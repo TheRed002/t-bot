@@ -48,3 +48,6 @@ Thumbs.db
 *.mov
 *.wmv
 
+# Project  Specifics
+prompts.md
+INTEGRATION_POINTS.md
