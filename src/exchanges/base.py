@@ -1,0 +1,327 @@
+"""
+Base exchange interface for unified trading operations.
+
+This module defines the abstract base class that all exchange implementations
+must inherit from, providing a unified interface across different exchanges.
+
+CRITICAL: This integrates with P-001 (core types, exceptions, config) and
+P-002A (error handling) components.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Dict, List, Optional, Callable, Any
+from decimal import Decimal
+from datetime import datetime
+import asyncio
+import logging
+
+# MANDATORY: Import from P-001
+from src.core.types import (
+    OrderRequest, OrderResponse, MarketData, Position,
+    Signal, TradingMode, OrderSide, OrderType,
+    ExchangeInfo, Ticker, OrderBook, Trade, OrderStatus
+)
+from src.core.exceptions import (
+    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError,
+    ValidationError, ExecutionError
+)
+from src.core.config import Config
+
+# MANDATORY: Import from P-002A
+from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.connection_manager import ConnectionManager as ErrorConnectionManager
+
+# MANDATORY: Import from P-016A (utils) - will be implemented later
+# from src.utils.decorators import time_execution, retry, circuit_breaker
+
+logger = logging.getLogger(__name__)
+
+
+class BaseExchange(ABC):
+    """
+    Abstract base class for all exchange implementations.
+    
+    This class defines the unified interface that all exchange implementations
+    must follow, ensuring consistent behavior across different exchanges.
+    
+    CRITICAL: All exchange implementations (P-004, P-005, P-006) must inherit
+    from this exact interface.
+    """
+    
+    def __init__(self, config: Config, exchange_name: str):
+        """
+        Initialize the base exchange.
+        
+        Args:
+            config: Application configuration
+            exchange_name: Name of the exchange (e.g., 'binance', 'okx')
+        """
+        self.config = config
+        self.exchange_name = exchange_name
+        self.status = "initializing"
+        self.connected = False
+        self.last_heartbeat = None
+        
+        # Initialize error handling
+        self.error_handler = ErrorHandler(config.error_handling)
+        self.connection_manager = ErrorConnectionManager(config.error_handling)
+        
+        # Initialize rate limiter and connection manager
+        self.rate_limiter = None  # Will be set by subclasses
+        self.ws_manager = None    # Will be set by subclasses
+        
+        logger.info(f"Initialized {exchange_name} exchange interface")
+    
+    @abstractmethod
+    async def connect(self) -> bool:
+        """
+        Establish connection to the exchange.
+        
+        Returns:
+            bool: True if connection successful, False otherwise
+        """
+        pass
+    
+    @abstractmethod
+    async def disconnect(self) -> None:
+        """Disconnect from the exchange."""
+        pass
+    
+    @abstractmethod
+    async def get_account_balance(self) -> Dict[str, Decimal]:
+        """
+        Get all asset balances from the exchange.
+        
+        Returns:
+            Dict[str, Decimal]: Dictionary mapping asset symbols to balances
+        """
+        pass
+    
+    @abstractmethod
+    async def place_order(self, order: OrderRequest) -> OrderResponse:
+        """
+        Execute a trade order on the exchange.
+        
+        Args:
+            order: Order request with all necessary details
+            
+        Returns:
+            OrderResponse: Order response with execution details
+            
+        Raises:
+            ExchangeError: If order placement fails
+            ValidationError: If order request is invalid
+        """
+        pass
+    
+    @abstractmethod
+    async def cancel_order(self, order_id: str) -> bool:
+        """
+        Cancel an existing order.
+        
+        Args:
+            order_id: ID of the order to cancel
+            
+        Returns:
+            bool: True if cancellation successful, False otherwise
+        """
+        pass
+    
+    @abstractmethod
+    async def get_order_status(self, order_id: str) -> OrderStatus:
+        """
+        Check the status of an order.
+        
+        Args:
+            order_id: ID of the order to check
+            
+        Returns:
+            OrderStatus: Current status of the order
+        """
+        pass
+    
+    @abstractmethod
+    async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
+        """
+        Get OHLCV market data for a symbol.
+        
+        Args:
+            symbol: Trading symbol (e.g., 'BTCUSDT')
+            timeframe: Timeframe for the data (e.g., '1m', '1h', '1d')
+            
+        Returns:
+            MarketData: Market data with price and volume information
+        """
+        pass
+    
+    @abstractmethod
+    async def subscribe_to_stream(self, symbol: str, callback: Callable) -> None:
+        """
+        Subscribe to real-time data stream for a symbol.
+        
+        Args:
+            symbol: Trading symbol to subscribe to
+            callback: Callback function to handle incoming data
+        """
+        pass
+    
+    @abstractmethod
+    async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook:
+        """
+        Get order book depth for a symbol.
+        
+        Args:
+            symbol: Trading symbol
+            depth: Number of levels to retrieve
+            
+        Returns:
+            OrderBook: Order book with bid and ask levels
+        """
+        pass
+    
+    @abstractmethod
+    async def get_trade_history(self, symbol: str, limit: int = 100) -> List[Trade]:
+        """
+        Get historical trades for a symbol.
+        
+        Args:
+            symbol: Trading symbol
+            limit: Maximum number of trades to retrieve
+            
+        Returns:
+            List[Trade]: List of historical trades
+        """
+        pass
+    
+    @abstractmethod
+    async def get_exchange_info(self) -> ExchangeInfo:
+        """
+        Get exchange information including supported symbols and features.
+        
+        Returns:
+            ExchangeInfo: Exchange information
+        """
+        pass
+    
+    @abstractmethod
+    async def get_ticker(self, symbol: str) -> Ticker:
+        """
+        Get real-time ticker information for a symbol.
+        
+        Args:
+            symbol: Trading symbol
+            
+        Returns:
+            Ticker: Real-time ticker data
+        """
+        pass
+    
+    # Standard methods that can be overridden
+    async def pre_trade_validation(self, order: OrderRequest) -> bool:
+        """
+        Pre-trade validation hook.
+        
+        Args:
+            order: Order request to validate
+            
+        Returns:
+            bool: True if validation passes, False otherwise
+        """
+        try:
+            # Basic validation
+            if not order.symbol or not order.quantity:
+                logger.warning(f"Invalid order: missing symbol or quantity")
+                return False
+            
+            if order.quantity <= 0:
+                logger.warning(f"Invalid order: quantity must be positive")
+                return False
+            
+            # TODO: Remove in production - Additional validation can be added here
+            logger.debug(f"Order validation passed for {order.symbol}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Order validation failed: {str(e)}")
+            return False
+    
+    async def post_trade_processing(self, order_response: OrderResponse) -> None:
+        """
+        Post-trade processing hook.
+        
+        Args:
+            order_response: Response from the exchange after order execution
+        """
+        try:
+            # Log the trade
+            logger.info(f"Order executed: {order_response.id} - {order_response.symbol} "
+                       f"{order_response.side.value} {order_response.filled_quantity}")
+            
+            # TODO: Remove in production - Additional processing can be added here
+            # - Update position tracking
+            # - Calculate fees
+            # - Update performance metrics
+            
+        except Exception as e:
+            logger.error(f"Post-trade processing failed: {str(e)}")
+    
+    def is_connected(self) -> bool:
+        """
+        Check if the exchange is connected.
+        
+        Returns:
+            bool: True if connected, False otherwise
+        """
+        return self.connected and self.status == "connected"
+    
+    def get_status(self) -> str:
+        """
+        Get the current status of the exchange.
+        
+        Returns:
+            str: Current status
+        """
+        return self.status
+    
+    def get_exchange_name(self) -> str:
+        """
+        Get the name of the exchange.
+        
+        Returns:
+            str: Exchange name
+        """
+        return self.exchange_name
+    
+    async def health_check(self) -> bool:
+        """
+        Perform a health check on the exchange connection.
+        
+        Returns:
+            bool: True if healthy, False otherwise
+        """
+        try:
+            # Basic health check - try to get account balance
+            await self.get_account_balance()
+            self.last_heartbeat = datetime.now()
+            return True
+        except Exception as e:
+            logger.warning(f"Health check failed for {self.exchange_name}: {str(e)}")
+            return False
+    
+    def get_rate_limits(self) -> Dict[str, int]:
+        """
+        Get the rate limits for this exchange.
+        
+        Returns:
+            Dict[str, int]: Rate limits configuration
+        """
+        return self.config.exchanges.rate_limits.get(self.exchange_name, {})
+    
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.connect()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.disconnect() 

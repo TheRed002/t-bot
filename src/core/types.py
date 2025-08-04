@@ -103,7 +103,57 @@ class Position(BaseModel):
 
 
 # TODO:REVERSE INTEGRATION POINTS: Future prompts will add:
-# - P-003: Exchange-specific types (ExchangeInfo, Ticker, OrderBook)
 # - P-008: Risk types (RiskMetrics, PositionLimits)  
 # - P-011: Strategy types (StrategyConfig, StrategyStatus)
 # - P-017: ML types (ModelPrediction, ModelMetadata) 
+
+class ExchangeInfo(BaseModel):
+    """Exchange information including supported symbols and features."""
+    name: str
+    supported_symbols: List[str]
+    rate_limits: Dict[str, int]
+    features: List[str]
+    api_version: str
+
+class Ticker(BaseModel):
+    """Real-time ticker information for a symbol."""
+    symbol: str
+    bid: Decimal
+    ask: Decimal
+    last_price: Decimal
+    volume_24h: Decimal
+    price_change_24h: Decimal
+    timestamp: datetime
+
+class OrderBook(BaseModel):
+    """Order book with bid and ask levels."""
+    symbol: str
+    bids: List[List[Decimal]]  # [[price, quantity], ...]
+    asks: List[List[Decimal]]  # [[price, quantity], ...]
+    timestamp: datetime
+
+class ExchangeStatus(Enum):
+    """Exchange connection status."""
+    ONLINE = "online"
+    OFFLINE = "offline"
+    MAINTENANCE = "maintenance"
+
+class OrderStatus(Enum):
+    """Order status enumeration."""
+    PENDING = "pending"
+    PARTIALLY_FILLED = "partially_filled"
+    FILLED = "filled"
+    CANCELLED = "cancelled"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+class Trade(BaseModel):
+    """Trade execution record."""
+    id: str
+    symbol: str
+    side: OrderSide
+    quantity: Decimal
+    price: Decimal
+    timestamp: datetime
+    fee: Decimal = Decimal("0")
+    fee_currency: str = "USDT" 

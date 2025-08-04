@@ -137,6 +137,58 @@ class ErrorHandlingConfig(BaseConfig):
         return v
 
 
+class ExchangeConfig(BaseConfig):
+    """Exchange configuration for API credentials and rate limits."""
+    
+    # Default settings
+    default_timeout: int = Field(default=30, description="Default exchange API timeout")
+    max_retries: int = Field(default=3, description="Maximum retry attempts for exchange API calls")
+    
+    # Binance
+    binance_api_key: str = Field(default="", description="Binance API key")
+    binance_api_secret: str = Field(default="", description="Binance API secret")
+    binance_testnet: bool = Field(default=True, description="Use Binance testnet")
+    
+    # OKX  
+    okx_api_key: str = Field(default="", description="OKX API key")
+    okx_api_secret: str = Field(default="", description="OKX API secret")
+    okx_passphrase: str = Field(default="", description="OKX API passphrase")
+    okx_sandbox: bool = Field(default=True, description="Use OKX sandbox")
+    
+    # Coinbase
+    coinbase_api_key: str = Field(default="", description="Coinbase API key")
+    coinbase_api_secret: str = Field(default="", description="Coinbase API secret")
+    coinbase_sandbox: bool = Field(default=True, description="Use Coinbase sandbox")
+    
+    # Rate limiting configuration
+    rate_limits: Dict[str, Dict[str, int]] = Field(
+        default={
+            "binance": {
+                "requests_per_minute": 1200,
+                "orders_per_second": 10,
+                "websocket_connections": 5
+            },
+            "okx": {
+                "requests_per_minute": 600,
+                "orders_per_second": 20,
+                "websocket_connections": 3
+            },
+            "coinbase": {
+                "requests_per_minute": 600,
+                "orders_per_second": 15,
+                "websocket_connections": 4
+            }
+        },
+        description="Exchange-specific rate limits"
+    )
+    
+    # Supported exchanges
+    supported_exchanges: List[str] = Field(
+        default=["binance", "okx", "coinbase"],
+        description="List of supported exchanges"
+    )
+
+
 class Config(BaseConfig):
     """Master configuration class for the entire application."""
     
@@ -152,6 +204,7 @@ class Config(BaseConfig):
     database: DatabaseConfig = DatabaseConfig()
     security: SecurityConfig = SecurityConfig()
     error_handling: ErrorHandlingConfig = ErrorHandlingConfig()
+    exchanges: ExchangeConfig = ExchangeConfig()
     
     @field_validator('environment')
     @classmethod
