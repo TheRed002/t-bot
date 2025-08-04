@@ -164,7 +164,7 @@ class Config(BaseConfig):
     
     def generate_schema(self) -> None:
         """Generate JSON schema for configuration validation."""
-        schema = self.schema()
+        schema = self.model_json_schema()
         schema_path = Path("config/config.schema.json")
         schema_path.parent.mkdir(exist_ok=True)
         with open(schema_path, 'w') as f:
