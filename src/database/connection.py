@@ -217,13 +217,14 @@ class DatabaseConnectionManager:
                     pass
             
             if self.async_engine:
+                # Close all connections in the pool gracefully
                 await self.async_engine.dispose()
             
             if self.sync_engine:
                 self.sync_engine.dispose()
             
             if self.redis_client:
-                await self.redis_client.close()
+                await self.redis_client.disconnect()
             
             if self.influxdb_client:
                 self.influxdb_client.close()
@@ -232,6 +233,10 @@ class DatabaseConnectionManager:
             
         except Exception as e:
             logger.error("Error closing database connections", error=str(e))
+        finally:
+            # Ensure we clear the global reference
+            global _connection_manager
+            _connection_manager = None
     
     def is_healthy(self) -> bool:
         """Check if all database connections are healthy."""

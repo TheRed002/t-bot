@@ -42,6 +42,16 @@ target_metadata = Base.metadata
 
 def get_url() -> str:
     """Get database URL from configuration."""
+    import os
+    
+    # Check if we're in testing mode
+    if os.getenv("TESTING") == "true":
+        # Use the DATABASE_URL environment variable directly for testing
+        database_url = os.getenv("DATABASE_URL")
+        if database_url:
+            logger.info(f"Using test database URL: {database_url}")
+            return database_url
+    
     try:
         # Load application config
         app_config = AppConfig()
@@ -49,7 +59,6 @@ def get_url() -> str:
     except Exception as e:
         logger.error("Failed to get database URL", error=str(e))
         # Fallback to environment variable
-        import os
         return os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/trading_bot")
 
 
