@@ -22,8 +22,7 @@ class BaseConfig(BaseSettings):
         "env_file": ".env",
         "case_sensitive": False,
         "validate_assignment": True,
-        "extra": "ignore",
-        "env_prefix": ""
+        "extra": "ignore"
     }
 
 
@@ -31,25 +30,25 @@ class DatabaseConfig(BaseConfig):
     """Database configuration for PostgreSQL, Redis, and InfluxDB."""
     
     # PostgreSQL
-    postgresql_host: str = Field("localhost", description="PostgreSQL host")
-    postgresql_port: int = Field(5432, description="PostgreSQL port")
-    postgresql_database: str = Field("trading_bot", description="PostgreSQL database name")
-    postgresql_username: str = Field("postgres", description="PostgreSQL username")
-    postgresql_password: str = Field("password", description="PostgreSQL password")
-    postgresql_pool_size: int = Field(10, description="PostgreSQL connection pool size")
+    postgresql_host: str = Field(default="localhost", description="PostgreSQL host")
+    postgresql_port: int = Field(default=5432, description="PostgreSQL port")
+    postgresql_database: str = Field(default="trading_bot", description="PostgreSQL database name")
+    postgresql_username: str = Field(default="trading_bot", description="PostgreSQL username")
+    postgresql_password: str = Field(default="trading_bot_password", description="PostgreSQL password")
+    postgresql_pool_size: int = Field(default=10, description="PostgreSQL connection pool size")
     
     # Redis
-    redis_host: str = Field("localhost", description="Redis host")
-    redis_port: int = Field(6379, description="Redis port")
-    redis_password: Optional[str] = Field(None, description="Redis password")
-    redis_db: int = Field(0, description="Redis database number")
+    redis_host: str = Field(default="localhost", description="Redis host")
+    redis_port: int = Field(default=6379, description="Redis port")
+    redis_password: Optional[str] = Field(default=None, description="Redis password")
+    redis_db: int = Field(default=0, description="Redis database number")
     
     # InfluxDB
-    influxdb_host: str = Field("localhost", description="InfluxDB host")
-    influxdb_port: int = Field(8086, description="InfluxDB port")
-    influxdb_token: str = Field("test-token", description="InfluxDB token")
-    influxdb_org: str = Field("test-org", description="InfluxDB organization")
-    influxdb_bucket: str = Field("trading-data", description="InfluxDB bucket")
+    influxdb_host: str = Field(default="localhost", description="InfluxDB host")
+    influxdb_port: int = Field(default=8086, description="InfluxDB port")
+    influxdb_token: str = Field(default="test-token", description="InfluxDB token")
+    influxdb_org: str = Field(default="test-org", description="InfluxDB organization")
+    influxdb_bucket: str = Field(default="trading-data", description="InfluxDB bucket")
 
     @field_validator('postgresql_port', 'redis_port', 'influxdb_port')
     @classmethod
@@ -71,10 +70,10 @@ class DatabaseConfig(BaseConfig):
 class SecurityConfig(BaseConfig):
     """Security configuration for authentication and encryption."""
     
-    secret_key: str = Field("test-secret-key-32-chars-long-for-testing", description="Secret key for JWT")
-    jwt_algorithm: str = Field("HS256", description="JWT algorithm")
-    jwt_expire_minutes: int = Field(30, description="JWT expiration time in minutes")
-    encryption_key: str = Field("test-encryption-key-32-chars-long-for-testing", description="Encryption key")
+    secret_key: str = Field(default="test-secret-key-32-chars-long-for-testing", description="Secret key for JWT")
+    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
+    jwt_expire_minutes: int = Field(default=30, description="JWT expiration time in minutes")
+    encryption_key: str = Field(default="test-encryption-key-32-chars-long-for-testing", description="Encryption key")
 
     @field_validator('jwt_expire_minutes')
     @classmethod
@@ -93,20 +92,66 @@ class SecurityConfig(BaseConfig):
         return v
 
 
+class ErrorHandlingConfig(BaseConfig):
+    """Error handling configuration for P-002A framework."""
+    
+    # Circuit breaker settings
+    circuit_breaker_failure_threshold: int = Field(default=5, description="Circuit breaker failure threshold")
+    circuit_breaker_recovery_timeout: int = Field(default=30, description="Circuit breaker recovery timeout in seconds")
+    
+    # Retry policies
+    max_retry_attempts: int = Field(default=3, description="Maximum retry attempts")
+    retry_backoff_factor: float = Field(default=2.0, description="Retry backoff factor")
+    retry_max_delay: int = Field(default=60, description="Maximum retry delay in seconds")
+    
+    # Error pattern analytics
+    pattern_detection_enabled: bool = Field(default=True, description="Enable error pattern detection")
+    correlation_analysis_enabled: bool = Field(default=True, description="Enable correlation analysis")
+    predictive_alerts_enabled: bool = Field(default=True, description="Enable predictive alerts")
+    
+    # State monitoring
+    state_validation_frequency: int = Field(default=60, description="State validation frequency in seconds")
+    auto_reconciliation_enabled: bool = Field(default=True, description="Enable automatic reconciliation")
+    max_discrepancy_threshold: float = Field(default=0.01, description="Maximum discrepancy threshold")
+    
+    # Recovery scenarios
+    partial_fill_min_percentage: float = Field(default=0.5, description="Minimum fill percentage for partial orders")
+    network_max_offline_duration: int = Field(default=300, description="Maximum offline duration in seconds")
+    data_feed_max_staleness: int = Field(default=30, description="Maximum data staleness in seconds")
+    order_rejection_max_retries: int = Field(default=2, description="Maximum retry attempts for rejected orders")
+    
+    @field_validator('circuit_breaker_failure_threshold', 'max_retry_attempts', 'order_rejection_max_retries')
+    @classmethod
+    def validate_positive_integers(cls, v):
+        """Validate positive integer values."""
+        if v <= 0:
+            raise ValueError(f'Value must be positive, got {v}')
+        return v
+    
+    @field_validator('retry_backoff_factor', 'partial_fill_min_percentage', 'max_discrepancy_threshold')
+    @classmethod
+    def validate_positive_floats(cls, v):
+        """Validate positive float values."""
+        if v <= 0:
+            raise ValueError(f'Value must be positive, got {v}')
+        return v
+
+
 class Config(BaseConfig):
     """Master configuration class for the entire application."""
     
     # Environment
-    environment: str = Field("development", description="Application environment")
-    debug: bool = Field(False, description="Debug mode")
+    environment: str = Field(default="development", description="Application environment")
+    debug: bool = Field(default=False, description="Debug mode")
     
     # Application
-    app_name: str = Field("trading-bot-suite", description="Application name")
-    app_version: str = Field("2.0.0", description="Application version")
+    app_name: str = Field(default="trading-bot-suite", description="Application name")
+    app_version: str = Field(default="2.0.0", description="Application version")
     
     # Sub-configurations
     database: DatabaseConfig = DatabaseConfig()
     security: SecurityConfig = SecurityConfig()
+    error_handling: ErrorHandlingConfig = ErrorHandlingConfig()
     
     @field_validator('environment')
     @classmethod
@@ -129,6 +174,16 @@ class Config(BaseConfig):
         """Generate PostgreSQL database URL."""
         return (
             f"postgresql://{self.database.postgresql_username}:"
+            f"{self.database.postgresql_password}@"
+            f"{self.database.postgresql_host}:"
+            f"{self.database.postgresql_port}/"
+            f"{self.database.postgresql_database}"
+        )
+    
+    def get_async_database_url(self) -> str:
+        """Generate async PostgreSQL database URL."""
+        return (
+            f"postgresql+asyncpg://{self.database.postgresql_username}:"
             f"{self.database.postgresql_password}@"
             f"{self.database.postgresql_host}:"
             f"{self.database.postgresql_port}/"

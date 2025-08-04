@@ -265,7 +265,7 @@ class TestCoreConfiguration:
         config = Config()
         
         assert config.app_name == "trading-bot-suite"
-        assert config.app_version == "2.0.0"
+        assert config.app_version == "1.0.0"
         assert config.environment in ["development", "staging", "production"]
     
     def test_database_config(self):

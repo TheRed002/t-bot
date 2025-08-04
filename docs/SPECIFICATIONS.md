@@ -1082,7 +1082,7 @@ InfluxDB (Time Series)
 from fastapi import FastAPI, WebSocket
 from pydantic import BaseModel
 
-app = FastAPI(title="Trading Bot API", version="2.0.0")
+app = FastAPI(title="Trading Bot API", version="1.0.0")
 
 @app.get("/api/v1/bots")
 async def get_bots() -> List[BotInfo]

@@ -4,7 +4,7 @@ Trading Bot Framework - Main Package
 This package contains the core trading bot framework implementation.
 """
 
-__version__ = "2.0.0"
+__version__ = "1.0.0"
 __author__ = "Trading Bot Team"
 __description__ = "Comprehensive algorithmic trading platform"
 

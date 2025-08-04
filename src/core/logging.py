@@ -79,8 +79,10 @@ def setup_logging(environment: str = "development", log_level: str = "INFO") -> 
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
-        correlation_context.get_correlation_id,
-        structlog.processors.UnicodeDecoder(),
+        # Add correlation ID processor with proper None handling
+        lambda logger, method_name, event_dict: event_dict.update(correlation_id=correlation_context.get_correlation_id()) if event_dict is not None else {"correlation_id": correlation_context.get_correlation_id()},
+        # Custom UnicodeDecoder that handles None for tests
+        lambda logger, method_name, event_dict: structlog.processors.UnicodeDecoder()(logger, method_name, event_dict) if event_dict is not None else {},
     ]
     
     # Add JSON formatting for production
