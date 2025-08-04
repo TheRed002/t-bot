@@ -17,6 +17,21 @@ test:
 	source ~/.venv/bin/activate && python -m pytest tests/ -v --tb=short
 	@echo "✅ Tests completed!"
 
+test-unit:
+	@echo "🧪 Running all unit tests..."
+	source ~/.venv/bin/activate && python -m pytest tests/unit/ -v --tb=short
+	@echo "✅ Tests completed!"
+	
+test-integration:
+	@echo "🧪 Running all unit tests..."
+	source ~/.venv/bin/activate && python -m pytest tests/integration/ -v --tb=short
+	@echo "✅ Tests completed!"
+
+coverage:
+	@echo "🧪 Running coverage..."
+	source ~/.venv/bin/activate && python -m pytest tests/ --cov=src --cov-report=term-missing
+	@echo "✅ Coverage completed!"
+
 # Start database services with Docker
 docker-up:
 	@echo "🐳 Starting database services with Docker..."

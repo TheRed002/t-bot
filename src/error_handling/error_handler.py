@@ -24,6 +24,7 @@ from src.core.exceptions import (
     StateConsistencyError, SecurityError
 )
 from src.core.config import Config
+from src.error_handling.pattern_analytics import ErrorPattern
 
 logger = structlog.get_logger()
 
@@ -44,6 +45,7 @@ class ErrorContext:
     severity: ErrorSeverity
     component: str
     operation: str
+    error: Exception  # Add the actual error object
     user_id: Optional[str] = None
     bot_id: Optional[str] = None
     symbol: Optional[str] = None
@@ -86,6 +88,12 @@ class CircuitBreaker:
                 self.state = "OPEN"
             
             raise e
+    
+    def should_transition_to_half_open(self) -> bool:
+        """Check if circuit breaker should transition to HALF_OPEN state."""
+        if self.state == "OPEN" and self.last_failure_time:
+            return time.time() - self.last_failure_time > self.recovery_timeout
+        return False
 
 
 class ErrorHandler:
@@ -133,7 +141,7 @@ class ErrorHandler:
         """Classify error severity based on error type and context."""
         if isinstance(error, (StateConsistencyError, SecurityError)):
             return ErrorSeverity.CRITICAL
-        elif isinstance(error, (RiskManagementError, ExchangeError, ConnectionError)):
+        elif isinstance(error, (RiskManagementError, ExchangeError, ConnectionError, ExecutionError)):
             return ErrorSeverity.HIGH
         elif isinstance(error, (DataError, ModelError)):
             return ErrorSeverity.MEDIUM
@@ -152,19 +160,26 @@ class ErrorHandler:
         """Create error context for tracking and recovery."""
         import uuid
         
+        # Extract kwargs that should be passed to ErrorContext
+        context_kwargs = {}
+        for key in ['user_id', 'bot_id', 'symbol', 'order_id']:
+            if key in kwargs:
+                context_kwargs[key] = kwargs.pop(key)
+        
         return ErrorContext(
             error_id=str(uuid.uuid4()),
             timestamp=datetime.now(timezone.utc),
             severity=self.classify_error(error),
             component=component,
             operation=operation,
+            error=error,
             details={
                 "error_type": type(error).__name__,
                 "error_message": str(error),
                 "kwargs": kwargs
             },
             stack_trace=self._get_stack_trace(),
-            **kwargs
+            **context_kwargs
         )
     
     def _get_stack_trace(self) -> str:
@@ -196,6 +211,7 @@ class ErrorHandler:
         self._update_error_patterns(context)
         
         # Check if error should trigger circuit breaker
+        circuit_breaker_triggered = False
         circuit_breaker_key = self._get_circuit_breaker_key(context)
         if circuit_breaker_key and circuit_breaker_key in self.circuit_breakers:
             try:
@@ -208,9 +224,9 @@ class ErrorHandler:
                     circuit_breaker=circuit_breaker_key,
                     error_id=context.error_id
                 )
-                return False
+                circuit_breaker_triggered = True
         
-        # Attempt recovery if strategy provided
+        # Attempt recovery if strategy provided and not at max attempts
         if recovery_strategy and context.recovery_attempts < context.max_recovery_attempts:
             try:
                 context.recovery_attempts += 1
@@ -241,16 +257,22 @@ class ErrorHandler:
         
         if pattern_key not in self.error_patterns:
             self.error_patterns[pattern_key] = ErrorPattern(
-                pattern_key=pattern_key,
+                pattern_id=pattern_key,
+                pattern_type="frequency",
                 component=context.component,
                 error_type=type(context.error).__name__,
-                first_occurrence=context.timestamp,
+                frequency=0.0,
+                severity=context.severity.value,
+                first_detected=context.timestamp,
+                last_detected=context.timestamp,
                 occurrence_count=0,
-                severity=context.severity
+                confidence=0.8,
+                description=f"Error pattern for {context.component}",
+                suggested_action="Monitor and investigate"
             )
         
         self.error_patterns[pattern_key].occurrence_count += 1
-        self.error_patterns[pattern_key].last_occurrence = context.timestamp
+        self.error_patterns[pattern_key].last_detected = context.timestamp
     
     def _get_circuit_breaker_key(self, context: ErrorContext) -> Optional[str]:
         """Determine which circuit breaker should be triggered."""
@@ -300,39 +322,6 @@ class ErrorHandler:
     def get_error_patterns(self) -> Dict[str, 'ErrorPattern']:
         """Get current error patterns for analysis."""
         return self.error_patterns.copy()
-
-
-class ErrorPattern:
-    """Represents a recurring error pattern for analysis."""
-    
-    def __init__(
-        self,
-        pattern_key: str,
-        component: str,
-        error_type: str,
-        first_occurrence: datetime,
-        occurrence_count: int = 0,
-        severity: ErrorSeverity = ErrorSeverity.MEDIUM
-    ):
-        self.pattern_key = pattern_key
-        self.component = component
-        self.error_type = error_type
-        self.first_occurrence = first_occurrence
-        self.last_occurrence = first_occurrence
-        self.occurrence_count = occurrence_count
-        self.severity = severity
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "pattern_key": self.pattern_key,
-            "component": self.component,
-            "error_type": self.error_type,
-            "first_occurrence": self.first_occurrence.isoformat(),
-            "last_occurrence": self.last_occurrence.isoformat(),
-            "occurrence_count": self.occurrence_count,
-            "severity": self.severity.value
-        }
 
 
 def error_handler_decorator(
