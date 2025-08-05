@@ -31,6 +31,10 @@ from src.core.config import Config
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.connection_manager import ConnectionManager as ErrorConnectionManager
 
+# MANDATORY: Import from P-007 (advanced rate limiting)
+from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
+from src.exchanges.connection_manager import ConnectionManager
+
 # MANDATORY: Import from P-016A (utils) - will be implemented later
 # from src.utils.decorators import time_execution, retry, circuit_breaker
 
@@ -66,10 +70,16 @@ class BaseExchange(ABC):
         self.error_handler = ErrorHandler(config.error_handling)
         self.connection_manager = ErrorConnectionManager(config.error_handling)
         
+        # P-007: Advanced rate limiting and connection management integration
+        self.advanced_rate_limiter = AdvancedRateLimiter(config)
+        self.connection_manager = ConnectionManager(config, exchange_name)
+        
         # Initialize rate limiter and connection manager
         self.rate_limiter = None  # Will be set by subclasses
         self.ws_manager = None    # Will be set by subclasses
         
+        # TODO: Remove in production
+        logger.debug(f"BaseExchange initialized with P-007 components for {exchange_name}")
         logger.info(f"Initialized {exchange_name} exchange interface")
     
     @abstractmethod
@@ -307,6 +317,41 @@ class BaseExchange(ABC):
         except Exception as e:
             logger.warning(f"Health check failed for {self.exchange_name}: {str(e)}")
             return False
+    
+    async def _check_rate_limit(self, endpoint: str, weight: int = 1) -> bool:
+        """
+        Check if rate limit allows the request.
+        
+        Args:
+            endpoint: API endpoint
+            weight: Request weight
+            
+        Returns:
+            bool: True if request is allowed
+            
+        Raises:
+            ExchangeRateLimitError: If rate limit is exceeded
+            ValidationError: If parameters are invalid
+        """
+        try:
+            # Validate parameters
+            if not endpoint:
+                raise ValidationError("Endpoint is required")
+            
+            if weight <= 0:
+                raise ValidationError("Weight must be positive")
+            
+            # Check rate limit using advanced rate limiter
+            return await self.advanced_rate_limiter.check_rate_limit(
+                self.exchange_name, endpoint, weight
+            )
+            
+        except (ValidationError, ExchangeRateLimitError):
+            raise
+        except Exception as e:
+            logger.error("Rate limit check failed", 
+                        exchange=self.exchange_name, endpoint=endpoint, error=str(e))
+            raise ExchangeRateLimitError(f"Rate limit check failed: {str(e)}")
     
     def get_rate_limits(self) -> Dict[str, int]:
         """

@@ -23,6 +23,12 @@ from src.core.config import Config
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.connection_manager import ConnectionManager as ErrorConnectionManager
 
+# MANDATORY: Import from P-007 (advanced rate limiting)
+from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
+from src.exchanges.health_monitor import ConnectionHealthMonitor
+from src.exchanges.websocket_pool import WebSocketConnectionPool
+from src.core.types import ConnectionType
+
 logger = logging.getLogger(__name__)
 
 
@@ -286,6 +292,16 @@ class ConnectionManager:
         self.error_handler = ErrorHandler(config.error_handling)
         self.error_connection_manager = ErrorConnectionManager(config.error_handling)
         
+        # P-007: Advanced rate limiting and connection management integration
+        self.advanced_rate_limiter = AdvancedRateLimiter(config)
+        self.health_monitor = ConnectionHealthMonitor(config)
+        self.websocket_pool = WebSocketConnectionPool(
+            exchange=exchange_name,
+            max_connections=10,
+            max_messages_per_second=100,
+            max_subscriptions=50
+        )
+        
         # Connection pools
         self.rest_connections: Dict[str, Any] = {}  # Will be populated by actual implementations
         self.websocket_connections: Dict[str, WebSocketConnection] = {}
@@ -299,6 +315,8 @@ class ConnectionManager:
         self.max_rest_connections = 10
         self.max_websocket_connections = 5
         
+        # TODO: Remove in production
+        logger.debug(f"ConnectionManager initialized with P-007 components for {exchange_name}")
         logger.info(f"Initialized connection manager for {exchange_name}")
     
     async def get_rest_connection(self, endpoint: str = "default") -> Optional[Any]:
@@ -346,6 +364,138 @@ class ConnectionManager:
         
         logger.info(f"Created WebSocket connection {connection_id} for {self.exchange_name}")
         return connection
+    
+    
+    async def get_connection(self, exchange: str, stream_type: str) -> Optional[Any]:
+        """
+        Get a WebSocket connection from the pool.
+        
+        Args:
+            exchange: Exchange name
+            stream_type: Type of stream (ticker, orderbook, trades, etc.)
+            
+        Returns:
+            Optional[Any]: WebSocket connection or None if not available
+            
+        Raises:
+            ExchangeConnectionError: If connection retrieval fails
+            ValidationError: If parameters are invalid
+        """
+        try:
+            # Validate parameters
+            if not exchange or not stream_type:
+                raise ValidationError("Exchange and stream_type are required")
+            
+            # Convert stream_type to ConnectionType
+            try:
+                connection_type = ConnectionType(stream_type)
+            except ValueError:
+                raise ValidationError(f"Invalid stream type: {stream_type}")
+            
+            # Get connection from pool
+            pooled_connection = await self.websocket_pool.get_connection(connection_type)
+            
+            if pooled_connection:
+                # Register with health monitor
+                await self.health_monitor.monitor_connection(pooled_connection.connection)
+                
+                logger.debug("Retrieved connection from pool", 
+                           exchange=exchange, stream_type=stream_type,
+                           connection_id=pooled_connection.connection_id)
+                return pooled_connection.connection
+            else:
+                logger.warning("No available connection in pool", 
+                             exchange=exchange, stream_type=stream_type)
+                return None
+                
+        except (ValidationError, ExchangeConnectionError):
+            raise
+        except Exception as e:
+            logger.error("Failed to get connection", 
+                        exchange=exchange, stream_type=stream_type, error=str(e))
+            raise ExchangeConnectionError(f"Connection retrieval failed: {str(e)}")
+    
+    
+    async def release_connection(self, exchange: str, connection: Any) -> None:
+        """
+        Release a connection back to the pool.
+        
+        Args:
+            exchange: Exchange name
+            connection: WebSocket connection to release
+            
+        Raises:
+            ExchangeConnectionError: If connection release fails
+            ValidationError: If parameters are invalid
+        """
+        try:
+            # Validate parameters
+            if not exchange or not connection:
+                raise ValidationError("Exchange and connection are required")
+            
+            # Find the pooled connection
+            connection_id = getattr(connection, 'id', str(id(connection)))
+            
+            # Release to pool
+            for pooled_conn in self.websocket_pool.active_connections.values():
+                if pooled_conn.connection_id == connection_id:
+                    await self.websocket_pool.release_connection(pooled_conn)
+                    
+                    # Unregister from health monitor
+                    self.health_monitor.unregister_connection(connection_id)
+                    
+                    logger.debug("Released connection back to pool", 
+                               exchange=exchange, connection_id=connection_id)
+                    return
+            
+            logger.warning("Connection not found in pool", 
+                         exchange=exchange, connection_id=connection_id)
+            
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error("Failed to release connection", 
+                        exchange=exchange, error=str(e))
+            raise ExchangeConnectionError(f"Connection release failed: {str(e)}")
+    
+    
+    async def handle_connection_failure(self, exchange: str, connection: Any) -> None:
+        """
+        Handle connection failure and trigger recovery.
+        
+        Args:
+            exchange: Exchange name
+            connection: Failed WebSocket connection
+            
+        Raises:
+            ExchangeConnectionError: If failure handling fails
+            ValidationError: If parameters are invalid
+        """
+        try:
+            # Validate parameters
+            if not exchange or not connection:
+                raise ValidationError("Exchange and connection are required")
+            
+            # Mark connection as failed in health monitor
+            await self.health_monitor.mark_failed(connection)
+            
+            # Trigger recovery scenario
+            await self.error_handler.handle_error(
+                RecoveryScenario.CONNECTION_FAILURE,
+                exchange=exchange,
+                connection_id=getattr(connection, 'id', str(id(connection)))
+            )
+            
+            logger.warning("Handled connection failure", 
+                         exchange=exchange, 
+                         connection_id=getattr(connection, 'id', str(id(connection))))
+            
+        except ValidationError:
+            raise
+        except Exception as e:
+            logger.error("Failed to handle connection failure", 
+                        exchange=exchange, error=str(e))
+            raise ExchangeConnectionError(f"Connection failure handling failed: {str(e)}")
     
     async def get_websocket_connection(self, connection_id: str = "default") -> Optional[WebSocketConnection]:
         """

@@ -21,6 +21,10 @@ from src.core.config import Config
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
+# MANDATORY: Import from P-007 (advanced rate limiting)
+from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
+from src.exchanges.connection_manager import ConnectionManager
+
 # Import base exchange interface
 from .base import BaseExchange
 
@@ -122,6 +126,8 @@ class ExchangeFactory:
             if not connected:
                 raise ExchangeError(f"Failed to connect to {exchange_name}")
             
+            # TODO: Remove in production
+            logger.debug(f"Exchange {exchange_name} created with P-007 components")
             logger.info(f"Created and connected to {exchange_name}")
             return exchange
             
