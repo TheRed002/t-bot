@@ -1313,7 +1313,7 @@ src/exchanges/
 - **From P-001**: `src.core.types` (MarketData, OrderRequest, OrderResponse, Position), `src.core.exceptions` (ExchangeRateLimitError, ExchangeConnectionError, ExchangeError, ValidationError), `src.core.config` (Config)
 - **From P-002A**: `src.error_handling.error_handler` (ErrorHandler), `src.error_handling.recovery_scenarios` (RecoveryScenario)  
 - **From P-003+**: `src.exchanges.base` (BaseExchange), `src.exchanges.factory` (ExchangeFactory)
-- **From P-016A**: `src.utils.decorators` (@time_execution), `src.core.logging` (get_logger)
+- **From P-007A**: `src.utils.decorators` (@time_execution), `src.core.logging` (get_logger)
 
 #### Required Patterns from @COMMON_PATTERNS.md:
 - MANDATORY: Use standard exception handling patterns for rate limit violations
@@ -1452,6 +1452,232 @@ Add rate limiting configuration to exchange factory:
 
 ---
 
+## **Prompt P-007A: Utility Framework and Helper Functions**
+
+**Title:** Implement comprehensive utility framework with decorators, helpers, validators, and formatters
+
+### Context
+- **Current State:** Data quality management operational (P-016)
+- **Target State:** Reusable utility functions available across all components
+- **Phase Goal:** Common utilities before ML infrastructure implementation
+
+**Technical Context**: Reference @SPECIFICATIONS.md Section 15 project structure utils module. Essential for code reusability.
+
+### Dependencies
+**Depends On:** P-001 (core types), P-002A (error handling)
+**Enables:** P-017+ (ML models), all components benefit from utilities
+
+### Task Details
+
+#### 1. Common Decorators (`src/utils/decorators.py`)
+Implement reusable decorators for cross-cutting concerns:
+- **Performance Monitoring**: `@time_execution`, `@memory_usage`, `@cpu_usage`
+- **Error Handling**: `@retry`, `@circuit_breaker`, `@timeout`
+- **Caching**: `@cache_result`, `@redis_cache`, `@ttl_cache`
+- **Logging**: `@log_calls`, `@log_performance`, `@log_errors`
+- **Validation**: `@validate_input`, `@validate_output`, `@type_check`
+- **Rate Limiting**: `@rate_limit`, `@api_throttle`
+
+#### 2. Helper Functions (`src/utils/helpers.py`)
+Implement common utility functions:
+- **Mathematical Utilities**: statistical calculations, financial metrics
+- **Date/Time Utilities**: timezone handling, trading session detection
+- **Data Conversion**: unit conversions, currency conversions
+- **File Operations**: safe file I/O, configuration loading
+- **Network Utilities**: connection testing, latency measurement
+- **String Utilities**: parsing, formatting, sanitization
+
+#### 3. Validation Utilities (`src/utils/validators.py`)
+Implement comprehensive validation functions:
+- **Financial Data Validation**: price ranges, volume checks, symbol validation
+- **Configuration Validation**: parameter bounds, required fields
+- **API Input Validation**: request payload validation, security checks
+- **Data Type Validation**: type checking, schema validation
+- **Business Rule Validation**: trading rules, risk limit validation
+- **Exchange Data Validation**: order validation, balance verification
+
+#### 4. Data Formatters (`src/utils/formatters.py`)
+Implement data formatting and transformation utilities:
+- **Financial Formatting**: currency formatting, percentage display
+- **API Response Formatting**: JSON standardization, error formatting
+- **Log Formatting**: structured log formatting, correlation IDs
+- **Chart Data Formatting**: OHLCV formatting, indicator data
+- **Report Formatting**: performance reports, risk reports
+- **Export Formatting**: CSV, Excel, PDF export utilities
+
+#### 5. Constants and Enums (`src/utils/constants.py`)
+Define system-wide constants and enumerations:
+- **Trading Constants**: market hours, settlement times, precision
+- **API Constants**: endpoints, rate limits, timeouts
+- **Financial Constants**: fee structures, minimum amounts
+- **Configuration Constants**: default values, limits
+- **Error Constants**: error codes, message templates
+- **Market Constants**: symbol mappings, exchange specifications
+
+### Directory Structure to Create
+```
+src/utils/
+├── __init__.py
+├── decorators.py
+├── helpers.py
+├── validators.py
+├── formatters.py
+└── constants.py
+```
+
+### Key Utility Implementations
+
+#### Performance Monitoring Decorator
+```python
+import time
+import functools
+from typing import Callable, Any
+import structlog
+
+logger = structlog.get_logger()
+
+def time_execution(func: Callable) -> Callable:
+    """Decorator to measure and log execution time"""
+    @functools.wraps(func)
+    async def async_wrapper(*args, **kwargs) -> Any:
+        start_time = time.perf_counter()
+        try:
+            result = await func(*args, **kwargs)
+            execution_time = time.perf_counter() - start_time
+            logger.info(
+                "Function executed",
+                function=func.__name__,
+                execution_time_ms=round(execution_time * 1000, 2),
+                success=True
+            )
+            return result
+        except Exception as e:
+            execution_time = time.perf_counter() - start_time
+            logger.error(
+                "Function failed",
+                function=func.__name__,
+                execution_time_ms=round(execution_time * 1000, 2),
+                error=str(e),
+                success=False
+            )
+            raise
+    
+    @functools.wraps(func)
+    def sync_wrapper(*args, **kwargs) -> Any:
+        start_time = time.perf_counter()
+        try:
+            result = func(*args, **kwargs)
+            execution_time = time.perf_counter() - start_time
+            logger.info(
+                "Function executed",
+                function=func.__name__,
+                execution_time_ms=round(execution_time * 1000, 2),
+                success=True
+            )
+            return result
+        except Exception as e:
+            execution_time = time.perf_counter() - start_time
+            logger.error(
+                "Function failed",
+                function=func.__name__,
+                execution_time_ms=round(execution_time * 1000, 2),
+                error=str(e),
+                success=False
+            )
+            raise
+    
+    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+```
+
+#### Financial Validation Functions
+```python
+from decimal import Decimal
+from typing import Optional
+from src.core.exceptions import ValidationError
+
+def validate_price(price: float, symbol: str) -> Decimal:
+    """Validate and normalize price values"""
+    if price <= 0:
+        raise ValidationError(f"Price must be positive for {symbol}, got {price}")
+    
+    if price > 1_000_000:  # Sanity check for extremely high prices
+        raise ValidationError(f"Price {price} for {symbol} exceeds maximum allowed")
+    
+    # Convert to Decimal for financial precision
+    return Decimal(str(price))
+
+def validate_quantity(quantity: float, symbol: str, min_qty: Optional[float] = None) -> Decimal:
+    """Validate trading quantity"""
+    if quantity <= 0:
+        raise ValidationError(f"Quantity must be positive for {symbol}, got {quantity}")
+    
+    if min_qty and quantity < min_qty:
+        raise ValidationError(f"Quantity {quantity} below minimum {min_qty} for {symbol}")
+    
+    return Decimal(str(quantity))
+
+def validate_symbol(symbol: str) -> str:
+    """Validate trading symbol format"""
+    if not symbol or len(symbol) < 3:
+        raise ValidationError(f"Invalid symbol format: {symbol}")
+    
+    if not symbol.replace('/', '').replace('-', '').isalnum():
+        raise ValidationError(f"Symbol contains invalid characters: {symbol}")
+    
+    return symbol.upper()
+```
+
+#### Financial Formatting Utilities
+```python
+from decimal import Decimal, ROUND_HALF_UP
+from typing import Optional
+
+def format_currency(amount: float, currency: str = "USD", precision: int = 2) -> str:
+    """Format amount as currency string"""
+    if currency.upper() in ["BTC", "ETH"]:
+        precision = 8  # Crypto precision
+    elif currency.upper() in ["USDT", "USDC", "USD"]:
+        precision = 2  # Fiat precision
+    
+    formatted = f"{amount:,.{precision}f}"
+    return f"{formatted} {currency.upper()}"
+
+def format_percentage(value: float, precision: int = 2) -> str:
+    """Format value as percentage"""
+    percentage = value * 100
+    return f"{percentage:+.{precision}f}%"
+
+def format_pnl(pnl: float, currency: str = "USD") -> str:
+    """Format P&L with appropriate color coding info"""
+    formatted = format_currency(pnl, currency)
+    color = "green" if pnl >= 0 else "red"
+    symbol = "+" if pnl >= 0 else ""
+    return f"{symbol}{formatted}", color
+```
+
+### Acceptance Criteria
+- All decorators work with both sync and async functions
+- Validators handle edge cases and provide clear error messages
+- Formatters support multiple currencies and precision levels
+- Helpers provide consistent functionality across components
+- Performance overhead <1ms for decorator applications
+
+### Integration Points
+- Error handling via P-002A (error handling framework)
+- Logging integration with P-001 (structured logging)
+- Type definitions from P-001 (core types)
+- Used by P-017+ (ML models) and all subsequent components
+- Performance monitoring via P-030+ (monitoring system)
+
+### Reverse Integration Required
+- **Update P-003+ (Exchanges)**: Apply performance monitoring decorators to all API calls
+- **Update P-008+ (Risk Management)**: Use validation utilities for risk parameter validation
+- **Update P-011+ (Strategies)**: Apply performance decorators and validation to all strategy methods
+- **Update P-014+ (Data Pipeline)**: Use formatting utilities for data display and validation
+- **Update P-017+ (ML Models)**: Apply caching decorators and validation utilities
+- **Update P-026+ (Web Interface)**: Use formatters for API responses and financial data display
+---
+
 ## **Prompt P-008: Risk Management Framework Foundation**
 
 **Title:** Implement base risk management system with position sizing and portfolio limits
@@ -1464,7 +1690,7 @@ Add rate limiting configuration to exchange factory:
 **Technical Context**: Reference @SPECIFICATIONS.md Section 2 "Risk Management Module". Support static, dynamic, and AI-powered risk modes.
 
 ### Dependencies
-**Depends On:** P-001 (types, exceptions, config), P-002 (position tracking), P-002A (error handling), P-003+ (exchange integrations), P-016A (utils)
+**Depends On:** P-001 (types, exceptions, config), P-002 (position tracking), P-002A (error handling), P-003+ (exchange integrations), P-007A (utils)
 **Enables:** P-009 (circuit breakers), P-010 (dynamic risk), P-010A (capital management), P-011+ (strategy implementations)
 
 ### Mandatory Integration Requirements
@@ -1487,7 +1713,7 @@ from src.core.config import Config
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import RecoveryScenario
 
-# From P-016A - MANDATORY: Use decorators and validators
+# From P-007A - MANDATORY: Use decorators and validators
 from src.utils.decorators import time_execution, retry, circuit_breaker
 from src.utils.validators import validate_price, validate_quantity, validate_position
 from src.utils.formatters import format_percentage, format_currency
@@ -1641,7 +1867,7 @@ python -c "from src.risk_management.base import BaseRiskManager; print('BaseRisk
 **Technical Context**: Reference @SPECIFICATIONS.md Section 2.1.4 "Circuit Breaker Configuration".
 
 ### Dependencies
-**Depends On:** P-008 (risk management base), P-001 (types, exceptions), P-002A (error handling), P-016A (utils)
+**Depends On:** P-008 (risk management base), P-001 (types, exceptions), P-002A (error handling), P-007A (utils)
 **Enables:** P-010 (dynamic risk), P-010A (capital management), P-011+ (strategies with safety guarantees)
 
 ### Mandatory Integration Requirements
@@ -1661,7 +1887,7 @@ from src.core.config import Config
 # From P-002A - MANDATORY: Use error handling patterns
 from src.error_handling.error_handler import ErrorHandler
 
-# From P-016A - MANDATORY: Use decorators
+# From P-007A - MANDATORY: Use decorators
 from src.utils.decorators import time_execution, circuit_breaker
 ```
 
@@ -1710,7 +1936,7 @@ src/risk_management/
 **Technical Context**: Reference @SPECIFICATIONS.md Section 2.1.2 "Dynamic Risk Management".
 
 ### Dependencies
-**Depends On:** P-008 (base risk), P-009 (circuit breakers), P-001 (types), P-002A (error handling), P-016A (utils)
+**Depends On:** P-008 (base risk), P-009 (circuit breakers), P-001 (types), P-002A (error handling), P-007A (utils)
 **Enables:** P-010A (capital management), P-011+ (advanced strategies), P-017+ (ML integration)
 
 ### Mandatory Integration Requirements
@@ -1731,7 +1957,7 @@ from src.core.config import Config
 # From P-002A - MANDATORY: Use error handling
 from src.error_handling.error_handler import ErrorHandler
 
-# From P-016A - MANDATORY: Use decorators and validators
+# From P-007A - MANDATORY: Use decorators and validators
 from src.utils.decorators import time_execution, retry
 from src.utils.validators import validate_price
 ```
@@ -1779,7 +2005,7 @@ src/risk_management/
 **Technical Context**: Reference @SPECIFICATIONS.md Section 3.5 "Capital Management". Support multi-strategy and multi-exchange allocation.
 
 ### Dependencies
-**Depends On:** P-008+ (risk management), P-003+ (multi-exchange support), P-002 (portfolio tracking), P-001 (types, config), P-002A (error handling), P-016A (utils)
+**Depends On:** P-008+ (risk management), P-003+ (multi-exchange support), P-002 (portfolio tracking), P-001 (types, config), P-002A (error handling), P-007A (utils)
 **Enables:** P-011 (strategies with capital allocation), P-013+ (strategy capital requirements)
 
 ### Mandatory Integration Requirements
@@ -1802,7 +2028,7 @@ from src.core.config import Config
 # From P-002A - MANDATORY: Use error handling
 from src.error_handling.error_handler import ErrorHandler
 
-# From P-016A - MANDATORY: Use decorators and validators
+# From P-007A - MANDATORY: Use decorators and validators
 from src.utils.decorators import time_execution, retry
 from src.utils.validators import validate_quantity, validate_percentage
 from src.utils.formatters import format_currency
@@ -2092,7 +2318,7 @@ python -c "from src.capital_management.capital_allocator import CapitalAllocator
 **Technical Context**: Reference @SPECIFICATIONS.md Section 3 "Strategy Framework". Support static, dynamic, and AI strategies.
 
 ### Dependencies
-**Depends On:** P-001 (types), P-008+ (risk management), P-003+ (exchanges), P-002A (error handling), P-016A (utils)
+**Depends On:** P-001 (types), P-008+ (risk management), P-003+ (exchanges), P-002A (error handling), P-007A (utils)
 **Enables:** P-012 (static strategies), P-013 (dynamic strategies), P-013A-E (all strategy types), P-019 (AI strategies)
 
 ### Mandatory Integration Requirements
@@ -2114,7 +2340,7 @@ from src.core.config import Config
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import RecoveryScenario
 
-# From P-016A - MANDATORY: Use decorators and validators
+# From P-007A - MANDATORY: Use decorators and validators
 from src.utils.decorators import time_execution, retry, circuit_breaker
 from src.utils.validators import validate_signal, validate_position
 from src.utils.formatters import format_percentage
@@ -2152,7 +2378,7 @@ from src.core.types import (
 )
 from src.core.exceptions import ValidationError, RiskManagementError
 
-# MANDATORY: Import from P-016A  
+# MANDATORY: Import from P-007A  
 from src.utils.decorators import time_execution, retry
 from src.utils.validators import validate_signal
 
@@ -2370,7 +2596,7 @@ python -c "from src.core.config import Config; c = Config(); print(f'Strategy co
 **Technical Context**: Reference @SPECIFICATIONS.md Section 3.3 strategy configurations. Include comprehensive backtesting.
 
 ### Dependencies
-**Depends On:** P-011 (strategy base), P-008+ (risk management), P-001 (types), P-002A (error handling), P-016A (utils)
+**Depends On:** P-011 (strategy base), P-008+ (risk management), P-001 (types), P-002A (error handling), P-007A (utils)
 **Enables:** P-013 (dynamic strategies), P-013A-E (all strategy types), P-020+ (execution engine)
 
 ### Mandatory Integration Requirements
@@ -2388,7 +2614,7 @@ from src.core.types import (
 )
 from src.core.exceptions import ValidationError
 
-# From P-016A - Use decorators and validators
+# From P-007A - Use decorators and validators
 from src.utils.decorators import time_execution, retry
 from src.utils.validators import validate_price, validate_quantity
 
@@ -2499,7 +2725,7 @@ strategies:
 **Technical Context**: Reference @SPECIFICATIONS.md Section 3.1.2 "Dynamic Strategies".
 
 ### Dependencies
-**Depends On:** P-012 (static strategies), P-010 (regime detection), P-011 (strategy base), P-001 (types), P-002A (error handling), P-016A (utils)
+**Depends On:** P-012 (static strategies), P-010 (regime detection), P-011 (strategy base), P-001 (types), P-002A (error handling), P-007A (utils)
 **Enables:** P-013A (arbitrage), P-013B (market making), P-013C (backtesting), P-013D (evolutionary), P-013E (hybrid), P-019 (AI strategies)
 
 ### Mandatory Integration Requirements
@@ -2524,7 +2750,7 @@ from src.core.exceptions import ValidationError, RiskManagementError
 # From P-002A - MANDATORY: Use error handling
 from src.error_handling.error_handler import ErrorHandler
 
-# From P-016A - MANDATORY: Use decorators and validators
+# From P-007A - MANDATORY: Use decorators and validators
 from src.utils.decorators import time_execution, retry
 from src.utils.validators import validate_signal
 ```
@@ -3213,7 +3439,7 @@ hybrid_strategies:
 **Technical Context**: Reference @SPECIFICATIONS.md Section 4 "Data Management System".
 
 ### Dependencies
-**Depends On:** P-002 (database), P-003+ (exchanges for market data), P-001 (types), P-002A (error handling), P-016A (utils)
+**Depends On:** P-002 (database), P-003+ (exchanges for market data), P-001 (types), P-002A (error handling), P-007A (utils)
 **Enables:** P-015 (feature engineering), P-016 (data quality), P-017+ (ML models)
 
 ### Mandatory Integration Requirements
@@ -3237,7 +3463,7 @@ from src.database.connection import get_session
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import RecoveryScenario
 
-# From P-016A - MANDATORY: Use decorators and validators
+# From P-007A - MANDATORY: Use decorators and validators
 from src.utils.decorators import time_execution, retry, circuit_breaker
 from src.utils.validators import validate_price, validate_quantity
 from src.utils.formatters import format_currency
@@ -3307,7 +3533,7 @@ src/data/
 **Technical Context**: Reference @SPECIFICATIONS.md Section 4.3 "Feature Engineering". Use TA-Lib for technical indicators.
 
 ### Dependencies
-**Depends On:** P-014 (data pipeline), P-001 (types), P-002A (error handling), P-016A (utils)
+**Depends On:** P-014 (data pipeline), P-001 (types), P-002A (error handling), P-007A (utils)
 **Enables:** P-016 (data quality), P-017+ (ML models), P-019 (AI strategies)
 
 ### Mandatory Integration Requirements
@@ -3327,7 +3553,7 @@ from src.core.config import Config
 # From P-002A - MANDATORY: Use error handling patterns
 from src.error_handling.error_handler import ErrorHandler
 
-# From P-016A - MANDATORY: Use decorators and validators
+# From P-007A - MANDATORY: Use decorators and validators
 from src.utils.decorators import time_execution, retry, cache_result
 from src.utils.validators import validate_price, validate_quantity
 from src.utils.formatters import format_percentage
@@ -3432,8 +3658,6 @@ src/data/quality/
 ```
 
 ---
-
-## **Prompt P-016A: Utility Framework and Helper Functions**
 
 **Title:** Implement comprehensive utility framework with decorators, helpers, validators, and formatters
 
@@ -3672,7 +3896,7 @@ def format_pnl(pnl: float, currency: str = "USD") -> str:
 **Technical Context**: Reference @SPECIFICATIONS.md Section 5 "Machine Learning Infrastructure". MLflow integration.
 
 ### Dependencies
-**Depends On:** P-015 (features), P-016 (data quality), P-001 (types, config), P-002A (error handling), P-016A (utils)
+**Depends On:** P-015 (features), P-016 (data quality), P-001 (types, config), P-002A (error handling), P-007A (utils)
 **Enables:** P-018 (training pipeline), P-019 (AI strategies)
 
 ### Mandatory Integration Requirements
@@ -3695,7 +3919,7 @@ from src.core.config import Config
 # From P-002A - MANDATORY: Use error handling patterns
 from src.error_handling.error_handler import ErrorHandler
 
-# From P-016A - MANDATORY: Use decorators and validators
+# From P-007A - MANDATORY: Use decorators and validators
 from src.utils.decorators import time_execution, retry, cache_result
 from src.utils.validators import validate_model_input
 from src.utils.formatters import format_percentage
@@ -4011,7 +4235,7 @@ src/strategies/ai/
 **Technical Context**: Reference @SPECIFICATIONS.md Section 6 "Execution Engine". Support multiple execution algorithms.
 
 ### Dependencies
-**Depends On:** P-011+ (strategies), P-003+ (exchanges), P-007 (advanced rate limiting), P-008+ (risk management), P-001 (types), P-002A (error handling), P-016A (utils)
+**Depends On:** P-011+ (strategies), P-003+ (exchanges), P-007 (advanced rate limiting), P-008+ (risk management), P-001 (types), P-002A (error handling), P-007A (utils)
 **Enables:** P-021 (bot instances), P-022+ (bot orchestration), production trading
 
 ### Mandatory Integration Requirements
@@ -4056,7 +4280,7 @@ from src.error_handling.recovery_scenarios import (
     PartialFillRecovery, NetworkDisconnectionRecovery
 )
 
-# From P-016A - MANDATORY: Use decorators and validators
+# From P-007A - MANDATORY: Use decorators and validators
 from src.utils.decorators import time_execution, retry, circuit_breaker
 from src.utils.validators import validate_order, validate_position
 from src.utils.formatters import format_currency
@@ -4353,7 +4577,7 @@ src/state/
 **Technical Context**: Reference @SPECIFICATIONS.md Section 9.2 "Backend API" and Section 9.4 "Security Features".
 
 ### Dependencies
-**Depends On:** P-001 (config), P-002 (database), P-025 (real-time state), P-002A (error handling), P-016A (utils)
+**Depends On:** P-001 (config), P-002 (database), P-025 (real-time state), P-002A (error handling), P-007A (utils)
 **Enables:** P-027 (API endpoints), P-028 (WebSocket), P-029 (frontend)
 
 ### Mandatory Integration Requirements
@@ -4376,7 +4600,7 @@ from src.state_management.real_time_state import StateManager
 # From P-002A - MANDATORY: Use error handling patterns
 from src.error_handling.error_handler import ErrorHandler
 
-# From P-016A - MANDATORY: Use formatters and validators
+# From P-007A - MANDATORY: Use formatters and validators
 from src.utils.formatters import format_api_response, format_currency
 from src.utils.validators import validate_user_input
 from src.utils.decorators import time_execution
@@ -4391,7 +4615,7 @@ import uvicorn
 #### Required Patterns from @COMMON_PATTERNS.md:
 - MANDATORY: Use standard API response patterns for all endpoints
 - MANDATORY: Apply authentication middleware from security patterns
-- MANDATORY: Use P-016A formatters for all financial data in responses
+- MANDATORY: Use P-007A formatters for all financial data in responses
 - MANDATORY: Implement standard exception handling for API errors
 
 ### Task Details
@@ -4530,7 +4754,7 @@ python -c "from src.web_interface.security.auth import AuthManager; print('AuthM
 **Technical Context**: Reference @SPECIFICATIONS.md Section 17.1 "REST API Endpoints".
 
 ### Dependencies
-**Depends On:** P-026 (FastAPI backend), P-021+ (bot management), P-011+ (strategies), P-008+ (risk), P-017+ (ML), P-001 (types), P-016A (utils)
+**Depends On:** P-026 (FastAPI backend), P-021+ (bot management), P-011+ (strategies), P-008+ (risk), P-017+ (ML), P-001 (types), P-007A (utils)
 **Enables:** P-028 (WebSocket), P-029 (frontend integration)
 
 ### Mandatory Integration Requirements
@@ -4569,7 +4793,7 @@ from src.core.types import (
 )
 from src.core.exceptions import ValidationError, SecurityError
 
-# From P-016A - MANDATORY: Use formatters for API responses
+# From P-007A - MANDATORY: Use formatters for API responses
 from src.utils.formatters import (
     format_api_response, format_currency, format_percentage,
     format_financial_data
@@ -4584,8 +4808,8 @@ from pydantic import BaseModel as PydanticModel
 #### Required Patterns from @COMMON_PATTERNS.md:
 - MANDATORY: Use standard API response patterns for ALL endpoints
 - MANDATORY: Apply authentication decorators to protected endpoints
-- MANDATORY: Use P-016A formatters for all financial data in responses
-- MANDATORY: Implement comprehensive input validation using P-016A validators
+- MANDATORY: Use P-007A formatters for all financial data in responses
+- MANDATORY: Implement comprehensive input validation using P-007A validators
 
 ### Task Details
 
@@ -5439,13 +5663,13 @@ echo "All tests completed successfully!"
 ## **Summary and Next Steps**
 
 ### Prompt Execution Order
-Execute prompts **P-001 through P-037** in sequential order (including all sub-prompts: P-002A, P-010A, P-013A, P-013B, P-013C, P-013D, P-013E, P-016A). Each prompt builds upon previous work and enables subsequent components.
+Execute prompts **P-001 through P-037** in sequential order (including all sub-prompts: P-002A, P-010A, P-013A, P-013B, P-013C, P-013D, P-013E, P-007A). Each prompt builds upon previous work and enables subsequent components.
 
 ### Critical Dependencies
 - **Foundation**: P-001 (core) → P-002 (database) → P-002A (error handling) → P-003 (exchanges)
 - **Risk Management**: P-008 → P-009 → P-010 → P-010A (capital management)
 - **Strategies**: P-011 → P-012 → P-013 → P-013A (arbitrage) → P-013B (market making) → P-013C (backtesting) → P-019
-- **Data Pipeline**: P-014 → P-015 → P-016 → P-016A (utils)
+- **Data Pipeline**: P-014 → P-015 → P-016 → P-007A (utils)
 - **ML Pipeline**: P-017 → P-018 → P-019
 - **Web Interface**: P-026 → P-027 → P-028 → P-029
 - **Production**: P-030 → P-031 → P-032 → P-033 → P-034 → P-035 → P-036 → P-037
