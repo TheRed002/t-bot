@@ -51,6 +51,33 @@ except ImportError as e:
     print(f"Warning: Binance order manager not available: {e}")
     BINANCE_ORDERS_AVAILABLE = False
 
+# Import OKX exchange implementation (P-005)
+try:
+    from .okx import OKXExchange
+    OKX_AVAILABLE = True
+except ImportError as e:
+    # TODO: Remove in production
+    print(f"Warning: OKX exchange not available: {e}")
+    OKX_AVAILABLE = False
+
+# Import OKX WebSocket handler (P-005)
+try:
+    from .okx_websocket import OKXWebSocketManager
+    OKX_WEBSOCKET_AVAILABLE = True
+except ImportError as e:
+    # TODO: Remove in production
+    print(f"Warning: OKX WebSocket handler not available: {e}")
+    OKX_WEBSOCKET_AVAILABLE = False
+
+# Import OKX order manager (P-005)
+try:
+    from .okx_orders import OKXOrderManager
+    OKX_ORDERS_AVAILABLE = True
+except ImportError as e:
+    # TODO: Remove in production
+    print(f"Warning: OKX order manager not available: {e}")
+    OKX_ORDERS_AVAILABLE = False
+
 
 def register_exchanges(factory: ExchangeFactory) -> None:
     """
@@ -66,8 +93,14 @@ def register_exchanges(factory: ExchangeFactory) -> None:
     else:
         print("Warning: Binance exchange not registered - dependencies missing")
     
+    # Register OKX exchange (P-005)
+    if OKX_AVAILABLE:
+        factory.register_exchange("okx", OKXExchange)
+        print("Registered OKX exchange")
+    else:
+        print("Warning: OKX exchange not registered - dependencies missing")
+    
     # TODO: Register other exchanges as they are implemented
-    # - P-005: OKX exchange
     # - P-006: Coinbase exchange
     
     print(f"Registered {len(factory.get_supported_exchanges())} exchanges")
@@ -95,6 +128,11 @@ __all__ = [
     'BinanceExchange',
     'BinanceWebSocketHandler',
     'BinanceOrderManager',
+    
+    # OKX implementation (P-005)
+    'OKXExchange',
+    'OKXWebSocketManager',
+    'OKXOrderManager',
     
     # Utility function
     'register_exchanges',
