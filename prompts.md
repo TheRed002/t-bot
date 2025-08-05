@@ -1299,11 +1299,156 @@ src/exchanges/
 - **Target State:** Advanced rate limiting preventing violations across all exchanges
 - **Phase Goal:** Robust connection management for production reliability
 
-**Technical Context**: Coordinate rate limits across Binance (weight-based), OKX (endpoint-based), Coinbase (point-based).
+**Technical Context**: Coordinate rate limits across Binance (weight-based), OKX (endpoint-based), Coinbase (point-based). Reference @SPECIFICATIONS.md Section 1.4 "Exchange-Specific Rate Limits".
 
 ### Dependencies
 **Depends On:** P-004, P-005, P-006 (all exchange implementations)
 **Enables:** P-008+ (risk management can assume reliable exchange connectivity)
+
+### Mandatory Integration Requirements
+**CRITICAL**: This prompt MUST integrate with existing components and update P-003:
+
+#### Required Imports from Previous Prompts:
+**MANDATORY**: Import the following components from previous prompts:
+- **From P-001**: `src.core.types` (MarketData, OrderRequest, OrderResponse, Position), `src.core.exceptions` (ExchangeRateLimitError, ExchangeConnectionError, ExchangeError, ValidationError), `src.core.config` (Config)
+- **From P-002A**: `src.error_handling.error_handler` (ErrorHandler), `src.error_handling.recovery_scenarios` (RecoveryScenario)  
+- **From P-003+**: `src.exchanges.base` (BaseExchange), `src.exchanges.factory` (ExchangeFactory)
+- **From P-016A**: `src.utils.decorators` (@time_execution), `src.core.logging` (get_logger)
+
+#### Required Patterns from @COMMON_PATTERNS.md:
+- MANDATORY: Use standard exception handling patterns for rate limit violations
+- MANDATORY: Apply @time_execution decorator to all rate limiting methods
+- MANDATORY: Use structured logging with rate limit context
+- MANDATORY: Implement validation patterns for all rate limit parameters
+
+### Task Details
+
+#### 1. Advanced Rate Limiter (`src/exchanges/advanced_rate_limiter.py`)
+Implement sophisticated multi-exchange rate limiting:
+
+**Exchange-Specific Rate Limits:**
+
+**AdvancedRateLimiter Class Requirements:**
+- **Purpose**: Coordinate rate limiting across all exchanges
+- **Methods**: `check_rate_limit(exchange, endpoint, weight)`, `wait_if_needed(exchange, endpoint)`
+- **Validation**: Must validate all input parameters (exchange, endpoint, weight)
+- **Error Handling**: Must handle KeyError for unknown exchanges, catch exceptions and raise ExchangeRateLimitError
+- **Logging**: Must use structured logging with rate limit context
+- **Decorators**: Must apply @time_execution decorator to all methods
+
+**BinanceRateLimiter Class Requirements:**
+- **Purpose**: Implement weight-based rate limiting (1200 requests/minute)
+- **Methods**: `check_limit(endpoint, weight)`, `wait_for_reset(endpoint)`
+- **Validation**: Must validate endpoint and weight parameters
+- **Limits**: Weight limit of 1200 per minute, order limits (50/10s, 160000/24h)
+- **Error Handling**: Must handle validation errors and rate limit violations
+- **Decorators**: Must apply @time_execution decorator
+
+**OKXRateLimiter Class Requirements:**
+- **Purpose**: Implement endpoint-based rate limiting
+- **Methods**: `check_limit(endpoint, weight)`, `wait_for_reset(endpoint)`
+- **Validation**: Must validate endpoint and weight parameters
+- **Limits**: REST (60/2s), Orders (600/2s), Historical (20/2s)
+- **Error Handling**: Must handle validation errors and rate limit violations
+- **Decorators**: Must apply @time_execution decorator
+
+**CoinbaseRateLimiter Class Requirements:**
+- **Purpose**: Implement point-based rate limiting (8000 points/minute)
+- **Methods**: `check_limit(endpoint, is_private)`, `_calculate_points(endpoint)`
+- **Validation**: Must validate endpoint and is_private parameters
+- **Limits**: 8000 points/minute, private (10/s), public (15/s)
+- **Error Handling**: Must handle validation errors and rate limit violations
+- **Decorators**: Must apply @time_execution decorator
+
+#### 2. Global Rate Coordinator (`src/exchanges/global_coordinator.py`)
+Implement cross-exchange rate limit coordination:
+
+**GlobalRateCoordinator Class Requirements:**
+- **Purpose**: Coordinate rate limits across all exchanges
+- **Methods**: `check_global_limits(request_type, count)`, `coordinate_request(exchange, endpoint, request_type)`
+- **Validation**: Must validate all input parameters (request_type, count, exchange, endpoint)
+- **Global Limits**: Total requests (5000/minute), orders (1000/minute), connections (50 concurrent)
+- **Error Handling**: Must handle validation errors and coordinate between global and exchange-specific limits
+- **Decorators**: Must apply @time_execution decorator to all methods
+
+#### 3. Connection Manager (`src/exchanges/connection_manager.py`)
+Implement WebSocket connection pooling and management:
+
+**ConnectionManager Class Requirements:**
+- **Purpose**: Manage WebSocket connection pooling across all exchanges
+- **Methods**: `get_connection(exchange, stream_type)`, `release_connection(exchange, connection)`, `handle_connection_failure(exchange, connection)`
+- **Validation**: Must validate all input parameters (exchange, stream_type, connection)
+- **Connection Pools**: Binance (300 connections, 5 msg/s), OKX (3 connections, 100 subscriptions), Coinbase (4 connections, 100 subscriptions)
+- **Error Handling**: Must handle KeyError for unknown exchanges, catch exceptions and raise ExchangeConnectionError
+- **Health Monitoring**: Must integrate with ConnectionHealthMonitor for automatic health checks
+- **Recovery**: Must trigger RecoveryScenario.CONNECTION_FAILURE when failures occur
+- **Decorators**: Must apply @time_execution decorator to all methods
+
+**WebSocketConnectionPool Class Requirements:**
+- **Purpose**: Manage individual WebSocket connection pools
+- **Methods**: `get_connection()`, `release_connection(connection)`, `_create_connection()`, `_is_connection_healthy(connection)`
+- **Validation**: Must validate connection parameters
+- **Connection Limits**: Must respect max_connections, max_messages_per_second, max_subscriptions
+- **Health Checks**: Must perform ping-based health checks before reusing connections
+- **Error Handling**: Must handle connection creation and health check failures
+
+#### 4. Connection Health Monitor (`src/exchanges/health_monitor.py`)
+Implement connection health monitoring and automatic recovery:
+
+**ConnectionHealthMonitor Class Requirements:**
+- **Purpose**: Monitor WebSocket connection health and trigger automatic recovery
+- **Methods**: `monitor_connection(connection)`, `mark_failed(connection)`, `_trigger_recovery(connection)`
+- **Validation**: Must validate connection parameters
+- **Health Checks**: Must perform ping-based health checks every 30 seconds
+- **Failure Tracking**: Must track failures, last failure time, recovery attempts, and status
+- **Recovery Logic**: Must implement exponential backoff (max 5 attempts, 2^attempts delay)
+- **Status Management**: Must track connection status (healthy, failed, recovered)
+- **Error Handling**: Must handle validation errors and connection health check failures
+- **Decorators**: Must apply @time_execution decorator to all methods
+
+### Directory Structure to Create
+```
+src/exchanges/
+├── advanced_rate_limiter.py
+├── global_coordinator.py
+├── connection_manager.py
+├── health_monitor.py
+└── websocket_pool.py
+```
+
+### Reverse Integration Required
+**CRITICAL**: This prompt MUST update P-003 files with advanced rate limiting components:
+
+#### Update P-003 src/exchanges/base.py:
+Add rate limiting integration to the base exchange class:
+- **Import Requirements**: Must import `AdvancedRateLimiter` and `ConnectionManager`
+- **Initialization**: Must initialize `rate_limiter` and `connection_manager` in `__init__`
+- **Method Requirements**: Must add `_check_rate_limit(endpoint, weight)` method
+- **Integration**: Must integrate rate limiting into all exchange operations
+
+#### Update P-003 src/exchanges/factory.py:
+Add rate limiting configuration to exchange factory:
+- **Factory Integration**: Must initialize `rate_limiter` and `connection_manager` in `create_exchange` method
+- **Configuration**: Must pass rate limiting configuration to exchange instances
+
+### Performance Requirements
+- **Rate Limiting Overhead**: <1ms per request
+- **Connection Pool Efficiency**: 95% connection reuse rate
+- **Health Monitoring**: <5ms health check overhead
+- **Global Coordination**: <2ms cross-exchange coordination
+- **Recovery Time**: <30 seconds for connection recovery
+
+### Error Handling
+- **Rate Limit Violations**: Automatic throttling with exponential backoff
+- **Connection Failures**: Automatic reconnection with circuit breaker
+- **Health Check Failures**: Graceful degradation with fallback connections
+- **Global Limit Exceeded**: Request queuing with priority system
+
+### Testing Requirements
+- **Unit Tests**: Rate limiter accuracy, connection pool efficiency
+- **Integration Tests**: Multi-exchange rate limit coordination
+- **Performance Tests**: Load testing with concurrent requests
+- **Recovery Tests**: Connection failure and recovery scenarios
 
 ---
 
@@ -2430,7 +2575,7 @@ src/strategies/dynamic/
 **Technical Context**: Reference @SPECIFICATIONS.md Section 3.3.4 "Arbitrage Strategy". Requires ultra-low latency execution.
 
 ### Dependencies
-**Depends On:** P-013 (dynamic strategies), P-003+ (multi-exchange support), P-020 (execution engine)
+**Depends On:** P-013 (dynamic strategies), P-003+ (multi-exchange support), P-007 (advanced rate limiting), P-020 (execution engine)
 **Enables:** P-013B (market making), P-014 (data pipeline for latency monitoring)
 
 ### Task Details
@@ -2439,19 +2584,21 @@ src/strategies/dynamic/
 Implement cross-exchange price differential strategy:
 - Real-time price monitoring across Binance, OKX, Coinbase
 - Spread detection with configurable minimum profit threshold (0.1% after fees)
-- Simultaneous order placement across exchanges
+- Simultaneous order placement across exchanges with rate limit coordination
 - Position balancing and currency conversion handling
 - Latency monitoring with 100ms threshold alerting
 - Execution shortfall analysis and optimization
+- Rate limit-aware execution timing for high-frequency operations
 
 #### 2. Triangular Arbitrage (`src/strategies/static/triangular_arbitrage.py`)
 Implement triangular arbitrage opportunities:
 - Three-pair arbitrage detection (e.g., BTC/USDT → ETH/BTC → ETH/USDT)
 - Path optimization for maximum profit extraction
-- Rapid execution sequencing with partial fill handling
+- Rapid execution sequencing with partial fill handling and rate limit coordination
 - Currency conversion chain validation
 - Slippage impact analysis across the arbitrage chain
 - Maximum execution time enforcement (500ms)
+- Cross-exchange rate limit synchronization for multi-step trades
 
 #### 3. Arbitrage Opportunity Scanner (`src/strategies/static/arbitrage_scanner.py`)
 Implement opportunity detection engine:
@@ -2532,19 +2679,20 @@ strategies:
 **Technical Context**: Reference @SPECIFICATIONS.md Section 3.3.5 "Market Making Strategy". Requires advanced order management.
 
 ### Dependencies
-**Depends On:** P-013A (arbitrage), P-020 (execution engine), P-008+ (risk management)
+**Depends On:** P-013A (arbitrage), P-007 (advanced rate limiting), P-020 (execution engine), P-008+ (risk management)
 **Enables:** P-014 (data pipeline), P-019 (AI strategies)
 
 ### Task Details
 
 #### 1. Market Making Engine (`src/strategies/static/market_making.py`)
 Implement core market making logic:
-- Dual-sided order placement with configurable spreads
+- Dual-sided order placement with configurable spreads and rate limit coordination
 - Order level management (5 levels default)
 - Spread adjustment based on volatility and competition
 - Inventory skew implementation for risk management
-- Order refresh management (30-second default)
+- Order refresh management (30-second default) with rate limit awareness
 - Competitive quote monitoring and adjustment
+- Cross-exchange rate limit synchronization for multi-exchange market making
 
 #### 2. Inventory Manager (`src/strategies/static/inventory_manager.py`)
 Implement inventory risk management:
@@ -3863,7 +4011,7 @@ src/strategies/ai/
 **Technical Context**: Reference @SPECIFICATIONS.md Section 6 "Execution Engine". Support multiple execution algorithms.
 
 ### Dependencies
-**Depends On:** P-011+ (strategies), P-003+ (exchanges), P-008+ (risk management), P-001 (types), P-002A (error handling), P-016A (utils)
+**Depends On:** P-011+ (strategies), P-003+ (exchanges), P-007 (advanced rate limiting), P-008+ (risk management), P-001 (types), P-002A (error handling), P-016A (utils)
 **Enables:** P-021 (bot instances), P-022+ (bot orchestration), production trading
 
 ### Mandatory Integration Requirements
@@ -3878,6 +4026,10 @@ from src.strategies.factory import StrategyFactory
 # From P-003+ - MANDATORY: Use existing exchange interfaces
 from src.exchanges.base import BaseExchange
 from src.exchanges.factory import ExchangeFactory
+
+# From P-007 - MANDATORY: Use advanced rate limiting
+from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
+from src.exchanges.global_coordinator import GlobalRateCoordinator
 
 # From P-008+ - MANDATORY: Use existing risk management
 from src.risk_management.base import BaseRiskManager
@@ -3925,6 +4077,8 @@ Implement comprehensive order management:
 - Order modification and cancellation
 - Fill reporting and confirmation
 - Order book impact analysis
+- Rate limit coordination with P-007 advanced rate limiting
+- Global rate limit enforcement across all exchanges
 
 #### 2. Execution Algorithms (`src/execution/execution_engine.py`)
 Implement multiple execution strategies:
@@ -3933,6 +4087,8 @@ Implement multiple execution strategies:
 - TWAP (Time-Weighted Average Price) algorithm
 - VWAP (Volume-Weighted Average Price) algorithm
 - Implementation shortfall minimization
+- Rate limit-aware execution timing
+- Cross-exchange rate limit coordination
 
 #### 3. Slippage Optimizer (`src/execution/slippage_optimizer.py`)
 Implement slippage minimization:
