@@ -78,6 +78,33 @@ except ImportError as e:
     print(f"Warning: OKX order manager not available: {e}")
     OKX_ORDERS_AVAILABLE = False
 
+# Import Coinbase exchange implementation (P-006)
+try:
+    from .coinbase import CoinbaseExchange
+    COINBASE_AVAILABLE = True
+except ImportError as e:
+    # TODO: Remove in production
+    print(f"Warning: Coinbase exchange not available: {e}")
+    COINBASE_AVAILABLE = False
+
+# Import Coinbase WebSocket handler (P-006)
+try:
+    from .coinbase_websocket import CoinbaseWebSocketHandler
+    COINBASE_WEBSOCKET_AVAILABLE = True
+except ImportError as e:
+    # TODO: Remove in production
+    print(f"Warning: Coinbase WebSocket handler not available: {e}")
+    COINBASE_WEBSOCKET_AVAILABLE = False
+
+# Import Coinbase order manager (P-006)
+try:
+    from .coinbase_orders import CoinbaseOrderManager
+    COINBASE_ORDERS_AVAILABLE = True
+except ImportError as e:
+    # TODO: Remove in production
+    print(f"Warning: Coinbase order manager not available: {e}")
+    COINBASE_ORDERS_AVAILABLE = False
+
 
 def register_exchanges(factory: ExchangeFactory) -> None:
     """
@@ -100,8 +127,14 @@ def register_exchanges(factory: ExchangeFactory) -> None:
     else:
         print("Warning: OKX exchange not registered - dependencies missing")
     
+    # Register Coinbase exchange (P-006)
+    if COINBASE_AVAILABLE:
+        factory.register_exchange("coinbase", CoinbaseExchange)
+        print("Registered Coinbase exchange")
+    else:
+        print("Warning: Coinbase exchange not registered - dependencies missing")
+    
     # TODO: Register other exchanges as they are implemented
-    # - P-006: Coinbase exchange
     
     print(f"Registered {len(factory.get_supported_exchanges())} exchanges")
 
@@ -133,6 +166,11 @@ __all__ = [
     'OKXExchange',
     'OKXWebSocketManager',
     'OKXOrderManager',
+    
+    # Coinbase implementation (P-006)
+    'CoinbaseExchange',
+    'CoinbaseWebSocketHandler',
+    'CoinbaseOrderManager',
     
     # Utility function
     'register_exchanges',
