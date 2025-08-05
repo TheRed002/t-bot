@@ -30,7 +30,13 @@ tenacity==8.2.3
 circuitbreaker==1.4.0
 asyncio-throttle==1.0.2
 
+# Exchange Dependencies (P-003, P-004)
+ccxt==4.1.64
+python-binance==1.0.19
+websockets==13.0
+aiohttp==3.9.1
+aiofiles==23.2.1
+
 # TODO: Add more dependencies as subsequent prompts are implemented
-# - P-003: ccxt, websockets, aiohttp
 # - P-017: numpy, pandas, scikit-learn, tensorflow
 # - P-026: fastapi, uvicorn 

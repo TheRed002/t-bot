@@ -137,9 +137,34 @@ class Application:
     
     async def _initialize_exchanges(self) -> None:
         """Initialize exchange connections."""
-        # Placeholder for P-003 exchange implementation
-        self.logger.info("Exchange initialization placeholder - will be implemented in P-003")
-        self.health_status["components"]["exchanges"] = "initialized"
+        try:
+            from src.exchanges import ExchangeFactory, register_exchanges
+            
+            # Create exchange factory
+            self.components["exchange_factory"] = ExchangeFactory(self.config)
+            
+            # Register all available exchanges
+            register_exchanges(self.components["exchange_factory"])
+            
+            # Initialize supported exchanges from configuration
+            supported_exchanges = self.config.exchanges.supported_exchanges
+            for exchange_name in supported_exchanges:
+                if self.components["exchange_factory"].is_exchange_supported(exchange_name):
+                    try:
+                        exchange = await self.components["exchange_factory"].create_exchange(exchange_name)
+                        self.logger.info(f"Initialized exchange: {exchange_name}")
+                    except Exception as e:
+                        self.logger.error(f"Failed to initialize exchange {exchange_name}: {str(e)}")
+                else:
+                    self.logger.warning(f"Exchange {exchange_name} not supported")
+            
+            self.health_status["components"]["exchanges"] = "initialized"
+            self.logger.info("Exchange initialization completed")
+            
+        except Exception as e:
+            self.logger.error(f"Exchange initialization failed: {str(e)}")
+            self.health_status["components"]["exchanges"] = "error"
+            raise
     
     async def _initialize_risk_management(self) -> None:
         """Initialize risk management system."""
@@ -206,9 +231,16 @@ class Application:
     
     async def _shutdown_exchanges(self) -> None:
         """Shutdown exchange connections."""
-        # Placeholder for P-003 exchange shutdown
-        self.logger.info("Exchange shutdown placeholder - will be implemented in P-003")
-        self.health_status["components"]["exchanges"] = "shutdown"
+        try:
+            if "exchange_factory" in self.components:
+                await self.components["exchange_factory"].disconnect_all()
+                self.logger.info("Disconnected all exchanges")
+            
+            self.health_status["components"]["exchanges"] = "shutdown"
+            
+        except Exception as e:
+            self.logger.error(f"Exchange shutdown error: {str(e)}")
+            self.health_status["components"]["exchanges"] = "error"
     
     async def _shutdown_risk_management(self) -> None:
         """Shutdown risk management system."""

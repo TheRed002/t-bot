@@ -146,6 +146,7 @@ class OrderStatus(Enum):
     CANCELLED = "cancelled"
     REJECTED = "rejected"
     EXPIRED = "expired"
+    UNKNOWN = "unknown"
 
 class Trade(BaseModel):
     """Trade execution record."""
