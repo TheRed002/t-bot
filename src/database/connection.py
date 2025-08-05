@@ -15,7 +15,7 @@ from typing import AsyncGenerator, Optional, Dict, Any
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import QueuePool, AsyncAdaptedQueuePool
 import redis.asyncio as redis
 from influxdb_client import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
@@ -65,7 +65,7 @@ class DatabaseConnectionManager:
             self.async_engine = create_async_engine(
                 self.config.get_async_database_url(),
                 echo=self.config.debug,
-                poolclass=QueuePool,
+                poolclass=AsyncAdaptedQueuePool,
                 pool_size=self.config.database.postgresql_pool_size,
                 max_overflow=20,
                 pool_pre_ping=True,
