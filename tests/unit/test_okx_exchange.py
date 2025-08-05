@@ -14,7 +14,7 @@ and handles all required functionality correctly.
 
 import pytest
 import asyncio
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from decimal import Decimal
 from datetime import datetime, timezone
 
@@ -55,83 +55,175 @@ class TestOKXExchange:
         return OKXExchange(config, "okx")
     
     @pytest.fixture
-    def mock_okx_clients(self):
-        """Mock OKX API clients."""
-        with patch('src.exchanges.okx.Account') as mock_account, \
-             patch('src.exchanges.okx.Market') as mock_market, \
-             patch('src.exchanges.okx.Trade') as mock_trade, \
-             patch('src.exchanges.okx.Public') as mock_public:
+    def mock_account_client(self):
+        """Mock OKX Account client."""
+        mock_client = Mock()
+        mock_client.get_balance.return_value = {
+            'code': '0',
+            'data': [
+                {
+                    'ccy': 'USDT',
+                    'availBal': '1000.0',
+                    'frozenBal': '0.0'
+                },
+                {
+                    'ccy': 'BTC',
+                    'availBal': '0.1',
+                    'frozenBal': '0.0'
+                }
+            ]
+        }
+        return mock_client
+    
+    @pytest.fixture
+    def mock_market_client(self):
+        """Mock OKX Market client."""
+        mock_client = Mock()
+        mock_client.get_candlesticks.return_value = {
+            'code': '0',
+            'data': [
+                ['1640995200000', '50000', '51000', '49000', '50500', '1000', '50000000']
+            ]
+        }
+        mock_client.get_orderbook.return_value = {
+            'code': '0',
+            'data': [{
+                'bids': [['50000', '1.0'], ['49999', '2.0']],
+                'asks': [['50001', '1.0'], ['50002', '2.0']]
+            }]
+        }
+        mock_client.get_trades.return_value = {
+            'code': '0',
+            'data': [
+                {
+                    'tradeId': '12345',
+                    'instId': 'BTC-USDT',
+                    'side': 'buy',
+                    'sz': '0.1',
+                    'px': '50000',
+                    'ts': '1640995200000'
+                }
+            ]
+        }
+        return mock_client
+    
+    @pytest.fixture
+    def mock_trade_client(self):
+        """Mock OKX Trade client."""
+        mock_client = Mock()
+        
+        # Default order placement response
+        def place_order_side_effect(**kwargs):
+            # Determine side and order type from the request
+            side = kwargs.get('side', 'buy')
+            ord_type = kwargs.get('ordType', 'market')
             
-            # Mock successful responses
-            mock_account.return_value.get_account_balance.return_value = {
-                'code': '0',
-                'data': [
-                    {
-                        'ccy': 'USDT',
-                        'availBal': '1000.0',
-                        'frozenBal': '0.0'
-                    },
-                    {
-                        'ccy': 'BTC',
-                        'availBal': '0.1',
-                        'frozenBal': '0.0'
-                    }
-                ]
-            }
-            
-            mock_public.return_value.get_candlesticks.return_value = {
-                'code': '0',
-                'data': [
-                    ['1640995200000', '50000', '51000', '49000', '50500', '1000', '50000000']
-                ]
-            }
-            
-            mock_public.return_value.get_orderbook.return_value = {
+            return {
                 'code': '0',
                 'data': [{
-                    'bids': [['50000', '1.0'], ['49999', '2.0']],
-                    'asks': [['50001', '1.0'], ['50002', '2.0']]
+                    'ordId': 'test_order_123',
+                    'instId': kwargs.get('instId', 'BTC-USDT'),
+                    'side': side,
+                    'ordType': ord_type,
+                    'sz': kwargs.get('sz', '100'),
+                    'px': kwargs.get('px', '50000'),
+                    'state': 'live',
+                    'cTime': '1640995200000'
                 }]
             }
-            
-            mock_public.return_value.get_trades.return_value = {
-                'code': '0',
-                'data': [
-                    {
-                        'tradeId': '12345',
-                        'side': 'buy',
-                        'sz': '1.0',
-                        'px': '50000',
-                        'ts': '1640995200000'
-                    }
-                ]
-            }
-            
-            mock_public.return_value.get_instruments.return_value = {
-                'code': '0',
-                'data': [
-                    {'instId': 'BTC-USDT'},
-                    {'instId': 'ETH-USDT'}
-                ]
-            }
-            
-            mock_public.return_value.get_ticker.return_value = {
-                'code': '0',
-                'data': [{
-                    'bidPx': '50000',
-                    'askPx': '50001',
-                    'last': '50000.5',
-                    'vol24h': '1000',
-                    'change24h': '500'
-                }]
-            }
-            
-            yield {
-                'account': mock_account,
-                'market': mock_market,
-                'trade': mock_trade,
-                'public': mock_public
-            }
+        
+        mock_client.place_order.side_effect = place_order_side_effect
+        mock_client.cancel_order.return_value = {
+            'code': '0',
+            'data': [{
+                'ordId': 'test_order_123',
+                'sState': 'canceled'
+            }]
+        }
+        mock_client.get_order.return_value = {
+            'code': '0',
+            'data': [{
+                'ordId': 'test_order_123',
+                'instId': 'BTC-USDT',
+                'side': 'buy',
+                'ordType': 'market',
+                'sz': '100',
+                'px': '50000',
+                'state': 'filled',
+                'cTime': '1640995200000',
+                'fillSz': '100'
+            }]
+        }
+        mock_client.get_order_details.return_value = {
+            'code': '0',
+            'data': [{
+                'ordId': 'test_order_123',
+                'instId': 'BTC-USDT',
+                'side': 'buy',
+                'ordType': 'market',
+                'sz': '100',
+                'px': '50000',
+                'state': 'filled',
+                'cTime': '1640995200000',
+                'fillSz': '100'
+            }]
+        }
+        return mock_client
+    
+    @pytest.fixture
+    def mock_public_client(self):
+        """Mock OKX Public client."""
+        mock_client = Mock()
+        mock_client.get_instruments.return_value = {
+            'code': '0',
+            'data': [
+                {
+                    'instId': 'BTC-USDT',
+                    'baseCcy': 'BTC',
+                    'quoteCcy': 'USDT',
+                    'state': 'live'
+                }
+            ]
+        }
+        mock_client.get_ticker.return_value = {
+            'code': '0',
+            'data': [{
+                'instId': 'BTC-USDT',
+                'last': '50000',
+                'bidPx': '49999',
+                'askPx': '50001',
+                'vol24h': '1000',
+                'change24h': '500',
+                'ts': '1640995200000'
+            }]
+        }
+        mock_client.get_candlesticks.return_value = {
+            'code': '0',
+            'data': [
+                ['1640995200000', '50000', '51000', '49000', '50500', '1000', '50000000']
+            ]
+        }
+        mock_client.get_orderbook.return_value = {
+            'code': '0',
+            'data': [{
+                'bids': [['50000', '1.0'], ['49999', '2.0']],
+                'asks': [['50001', '1.0'], ['50002', '2.0']]
+            }]
+        }
+        mock_client.get_trades.return_value = {
+            'code': '0',
+            'data': [
+                {
+                    'tradeId': '12345',
+                    'instId': 'BTC-USDT',
+                    'side': 'buy',
+                    'sz': '0.1',
+                    'px': '50000',
+                    'ts': '1640995200000'
+                }
+            ]
+        }
+        return mock_client
     
     @pytest.mark.asyncio
     async def test_okx_exchange_initialization(self, okx_exchange):
@@ -144,17 +236,22 @@ class TestOKXExchange:
         assert okx_exchange.connected is False
     
     @pytest.mark.asyncio
-    async def test_okx_connect_success(self, okx_exchange, mock_okx_clients):
+    async def test_okx_connect_success(self, okx_exchange, mock_account_client, mock_market_client, mock_trade_client, mock_public_client):
         """Test successful connection to OKX."""
-        result = await okx_exchange.connect()
-        
-        assert result is True
-        assert okx_exchange.connected is True
-        assert okx_exchange.status == "connected"
-        assert okx_exchange.account_client is not None
-        assert okx_exchange.market_client is not None
-        assert okx_exchange.trade_client is not None
-        assert okx_exchange.public_client is not None
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=mock_market_client), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            result = await okx_exchange.connect()
+            
+            assert result is True
+            assert okx_exchange.connected is True
+            assert okx_exchange.status == "connected"
+            assert okx_exchange.account_client is not None
+            assert okx_exchange.market_client is not None
+            assert okx_exchange.trade_client is not None
+            assert okx_exchange.public_client is not None
     
     @pytest.mark.asyncio
     async def test_okx_connect_failure(self, okx_exchange):
@@ -167,234 +264,257 @@ class TestOKXExchange:
         assert okx_exchange.status == "error"
     
     @pytest.mark.asyncio
-    async def test_okx_disconnect(self, okx_exchange, mock_okx_clients):
+    async def test_okx_disconnect(self, okx_exchange, mock_account_client, mock_market_client, mock_trade_client, mock_public_client):
         """Test disconnection from OKX."""
         # First connect
-        await okx_exchange.connect()
-        
-        # Then disconnect
-        await okx_exchange.disconnect()
-        
-        assert okx_exchange.connected is False
-        assert okx_exchange.status == "disconnected"
-        assert okx_exchange.account_client is None
-        assert okx_exchange.market_client is None
-        assert okx_exchange.trade_client is None
-        assert okx_exchange.public_client is None
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=mock_market_client), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            await okx_exchange.connect()
+            
+            # Then disconnect
+            await okx_exchange.disconnect()
+            
+            assert okx_exchange.connected is False
+            assert okx_exchange.status == "disconnected"
+            assert okx_exchange.account_client is None
+            assert okx_exchange.market_client is None
+            assert okx_exchange.trade_client is None
+            assert okx_exchange.public_client is None
     
     @pytest.mark.asyncio
-    async def test_get_account_balance(self, okx_exchange, mock_okx_clients):
+    async def test_get_account_balance(self, okx_exchange, mock_account_client):
         """Test getting account balance from OKX."""
-        await okx_exchange.connect()
-        
-        balances = await okx_exchange.get_account_balance()
-        
-        assert isinstance(balances, dict)
-        assert 'USDT' in balances
-        assert 'BTC' in balances
-        assert balances['USDT'] == Decimal('1000.0')
-        assert balances['BTC'] == Decimal('0.1')
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await okx_exchange.connect()
+            
+            balances = await okx_exchange.get_account_balance()
+            
+            assert isinstance(balances, dict)
+            assert "USDT" in balances
+            assert "BTC" in balances
+            assert balances["USDT"] == Decimal('1000.0')
+            assert balances["BTC"] == Decimal('0.1')
     
     @pytest.mark.asyncio
-    async def test_place_order_success(self, okx_exchange, mock_okx_clients):
+    async def test_place_order_success(self, okx_exchange, mock_trade_client, mock_account_client):
         """Test successful order placement on OKX."""
-        await okx_exchange.connect()
-        
-        # Mock successful order placement
-        mock_okx_clients['trade'].return_value.place_order.return_value = {
-            'code': '0',
-            'data': [{
-                'ordId': '12345',
-                'clOrdId': 'test_order',
-                'instId': 'BTC-USDT',
-                'side': 'buy',
-                'ordType': 'limit',
-                'sz': '1.0',
-                'px': '50000',
-                'accFillSz': '0',
-                'state': 'live'
-            }]
-        }
-        
-        order_request = OrderRequest(
-            symbol="BTC-USDT",
-            side=OrderSide.BUY,
-            order_type=OrderType.LIMIT,
-            quantity=Decimal('1.0'),
-            price=Decimal('50000'),
-            client_order_id="test_order"
-        )
-        
-        response = await okx_exchange.place_order(order_request)
-        
-        assert isinstance(response, OrderResponse)
-        assert response.id == "12345"
-        assert response.symbol == "BTC-USDT"
-        assert response.side == OrderSide.BUY
-        assert response.order_type == OrderType.LIMIT
-        assert response.quantity == Decimal('1.0')
-        assert response.price == Decimal('50000')
-        assert response.status == OrderStatus.PENDING.value
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await okx_exchange.connect()
+            
+            response = await okx_exchange.place_order(
+                OrderRequest(
+                    symbol="BTC-USDT",
+                    side=OrderSide.BUY,
+                    order_type=OrderType.MARKET,
+                    quantity=Decimal('100'),
+                    client_order_id="test_order"
+                )
+            )
+            
+            assert isinstance(response, OrderResponse)
+            assert response.id == "test_order_123"
+            assert response.symbol == "BTC-USDT"
+            assert response.side == OrderSide.BUY
+            assert response.order_type == OrderType.MARKET
+            assert response.quantity == Decimal('100')
+            assert response.price == Decimal('50000')
+            assert response.status == OrderStatus.PENDING.value  # 'live' maps to PENDING
     
     @pytest.mark.asyncio
-    async def test_place_order_insufficient_funds(self, okx_exchange, mock_okx_clients):
+    async def test_place_order_insufficient_funds(self, okx_exchange, mock_trade_client, mock_account_client):
         """Test order placement with insufficient funds."""
-        await okx_exchange.connect()
-        
-        # Mock insufficient funds error
-        mock_okx_clients['trade'].return_value.place_order.return_value = {
-            'code': '58006',
-            'msg': 'Insufficient balance'
-        }
-        
-        order_request = OrderRequest(
-            symbol="BTC-USDT",
-            side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
-            quantity=Decimal('1000.0')
-        )
-        
-        with pytest.raises(ExchangeInsufficientFundsError):
-            await okx_exchange.place_order(order_request)
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await okx_exchange.connect()
+            
+            # Mock insufficient funds error by overriding the side_effect
+            mock_trade_client.place_order.side_effect = None
+            mock_trade_client.place_order.return_value = {
+                'code': '58006',
+                'msg': 'Insufficient balance'
+            }
+            
+            order_request = OrderRequest(
+                symbol="BTC-USDT",
+                side=OrderSide.BUY,
+                order_type=OrderType.MARKET,
+                quantity=Decimal('1000.0')
+            )
+            
+            with pytest.raises(ExchangeInsufficientFundsError):
+                await okx_exchange.place_order(order_request)
     
     @pytest.mark.asyncio
-    async def test_cancel_order_success(self, okx_exchange, mock_okx_clients):
+    async def test_cancel_order_success(self, okx_exchange, mock_trade_client, mock_account_client):
         """Test successful order cancellation on OKX."""
-        await okx_exchange.connect()
-        
-        # Mock successful cancellation
-        mock_okx_clients['trade'].return_value.cancel_order.return_value = {
-            'code': '0',
-            'data': [{'ordId': '12345'}]
-        }
-        
-        result = await okx_exchange.cancel_order("12345")
-        
-        assert result is True
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await okx_exchange.connect()
+            
+            result = await okx_exchange.cancel_order("test_order_123")
+            
+            assert result is True
     
     @pytest.mark.asyncio
-    async def test_cancel_order_failure(self, okx_exchange, mock_okx_clients):
+    async def test_cancel_order_failure(self, okx_exchange, mock_trade_client, mock_account_client):
         """Test order cancellation failure on OKX."""
-        await okx_exchange.connect()
-        
-        # Mock cancellation failure
-        mock_okx_clients['trade'].return_value.cancel_order.return_value = {
-            'code': '58008',
-            'msg': 'Order does not exist'
-        }
-        
-        result = await okx_exchange.cancel_order("12345")
-        
-        assert result is False
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await okx_exchange.connect()
+            
+            # Mock cancellation failure
+            mock_trade_client.cancel_order.return_value = {
+                'code': '58008',
+                'msg': 'Order does not exist'
+            }
+            
+            result = await okx_exchange.cancel_order("non-existent-order")
+            assert result is False
     
     @pytest.mark.asyncio
-    async def test_get_order_status(self, okx_exchange, mock_okx_clients):
+    async def test_get_order_status(self, okx_exchange, mock_trade_client, mock_account_client):
         """Test getting order status from OKX."""
-        await okx_exchange.connect()
-        
-        # Mock order details
-        mock_okx_clients['trade'].return_value.get_order_details.return_value = {
-            'code': '0',
-            'data': [{
-                'ordId': '12345',
-                'state': 'filled'
-            }]
-        }
-        
-        status = await okx_exchange.get_order_status("12345")
-        
-        assert status == OrderStatus.FILLED
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await okx_exchange.connect()
+            
+            status = await okx_exchange.get_order_status("test_order_123")
+            
+            assert status == OrderStatus.FILLED
     
     @pytest.mark.asyncio
-    async def test_get_market_data(self, okx_exchange, mock_okx_clients):
+    async def test_get_market_data(self, okx_exchange, mock_public_client, mock_account_client):
         """Test getting market data from OKX."""
-        await okx_exchange.connect()
-        
-        market_data = await okx_exchange.get_market_data("BTC-USDT", "1m")
-        
-        assert isinstance(market_data, MarketData)
-        assert market_data.symbol == "BTC-USDT"
-        assert market_data.price == Decimal('50500')
-        assert market_data.volume == Decimal('1000')
-        assert market_data.open_price == Decimal('50000')
-        assert market_data.high_price == Decimal('51000')
-        assert market_data.low_price == Decimal('49000')
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            await okx_exchange.connect()
+            
+            market_data = await okx_exchange.get_market_data("BTC-USDT")
+            
+            assert isinstance(market_data, MarketData)
+            assert market_data.symbol == "BTC-USDT"
+            assert market_data.open_price == Decimal('50000')
+            assert market_data.high_price == Decimal('51000')
+            assert market_data.low_price == Decimal('49000')
+            assert market_data.price == Decimal('50500')  # price is the close price
+            assert market_data.volume == Decimal('1000')
     
     @pytest.mark.asyncio
-    async def test_get_order_book(self, okx_exchange, mock_okx_clients):
+    async def test_get_order_book(self, okx_exchange, mock_public_client, mock_account_client):
         """Test getting order book from OKX."""
-        await okx_exchange.connect()
-        
-        order_book = await okx_exchange.get_order_book("BTC-USDT", 10)
-        
-        assert isinstance(order_book, OrderBook)
-        assert order_book.symbol == "BTC-USDT"
-        assert len(order_book.bids) == 2
-        assert len(order_book.asks) == 2
-        assert order_book.bids[0][0] == Decimal('50000')
-        assert order_book.bids[0][1] == Decimal('1.0')
-        assert order_book.asks[0][0] == Decimal('50001')
-        assert order_book.asks[0][1] == Decimal('1.0')
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            await okx_exchange.connect()
+            
+            order_book = await okx_exchange.get_order_book("BTC-USDT")
+            
+            assert isinstance(order_book, OrderBook)
+            assert order_book.symbol == "BTC-USDT"
+            assert len(order_book.bids) == 2
+            assert len(order_book.asks) == 2
+            assert order_book.bids[0][0] == Decimal('50000')  # price
+            assert order_book.bids[0][1] == Decimal('1.0')    # quantity
+            assert order_book.asks[0][0] == Decimal('50001')  # price
+            assert order_book.asks[0][1] == Decimal('1.0')    # quantity
     
     @pytest.mark.asyncio
-    async def test_get_trade_history(self, okx_exchange, mock_okx_clients):
+    async def test_get_trade_history(self, okx_exchange, mock_public_client, mock_account_client):
         """Test getting trade history from OKX."""
-        await okx_exchange.connect()
-
-        trades = await okx_exchange.get_trade_history("BTC-USDT", 100)
-
-        assert isinstance(trades, list)
-        assert len(trades) == 1
-        # The mock returns a Mock object, so we need to check differently
-        assert hasattr(trades[0], 'id')
-        # Since the mock returns a Mock object, we can't check the actual values
-        # This test verifies that the method returns a list with the expected structure
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            await okx_exchange.connect()
+            
+            trades = await okx_exchange.get_trade_history("BTC-USDT")
+            
+            assert isinstance(trades, list)
+            assert len(trades) == 1
+            assert trades[0].symbol == "BTC-USDT"
+            assert trades[0].side == OrderSide.BUY
+            assert trades[0].quantity == Decimal('0.1')
+            assert trades[0].price == Decimal('50000')
     
     @pytest.mark.asyncio
-    async def test_get_exchange_info(self, okx_exchange, mock_okx_clients):
+    async def test_get_exchange_info(self, okx_exchange, mock_public_client, mock_account_client):
         """Test getting exchange info from OKX."""
-        await okx_exchange.connect()
-        
-        exchange_info = await okx_exchange.get_exchange_info()
-        
-        assert isinstance(exchange_info, ExchangeInfo)
-        assert exchange_info.name == "OKX"
-        assert len(exchange_info.supported_symbols) == 2
-        assert "BTC-USDT" in exchange_info.supported_symbols
-        assert "ETH-USDT" in exchange_info.supported_symbols
-        assert exchange_info.api_version == "v5"
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            await okx_exchange.connect()
+            
+            exchange_info = await okx_exchange.get_exchange_info()
+            
+            assert isinstance(exchange_info, ExchangeInfo)
+            assert exchange_info.name == "OKX"
+            assert len(exchange_info.supported_symbols) == 1
+            assert "BTC-USDT" in exchange_info.supported_symbols
+            assert exchange_info.api_version == "v5"
     
     @pytest.mark.asyncio
-    async def test_get_ticker(self, okx_exchange, mock_okx_clients):
+    async def test_get_ticker(self, okx_exchange, mock_public_client, mock_account_client):
         """Test getting ticker from OKX."""
-        await okx_exchange.connect()
-        
-        ticker = await okx_exchange.get_ticker("BTC-USDT")
-        
-        assert isinstance(ticker, Ticker)
-        assert ticker.symbol == "BTC-USDT"
-        assert ticker.bid == Decimal('50000')
-        assert ticker.ask == Decimal('50001')
-        assert ticker.last_price == Decimal('50000.5')
-        assert ticker.volume_24h == Decimal('1000')
-        assert ticker.price_change_24h == Decimal('500')
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            await okx_exchange.connect()
+            
+            ticker = await okx_exchange.get_ticker("BTC-USDT")
+            
+            assert isinstance(ticker, Ticker)
+            assert ticker.symbol == "BTC-USDT"
+            assert ticker.bid == Decimal('49999')
+            assert ticker.ask == Decimal('50001')
+            assert ticker.last_price == Decimal('50000')
+            assert ticker.volume_24h == Decimal('1000')
+            assert ticker.price_change_24h == Decimal('500')
     
     @pytest.mark.asyncio
-    async def test_health_check_success(self, okx_exchange, mock_okx_clients):
+    async def test_health_check_success(self, okx_exchange, mock_account_client):
         """Test successful health check."""
-        await okx_exchange.connect()
-        
-        health = await okx_exchange.health_check()
-        
-        assert health is True
-    
-    @pytest.mark.asyncio
-    async def test_health_check_failure(self, okx_exchange):
-        """Test health check failure."""
-        # Don't connect first
-        health = await okx_exchange.health_check()
-        
-        assert health is False
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await okx_exchange.connect()
+            
+            result = await okx_exchange.health_check()
+            assert result is True
     
     def test_get_rate_limits(self, okx_exchange):
         """Test getting rate limits."""
@@ -444,12 +564,12 @@ class TestOKXExchange:
         # This is a limitation of the current implementation
 
     @pytest.mark.asyncio
-    async def test_get_account_balance_with_cache(self, mock_okx_clients, config):
+    async def test_get_account_balance_with_cache(self, mock_account_client, config):
         """Test getting account balance with cached data."""
         exchange = OKXExchange(config)
         
         # Mock the clients
-        exchange.account_client = mock_okx_clients["account"]
+        exchange.account_client = mock_account_client
         
         # Mock successful balance response with correct structure
         mock_balance_data = {
@@ -463,7 +583,7 @@ class TestOKXExchange:
                 "upl": "0.0"
             }]
         }
-        mock_okx_clients["account"].get_account_balance.return_value = mock_balance_data
+        mock_account_client.get_balance.return_value = mock_balance_data
         
         # First call - should fetch from API
         balance = await exchange.get_account_balance()
@@ -475,290 +595,312 @@ class TestOKXExchange:
         assert balance_cached == balance
 
     @pytest.mark.asyncio
-    async def test_get_order_status_not_found(self, mock_okx_clients, config):
+    async def test_get_order_status_not_found(self, mock_trade_client, config):
         """Test getting status of non-existent order."""
         exchange = OKXExchange(config)
-        exchange.trade_client = mock_okx_clients["trade"]
-        
+        exchange.trade_client = mock_trade_client
+
         # Mock order not found response
-        mock_okx_clients["trade"].get_order_details.return_value = {
+        mock_trade_client.get_order_details.return_value = {
             "code": "1",
             "msg": "Order not found"
         }
-        
+
         # The implementation logs a warning but doesn't raise an exception
         # So we just test that it doesn't crash
         result = await exchange.get_order_status("non-existent-order")
         assert result == OrderStatus.UNKNOWN
 
     @pytest.mark.asyncio
-    async def test_get_market_data_invalid_timeframe(self, mock_okx_clients, config):
+    async def test_get_market_data_invalid_timeframe(self, mock_public_client, config):
         """Test getting market data with invalid timeframe."""
         exchange = OKXExchange(config)
-        exchange.public_client = mock_okx_clients["public"]
-        
+        exchange.public_client = mock_public_client
+
         # Mock the get_candlesticks method to return a proper response
-        mock_okx_clients["public"].get_candlesticks.return_value = {
+        mock_public_client.get_candlesticks.return_value = {
             "code": "0",
             "data": [["1234567890", "50000", "51000", "49000", "50500", "100", "0"]]
         }
-        
+
         # The implementation should handle invalid timeframes gracefully
         result = await exchange.get_market_data("BTC-USDT", "invalid_timeframe")
+        
+        # Should still work because _convert_timeframe_to_okx handles invalid timeframes
+        assert isinstance(result, MarketData)
         assert result.symbol == "BTC-USDT"
 
     @pytest.mark.asyncio
-    async def test_get_order_book_invalid_depth(self, mock_okx_clients, config):
+    async def test_get_order_book_invalid_depth(self, mock_public_client, config):
         """Test getting order book with invalid depth."""
         exchange = OKXExchange(config)
-        exchange.public_client = mock_okx_clients["public"]
-        
+        exchange.public_client = mock_public_client
+
         # Mock successful response
-        mock_okx_clients["public"].get_orderbook.return_value = {
+        mock_public_client.get_orderbook.return_value = {
             "code": "0",
             "data": [{
-                "asks": [["50000", "1.0"]],
-                "bids": [["49999", "1.0"]],
-                "ts": "1234567890"
+                "bids": [["50000", "1.0"], ["49999", "2.0"]],
+                "asks": [["50001", "1.0"], ["50002", "2.0"]]
             }]
         }
-        
+
+        # Test with invalid depth (should still work)
         order_book = await exchange.get_order_book("BTC-USDT", depth=5)
-        assert len(order_book.bids) == 1
-        assert len(order_book.asks) == 1
+        
+        assert isinstance(order_book, OrderBook)
+        assert order_book.symbol == "BTC-USDT"
+        assert len(order_book.bids) == 2
+        assert len(order_book.asks) == 2
 
     @pytest.mark.asyncio
-    async def test_get_trade_history_empty(self, mock_okx_clients, config):
+    async def test_get_trade_history_empty(self, mock_public_client, mock_account_client, config):
         """Test getting trade history when no trades exist."""
         exchange = OKXExchange(config)
-        exchange.public_client = mock_okx_clients["public"]
         
-        # Mock empty response
-        mock_okx_clients["public"].get_trades.return_value = {
-            "code": "0",
-            "data": []
-        }
-        
-        trades = await exchange.get_trade_history("BTC-USDT", limit=10)
-        assert len(trades) == 0
+        # Mock the clients
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            await exchange.connect()
+            
+            # Mock empty response
+            mock_public_client.get_trades.return_value = {
+                "code": "0",
+                "data": []
+            }
+
+            trades = await exchange.get_trade_history("BTC-USDT")
+            
+            assert isinstance(trades, list)
+            assert len(trades) == 0
 
     @pytest.mark.asyncio
-    async def test_get_exchange_info_api_error(self, mock_okx_clients, config):
+    async def test_get_exchange_info_api_error(self, mock_public_client, config):
         """Test getting exchange info when API returns error."""
         exchange = OKXExchange(config)
-        exchange.market_client = mock_okx_clients["market"]
+        exchange.public_client = mock_public_client
         
         # Mock API error
-        mock_okx_clients["market"].get_instruments.side_effect = Exception("API Error")
+        mock_public_client.get_instruments.side_effect = Exception("API Error")
         
         with pytest.raises(ExchangeError):
             await exchange.get_exchange_info()
 
     @pytest.mark.asyncio
-    async def test_get_ticker_api_error(self, mock_okx_clients, config):
+    async def test_get_ticker_api_error(self, mock_public_client, config):
         """Test getting ticker when API returns error."""
         exchange = OKXExchange(config)
-        exchange.market_client = mock_okx_clients["market"]
+        exchange.public_client = mock_public_client
         
         # Mock API error
-        mock_okx_clients["market"].get_ticker.side_effect = Exception("API Error")
+        mock_public_client.get_ticker.side_effect = Exception("API Error")
         
         with pytest.raises(ExchangeError):
             await exchange.get_ticker("BTC-USDT")
 
     @pytest.mark.asyncio
-    async def test_health_check_failure(self, mock_okx_clients, config):
+    async def test_health_check_failure(self, mock_account_client, config):
         """Test health check when API is down."""
         exchange = OKXExchange(config)
-        exchange.market_client = mock_okx_clients["market"]
+        exchange.account_client = mock_account_client
         
         # Mock API error
-        mock_okx_clients["market"].get_ticker.side_effect = Exception("API Error")
+        mock_account_client.get_balance.side_effect = Exception("API Error")
         
         result = await exchange.health_check()
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_place_order_with_stop_price(self, okx_exchange, mock_okx_clients):
+    async def test_place_order_with_stop_price(self, mock_trade_client, mock_account_client, config):
         """Test order placement with stop price."""
-        await okx_exchange.connect()
+        exchange = OKXExchange(config)
         
-        # Mock successful order placement
-        mock_okx_clients['trade'].return_value.place_order.return_value = {
-            'code': '0',
-            'data': [{
-                'ordId': '12345',
-                'clOrdId': 'test_order',
-                'instId': 'BTC-USDT',
-                'side': 'sell',
-                'ordType': 'conditional',
-                'sz': '1.0',
-                'px': '45000',
-                'accFillSz': '0',
-                'state': 'live'
-            }]
-        }
-        
-        order_request = OrderRequest(
-            symbol="BTC-USDT",
-            side=OrderSide.SELL,
-            order_type=OrderType.STOP_LOSS,
-            quantity=Decimal('1.0'),
-            price=Decimal('45000'),
-            stop_price=Decimal('46000')
-        )
-        
-        response = await okx_exchange.place_order(order_request)
-        
-        assert isinstance(response, OrderResponse)
-        assert response.id == "12345"
-        assert response.side == OrderSide.SELL
-        assert response.order_type == OrderType.STOP_LOSS
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await exchange.connect()
+            
+            response = await exchange.place_order(
+                OrderRequest(
+                    symbol="BTC-USDT",
+                    side=OrderSide.SELL,
+                    order_type=OrderType.STOP_LOSS,
+                    quantity=Decimal('100'),
+                    price=Decimal('45000'),
+                    stop_price=Decimal('46000')
+                )
+            )
+            
+            assert isinstance(response, OrderResponse)
+            assert response.id == "test_order_123"
+            assert response.side == OrderSide.SELL
+            assert response.order_type == OrderType.STOP_LOSS
 
     @pytest.mark.asyncio
-    async def test_place_order_with_time_in_force(self, okx_exchange, mock_okx_clients):
+    async def test_place_order_with_time_in_force(self, mock_trade_client, mock_account_client, config):
         """Test order placement with time in force."""
-        await okx_exchange.connect()
+        exchange = OKXExchange(config)
         
-        # Mock successful order placement
-        mock_okx_clients['trade'].return_value.place_order.return_value = {
-            'code': '0',
-            'data': [{
-                'ordId': '12345',
-                'clOrdId': 'test_order',
-                'instId': 'BTC-USDT',
-                'side': 'buy',
-                'ordType': 'limit',
-                'sz': '1.0',
-                'px': '50000',
-                'accFillSz': '0',
-                'state': 'live'
-            }]
-        }
-        
-        order_request = OrderRequest(
-            symbol="BTC-USDT",
-            side=OrderSide.BUY,
-            order_type=OrderType.LIMIT,
-            quantity=Decimal('1.0'),
-            price=Decimal('50000'),
-            time_in_force='IOC'
-        )
-        
-        response = await okx_exchange.place_order(order_request)
-        
-        assert isinstance(response, OrderResponse)
-        assert response.id == "12345"
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await exchange.connect()
+            
+            response = await exchange.place_order(
+                OrderRequest(
+                    symbol="BTC-USDT",
+                    side=OrderSide.BUY,
+                    order_type=OrderType.LIMIT,
+                    quantity=Decimal('100'),
+                    price=Decimal('50000'),
+                    time_in_force='IOC'
+                )
+            )
+            
+            assert isinstance(response, OrderResponse)
+            assert response.id == "test_order_123"
 
     @pytest.mark.asyncio
-    async def test_cancel_order_not_found(self, okx_exchange):
+    async def test_cancel_order_not_found(self, mock_trade_client, mock_account_client, config):
         """Test order cancellation when order not found."""
-        # The method returns False instead of raising an exception
-        result = await okx_exchange.cancel_order("non-existent-order")
-        assert result is False
+        exchange = OKXExchange(config)
+        
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await exchange.connect()
+            
+            # Mock cancellation failure
+            mock_trade_client.cancel_order.return_value = {
+                'code': '58008',
+                'msg': 'Order does not exist'
+            }
+            
+            result = await exchange.cancel_order("non-existent-order")
+            assert result is False
 
     @pytest.mark.asyncio
-    async def test_get_order_status_partially_filled(self, okx_exchange, mock_okx_clients):
+    async def test_get_order_status_partially_filled(self, mock_trade_client, mock_account_client, config):
         """Test getting order status for partially filled order."""
-        await okx_exchange.connect()
+        exchange = OKXExchange(config)
         
-        # Mock partially filled order
-        mock_okx_clients['trade'].return_value.get_order_details.return_value = {
-            'code': '0',
-            'data': [{
-                'ordId': '12345',
-                'state': 'partially_filled',
-                'accFillSz': '0.5',
-                'sz': '1.0'
-            }]
-        }
-        
-        status = await okx_exchange.get_order_status("12345")
-        assert status == OrderStatus.PARTIALLY_FILLED
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=mock_trade_client), \
+             patch('src.exchanges.okx.Public', return_value=Mock()):
+            
+            await exchange.connect()
+            
+            # Mock partially filled order
+            mock_trade_client.get_order_details.return_value = {
+                'code': '0',
+                'data': [{
+                    'ordId': 'test_order_123',
+                    'state': 'partially_filled',
+                    'accFillSz': '50',
+                    'sz': '100'
+                }]
+            }
+            
+            status = await exchange.get_order_status("test_order_123")
+            assert status == OrderStatus.PARTIALLY_FILLED
 
     @pytest.mark.asyncio
-    async def test_get_market_data_with_timeframe(self, okx_exchange, mock_okx_clients):
+    async def test_get_market_data_with_timeframe(self, mock_public_client, mock_account_client, config):
         """Test getting market data with specific timeframe."""
-        await okx_exchange.connect()
+        exchange = OKXExchange(config)
         
-        # Mock candlestick data - the implementation takes the first candle
-        mock_okx_clients['public'].return_value.get_candlesticks.return_value = {
-            'code': '0',
-            'data': [
-                ['1640995200000', '50000', '51000', '49000', '50500', '1000', '50000000']
-            ]
-        }
-        
-        market_data = await okx_exchange.get_market_data("BTC-USDT", "1h")
-        
-        assert isinstance(market_data, MarketData)
-        assert market_data.symbol == "BTC-USDT"
-        assert market_data.price == Decimal('50500')  # Close price from first candle
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            await exchange.connect()
+            
+            # Mock candlestick data
+            mock_public_client.get_candlesticks.return_value = {
+                'code': '0',
+                'data': [
+                    ['1640995200000', '50000', '51000', '49000', '50500', '1000', '50000000']
+                ]
+            }
+            
+            market_data = await exchange.get_market_data("BTC-USDT", "1h")
+            
+            assert isinstance(market_data, MarketData)
+            assert market_data.symbol == "BTC-USDT"
+            assert market_data.open_price == Decimal('50000')
+            assert market_data.high_price == Decimal('51000')
+            assert market_data.low_price == Decimal('49000')
+            assert market_data.price == Decimal('50500')  # close price
+            assert market_data.volume == Decimal('1000')
 
     @pytest.mark.asyncio
-    async def test_get_order_book_empty(self, okx_exchange, mock_okx_clients):
+    async def test_get_order_book_empty(self, mock_public_client, mock_account_client, config):
         """Test getting order book with empty data."""
-        await okx_exchange.connect()
+        exchange = OKXExchange(config)
         
-        # Mock empty order book
-        mock_okx_clients['public'].return_value.get_orderbook.return_value = {
-            'code': '0',
-            'data': [{
-                'bids': [],
-                'asks': []
-            }]
-        }
-        
-        order_book = await okx_exchange.get_order_book("BTC-USDT", 10)
-        
-        assert isinstance(order_book, OrderBook)
-        assert order_book.symbol == "BTC-USDT"
-        assert len(order_book.bids) == 0
-        assert len(order_book.asks) == 0
+        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
+             patch('src.exchanges.okx.Market', return_value=Mock()), \
+             patch('src.exchanges.okx.OKXTrade', return_value=Mock()), \
+             patch('src.exchanges.okx.Public', return_value=mock_public_client):
+            
+            await exchange.connect()
+            
+            # Mock empty order book
+            mock_public_client.get_orderbook.return_value = {
+                'code': '0',
+                'data': [{
+                    'bids': [],
+                    'asks': []
+                }]
+            }
+            
+            order_book = await exchange.get_order_book("BTC-USDT")
+            
+            assert isinstance(order_book, OrderBook)
+            assert order_book.symbol == "BTC-USDT"
+            assert len(order_book.bids) == 0
+            assert len(order_book.asks) == 0
 
     @pytest.mark.asyncio
-    async def test_get_trade_history_empty(self, okx_exchange, mock_okx_clients):
-        """Test getting trade history with empty data."""
-        await okx_exchange.connect()
-        
-        # Mock empty trade history
-        mock_okx_clients['public'].return_value.get_trades.return_value = {
-            'code': '0',
-            'data': []
-        }
-        
-        trades = await okx_exchange.get_trade_history("BTC-USDT", 100)
-        
-        assert isinstance(trades, list)
-        assert len(trades) == 0
-
-    @pytest.mark.asyncio
-    async def test_get_exchange_info_error(self, okx_exchange, mock_okx_clients):
+    async def test_get_exchange_info_error(self, mock_public_client, config):
         """Test getting exchange info with API error."""
-        await okx_exchange.connect()
+        exchange = OKXExchange(config)
+        exchange.public_client = mock_public_client
         
         # Mock API error
-        mock_okx_clients['public'].return_value.get_instruments.return_value = {
+        mock_public_client.get_instruments.return_value = {
             'code': '1',
             'msg': 'API Error'
         }
         
         with pytest.raises(ExchangeError):
-            await okx_exchange.get_exchange_info()
+            await exchange.get_exchange_info()
 
     @pytest.mark.asyncio
-    async def test_get_ticker_error(self, okx_exchange, mock_okx_clients):
+    async def test_get_ticker_error(self, mock_public_client, config):
         """Test getting ticker with API error."""
-        await okx_exchange.connect()
+        exchange = OKXExchange(config)
+        exchange.public_client = mock_public_client
         
         # Mock API error
-        mock_okx_clients['public'].return_value.get_ticker.return_value = {
+        mock_public_client.get_ticker.return_value = {
             'code': '1',
             'msg': 'API Error'
         }
         
         with pytest.raises(ExchangeError):
-            await okx_exchange.get_ticker("BTC-USDT")
+            await exchange.get_ticker("BTC-USDT")
 
     @pytest.mark.asyncio
     async def test_websocket_initialization(self, okx_exchange):
@@ -809,14 +951,15 @@ class TestOKXExchange:
             assert "test_stream" not in okx_exchange.active_streams
 
     @pytest.mark.asyncio
-    async def test_health_check_failure(self, okx_exchange, mock_okx_clients):
+    async def test_health_check_failure(self, mock_account_client, config):
         """Test health check failure."""
-        await okx_exchange.connect()
+        exchange = OKXExchange(config)
+        exchange.account_client = mock_account_client
         
         # Mock API error in get_account_balance
-        mock_okx_clients['account'].return_value.get_account_balance.side_effect = Exception("API Error")
+        mock_account_client.get_balance.side_effect = Exception("API Error")
         
-        healthy = await okx_exchange.health_check()
+        healthy = await exchange.health_check()
         assert healthy is False
 
     @pytest.mark.asyncio

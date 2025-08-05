@@ -8,6 +8,7 @@ This module provides fixtures and configuration for all test types:
 """
 
 import pytest
+import pytest_asyncio
 import asyncio
 import os
 import tempfile
@@ -327,7 +328,7 @@ def database_setup(config, test_db_config):
     return config
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="function", autouse=True)
 async def cleanup_after_all_tests():
     """
     Clean up all database connections after all tests complete.

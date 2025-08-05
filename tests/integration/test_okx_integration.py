@@ -50,11 +50,11 @@ class TestOKXIntegration:
         """Mock OKX API clients."""
         with patch('src.exchanges.okx.Account') as mock_account, \
              patch('src.exchanges.okx.Market') as mock_market, \
-             patch('src.exchanges.okx.Trade') as mock_trade, \
+             patch('src.exchanges.okx.OKXTrade') as mock_trade, \
              patch('src.exchanges.okx.Public') as mock_public:
             
             # Mock successful responses
-            mock_account.return_value.get_account_balance.return_value = {
+            mock_account.return_value.get_balance.return_value = {
                 'code': '0',
                 'data': [
                     {
@@ -68,6 +68,44 @@ class TestOKXIntegration:
                         'frozenBal': '0.0'
                     }
                 ]
+            }
+            
+            # Mock trade client responses
+            mock_trade.return_value.place_order.return_value = {
+                'code': '0',
+                'data': [{
+                    'ordId': 'test_order_123',
+                    'instId': 'BTC-USDT',
+                    'side': 'buy',
+                    'ordType': 'market',
+                    'sz': '100',
+                    'px': '50000',
+                    'state': 'live',
+                    'cTime': '1640995200000'
+                }]
+            }
+            
+            mock_trade.return_value.cancel_order.return_value = {
+                'code': '0',
+                'data': [{
+                    'ordId': 'test_order_123',
+                    'sState': 'canceled'
+                }]
+            }
+            
+            mock_trade.return_value.get_order_details.return_value = {
+                'code': '0',
+                'data': [{
+                    'ordId': 'test_order_123',
+                    'instId': 'BTC-USDT',
+                    'side': 'buy',
+                    'ordType': 'market',
+                    'sz': '100',
+                    'px': '50000',
+                    'state': 'filled',
+                    'cTime': '1640995200000',
+                    'fillSz': '100'
+                }]
             }
             
             mock_public.return_value.get_candlesticks.return_value = {
@@ -101,51 +139,33 @@ class TestOKXIntegration:
             mock_public.return_value.get_instruments.return_value = {
                 'code': '0',
                 'data': [
-                    {'instId': 'BTC-USDT'},
-                    {'instId': 'ETH-USDT'}
+                    {
+                        'instId': 'BTC-USDT',
+                        'baseCcy': 'BTC',
+                        'quoteCcy': 'USDT',
+                        'state': 'live'
+                    }
                 ]
             }
             
             mock_public.return_value.get_ticker.return_value = {
                 'code': '0',
                 'data': [{
-                    'bidPx': '50000',
-                    'askPx': '50001',
-                    'last': '50000.5',
-                    'vol24h': '1000',
-                    'change24h': '500'
-                }]
-            }
-            
-            # Mock trade client responses
-            mock_trade.return_value.place_order.return_value = {
-                'code': '0',
-                'data': [{
-                    'ordId': '12345',
-                    'clOrdId': 'test-order-123',
                     'instId': 'BTC-USDT',
-                    'side': 'buy',
-                    'ordType': 'market',
-                    'sz': '0.1',
-                    'px': '0',
-                    'accFillSz': '0',
-                    'state': 'live'
-                }]
-            }
-            
-            mock_trade.return_value.get_order_details.return_value = {
-                'code': '0',
-                'data': [{
-                    'ordId': '12345',
-                    'state': 'filled'
+                    'last': '50000',
+                    'bidPx': '49999',
+                    'askPx': '50001',
+                    'vol24h': '1000',
+                    'change24h': '500',
+                    'ts': '1640995200000'
                 }]
             }
             
             yield {
-                'account': mock_account,
-                'market': mock_market,
-                'trade': mock_trade,
-                'public': mock_public
+                'account': mock_account.return_value,
+                'market': mock_market.return_value,
+                'trade': mock_trade.return_value,
+                'public': mock_public.return_value
             }
     
     @pytest.mark.asyncio
@@ -185,7 +205,7 @@ class TestOKXIntegration:
         )
 
         order_response = await exchange.place_order(order_request)
-        assert order_response.id == "12345"  # Use 'id' not 'order_id'
+        assert order_response.id == "test_order_123"  # Use 'id' not 'order_id'
 
     @pytest.mark.asyncio
     async def test_websocket_integration(self, config):
@@ -217,18 +237,16 @@ class TestOKXIntegration:
     async def test_order_manager_integration(self, config, mock_okx_clients):
         """Test order manager integration with real order workflows."""
         # Configure the mock to return proper response
-        mock_trade_instance = mock_okx_clients["trade"].return_value
+        mock_trade_instance = mock_okx_clients["trade"]
         mock_trade_instance.place_order.return_value = {
             'code': '0',
             'data': [{
-                'ordId': '12345',
-                'clOrdId': 'test-order-123',
+                'ordId': 'test_order_123',
                 'instId': 'BTC-USDT',
                 'side': 'buy',
                 'ordType': 'limit',
                 'sz': '0.1',
                 'px': '50000',
-                'accFillSz': '0',
                 'state': 'live'
             }]
         }
@@ -257,7 +275,7 @@ class TestOKXIntegration:
 
         # Test order placement
         response = await order_manager.place_order(order_request)
-        assert response.id == "12345"  # Use 'id' not 'order_id'
+        assert response.id == "test_order_123"  # Use 'id' not 'order_id'
 
     @pytest.mark.asyncio
     async def test_error_handling_integration(self, config):
@@ -270,7 +288,7 @@ class TestOKXIntegration:
                 await exchange.connect()
 
         # Test order placement error handling
-        with patch('src.exchanges.okx.Trade') as mock_trade:
+        with patch('src.exchanges.okx.OKXTrade') as mock_trade:
             mock_trade.return_value.place_order.return_value = {
                 'code': '58006',
                 'msg': 'Insufficient balance'
@@ -281,7 +299,7 @@ class TestOKXIntegration:
                  patch('src.exchanges.okx.Market') as mock_market, \
                  patch('src.exchanges.okx.Public') as mock_public:
                 
-                mock_account.return_value.get_account_balance.return_value = {
+                mock_account.return_value.get_balance.return_value = {
                     'code': '0',
                     'data': [{'ccy': 'USDT', 'availBal': '1000.0'}]
                 }
@@ -304,8 +322,8 @@ class TestOKXIntegration:
         exchange = OKXExchange(config)
         
         # Configure mock instances
-        mock_public_instance = mock_okx_clients["public"].return_value
-        mock_market_instance = mock_okx_clients["market"].return_value
+        mock_public_instance = mock_okx_clients["public"]
+        mock_market_instance = mock_okx_clients["market"]
         
         exchange.public_client = mock_public_instance
         exchange.market_client = mock_market_instance
@@ -350,13 +368,13 @@ class TestOKXIntegration:
         exchange = OKXExchange(config)
         
         # Configure mock instances
-        mock_account_instance = mock_okx_clients["account"].return_value
-        mock_market_instance = mock_okx_clients["market"].return_value
-        mock_public_instance = mock_okx_clients["public"].return_value
-        mock_trade_instance = mock_okx_clients["trade"].return_value
+        mock_account_instance = mock_okx_clients["account"]
+        mock_market_instance = mock_okx_clients["market"]
+        mock_public_instance = mock_okx_clients["public"]
+        mock_trade_instance = mock_okx_clients["trade"]
         
         # Mock successful responses
-        mock_account_instance.get_account_balance.return_value = {
+        mock_account_instance.get_balance.return_value = {
             'code': '0',
             'data': [{'ccy': 'USDT', 'availBal': '1000.0'}]
         }

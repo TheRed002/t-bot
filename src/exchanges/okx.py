@@ -49,7 +49,7 @@ from src.exchanges.connection_manager import ConnectionManager
 # OKX-specific imports
 import aiohttp
 import websockets
-from okx.api import Account, Market, Trade, Public
+from okx.api import Account, Market, Trade as OKXTrade, Public
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class OKXExchange(BaseExchange):
         # Initialize OKX clients
         self.account_client: Optional[Account] = None
         self.market_client: Optional[Market] = None
-        self.trade_client: Optional[Trade] = None
+        self.trade_client: Optional[OKXTrade] = None
         self.public_client: Optional[Public] = None
         
         # Initialize rate limiter for OKX-specific limits
@@ -136,34 +136,30 @@ class OKXExchange(BaseExchange):
             
             # Initialize OKX API clients
             self.account_client = Account(
-                api_key=self.api_key,
-                api_secret_key=self.api_secret,
+                key=self.api_key,
+                secret=self.api_secret,
                 passphrase=self.passphrase,
-                sandbox=self.sandbox,
                 flag="0"  # 0: live trading, 1: demo trading
             )
             
             self.market_client = Market(
-                api_key=self.api_key,
-                api_secret_key=self.api_secret,
+                key=self.api_key,
+                secret=self.api_secret,
                 passphrase=self.passphrase,
-                sandbox=self.sandbox,
                 flag="0"
             )
             
-            self.trade_client = Trade(
-                api_key=self.api_key,
-                api_secret_key=self.api_secret,
+            self.trade_client = OKXTrade(
+                key=self.api_key,
+                secret=self.api_secret,
                 passphrase=self.passphrase,
-                sandbox=self.sandbox,
                 flag="0"
             )
             
             self.public_client = Public(
-                api_key=self.api_key,
-                api_secret_key=self.api_secret,
+                key=self.api_key,
+                secret=self.api_secret,
                 passphrase=self.passphrase,
-                sandbox=self.sandbox,
                 flag="0"
             )
             
@@ -219,7 +215,7 @@ class OKXExchange(BaseExchange):
                 raise ExchangeConnectionError("OKX account client not initialized")
             
             # Get account balance from OKX
-            result = self.account_client.get_account_balance()
+            result = self.account_client.get_balance()
             
             if result.get('code') != '0':
                 raise ExchangeError(f"Failed to get account balance: {result.get('msg', 'Unknown error')}")
