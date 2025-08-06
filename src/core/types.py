@@ -130,7 +130,6 @@ class Position(BaseModel):
 
 
 # TODO:REVERSE INTEGRATION POINTS: Future prompts will add:
-# - P-008: Risk types (RiskMetrics, PositionLimits)  
 # - P-011: Strategy types (StrategyConfig, StrategyStatus)
 # - P-017: ML types (ModelPrediction, ModelMetadata) 
 
@@ -184,4 +183,44 @@ class Trade(BaseModel):
     price: Decimal
     timestamp: datetime
     fee: Decimal = Decimal("0")
-    fee_currency: str = "USDT" 
+    fee_currency: str = "USDT"
+
+
+# Risk Management Types (P-008)
+class RiskLevel(Enum):
+    """Risk level enumeration for portfolio risk assessment."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class PositionSizeMethod(Enum):
+    """Position sizing method enumeration."""
+    FIXED_PCT = "fixed_percentage"
+    KELLY_CRITERION = "kelly_criterion"
+    VOLATILITY_ADJUSTED = "volatility_adjusted"
+    CONFIDENCE_WEIGHTED = "confidence_weighted"
+
+
+class RiskMetrics(BaseModel):
+    """Risk metrics for portfolio risk assessment."""
+    var_1d: Decimal = Field(description="1-day Value at Risk")
+    var_5d: Decimal = Field(description="5-day Value at Risk")
+    expected_shortfall: Decimal = Field(description="Expected shortfall (Conditional VaR)")
+    max_drawdown: Decimal = Field(description="Maximum historical drawdown")
+    sharpe_ratio: Optional[Decimal] = Field(default=None, description="Sharpe ratio")
+    current_drawdown: Decimal = Field(default=Decimal("0"), description="Current drawdown")
+    risk_level: RiskLevel = Field(description="Current risk level")
+    timestamp: datetime = Field(description="Timestamp of risk calculation")
+
+
+class PositionLimits(BaseModel):
+    """Position limits for risk management."""
+    max_position_size: Decimal = Field(description="Maximum position size")
+    max_positions_per_symbol: int = Field(default=1, description="Maximum positions per symbol")
+    max_total_positions: int = Field(default=10, description="Maximum total positions")
+    max_portfolio_exposure: Decimal = Field(default=Decimal("0.95"), description="Maximum portfolio exposure (95%)")
+    max_sector_exposure: Decimal = Field(default=Decimal("0.25"), description="Maximum sector exposure (25%)")
+    max_correlation_exposure: Decimal = Field(default=Decimal("0.5"), description="Maximum correlated exposure (50%)")
+    max_leverage: Decimal = Field(default=Decimal("1.0"), description="Maximum leverage (no leverage by default)") 

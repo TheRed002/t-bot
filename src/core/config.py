@@ -189,6 +189,117 @@ class ExchangeConfig(BaseConfig):
     )
 
 
+class RiskConfig(BaseConfig):
+    """Risk management configuration for P-008 framework."""
+    
+    # Position sizing
+    default_position_size_method: str = Field(
+        default="fixed_percentage", 
+        description="Default position sizing method"
+    )
+    default_position_size_pct: float = Field(
+        default=0.02, 
+        description="Default position size percentage (2%)"
+    )
+    max_position_size_pct: float = Field(
+        default=0.1, 
+        description="Maximum position size percentage (10%)"
+    )
+    
+    # Portfolio limits
+    max_total_positions: int = Field(
+        default=10, 
+        description="Maximum total positions"
+    )
+    max_positions_per_symbol: int = Field(
+        default=1, 
+        description="Maximum positions per symbol"
+    )
+    max_portfolio_exposure: float = Field(
+        default=0.95, 
+        description="Maximum portfolio exposure (95%)"
+    )
+    max_sector_exposure: float = Field(
+        default=0.25, 
+        description="Maximum sector exposure (25%)"
+    )
+    max_correlation_exposure: float = Field(
+        default=0.5, 
+        description="Maximum correlation exposure (50%)"
+    )
+    max_leverage: float = Field(
+        default=1.0, 
+        description="Maximum leverage (no leverage by default)"
+    )
+    
+    # Risk thresholds
+    max_daily_loss_pct: float = Field(
+        default=0.05, 
+        description="Maximum daily loss percentage (5%)"
+    )
+    max_drawdown_pct: float = Field(
+        default=0.15, 
+        description="Maximum drawdown percentage (15%)"
+    )
+    var_confidence_level: float = Field(
+        default=0.95, 
+        description="VaR confidence level (95%)"
+    )
+    
+    # Kelly Criterion settings
+    kelly_lookback_days: int = Field(
+        default=30, 
+        description="Kelly Criterion lookback period in days"
+    )
+    kelly_max_fraction: float = Field(
+        default=0.25, 
+        description="Maximum Kelly fraction (25%)"
+    )
+    
+    # Volatility adjustment
+    volatility_window: int = Field(
+        default=20, 
+        description="Volatility calculation window"
+    )
+    volatility_target: float = Field(
+        default=0.02, 
+        description="Volatility target (2% daily)"
+    )
+    
+    # Risk calculation settings
+    var_calculation_window: int = Field(
+        default=252, 
+        description="VaR calculation window (trading days)"
+    )
+    drawdown_calculation_window: int = Field(
+        default=252, 
+        description="Drawdown calculation window (trading days)"
+    )
+    correlation_calculation_window: int = Field(
+        default=60, 
+        description="Correlation calculation window (days)"
+    )
+    
+    @field_validator('default_position_size_pct', 'max_position_size_pct', 'max_portfolio_exposure', 
+                    'max_sector_exposure', 'max_correlation_exposure', 'max_daily_loss_pct', 
+                    'max_drawdown_pct', 'var_confidence_level', 'kelly_max_fraction', 'volatility_target')
+    @classmethod
+    def validate_percentage_fields(cls, v):
+        """Validate percentage fields are between 0 and 1."""
+        if not 0 <= v <= 1:
+            raise ValueError(f'Percentage must be between 0 and 1, got {v}')
+        return v
+    
+    @field_validator('max_total_positions', 'kelly_lookback_days', 'volatility_window', 
+                    'var_calculation_window', 'drawdown_calculation_window', 'correlation_calculation_window')
+    @classmethod
+    def validate_positive_integers(cls, v):
+        """Validate positive integer fields."""
+        if v <= 0:
+            raise ValueError(f'Value must be positive, got {v}')
+        return v
+
+
 class Config(BaseConfig):
     """Master configuration class for the entire application."""
     
@@ -205,6 +316,7 @@ class Config(BaseConfig):
     security: SecurityConfig = SecurityConfig()
     error_handling: ErrorHandlingConfig = ErrorHandlingConfig()
     exchanges: ExchangeConfig = ExchangeConfig()
+    risk: RiskConfig = RiskConfig()
     
     @field_validator('environment')
     @classmethod

@@ -168,9 +168,22 @@ class Application:
     
     async def _initialize_risk_management(self) -> None:
         """Initialize risk management system."""
-        # Placeholder for P-008 risk management implementation
-        self.logger.info("Risk management initialization placeholder - will be implemented in P-008")
-        self.health_status["components"]["risk_management"] = "initialized"
+        try:
+            from src.risk_management import RiskManager
+            
+            # Create risk manager
+            self.components["risk_manager"] = RiskManager(self.config)
+            
+            # Validate risk parameters
+            await self.components["risk_manager"].validate_risk_parameters()
+            
+            self.health_status["components"]["risk_management"] = "initialized"
+            self.logger.info("Risk management system initialized successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Risk management initialization failed: {str(e)}")
+            self.health_status["components"]["risk_management"] = "error"
+            raise
     
     async def _initialize_strategies(self) -> None:
         """Initialize trading strategies."""
@@ -244,9 +257,21 @@ class Application:
     
     async def _shutdown_risk_management(self) -> None:
         """Shutdown risk management system."""
-        # Placeholder for P-008 risk management shutdown
-        self.logger.info("Risk management shutdown placeholder - will be implemented in P-008")
-        self.health_status["components"]["risk_management"] = "shutdown"
+        try:
+            if "risk_manager" in self.components:
+                # Get final risk summary before shutdown
+                risk_summary = await self.components["risk_manager"].get_comprehensive_risk_summary()
+                self.logger.info("Final risk summary", risk_summary=risk_summary)
+                
+                # Clear components
+                del self.components["risk_manager"]
+            
+            self.health_status["components"]["risk_management"] = "shutdown"
+            self.logger.info("Risk management system shutdown completed")
+            
+        except Exception as e:
+            self.logger.error(f"Risk management shutdown failed: {str(e)}")
+            self.health_status["components"]["risk_management"] = "error"
     
     async def _shutdown_strategies(self) -> None:
         """Shutdown trading strategies."""
