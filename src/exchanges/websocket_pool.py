@@ -10,7 +10,6 @@ P-002A (error handling), and P-003+ (exchange interfaces).
 
 import asyncio
 import time
-import logging
 from typing import Dict, Optional, Any, List, Set
 from datetime import datetime, timedelta
 from enum import Enum
@@ -26,15 +25,16 @@ from src.core.exceptions import (
     ExchangeRateLimitError, ExchangeConnectionError, ExchangeError, ValidationError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import RecoveryScenario
 
-# MANDATORY: Import from P-016A (placeholder until P-016A is implemented)
+# MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
 # from src.utils.decorators import time_execution
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass

@@ -280,6 +280,20 @@ class RiskConfig(BaseConfig):
         description="Correlation calculation window (days)"
     )
     
+    # Emergency controls (P-009)
+    emergency_close_positions: bool = Field(
+        default=True, 
+        description="Close all positions during emergency stop"
+    )
+    emergency_recovery_timeout_hours: int = Field(
+        default=1, 
+        description="Recovery timeout in hours after emergency stop"
+    )
+    emergency_manual_override_enabled: bool = Field(
+        default=True, 
+        description="Enable manual override for emergency controls"
+    )
+    
     @field_validator('default_position_size_pct', 'max_position_size_pct', 'max_portfolio_exposure', 
                     'max_sector_exposure', 'max_correlation_exposure', 'max_daily_loss_pct', 
                     'max_drawdown_pct', 'var_confidence_level', 'kelly_max_fraction', 'volatility_target')

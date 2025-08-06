@@ -13,7 +13,6 @@ from typing import Dict, List, Optional, Callable, Any
 from decimal import Decimal
 from datetime import datetime
 import asyncio
-import logging
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -26,6 +25,7 @@ from src.core.exceptions import (
     ValidationError, ExecutionError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -35,10 +35,10 @@ from src.error_handling.connection_manager import ConnectionManager as ErrorConn
 from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
 from src.exchanges.connection_manager import ConnectionManager
 
-# MANDATORY: Import from P-016A (utils) - will be implemented later
+# MANDATORY: Import from P-007A (utils) - will be implemented later
 # from src.utils.decorators import time_execution, retry, circuit_breaker
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BaseExchange(ABC):

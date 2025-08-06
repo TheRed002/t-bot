@@ -113,11 +113,11 @@ def calculate_sharpe_ratio(
 
 ### **Error Handling**
 ```python
-import logging
+from src.core.logging import get_logger
 from typing import Optional
 from src.error_handling.error_manager import ErrorManager
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class ExchangeManager:
     def __init__(self):

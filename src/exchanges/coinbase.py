@@ -17,7 +17,6 @@ import base64
 from typing import Dict, List, Optional, Callable, Any
 from decimal import Decimal
 from datetime import datetime, timezone
-import logging
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -46,8 +45,9 @@ from coinbase.rest import RESTClient
 from coinbase.websocket import WSClient
 # Note: Using generic Exception handling for REST API as no specific exceptions are documented
 # For WebSocket, use WSClientException and WSClientConnectionClosedException as per documentation
+from src.core.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class CoinbaseExchange(BaseExchange):

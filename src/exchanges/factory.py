@@ -10,13 +10,13 @@ and P-002A (error handling) components.
 """
 
 from typing import Dict, Optional, Type, List
-import logging
 from datetime import datetime
 
 # MANDATORY: Import from P-001
 from src.core.types import ExchangeInfo, ExchangeStatus
 from src.core.exceptions import ExchangeError, ValidationError
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -28,7 +28,7 @@ from src.exchanges.connection_manager import ConnectionManager
 # Import base exchange interface
 from .base import BaseExchange
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ExchangeFactory:

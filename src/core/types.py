@@ -223,4 +223,32 @@ class PositionLimits(BaseModel):
     max_portfolio_exposure: Decimal = Field(default=Decimal("0.95"), description="Maximum portfolio exposure (95%)")
     max_sector_exposure: Decimal = Field(default=Decimal("0.25"), description="Maximum sector exposure (25%)")
     max_correlation_exposure: Decimal = Field(default=Decimal("0.5"), description="Maximum correlated exposure (50%)")
-    max_leverage: Decimal = Field(default=Decimal("1.0"), description="Maximum leverage (no leverage by default)") 
+    max_leverage: Decimal = Field(default=Decimal("1.0"), description="Maximum leverage (no leverage by default)")
+
+
+# Circuit Breaker Types (P-009)
+class CircuitBreakerStatus(Enum):
+    """Circuit breaker status enumeration."""
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+
+class CircuitBreakerType(Enum):
+    """Circuit breaker type enumeration."""
+    DAILY_LOSS_LIMIT = "daily_loss_limit"
+    DRAWDOWN_LIMIT = "drawdown_limit"
+    VOLATILITY_SPIKE = "volatility_spike"
+    MODEL_CONFIDENCE = "model_confidence"
+    SYSTEM_ERROR_RATE = "system_error_rate"
+    MANUAL_TRIGGER = "manual_trigger"
+
+
+class CircuitBreakerEvent(BaseModel):
+    """Circuit breaker event record."""
+    trigger_type: CircuitBreakerType
+    threshold: Decimal
+    actual_value: Decimal
+    timestamp: datetime
+    description: str
+    metadata: Dict[str, Any] = Field(default_factory=dict)

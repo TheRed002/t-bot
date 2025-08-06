@@ -10,7 +10,6 @@ and P-002A (error handling) components.
 
 import asyncio
 import time
-import logging
 from typing import Dict, Optional, Callable, Any
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -18,11 +17,12 @@ from collections import defaultdict
 # MANDATORY: Import from P-001
 from src.core.exceptions import ExchangeRateLimitError, ExchangeError
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TokenBucket:

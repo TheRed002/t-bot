@@ -93,6 +93,16 @@ class CapitalAllocationError(RiskManagementError):
     pass
 
 
+class CircuitBreakerTriggeredError(RiskManagementError):
+    """Circuit breaker triggered, trading halted."""
+    pass
+
+
+class EmergencyStopError(RiskManagementError):
+    """Emergency stop activation failed."""
+    pass
+
+
 # Data-related exceptions
 class DataError(TradingBotError):
     """Data quality and processing errors."""

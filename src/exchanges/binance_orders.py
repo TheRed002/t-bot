@@ -9,7 +9,6 @@ and P-003 (base exchange interface) components.
 """
 
 import asyncio
-import logging
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
 from datetime import datetime, timezone
@@ -22,6 +21,7 @@ from src.core.exceptions import (
     ExchangeError, OrderRejectionError, ValidationError, ExecutionError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -29,7 +29,7 @@ from src.error_handling.error_handler import ErrorHandler
 # Binance-specific imports
 from binance.exceptions import BinanceAPIException, BinanceOrderException
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BinanceOrderManager:

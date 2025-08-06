@@ -9,7 +9,6 @@ and P-002A (error handling) components.
 """
 
 import asyncio
-import logging
 import time
 from typing import Dict, List, Optional, Callable, Any
 from datetime import datetime, timedelta
@@ -18,6 +17,7 @@ from collections import defaultdict
 # MANDATORY: Import from P-001
 from src.core.exceptions import ExchangeConnectionError, ExchangeError
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -29,7 +29,7 @@ from src.exchanges.health_monitor import ConnectionHealthMonitor
 from src.exchanges.websocket_pool import WebSocketConnectionPool
 from src.core.types import ConnectionType
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WebSocketConnection:

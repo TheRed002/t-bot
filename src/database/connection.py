@@ -9,7 +9,6 @@ used by all subsequent prompts for data persistence.
 """
 
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional, Dict, Any
 from sqlalchemy import create_engine, text

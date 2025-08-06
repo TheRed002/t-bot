@@ -60,9 +60,9 @@ This document defines how components integrate with each other and critical reve
 - **P-020**: Implement P-002A's partial fill recovery in execution engine
 - **P-026+**: Use P-002A's input validation patterns
 
-### 6. Utility Framework (P-016A → All Components) 
+### 6. Utility Framework (P-007A → All Components) 
 **Forward Integration:**
-- All prompts must use decorators and validators from P-016A
+- All prompts must use decorators and validators from P-007A
 - Apply performance monitoring and validation decorators
 
 **Reverse Integration Required:**

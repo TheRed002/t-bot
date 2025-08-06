@@ -24,7 +24,6 @@ import base64
 from typing import Dict, List, Optional, Callable, Any
 from decimal import Decimal
 from datetime import datetime, timezone
-import logging
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -35,6 +34,7 @@ from src.core.exceptions import (
     ExchangeError, ExchangeConnectionError, ExchangeRateLimitError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -43,7 +43,7 @@ from src.error_handling.error_handler import ErrorHandler
 import websockets
 import aiohttp
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OKXWebSocketManager:
