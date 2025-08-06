@@ -307,7 +307,7 @@ pip install --no-dev -r requirements/production.txt
 ```python
 # Core Framework (P-001)
 from pydantic import BaseModel, Field, BaseSettings
-import structlog
+from src.core.logging import get_logger
 from typing import Dict, List, Optional, Any
 
 # Database (P-002) 

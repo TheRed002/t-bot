@@ -179,10 +179,10 @@ class TradingConfig(BaseSettings):
 
 ### **Logging Standards**
 ```python
-import structlog
+from src.core.logging import get_logger
 from typing import Any, Dict
 
-logger = structlog.get_logger()
+logger = get_logger()
 
 class StrategyExecutor:
     def __init__(self, strategy_name: str):
@@ -838,10 +838,10 @@ CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 ### **Structured Logging**
 ```python
-import structlog
+from src.core.logging import get_logger
 from typing import Any, Dict
 
-logger = structlog.get_logger()
+logger = get_logger()
 
 def log_trading_event(
     event_type: str,

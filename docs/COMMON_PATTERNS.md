@@ -102,10 +102,10 @@ class ResourceManager:
 ### Structured Logging
 ```python
 # MANDATORY: Use structured logging everywhere
-import structlog
+from src.core.logging import get_logger
 
 # Correct logging pattern
-logger = structlog.get_logger(__name__)
+logger = get_logger(__name__)
 
 async def process_order(order: Order) -> OrderResult:
     """Example of proper logging"""

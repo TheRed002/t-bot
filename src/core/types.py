@@ -252,3 +252,27 @@ class CircuitBreakerEvent(BaseModel):
     timestamp: datetime
     description: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+# Market Regime Types (P-010)
+class MarketRegime(Enum):
+    """Market regime enumeration for classification."""
+    LOW_VOLATILITY = "low_volatility"
+    MEDIUM_VOLATILITY = "medium_volatility"
+    HIGH_VOLATILITY = "high_volatility"
+    TRENDING_UP = "trending_up"
+    TRENDING_DOWN = "trending_down"
+    RANGING = "ranging"
+    HIGH_CORRELATION = "high_correlation"
+    LOW_CORRELATION = "low_correlation"
+    CRISIS = "crisis"
+
+
+class RegimeChangeEvent(BaseModel):
+    """Regime change event record."""
+    from_regime: MarketRegime
+    to_regime: MarketRegime
+    confidence: float = Field(ge=0.0, le=1.0)
+    timestamp: datetime
+    trigger_metrics: Dict[str, Any] = Field(default_factory=dict)
+    description: str
