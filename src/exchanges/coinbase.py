@@ -38,6 +38,9 @@ from src.exchanges.base import BaseExchange
 from src.exchanges.rate_limiter import RateLimiter
 from src.exchanges.connection_manager import ConnectionManager
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils.constants import API_ENDPOINTS, RATE_LIMITS, TIMEOUTS
+
 # Coinbase-specific imports
 import aiohttp
 import websockets
@@ -78,13 +81,14 @@ class CoinbaseExchange(BaseExchange):
         self.api_secret = config.exchanges.coinbase_api_secret
         self.sandbox = config.exchanges.coinbase_sandbox
         
-        # Coinbase API URLs
+        # Coinbase API URLs from constants
+        coinbase_config = API_ENDPOINTS["coinbase"]
         if self.sandbox:
-            self.base_url = "https://api-public.sandbox.exchange.coinbase.com"
-            self.ws_url = "wss://ws-feed-public.sandbox.exchange.coinbase.com"
+            self.base_url = coinbase_config["sandbox_url"]
+            self.ws_url = coinbase_config["ws_url"]
         else:
-            self.base_url = "https://api.exchange.coinbase.com"
-            self.ws_url = "wss://ws-feed.exchange.coinbase.com"
+            self.base_url = coinbase_config["base_url"]
+            self.ws_url = coinbase_config["ws_url"]
         
         # Initialize Coinbase client
         self.client: Optional[RESTClient] = None
@@ -213,6 +217,7 @@ class CoinbaseExchange(BaseExchange):
             logger.error(f"Failed to get account balance: {str(e)}")
             raise ExchangeError(f"Failed to get account balance: {str(e)}")
     
+    @time_execution
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """
         Place an order on Coinbase exchange.
@@ -260,6 +265,7 @@ class CoinbaseExchange(BaseExchange):
             logger.error(f"Failed to place order: {str(e)}")
             raise ExecutionError(f"Failed to place order: {str(e)}")
     
+    @time_execution
     async def cancel_order(self, order_id: str) -> bool:
         """
         Cancel an existing order on Coinbase exchange.
@@ -294,6 +300,7 @@ class CoinbaseExchange(BaseExchange):
             logger.error(f"Failed to cancel order {order_id}: {str(e)}")
             return False
     
+    @time_execution
     async def get_order_status(self, order_id: str) -> OrderStatus:
         """
         Get the status of an order on Coinbase exchange.
@@ -323,6 +330,7 @@ class CoinbaseExchange(BaseExchange):
             logger.error(f"Failed to get order status for {order_id}: {str(e)}")
             return OrderStatus.UNKNOWN
     
+    @time_execution
     async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """
         Get market data for a symbol from Coinbase exchange.
@@ -396,6 +404,7 @@ class CoinbaseExchange(BaseExchange):
             logger.error(f"Failed to subscribe to {symbol} stream: {str(e)}")
             raise ExchangeError(f"Failed to subscribe to stream: {str(e)}")
     
+    @time_execution
     async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook:
         """
         Get order book for a symbol from Coinbase exchange.
@@ -428,6 +437,7 @@ class CoinbaseExchange(BaseExchange):
             logger.error(f"Failed to get order book for {symbol}: {str(e)}")
             raise ExchangeError(f"Failed to get order book: {str(e)}")
     
+    @time_execution
     async def get_trade_history(self, symbol: str, limit: int = 100) -> List[Trade]:
         """
         Get trade history for a symbol from Coinbase exchange.
@@ -467,6 +477,7 @@ class CoinbaseExchange(BaseExchange):
             logger.error(f"Failed to get trade history for {symbol}: {str(e)}")
             raise ExchangeError(f"Failed to get trade history: {str(e)}")
     
+    @time_execution
     async def get_exchange_info(self) -> ExchangeInfo:
         """
         Get exchange information including supported symbols and features.
@@ -503,6 +514,7 @@ class CoinbaseExchange(BaseExchange):
             logger.error(f"Failed to get exchange info: {str(e)}")
             raise ExchangeError(f"Failed to get exchange info: {str(e)}")
     
+    @time_execution
     async def get_ticker(self, symbol: str) -> Ticker:
         """
         Get real-time ticker information for a symbol.

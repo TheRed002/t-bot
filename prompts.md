@@ -2024,6 +2024,9 @@ from src.exchanges.base import BaseExchange
 from src.core.types import Position, MarketData, CapitalAllocation  # Will be added
 from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.config import Config
+from src.core.logging import get_logger
+
+# MANDATORY: Use structured logging from src.core.logging for all capital management operations
 
 # From P-002A - MANDATORY: Use error handling
 from src.error_handling.error_handler import ErrorHandler
@@ -2038,7 +2041,7 @@ from src.utils.formatters import format_currency
 - MANDATORY: Integrate with existing risk management framework
 - MANDATORY: Use standard exception handling for capital allocation failures
 - MANDATORY: Apply performance decorators to allocation algorithms
-- MANDATORY: Use structured logging for all capital movements
+- MANDATORY: Use structured logging from src.core.logging for all capital movements and allocation decisions
 
 ### Task Details
 
@@ -2335,6 +2338,9 @@ from src.core.exceptions import (
     ValidationError, RiskManagementError, ExecutionError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
+
+# MANDATORY: Use structured logging from src.core.logging for all strategy operations
 
 # From P-002A - MANDATORY: Use error handling patterns
 from src.error_handling.error_handler import ErrorHandler
@@ -2355,7 +2361,7 @@ from src.exchanges.base import BaseExchange
 #### Required Patterns from @COMMON_PATTERNS.md:
 - MANDATORY: Use standard strategy implementation pattern
 - MANDATORY: Apply @time_execution decorator to generate_signals()
-- MANDATORY: Use structured logging with strategy context
+- MANDATORY: Use structured logging from src.core.logging with strategy context
 - MANDATORY: Implement error handling with graceful degradation
 
 ### Task Details
@@ -2377,6 +2383,7 @@ from src.core.types import (
     StrategyStatus, StrategyMetrics
 )
 from src.core.exceptions import ValidationError, RiskManagementError
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-007A  
 from src.utils.decorators import time_execution, retry
@@ -2746,6 +2753,9 @@ from src.core.types import (
     StrategyConfig, StrategyStatus
 )
 from src.core.exceptions import ValidationError, RiskManagementError
+from src.core.logging import get_logger
+
+# MANDATORY: Use structured logging from src.core.logging for all dynamic strategy operations
 
 # From P-002A - MANDATORY: Use error handling
 from src.error_handling.error_handler import ErrorHandler
@@ -3737,7 +3747,7 @@ src/utils/
 import time
 import functools
 from typing import Callable, Any
-import structlog
+from src.core.logging import get_logger
 
 logger = structlog.get_logger()
 
@@ -3915,6 +3925,9 @@ from src.core.types import (
 )
 from src.core.exceptions import ModelError, ModelLoadError, ModelInferenceError
 from src.core.config import Config
+from src.core.logging import get_logger
+
+# MANDATORY: Use structured logging from src.core.logging for all ML operations
 
 # From P-002A - MANDATORY: Use error handling patterns
 from src.error_handling.error_handler import ErrorHandler
@@ -3936,7 +3949,7 @@ import optuna
 #### Required Patterns from @COMMON_PATTERNS.md:
 - MANDATORY: Use standard exception handling for model operations
 - MANDATORY: Apply @cache_result decorators for model inference
-- MANDATORY: Use structured logging for model lifecycle events
+- MANDATORY: Use structured logging from src.core.logging for model lifecycle events
 - MANDATORY: Implement graceful fallback when models fail
 
 ### Task Details
@@ -4273,6 +4286,9 @@ from src.core.exceptions import (
     RiskManagementError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
+
+# MANDATORY: Use structured logging from src.core.logging for all execution operations
 
 # From P-002A - MANDATORY: Use error handling and recovery
 from src.error_handling.error_handler import ErrorHandler
@@ -4290,7 +4306,7 @@ from src.utils.formatters import format_currency
 - MANDATORY: Use standard exception handling for all execution failures
 - MANDATORY: Apply @circuit_breaker decorator to exchange order placement
 - MANDATORY: Integrate with P-002A partial fill recovery scenarios
-- MANDATORY: Use structured logging for all execution events with trade context
+- MANDATORY: Use structured logging from src.core.logging for all execution events with trade context
 
 ### Task Details
 
@@ -4589,6 +4605,9 @@ src/state/
 from src.core.types import Position, Signal, MarketData
 from src.core.exceptions import SecurityError, AuthenticationError, ValidationError
 from src.core.config import Config
+from src.core.logging import get_logger
+
+# MANDATORY: Use structured logging from src.core.logging for all web interface operations
 
 # From P-002 - MANDATORY: Use existing database models
 from src.database.models import User, BotInstance, Trade
@@ -4792,6 +4811,9 @@ from src.core.types import (
     ModelMetadata, RiskMetrics, CapitalAllocation
 )
 from src.core.exceptions import ValidationError, SecurityError
+from src.core.logging import get_logger
+
+# MANDATORY: Use structured logging from src.core.logging for all API operations
 
 # From P-007A - MANDATORY: Use formatters for API responses
 from src.utils.formatters import (
@@ -5023,6 +5045,8 @@ Implement Prometheus metrics:
 - Model performance metrics (accuracy, drift)
 - API performance metrics (response time, error rate)
 
+**MANDATORY**: Use structured logging from src.core.logging for all monitoring events and metrics collection
+
 #### 2. Health Monitoring (`src/monitoring/health_check.py`)
 Implement health check system:
 - Component health validation
@@ -5031,6 +5055,8 @@ Implement health check system:
 - Resource utilization monitoring
 - Service availability tracking
 
+**MANDATORY**: Use structured logging from src.core.logging for all health check events and status updates
+
 #### 3. Performance Monitoring (`src/monitoring/performance.py`)
 Implement performance tracking:
 - Latency measurement and tracking
@@ -5038,6 +5064,8 @@ Implement performance tracking:
 - Resource efficiency metrics
 - Bottleneck identification
 - Performance trend analysis
+
+**MANDATORY**: Use structured logging from src.core.logging for all performance monitoring events and alerts
 
 ### Directory Structure to Create
 ```
@@ -5079,6 +5107,8 @@ Implement alert management system:
 - Security alerts (unauthorized access, API issues)
 - Model drift alerts (prediction accuracy decline)
 
+**MANDATORY**: Use structured logging from src.core.logging for all alert generation and notification events
+
 #### 2. Notification Channels (`src/monitoring/notifications/`)
 Implement multiple notification methods:
 - Discord integration for real-time alerts
@@ -5086,6 +5116,8 @@ Implement multiple notification methods:
 - Email alerts for weekly reports
 - SMS for emergency situations
 - Webhook integration for external systems
+
+**MANDATORY**: Use structured logging from src.core.logging for all notification delivery events and status tracking
 
 ### Directory Structure to Create
 ```
@@ -5198,6 +5230,7 @@ from src.utils.formatters import format_currency
 - MANDATORY: Test error handling propagation through entire system
 - MANDATORY: Test configuration loading for all components
 - MANDATORY: Validate reverse integration points are working (P-001 types used everywhere)
+- MANDATORY: Test logging integration using src.core.logging across all components
 
 ### Task Details
 
@@ -5294,6 +5327,7 @@ Implement production optimizations:
 - Health checks and restart policies
 - Resource limits and reservations
 - Secrets management and environment variables
+- Logging configuration for src.core.logging integration
 
 ### Directory Structure to Create
 ```
@@ -5350,6 +5384,7 @@ Implement deployment safeguards:
 - Security scan requirements
 - Manual approval for production
 - Rollback capabilities
+- Logging configuration validation for src.core.logging
 
 #### 3. Environment Management
 Implement environment-specific deployments:
@@ -5422,6 +5457,7 @@ Implement production monitoring:
 - Security monitoring and audit logging
 - Business metrics tracking
 - SLA monitoring and reporting
+- Structured logging from src.core.logging for all production events
 
 ### Directory Structure to Create
 ```
@@ -5455,6 +5491,7 @@ scripts/
 - [ ] Documentation complete
 - [ ] Team training completed
 - [ ] Go-live approval obtained
+- [ ] Logging configuration validated for src.core.logging
 
 ---
 
@@ -5500,24 +5537,28 @@ Implement developer resources:
 - **contributing.md**: Contribution guidelines and code standards
 - **coding_standards.md**: Code style and patterns
 - **testing_guide.md**: Testing procedures and standards
+- **logging_guide.md**: Logging standards using src.core.logging
 
 #### 5. Setup Scripts (`scripts/setup/`)
 Implement installation and setup automation:
 - **install_dependencies.sh**: Automated dependency installation
 - **setup_database.sh**: Database initialization and migration
 - **configure_exchanges.sh**: Exchange API setup and validation
+- **setup_logging.sh**: Logging configuration for src.core.logging
 
 #### 6. Maintenance Scripts (`scripts/maintenance/`)
 Implement operational maintenance automation:
 - **backup_data.sh**: Automated data backup procedures
 - **cleanup_old_data.sh**: Data retention and cleanup
 - **update_models.sh**: ML model update and deployment
+- **rotate_logs.sh**: Log rotation and archival for src.core.logging
 
 #### 7. Development Scripts (`scripts/development/`)
 Implement development workflow automation:
 - **run_tests.sh**: Comprehensive test execution
 - **lint_code.sh**: Code quality validation
 - **generate_docs.sh**: Documentation generation automation
+- **validate_logging.sh**: Logging configuration validation for src.core.logging
 
 ### Directory Structure to Create
 ```
@@ -5689,6 +5730,7 @@ After completing all prompts:
 4. Test disaster recovery procedures (P-036)
 5. Conduct end-to-end trading workflow test
 6. Validate all monitoring and alerting systems
+7. Verify logging integration using src.core.logging across all components
 
 ### Production Readiness Criteria
 - [ ] All 42 prompts completed successfully (P-001 through P-037 + sub-prompts)
@@ -5699,3 +5741,4 @@ After completing all prompts:
 - [ ] Documentation complete
 - [ ] Disaster recovery tested
 - [ ] Team training completed
+- [ ] Logging system validated using src.core.logging

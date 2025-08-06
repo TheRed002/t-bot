@@ -31,7 +31,7 @@ from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import RecoveryScenario
 
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
-# from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -77,6 +77,7 @@ class GlobalRateCoordinator:
                     global_limits=self.global_limits)
     
     
+    @time_execution
     async def check_global_limits(self, request_type: str, count: int = 1) -> bool:
         """
         Check if request is within global rate limits.
@@ -131,6 +132,7 @@ class GlobalRateCoordinator:
             raise ExchangeRateLimitError(f"Global rate limit check failed: {str(e)}")
     
     
+    @time_execution
     async def coordinate_request(self, exchange: str, endpoint: str, request_type: str) -> bool:
         """
         Coordinate request across global and exchange-specific limits.

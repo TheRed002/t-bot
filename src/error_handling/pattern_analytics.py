@@ -15,13 +15,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List, Set, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict, Counter
-import structlog
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001 core framework
 from src.core.exceptions import TradingBotError
 from src.core.config import Config
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 @dataclass

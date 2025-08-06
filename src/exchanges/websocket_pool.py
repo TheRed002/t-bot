@@ -32,7 +32,7 @@ from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import RecoveryScenario
 
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
-# from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -94,6 +94,7 @@ class WebSocketConnectionPool:
                     exchange=exchange, max_connections=max_connections)
     
     
+    @time_execution
     async def get_connection(self, connection_type: ConnectionType) -> Optional[PooledConnection]:
         """
         Get a connection from the pool.
@@ -155,6 +156,7 @@ class WebSocketConnectionPool:
             raise ExchangeConnectionError(f"Connection retrieval failed: {str(e)}")
     
     
+    @time_execution
     async def release_connection(self, connection: PooledConnection) -> None:
         """
         Release a connection back to the pool.

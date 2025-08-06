@@ -38,6 +38,9 @@ from src.exchanges.base import BaseExchange
 from src.exchanges.rate_limiter import RateLimiter
 from src.exchanges.connection_manager import ConnectionManager
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils.constants import API_ENDPOINTS, RATE_LIMITS, TIMEOUTS
+
 # Binance-specific imports
 import aiohttp
 import websockets
@@ -75,13 +78,14 @@ class BinanceExchange(BaseExchange):
         self.api_secret = config.exchanges.binance_api_secret
         self.testnet = config.exchanges.binance_testnet
         
-        # Binance API URLs
+        # Binance API URLs from constants
+        binance_config = API_ENDPOINTS["binance"]
         if self.testnet:
-            self.base_url = "https://testnet.binance.vision"
-            self.ws_url = "wss://testnet-dex.binance.org/ws"
+            self.base_url = binance_config["testnet_url"]
+            self.ws_url = binance_config["ws_testnet_url"]
         else:
-            self.base_url = "https://api.binance.com"
-            self.ws_url = "wss://stream.binance.com:9443/ws"
+            self.base_url = binance_config["base_url"]
+            self.ws_url = binance_config["ws_url"]
         
         # Initialize Binance client
         self.client: Optional[AsyncClient] = None
@@ -198,6 +202,7 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Error getting balance from Binance: {str(e)}")
             raise ExchangeError(f"Failed to get balance: {str(e)}")
     
+    @time_execution
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """
         Place an order on Binance.
@@ -263,6 +268,7 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Error placing order on Binance: {str(e)}")
             raise ExecutionError(f"Failed to place order: {str(e)}")
     
+    @time_execution
     async def cancel_order(self, order_id: str) -> bool:
         """
         Cancel an order on Binance.
@@ -293,6 +299,7 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Error cancelling order on Binance: {str(e)}")
             return False
     
+    @time_execution
     async def get_order_status(self, order_id: str) -> OrderStatus:
         """
         Get order status from Binance.
@@ -325,6 +332,7 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Error getting order status from Binance: {str(e)}")
             raise ExchangeError(f"Failed to get order status: {str(e)}")
     
+    @time_execution
     async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """
         Get market data from Binance.
@@ -407,6 +415,7 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Error subscribing to stream: {str(e)}")
             raise ExchangeError(f"Failed to subscribe to stream: {str(e)}")
     
+    @time_execution
     async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook:
         """
         Get order book from Binance.
@@ -448,6 +457,7 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Error getting order book from Binance: {str(e)}")
             raise ExchangeError(f"Failed to get order book: {str(e)}")
     
+    @time_execution
     async def get_trade_history(self, symbol: str, limit: int = 100) -> List[Trade]:
         """
         Get trade history from Binance.
@@ -492,6 +502,7 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Error getting trade history from Binance: {str(e)}")
             raise ExchangeError(f"Failed to get trade history: {str(e)}")
     
+    @time_execution
     async def get_exchange_info(self) -> ExchangeInfo:
         """
         Get exchange information from Binance.
@@ -531,6 +542,7 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Error getting exchange info from Binance: {str(e)}")
             raise ExchangeError(f"Failed to get exchange info: {str(e)}")
     
+    @time_execution
     async def get_ticker(self, symbol: str) -> Ticker:
         """
         Get ticker information from Binance.

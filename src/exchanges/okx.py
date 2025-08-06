@@ -46,6 +46,9 @@ from src.exchanges.base import BaseExchange
 from src.exchanges.rate_limiter import RateLimiter
 from src.exchanges.connection_manager import ConnectionManager
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils.constants import API_ENDPOINTS, RATE_LIMITS, TIMEOUTS
+
 # OKX-specific imports
 import aiohttp
 import websockets
@@ -89,15 +92,16 @@ class OKXExchange(BaseExchange):
         self.passphrase = config.exchanges.okx_passphrase
         self.sandbox = config.exchanges.okx_sandbox
         
-        # OKX API URLs
+        # OKX API URLs from constants
+        okx_config = API_ENDPOINTS["okx"]
         if self.sandbox:
-            self.base_url = "https://www.okx.com"
-            self.ws_url = "wss://wspap.okx.com:8443/ws/v5/public"
-            self.ws_private_url = "wss://wspap.okx.com:8443/ws/v5/private"
+            self.base_url = okx_config["sandbox_url"]
+            self.ws_url = okx_config["ws_url"]
+            self.ws_private_url = okx_config["ws_private_url"]
         else:
-            self.base_url = "https://www.okx.com"
-            self.ws_url = "wss://ws.okx.com:8443/ws/v5/public"
-            self.ws_private_url = "wss://ws.okx.com:8443/ws/v5/private"
+            self.base_url = okx_config["base_url"]
+            self.ws_url = okx_config["ws_url"]
+            self.ws_private_url = okx_config["ws_private_url"]
         
         # Initialize OKX clients
         self.account_client: Optional[Account] = None
@@ -243,6 +247,7 @@ class OKXExchange(BaseExchange):
             logger.error(f"Failed to get account balance from OKX: {str(e)}")
             raise ExchangeError(f"Failed to get account balance from OKX: {str(e)}")
     
+    @time_execution
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """
         Execute a trade order on OKX exchange.
@@ -300,6 +305,7 @@ class OKXExchange(BaseExchange):
                 raise
             raise ExchangeError(f"Failed to place order on OKX: {str(e)}")
     
+    @time_execution
     async def cancel_order(self, order_id: str) -> bool:
         """
         Cancel an existing order on OKX exchange.
@@ -332,6 +338,7 @@ class OKXExchange(BaseExchange):
             logger.error(f"Failed to cancel order {order_id} on OKX: {str(e)}")
             return False
     
+    @time_execution
     async def get_order_status(self, order_id: str) -> OrderStatus:
         """
         Check the status of an order on OKX exchange.
@@ -362,6 +369,7 @@ class OKXExchange(BaseExchange):
             logger.error(f"Failed to get order status for {order_id} on OKX: {str(e)}")
             return OrderStatus.UNKNOWN
     
+    @time_execution
     async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """
         Get OHLCV market data for a symbol from OKX.
@@ -441,6 +449,7 @@ class OKXExchange(BaseExchange):
             logger.error(f"Failed to subscribe to stream for {symbol} on OKX: {str(e)}")
             raise ExchangeError(f"Failed to subscribe to stream on OKX: {str(e)}")
     
+    @time_execution
     async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook:
         """
         Get order book for a symbol from OKX.
@@ -483,6 +492,7 @@ class OKXExchange(BaseExchange):
             logger.error(f"Failed to get order book for {symbol} from OKX: {str(e)}")
             raise ExchangeError(f"Failed to get order book from OKX: {str(e)}")
     
+    @time_execution
     async def get_trade_history(self, symbol: str, limit: int = 100) -> List[Trade]:
         """
         Get recent trade history for a symbol from OKX.
@@ -529,6 +539,7 @@ class OKXExchange(BaseExchange):
             logger.error(f"Failed to get trade history for {symbol} from OKX: {str(e)}")
             raise ExchangeError(f"Failed to get trade history from OKX: {str(e)}")
     
+    @time_execution
     async def get_exchange_info(self) -> ExchangeInfo:
         """
         Get exchange information from OKX.
@@ -568,6 +579,7 @@ class OKXExchange(BaseExchange):
             logger.error(f"Failed to get exchange info from OKX: {str(e)}")
             raise ExchangeError(f"Failed to get exchange info from OKX: {str(e)}")
     
+    @time_execution
     async def get_ticker(self, symbol: str) -> Ticker:
         """
         Get ticker information for a symbol from OKX.

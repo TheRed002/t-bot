@@ -10,7 +10,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
-import structlog
+from src.core.logging import get_logger
 from unittest.mock import Mock, AsyncMock, patch
 from typing import Dict, List, Callable
 
@@ -45,7 +45,7 @@ def config():
 def setup_logging_for_tests():
     """Setup logging for tests."""
     setup_logging(environment="test")
-    logger = structlog.get_logger()
+    logger = get_logger(__name__)
 
 
 class MockExchange(BaseExchange):

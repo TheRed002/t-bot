@@ -395,7 +395,6 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any, Union
 
 # Third-party imports  
-import structlog
 from pydantic import BaseModel, Field
 
 # Core application imports (ALWAYS FIRST)
@@ -405,6 +404,7 @@ from src.core.exceptions import (
     TradingBotError, ExchangeError, RiskManagementError, 
     ValidationError, ExecutionError
 )
+from src.core.logging import get_logger
 
 # Component-specific imports
 from src.utils.decorators import time_execution, retry, circuit_breaker

@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Callable
 from decimal import Decimal
-import structlog
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001 core framework
 from src.core.types import OrderRequest, OrderResponse, Position, MarketData
@@ -24,7 +24,7 @@ from src.core.exceptions import (
 )
 from src.core.config import Config
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class RecoveryScenario:

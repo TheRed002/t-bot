@@ -35,8 +35,8 @@ from src.error_handling.connection_manager import ConnectionManager as ErrorConn
 from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
 from src.exchanges.connection_manager import ConnectionManager
 
-# MANDATORY: Import from P-007A (utils) - will be implemented later
-# from src.utils.decorators import time_execution, retry, circuit_breaker
+# MANDATORY: Import from P-007A (utils)
+from src.utils.decorators import time_execution, retry, circuit_breaker
 
 logger = get_logger(__name__)
 

@@ -23,7 +23,6 @@ import functools
 import asyncio
 import inspect
 import psutil
-import structlog
 from typing import Callable, Any, Optional, Dict, List, Union
 from decimal import Decimal
 from datetime import datetime, timedelta

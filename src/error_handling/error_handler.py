@@ -15,7 +15,7 @@ from enum import Enum
 from typing import Dict, Any, Optional, List, Callable, Union
 from dataclasses import dataclass, field
 from functools import wraps
-import structlog
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001 core framework
 from src.core.exceptions import (
@@ -26,7 +26,7 @@ from src.core.exceptions import (
 from src.core.config import Config
 from src.error_handling.pattern_analytics import ErrorPattern
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class ErrorSeverity(Enum):

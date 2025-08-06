@@ -14,12 +14,12 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 import asyncio
-import structlog
 
 # MANDATORY: Import from P-001
 from src.core.types import RiskLevel, MarketData, RiskMetrics, MarketRegime, RegimeChangeEvent
 from src.core.exceptions import RiskManagementError, ValidationError
 from pydantic import BaseModel, Field
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution, retry
@@ -29,7 +29,7 @@ from src.utils.validators import validate_price
 from src.risk_management.base import BaseRiskManager
 from src.risk_management.risk_metrics import RiskCalculator
 
-logger = structlog.get_logger()
+logger = get_logger()
 
 
 class MarketRegimeDetector:

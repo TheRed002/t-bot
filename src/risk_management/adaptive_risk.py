@@ -12,11 +12,11 @@ import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from decimal import Decimal
-import structlog
 
 # MANDATORY: Import from P-001
 from src.core.types import RiskLevel, MarketData, Position, Signal, RiskMetrics, MarketRegime
 from src.core.exceptions import RiskManagementError, ValidationError
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution, retry
@@ -31,7 +31,7 @@ from src.risk_management.portfolio_limits import PortfolioLimits
 # MANDATORY: Import from P-010 (regime detection)
 from src.risk_management.regime_detection import MarketRegimeDetector
 
-logger = structlog.get_logger()
+logger = get_logger()
 
 
 class AdaptiveRiskManager:

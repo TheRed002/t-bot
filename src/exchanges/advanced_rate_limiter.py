@@ -31,7 +31,7 @@ from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import RecoveryScenario
 
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
-# from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -74,6 +74,7 @@ class AdvancedRateLimiter:
             logger.error(f"Failed to initialize exchange rate limiters: {str(e)}")
             raise ExchangeError(f"Rate limiter initialization failed: {str(e)}")
     
+    @time_execution
     async def check_rate_limit(self, exchange: str, endpoint: str, weight: int = 1) -> bool:
         """
         Check if rate limit allows the request.
@@ -126,6 +127,7 @@ class AdvancedRateLimiter:
             logger.error(f"Rate limit check failed: exchange {exchange}, endpoint {endpoint}, error {str(e)}")
             raise ExchangeRateLimitError(f"Rate limit check failed: {str(e)}")
     
+    @time_execution
     async def wait_if_needed(self, exchange: str, endpoint: str) -> float:
         """
         Wait if rate limit is exceeded.

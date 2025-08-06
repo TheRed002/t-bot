@@ -10,7 +10,7 @@ import asyncio
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
-import structlog
+from src.core.logging import get_logger
 
 from src.core.config import Config
 from src.core.logging import setup_logging
@@ -49,7 +49,7 @@ def config():
 def setup_logging_for_tests():
     """Setup logging for tests."""
     setup_logging(environment="test")
-    logger = structlog.get_logger()
+    logger = get_logger(__name__)
 
 
 @pytest.mark.asyncio

@@ -28,7 +28,7 @@ from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import RecoveryScenario
 
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
-# from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -96,6 +96,7 @@ class ConnectionHealthMonitor:
                     health_check_interval=self.health_check_interval)
     
     
+    @time_execution
     async def monitor_connection(self, connection: Any) -> None:
         """
         Start monitoring a connection.
@@ -143,6 +144,7 @@ class ConnectionHealthMonitor:
             raise ExchangeConnectionError(f"Connection monitoring failed: {str(e)}")
     
     
+    @time_execution
     async def mark_failed(self, connection: Any) -> None:
         """
         Mark a connection as failed.
