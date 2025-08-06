@@ -29,7 +29,7 @@ from src.utils.validators import validate_price
 from src.risk_management.base import BaseRiskManager
 from src.risk_management.risk_metrics import RiskCalculator
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 class MarketRegimeDetector:

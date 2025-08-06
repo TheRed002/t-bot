@@ -184,7 +184,7 @@ class Config(BaseConfig):
     
     # Application
     app_name: str = Field("trading-bot-suite", env="APP_NAME")
-    app_version: str = Field("2.0.0", env="APP_VERSION")
+    app_version: str = Field("1.0.0", env="APP_VERSION")
     
     # Sub-configurations
     database: DatabaseConfig = DatabaseConfig()

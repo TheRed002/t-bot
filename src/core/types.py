@@ -11,7 +11,7 @@ from decimal import Decimal
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from enum import Enum
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TradingMode(Enum):
@@ -276,3 +276,165 @@ class RegimeChangeEvent(BaseModel):
     timestamp: datetime
     trigger_metrics: Dict[str, Any] = Field(default_factory=dict)
     description: str
+
+
+class AllocationStrategy(Enum):
+    """Capital allocation strategy enumeration."""
+    EQUAL_WEIGHT = "equal_weight"
+    PERFORMANCE_WEIGHTED = "performance_weighted"
+    VOLATILITY_WEIGHTED = "volatility_weighted"
+    RISK_PARITY = "risk_parity"
+    DYNAMIC = "dynamic"
+
+
+class CapitalAllocation(BaseModel):
+    """Capital allocation record for strategies and exchanges."""
+    strategy_id: str = Field(description="Strategy identifier")
+    exchange: str = Field(description="Exchange name")
+    allocated_amount: Decimal = Field(description="Total allocated capital")
+    utilized_amount: Decimal = Field(default=Decimal("0"), description="Currently utilized capital")
+    available_amount: Decimal = Field(description="Available capital for trading")
+    allocation_percentage: float = Field(description="Allocation percentage of total capital")
+    last_rebalance: datetime = Field(description="Last rebalancing timestamp")
+    
+    @field_validator('allocation_percentage')
+    @classmethod
+    def validate_allocation_percentage(cls, v):
+        """Validate allocation percentage is between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f'Allocation percentage must be between 0 and 1, got {v}')
+        return v
+
+
+class FundFlow(BaseModel):
+    """Fund flow record for capital movements."""
+    from_strategy: Optional[str] = Field(default=None, description="Source strategy")
+    to_strategy: Optional[str] = Field(default=None, description="Target strategy")
+    from_exchange: Optional[str] = Field(default=None, description="Source exchange")
+    to_exchange: Optional[str] = Field(default=None, description="Target exchange")
+    amount: Decimal = Field(description="Flow amount")
+    currency: str = Field(default="USDT", description="Currency of flow")
+    reason: str = Field(description="Flow reason")
+    timestamp: datetime = Field(description="Flow timestamp")
+    converted_amount: Optional[Decimal] = Field(default=None, description="Converted amount for currency flows")
+    exchange_rate: Optional[Decimal] = Field(default=None, description="Exchange rate for currency conversion")
+    
+    @field_validator('amount')
+    @classmethod
+    def validate_amount(cls, v):
+        """Validate flow amount is positive."""
+        if v <= 0:
+            raise ValueError(f'Fund flow amount must be positive, got {v}')
+        return v
+
+
+class CapitalMetrics(BaseModel):
+    """Capital management metrics."""
+    total_capital: Decimal = Field(description="Total available capital")
+    allocated_capital: Decimal = Field(description="Total allocated capital")
+    available_capital: Decimal = Field(description="Unallocated capital")
+    utilization_rate: float = Field(description="Capital utilization rate")
+    allocation_efficiency: float = Field(
+        ge=0.0, 
+        le=3.0,  # Allow up to 300% efficiency for exceptional performance
+        description="Real allocation efficiency based on utilization, performance, and market conditions"
+    )
+    rebalance_frequency_hours: int = Field(description="Rebalancing frequency in hours")
+    emergency_reserve: Decimal = Field(description="Emergency reserve amount")
+    last_updated: datetime = Field(description="Last metrics update timestamp")
+    allocation_count: int = Field(description="Number of active allocations")
+    
+    @field_validator('utilization_rate')
+    @classmethod
+    def validate_utilization_rate(cls, v):
+        """Validate utilization rate is between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f'Utilization rate must be between 0 and 1, got {v}')
+        return v
+    
+    @field_validator('allocation_efficiency')
+    @classmethod
+    def validate_allocation_efficiency(cls, v):
+        """Validate allocation efficiency is between 0 and 3 (300% efficiency allowed)."""
+        if not 0.0 <= v <= 3.0:
+            raise ValueError(f'Allocation efficiency must be between 0 and 3, got {v}')
+        return v
+
+
+class CurrencyExposure(BaseModel):
+    """Currency exposure tracking."""
+    currency: str = Field(description="Currency code")
+    total_exposure: Decimal = Field(description="Total exposure in this currency")
+    base_currency_equivalent: Decimal = Field(description="Equivalent in base currency")
+    exposure_percentage: float = Field(description="Percentage of total portfolio")
+    hedging_required: bool = Field(description="Whether hedging is required")
+    hedge_amount: Decimal = Field(default=Decimal("0"), description="Amount to hedge")
+    timestamp: datetime = Field(description="Exposure calculation timestamp")
+    
+    @field_validator('exposure_percentage')
+    @classmethod
+    def validate_exposure_percentage(cls, v):
+        """Validate exposure percentage is between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f'Exposure percentage must be between 0 and 1, got {v}')
+        return v
+
+
+class ExchangeAllocation(BaseModel):
+    """Exchange-specific capital allocation."""
+    exchange: str = Field(description="Exchange name")
+    allocated_amount: Decimal = Field(description="Allocated capital")
+    available_amount: Decimal = Field(description="Available capital")
+    utilization_rate: float = Field(description="Utilization rate")
+    liquidity_score: float = Field(description="Liquidity score (0-1)")
+    fee_efficiency: float = Field(description="Fee efficiency score (0-1)")
+    reliability_score: float = Field(description="API reliability score (0-1)")
+    last_rebalance: datetime = Field(description="Last rebalancing timestamp")
+    
+    @field_validator('utilization_rate', 'liquidity_score', 'fee_efficiency', 'reliability_score')
+    @classmethod
+    def validate_score_fields(cls, v):
+        """Validate score fields are between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f'Score must be between 0 and 1, got {v}')
+        return v
+
+
+class WithdrawalRule(BaseModel):
+    """Withdrawal rule configuration."""
+    name: str = Field(description="Rule name")
+    description: str = Field(description="Rule description")
+    enabled: bool = Field(default=True, description="Whether rule is enabled")
+    threshold: Optional[float] = Field(default=None, description="Performance threshold")
+    min_amount: Optional[Decimal] = Field(default=None, description="Minimum withdrawal amount")
+    max_percentage: Optional[float] = Field(default=None, description="Maximum withdrawal percentage")
+    cooldown_hours: Optional[int] = Field(default=None, description="Cooldown period in hours")
+    
+    @field_validator('threshold', 'max_percentage')
+    @classmethod
+    def validate_percentage_fields(cls, v):
+        """Validate percentage fields."""
+        if v is not None and not 0.0 <= v <= 1.0:
+            raise ValueError(f'Percentage must be between 0 and 1, got {v}')
+        return v
+
+
+class CapitalProtection(BaseModel):
+    """Capital protection configuration."""
+    emergency_reserve_pct: float = Field(default=0.1, description="Emergency reserve percentage")
+    max_daily_loss_pct: float = Field(default=0.05, description="Maximum daily loss percentage")
+    max_weekly_loss_pct: float = Field(default=0.10, description="Maximum weekly loss percentage")
+    max_monthly_loss_pct: float = Field(default=0.15, description="Maximum monthly loss percentage")
+    profit_lock_pct: float = Field(default=0.5, description="Profit lock percentage")
+    auto_compound_enabled: bool = Field(default=True, description="Enable auto-compounding")
+    auto_compound_frequency: str = Field(default="weekly", description="Auto-compound frequency")
+    profit_threshold: Decimal = Field(default=Decimal("100"), description="Minimum profit for compounding")
+    
+    @field_validator('emergency_reserve_pct', 'max_daily_loss_pct', 'max_weekly_loss_pct', 
+                    'max_monthly_loss_pct', 'profit_lock_pct')
+    @classmethod
+    def validate_percentage_fields(cls, v):
+        """Validate percentage fields are between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f'Percentage must be between 0 and 1, got {v}')
+        return v

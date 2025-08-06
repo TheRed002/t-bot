@@ -31,7 +31,7 @@ from src.risk_management.portfolio_limits import PortfolioLimits
 # MANDATORY: Import from P-010 (regime detection)
 from src.risk_management.regime_detection import MarketRegimeDetector
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 class AdaptiveRiskManager:

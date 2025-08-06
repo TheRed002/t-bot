@@ -312,5 +312,26 @@ class ConnectionError(NetworkError):
     pass
 
 
+# Capital management exceptions
+class CapitalManagementError(TradingBotError):
+    """Capital management and allocation errors."""
+    pass
+
+
+class InsufficientCapitalError(CapitalManagementError):
+    """Insufficient capital for allocation."""
+    pass
+
+
+class WithdrawalError(CapitalManagementError):
+    """Withdrawal rule violations."""
+    pass
+
+
+class CurrencyError(CapitalManagementError):
+    """Currency conversion and exposure errors."""
+    pass
+
+
 # REVERSE INTEGRATION: Future prompts may add specific sub-exceptions but must 
 # extend these base classes, never replace them. 

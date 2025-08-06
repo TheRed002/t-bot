@@ -40,6 +40,7 @@ from src.exchanges.connection_manager import ConnectionManager
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.constants import API_ENDPOINTS, RATE_LIMITS, TIMEOUTS
+from src.utils.decorators import time_execution
 
 # Binance-specific imports
 import aiohttp

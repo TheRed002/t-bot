@@ -314,6 +314,121 @@ class RiskConfig(BaseConfig):
         return v
 
 
+class CapitalManagementConfig(BaseConfig):
+    """Capital management configuration for P-010A framework."""
+    
+    # Base settings
+    base_currency: str = Field(default="USDT", description="Base currency for all calculations")
+    total_capital: float = Field(default=10000.0, description="Total available capital")
+    emergency_reserve_pct: float = Field(default=0.1, description="Emergency reserve percentage (10%)")
+    
+    # Allocation strategy
+    allocation_strategy: str = Field(default="risk_parity", description="Capital allocation strategy")
+    rebalance_frequency_hours: int = Field(default=24, description="Rebalancing frequency in hours")
+    min_allocation_pct: float = Field(default=0.01, description="Minimum allocation percentage (1%)")
+    max_allocation_pct: float = Field(default=0.25, description="Maximum allocation percentage (25%)")
+    
+    # Exchange distribution
+    max_exchange_allocation_pct: float = Field(default=0.6, description="Maximum exchange allocation (60%)")
+    min_exchange_balance: float = Field(default=100.0, description="Minimum exchange balance")
+    
+    # Fund flow controls
+    max_daily_reallocation_pct: float = Field(default=0.2, description="Maximum daily reallocation (20%)")
+    fund_flow_cooldown_minutes: int = Field(default=60, description="Fund flow cooldown in minutes")
+    min_deposit_amount: float = Field(default=1000.0, description="Minimum deposit amount")
+    min_withdrawal_amount: float = Field(default=100.0, description="Minimum withdrawal amount")
+    max_withdrawal_pct: float = Field(default=0.2, description="Maximum withdrawal percentage (20%)")
+    
+    # Currency management
+    supported_currencies: List[str] = Field(
+        default=["USDT", "BUSD", "USDC", "BTC", "ETH"],
+        description="Supported currencies for trading"
+    )
+    hedging_enabled: bool = Field(default=True, description="Enable currency hedging")
+    hedging_threshold: float = Field(default=0.1, description="Hedging threshold (10% exposure)")
+    hedge_ratio: float = Field(default=0.8, description="Hedge coverage ratio (80%)")
+    
+    # Withdrawal rules
+    withdrawal_rules: Dict[str, Dict[str, Any]] = Field(
+        default={
+            "profit_only": {
+                "enabled": True,
+                "description": "Only withdraw realized profits"
+            },
+            "maintain_minimum": {
+                "enabled": True,
+                "description": "Keep minimum capital for each strategy"
+            },
+            "performance_based": {
+                "enabled": False,
+                "threshold": 0.05,
+                "description": "Allow withdrawals only if performance > threshold"
+            }
+        },
+        description="Withdrawal rule configurations"
+    )
+    
+    # Auto-compounding
+    auto_compound_enabled: bool = Field(default=True, description="Enable auto-compounding")
+    auto_compound_frequency: str = Field(default="weekly", description="Auto-compound frequency")
+    profit_threshold: float = Field(default=100.0, description="Minimum profit for compounding")
+    
+    # Capital protection
+    max_daily_loss_pct: float = Field(default=0.05, description="Maximum daily loss (5%)")
+    max_weekly_loss_pct: float = Field(default=0.10, description="Maximum weekly loss (10%)")
+    max_monthly_loss_pct: float = Field(default=0.15, description="Maximum monthly loss (15%)")
+    profit_lock_pct: float = Field(default=0.5, description="Profit lock percentage (50%)")
+    
+    # Per-strategy minimum allocations
+    per_strategy_minimum: Dict[str, float] = Field(
+        default={
+            "mean_reversion": 5000.0,
+            "trend_following": 10000.0,
+            "ml_strategy": 15000.0,
+            "arbitrage": 20000.0,
+            "market_making": 25000.0
+        },
+        description="Minimum capital requirements per strategy"
+    )
+    
+    # Exchange allocation weights
+    exchange_allocation_weights: Dict[str, float] = Field(
+        default={
+            "binance": 0.5,
+            "okx": 0.3,
+            "coinbase": 0.2
+        },
+        description="Default exchange allocation weights"
+    )
+    
+    @field_validator('emergency_reserve_pct', 'min_allocation_pct', 'max_allocation_pct', 
+                    'max_exchange_allocation_pct', 'max_daily_reallocation_pct', 
+                    'hedging_threshold', 'hedge_ratio', 'max_daily_loss_pct', 
+                    'max_weekly_loss_pct', 'max_monthly_loss_pct', 'profit_lock_pct')
+    @classmethod
+    def validate_percentage_fields(cls, v):
+        """Validate percentage fields are between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f'Percentage must be between 0 and 1, got {v}')
+        return v
+    
+    @field_validator('rebalance_frequency_hours', 'fund_flow_cooldown_minutes')
+    @classmethod
+    def validate_positive_integers(cls, v):
+        """Validate positive integer fields."""
+        if v <= 0:
+            raise ValueError(f'Value must be positive, got {v}')
+        return v
+    
+    @field_validator('total_capital', 'min_exchange_balance', 'profit_threshold')
+    @classmethod
+    def validate_positive_floats(cls, v):
+        """Validate positive float fields."""
+        if v <= 0:
+            raise ValueError(f'Value must be positive, got {v}')
+        return v
+
+
 class Config(BaseConfig):
     """Master configuration class for the entire application."""
     
@@ -323,7 +438,7 @@ class Config(BaseConfig):
     
     # Application
     app_name: str = Field(default="trading-bot-suite", description="Application name")
-    app_version: str = Field(default="2.0.0", description="Application version")
+    app_version: str = Field(default="1.0.0", description="Application version")
     
     # Sub-configurations
     database: DatabaseConfig = DatabaseConfig()
@@ -331,6 +446,7 @@ class Config(BaseConfig):
     error_handling: ErrorHandlingConfig = ErrorHandlingConfig()
     exchanges: ExchangeConfig = ExchangeConfig()
     risk: RiskConfig = RiskConfig()
+    capital_management: CapitalManagementConfig = CapitalManagementConfig()
     
     @field_validator('environment')
     @classmethod

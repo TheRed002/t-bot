@@ -34,6 +34,9 @@ from src.utils.decorators import time_execution, retry
 from src.utils.validators import validate_price, validate_quantity, validate_position_limits
 from src.utils.formatters import format_percentage, format_currency
 
+# P-010A: Reverse integration - CapitalAllocator integration
+# Note: CapitalAllocator can be imported when needed, avoiding circular imports
+
 logger = get_logger(__name__)
 
 
