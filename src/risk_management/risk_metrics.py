@@ -17,7 +17,6 @@ from typing import List, Optional, Dict, Any, Tuple
 from decimal import Decimal
 from datetime import datetime, timedelta
 import numpy as np
-import structlog
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -27,6 +26,7 @@ from src.core.exceptions import (
     RiskManagementError, ValidationError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -36,7 +36,7 @@ from src.utils.decorators import time_execution, retry
 from src.utils.validators import validate_price, validate_quantity, validate_position_limits
 from src.utils.formatters import format_percentage, format_currency
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class RiskCalculator:
@@ -218,8 +218,11 @@ class RiskCalculator:
             Decimal: VaR value
         """
         if len(self.portfolio_returns) < 30:
-            # Insufficient data, use conservative estimate
-            return portfolio_value * Decimal("0.02")  # 2% VaR
+            # Insufficient data, use conservative estimate scaled by sqrt(days)
+            # This ensures 5-day VaR is larger than 1-day VaR
+            base_var_pct = Decimal("0.02")  # 2% base VaR
+            scaled_var_pct = base_var_pct * Decimal(str(np.sqrt(days)))
+            return portfolio_value * scaled_var_pct
         
         # Calculate daily volatility
         returns_array = np.array(self.portfolio_returns)
@@ -361,7 +364,13 @@ class RiskCalculator:
         Returns:
             RiskLevel: Determined risk level
         """
-        # Risk level thresholds
+        # Get current portfolio value for percentage calculations
+        current_portfolio_value = self.portfolio_values[-1] if self.portfolio_values else 1
+        
+        # Calculate VaR as percentage of portfolio value
+        var_1d_pct = var_1d / Decimal(str(current_portfolio_value)) if current_portfolio_value > 0 else Decimal("0")
+        
+        # Risk level thresholds (as percentages)
         var_threshold_high = Decimal("0.05")  # 5% VaR
         var_threshold_critical = Decimal("0.10")  # 10% VaR
         drawdown_threshold_high = Decimal("0.10")  # 10% drawdown
@@ -369,18 +378,18 @@ class RiskCalculator:
         sharpe_threshold_low = Decimal("-1.0")  # Negative Sharpe ratio
         
         # Check for critical risk
-        if (var_1d > var_threshold_critical or 
+        if (var_1d_pct > var_threshold_critical or 
             current_drawdown > drawdown_threshold_critical):
             return RiskLevel.CRITICAL
         
         # Check for high risk
-        if (var_1d > var_threshold_high or 
+        if (var_1d_pct > var_threshold_high or 
             current_drawdown > drawdown_threshold_high or
             (sharpe_ratio and sharpe_ratio < sharpe_threshold_low)):
             return RiskLevel.HIGH
         
         # Check for medium risk
-        if (var_1d > Decimal("0.02") or  # 2% VaR
+        if (var_1d_pct > Decimal("0.02") or  # 2% VaR
             current_drawdown > Decimal("0.05") or  # 5% drawdown
             (sharpe_ratio and sharpe_ratio < Decimal("0.5"))):
             return RiskLevel.MEDIUM

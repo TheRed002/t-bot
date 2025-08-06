@@ -13,7 +13,6 @@ from typing import List, Optional, Dict, Any, Tuple
 from decimal import Decimal
 from datetime import datetime, timedelta
 import asyncio
-import structlog
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -25,6 +24,7 @@ from src.core.exceptions import (
     ValidationError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -38,7 +38,7 @@ from src.utils.formatters import format_percentage, format_currency
 # MANDATORY: Import from P-003+
 from src.exchanges.base import BaseExchange
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class BaseRiskManager(ABC):

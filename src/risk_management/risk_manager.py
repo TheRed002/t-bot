@@ -12,7 +12,6 @@ P-002A (error handling), and P-007A (utils) components.
 from typing import List, Optional, Dict, Any, Tuple
 from decimal import Decimal
 from datetime import datetime, timedelta
-import structlog
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -24,6 +23,7 @@ from src.core.exceptions import (
     ValidationError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -43,7 +43,7 @@ from .position_sizing import PositionSizer
 from .portfolio_limits import PortfolioLimits
 from .risk_metrics import RiskCalculator
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class RiskManager(BaseRiskManager):

@@ -15,7 +15,6 @@ from typing import List, Optional, Dict, Any, Tuple
 from decimal import Decimal
 from datetime import datetime, timedelta
 import numpy as np
-import structlog
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -25,6 +24,7 @@ from src.core.exceptions import (
     RiskManagementError, PositionLimitError, ValidationError
 )
 from src.core.config import Config
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -34,7 +34,7 @@ from src.utils.decorators import time_execution, retry
 from src.utils.validators import validate_price, validate_quantity, validate_position_limits
 from src.utils.formatters import format_percentage, format_currency
 
-logger = structlog.get_logger()
+logger = get_logger(__name__)
 
 
 class PositionSizer:
