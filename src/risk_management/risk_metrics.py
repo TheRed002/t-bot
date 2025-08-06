@@ -241,7 +241,9 @@ class RiskCalculator:
             # Interpolate for other confidence levels
             z_score = 1.645 + (confidence_level - 0.95) * (2.326 - 1.645) / 0.04
         
-        var_value = portfolio_value * Decimal(str(daily_volatility)) * Decimal(str(np.sqrt(days))) * Decimal(str(z_score))
+        # Formula: VaR = portfolio_value * (volatility * sqrt(days) * z_score)
+        var_percentage = daily_volatility * np.sqrt(days) * z_score
+        var_value = portfolio_value * Decimal(str(var_percentage))
         
         return var_value
     

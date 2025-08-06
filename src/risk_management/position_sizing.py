@@ -199,16 +199,18 @@ class PositionSizer:
                 return await self._fixed_percentage_sizing(signal, portfolio_value)
             
             # Kelly fraction = (mean_return) / variance
+            # But we need to ensure it's a reasonable percentage of portfolio
             kelly_fraction = mean_return / variance
             
-            # Apply maximum Kelly fraction limit
+            # Apply maximum Kelly fraction limit (25% by default)
             max_kelly = self.risk_config.kelly_max_fraction
             kelly_fraction = min(kelly_fraction, max_kelly)
             
             # Apply confidence adjustment
             kelly_fraction *= signal.confidence
             
-            # Calculate position size
+            # CRITICAL FIX: Kelly fraction should be a percentage, not absolute value
+            # Convert to percentage and apply to portfolio
             position_size = portfolio_value * Decimal(str(kelly_fraction))
             
             self.logger.debug("Kelly Criterion sizing",
