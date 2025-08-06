@@ -8,7 +8,7 @@ CRITICAL: This file will be updated by subsequent prompts. Use exact types from 
 """
 
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator
@@ -437,4 +437,71 @@ class CapitalProtection(BaseModel):
         """Validate percentage fields are between 0 and 1."""
         if not 0.0 <= v <= 1.0:
             raise ValueError(f'Percentage must be between 0 and 1, got {v}')
+        return v
+
+class StrategyType(Enum):
+    """Strategy type enumeration for different trading strategies."""
+    STATIC = "static"
+    DYNAMIC = "dynamic" 
+    ARBITRAGE = "arbitrage"
+    MARKET_MAKING = "market_making"
+    EVOLUTIONARY = "evolutionary"
+    HYBRID = "hybrid"
+    AI_ML = "ai_ml"
+
+class StrategyStatus(Enum):
+    """Strategy status enumeration for tracking strategy state."""
+    STOPPED = "stopped"
+    STARTING = "starting"
+    RUNNING = "running"
+    PAUSED = "paused"
+    ERROR = "error"
+
+class StrategyConfig(BaseModel):
+    """Strategy configuration model for storing strategy parameters."""
+    name: str = Field(description="Strategy name")
+    strategy_type: StrategyType = Field(description="Strategy type")
+    enabled: bool = Field(default=True, description="Whether strategy is enabled")
+    symbols: List[str] = Field(description="Trading symbols")
+    timeframe: str = Field(default="1h", description="Trading timeframe")
+    min_confidence: float = Field(default=0.6, ge=0.0, le=1.0, description="Minimum signal confidence")
+    max_positions: int = Field(default=5, ge=1, description="Maximum positions")
+    position_size_pct: float = Field(default=0.02, ge=0.001, le=0.1, description="Position size percentage")
+    stop_loss_pct: float = Field(default=0.02, ge=0.001, le=0.1, description="Stop loss percentage")
+    take_profit_pct: float = Field(default=0.04, ge=0.001, le=0.2, description="Take profit percentage")
+    parameters: Dict[str, Any] = Field(default_factory=dict, description="Strategy-specific parameters")
+    
+    @field_validator('min_confidence', 'position_size_pct', 'stop_loss_pct', 'take_profit_pct')
+    @classmethod
+    def validate_percentage_fields(cls, v):
+        """Validate percentage fields are between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f'Percentage must be between 0 and 1, got {v}')
+        return v
+    
+    @field_validator('max_positions')
+    @classmethod
+    def validate_positive_integer(cls, v):
+        """Validate positive integer fields."""
+        if v <= 0:
+            raise ValueError(f'Value must be positive, got {v}')
+        return v
+
+class StrategyMetrics(BaseModel):
+    """Strategy performance metrics model."""
+    total_trades: int = Field(default=0, description="Total number of trades")
+    winning_trades: int = Field(default=0, description="Number of winning trades")
+    losing_trades: int = Field(default=0, description="Number of losing trades")
+    total_pnl: Decimal = Field(default=Decimal("0"), description="Total P&L")
+    win_rate: float = Field(default=0.0, description="Win rate percentage")
+    sharpe_ratio: Optional[float] = Field(default=None, description="Sharpe ratio")
+    max_drawdown: Optional[float] = Field(default=None, description="Maximum drawdown")
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Last metrics update timestamp")
+    
+    @field_validator('win_rate')
+    @classmethod
+    def validate_win_rate(cls, v):
+        """Validate win rate is between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f'Win rate must be between 0 and 1, got {v}')
         return v

@@ -429,6 +429,54 @@ class CapitalManagementConfig(BaseConfig):
         return v
 
 
+class StrategyManagementConfig(BaseConfig):
+    """Strategy management configuration for P-011 framework."""
+    
+    # Global strategy settings
+    max_concurrent_strategies: int = Field(default=10, description="Maximum concurrent strategies")
+    strategy_restart_delay: int = Field(default=60, description="Strategy restart delay in seconds")
+    performance_window_days: int = Field(default=30, description="Performance evaluation window in days")
+    
+    # Default strategy parameters
+    default_min_confidence: float = Field(default=0.6, description="Default minimum signal confidence")
+    default_position_size: float = Field(default=0.02, description="Default position size percentage")
+    default_stop_loss: float = Field(default=0.02, description="Default stop loss percentage")
+    default_take_profit: float = Field(default=0.04, description="Default take profit percentage")
+    
+    # Hot reloading
+    enable_hot_reload: bool = Field(default=True, description="Enable hot reloading of strategies")
+    config_check_interval: int = Field(default=30, description="Configuration check interval in seconds")
+    
+    # Strategy performance thresholds
+    min_win_rate: float = Field(default=0.4, description="Minimum acceptable win rate")
+    min_sharpe_ratio: float = Field(default=0.5, description="Minimum acceptable Sharpe ratio")
+    max_drawdown_threshold: float = Field(default=0.15, description="Maximum acceptable drawdown")
+    
+    # Strategy monitoring
+    performance_evaluation_frequency: int = Field(default=24, description="Performance evaluation frequency in hours")
+    auto_disable_poor_performers: bool = Field(default=True, description="Auto-disable poorly performing strategies")
+    performance_alert_threshold: float = Field(default=0.3, description="Performance alert threshold")
+    
+    @field_validator('max_concurrent_strategies', 'strategy_restart_delay', 'performance_window_days', 
+                    'config_check_interval', 'performance_evaluation_frequency')
+    @classmethod
+    def validate_positive_integers(cls, v):
+        """Validate positive integer fields."""
+        if v <= 0:
+            raise ValueError(f'Value must be positive, got {v}')
+        return v
+    
+    @field_validator('default_min_confidence', 'default_position_size', 'default_stop_loss', 
+                    'default_take_profit', 'min_win_rate', 'min_sharpe_ratio', 'max_drawdown_threshold',
+                    'performance_alert_threshold')
+    @classmethod
+    def validate_percentage_fields(cls, v):
+        """Validate percentage fields are between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f'Percentage must be between 0 and 1, got {v}')
+        return v
+
+
 class Config(BaseConfig):
     """Master configuration class for the entire application."""
     
@@ -447,6 +495,7 @@ class Config(BaseConfig):
     exchanges: ExchangeConfig = ExchangeConfig()
     risk: RiskConfig = RiskConfig()
     capital_management: CapitalManagementConfig = CapitalManagementConfig()
+    strategies: StrategyManagementConfig = StrategyManagementConfig()
     
     @field_validator('environment')
     @classmethod

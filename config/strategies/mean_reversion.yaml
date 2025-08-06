@@ -1,0 +1,20 @@
+_metadata:
+  last_updated: '2025-08-06T21:06:22.628824'
+  version: 1.0.0
+enabled: true
+max_positions: 10
+min_confidence: 0.9
+name: mean_reversion
+parameters:
+  entry_threshold: 2.0
+  exit_threshold: 0.5
+  lookback_period: 20
+  volatility_window: 20
+position_size_pct: 0.02
+stop_loss_pct: 0.02
+strategy_type: static
+symbols:
+- BTCUSDT
+- ETHUSDT
+take_profit_pct: 0.04
+timeframe: 5m

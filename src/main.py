@@ -187,9 +187,48 @@ class Application:
     
     async def _initialize_strategies(self) -> None:
         """Initialize trading strategies."""
-        # Placeholder for P-011 strategy implementation
-        self.logger.info("Strategy initialization placeholder - will be implemented in P-011")
-        self.health_status["components"]["strategies"] = "initialized"
+        try:
+            from src.strategies import StrategyFactory, StrategyConfigurationManager
+            
+            # Create strategy configuration manager
+            self.components["strategy_config_manager"] = StrategyConfigurationManager()
+            
+            # Create strategy factory
+            self.components["strategy_factory"] = StrategyFactory()
+            
+            # Set dependencies for strategy factory
+            if "risk_manager" in self.components:
+                self.components["strategy_factory"].set_risk_manager(self.components["risk_manager"])
+            
+            if "exchange_factory" in self.components:
+                # Get first available exchange for strategies
+                exchanges = self.components["exchange_factory"].get_all_exchanges()
+                if exchanges:
+                    first_exchange = list(exchanges.values())[0]
+                    self.components["strategy_factory"].set_exchange(first_exchange)
+            
+            # Load and create strategies from configuration
+            available_strategies = self.components["strategy_config_manager"].get_available_strategies()
+            for strategy_name in available_strategies:
+                try:
+                    # Load strategy configuration
+                    config = self.components["strategy_config_manager"].load_strategy_config(strategy_name)
+                    
+                    # Create strategy instance
+                    strategy = self.components["strategy_factory"].create_strategy(strategy_name, config.dict())
+                    
+                    self.logger.info(f"Initialized strategy: {strategy_name}")
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to initialize strategy {strategy_name}: {str(e)}")
+            
+            self.health_status["components"]["strategies"] = "initialized"
+            self.logger.info("Strategy initialization completed successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Strategy initialization failed: {str(e)}")
+            self.health_status["components"]["strategies"] = "error"
+            raise
     
     async def _initialize_ml_models(self) -> None:
         """Initialize machine learning models."""
@@ -275,8 +314,16 @@ class Application:
     
     async def _shutdown_strategies(self) -> None:
         """Shutdown trading strategies."""
-        # Placeholder for P-011 strategy shutdown
-        self.logger.info("Strategy shutdown placeholder - will be implemented in P-011")
+        try:
+            if "strategy_factory" in self.components:
+                await self.components["strategy_factory"].shutdown_all_strategies()
+                self.logger.info("All strategies shutdown successfully")
+            else:
+                self.logger.warning("Strategy factory not found during shutdown")
+                
+        except Exception as e:
+            self.logger.error(f"Strategy shutdown failed: {str(e)}")
+            # Continue with shutdown even if strategy shutdown fails
         self.health_status["components"]["strategies"] = "shutdown"
     
     async def _shutdown_ml_models(self) -> None:

@@ -329,6 +329,45 @@ def validate_risk_parameters(params: Dict[str, Any]) -> bool:
     return True
 
 
+def validate_signal(signal: Signal) -> bool:
+    """
+    Validate trading signal.
+    
+    Args:
+        signal: Signal to validate
+        
+    Returns:
+        True if valid
+        
+    Raises:
+        ValidationError: If signal is invalid
+    """
+    if not isinstance(signal, Signal):
+        raise ValidationError("Signal must be a Signal instance")
+    
+    # Validate confidence
+    if not 0 <= signal.confidence <= 1:
+        raise ValidationError("Signal confidence must be between 0 and 1")
+    
+    # Validate direction
+    valid_directions = ["buy", "sell", "hold"]
+    if signal.direction.value not in valid_directions:
+        raise ValidationError(f"Invalid signal direction: {signal.direction}")
+    
+    # Validate symbol
+    validate_symbol(signal.symbol)
+    
+    # Validate timestamp
+    if not isinstance(signal.timestamp, datetime):
+        raise ValidationError("Signal timestamp must be a datetime instance")
+    
+    # Validate strategy name
+    if not signal.strategy_name or not isinstance(signal.strategy_name, str):
+        raise ValidationError("Signal must have a valid strategy name")
+    
+    return True
+
+
 def validate_strategy_config(config: Dict[str, Any]) -> bool:
     """
     Validate strategy configuration.
