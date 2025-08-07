@@ -28,6 +28,13 @@ from src.exchanges.base import BaseExchange
 # MANDATORY: Import from P-011
 from src.strategies.base import BaseStrategy
 
+# MANDATORY: Import from P-013 - Dynamic strategies
+from src.strategies.static.mean_reversion import MeanReversionStrategy
+from src.strategies.static.trend_following import TrendFollowingStrategy
+from src.strategies.static.breakout import BreakoutStrategy
+from src.strategies.dynamic.adaptive_momentum import AdaptiveMomentumStrategy
+from src.strategies.dynamic.volatility_breakout import VolatilityBreakoutStrategy
+
 logger = get_logger(__name__)
 
 
@@ -48,12 +55,18 @@ class StrategyFactory:
     
     def _register_builtin_strategies(self) -> None:
         """Register built-in strategy classes."""
-        # TODO: Register actual strategy classes when they are implemented
-        # self._register_strategy_class("mean_reversion", MeanReversionStrategy)
-        # self._register_strategy_class("trend_following", TrendFollowingStrategy)
-        # self._register_strategy_class("breakout", BreakoutStrategy)
+        # Static strategies
+        self._register_strategy_class("mean_reversion", MeanReversionStrategy)
+        self._register_strategy_class("trend_following", TrendFollowingStrategy)
+        self._register_strategy_class("breakout", BreakoutStrategy)
         
-        logger.info("Built-in strategies registered")
+        # Dynamic strategies (P-013)
+        self._register_strategy_class("adaptive_momentum", AdaptiveMomentumStrategy)
+        self._register_strategy_class("volatility_breakout", VolatilityBreakoutStrategy)
+        
+        logger.info("Built-in strategies registered", 
+                   static_count=3,
+                   dynamic_count=2)
     
     def _register_strategy_class(self, name: str, strategy_class: Type[BaseStrategy]) -> None:
         """Register a strategy class.
@@ -102,19 +115,18 @@ class StrategyFactory:
                 strategy.set_exchange(self._exchange)
             
             # Store strategy instance
-            self._strategies[strategy.name] = strategy
+            self._strategies[strategy_name] = strategy
             
             logger.info("Strategy created successfully", 
-                       strategy_name=strategy_name, 
-                       strategy_instance=strategy.name)
+                       name=strategy_name,
+                       class_name=strategy_class.__name__)
             
             return strategy
             
         except Exception as e:
-            logger.error("Failed to create strategy", 
-                        strategy_name=strategy_name, 
-                        error=str(e))
-            raise ValidationError(f"Failed to create strategy {strategy_name}: {str(e)}")
+            logger.error("Strategy creation failed", 
+                        strategy_name=strategy_name, error=str(e))
+            raise ValidationError(f"Strategy creation failed: {str(e)}")
     
     def _get_strategy_class(self, strategy_name: str) -> Optional[Type[BaseStrategy]]:
         """Get strategy class by name.
@@ -125,28 +137,29 @@ class StrategyFactory:
         Returns:
             Strategy class or None if not found
         """
-        # Check registered classes first
+        # First check if already registered
         if strategy_name in self._strategy_classes:
             return self._strategy_classes[strategy_name]
         
-        # Try dynamic import
+        # Try dynamic import from static strategies
         try:
-            module_name = f"src.strategies.static.{strategy_name.lower()}"
-            class_name = f"{strategy_name.title()}Strategy"
-            
-            module = importlib.import_module(module_name)
-            strategy_class = getattr(module, class_name)
-            
-            # Register for future use
-            self._register_strategy_class(strategy_name, strategy_class)
-            
-            return strategy_class
-            
-        except (ImportError, AttributeError) as e:
-            logger.warning("Strategy class not found", 
-                          strategy_name=strategy_name, 
-                          error=str(e))
-            return None
+            module = importlib.import_module(f"src.strategies.static.{strategy_name}")
+            strategy_class = getattr(module, f"{strategy_name.title().replace('_', '')}Strategy", None)
+            if strategy_class and issubclass(strategy_class, BaseStrategy):
+                return strategy_class
+        except (ImportError, AttributeError):
+            pass
+        
+        # Try dynamic import from dynamic strategies
+        try:
+            module = importlib.import_module(f"src.strategies.dynamic.{strategy_name}")
+            strategy_class = getattr(module, f"{strategy_name.title().replace('_', '')}Strategy", None)
+            if strategy_class and issubclass(strategy_class, BaseStrategy):
+                return strategy_class
+        except (ImportError, AttributeError):
+            pass
+        
+        return None
     
     @time_execution
     async def start_strategy(self, strategy_name: str) -> bool:
@@ -159,18 +172,20 @@ class StrategyFactory:
             True if strategy started successfully, False otherwise
         """
         try:
-            strategy = self._strategies.get(strategy_name)
+            strategy = self.get_strategy(strategy_name)
             if not strategy:
                 logger.error("Strategy not found", strategy_name=strategy_name)
                 return False
             
+            # Start strategy
             await strategy.start()
+            
+            logger.info("Strategy started successfully", strategy_name=strategy_name)
             return True
             
         except Exception as e:
-            logger.error("Failed to start strategy", 
-                        strategy_name=strategy_name, 
-                        error=str(e))
+            logger.error("Strategy start failed", 
+                        strategy_name=strategy_name, error=str(e))
             return False
     
     @time_execution
@@ -184,18 +199,20 @@ class StrategyFactory:
             True if strategy stopped successfully, False otherwise
         """
         try:
-            strategy = self._strategies.get(strategy_name)
+            strategy = self.get_strategy(strategy_name)
             if not strategy:
                 logger.error("Strategy not found", strategy_name=strategy_name)
                 return False
             
+            # Stop strategy
             await strategy.stop()
+            
+            logger.info("Strategy stopped successfully", strategy_name=strategy_name)
             return True
             
         except Exception as e:
-            logger.error("Failed to stop strategy", 
-                        strategy_name=strategy_name, 
-                        error=str(e))
+            logger.error("Strategy stop failed", 
+                        strategy_name=strategy_name, error=str(e))
             return False
     
     @time_execution
@@ -210,18 +227,22 @@ class StrategyFactory:
         """
         try:
             # Stop strategy
-            await self.stop_strategy(strategy_name)
+            if not await self.stop_strategy(strategy_name):
+                return False
             
-            # Wait a bit before restarting
+            # Wait a moment for cleanup
             await asyncio.sleep(1)
             
             # Start strategy
-            return await self.start_strategy(strategy_name)
+            if not await self.start_strategy(strategy_name):
+                return False
+            
+            logger.info("Strategy restarted successfully", strategy_name=strategy_name)
+            return True
             
         except Exception as e:
-            logger.error("Failed to restart strategy", 
-                        strategy_name=strategy_name, 
-                        error=str(e))
+            logger.error("Strategy restart failed", 
+                        strategy_name=strategy_name, error=str(e))
             return False
     
     def get_strategy(self, strategy_name: str) -> Optional[BaseStrategy]:
@@ -252,19 +273,19 @@ class StrategyFactory:
         Returns:
             Strategy status or None if not found
         """
-        strategy = self._strategies.get(strategy_name)
+        strategy = self.get_strategy(strategy_name)
         return strategy.status if strategy else None
     
     def get_strategy_performance(self, strategy_name: str) -> Optional[Dict[str, Any]]:
-        """Get strategy performance summary.
+        """Get strategy performance metrics.
         
         Args:
             strategy_name: Name of the strategy
             
         Returns:
-            Performance summary or None if not found
+            Performance metrics or None if not found
         """
-        strategy = self._strategies.get(strategy_name)
+        strategy = self.get_strategy(strategy_name)
         return strategy.get_performance_summary() if strategy else None
     
     def set_risk_manager(self, risk_manager: BaseRiskManager) -> None:
@@ -297,7 +318,7 @@ class StrategyFactory:
     
     @time_execution
     async def hot_swap_strategy(self, strategy_name: str, new_config: Dict[str, Any]) -> bool:
-        """Hot swap a strategy with new configuration.
+        """Hot-swap a strategy with new configuration.
         
         Args:
             strategy_name: Name of the strategy to swap
@@ -307,33 +328,27 @@ class StrategyFactory:
             True if swap successful, False otherwise
         """
         try:
-            strategy = self._strategies.get(strategy_name)
-            if not strategy:
+            # Validate new configuration
+            validate_strategy_config(new_config)
+            
+            # Get current strategy
+            current_strategy = self.get_strategy(strategy_name)
+            if not current_strategy:
                 logger.error("Strategy not found for hot swap", strategy_name=strategy_name)
                 return False
             
-            # Store current status
-            current_status = strategy.status
+            # Update the existing strategy's configuration
+            current_strategy.update_config(new_config)
             
-            # Stop strategy if running
-            if strategy.status == StrategyStatus.RUNNING:
-                await strategy.stop()
+            logger.info("Strategy hot-swapped successfully", 
+                       strategy_name=strategy_name,
+                       class_name=current_strategy.__class__.__name__)
             
-            # Update configuration
-            strategy.update_config(new_config)
-            
-            # Restart if it was running
-            if current_status == StrategyStatus.RUNNING:
-                await strategy.start()
-            
-            logger.info("Strategy hot swapped successfully", 
-                       strategy_name=strategy_name)
             return True
             
         except Exception as e:
-            logger.error("Failed to hot swap strategy", 
-                        strategy_name=strategy_name, 
-                        error=str(e))
+            logger.error("Strategy hot-swap failed", 
+                        strategy_name=strategy_name, error=str(e))
             return False
     
     def remove_strategy(self, strategy_name: str) -> bool:
@@ -346,71 +361,78 @@ class StrategyFactory:
             True if strategy removed successfully, False otherwise
         """
         try:
-            strategy = self._strategies.pop(strategy_name, None)
-            if strategy:
-                logger.info("Strategy removed", strategy_name=strategy_name)
-                return True
-            else:
+            if strategy_name not in self._strategies:
                 logger.warning("Strategy not found for removal", strategy_name=strategy_name)
                 return False
-                
+            
+            # Remove strategy instance
+            del self._strategies[strategy_name]
+            
+            logger.info("Strategy removed successfully", strategy_name=strategy_name)
+            return True
+            
         except Exception as e:
-            logger.error("Failed to remove strategy", 
-                        strategy_name=strategy_name, 
-                        error=str(e))
+            logger.error("Strategy removal failed", 
+                        strategy_name=strategy_name, error=str(e))
             return False
     
     @time_execution
     async def shutdown_all_strategies(self) -> None:
         """Shutdown all strategies."""
-        logger.info("Shutting down all strategies")
-        
-        shutdown_tasks = []
-        for strategy_name, strategy in self._strategies.items():
-            if strategy.status in [StrategyStatus.RUNNING, StrategyStatus.PAUSED]:
-                task = asyncio.create_task(strategy.stop())
-                shutdown_tasks.append((strategy_name, task))
-        
-        # Wait for all strategies to stop
-        for strategy_name, task in shutdown_tasks:
-            try:
-                await task
-                logger.info("Strategy shutdown completed", strategy_name=strategy_name)
-            except Exception as e:
-                logger.error("Failed to shutdown strategy", 
-                            strategy_name=strategy_name, 
-                            error=str(e))
-        
-        logger.info("All strategies shutdown completed")
+        try:
+            shutdown_tasks = []
+            
+            for strategy_name, strategy in self._strategies.items():
+                try:
+                    await strategy.stop()
+                    shutdown_tasks.append(strategy_name)
+                except Exception as e:
+                    logger.error("Failed to shutdown strategy", 
+                               strategy_name=strategy_name, error=str(e))
+            
+            # Clear all strategies
+            self._strategies.clear()
+            
+            logger.info("All strategies shutdown", 
+                       shutdown_count=len(shutdown_tasks),
+                       total_count=len(self._strategies))
+            
+        except Exception as e:
+            logger.error("Strategy shutdown failed", error=str(e))
     
     def get_strategy_summary(self) -> Dict[str, Any]:
         """Get summary of all strategies.
         
         Returns:
-            Strategy summary dictionary
+            Dictionary with strategy summary information
         """
+        running_count = 0
+        stopped_count = 0
+        error_count = 0
+        
+        for strategy in self._strategies.values():
+            if strategy.status == StrategyStatus.RUNNING:
+                running_count += 1
+            elif strategy.status == StrategyStatus.STOPPED:
+                stopped_count += 1
+            elif strategy.status == StrategyStatus.ERROR:
+                error_count += 1
+        
         summary = {
-            "total_strategies": len(self._strategies),
-            "running_strategies": 0,
-            "stopped_strategies": 0,
-            "error_strategies": 0,
-            "strategies": {}
+            'total_strategies': len(self._strategies),
+            'running_strategies': running_count,
+            'stopped_strategies': stopped_count,
+            'error_strategies': error_count,
+            'strategies': {}
         }
         
         for name, strategy in self._strategies.items():
-            summary["strategies"][name] = {
-                "status": strategy.status.value,
-                "version": strategy.version,
-                "symbols": strategy.config.symbols,
-                "timeframe": strategy.config.timeframe,
-                "performance": strategy.get_performance_summary()
+            strategy_info = {
+                'name': name,
+                'class': strategy.__class__.__name__,
+                'status': strategy.status.value,
+                'type': strategy.config.strategy_type.value if hasattr(strategy.config, 'strategy_type') else 'unknown'
             }
-            
-            if strategy.status == StrategyStatus.RUNNING:
-                summary["running_strategies"] += 1
-            elif strategy.status == StrategyStatus.STOPPED:
-                summary["stopped_strategies"] += 1
-            elif strategy.status == StrategyStatus.ERROR:
-                summary["error_strategies"] += 1
+            summary['strategies'][name] = strategy_info
         
         return summary 

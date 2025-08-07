@@ -291,8 +291,10 @@ class TestStrategyFrameworkIntegration:
         ]
         
         strategies = []
-        for config in configs:
-            strategy = strategy_factory.create_strategy("mock_strategy", config)
+        for i, config in enumerate(configs):
+            strategy_name = f"mock_strategy_{i}"
+            strategy_factory._register_strategy_class(strategy_name, MockStrategy)
+            strategy = strategy_factory.create_strategy(strategy_name, config)
             strategies.append(strategy)
         
         # Start all strategies
@@ -501,7 +503,7 @@ class TestStrategyFrameworkIntegration:
         new_config["min_confidence"] = 0.8
         new_config["max_positions"] = 10
         
-        success = await strategy_factory.hot_swap_strategy("test_strategy", new_config)
+        success = await strategy_factory.hot_swap_strategy("mock_strategy", new_config)
         
         assert success is True
         assert strategy.config.min_confidence == 0.8

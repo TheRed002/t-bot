@@ -246,11 +246,12 @@ class TestStrategyFactory:
         """Test getting all strategies."""
         # Register and create multiple strategies
         factory._register_strategy_class("test_strategy", MockStrategy)
+        factory._register_strategy_class("test_strategy2", MockStrategy)
         strategy1 = factory.create_strategy("test_strategy", mock_config)
         
         mock_config2 = mock_config.copy()
         mock_config2["name"] = "test_strategy2"
-        strategy2 = factory.create_strategy("test_strategy", mock_config2)
+        strategy2 = factory.create_strategy("test_strategy2", mock_config2)
         
         all_strategies = factory.get_all_strategies()
         

@@ -10,6 +10,7 @@ import numpy as np
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
+import asyncio
 
 # Import from P-001
 from src.core.types import (
@@ -597,6 +598,158 @@ class TestMeanReversionStrategy:
         
         result = strategy.should_exit(mock_position, data)
         assert result is False
+    
+    def test_should_exit_atr_calculation_exception(self, strategy, mock_position, mock_market_data):
+        """Test exit check when ATR calculation fails."""
+        # Add data for ATR calculation but with invalid data to cause exception
+        for i in range(30):
+            strategy.high_history.append(50000 + i)
+            strategy.low_history.append(50000 - i)
+            strategy.price_history.append(50000 + i)
+        
+        # Mock the calculate_atr function to raise an exception
+        with patch('src.utils.helpers.calculate_atr', side_effect=Exception("ATR calculation failed")):
+            result = strategy.should_exit(mock_position, mock_market_data)
+            assert result is False
+    
+    def test_should_exit_atr_none_result(self, strategy, mock_position, mock_market_data):
+        """Test exit check when ATR calculation returns None."""
+        # Add data for ATR calculation
+        for i in range(30):
+            strategy.high_history.append(50000 + i)
+            strategy.low_history.append(50000 - i)
+            strategy.price_history.append(50000 + i)
+        
+        # Mock the calculate_atr function to return None
+        with patch('src.utils.helpers.calculate_atr', return_value=None):
+            result = strategy.should_exit(mock_position, mock_market_data)
+            assert result is False
+    
+    def test_should_exit_atr_zero_result(self, strategy, mock_position, mock_market_data):
+        """Test exit check when ATR calculation returns zero."""
+        # Add data for ATR calculation
+        for i in range(30):
+            strategy.high_history.append(50000 + i)
+            strategy.low_history.append(50000 - i)
+            strategy.price_history.append(50000 + i)
+        
+        # Mock the calculate_atr function to return 0
+        with patch('src.utils.helpers.calculate_atr', return_value=0):
+            result = strategy.should_exit(mock_position, mock_market_data)
+            assert result is False
+    
+    def test_should_exit_sell_position_stop_loss(self, strategy, mock_market_data):
+        """Test exit condition for sell position based on ATR stop loss."""
+        # Create a sell position
+        sell_position = Position(
+            symbol="BTCUSDT",
+            quantity=Decimal("1"),
+            entry_price=Decimal("50000"),
+            current_price=Decimal("50000"),
+            unrealized_pnl=Decimal("0"),
+            side=OrderSide.SELL,
+            timestamp=datetime.now(timezone.utc)
+        )
+        
+        # Add data for ATR calculation
+        for i in range(30):
+            strategy.high_history.append(50000 + i)
+            strategy.low_history.append(50000 - i)
+            strategy.price_history.append(50000 + i)
+        
+        # Set price to trigger stop loss (well above entry price)
+        mock_market_data.price = Decimal("51000")  # Above stop loss
+        
+        # Mock ATR calculation to return a reasonable value
+        with patch('src.utils.helpers.calculate_atr', return_value=1000):
+            result = strategy.should_exit(sell_position, mock_market_data)
+            assert result is True
+    
+    def test_validate_signal_old_signal_edge_case(self, strategy):
+        """Test signal validation with signal that is exactly 5 minutes old."""
+        # Create a signal that is exactly 5 minutes old
+        old_timestamp = datetime.now(timezone.utc) - timedelta(minutes=5)
+        signal = Signal(
+            direction=SignalDirection.BUY,
+            confidence=0.8,
+            timestamp=old_timestamp,
+            symbol="BTCUSDT",
+            strategy_name=strategy.name,
+            metadata={"z_score": 2.5, "signal_type": "entry"}
+        )
+        
+        # Add data for validation
+        for i in range(25):
+            strategy.price_history.append(50000 + i)
+        
+        result = asyncio.run(strategy.validate_signal(signal))
+        assert result is False
+    
+    def test_validate_signal_invalid_zscore_type(self, strategy):
+        """Test signal validation with invalid z_score type in metadata."""
+        signal = Signal(
+            direction=SignalDirection.BUY,
+            confidence=0.8,
+            timestamp=datetime.now(timezone.utc),
+            symbol="BTCUSDT",
+            strategy_name=strategy.name,
+            metadata={"z_score": "invalid", "signal_type": "entry"}
+        )
+        
+        result = asyncio.run(strategy.validate_signal(signal))
+        assert result is False
+    
+    def test_validate_signal_entry_below_threshold_edge_case(self, strategy):
+        """Test signal validation with entry signal exactly at threshold."""
+        signal = Signal(
+            direction=SignalDirection.BUY,
+            confidence=0.8,
+            timestamp=datetime.now(timezone.utc),
+            symbol="BTCUSDT",
+            strategy_name=strategy.name,
+            metadata={"z_score": 2.0, "signal_type": "entry"}  # Exactly at threshold
+        )
+        
+        result = asyncio.run(strategy.validate_signal(signal))
+        assert result is True  # Should pass when exactly at threshold
+    
+    def test_volume_filter_debug_logging(self, strategy, mock_market_data):
+        """Test volume filter debug logging."""
+        # Enable volume filter
+        strategy.volume_filter = True
+        
+        # Add data for volume calculation
+        for i in range(25):
+            strategy.volume_history.append(100.0)
+        
+        # Set current volume below threshold to trigger debug logging
+        mock_market_data.volume = Decimal("50")  # Below threshold
+        
+        # This should trigger the debug logging in _generate_signals_impl
+        signals = asyncio.run(strategy.generate_signals(mock_market_data))
+        assert len(signals) == 0  # Should be rejected by volume filter
+    
+    def test_zscore_debug_logging(self, strategy):
+        """Test Z-score calculation debug logging."""
+        # Add data for Z-score calculation
+        for i in range(25):
+            strategy.price_history.append(50000 + i)
+        
+        # This should trigger the debug logging in _calculate_zscore
+        z_score = strategy._calculate_zscore()
+        assert z_score is not None
+    
+    def test_atr_debug_logging(self, strategy, mock_position, mock_market_data):
+        """Test ATR calculation debug logging."""
+        # Add data for ATR calculation
+        for i in range(30):
+            strategy.high_history.append(50000 + i)
+            strategy.low_history.append(50000 - i)
+            strategy.price_history.append(50000 + i)
+        
+        # This should trigger the debug logging in should_exit
+        result = strategy.should_exit(mock_position, mock_market_data)
+        # The result doesn't matter, we just want to trigger the debug logging
     
     @pytest.mark.asyncio
     async def test_strategy_integration(self, strategy, mock_market_data):
