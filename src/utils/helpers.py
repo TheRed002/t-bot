@@ -455,6 +455,25 @@ def round_to_precision(value: float, precision: int) -> float:
     return round(value * factor) / factor
 
 
+def round_to_precision_decimal(value: Decimal, precision: int) -> Decimal:
+    """
+    Round Decimal value to specified precision.
+    
+    Args:
+        value: Decimal value to round
+        precision: Number of decimal places
+        
+    Returns:
+        Rounded Decimal value
+    """
+    if precision < 0:
+        raise ValidationError("Precision must be non-negative")
+    
+    # Use Decimal's quantize method for precise rounding
+    factor = Decimal(f"0.{'0' * (precision - 1)}1") if precision > 0 else Decimal("1")
+    return value.quantize(factor, rounding=ROUND_HALF_UP)
+
+
 # =============================================================================
 # File Operations
 # =============================================================================

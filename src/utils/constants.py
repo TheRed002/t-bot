@@ -69,7 +69,10 @@ PRECISION_LEVELS = {
     "USDT": 2,     # Tether precision
     "USD": 2,      # US Dollar precision
     "JPY": 0,      # Japanese Yen (no decimals)
-    "default": 4   # Default precision
+    "default": 4,  # Default precision
+    "fee": 6,      # Fee calculation precision
+    "price": 8,    # Price calculation precision
+    "position": 8  # Position size precision
 }
 
 # Trading session definitions
@@ -190,6 +193,14 @@ FEE_STRUCTURES = {
     }
 }
 
+# Global fee structure for arbitrage calculations
+GLOBAL_FEE_STRUCTURE = {
+    "maker_fee": 0.001,  # Default maker fee
+    "taker_fee": 0.001,  # Default taker fee
+    "min_fee": 0.00001,  # Default minimum fee
+    "fee_currency": "USDT"  # Default fee currency
+}
+
 # Minimum amounts for different operations
 MINIMUM_AMOUNTS = {
     "BTC": {
@@ -207,6 +218,13 @@ MINIMUM_AMOUNTS = {
         "min_notional": 10.0,
         "min_increment": 0.01
     }
+}
+
+# Global minimum amounts for general operations
+GLOBAL_MINIMUM_AMOUNTS = {
+    "position": 0.001,  # Minimum position size for arbitrage
+    "order": 0.00001,   # Minimum order size
+    "notional": 10.0    # Minimum notional value
 }
 
 # Maximum amounts for safety limits

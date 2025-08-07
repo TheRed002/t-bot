@@ -275,6 +275,27 @@ class SignalGenerationError(StrategyError):
     pass
 
 
+# Arbitrage exceptions (P-013A)
+class ArbitrageError(StrategyError):
+    """Arbitrage strategy specific errors."""
+    pass
+
+
+class ArbitrageOpportunityError(ArbitrageError):
+    """Arbitrage opportunity detection errors."""
+    pass
+
+
+class ArbitrageExecutionError(ArbitrageError):
+    """Arbitrage execution failures."""
+    pass
+
+
+class ArbitrageTimingError(ArbitrageError):
+    """Arbitrage timing constraint violations."""
+    pass
+
+
 # Database exceptions
 class DatabaseError(TradingBotError):
     """Database operation errors."""
