@@ -127,6 +127,7 @@ class Position(BaseModel):
     unrealized_pnl: Decimal
     side: OrderSide
     timestamp: datetime
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional position metadata")
 
 
 # TODO:REVERSE INTEGRATION POINTS: Future prompts will add:

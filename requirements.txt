@@ -41,6 +41,10 @@ websockets==15.0.1
 aiohttp==3.12.15
 aiofiles==24.1.0
 
+# Technical Analysis Dependencies (P-012)
+ta-lib==0.4.64
+numpy==1.26.4
+
 # TODO: Add more dependencies as subsequent prompts are implemented
-# - P-017: numpy, pandas, scikit-learn, tensorflow
+# - P-017: pandas, scikit-learn, tensorflow
 # - P-026: fastapi, uvicorn 

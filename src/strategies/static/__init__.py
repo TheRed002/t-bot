@@ -1,19 +1,19 @@
 """
 Static trading strategies.
 
-This module contains static trading strategies that will be implemented in P-012.
+This module contains static trading strategies that have been implemented in P-012.
 """
 
-# TODO: Import strategy classes when they are implemented in P-012
-# from .mean_reversion import MeanReversionStrategy
-# from .trend_following import TrendFollowingStrategy  
-# from .breakout import BreakoutStrategy
+# Import strategy classes implemented in P-012
+from .mean_reversion import MeanReversionStrategy
+from .trend_following import TrendFollowingStrategy  
+from .breakout import BreakoutStrategy
 
 __all__ = [
-    # Static strategies (to be implemented in P-012)
-    # "MeanReversionStrategy",
-    # "TrendFollowingStrategy", 
-    # "BreakoutStrategy"
+    # Static strategies (implemented in P-012)
+    "MeanReversionStrategy",
+    "TrendFollowingStrategy", 
+    "BreakoutStrategy"
 ]
 
 # Version information

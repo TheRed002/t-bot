@@ -801,4 +801,350 @@ def extract_numbers(text: str) -> List[float]:
     """
     pattern = r'-?\d*\.?\d+'
     matches = re.findall(pattern, text)
-    return [float(match) for match in matches] 
+    return [float(match) for match in matches]
+
+
+# =============================================================================
+# Technical Analysis Utilities
+# =============================================================================
+
+def calculate_atr(highs: List[float], lows: List[float], closes: List[float], 
+                 period: int = 14) -> float:
+    """
+    Calculate Average True Range (ATR) using ta-lib.
+    
+    Args:
+        highs: List of high prices
+        lows: List of low prices
+        closes: List of close prices
+        period: ATR period (default 14)
+        
+    Returns:
+        ATR value as float or None if insufficient data
+        
+    Raises:
+        ValidationError: If data is insufficient or invalid
+    """
+    try:
+        import talib
+        
+        # Convert to numpy arrays
+        high_array = np.array(highs, dtype=np.float64)
+        low_array = np.array(lows, dtype=np.float64)
+        close_array = np.array(closes, dtype=np.float64)
+        
+        # Calculate ATR using ta-lib
+        atr = talib.ATR(high_array, low_array, close_array, timeperiod=period)
+        
+        # Find the last non-NaN value
+        for i in range(len(atr) - 1, -1, -1):
+            if not np.isnan(atr[i]):
+                return float(atr[i])
+        return None
+        
+    except ImportError:
+        logger.warning("ta-lib not available, falling back to manual ATR calculation")
+        # Fallback to manual calculation
+        if len(highs) < period + 1 or len(lows) < period + 1 or len(closes) < period + 1:
+            raise ValidationError(f"Need at least {period + 1} data points for ATR calculation")
+        
+        if len(highs) != len(lows) or len(highs) != len(closes):
+            raise ValidationError("High, low, and close arrays must have the same length")
+        
+        # Calculate True Range
+        true_ranges = []
+        for i in range(1, len(closes)):
+            high_low = highs[i] - lows[i]
+            high_close_prev = abs(highs[i] - closes[i-1])
+            low_close_prev = abs(lows[i] - closes[i-1])
+            
+            true_range = max(high_low, high_close_prev, low_close_prev)
+            true_ranges.append(true_range)
+        
+        # Calculate ATR using simple moving average
+        if len(true_ranges) < period:
+            raise ValidationError(f"Not enough true range data for {period}-period ATR")
+        
+        # Use the last 'period' true ranges
+        recent_true_ranges = true_ranges[-period:]
+        atr = sum(recent_true_ranges) / period
+        
+        return float(atr)
+    except Exception as e:
+        logger.error(f"Error calculating ATR: {e}")
+        return None
+
+
+def calculate_zscore(values: List[float], lookback_period: int = 20) -> float:
+    """
+    Calculate Z-score for mean reversion analysis using ta-lib.
+    
+    Args:
+        values: List of values (e.g., prices)
+        lookback_period: Number of periods to look back (default 20)
+        
+    Returns:
+        Z-score as float or None if insufficient data
+        
+    Raises:
+        ValidationError: If insufficient data or invalid parameters
+    """
+    try:
+        import talib
+        
+        # Convert to numpy array
+        price_array = np.array(values, dtype=np.float64)
+        
+        # Calculate Simple Moving Average using ta-lib
+        sma = talib.SMA(price_array, timeperiod=lookback_period)
+        
+        # Calculate Standard Deviation using ta-lib
+        # Note: ta-lib doesn't have a direct STDDEV function, so we'll use manual calculation
+        if len(sma) > 0 and not np.isnan(sma[-1]):
+            mean = sma[-1]
+            # Calculate standard deviation manually for the lookback period
+            recent_prices = price_array[-lookback_period:]
+            std_dev = np.std(recent_prices)
+            
+            if std_dev > 0:
+                current_price = price_array[-1]
+                z_score = (current_price - mean) / std_dev
+                return float(z_score)
+        
+        return None
+        
+    except ImportError:
+        logger.warning("ta-lib not available, falling back to manual Z-score calculation")
+        # Fallback to manual calculation
+        if len(values) < lookback_period:
+            raise ValidationError(f"Need at least {lookback_period} values for Z-score calculation")
+        
+        if lookback_period <= 0:
+            raise ValidationError("Lookback period must be positive")
+        
+        # Get the recent values for calculation
+        recent_values = values[-lookback_period:]
+        
+        # Calculate mean and standard deviation
+        mean = sum(recent_values) / len(recent_values)
+        
+        # Calculate variance
+        variance = sum((x - mean) ** 2 for x in recent_values) / len(recent_values)
+        std_dev = variance ** 0.5
+        
+        # Avoid division by zero
+        if std_dev == 0:
+            # If all values are the same, return 0 (no deviation from mean)
+            return 0.0
+        
+        # Calculate Z-score for the current value
+        current_value = values[-1]
+        zscore = (current_value - mean) / std_dev
+        
+        return float(zscore)
+    except Exception as e:
+        logger.error(f"Error calculating Z-score: {e}")
+        return None
+
+
+def calculate_rsi(prices: List[float], period: int = 14) -> float:
+    """
+    Calculate Relative Strength Index (RSI) using ta-lib.
+    
+    Args:
+        prices: List of prices
+        period: RSI period (default 14)
+        
+    Returns:
+        RSI value as float (0-100) or None if insufficient data
+        
+    Raises:
+        ValidationError: If insufficient data or invalid parameters
+    """
+    try:
+        import talib
+        
+        # Convert to numpy array
+        price_array = np.array(prices, dtype=np.float64)
+        
+        # Calculate RSI using ta-lib
+        rsi = talib.RSI(price_array, timeperiod=period)
+        
+        # Return the last non-NaN value
+        if len(rsi) > 0 and not np.isnan(rsi[-1]):
+            return float(rsi[-1])
+        return None
+        
+    except ImportError:
+        logger.warning("ta-lib not available, falling back to manual RSI calculation")
+        # Fallback to manual calculation
+        if len(prices) < period + 1:
+            raise ValidationError(f"Need at least {period + 1} prices for RSI calculation")
+        
+        if period <= 0:
+            raise ValidationError("RSI period must be positive")
+        
+        # Calculate price changes
+        changes = []
+        for i in range(1, len(prices)):
+            change = prices[i] - prices[i-1]
+            changes.append(change)
+        
+        if len(changes) < period:
+            raise ValidationError(f"Not enough price changes for {period}-period RSI")
+        
+        # Get recent changes
+        recent_changes = changes[-period:]
+        
+        # Separate gains and losses
+        gains = [change if change > 0 else 0 for change in recent_changes]
+        losses = [-change if change < 0 else 0 for change in recent_changes]
+        
+        # Calculate average gain and loss
+        avg_gain = sum(gains) / period
+        avg_loss = sum(losses) / period
+        
+        # Avoid division by zero
+        if avg_loss == 0:
+            return 100.0
+        
+        # Calculate RS and RSI
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        return float(rsi)
+    except Exception as e:
+        logger.error(f"Error calculating RSI: {e}")
+        return None
+
+
+def calculate_moving_average(prices: List[float], period: int, ma_type: str = "sma") -> float:
+    """
+    Calculate moving average using ta-lib.
+    
+    Args:
+        prices: List of prices
+        period: Moving average period
+        ma_type: Type of moving average ("sma", "ema", "wma")
+        
+    Returns:
+        Moving average value as float or None if insufficient data
+        
+    Raises:
+        ValidationError: If insufficient data or invalid parameters
+    """
+    try:
+        import talib
+        
+        # Convert to numpy array
+        price_array = np.array(prices, dtype=np.float64)
+        
+        if ma_type.lower() == "sma":
+            ma = talib.SMA(price_array, timeperiod=period)
+        elif ma_type.lower() == "ema":
+            ma = talib.EMA(price_array, timeperiod=period)
+        elif ma_type.lower() == "wma":
+            ma = talib.WMA(price_array, timeperiod=period)
+        else:
+            logger.error(f"Unsupported moving average type: {ma_type}")
+            return None
+        
+        # Return the last non-NaN value
+        if len(ma) > 0 and not np.isnan(ma[-1]):
+            return float(ma[-1])
+        return None
+        
+    except ImportError:
+        logger.warning("ta-lib not available, falling back to manual MA calculation")
+        # Fallback to manual calculation
+        if len(prices) < period:
+            raise ValidationError(f"Need at least {period} prices for {period}-period moving average")
+        
+        if period <= 0:
+            raise ValidationError("Moving average period must be positive")
+        
+        if ma_type.lower() == "sma":
+            # Simple Moving Average
+            recent_prices = prices[-period:]
+            sma = sum(recent_prices) / period
+            return float(sma)
+        
+        elif ma_type.lower() == "ema":
+            # Exponential Moving Average
+            if len(prices) < period:
+                raise ValidationError(f"Need at least {period} prices for EMA calculation")
+            
+            # Use SMA as initial EMA value
+            initial_ema = sum(prices[:period]) / period
+            
+            # Calculate multiplier
+            multiplier = 2 / (period + 1)
+            
+            # Calculate EMA
+            ema = initial_ema
+            for price in prices[period:]:
+                ema = (price * multiplier) + (ema * (1 - multiplier))
+            
+            return float(ema)
+        
+        else:
+            raise ValidationError(f"Unsupported moving average type: {ma_type}")
+    except Exception as e:
+        logger.error(f"Error calculating moving average: {e}")
+        return None
+
+
+def calculate_support_resistance(prices: List[float], lookback_period: int = 20) -> Tuple[float, float]:
+    """
+    Calculate support and resistance levels using ta-lib.
+    
+    Args:
+        prices: List of prices
+        lookback_period: Number of periods to analyze (default 20)
+        
+    Returns:
+        Tuple of (support_level, resistance_level) or (None, None) if insufficient data
+        
+    Raises:
+        ValidationError: If insufficient data
+    """
+    try:
+        import talib
+        import numpy as np
+        
+        # Convert to numpy array
+        price_array = np.array(prices, dtype=np.float64)
+        
+        # Calculate support and resistance using ta-lib
+        # Note: ta-lib doesn't have direct support/resistance functions
+        # We'll use manual calculation based on local minima and maxima
+        
+        if len(price_array) < lookback_period:
+            return None, None
+        
+        # Get recent prices for analysis
+        recent_prices = price_array[-lookback_period:]
+        
+        # Find local minima and maxima
+        support_level = float(np.min(recent_prices))
+        resistance_level = float(np.max(recent_prices))
+        
+        return support_level, resistance_level
+        
+    except ImportError:
+        logger.warning("ta-lib not available, falling back to manual support/resistance calculation")
+        # Fallback to manual calculation
+        if len(prices) < lookback_period:
+            raise ValidationError(f"Need at least {lookback_period} prices for support/resistance calculation")
+        
+        # Get recent prices
+        recent_prices = prices[-lookback_period:]
+        
+        # Calculate support and resistance as min and max of recent prices
+        support_level = min(recent_prices)
+        resistance_level = max(recent_prices)
+        
+        return float(support_level), float(resistance_level)
+    except Exception as e:
+        logger.error(f"Error calculating support/resistance: {e}")
+        return None, None 
