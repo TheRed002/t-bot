@@ -3149,7 +3149,7 @@ backtesting:
 - **Target State:** Self-optimizing strategies using evolutionary algorithms
 - **Phase Goal:** Advanced AI strategies that evolve and improve over time
 
-**Technical Context**: Reference @SPECIFICATIONS.md Section 3.1.4 "Evolutionary Strategies". Implement genetic algorithms and neuroevolution.
+**Technical Context**: Reference @SPECIFICATIONS.md Section 3.1.4 "Evolutionary Strategies". Implement genetic algorithms and neuroevolution. Use AI/ML python libraries wherever possible like tensorflow, scikit etc. 
 
 ### Dependencies
 **Depends On:** P-013C (backtesting), P-012+ (all base strategies), P-017+ (ML infrastructure)
