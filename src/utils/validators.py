@@ -29,7 +29,8 @@ from pathlib import Path
 from src.core.exceptions import ValidationError, DataError
 from src.core.types import (
     OrderRequest, OrderResponse, MarketData, Position,
-    Signal, SignalDirection, OrderSide, OrderType
+    Signal, SignalDirection, OrderSide, OrderType,
+    StrategyConfig, RiskConfig, Config, TradingMode
 )
 from src.core.logging import get_logger
 
@@ -305,12 +306,12 @@ def validate_market_data(data: MarketData) -> bool:
 # Configuration Validation
 # =============================================================================
 
-def validate_config(config: Dict[str, Any], required_fields: List[str] = None) -> bool:
+def validate_config(config: Union[Dict[str, Any], Config], required_fields: List[str] = None) -> bool:
     """
-    Validate configuration dictionary.
+    Validate configuration using core Config type or dictionary.
     
     Args:
-        config: Configuration dictionary to validate
+        config: Configuration object (Config) or dictionary to validate
         required_fields: List of required field names
         
     Returns:
@@ -319,25 +320,31 @@ def validate_config(config: Dict[str, Any], required_fields: List[str] = None) -
     Raises:
         ValidationError: If configuration is invalid
     """
-    if not isinstance(config, dict):
-        raise ValidationError("Configuration must be a dictionary")
+    # Handle both Config objects and dictionaries
+    if hasattr(config, 'model_dump'):
+        # It's a Pydantic model (Config object)
+        config_dict = config.model_dump()
+    elif isinstance(config, dict):
+        config_dict = config
+    else:
+        raise ValidationError("Configuration must be a Config object or dictionary")
     
     if required_fields:
         for field in required_fields:
-            if field not in config:
+            if field not in config_dict:
                 raise ValidationError(f"Required field missing: {field}")
-            if config[field] is None:
+            if config_dict[field] is None:
                 raise ValidationError(f"Required field cannot be None: {field}")
     
     return True
 
 
-def validate_risk_parameters(params: Dict[str, Any]) -> bool:
+def validate_risk_parameters(params: Union[Dict[str, Any], RiskConfig]) -> bool:
     """
-    Validate risk management parameters.
+    Validate risk management parameters using core RiskConfig type.
     
     Args:
-        params: Risk parameters dictionary
+        params: Risk configuration object (RiskConfig) or dictionary
         
     Returns:
         True if valid
@@ -403,12 +410,12 @@ def validate_signal(signal: Signal) -> bool:
     return True
 
 
-def validate_strategy_config(config: Dict[str, Any]) -> bool:
+def validate_strategy_config(config: Union[Dict[str, Any], StrategyConfig]) -> bool:
     """
-    Validate strategy configuration.
+    Validate strategy configuration using core StrategyConfig type.
     
     Args:
-        config: Strategy configuration dictionary
+        config: Strategy configuration object (StrategyConfig) or dictionary
         
     Returns:
         True if valid

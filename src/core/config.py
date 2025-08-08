@@ -9,14 +9,19 @@ CRITICAL: This file will be extended by ALL subsequent prompts. Use exact patter
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 import json
+import yaml
 from pathlib import Path
 import os
 
 
 class BaseConfig(BaseSettings):
-    """Base configuration class with common patterns."""
+    """Base configuration class with common patterns.
+    
+    Provides common Pydantic settings configuration with environment
+    variable support, case insensitive matching, and validation.
+    """
     
     model_config = {
         "env_file": ".env",
@@ -32,9 +37,9 @@ class DatabaseConfig(BaseConfig):
     # PostgreSQL
     postgresql_host: str = Field(default="localhost", description="PostgreSQL host")
     postgresql_port: int = Field(default=5432, description="PostgreSQL port")
-    postgresql_database: str = Field(default="trading_bot", description="PostgreSQL database name")
-    postgresql_username: str = Field(default="trading_bot", description="PostgreSQL username")
-    postgresql_password: str = Field(default="trading_bot_password", description="PostgreSQL password")
+    postgresql_database: str = Field(default="trading_bot", pattern=r"^[a-zA-Z0-9_-]+$", description="PostgreSQL database name")
+    postgresql_username: str = Field(default="trading_bot", pattern=r"^[a-zA-Z0-9_-]+$", description="PostgreSQL username")
+    postgresql_password: str = Field(default="trading_bot_password", min_length=8, description="PostgreSQL password")
     postgresql_pool_size: int = Field(default=10, description="PostgreSQL connection pool size")
     
     # Redis
@@ -52,7 +57,7 @@ class DatabaseConfig(BaseConfig):
 
     @field_validator('postgresql_port', 'redis_port', 'influxdb_port')
     @classmethod
-    def validate_ports(cls, v):
+    def validate_ports(cls, v: int) -> int:
         """Validate port numbers are within valid range."""
         if not 1 <= v <= 65535:
             raise ValueError(f'Port must be between 1 and 65535, got {v}')
@@ -71,7 +76,7 @@ class SecurityConfig(BaseConfig):
     """Security configuration for authentication and encryption."""
     
     secret_key: str = Field(default="test-secret-key-32-chars-long-for-testing", description="Secret key for JWT")
-    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
+    jwt_algorithm: str = Field(default="HS256", pattern=r"^(HS256|HS384|HS512|RS256|RS384|RS512)$", description="JWT algorithm")
     jwt_expire_minutes: int = Field(default=30, description="JWT expiration time in minutes")
     encryption_key: str = Field(default="test-encryption-key-32-chars-long-for-testing", description="Encryption key")
 
@@ -145,19 +150,19 @@ class ExchangeConfig(BaseConfig):
     max_retries: int = Field(default=3, description="Maximum retry attempts for exchange API calls")
     
     # Binance
-    binance_api_key: str = Field(default="", description="Binance API key")
-    binance_api_secret: str = Field(default="", description="Binance API secret")
+    binance_api_key: str = Field(default="", min_length=0, description="Binance API key")
+    binance_api_secret: str = Field(default="", min_length=0, description="Binance API secret")
     binance_testnet: bool = Field(default=True, description="Use Binance testnet")
     
     # OKX  
-    okx_api_key: str = Field(default="", description="OKX API key")
-    okx_api_secret: str = Field(default="", description="OKX API secret")
-    okx_passphrase: str = Field(default="", description="OKX API passphrase")
+    okx_api_key: str = Field(default="", min_length=0, description="OKX API key")
+    okx_api_secret: str = Field(default="", min_length=0, description="OKX API secret")
+    okx_passphrase: str = Field(default="", min_length=0, description="OKX API passphrase")
     okx_sandbox: bool = Field(default=True, description="Use OKX sandbox")
     
     # Coinbase
-    coinbase_api_key: str = Field(default="", description="Coinbase API key")
-    coinbase_api_secret: str = Field(default="", description="Coinbase API secret")
+    coinbase_api_key: str = Field(default="", min_length=0, description="Coinbase API key")
+    coinbase_api_secret: str = Field(default="", min_length=0, description="Coinbase API secret")
     coinbase_sandbox: bool = Field(default=True, description="Use Coinbase sandbox")
     
     # Rate limiting configuration
@@ -187,6 +192,14 @@ class ExchangeConfig(BaseConfig):
         default=["binance", "okx", "coinbase"],
         description="List of supported exchanges"
     )
+    
+    @field_validator('binance_api_key', 'binance_api_secret', 'okx_api_key', 'okx_api_secret', 'okx_passphrase', 'coinbase_api_key', 'coinbase_api_secret')
+    @classmethod
+    def validate_api_credentials(cls, v: str) -> str:
+        """Validate API credentials - either empty (for testing) or minimum length."""
+        if v and len(v) < 16:  # If provided, must be at least 16 chars
+            raise ValueError(f'API credential must be at least 16 characters long, got {len(v)}')
+        return v
 
 
 class RiskConfig(BaseConfig):
@@ -243,6 +256,8 @@ class RiskConfig(BaseConfig):
     )
     var_confidence_level: float = Field(
         default=0.95, 
+        ge=0.5, 
+        le=0.999,
         description="VaR confidence level (95%)"
     )
     
@@ -318,8 +333,8 @@ class CapitalManagementConfig(BaseConfig):
     """Capital management configuration for P-010A framework."""
     
     # Base settings
-    base_currency: str = Field(default="USDT", description="Base currency for all calculations")
-    total_capital: float = Field(default=10000.0, description="Total available capital")
+    base_currency: str = Field(default="USDT", pattern=r"^[A-Z]{3,10}$", description="Base currency for all calculations")
+    total_capital: float = Field(default=10000.0, gt=0, description="Total available capital")
     emergency_reserve_pct: float = Field(default=0.1, description="Emergency reserve percentage (10%)")
     
     # Allocation strategy
@@ -478,7 +493,24 @@ class StrategyManagementConfig(BaseConfig):
 
 
 class Config(BaseConfig):
-    """Master configuration class for the entire application."""
+    """Master configuration class for the entire application.
+    
+    Aggregates all configuration classes and provides utility methods
+    for database URLs, environment checks, and schema generation.
+    
+    Attributes:
+        environment: Application environment (development/staging/production)
+        debug: Debug mode flag
+        app_name: Application name
+        app_version: Application version
+        database: Database configuration settings
+        security: Security configuration settings
+        error_handling: Error handling configuration
+        exchanges: Exchange API configuration
+        risk: Risk management configuration
+        capital_management: Capital management configuration
+        strategies: Strategy management configuration
+    """
     
     # Environment
     environment: str = Field(default="development", description="Application environment")
@@ -499,7 +531,7 @@ class Config(BaseConfig):
     
     @field_validator('environment')
     @classmethod
-    def validate_environment(cls, v):
+    def validate_environment(cls, v: str) -> str:
         """Validate environment setting."""
         allowed = ['development', 'staging', 'production']
         if v not in allowed:
@@ -513,9 +545,86 @@ class Config(BaseConfig):
         schema_path.parent.mkdir(exist_ok=True)
         with open(schema_path, 'w') as f:
             json.dump(schema, f, indent=2)
+    
+    @classmethod
+    def from_yaml(cls, yaml_path: Union[str, Path]) -> 'Config':
+        """Load configuration from YAML file.
+        
+        Args:
+            yaml_path: Path to YAML configuration file
+            
+        Returns:
+            Config instance loaded from YAML
+            
+        Raises:
+            FileNotFoundError: If YAML file doesn't exist
+            yaml.YAMLError: If YAML parsing fails
+            ValidationError: If configuration validation fails
+        """
+        yaml_path = Path(yaml_path)
+        if not yaml_path.exists():
+            raise FileNotFoundError(f"Configuration file not found: {yaml_path}")
+        
+        try:
+            with open(yaml_path, 'r', encoding='utf-8') as f:
+                yaml_data = yaml.safe_load(f)
+            
+            # Merge with environment variables (env vars take precedence)
+            return cls(**yaml_data)
+            
+        except yaml.YAMLError as e:
+            raise ValueError(f"Failed to parse YAML configuration: {e}")
+    
+    @classmethod
+    def from_yaml_with_env_override(cls, yaml_path: Union[str, Path]) -> 'Config':
+        """Load configuration from YAML file with environment variable overrides.
+        
+        Args:
+            yaml_path: Path to YAML configuration file
+            
+        Returns:
+            Config instance with YAML base and env overrides
+        """
+        # First try to load from YAML if it exists
+        yaml_path = Path(yaml_path)
+        yaml_data = {}
+        
+        if yaml_path.exists():
+            try:
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    yaml_data = yaml.safe_load(f) or {}
+            except yaml.YAMLError:
+                # If YAML parsing fails, fall back to env-only
+                yaml_data = {}
+        
+        # Create config with YAML data as base, env vars will override
+        # due to pydantic-settings precedence
+        os.environ.update({k: str(v) for k, v in yaml_data.items() 
+                          if k not in os.environ and v is not None})
+        
+        return cls()
+    
+    def to_yaml(self, yaml_path: Union[str, Path]) -> None:
+        """Save current configuration to YAML file.
+        
+        Args:
+            yaml_path: Path where to save YAML configuration
+        """
+        yaml_path = Path(yaml_path)
+        yaml_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Convert config to dict and handle nested models
+        config_dict = self.model_dump()
+        
+        with open(yaml_path, 'w', encoding='utf-8') as f:
+            yaml.dump(config_dict, f, default_flow_style=False, indent=2)
 
     def get_database_url(self) -> str:
-        """Generate PostgreSQL database URL."""
+        """Generate PostgreSQL database URL.
+        
+        Returns:
+            PostgreSQL connection URL string
+        """
         return (
             f"postgresql://{self.database.postgresql_username}:"
             f"{self.database.postgresql_password}@"
@@ -525,7 +634,11 @@ class Config(BaseConfig):
         )
     
     def get_async_database_url(self) -> str:
-        """Generate async PostgreSQL database URL."""
+        """Generate async PostgreSQL database URL.
+        
+        Returns:
+            Async PostgreSQL connection URL string
+        """
         return (
             f"postgresql+asyncpg://{self.database.postgresql_username}:"
             f"{self.database.postgresql_password}@"
@@ -535,7 +648,11 @@ class Config(BaseConfig):
         )
 
     def get_redis_url(self) -> str:
-        """Generate Redis URL."""
+        """Generate Redis connection URL.
+        
+        Returns:
+            Redis connection URL string with optional password
+        """
         if self.database.redis_password:
             return (
                 f"redis://:{self.database.redis_password}@"
@@ -554,6 +671,21 @@ class Config(BaseConfig):
     def is_development(self) -> bool:
         """Check if running in development environment."""
         return self.environment == "development"
+    
+    def validate_yaml_config(self, yaml_path: Union[str, Path]) -> bool:
+        """Validate YAML configuration file without loading.
+        
+        Args:
+            yaml_path: Path to YAML configuration file
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        try:
+            self.from_yaml(yaml_path)
+            return True
+        except Exception:
+            return False
 
 
 # REVERSE INTEGRATION POINTS: Future prompts will add these config classes:

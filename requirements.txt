@@ -6,6 +6,7 @@
 # Pydantic for configuration and data validation
 pydantic==2.11.7
 pydantic-settings==2.10.1
+PyYAML==6.0.2
 
 # Structured logging
 structlog==25.4.0

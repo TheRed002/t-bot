@@ -15,7 +15,13 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class TradingMode(Enum):
-    """Trading mode enumeration for different execution environments."""
+    """Trading mode enumeration for different execution environments.
+    
+    Attributes:
+        LIVE: Live trading with real money
+        PAPER: Paper trading for testing
+        BACKTEST: Historical backtesting mode
+    """
     LIVE = "live"
     PAPER = "paper" 
     BACKTEST = "backtest"
@@ -70,7 +76,16 @@ class ConnectionType(Enum):
 
 
 class Signal(BaseModel):
-    """Trading signal with direction, confidence, and metadata."""
+    """Trading signal with direction, confidence, and metadata.
+    
+    Attributes:
+        direction: Signal direction (buy/sell/hold)
+        confidence: Signal confidence level (0.0 to 1.0)
+        timestamp: When the signal was generated
+        symbol: Trading symbol for the signal
+        strategy_name: Name of strategy that generated signal
+        metadata: Additional signal metadata
+    """
     direction: SignalDirection
     confidence: float = Field(ge=0.0, le=1.0, description="Signal confidence between 0 and 1")
     timestamp: datetime
@@ -80,27 +95,39 @@ class Signal(BaseModel):
 
 
 class MarketData(BaseModel):
-    """Market data structure for price and volume information."""
-    symbol: str
-    price: Decimal
-    volume: Decimal
+    """Market data structure for price and volume information.
+    
+    Attributes:
+        symbol: Trading symbol
+        price: Current market price
+        volume: Trading volume
+        timestamp: Data timestamp
+        bid: Bid price (optional)
+        ask: Ask price (optional)
+        open_price: Opening price (optional)
+        high_price: High price (optional)
+        low_price: Low price (optional)
+    """
+    symbol: str = Field(min_length=3, description="Trading symbol")
+    price: Decimal = Field(gt=0, description="Current price (must be positive)")
+    volume: Decimal = Field(ge=0, description="Volume (must be non-negative)")
     timestamp: datetime
-    bid: Optional[Decimal] = None
-    ask: Optional[Decimal] = None
-    open_price: Optional[Decimal] = None
-    high_price: Optional[Decimal] = None
-    low_price: Optional[Decimal] = None
+    bid: Optional[Decimal] = Field(default=None, gt=0, description="Bid price (must be positive if set)")
+    ask: Optional[Decimal] = Field(default=None, gt=0, description="Ask price (must be positive if set)")
+    open_price: Optional[Decimal] = Field(default=None, gt=0, description="Open price (must be positive if set)")
+    high_price: Optional[Decimal] = Field(default=None, gt=0, description="High price (must be positive if set)")
+    low_price: Optional[Decimal] = Field(default=None, gt=0, description="Low price (must be positive if set)")
 
 
 class OrderRequest(BaseModel):
     """Order request structure for placing trades."""
-    symbol: str
+    symbol: str = Field(min_length=3, description="Trading symbol")
     side: OrderSide
     order_type: OrderType
-    quantity: Decimal
-    price: Optional[Decimal] = None
-    stop_price: Optional[Decimal] = None
-    time_in_force: str = "GTC"  # Good Till Cancelled
+    quantity: Decimal = Field(gt=0, description="Order quantity (must be positive)")
+    price: Optional[Decimal] = Field(default=None, gt=0, description="Order price (must be positive if set)")
+    stop_price: Optional[Decimal] = Field(default=None, gt=0, description="Stop price (must be positive if set)")
+    time_in_force: str = Field(default="GTC", pattern=r"^(GTC|IOC|FOK)$", description="Time in force")
     client_order_id: Optional[str] = None
 
 
@@ -119,11 +146,22 @@ class OrderResponse(BaseModel):
 
 
 class Position(BaseModel):
-    """Position structure for tracking open positions."""
-    symbol: str
-    quantity: Decimal
-    entry_price: Decimal
-    current_price: Decimal
+    """Position structure for tracking open positions.
+    
+    Attributes:
+        symbol: Trading symbol
+        quantity: Position size (must be positive)
+        entry_price: Entry price (must be positive)
+        current_price: Current market price (must be positive)
+        unrealized_pnl: Unrealized profit/loss
+        side: Position side (buy/sell)
+        timestamp: Position timestamp
+        metadata: Additional position metadata
+    """
+    symbol: str = Field(min_length=3, description="Trading symbol")
+    quantity: Decimal = Field(gt=0, description="Position quantity (must be positive)")
+    entry_price: Decimal = Field(gt=0, description="Entry price (must be positive)")
+    current_price: Decimal = Field(gt=0, description="Current price (must be positive)")
     unrealized_pnl: Decimal
     side: OrderSide
     timestamp: datetime
@@ -177,14 +215,14 @@ class OrderStatus(Enum):
 
 class Trade(BaseModel):
     """Trade execution record."""
-    id: str
-    symbol: str
+    id: str = Field(min_length=1, description="Trade ID")
+    symbol: str = Field(min_length=3, description="Trading symbol")
     side: OrderSide
-    quantity: Decimal
-    price: Decimal
+    quantity: Decimal = Field(gt=0, description="Trade quantity (must be positive)")
+    price: Decimal = Field(gt=0, description="Trade price (must be positive)")
     timestamp: datetime
-    fee: Decimal = Decimal("0")
-    fee_currency: str = "USDT"
+    fee: Decimal = Field(ge=0, default=Decimal("0"), description="Trade fee (must be non-negative)")
+    fee_currency: str = Field(default="USDT", pattern=r"^[A-Z]{3,10}$", description="Fee currency code")
 
 
 # Risk Management Types (P-008)
@@ -290,17 +328,17 @@ class AllocationStrategy(Enum):
 
 class CapitalAllocation(BaseModel):
     """Capital allocation record for strategies and exchanges."""
-    strategy_id: str = Field(description="Strategy identifier")
-    exchange: str = Field(description="Exchange name")
-    allocated_amount: Decimal = Field(description="Total allocated capital")
-    utilized_amount: Decimal = Field(default=Decimal("0"), description="Currently utilized capital")
-    available_amount: Decimal = Field(description="Available capital for trading")
+    strategy_id: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$", description="Strategy identifier")
+    exchange: str = Field(min_length=3, pattern=r"^[a-z]+$", description="Exchange name")
+    allocated_amount: Decimal = Field(gt=0, description="Total allocated capital")
+    utilized_amount: Decimal = Field(default=Decimal("0"), ge=0, description="Currently utilized capital")
+    available_amount: Decimal = Field(ge=0, description="Available capital for trading")
     allocation_percentage: float = Field(description="Allocation percentage of total capital")
     last_rebalance: datetime = Field(description="Last rebalancing timestamp")
     
     @field_validator('allocation_percentage')
     @classmethod
-    def validate_allocation_percentage(cls, v):
+    def validate_allocation_percentage(cls, v: float) -> float:
         """Validate allocation percentage is between 0 and 1."""
         if not 0.0 <= v <= 1.0:
             raise ValueError(f'Allocation percentage must be between 0 and 1, got {v}')
@@ -314,15 +352,15 @@ class FundFlow(BaseModel):
     from_exchange: Optional[str] = Field(default=None, description="Source exchange")
     to_exchange: Optional[str] = Field(default=None, description="Target exchange")
     amount: Decimal = Field(description="Flow amount")
-    currency: str = Field(default="USDT", description="Currency of flow")
-    reason: str = Field(description="Flow reason")
+    currency: str = Field(default="USDT", pattern=r"^[A-Z]{3,10}$", description="Currency code")
+    reason: str = Field(min_length=1, description="Flow reason")
     timestamp: datetime = Field(description="Flow timestamp")
-    converted_amount: Optional[Decimal] = Field(default=None, description="Converted amount for currency flows")
-    exchange_rate: Optional[Decimal] = Field(default=None, description="Exchange rate for currency conversion")
+    converted_amount: Optional[Decimal] = Field(default=None, gt=0, description="Converted amount for currency flows")
+    exchange_rate: Optional[Decimal] = Field(default=None, gt=0, description="Exchange rate for currency conversion")
     
     @field_validator('amount')
     @classmethod
-    def validate_amount(cls, v):
+    def validate_amount(cls, v: Decimal) -> Decimal:
         """Validate flow amount is positive."""
         if v <= 0:
             raise ValueError(f'Fund flow amount must be positive, got {v}')
@@ -383,9 +421,9 @@ class CurrencyExposure(BaseModel):
 
 class ExchangeAllocation(BaseModel):
     """Exchange-specific capital allocation."""
-    exchange: str = Field(description="Exchange name")
-    allocated_amount: Decimal = Field(description="Allocated capital")
-    available_amount: Decimal = Field(description="Available capital")
+    exchange: str = Field(min_length=3, pattern=r"^[a-z]+$", description="Exchange name")
+    allocated_amount: Decimal = Field(gt=0, description="Allocated capital")
+    available_amount: Decimal = Field(ge=0, description="Available capital")
     utilization_rate: float = Field(description="Utilization rate")
     liquidity_score: float = Field(description="Liquidity score (0-1)")
     fee_efficiency: float = Field(description="Fee efficiency score (0-1)")
@@ -460,11 +498,11 @@ class StrategyStatus(Enum):
 
 class StrategyConfig(BaseModel):
     """Strategy configuration model for storing strategy parameters."""
-    name: str = Field(description="Strategy name")
+    name: str = Field(min_length=1, description="Strategy name")
     strategy_type: StrategyType = Field(description="Strategy type")
     enabled: bool = Field(default=True, description="Whether strategy is enabled")
-    symbols: List[str] = Field(description="Trading symbols")
-    timeframe: str = Field(default="1h", description="Trading timeframe")
+    symbols: List[str] = Field(min_length=1, description="Trading symbols")
+    timeframe: str = Field(default="1h", pattern=r"^(1m|5m|15m|30m|1h|4h|1d)$", description="Trading timeframe")
     min_confidence: float = Field(default=0.6, ge=0.0, le=1.0, description="Minimum signal confidence")
     max_positions: int = Field(default=5, ge=1, description="Maximum positions")
     position_size_pct: float = Field(default=0.02, ge=0.001, le=0.1, description="Position size percentage")
@@ -472,9 +510,20 @@ class StrategyConfig(BaseModel):
     take_profit_pct: float = Field(default=0.04, ge=0.001, le=0.2, description="Take profit percentage")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Strategy-specific parameters")
     
+    @field_validator('symbols')
+    @classmethod
+    def validate_symbols(cls, v: List[str]) -> List[str]:
+        """Validate symbols list is non-empty and contains valid symbols."""
+        if not v or len(v) == 0:
+            raise ValueError('At least one symbol is required')
+        for symbol in v:
+            if not isinstance(symbol, str) or len(symbol) < 3:
+                raise ValueError(f'Invalid symbol format: {symbol}')
+        return v
+    
     @field_validator('min_confidence', 'position_size_pct', 'stop_loss_pct', 'take_profit_pct')
     @classmethod
-    def validate_percentage_fields(cls, v):
+    def validate_percentage_fields(cls, v: float) -> float:
         """Validate percentage fields are between 0 and 1."""
         if not 0.0 <= v <= 1.0:
             raise ValueError(f'Percentage must be between 0 and 1, got {v}')
@@ -482,7 +531,7 @@ class StrategyConfig(BaseModel):
     
     @field_validator('max_positions')
     @classmethod
-    def validate_positive_integer(cls, v):
+    def validate_positive_integer(cls, v: int) -> int:
         """Validate positive integer fields."""
         if v <= 0:
             raise ValueError(f'Value must be positive, got {v}')
@@ -501,7 +550,7 @@ class StrategyMetrics(BaseModel):
     
     @field_validator('win_rate')
     @classmethod
-    def validate_win_rate(cls, v):
+    def validate_win_rate(cls, v: float) -> float:
         """Validate win rate is between 0 and 1."""
         if not 0.0 <= v <= 1.0:
             raise ValueError(f'Win rate must be between 0 and 1, got {v}')

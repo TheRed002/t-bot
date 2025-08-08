@@ -14,19 +14,28 @@ Features:
 
 import structlog
 import logging
+import logging.handlers
 import uuid
 import time
 import functools
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, cast
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import os
 import sys
 import contextvars
+from pathlib import Path
 
 
 class CorrelationContext:
-    """Context manager for correlation ID tracking."""
+    """Context manager for correlation ID tracking.
+    
+    Provides thread-safe correlation ID management for request tracing
+    across the entire application using contextvars.
+    
+    Attributes:
+        correlation_id: Current correlation ID (optional)
+    """
     
     def __init__(self):
         self.correlation_id: Optional[str] = None
@@ -58,17 +67,42 @@ class CorrelationContext:
             self._context.reset(token)
 
 
+def _add_correlation_id(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Add correlation ID to event dict."""
+    if event_dict is not None:
+        event_dict.update(correlation_id=correlation_context.get_correlation_id())
+        return event_dict
+    return {"correlation_id": correlation_context.get_correlation_id()}
+
+
+def _safe_unicode_decoder(logger: Any, method_name: str, event_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Safe unicode decoder for event dict."""
+    if event_dict is not None:
+        return cast(Dict[str, Any], structlog.processors.UnicodeDecoder()(logger, method_name, event_dict))
+    return {}
+
+
 # Global correlation context
 correlation_context = CorrelationContext()
 
 
-def setup_logging(environment: str = "development", log_level: str = "INFO") -> None:
-    """
-    Setup structured logging configuration.
+def setup_logging(
+    environment: str = "development", 
+    log_level: str = "INFO",
+    log_file: Optional[str] = None,
+    max_bytes: int = 10 * 1024 * 1024,  # 10MB
+    backup_count: int = 5,
+    retention_days: int = 30
+) -> None:
+    """Setup structured logging configuration with rotation and retention.
     
     Args:
         environment: Environment (development, staging, production)
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_file: Log file path (None for stdout only)
+        max_bytes: Maximum bytes per log file before rotation
+        backup_count: Number of backup files to keep
+        retention_days: Days to retain log files
     """
     # Configure structlog processors
     processors = [
@@ -80,9 +114,9 @@ def setup_logging(environment: str = "development", log_level: str = "INFO") -> 
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         # Add correlation ID processor with proper None handling
-        lambda logger, method_name, event_dict: event_dict.update(correlation_id=correlation_context.get_correlation_id()) if event_dict is not None else {"correlation_id": correlation_context.get_correlation_id()},
+        _add_correlation_id,
         # Custom UnicodeDecoder that handles None for tests
-        lambda logger, method_name, event_dict: structlog.processors.UnicodeDecoder()(logger, method_name, event_dict) if event_dict is not None else {},
+        _safe_unicode_decoder,
     ]
     
     # Add JSON formatting for production
@@ -100,23 +134,49 @@ def setup_logging(environment: str = "development", log_level: str = "INFO") -> 
         cache_logger_on_first_use=True,
     )
     
-    # Configure standard library logging
-    logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=getattr(logging, log_level.upper()),
-    )
+    # Configure standard library logging with rotation if file specified
+    if log_file:
+        # Ensure log directory exists
+        log_path = Path(log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Setup rotating file handler
+        file_handler = logging.handlers.RotatingFileHandler(
+            filename=log_file,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding='utf-8'
+        )
+        
+        # Setup console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        
+        # Configure logging with both handlers
+        logging.basicConfig(
+            format="%(message)s",
+            level=getattr(logging, log_level.upper()),
+            handlers=[file_handler, console_handler]
+        )
+        
+        # Clean up old log files based on retention policy
+        _cleanup_old_logs(log_path.parent, log_path.stem, retention_days)
+    else:
+        # Console only
+        logging.basicConfig(
+            format="%(message)s",
+            stream=sys.stdout,
+            level=getattr(logging, log_level.upper()),
+        )
 
 
 def get_logger(name: str) -> structlog.BoundLogger:
-    """
-    Get a structured logger instance.
+    """Get a structured logger instance.
     
     Args:
         name: Logger name (usually __name__)
     
     Returns:
-        Configured structured logger
+        Configured structured logger with correlation ID support
     """
     return structlog.get_logger(name)
 
@@ -224,7 +284,15 @@ def log_async_performance(func: Callable) -> Callable:
 
 
 class SecureLogger:
-    """Logger wrapper that prevents sensitive data from being logged."""
+    """Logger wrapper that prevents sensitive data from being logged.
+    
+    Automatically sanitizes sensitive fields like passwords, API keys,
+    and tokens before logging to prevent accidental exposure.
+    
+    Attributes:
+        logger: Underlying structured logger
+        sensitive_fields: Set of field names to sanitize
+    """
     
     def __init__(self, logger: structlog.BoundLogger):
         self.logger = logger
@@ -288,7 +356,7 @@ def get_secure_logger(name: str) -> SecureLogger:
 # TODO: Remove in production - Debug logging configuration
 def setup_debug_logging() -> None:
     """Setup debug logging for development."""
-    setup_logging(environment="development", log_level="DEBUG")
+    setup_development_logging()
     logger = get_logger(__name__)
     logger.info("Debug logging enabled")
 
@@ -333,6 +401,62 @@ class PerformanceMonitor:
                     error_type=exc_type.__name__,
                     correlation_id=correlation_context.get_correlation_id(),
                 )
+
+
+def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None:
+    """Clean up old log files based on retention policy.
+    
+    Args:
+        log_dir: Directory containing log files
+        log_name: Base name of log files
+        retention_days: Number of days to retain log files
+    """
+    import time
+    from datetime import datetime, timedelta
+    
+    if not log_dir.exists():
+        return
+    
+    cutoff_time = time.time() - (retention_days * 24 * 3600)
+    
+    # Find and remove old log files
+    for log_file in log_dir.glob(f"{log_name}*"):
+        try:
+            if log_file.stat().st_mtime < cutoff_time:
+                log_file.unlink()
+                print(f"Removed old log file: {log_file}")
+        except (OSError, IOError) as e:
+            print(f"Failed to remove old log file {log_file}: {e}")
+
+
+def setup_production_logging(
+    log_dir: str = "logs",
+    app_name: str = "trading-bot"
+) -> None:
+    """Setup production logging with file rotation and retention.
+    
+    Args:
+        log_dir: Directory for log files
+        app_name: Application name for log file naming
+    """
+    log_file = f"{log_dir}/{app_name}.log"
+    setup_logging(
+        environment="production",
+        log_level="INFO",
+        log_file=log_file,
+        max_bytes=50 * 1024 * 1024,  # 50MB per file
+        backup_count=10,  # Keep 10 backup files
+        retention_days=90  # Retain for 90 days
+    )
+
+
+def setup_development_logging() -> None:
+    """Setup development logging with debug level and console output."""
+    setup_logging(
+        environment="development",
+        log_level="DEBUG",
+        log_file=None  # Console only for development
+    )
 
 
 # Initialize default logging configuration
