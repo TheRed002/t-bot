@@ -21,6 +21,9 @@ from src.core.logging import get_logger
 from src.core.exceptions import TradingBotError
 from src.core.config import Config
 
+# MANDATORY: Import from P-007A utils framework
+from src.utils.decorators import time_execution
+
 logger = get_logger(__name__)
 
 
@@ -95,6 +98,7 @@ class ErrorPatternAnalytics:
         self.trend_window_hours = 24  # hours to analyze for trends
         self.pattern_confidence_threshold = 0.8  # minimum confidence for pattern detection
     
+    @time_execution
     def add_error_event(self, error_context: Dict[str, Any]):
         """Add an error event to the analytics system."""
         
@@ -117,6 +121,7 @@ class ErrorPatternAnalytics:
         # Trigger pattern analysis
         asyncio.create_task(self._analyze_patterns())
     
+    @time_execution
     async def _analyze_patterns(self):
         """Analyze error patterns asynchronously."""
         

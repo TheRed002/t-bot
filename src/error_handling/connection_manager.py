@@ -23,6 +23,9 @@ from src.core.exceptions import (
 )
 from src.core.config import Config
 
+# MANDATORY: Import from P-007A utils framework
+from src.utils.decorators import time_execution, retry, circuit_breaker
+
 logger = get_logger(__name__)
 
 
@@ -93,6 +96,8 @@ class ConnectionManager:
             "websocket": 10
         }
     
+    @time_execution
+    @retry(max_attempts=5)
     async def establish_connection(
         self,
         connection_id: str,
@@ -207,6 +212,8 @@ class ConnectionManager:
             logger.error("Failed to close connection", connection_id=connection_id, error=str(e))
             return False
     
+    @time_execution
+    @circuit_breaker(failure_threshold=3)
     async def reconnect_connection(self, connection_id: str) -> bool:
         """Reconnect a failed connection."""
         

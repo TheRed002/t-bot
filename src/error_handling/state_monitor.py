@@ -23,6 +23,9 @@ from src.core.exceptions import (
 )
 from src.core.config import Config
 
+# MANDATORY: Import from P-007A utils framework
+from src.utils.decorators import time_execution, retry
+
 logger = get_logger(__name__)
 
 
@@ -59,6 +62,8 @@ class StateMonitor:
         self.state_history: List[StateValidationResult] = []
         self.reconciliation_attempts: Dict[str, int] = {}
     
+    @time_execution
+    @retry(max_attempts=2)
     async def validate_state_consistency(self, component: str = "all") -> StateValidationResult:
         """Validate state consistency for specified component or all components."""
         

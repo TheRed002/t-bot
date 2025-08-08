@@ -26,6 +26,9 @@ from src.core.exceptions import (
 from src.core.config import Config
 from src.error_handling.pattern_analytics import ErrorPattern
 
+# MANDATORY: Import from P-007A utils framework
+from src.utils.decorators import time_execution, retry, circuit_breaker
+
 logger = get_logger(__name__)
 
 
@@ -137,6 +140,7 @@ class ErrorHandler:
             "model_inference": CircuitBreaker(failure_threshold=2, recovery_timeout=60)
         }
     
+    @time_execution
     def classify_error(self, error: Exception) -> ErrorSeverity:
         """Classify error severity based on error type and context."""
         if isinstance(error, (StateConsistencyError, SecurityError)):
@@ -150,6 +154,7 @@ class ErrorHandler:
         else:
             return ErrorSeverity.MEDIUM
     
+    @time_execution
     def create_error_context(
         self,
         error: Exception,
@@ -187,6 +192,7 @@ class ErrorHandler:
         import traceback
         return "".join(traceback.format_stack())
     
+    @time_execution
     async def handle_error(
         self,
         error: Exception,
@@ -274,6 +280,7 @@ class ErrorHandler:
         self.error_patterns[pattern_key].occurrence_count += 1
         self.error_patterns[pattern_key].last_detected = context.timestamp
     
+    @time_execution
     def _get_circuit_breaker_key(self, context: ErrorContext) -> Optional[str]:
         """Determine which circuit breaker should be triggered."""
         if "api" in context.component.lower():

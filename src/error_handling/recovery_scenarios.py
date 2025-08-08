@@ -24,6 +24,9 @@ from src.core.exceptions import (
 )
 from src.core.config import Config
 
+# MANDATORY: Import from P-007A utils framework
+from src.utils.decorators import time_execution, retry
+
 logger = get_logger(__name__)
 
 
@@ -34,6 +37,7 @@ class RecoveryScenario:
         self.config = config
         self.recovery_config = config.error_handling
     
+    @time_execution
     async def execute_recovery(self, context: Any) -> bool:
         """Execute the recovery scenario. Override in subclasses."""
         raise NotImplementedError("Subclasses must implement execute_recovery")
@@ -48,6 +52,8 @@ class PartialFillRecovery(RecoveryScenario):
         self.cancel_remainder = True  # Default behavior
         self.log_details = True  # Default behavior
     
+    @time_execution
+    @retry(max_attempts=3)
     async def execute_recovery(self, context: Dict[str, Any]) -> bool:
         """Handle partial order fill recovery."""
         order = context.get("order")
@@ -145,6 +151,8 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
         self.conservative_mode = True  # Default behavior
         self.max_reconnect_attempts = 5
     
+    @time_execution
+    @retry(max_attempts=5, delay=2.0)
     async def execute_recovery(self, context: Dict[str, Any]) -> bool:
         """Handle network disconnection recovery."""
         component = context.get("component", "unknown")
@@ -264,6 +272,7 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
         self.redistribute_capital = True  # Default behavior
         self.pause_new_orders = True  # Default behavior
     
+    @time_execution
     async def execute_recovery(self, context: Dict[str, Any]) -> bool:
         """Handle exchange maintenance recovery."""
         exchange = context.get("exchange", "unknown")
@@ -322,6 +331,7 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
         self.fallback_sources = ["backup_feed", "static_data"]  # Default fallback sources
         self.conservative_trading = True  # Default behavior
     
+    @time_execution
     async def execute_recovery(self, context: Dict[str, Any]) -> bool:
         """Handle data feed interruption recovery."""
         data_source = context.get("data_source", "unknown")
@@ -380,6 +390,8 @@ class OrderRejectionRecovery(RecoveryScenario):
         self.adjust_parameters = True  # Default behavior
         self.max_retry_attempts = self.recovery_config.order_rejection_max_retries
     
+    @time_execution
+    @retry(max_attempts=2)
     async def execute_recovery(self, context: Dict[str, Any]) -> bool:
         """Handle order rejection recovery."""
         order = context.get("order")
@@ -435,6 +447,7 @@ class APIRateLimitRecovery(RecoveryScenario):
         self.max_retry_attempts = 3
         self.base_delay = 5
     
+    @time_execution
     async def execute_recovery(self, context: Dict[str, Any]) -> bool:
         """Handle API rate limit recovery."""
         api_endpoint = context.get("api_endpoint", "unknown")
