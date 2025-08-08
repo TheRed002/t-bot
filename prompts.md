@@ -1452,12 +1452,64 @@ Add rate limiting configuration to exchange factory:
 
 ---
 
+## **Prompt P-000: Data Quality Management System**
+
+**Title:** Implement comprehensive data quality monitoring and validation
+
+### Context
+- **Current State:** Feature engineering pipeline complete (P-015)
+- **Target State:** Robust data quality assurance for ML models
+- **Phase Goal:** Ensure high-quality features for ML training
+
+**Technical Context**: Reference @SPECIFICATIONS.md Section 4.4 "Data Quality Management".
+
+### Dependencies
+**Depends On:** P-014 (data pipeline), P-015 (feature engineering)
+**Enables:** P-017+ (reliable ML training data)
+
+### Task Details
+
+#### 1. Real-time Validation (`src/data/quality/validation.py`)
+Implement comprehensive validation:
+- Schema validation for incoming data
+- Range checks and business rule validation
+- Statistical outlier detection
+- Data freshness monitoring
+- Cross-source consistency checks
+
+#### 2. Data Cleaning (`src/data/quality/cleaning.py`)
+Implement data cleaning pipeline:
+- Missing data imputation strategies
+- Outlier handling (remove vs adjust)
+- Data smoothing for noisy signals
+- Duplicate detection and removal
+- Data normalization and standardization
+
+#### 3. Quality Monitoring (`src/data/quality/monitoring.py`)
+Implement ongoing quality monitoring:
+- Data drift detection using statistical tests
+- Feature distribution monitoring
+- Quality score calculation and trending
+- Automated alerting on quality degradation
+- Quality reports and dashboards
+
+### Directory Structure to Create
+```
+src/data/quality/
+├── __init__.py
+├── validation.py
+├── cleaning.py
+└── monitoring.py
+```
+
+---
+
 ## **Prompt P-007A: Utility Framework and Helper Functions**
 
 **Title:** Implement comprehensive utility framework with decorators, helpers, validators, and formatters
 
 ### Context
-- **Current State:** Data quality management operational (P-016)
+- **Current State:** Data quality management operational (P-000)
 - **Target State:** Reusable utility functions available across all components
 - **Phase Goal:** Common utilities before ML infrastructure implementation
 
@@ -3450,7 +3502,7 @@ hybrid_strategies:
 
 ### Dependencies
 **Depends On:** P-002 (database), P-003+ (exchanges for market data), P-001 (types), P-002A (error handling), P-007A (utils)
-**Enables:** P-015 (feature engineering), P-016 (data quality), P-017+ (ML models)
+**Enables:** P-015 (feature engineering), P-000 (data quality), P-017+ (ML models)
 
 ### Mandatory Integration Requirements
 **CRITICAL**: This prompt MUST integrate with existing components and use P-001 data types:
@@ -3544,7 +3596,7 @@ src/data/
 
 ### Dependencies
 **Depends On:** P-014 (data pipeline), P-001 (types), P-002A (error handling), P-007A (utils)
-**Enables:** P-016 (data quality), P-017+ (ML models), P-019 (AI strategies)
+**Enables:** P-000 (data quality), P-017+ (ML models), P-019 (AI strategies)
 
 ### Mandatory Integration Requirements
 **CRITICAL**: This prompt MUST integrate with existing data pipeline and use P-001 types:
@@ -3617,296 +3669,20 @@ src/data/features/
 
 ---
 
-## **Prompt P-016: Data Quality Management System**
-
-**Title:** Implement comprehensive data quality monitoring and validation
-
-### Context
-- **Current State:** Feature engineering pipeline complete (P-015)
-- **Target State:** Robust data quality assurance for ML models
-- **Phase Goal:** Ensure high-quality features for ML training
-
-**Technical Context**: Reference @SPECIFICATIONS.md Section 4.4 "Data Quality Management".
-
-### Dependencies
-**Depends On:** P-014 (data pipeline), P-015 (feature engineering)
-**Enables:** P-017+ (reliable ML training data)
-
-### Task Details
-
-#### 1. Real-time Validation (`src/data/quality/validation.py`)
-Implement comprehensive validation:
-- Schema validation for incoming data
-- Range checks and business rule validation
-- Statistical outlier detection
-- Data freshness monitoring
-- Cross-source consistency checks
-
-#### 2. Data Cleaning (`src/data/quality/cleaning.py`)
-Implement data cleaning pipeline:
-- Missing data imputation strategies
-- Outlier handling (remove vs adjust)
-- Data smoothing for noisy signals
-- Duplicate detection and removal
-- Data normalization and standardization
-
-#### 3. Quality Monitoring (`src/data/quality/monitoring.py`)
-Implement ongoing quality monitoring:
-- Data drift detection using statistical tests
-- Feature distribution monitoring
-- Quality score calculation and trending
-- Automated alerting on quality degradation
-- Quality reports and dashboards
-
-### Directory Structure to Create
-```
-src/data/quality/
-├── __init__.py
-├── validation.py
-├── cleaning.py
-└── monitoring.py
-```
-
----
-
-**Title:** Implement comprehensive utility framework with decorators, helpers, validators, and formatters
-
-### Context
-- **Current State:** Data quality management operational (P-016)
-- **Target State:** Reusable utility functions available across all components
-- **Phase Goal:** Common utilities before ML infrastructure implementation
-
-**Technical Context**: Reference @SPECIFICATIONS.md Section 15 project structure utils module. Essential for code reusability.
-
-### Dependencies
-**Depends On:** P-001 (core types), P-002A (error handling)
-**Enables:** P-017+ (ML models), all components benefit from utilities
-
-### Task Details
-
-#### 1. Common Decorators (`src/utils/decorators.py`)
-Implement reusable decorators for cross-cutting concerns:
-- **Performance Monitoring**: `@time_execution`, `@memory_usage`, `@cpu_usage`
-- **Error Handling**: `@retry`, `@circuit_breaker`, `@timeout`
-- **Caching**: `@cache_result`, `@redis_cache`, `@ttl_cache`
-- **Logging**: `@log_calls`, `@log_performance`, `@log_errors`
-- **Validation**: `@validate_input`, `@validate_output`, `@type_check`
-- **Rate Limiting**: `@rate_limit`, `@api_throttle`
-
-#### 2. Helper Functions (`src/utils/helpers.py`)
-Implement common utility functions:
-- **Mathematical Utilities**: statistical calculations, financial metrics
-- **Date/Time Utilities**: timezone handling, trading session detection
-- **Data Conversion**: unit conversions, currency conversions
-- **File Operations**: safe file I/O, configuration loading
-- **Network Utilities**: connection testing, latency measurement
-- **String Utilities**: parsing, formatting, sanitization
-
-#### 3. Validation Utilities (`src/utils/validators.py`)
-Implement comprehensive validation functions:
-- **Financial Data Validation**: price ranges, volume checks, symbol validation
-- **Configuration Validation**: parameter bounds, required fields
-- **API Input Validation**: request payload validation, security checks
-- **Data Type Validation**: type checking, schema validation
-- **Business Rule Validation**: trading rules, risk limit validation
-- **Exchange Data Validation**: order validation, balance verification
-
-#### 4. Data Formatters (`src/utils/formatters.py`)
-Implement data formatting and transformation utilities:
-- **Financial Formatting**: currency formatting, percentage display
-- **API Response Formatting**: JSON standardization, error formatting
-- **Log Formatting**: structured log formatting, correlation IDs
-- **Chart Data Formatting**: OHLCV formatting, indicator data
-- **Report Formatting**: performance reports, risk reports
-- **Export Formatting**: CSV, Excel, PDF export utilities
-
-#### 5. Constants and Enums (`src/utils/constants.py`)
-Define system-wide constants and enumerations:
-- **Trading Constants**: market hours, settlement times, precision
-- **API Constants**: endpoints, rate limits, timeouts
-- **Financial Constants**: fee structures, minimum amounts
-- **Configuration Constants**: default values, limits
-- **Error Constants**: error codes, message templates
-- **Market Constants**: symbol mappings, exchange specifications
-
-### Directory Structure to Create
-```
-src/utils/
-├── __init__.py
-├── decorators.py
-├── helpers.py
-├── validators.py
-├── formatters.py
-└── constants.py
-```
-
-### Key Utility Implementations
-
-#### Performance Monitoring Decorator
-```python
-import time
-import functools
-from typing import Callable, Any
-from src.core.logging import get_logger
-
-logger = structlog.get_logger()
-
-def time_execution(func: Callable) -> Callable:
-    """Decorator to measure and log execution time"""
-    @functools.wraps(func)
-    async def async_wrapper(*args, **kwargs) -> Any:
-        start_time = time.perf_counter()
-        try:
-            result = await func(*args, **kwargs)
-            execution_time = time.perf_counter() - start_time
-            logger.info(
-                "Function executed",
-                function=func.__name__,
-                execution_time_ms=round(execution_time * 1000, 2),
-                success=True
-            )
-            return result
-        except Exception as e:
-            execution_time = time.perf_counter() - start_time
-            logger.error(
-                "Function failed",
-                function=func.__name__,
-                execution_time_ms=round(execution_time * 1000, 2),
-                error=str(e),
-                success=False
-            )
-            raise
-    
-    @functools.wraps(func)
-    def sync_wrapper(*args, **kwargs) -> Any:
-        start_time = time.perf_counter()
-        try:
-            result = func(*args, **kwargs)
-            execution_time = time.perf_counter() - start_time
-            logger.info(
-                "Function executed",
-                function=func.__name__,
-                execution_time_ms=round(execution_time * 1000, 2),
-                success=True
-            )
-            return result
-        except Exception as e:
-            execution_time = time.perf_counter() - start_time
-            logger.error(
-                "Function failed",
-                function=func.__name__,
-                execution_time_ms=round(execution_time * 1000, 2),
-                error=str(e),
-                success=False
-            )
-            raise
-    
-    return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-```
-
-#### Financial Validation Functions
-```python
-from decimal import Decimal
-from typing import Optional
-from src.core.exceptions import ValidationError
-
-def validate_price(price: float, symbol: str) -> Decimal:
-    """Validate and normalize price values"""
-    if price <= 0:
-        raise ValidationError(f"Price must be positive for {symbol}, got {price}")
-    
-    if price > 1_000_000:  # Sanity check for extremely high prices
-        raise ValidationError(f"Price {price} for {symbol} exceeds maximum allowed")
-    
-    # Convert to Decimal for financial precision
-    return Decimal(str(price))
-
-def validate_quantity(quantity: float, symbol: str, min_qty: Optional[float] = None) -> Decimal:
-    """Validate trading quantity"""
-    if quantity <= 0:
-        raise ValidationError(f"Quantity must be positive for {symbol}, got {quantity}")
-    
-    if min_qty and quantity < min_qty:
-        raise ValidationError(f"Quantity {quantity} below minimum {min_qty} for {symbol}")
-    
-    return Decimal(str(quantity))
-
-def validate_symbol(symbol: str) -> str:
-    """Validate trading symbol format"""
-    if not symbol or len(symbol) < 3:
-        raise ValidationError(f"Invalid symbol format: {symbol}")
-    
-    if not symbol.replace('/', '').replace('-', '').isalnum():
-        raise ValidationError(f"Symbol contains invalid characters: {symbol}")
-    
-    return symbol.upper()
-```
-
-#### Financial Formatting Utilities
-```python
-from decimal import Decimal, ROUND_HALF_UP
-from typing import Optional
-
-def format_currency(amount: float, currency: str = "USD", precision: int = 2) -> str:
-    """Format amount as currency string"""
-    if currency.upper() in ["BTC", "ETH"]:
-        precision = 8  # Crypto precision
-    elif currency.upper() in ["USDT", "USDC", "USD"]:
-        precision = 2  # Fiat precision
-    
-    formatted = f"{amount:,.{precision}f}"
-    return f"{formatted} {currency.upper()}"
-
-def format_percentage(value: float, precision: int = 2) -> str:
-    """Format value as percentage"""
-    percentage = value * 100
-    return f"{percentage:+.{precision}f}%"
-
-def format_pnl(pnl: float, currency: str = "USD") -> str:
-    """Format P&L with appropriate color coding info"""
-    formatted = format_currency(pnl, currency)
-    color = "green" if pnl >= 0 else "red"
-    symbol = "+" if pnl >= 0 else ""
-    return f"{symbol}{formatted}", color
-```
-
-### Acceptance Criteria
-- All decorators work with both sync and async functions
-- Validators handle edge cases and provide clear error messages
-- Formatters support multiple currencies and precision levels
-- Helpers provide consistent functionality across components
-- Performance overhead <1ms for decorator applications
-
-### Integration Points
-- Error handling via P-002A (error handling framework)
-- Logging integration with P-001 (structured logging)
-- Type definitions from P-001 (core types)
-- Used by P-017+ (ML models) and all subsequent components
-- Performance monitoring via P-030+ (monitoring system)
-
-### Reverse Integration Required
-- **Update P-003+ (Exchanges)**: Apply performance monitoring decorators to all API calls
-- **Update P-008+ (Risk Management)**: Use validation utilities for risk parameter validation
-- **Update P-011+ (Strategies)**: Apply performance decorators and validation to all strategy methods
-- **Update P-014+ (Data Pipeline)**: Use formatting utilities for data display and validation
-- **Update P-017+ (ML Models)**: Apply caching decorators and validation utilities
-- **Update P-026+ (Web Interface)**: Use formatters for API responses and financial data display
-
----
 
 ## **Prompt P-017: Machine Learning Model Registry and Base Classes**
 
 **Title:** Implement ML model registry, base classes, and model management system
 
 ### Context
-- **Current State:** High-quality feature pipeline established (P-016)
+- **Current State:** High-quality feature pipeline established (P-000)
 - **Target State:** ML infrastructure ready for model training and deployment
 - **Phase Goal:** Foundation for AI-powered trading strategies
 
 **Technical Context**: Reference @SPECIFICATIONS.md Section 5 "Machine Learning Infrastructure". MLflow integration.
 
 ### Dependencies
-**Depends On:** P-015 (features), P-016 (data quality), P-001 (types, config), P-002A (error handling), P-007A (utils)
+**Depends On:** P-015 (features), P-000 (data quality), P-001 (types, config), P-002A (error handling), P-007A (utils)
 **Enables:** P-018 (training pipeline), P-019 (AI strategies)
 
 ### Mandatory Integration Requirements
@@ -3914,7 +3690,7 @@ def format_pnl(pnl: float, currency: str = "USD") -> str:
 
 #### Required Imports from Previous Prompts:
 ```python
-# From P-015/P-016 - MANDATORY: Use existing feature pipeline
+# From P-015/P-000 - MANDATORY: Use existing feature pipeline
 from src.data.features.calculator import FeatureCalculator
 from src.data.quality.validator import DataQualityValidator
 
@@ -5710,7 +5486,7 @@ Execute prompts **P-001 through P-037** in sequential order (including all sub-p
 - **Foundation**: P-001 (core) → P-002 (database) → P-002A (error handling) → P-003 (exchanges)
 - **Risk Management**: P-008 → P-009 → P-010 → P-010A (capital management)
 - **Strategies**: P-011 → P-012 → P-013 → P-013A (arbitrage) → P-013B (market making) → P-013C (backtesting) → P-019
-- **Data Pipeline**: P-014 → P-015 → P-016 → P-007A (utils)
+- **Data Pipeline**: P-014 → P-015 → P-000 → P-007A (utils)
 - **ML Pipeline**: P-017 → P-018 → P-019
 - **Web Interface**: P-026 → P-027 → P-028 → P-029
 - **Production**: P-030 → P-031 → P-032 → P-033 → P-034 → P-035 → P-036 → P-037

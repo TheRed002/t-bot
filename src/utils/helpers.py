@@ -46,6 +46,27 @@ logger = get_logger(__name__)
 # Mathematical Utilities
 # =============================================================================
 
+def calculate_percentage_change(old_value: float, new_value: float) -> float:
+    """
+    Calculate percentage change between two values.
+    
+    Args:
+        old_value: Original value
+        new_value: New value
+        
+    Returns:
+        Percentage change as a float (e.g., 0.05 for 5% increase, -0.03 for 3% decrease)
+        
+    Raises:
+        ValidationError: If old_value is zero (division by zero)
+    """
+    if old_value == 0:
+        raise ValidationError("Cannot calculate percentage change with zero old value")
+    
+    percentage_change = (new_value - old_value) / old_value
+    return float(percentage_change)
+
+
 def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.02) -> float:
     """
     Calculate the Sharpe ratio for a series of returns.
