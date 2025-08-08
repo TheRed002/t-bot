@@ -41,8 +41,10 @@ from src.error_handling.error_handler import ErrorHandler
 
 logger = get_logger(__name__)
 
-# TODO: Remove in production - Debug decorator registry
-_decorator_registry: Dict[str, int] = {}
+# Thread-safe cache for decorators
+import threading
+_cache_lock = threading.Lock()
+_memory_cache: Dict[str, Any] = {}
 
 def time_execution(func: Callable) -> Callable:
     """
@@ -86,7 +88,9 @@ def time_execution(func: Callable) -> Callable:
                 error=str(e),
                 error_type=type(e).__name__,
                 success=False,
-                module=func.__module__
+                module=func.__module__,
+                args_count=len(args),
+                kwargs_keys=list(kwargs.keys()) if kwargs else []
             )
             raise
     
@@ -113,12 +117,14 @@ def time_execution(func: Callable) -> Callable:
                 error=str(e),
                 error_type=type(e).__name__,
                 success=False,
-                module=func.__module__
+                module=func.__module__,
+                args_count=len(args),
+                kwargs_keys=list(kwargs.keys()) if kwargs else []
             )
             raise
     
-    # TODO: Remove in production - Track decorator usage
-    _decorator_registry[func.__name__] = _decorator_registry.get(func.__name__, 0) + 1
+            # Track function execution for monitoring
+        logger.debug(f"Function {func.__name__} executed successfully")
     
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
@@ -499,21 +505,35 @@ def timeout(seconds: float) -> Callable:
         
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
-            # For sync functions, we can't easily implement timeout without threading
-            # This is a simplified version that just logs a warning
-            logger.warning(
-                "Timeout decorator used on sync function - timeout not enforced",
-                function=func.__name__,
-                timeout_seconds=seconds
-            )
-            return func(*args, **kwargs)
+            import concurrent.futures
+            
+            # Use ThreadPoolExecutor to implement timeout for sync functions
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(func, *args, **kwargs)
+                try:
+                    result = future.result(timeout=seconds)
+                    return result
+                except concurrent.futures.TimeoutError:
+                    logger.error(
+                        "Function execution timed out",
+                        function=func.__name__,
+                        timeout_seconds=seconds
+                    )
+                    raise TradingTimeoutError(f"Function {func.__name__} timed out after {seconds} seconds")
+                except Exception as e:
+                    logger.error(
+                        "Function execution failed",
+                        function=func.__name__,
+                        error=str(e)
+                    )
+                    raise
         
         return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
     
     return decorator
 
 
-# Simple in-memory cache for demonstration
+# Thread-safe in-memory cache
 _cache: Dict[str, Any] = {}
 _cache_timestamps: Dict[str, float] = {}
 
@@ -537,18 +557,21 @@ def cache_result(ttl_seconds: float = 300) -> Callable:
             current_time = time.time()
             
             # Check if cached result exists and is still valid
-            if cache_key in _cache and current_time - _cache_timestamps[cache_key] < ttl_seconds:
-                logger.debug(
-                    "Returning cached result",
-                    function=func.__name__,
-                    cache_key=cache_key
-                )
-                return _cache[cache_key]
+            with _cache_lock:
+                if cache_key in _cache and current_time - _cache_timestamps[cache_key] < ttl_seconds:
+                    logger.debug(
+                        "Returning cached result",
+                        function=func.__name__,
+                        cache_key=cache_key
+                    )
+                    return _cache[cache_key]
             
             # Execute function and cache result
             result = await func(*args, **kwargs)
-            _cache[cache_key] = result
-            _cache_timestamps[cache_key] = current_time
+            
+            with _cache_lock:
+                _cache[cache_key] = result
+                _cache_timestamps[cache_key] = current_time
             
             logger.debug(
                 "Cached function result",
@@ -567,18 +590,21 @@ def cache_result(ttl_seconds: float = 300) -> Callable:
             current_time = time.time()
             
             # Check if cached result exists and is still valid
-            if cache_key in _cache and current_time - _cache_timestamps[cache_key] < ttl_seconds:
-                logger.debug(
-                    "Returning cached result",
-                    function=func.__name__,
-                    cache_key=cache_key
-                )
-                return _cache[cache_key]
+            with _cache_lock:
+                if cache_key in _cache and current_time - _cache_timestamps[cache_key] < ttl_seconds:
+                    logger.debug(
+                        "Returning cached result",
+                        function=func.__name__,
+                        cache_key=cache_key
+                    )
+                    return _cache[cache_key]
             
             # Execute function and cache result
             result = func(*args, **kwargs)
-            _cache[cache_key] = result
-            _cache_timestamps[cache_key] = current_time
+            
+            with _cache_lock:
+                _cache[cache_key] = result
+                _cache_timestamps[cache_key] = current_time
             
             logger.debug(
                 "Cached function result",

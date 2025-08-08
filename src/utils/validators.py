@@ -33,6 +33,9 @@ from src.core.types import (
 )
 from src.core.logging import get_logger
 
+# Import from P-002A error handling
+from src.error_handling.error_handler import ErrorHandler
+
 logger = get_logger(__name__)
 
 
@@ -40,13 +43,14 @@ logger = get_logger(__name__)
 # Financial Data Validation
 # =============================================================================
 
-def validate_price(price: float, symbol: str) -> Decimal:
+def validate_price(price: float, symbol: str, exchange: str = "binance") -> Decimal:
     """
     Validate and normalize price values.
     
     Args:
         price: Price to validate
         symbol: Trading symbol for context
+        exchange: Exchange name for precision rules
         
     Returns:
         Normalized price as Decimal
@@ -67,15 +71,8 @@ def validate_price(price: float, symbol: str) -> Decimal:
         # Convert to Decimal for financial precision
         decimal_price = Decimal(str(price))
         
-        # Determine precision based on symbol
-        if "BTC" in symbol.upper():
-            precision = 8
-        elif "ETH" in symbol.upper():
-            precision = 6
-        elif "USDT" in symbol.upper() or "USD" in symbol.upper():
-            precision = 2
-        else:
-            precision = 4
+        # Get precision from exchange-specific rules
+        precision = get_price_precision(symbol, exchange)
         
         # Round to appropriate precision
         normalized_price = decimal_price.quantize(
@@ -86,6 +83,44 @@ def validate_price(price: float, symbol: str) -> Decimal:
         
     except (InvalidOperation, ValueError) as e:
         raise ValidationError(f"Invalid price format for {symbol}: {str(e)}")
+
+
+def get_price_precision(symbol: str, exchange: str) -> int:
+    """
+    Get price precision based on exchange and symbol rules.
+    
+    Args:
+        symbol: Trading symbol
+        exchange: Exchange name
+        
+    Returns:
+        Precision level for the symbol
+    """
+    # Exchange-specific precision rules
+    exchange_precisions = {
+        "binance": {
+            "BTC": 8, "ETH": 6, "USDT": 2, "USD": 2,
+            "default": 4
+        },
+        "okx": {
+            "BTC": 8, "ETH": 6, "USDT": 2, "USD": 2,
+            "default": 4
+        },
+        "coinbase": {
+            "BTC": 8, "ETH": 6, "USDT": 2, "USD": 2,
+            "default": 4
+        }
+    }
+    
+    # Get exchange rules
+    exchange_rules = exchange_precisions.get(exchange.lower(), exchange_precisions["binance"])
+    
+    # Determine precision based on symbol
+    for asset in ["BTC", "ETH", "USDT", "USD"]:
+        if asset in symbol.upper():
+            return exchange_rules[asset]
+    
+    return exchange_rules["default"]
 
 
 def validate_quantity(quantity: float, symbol: str, min_qty: Optional[float] = None) -> Decimal:
@@ -934,5 +969,67 @@ def validate_exchange_info(exchange_info: Dict[str, Any]) -> bool:
     # Validate rate limits
     if not isinstance(exchange_info["rate_limits"], dict):
         raise ValidationError("Rate limits must be a dictionary")
+    
+    return True 
+
+
+def validate_position(position: Position) -> bool:
+    """
+    Validate position data.
+    
+    Args:
+        position: Position object to validate
+        
+    Returns:
+        True if valid, False otherwise
+        
+    Raises:
+        ValidationError: If position is invalid
+    """
+    if not isinstance(position, Position):
+        raise ValidationError("Position must be a Position object")
+    
+    if not position.symbol:
+        raise ValidationError("Position symbol cannot be empty")
+    
+    if position.quantity == 0:
+        raise ValidationError("Position quantity cannot be zero")
+    
+    if position.entry_price <= 0:
+        raise ValidationError("Position entry price must be positive")
+    
+    return True
+
+
+def validate_order(order: OrderRequest) -> bool:
+    """
+    Validate order request.
+    
+    Args:
+        order: OrderRequest object to validate
+        
+    Returns:
+        True if valid, False otherwise
+        
+    Raises:
+        ValidationError: If order is invalid
+    """
+    if not isinstance(order, OrderRequest):
+        raise ValidationError("Order must be an OrderRequest object")
+    
+    if not order.symbol:
+        raise ValidationError("Order symbol cannot be empty")
+    
+    if order.quantity <= 0:
+        raise ValidationError("Order quantity must be positive")
+    
+    if order.price <= 0:
+        raise ValidationError("Order price must be positive")
+    
+    if order.side not in [OrderSide.BUY, OrderSide.SELL]:
+        raise ValidationError("Order side must be BUY or SELL")
+    
+    if order.order_type not in [OrderType.MARKET, OrderType.LIMIT]:
+        raise ValidationError("Order type must be MARKET or LIMIT")
     
     return True 

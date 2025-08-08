@@ -39,6 +39,9 @@ import hashlib
 from src.core.exceptions import ValidationError, DataError
 from src.core.logging import get_logger
 
+# Import from P-002A error handling
+from src.error_handling.error_handler import ErrorHandler
+
 logger = get_logger(__name__)
 
 
@@ -67,13 +70,15 @@ def calculate_percentage_change(old_value: float, new_value: float) -> float:
     return float(percentage_change)
 
 
-def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.02) -> float:
+def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.02, 
+                          frequency: str = "daily") -> float:
     """
     Calculate the Sharpe ratio for a series of returns.
     
     Args:
         returns: List of return values (as decimals, e.g., 0.05 for 5%)
         risk_free_rate: Annual risk-free rate (default 2%)
+        frequency: Data frequency ("daily", "weekly", "monthly", "yearly")
         
     Returns:
         Sharpe ratio as a float
@@ -87,14 +92,22 @@ def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.02) -
     if len(returns) < 2:
         raise ValidationError("Need at least 2 returns to calculate Sharpe ratio")
     
+    # Validate frequency
+    valid_frequencies = {"daily": 252, "weekly": 52, "monthly": 12, "yearly": 1}
+    if frequency not in valid_frequencies:
+        raise ValidationError(f"Invalid frequency: {frequency}. Must be one of {list(valid_frequencies.keys())}")
+    
     # Convert to numpy array for calculations
     returns_array = np.array(returns)
     
+    # Calculate annualization factor
+    periods_per_year = valid_frequencies[frequency]
+    
     # Calculate mean return (annualized)
-    mean_return = np.mean(returns_array) * 252  # Assuming daily returns
+    mean_return = np.mean(returns_array) * periods_per_year
     
     # Calculate standard deviation (annualized)
-    std_return = np.std(returns_array, ddof=1) * np.sqrt(252)
+    std_return = np.std(returns_array, ddof=1) * np.sqrt(periods_per_year)
     
     # Avoid division by zero
     if std_return == 0:
@@ -168,8 +181,9 @@ def calculate_var(returns: List[float], confidence_level: float = 0.95) -> float
     returns_array = np.array(returns)
     
     # Calculate VaR using historical simulation
+    # For 95% confidence, we want the 5th percentile (worst 5% of returns)
     var_percentile = (1 - confidence_level) * 100
-    var = np.percentile(returns_array, [var_percentile])[0]
+    var = np.percentile(returns_array, var_percentile)
     
     return float(var)
 
@@ -239,8 +253,16 @@ def calculate_correlation(series1: List[float], series2: List[float]) -> float:
     arr1 = np.array(series1)
     arr2 = np.array(series2)
     
+    # Remove any NaN values from both arrays
+    mask = ~(np.isnan(arr1) | np.isnan(arr2))
+    if np.sum(mask) < 2:
+        raise ValidationError("Not enough valid data points after removing NaN values")
+    
+    arr1_clean = arr1[mask]
+    arr2_clean = arr2[mask]
+    
     # Calculate correlation
-    correlation = np.corrcoef(arr1, arr2)[0, 1]
+    correlation = np.corrcoef(arr1_clean, arr2_clean)[0, 1]
     
     # Handle NaN values
     if np.isnan(correlation):
@@ -331,6 +353,10 @@ def convert_timezone(dt: datetime, target_tz: str) -> datetime:
     Raises:
         ValidationError: If timezone is invalid
     """
+    # Validate timezone string format
+    if not isinstance(target_tz, str) or not target_tz.strip():
+        raise ValidationError("Timezone must be a non-empty string")
+    
     try:
         # Ensure datetime has timezone info
         if dt.tzinfo is None:
@@ -341,8 +367,10 @@ def convert_timezone(dt: datetime, target_tz: str) -> datetime:
         converted_dt = dt.astimezone(target_timezone)
         
         return converted_dt
+    except pytz.exceptions.UnknownTimeZoneError:
+        raise ValidationError(f"Invalid timezone: {target_tz}")
     except Exception as e:
-        raise ValidationError(f"Invalid timezone '{target_tz}': {str(e)}")
+        raise ValidationError(f"Error converting timezone: {str(e)}")
 
 
 def parse_datetime(dt_str: str, format_str: Optional[str] = None) -> datetime:

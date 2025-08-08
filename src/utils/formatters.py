@@ -35,6 +35,9 @@ from src.core.types import (
 )
 from src.core.logging import get_logger
 
+# Import from P-002A error handling
+from src.error_handling.error_handler import ErrorHandler
+
 logger = get_logger(__name__)
 
 

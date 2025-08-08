@@ -105,7 +105,12 @@ from .validators import (
     # Exchange data validation
     validate_order_response,
     validate_balance_data,
-    validate_trade_data
+    validate_trade_data,
+    
+    # Additional validation functions
+    validate_position,
+    validate_signal,
+    validate_order
 )
 
 from .formatters import (
@@ -197,7 +202,7 @@ __all__ = [
     'sanitize_user_input', 'validate_decimal', 'validate_positive_number',
     'validate_percentage', 'validate_trading_rules', 'validate_risk_limits',
     'validate_position_limits', 'validate_order_response', 'validate_balance_data',
-    'validate_trade_data',
+    'validate_trade_data', 'validate_position', 'validate_signal', 'validate_order',
     
     # Formatters
     'format_currency', 'format_percentage', 'format_pnl', 'format_quantity',
