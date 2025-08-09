@@ -152,7 +152,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
         self.max_reconnect_attempts = 5
     
     @time_execution
-    @retry(max_attempts=5, delay=2.0)
+    @retry(max_attempts=5, base_delay=2.0)
     async def execute_recovery(self, context: Dict[str, Any]) -> bool:
         """Handle network disconnection recovery."""
         component = context.get("component", "unknown")

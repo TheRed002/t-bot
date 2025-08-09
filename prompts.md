@@ -1464,7 +1464,7 @@ Add rate limiting configuration to exchange factory:
 **Technical Context**: Reference @SPECIFICATIONS.md Section 4.4 "Data Quality Management".
 
 ### Dependencies
-**Depends On:** P-014 (data pipeline), P-015 (feature engineering)
+**Depends On:** P-000A (data pipeline), P-015 (feature engineering)
 **Enables:** P-017+ (reliable ML training data)
 
 ### Task Details
@@ -1503,6 +1503,101 @@ src/data/quality/
 ```
 
 ---
+
+## **Prompt P-000A: Data Pipeline and Sources Integration**
+
+**Title:** Implement comprehensive data ingestion pipeline with validation
+
+### Context
+- **Current State:** Strategies require market data input
+- **Target State:** Reliable, validated data pipeline feeding all strategies
+- **Phase Goal:** High-quality data foundation for ML and strategies
+
+**Technical Context**: Reference @SPECIFICATIONS.md Section 4 "Data Management System".
+
+### Dependencies
+**Depends On:** P-002 (database), P-003+ (exchanges for market data), P-001 (types), P-002A (error handling), P-007A (utils)
+**Enables:** P-015 (feature engineering), P-000 (data quality), P-017+ (ML models)
+
+### Mandatory Integration Requirements
+**CRITICAL**: This prompt MUST integrate with existing components and use P-001 data types:
+
+#### Required Imports from Previous Prompts:
+```python
+# From P-001 - MANDATORY: Use existing MarketData types
+from src.core.types import MarketData, Ticker, OrderBook
+from src.core.exceptions import DataError, DataValidationError, DataSourceError
+from src.core.config import Config
+
+# From P-003+ - MANDATORY: Use existing exchange interfaces
+from src.exchanges.base import BaseExchange
+
+# From P-002 - MANDATORY: Use existing database models
+from src.database.models import MarketDataRecord, Trade
+from src.database.connection import get_session
+
+# From P-002A - MANDATORY: Use error handling patterns
+from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import RecoveryScenario
+
+# From P-007A - MANDATORY: Use decorators and validators
+from src.utils.decorators import time_execution, retry, circuit_breaker
+from src.utils.validators import validate_price, validate_quantity
+from src.utils.formatters import format_currency
+```
+
+#### Required Patterns from @COMMON_PATTERNS.md:
+- MANDATORY: Use standard exception handling for data source failures
+- MANDATORY: Apply @retry decorators for external data source calls
+- MANDATORY: Use structured logging for all data pipeline events
+- MANDATORY: Follow async context manager patterns for data connections
+
+### Task Details
+
+#### 1. Data Sources (`src/data/sources/`)
+Implement multiple data source integrations:
+- Market data from exchanges (OHLCV, order book, trades)
+- News sentiment from NewsAPI
+- Social media sentiment (Twitter/Reddit APIs)
+- Economic indicators (FRED API)
+- Alternative data (weather, satellite data)
+
+#### 2. Data Ingestion Pipeline (`src/data/pipeline/ingestion.py`)
+Implement robust data ingestion:
+- Real-time stream processing
+- Batch data collection for historical data
+- Data normalization across sources
+- Timestamp synchronization and alignment
+- Error handling and retry logic
+
+#### 3. Data Validation (`src/data/pipeline/validation.py`)
+Implement comprehensive data validation:
+- Schema validation for all data types
+- Range and sanity checks
+- Missing data detection and handling
+- Outlier detection using statistical methods
+- Data quality scoring and monitoring
+
+### Directory Structure to Create
+```
+src/data/
+├── __init__.py
+├── sources/
+│   ├── __init__.py
+│   ├── market_data.py
+│   ├── news_data.py
+│   ├── social_media.py
+│   └── alternative_data.py
+└── pipeline/
+    ├── __init__.py
+    ├── ingestion.py
+    ├── processing.py
+    ├── validation.py
+    └── storage.py
+```
+
+---
+
 
 ## **Prompt P-007A: Utility Framework and Helper Functions**
 
@@ -1725,7 +1820,7 @@ def format_pnl(pnl: float, currency: str = "USD") -> str:
 - **Update P-003+ (Exchanges)**: Apply performance monitoring decorators to all API calls
 - **Update P-008+ (Risk Management)**: Use validation utilities for risk parameter validation
 - **Update P-011+ (Strategies)**: Apply performance decorators and validation to all strategy methods
-- **Update P-014+ (Data Pipeline)**: Use formatting utilities for data display and validation
+- **Update P-000A+ (Data Pipeline)**: Use formatting utilities for data display and validation
 - **Update P-017+ (ML Models)**: Apply caching decorators and validation utilities
 - **Update P-026+ (Web Interface)**: Use formatters for API responses and financial data display
 ---
@@ -2864,7 +2959,7 @@ src/strategies/dynamic/
 
 ### Dependencies
 **Depends On:** P-013 (dynamic strategies), P-003+ (multi-exchange support), P-007 (advanced rate limiting), P-020 (execution engine)
-**Enables:** P-013B (market making), P-014 (data pipeline for latency monitoring)
+**Enables:** P-013B (market making), P-000A (data pipeline for latency monitoring)
 
 ### Task Details
 
@@ -2948,7 +3043,7 @@ strategies:
 - Latency monitoring and alerting operational
 
 ### Integration Points
-- Real-time market data from P-014 (data pipeline)
+- Real-time market data from P-000A (data pipeline)
 - Risk validation from P-008+ (risk management)
 - Multi-exchange execution via P-003+ (exchanges)
 - Performance monitoring via P-030+ (monitoring)
@@ -2968,7 +3063,7 @@ strategies:
 
 ### Dependencies
 **Depends On:** P-013A (arbitrage), P-007 (advanced rate limiting), P-020 (execution engine), P-008+ (risk management)
-**Enables:** P-014 (data pipeline), P-019 (AI strategies)
+**Enables:** P-000A (data pipeline), P-019 (AI strategies)
 
 ### Task Details
 
@@ -3056,7 +3151,7 @@ strategies:
 - Competitive positioning maintained automatically
 
 ### Integration Points
-- Order book data from P-014 (data pipeline)
+- Order book data from P-000A (data pipeline)
 - Risk limits from P-008+ (risk management)
 - Order execution via P-020 (execution engine)
 - Performance tracking via P-030+ (monitoring)
@@ -3076,7 +3171,7 @@ strategies:
 
 ### Dependencies
 **Depends On:** P-012+ (all strategies), P-008+ (risk management), P-002 (database for historical data)
-**Enables:** P-013D (evolutionary strategies), P-013E (hybrid strategies), P-014 (data pipeline)
+**Enables:** P-013D (evolutionary strategies), P-013E (hybrid strategies), P-000A (data pipeline)
 
 ### Task Details
 
@@ -3184,7 +3279,7 @@ backtesting:
 - All financial metrics calculated correctly and validated
 
 ### Integration Points
-- Historical data from P-002 (database) and P-014 (data pipeline)
+- Historical data from P-002 (database) and P-000A (data pipeline)
 - Strategy testing via P-012+ (all strategy implementations)
 - Risk validation through P-008+ (risk management)
 - Web interface integration via P-027+ (API endpoints)
@@ -3334,7 +3429,7 @@ evolutionary_strategies:
 
 ### Dependencies
 **Depends On:** P-013D (evolutionary), P-012+ (all strategy types), P-010 (regime detection)
-**Enables:** P-014 (data pipeline), P-019 (AI strategies), P-020 (execution engine)
+**Enables:** P-000A (data pipeline), P-019 (AI strategies), P-020 (execution engine)
 
 ### Task Details
 
@@ -3489,113 +3584,20 @@ hybrid_strategies:
 
 ---
 
-## **Prompt P-014: Data Pipeline and Sources Integration**
-
-**Title:** Implement comprehensive data ingestion pipeline with validation
-
-### Context
-- **Current State:** Strategies require market data input
-- **Target State:** Reliable, validated data pipeline feeding all strategies
-- **Phase Goal:** High-quality data foundation for ML and strategies
-
-**Technical Context**: Reference @SPECIFICATIONS.md Section 4 "Data Management System".
-
-### Dependencies
-**Depends On:** P-002 (database), P-003+ (exchanges for market data), P-001 (types), P-002A (error handling), P-007A (utils)
-**Enables:** P-015 (feature engineering), P-000 (data quality), P-017+ (ML models)
-
-### Mandatory Integration Requirements
-**CRITICAL**: This prompt MUST integrate with existing components and use P-001 data types:
-
-#### Required Imports from Previous Prompts:
-```python
-# From P-001 - MANDATORY: Use existing MarketData types
-from src.core.types import MarketData, Ticker, OrderBook
-from src.core.exceptions import DataError, DataValidationError, DataSourceError
-from src.core.config import Config
-
-# From P-003+ - MANDATORY: Use existing exchange interfaces
-from src.exchanges.base import BaseExchange
-
-# From P-002 - MANDATORY: Use existing database models
-from src.database.models import MarketDataRecord, Trade
-from src.database.connection import get_session
-
-# From P-002A - MANDATORY: Use error handling patterns
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import RecoveryScenario
-
-# From P-007A - MANDATORY: Use decorators and validators
-from src.utils.decorators import time_execution, retry, circuit_breaker
-from src.utils.validators import validate_price, validate_quantity
-from src.utils.formatters import format_currency
-```
-
-#### Required Patterns from @COMMON_PATTERNS.md:
-- MANDATORY: Use standard exception handling for data source failures
-- MANDATORY: Apply @retry decorators for external data source calls
-- MANDATORY: Use structured logging for all data pipeline events
-- MANDATORY: Follow async context manager patterns for data connections
-
-### Task Details
-
-#### 1. Data Sources (`src/data/sources/`)
-Implement multiple data source integrations:
-- Market data from exchanges (OHLCV, order book, trades)
-- News sentiment from NewsAPI
-- Social media sentiment (Twitter/Reddit APIs)
-- Economic indicators (FRED API)
-- Alternative data (weather, satellite data)
-
-#### 2. Data Ingestion Pipeline (`src/data/pipeline/ingestion.py`)
-Implement robust data ingestion:
-- Real-time stream processing
-- Batch data collection for historical data
-- Data normalization across sources
-- Timestamp synchronization and alignment
-- Error handling and retry logic
-
-#### 3. Data Validation (`src/data/pipeline/validation.py`)
-Implement comprehensive data validation:
-- Schema validation for all data types
-- Range and sanity checks
-- Missing data detection and handling
-- Outlier detection using statistical methods
-- Data quality scoring and monitoring
-
-### Directory Structure to Create
-```
-src/data/
-├── __init__.py
-├── sources/
-│   ├── __init__.py
-│   ├── market_data.py
-│   ├── news_data.py
-│   ├── social_media.py
-│   └── alternative_data.py
-└── pipeline/
-    ├── __init__.py
-    ├── ingestion.py
-    ├── processing.py
-    ├── validation.py
-    └── storage.py
-```
-
----
 
 ## **Prompt P-015: Feature Engineering Framework**
 
 **Title:** Implement comprehensive feature engineering pipeline with 100+ indicators
 
 ### Context
-- **Current State:** Data pipeline operational (P-014)
+- **Current State:** Data pipeline operational (P-000A)
 - **Target State:** Rich feature set for ML models and advanced strategies
 - **Phase Goal:** Comprehensive technical and alternative features
 
 **Technical Context**: Reference @SPECIFICATIONS.md Section 4.3 "Feature Engineering". Use TA-Lib for technical indicators.
 
 ### Dependencies
-**Depends On:** P-014 (data pipeline), P-001 (types), P-002A (error handling), P-007A (utils)
+**Depends On:** P-000A (data pipeline), P-001 (types), P-002A (error handling), P-007A (utils)
 **Enables:** P-000 (data quality), P-017+ (ML models), P-019 (AI strategies)
 
 ### Mandatory Integration Requirements
@@ -3603,7 +3605,7 @@ src/data/
 
 #### Required Imports from Previous Prompts:
 ```python
-# From P-014 - MANDATORY: Use existing data pipeline
+# From P-000A - MANDATORY: Use existing data pipeline
 from src.data.pipeline.processor import DataProcessor
 from src.data.sources.base import BaseDataSource
 
@@ -5486,7 +5488,7 @@ Execute prompts **P-001 through P-037** in sequential order (including all sub-p
 - **Foundation**: P-001 (core) → P-002 (database) → P-002A (error handling) → P-003 (exchanges)
 - **Risk Management**: P-008 → P-009 → P-010 → P-010A (capital management)
 - **Strategies**: P-011 → P-012 → P-013 → P-013A (arbitrage) → P-013B (market making) → P-013C (backtesting) → P-019
-- **Data Pipeline**: P-014 → P-015 → P-000 → P-007A (utils)
+- **Data Pipeline**: P-000A → P-015 → P-000 → P-007A (utils)
 - **ML Pipeline**: P-017 → P-018 → P-019
 - **Web Interface**: P-026 → P-027 → P-028 → P-029
 - **Production**: P-030 → P-031 → P-032 → P-033 → P-034 → P-035 → P-036 → P-037

@@ -20,6 +20,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.core.exceptions import DataError, ValidationError
 from src.core.logging import get_logger
 
+# Import utils from P-007A
+from src.utils.decorators import time_execution
+
+# Import error handling from P-002A
+from src.error_handling.error_handler import ErrorHandler
+
 # Import database models
 from .models import (
     Base, User, BotInstance, Trade, Position, BalanceSnapshot,
@@ -34,8 +40,13 @@ T = TypeVar('T', bound=Base)
 class DatabaseQueries:
     """Database query utilities with common CRUD operations."""
     
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, config: Optional[Dict[str, Any]] = None):
         self.session = session
+        if config:
+            self.error_handler = ErrorHandler(config)
+        else:
+            # TODO: Initialize with default config in production
+            self.error_handler = None
     
     # Generic CRUD operations
     async def create(self, model_instance: T) -> T:
@@ -47,6 +58,27 @@ class DatabaseQueries:
             return model_instance
         except SQLAlchemyError as e:
             await self.session.rollback()
+            
+            # Use ErrorHandler for sophisticated error management if available
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="database_queries",
+                    operation="create_record",
+                    details={"model_type": type(model_instance).__name__}
+                )
+                
+                handled = await self.error_handler.handle_error(error_context)
+                if handled:
+                    # Retry the operation after error handling
+                    try:
+                        self.session.add(model_instance)
+                        await self.session.commit()
+                        await self.session.refresh(model_instance)
+                        return model_instance
+                    except SQLAlchemyError:
+                        pass  # Fall through to raise original error
+            
             logger.error("Database create operation failed", error=str(e))
             raise DataError(f"Failed to create record: {str(e)}")
     
@@ -58,6 +90,26 @@ class DatabaseQueries:
             )
             return result.scalar_one_or_none()
         except SQLAlchemyError as e:
+            # Use ErrorHandler for sophisticated error management if available
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="database_queries",
+                    operation="get_by_id",
+                    details={"model_type": model_class.__name__, "record_id": record_id}
+                )
+                
+                handled = await self.error_handler.handle_error(error_context)
+                if handled:
+                    # Retry the operation after error handling
+                    try:
+                        result = await self.session.execute(
+                            select(model_class).where(model_class.id == record_id)
+                        )
+                        return result.scalar_one_or_none()
+                    except SQLAlchemyError:
+                        pass  # Fall through to raise original error
+            
             logger.error("Database get_by_id operation failed", error=str(e))
             raise DataError(f"Failed to get record by ID: {str(e)}")
     
@@ -346,6 +398,7 @@ class DatabaseQueries:
             raise DataError(f"Failed to get audit logs by user: {str(e)}")
     
     # Aggregation queries
+    @time_execution
     async def get_total_pnl_by_bot(self, bot_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None) -> Decimal:
         """Get total P&L for a bot within a time range."""
         try:

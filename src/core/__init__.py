@@ -46,4 +46,7 @@ __all__ = [
     # Logging
     "get_logger", "setup_logging", "log_performance", "log_async_performance",
     "get_secure_logger", "PerformanceMonitor", "correlation_context",
+    
+    # Error handling types (P-002A)
+    "ErrorPattern",
 ] 

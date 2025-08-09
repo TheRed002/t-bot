@@ -24,6 +24,13 @@ from src.core.config import Config
 from src.core.exceptions import DataError, DataSourceError
 from src.core.logging import get_logger
 
+# Import utils from P-007A
+from src.utils.decorators import time_execution, retry
+
+# Import error handling from P-002A
+from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
+
 logger = get_logger(__name__)
 
 # Global connection instances
@@ -44,7 +51,10 @@ class DatabaseConnectionManager:
         self.influxdb_client = None
         self._health_check_task = None
         self._connection_healthy = True
+        self.error_handler = ErrorHandler(config)
         
+    @time_execution
+    @retry(max_attempts=3)
     async def initialize(self) -> None:
         """Initialize all database connections."""
         try:
@@ -54,8 +64,23 @@ class DatabaseConnectionManager:
             await self._start_health_monitoring()
             logger.info("Database connections initialized successfully")
         except Exception as e:
-            logger.error("Failed to initialize database connections", error=str(e))
-            raise DataSourceError(f"Database initialization failed: {str(e)}")
+            # Create error context for comprehensive error handling
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="database_connection",
+                operation="initialize_all_connections",
+                details={"failed_during": "initialization"}
+            )
+            
+            # Use ErrorHandler for sophisticated error management
+            recovery_scenario = NetworkDisconnectionRecovery(self.config)
+            handled = await self.error_handler.handle_error(error_context, recovery_scenario)
+            
+            if not handled:
+                logger.error("Failed to initialize database connections", error=str(e))
+                raise DataSourceError(f"Database initialization failed: {str(e)}")
+            else:
+                logger.info("Database connections recovered after error handling")
     
     async def _setup_postgresql(self) -> None:
         """Setup PostgreSQL connections with async support."""
@@ -92,8 +117,23 @@ class DatabaseConnectionManager:
             logger.info("PostgreSQL connection established")
             
         except Exception as e:
-            logger.error("PostgreSQL connection failed", error=str(e))
-            raise DataSourceError(f"PostgreSQL connection failed: {str(e)}")
+            # Create error context for comprehensive error handling
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="database_connection",
+                operation="setup_postgresql",
+                details={"database_url": self.config.get_database_url()}
+            )
+            
+            # Use ErrorHandler for sophisticated error management
+            recovery_scenario = NetworkDisconnectionRecovery(self.config)
+            handled = await self.error_handler.handle_error(error_context, recovery_scenario)
+            
+            if not handled:
+                logger.error("PostgreSQL connection failed", error=str(e))
+                raise DataSourceError(f"PostgreSQL connection failed: {str(e)}")
+            else:
+                logger.info("PostgreSQL connection recovered after error handling")
     
     async def _setup_redis(self) -> None:
         """Setup Redis connection with async support."""
@@ -111,8 +151,23 @@ class DatabaseConnectionManager:
             logger.info("Redis connection established")
             
         except Exception as e:
-            logger.error("Redis connection failed", error=str(e))
-            raise DataSourceError(f"Redis connection failed: {str(e)}")
+            # Create error context for comprehensive error handling
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="database_connection",
+                operation="setup_redis",
+                details={"redis_url": self.config.get_redis_url()}
+            )
+            
+            # Use ErrorHandler for sophisticated error management
+            recovery_scenario = NetworkDisconnectionRecovery(self.config)
+            handled = await self.error_handler.handle_error(error_context, recovery_scenario)
+            
+            if not handled:
+                logger.error("Redis connection failed", error=str(e))
+                raise DataSourceError(f"Redis connection failed: {str(e)}")
+            else:
+                logger.info("Redis connection recovered after error handling")
     
     async def _setup_influxdb(self) -> None:
         """Setup InfluxDB connection."""
@@ -132,8 +187,23 @@ class DatabaseConnectionManager:
             logger.info("InfluxDB connection established")
             
         except Exception as e:
-            logger.error("InfluxDB connection failed", error=str(e))
-            raise DataSourceError(f"InfluxDB connection failed: {str(e)}")
+            # Create error context for comprehensive error handling
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="database_connection",
+                operation="setup_influxdb",
+                details={"influxdb_url": f"http://{self.config.database.influxdb_host}:{self.config.database.influxdb_port}"}
+            )
+            
+            # Use ErrorHandler for sophisticated error management
+            recovery_scenario = NetworkDisconnectionRecovery(self.config)
+            handled = await self.error_handler.handle_error(error_context, recovery_scenario)
+            
+            if not handled:
+                logger.error("InfluxDB connection failed", error=str(e))
+                raise DataSourceError(f"InfluxDB connection failed: {str(e)}")
+            else:
+                logger.info("InfluxDB connection recovered after error handling")
     
     async def _start_health_monitoring(self) -> None:
         """Start background health monitoring."""
@@ -170,6 +240,7 @@ class DatabaseConnectionManager:
                 
                 await asyncio.sleep(10)  # Retry sooner on failure
     
+    @time_execution
     async def get_async_session(self) -> AsyncSession:
         """Get async database session."""
         if not self.async_engine:

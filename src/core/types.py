@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator
+from dataclasses import dataclass
 
 
 class TradingMode(Enum):
@@ -643,3 +644,43 @@ class SocialSentiment(Enum):
     NEUTRAL = "neutral"
     BEARISH = "bearish"
     VERY_BEARISH = "very_bearish"
+
+
+# =============================================================================
+# Error Handling Types
+# =============================================================================
+
+@dataclass
+class ErrorPattern:
+    """Represents a detected error pattern."""
+    pattern_id: str
+    pattern_type: str  # frequency, correlation, trend, anomaly
+    component: str
+    error_type: str
+    frequency: float  # errors per hour
+    severity: str
+    first_detected: datetime
+    last_detected: datetime
+    occurrence_count: int
+    confidence: float  # 0.0 to 1.0
+    description: str
+    suggested_action: str
+    is_active: bool = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "pattern_id": self.pattern_id,
+            "pattern_type": self.pattern_type,
+            "component": self.component,
+            "error_type": self.error_type,
+            "frequency": self.frequency,
+            "severity": self.severity,
+            "first_detected": self.first_detected.isoformat(),
+            "last_detected": self.last_detected.isoformat(),
+            "occurrence_count": self.occurrence_count,
+            "confidence": self.confidence,
+            "description": self.description,
+            "suggested_action": self.suggested_action,
+            "is_active": self.is_active
+        }

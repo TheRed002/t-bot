@@ -29,13 +29,12 @@ from pathlib import Path
 from src.core.exceptions import ValidationError, DataError
 from src.core.types import (
     OrderRequest, OrderResponse, MarketData, Position,
-    Signal, SignalDirection, OrderSide, OrderType,
-    StrategyConfig, RiskConfig, Config, TradingMode
+    Signal, SignalDirection, OrderSide, OrderType, TradingMode
+    # TODO: Add RiskConfig, StrategyConfig when implemented in P-008+ (Risk Management)
 )
+from src.core.config import Config
 from src.core.logging import get_logger
 
-# Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
 
 logger = get_logger(__name__)
 
@@ -339,7 +338,7 @@ def validate_config(config: Union[Dict[str, Any], Config], required_fields: List
     return True
 
 
-def validate_risk_parameters(params: Union[Dict[str, Any], RiskConfig]) -> bool:
+def validate_risk_parameters(params: Union[Dict[str, Any], Any]) -> bool:  # TODO: Use RiskConfig when available
     """
     Validate risk management parameters using core RiskConfig type.
     
@@ -410,7 +409,7 @@ def validate_signal(signal: Signal) -> bool:
     return True
 
 
-def validate_strategy_config(config: Union[Dict[str, Any], StrategyConfig]) -> bool:
+def validate_strategy_config(config: Union[Dict[str, Any], Any]) -> bool:  # TODO: Use StrategyConfig when available
     """
     Validate strategy configuration using core StrategyConfig type.
     

@@ -24,7 +24,7 @@ from src.core.exceptions import (
     StateConsistencyError, SecurityError
 )
 from src.core.config import Config
-from src.error_handling.pattern_analytics import ErrorPattern
+from src.core.types import ErrorPattern
 
 # MANDATORY: Import from P-007A utils framework
 from src.utils.decorators import time_execution, retry, circuit_breaker
@@ -326,7 +326,7 @@ class ErrorHandler:
             name: breaker.state for name, breaker in self.circuit_breakers.items()
         }
     
-    def get_error_patterns(self) -> Dict[str, 'ErrorPattern']:
+    def get_error_patterns(self) -> Dict[str, ErrorPattern]:
         """Get current error patterns for analysis."""
         return self.error_patterns.copy()
 

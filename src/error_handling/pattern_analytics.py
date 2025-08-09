@@ -20,47 +20,13 @@ from src.core.logging import get_logger
 # MANDATORY: Import from P-001 core framework
 from src.core.exceptions import TradingBotError
 from src.core.config import Config
+from src.core.types import ErrorPattern
 
 # MANDATORY: Import from P-007A utils framework
 from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
-
-@dataclass
-class ErrorPattern:
-    """Represents a detected error pattern."""
-    pattern_id: str
-    pattern_type: str  # frequency, correlation, trend, anomaly
-    component: str
-    error_type: str
-    frequency: float  # errors per hour
-    severity: str
-    first_detected: datetime
-    last_detected: datetime
-    occurrence_count: int
-    confidence: float  # 0.0 to 1.0
-    description: str
-    suggested_action: str
-    is_active: bool = True
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            "pattern_id": self.pattern_id,
-            "pattern_type": self.pattern_type,
-            "component": self.component,
-            "error_type": self.error_type,
-            "frequency": self.frequency,
-            "severity": self.severity,
-            "first_detected": self.first_detected.isoformat(),
-            "last_detected": self.last_detected.isoformat(),
-            "occurrence_count": self.occurrence_count,
-            "confidence": self.confidence,
-            "description": self.description,
-            "suggested_action": self.suggested_action,
-            "is_active": self.is_active
-        }
 
 
 @dataclass
@@ -384,7 +350,12 @@ class ErrorPatternAnalytics:
         sum_xy = sum(x * y for x, y in zip(x_values, y_values))
         sum_x2 = sum(x ** 2 for x in x_values)
         
-        slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x ** 2)
+        # Calculate slope with division by zero protection
+        denominator = n * sum_x2 - sum_x ** 2
+        if denominator == 0:
+            return None  # Cannot calculate slope with zero denominator
+        
+        slope = (n * sum_xy - sum_x * sum_y) / denominator
         
         # Determine trend direction and strength
         if abs(slope) < 0.1:
