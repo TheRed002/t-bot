@@ -24,10 +24,14 @@ from dataclasses import dataclass
 from enum import Enum
 
 # Import from P-001 core components
-from src.core.types import MarketData, Signal, Position, Ticker, OrderBook
+from src.core.types import (
+    MarketData, Signal, Position, Ticker, OrderBook, 
+    ValidationLevel, ValidationResult
+)
 from src.core.exceptions import (
     DataError, DataValidationError, ValidationError
 )
+from src.core.config import Config
 from src.core.logging import get_logger
 
 # Import from P-002A error handling
@@ -41,19 +45,7 @@ from src.utils.helpers import calculate_percentage_change
 logger = get_logger(__name__)
 
 
-class ValidationLevel(Enum):
-    """Validation severity levels"""
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-
-
-class ValidationResult(Enum):
-    """Validation result enumeration"""
-    PASS = "pass"
-    FAIL = "fail"
-    WARNING = "warning"
+# ValidationLevel and ValidationResult are now imported from core.types
 
 
 @dataclass
@@ -77,33 +69,30 @@ class DataValidator:
     ensuring data quality for ML models and trading strategies.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Config):
         """
         Initialize the data validator with configuration.
         
         Args:
-            config: Validation configuration dictionary
+            config: Application configuration
         """
         self.config = config
-        # TODO: Remove in production - Create a minimal config for ErrorHandler
-        from src.core.config import Config
-        error_config = Config()
-        self.error_handler = ErrorHandler(error_config)
+        self.error_handler = ErrorHandler(config)
         
         # Validation thresholds
-        self.price_change_threshold = config.get('price_change_threshold', 0.5)  # 50% max change
-        self.volume_change_threshold = config.get('volume_change_threshold', 10.0)  # 1000% max change
-        self.outlier_std_threshold = config.get('outlier_std_threshold', 3.0)  # 3 standard deviations
-        self.max_data_age_seconds = config.get('max_data_age_seconds', 60)  # 1 minute max age
+        self.price_change_threshold = getattr(config, 'price_change_threshold', 0.5)  # 50% max change
+        self.volume_change_threshold = getattr(config, 'volume_change_threshold', 10.0)  # 1000% max change
+        self.outlier_std_threshold = getattr(config, 'outlier_std_threshold', 3.0)  # 3 standard deviations
+        self.max_data_age_seconds = getattr(config, 'max_data_age_seconds', 60)  # 1 minute max age
         
         # Statistical tracking for outlier detection
         self.price_history: Dict[str, List[float]] = {}
         self.volume_history: Dict[str, List[float]] = {}
-        self.max_history_size = config.get('max_history_size', 1000)
+        self.max_history_size = getattr(config, 'max_history_size', 1000)
         
         # Cross-source consistency tracking
         self.source_data: Dict[str, Dict[str, Any]] = {}
-        self.consistency_threshold = config.get('consistency_threshold', 0.01)  # 1% max difference
+        self.consistency_threshold = getattr(config, 'consistency_threshold', 0.01)  # 1% max difference
         
         logger.info("DataValidator initialized", config=config)
     

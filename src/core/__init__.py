@@ -8,7 +8,10 @@ exceptions, and logging systems.
 # Core framework exports
 from .types import (
     TradingMode, SignalDirection, OrderSide, OrderType,
-    Signal, MarketData, OrderRequest, OrderResponse, Position
+    Signal, MarketData, OrderRequest, OrderResponse, Position,
+    ValidationLevel, ValidationResult, QualityLevel, DriftType,
+    IngestionMode, PipelineStatus, ProcessingStep, StorageMode,
+    NewsSentiment, SocialSentiment
 )
 
 from .config import Config, DatabaseConfig, SecurityConfig
@@ -28,6 +31,9 @@ __all__ = [
     # Types
     "TradingMode", "SignalDirection", "OrderSide", "OrderType",
     "Signal", "MarketData", "OrderRequest", "OrderResponse", "Position",
+    "ValidationLevel", "ValidationResult", "QualityLevel", "DriftType",
+    "IngestionMode", "PipelineStatus", "ProcessingStep", "StorageMode",
+    "NewsSentiment", "SocialSentiment",
     
     # Configuration
     "Config", "DatabaseConfig", "SecurityConfig",

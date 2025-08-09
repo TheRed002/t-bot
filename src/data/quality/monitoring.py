@@ -26,10 +26,14 @@ import json
 import hashlib
 
 # Import from P-001 core components
-from src.core.types import MarketData, Signal, Position, Ticker, OrderBook
+from src.core.types import (
+    MarketData, Signal, Position, Ticker, OrderBook,
+    QualityLevel, DriftType
+)
 from src.core.exceptions import (
     DataError, DataValidationError, ValidationError
 )
+from src.core.config import Config
 from src.core.logging import get_logger
 
 # Import from P-002A error handling
@@ -43,21 +47,7 @@ from src.utils.helpers import calculate_percentage_change
 logger = get_logger(__name__)
 
 
-class QualityLevel(Enum):
-    """Quality level enumeration"""
-    EXCELLENT = "excellent"
-    GOOD = "good"
-    FAIR = "fair"
-    POOR = "poor"
-    CRITICAL = "critical"
-
-
-class DriftType(Enum):
-    """Data drift type enumeration"""
-    CONCEPT_DRIFT = "concept_drift"
-    COVARIATE_DRIFT = "covariate_drift"
-    LABEL_DRIFT = "label_drift"
-    DISTRIBUTION_DRIFT = "distribution_drift"
+# QualityLevel and DriftType are now imported from core.types
 
 
 @dataclass
@@ -90,30 +80,27 @@ class QualityMonitor:
     drift detection, distribution monitoring, and automated alerting.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Config):
         """
         Initialize the quality monitor with configuration.
         
         Args:
-            config: Monitoring configuration dictionary
+            config: Application configuration
         """
         self.config = config
-        # TODO: Remove in production - Create a minimal config for ErrorHandler
-        from src.core.config import Config
-        error_config = Config()
-        self.error_handler = ErrorHandler(error_config)
+        self.error_handler = ErrorHandler(config)
         
         # Monitoring thresholds
-        self.quality_thresholds = config.get('quality_thresholds', {
+        self.quality_thresholds = getattr(config, 'quality_thresholds', {
             'excellent': 0.95,
             'good': 0.85,
             'fair': 0.70,
             'poor': 0.50
         })
         
-        self.drift_threshold = config.get('drift_threshold', 0.1)  # 10% drift threshold
-        self.distribution_window = config.get('distribution_window', 1000)  # Data points for distribution
-        self.alert_cooldown = config.get('alert_cooldown', 3600)  # 1 hour cooldown
+        self.drift_threshold = getattr(config, 'drift_threshold', 0.1)  # 10% drift threshold
+        self.distribution_window = getattr(config, 'distribution_window', 1000)  # Data points for distribution
+        self.alert_cooldown = getattr(config, 'alert_cooldown', 3600)  # 1 hour cooldown
         
         # Data storage for monitoring
         self.price_distributions: Dict[str, List[float]] = {}

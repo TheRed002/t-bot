@@ -30,6 +30,7 @@ from src.core.types import MarketData, Signal, Position, Ticker, OrderBook
 from src.core.exceptions import (
     DataError, DataValidationError, ValidationError
 )
+from src.core.config import Config
 from src.core.logging import get_logger
 
 # Import from P-002A error handling
@@ -80,29 +81,26 @@ class DataCleaner:
     outliers, noise, and data quality issues.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Config):
         """
         Initialize the data cleaner with configuration.
         
         Args:
-            config: Cleaning configuration dictionary
+            config: Application configuration
         """
         self.config = config
-        # TODO: Remove in production - Create a minimal config for ErrorHandler
-        from src.core.config import Config
-        error_config = Config()
-        self.error_handler = ErrorHandler(error_config)
+        self.error_handler = ErrorHandler(config)
         
         # Cleaning thresholds
-        self.outlier_threshold = config.get('outlier_threshold', 3.0)  # Z-score threshold
-        self.missing_threshold = config.get('missing_threshold', 0.1)  # 10% missing data threshold
-        self.smoothing_window = config.get('smoothing_window', 5)  # Moving average window
-        self.duplicate_threshold = config.get('duplicate_threshold', 1.0)  # 1 second threshold
+        self.outlier_threshold = getattr(config, 'outlier_threshold', 3.0)  # Z-score threshold
+        self.missing_threshold = getattr(config, 'missing_threshold', 0.1)  # 10% missing data threshold
+        self.smoothing_window = getattr(config, 'smoothing_window', 5)  # Moving average window
+        self.duplicate_threshold = getattr(config, 'duplicate_threshold', 1.0)  # 1 second threshold
         
         # Data history for cleaning
         self.price_history: Dict[str, List[float]] = {}
         self.volume_history: Dict[str, List[float]] = {}
-        self.max_history_size = config.get('max_history_size', 1000)
+        self.max_history_size = getattr(config, 'max_history_size', 1000)
         
         # Cleaning statistics
         self.cleaning_stats = {

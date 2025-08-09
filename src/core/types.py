@@ -75,6 +75,74 @@ class ConnectionType(Enum):
     MARKET_DATA = "market_data"
 
 
+# Data validation and quality enums
+class ValidationLevel(Enum):
+    """Data validation severity levels used across quality and pipeline validation"""
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class ValidationResult(Enum):
+    """Data validation result enumeration"""
+    PASS = "pass"
+    FAIL = "fail"
+    WARNING = "warning"
+
+
+class QualityLevel(Enum):
+    """Data quality level enumeration for quality monitoring"""
+    EXCELLENT = "excellent"
+    GOOD = "good"
+    FAIR = "fair"
+    POOR = "poor"
+    CRITICAL = "critical"
+
+
+class DriftType(Enum):
+    """Data drift type enumeration for quality monitoring"""
+    CONCEPT_DRIFT = "concept_drift"
+    COVARIATE_DRIFT = "covariate_drift"
+    LABEL_DRIFT = "label_drift"
+    DISTRIBUTION_DRIFT = "distribution_drift"
+
+
+# Data pipeline enums
+class IngestionMode(Enum):
+    """Data ingestion mode enumeration"""
+    REAL_TIME = "real_time"
+    BATCH = "batch"
+    HYBRID = "hybrid"
+
+
+class PipelineStatus(Enum):
+    """Pipeline status enumeration"""
+    STOPPED = "stopped"
+    STARTING = "starting"
+    RUNNING = "running"
+    PAUSED = "paused"
+    ERROR = "error"
+    STOPPING = "stopping"
+
+
+class ProcessingStep(Enum):
+    """Data processing step enumeration"""
+    NORMALIZE = "normalize"
+    ENRICH = "enrich"
+    AGGREGATE = "aggregate"
+    TRANSFORM = "transform"
+    VALIDATE = "validate"
+    FILTER = "filter"
+
+
+class StorageMode(Enum):
+    """Storage operation mode enumeration"""
+    REAL_TIME = "real_time"
+    BATCH = "batch"
+    BUFFER = "buffer"
+
+
 class Signal(BaseModel):
     """Trading signal with direction, confidence, and metadata.
     
@@ -555,3 +623,23 @@ class StrategyMetrics(BaseModel):
         if not 0.0 <= v <= 1.0:
             raise ValueError(f'Win rate must be between 0 and 1, got {v}')
         return v
+
+
+# Data Module Enums (moved here to avoid circular dependencies)
+
+class NewsSentiment(Enum):
+    """News sentiment enumeration"""
+    VERY_POSITIVE = "very_positive"
+    POSITIVE = "positive"
+    NEUTRAL = "neutral"
+    NEGATIVE = "negative"
+    VERY_NEGATIVE = "very_negative"
+
+
+class SocialSentiment(Enum):
+    """Social media sentiment enumeration"""
+    VERY_BULLISH = "very_bullish"
+    BULLISH = "bullish"
+    NEUTRAL = "neutral"
+    BEARISH = "bearish"
+    VERY_BEARISH = "very_bearish"
