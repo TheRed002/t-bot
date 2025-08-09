@@ -21,7 +21,10 @@ from src.core.exceptions import DataError, ValidationError
 from src.core.logging import get_logger
 
 # Import utils from P-007A
-from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution, validate_input, cache_result, log_performance, timeout
+from src.utils.validators import validate_decimal, validate_positive_number, validate_order_request
+from src.utils.helpers import round_to_precision
+from src.utils.constants import LIMITS, TIMEOUTS
 
 # Import error handling from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -49,9 +52,25 @@ class DatabaseQueries:
             self.error_handler = None
     
     # Generic CRUD operations
+    @time_execution
+    @validate_input
+    @log_performance
     async def create(self, model_instance: T) -> T:
         """Create a new record."""
         try:
+            # Validate financial data if it's a Trade model
+            if hasattr(model_instance, 'price') and hasattr(model_instance, 'quantity'):
+                validate_decimal(model_instance.price, "price")
+                validate_positive_number(model_instance.price, "price")
+                validate_decimal(model_instance.quantity, "quantity") 
+                validate_positive_number(model_instance.quantity, "quantity")
+                
+                # Round to proper precision for financial calculations
+                if hasattr(model_instance, 'price'):
+                    model_instance.price = round_to_precision(model_instance.price, 8)
+                if hasattr(model_instance, 'quantity'):
+                    model_instance.quantity = round_to_precision(model_instance.quantity, 8)
+            
             self.session.add(model_instance)
             await self.session.commit()
             await self.session.refresh(model_instance)
@@ -82,6 +101,10 @@ class DatabaseQueries:
             logger.error("Database create operation failed", error=str(e))
             raise DataError(f"Failed to create record: {str(e)}")
     
+    @time_execution
+    @validate_input
+    @cache_result(ttl_seconds=300)  # Cache for 5 minutes
+    @log_performance
     async def get_by_id(self, model_class: type[T], record_id: str) -> Optional[T]:
         """Get a record by ID."""
         try:
@@ -252,6 +275,11 @@ class DatabaseQueries:
             raise DataError(f"Failed to get running bots: {str(e)}")
     
     # Trade queries
+    @time_execution
+    @validate_input
+    @cache_result(ttl_seconds=60)  # Cache for 1 minute for frequent queries
+    @log_performance
+    @timeout(seconds=30)
     async def get_trades_by_bot(self, bot_id: str, limit: Optional[int] = None, offset: int = 0) -> List[Trade]:
         """Get trades for a specific bot."""
         try:
@@ -322,6 +350,11 @@ class DatabaseQueries:
             raise DataError(f"Failed to get open positions: {str(e)}")
     
     # Balance queries
+    @time_execution
+    @validate_input
+    @cache_result(ttl_seconds=30)  # Cache for 30 seconds for real-time balance queries
+    @log_performance
+    @timeout(seconds=15)
     async def get_latest_balance_snapshot(self, user_id: str, exchange: str, currency: str) -> Optional[BalanceSnapshot]:
         """Get the latest balance snapshot for a user, exchange, and currency."""
         try:
@@ -399,6 +432,10 @@ class DatabaseQueries:
     
     # Aggregation queries
     @time_execution
+    @validate_input
+    @cache_result(ttl_seconds=120)  # Cache for 2 minutes for PnL calculations
+    @log_performance
+    @timeout(seconds=45)
     async def get_total_pnl_by_bot(self, bot_id: str, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None) -> Decimal:
         """Get total P&L for a bot within a time range."""
         try:

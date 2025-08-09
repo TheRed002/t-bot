@@ -25,7 +25,9 @@ from src.core.exceptions import DataError, DataSourceError
 from src.core.logging import get_logger
 
 # Import utils from P-007A
-from src.utils.decorators import time_execution, retry
+from src.utils.decorators import time_execution, retry, circuit_breaker, timeout, log_performance
+from src.utils.helpers import test_connection, measure_latency, ping_host
+from src.utils.constants import TIMEOUTS, LIMITS
 
 # Import error handling from P-002A
 from src.error_handling.error_handler import ErrorHandler
@@ -55,6 +57,8 @@ class DatabaseConnectionManager:
         
     @time_execution
     @retry(max_attempts=3)
+    @circuit_breaker(failure_threshold=3, recovery_timeout=30)
+    @timeout(seconds=60)
     async def initialize(self) -> None:
         """Initialize all database connections."""
         try:
@@ -82,6 +86,9 @@ class DatabaseConnectionManager:
             else:
                 logger.info("Database connections recovered after error handling")
     
+    @time_execution
+    @circuit_breaker(failure_threshold=2, recovery_timeout=15)
+    @timeout(seconds=30)
     async def _setup_postgresql(self) -> None:
         """Setup PostgreSQL connections with async support."""
         try:
@@ -135,6 +142,9 @@ class DatabaseConnectionManager:
             else:
                 logger.info("PostgreSQL connection recovered after error handling")
     
+    @time_execution
+    @circuit_breaker(failure_threshold=2, recovery_timeout=15)
+    @timeout(seconds=20)
     async def _setup_redis(self) -> None:
         """Setup Redis connection with async support."""
         try:
@@ -169,6 +179,9 @@ class DatabaseConnectionManager:
             else:
                 logger.info("Redis connection recovered after error handling")
     
+    @time_execution
+    @circuit_breaker(failure_threshold=2, recovery_timeout=15)
+    @timeout(seconds=25)
     async def _setup_influxdb(self) -> None:
         """Setup InfluxDB connection."""
         try:
