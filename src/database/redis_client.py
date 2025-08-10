@@ -467,5 +467,5 @@ class RedisClient:
             return format_api_response(
                 {},
                 success=False,
-                message=f"Failed to get Redis info: {
-                    str(e)}")
+                message=f"Failed to get Redis info: {str(e)}"
+            )

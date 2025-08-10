@@ -501,8 +501,8 @@ def timeout(seconds: float) -> Callable:
                     timeout_seconds=seconds
                 )
                 raise TimeoutError(
-                    f"Function {
-                        func.__name__} timed out after {seconds} seconds")
+                    f"Function {func.__name__} timed out after {seconds} seconds"
+                )
 
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
@@ -521,8 +521,8 @@ def timeout(seconds: float) -> Callable:
                         timeout_seconds=seconds
                     )
                     raise TimeoutError(
-                        f"Function {
-                            func.__name__} timed out after {seconds} seconds")
+                        f"Function {func.__name__} timed out after {seconds} seconds"
+                    )
                 except Exception as e:
                     logger.error(
                         "Function execution failed",
@@ -556,12 +556,7 @@ def cache_result(ttl_seconds: float = 300) -> Callable:
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
             # Create cache key from function name and arguments
-            cache_key = f"{
-                func.__name__}: {
-                hash(
-                    str(args) + str(
-                        sorted(
-                            kwargs.items())))}"
+            cache_key = f"{func.__name__}:{hash(str(args) + str(sorted(kwargs.items())))}"
 
             current_time = time.time()
 
@@ -595,12 +590,7 @@ def cache_result(ttl_seconds: float = 300) -> Callable:
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             # Create cache key from function name and arguments
-            cache_key = f"{
-                func.__name__}: {
-                hash(
-                    str(args) + str(
-                        sorted(
-                            kwargs.items())))}"
+            cache_key = f"{func.__name__}:{hash(str(args) + str(sorted(kwargs.items())))}"
 
             current_time = time.time()
 
@@ -657,12 +647,7 @@ def redis_cache(ttl_seconds: float = 300) -> Callable:
                 function=func.__name__
             )
             # Use the same cache mechanism as cache_result
-            cache_key = f"redis: {
-                func.__name__}: {
-                hash(
-                    str(args) + str(
-                        sorted(
-                            kwargs.items())))}"
+            cache_key = f"redis:{func.__name__}:{hash(str(args) + str(sorted(kwargs.items())))}"
 
             current_time = time.time()
 
@@ -699,12 +684,7 @@ def redis_cache(ttl_seconds: float = 300) -> Callable:
                 function=func.__name__
             )
             # Use the same cache mechanism as cache_result
-            cache_key = f"redis: {
-                func.__name__}: {
-                hash(
-                    str(args) + str(
-                        sorted(
-                            kwargs.items())))}"
+            cache_key = f"redis:{func.__name__}:{hash(str(args) + str(sorted(kwargs.items())))}"
 
             current_time = time.time()
 
@@ -1070,9 +1050,8 @@ def type_check(func: Callable) -> Callable:
             if param.annotation != inspect.Parameter.empty:
                 if not isinstance(param_value, param.annotation):
                     raise ValidationError(
-                        f"Type mismatch for parameter '{param_name}': " f"expected {
-                            param.annotation.__name__}, got {
-                            type(param_value).__name__}")
+                        f"Type mismatch for parameter '{param_name}': expected {param.annotation.__name__}, got {type(param_value).__name__}"
+                    )
 
         result = await func(*args, **kwargs)
 
@@ -1080,9 +1059,8 @@ def type_check(func: Callable) -> Callable:
         if sig.return_annotation != inspect.Parameter.empty:
             if not isinstance(result, sig.return_annotation):
                 raise ValidationError(
-                    f"Return type mismatch: expected {
-                        sig.return_annotation.__name__}, " f"got {
-                        type(result).__name__}")
+                    f"Return type mismatch: expected {sig.return_annotation.__name__}, got {type(result).__name__}"
+                )
 
         return result
 
@@ -1100,9 +1078,8 @@ def type_check(func: Callable) -> Callable:
             if param.annotation != inspect.Parameter.empty:
                 if not isinstance(param_value, param.annotation):
                     raise ValidationError(
-                        f"Type mismatch for parameter '{param_name}': " f"expected {
-                            param.annotation.__name__}, got {
-                            type(param_value).__name__}")
+                        f"Type mismatch for parameter '{param_name}': expected {param.annotation.__name__}, got {type(param_value).__name__}"
+                    )
 
         result = func(*args, **kwargs)
 
@@ -1110,9 +1087,8 @@ def type_check(func: Callable) -> Callable:
         if sig.return_annotation != inspect.Parameter.empty:
             if not isinstance(result, sig.return_annotation):
                 raise ValidationError(
-                    f"Return type mismatch: expected {
-                        sig.return_annotation.__name__}, " f"got {
-                        type(result).__name__}")
+                    f"Return type mismatch: expected {sig.return_annotation.__name__}, got {type(result).__name__}"
+                )
 
         return result
 

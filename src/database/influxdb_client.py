@@ -57,8 +57,8 @@ class InfluxDBClientWrapper:
                 logger.info("InfluxDB connection established")
             except Exception as e:
                 raise DataSourceError(
-                    f"InfluxDB health check failed: {
-                        str(e)}")
+                    f"InfluxDB health check failed: {str(e)}"
+                )
 
             logger.info("InfluxDB connection established")
 
@@ -423,5 +423,5 @@ class InfluxDBClientWrapper:
             return format_api_response(
                 {},
                 success=False,
-                message=f"Failed to get InfluxDB info: {
-                    str(e)}")
+                message=f"Failed to get InfluxDB info: {str(e)}"
+            )

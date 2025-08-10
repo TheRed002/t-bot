@@ -163,24 +163,21 @@ def setup_test_databases(config: Config) -> None:
                        (config.database.postgresql_username,))
         if not cursor.fetchone():
             cursor.execute(
-                f"CREATE USER {
-                    config.database.postgresql_username} WITH PASSWORD '{
-                    config.database.postgresql_password}' CREATEDB")
+                f"CREATE USER {config.database.postgresql_username} WITH PASSWORD '{config.database.postgresql_password}' CREATEDB"
+            )
         else:
             # Update password if user exists
             cursor.execute(
-                f"ALTER USER {
-                    config.database.postgresql_username} WITH PASSWORD '{
-                    config.database.postgresql_password}'")
+                f"ALTER USER {config.database.postgresql_username} WITH PASSWORD '{config.database.postgresql_password}'"
+            )
 
         # Create test database if it doesn't exist
         cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s",
                        (config.database.postgresql_database,))
         if not cursor.fetchone():
             cursor.execute(
-                f"CREATE DATABASE {
-                    config.database.postgresql_database} OWNER {
-                    config.database.postgresql_username}")
+                f"CREATE DATABASE {config.database.postgresql_database} OWNER {config.database.postgresql_username}"
+            )
 
         cursor.close()
         conn.close()
@@ -205,8 +202,8 @@ def setup_test_databases(config: Config) -> None:
 
     except Exception as e:
         raise DataSourceError(
-            f"Failed to setup PostgreSQL test database: {
-                str(e)}")
+            f"Failed to setup PostgreSQL test database: {str(e)}"
+        )
 
     # Setup Redis
     try:
@@ -250,8 +247,8 @@ def setup_test_databases(config: Config) -> None:
 
     except Exception as e:
         raise DataSourceError(
-            f"Failed to setup InfluxDB test bucket: {
-                str(e)}")
+            f"Failed to setup InfluxDB test bucket: {str(e)}"
+        )
 
 
 def cleanup_test_databases(config: Config) -> None:
@@ -277,13 +274,13 @@ def cleanup_test_databases(config: Config) -> None:
 
         # Drop test database
         cursor.execute(
-            f"DROP DATABASE IF EXISTS {
-                config.database.postgresql_database}")
+            f"DROP DATABASE IF EXISTS {config.database.postgresql_database}"
+        )
 
         # Drop test user
         cursor.execute(
-            f"DROP USER IF EXISTS {
-                config.database.postgresql_username}")
+            f"DROP USER IF EXISTS {config.database.postgresql_username}"
+        )
 
         cursor.close()
         conn.close()

@@ -124,8 +124,8 @@ class SecurityConfig(BaseConfig):
         """Validate key lengths for security."""
         if len(v) < 32:
             raise ValueError(
-                f'Key must be at least 32 characters long, got {
-                    len(v)}')
+                f"Key must be at least 32 characters long, got {len(v)}"
+            )
         return v
 
 
@@ -281,8 +281,8 @@ class ExchangeConfig(BaseConfig):
         """Validate API credentials - either empty (for testing) or minimum length."""
         if v and len(v) < 16:  # If provided, must be at least 16 chars
             raise ValueError(
-                f'API credential must be at least 16 characters long, got {
-                    len(v)}')
+                f"API credential must be at least 16 characters long, got {len(v)}"
+            )
         return v
 
 

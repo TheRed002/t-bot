@@ -54,11 +54,10 @@ class DatabaseQueries:
 
     # Generic CRUD operations
     @time_execution
-    @validate_input
     @log_performance
     async def create(self, model_instance: T) -> T:
         """Create a new record."""
-        with correlation_context():
+        with correlation_context.correlation_context():
             try:
                 # Validate financial data if it's a Trade model
                 if hasattr(
@@ -114,7 +113,6 @@ class DatabaseQueries:
                 raise DataError(f"Failed to create record: {str(e)}")
 
     @time_execution
-    @validate_input
     @cache_result(ttl_seconds=300)  # Cache for 5 minutes
     @log_performance
     async def get_by_id(
@@ -141,7 +139,8 @@ class DatabaseQueries:
                         # Retry the operation after error handling
                         try:
                             result = await self.session.execute(
-                                select(model_class).where(model_class.id == record_id)
+                                select(model_class).where(
+                                    model_class.id == record_id)
                             )
                             return result.scalar_one_or_none()
                         except SQLAlchemyError:
@@ -306,7 +305,6 @@ class DatabaseQueries:
 
     # Trade queries
     @time_execution
-    @validate_input
     @cache_result(ttl_seconds=60)  # Cache for 1 minute for frequent queries
     @log_performance
     @timeout(seconds=30)
@@ -395,7 +393,6 @@ class DatabaseQueries:
 
     # Balance queries
     @time_execution
-    @validate_input
     # Cache for 30 seconds for real-time balance queries
     @cache_result(ttl_seconds=30)
     @log_performance
@@ -447,8 +444,8 @@ class DatabaseQueries:
                 "Failed to get performance metrics by bot",
                 error=str(e))
             raise DataError(
-                f"Failed to get performance metrics by bot: {
-                    str(e)}")
+                f"Failed to get performance metrics by bot: {str(e)}"
+            )
 
     # Alert queries
     async def get_unread_alerts_by_user(self, user_id: str) -> List[Alert]:
@@ -503,7 +500,6 @@ class DatabaseQueries:
 
     # Aggregation queries
     @time_execution
-    @validate_input
     @cache_result(ttl_seconds=120)  # Cache for 2 minutes for PnL calculations
     @log_performance
     @timeout(seconds=45)

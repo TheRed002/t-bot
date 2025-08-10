@@ -149,8 +149,8 @@ def validate_quantity(
     """
     if not isinstance(quantity, (int, float, Decimal)):
         raise ValidationError(
-            f"Quantity must be a number for {symbol}, got {
-                type(quantity).__name__}")
+            f"Quantity must be a number for {symbol}, got {type(quantity).__name__}"
+        )
 
     if quantity <= 0:
         raise ValidationError(

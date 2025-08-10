@@ -36,7 +36,6 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-      - ./configs/redis.conf:/usr/local/etc/redis/redis.conf:ro
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
       interval: 30s

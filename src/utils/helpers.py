@@ -96,9 +96,8 @@ def calculate_sharpe_ratio(
         "yearly": 1}
     if frequency not in valid_frequencies:
         raise ValidationError(
-            f"Invalid frequency: {frequency}. Must be one of {
-                list(
-                    valid_frequencies.keys())}")
+            f"Invalid frequency: {frequency}. Must be one of {list(valid_frequencies.keys())}"
+        )
 
     # Convert to numpy array for calculations
     returns_array = np.array(returns)
@@ -403,8 +402,8 @@ def parse_datetime(dt_str: str, format_str: Optional[str] = None) -> datetime:
             return datetime.strptime(dt_str, format_str)
         except ValueError as e:
             raise ValidationError(
-                f"Cannot parse datetime '{dt_str}' with format '{format_str}': {
-                    str(e)}")
+                f"Cannot parse datetime '{dt_str}' with format '{format_str}': {str(e)}"
+            )
 
     # Try common formats
     common_formats = [
@@ -650,8 +649,8 @@ def load_config_file(file_path: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to load config file {file_path}: {str(e)}")
         raise ValidationError(
-            f"Cannot load config file '{file_path}': {
-                str(e)}")
+            f"Cannot load config file '{file_path}': {str(e)}"
+        )
 
 
 # =============================================================================
@@ -717,8 +716,8 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
     except Exception as e:
         logger.error(f"Failed to measure latency for {host}:{port}: {str(e)}")
         raise ValidationError(
-            f"Cannot measure latency to {host}: {port}: {
-                str(e)}")
+            f"Cannot measure latency to {host}:{port}: {str(e)}"
+        )
 
 
 async def ping_host(host: str, count: int = 3) -> Dict[str, Any]:
@@ -742,10 +741,8 @@ async def ping_host(host: str, count: int = 3) -> Dict[str, Any]:
                 await asyncio.sleep(0.1)  # Small delay between pings
             except Exception as e:
                 logger.warning(
-                    f"Ping attempt {
-                        i +
-                        1} failed for {host}: {
-                        str(e)}")
+                    f"Ping attempt {i + 1} failed for {host}: {str(e)}"
+                )
 
         if not latencies:
             return {
@@ -960,9 +957,8 @@ def calculate_atr(
         if len(highs) < period + 1 or len(lows) < period + \
                 1 or len(closes) < period + 1:
             raise ValidationError(
-                f"Need at least {
-                    period +
-                    1} data points for ATR calculation")
+                f"Need at least {period + 1} data points for ATR calculation"
+            )
 
         if len(highs) != len(lows) or len(highs) != len(closes):
             raise ValidationError(
@@ -1103,9 +1099,8 @@ def calculate_rsi(prices: List[float], period: int = 14) -> float:
         # Fallback to manual calculation
         if len(prices) < period + 1:
             raise ValidationError(
-                f"Need at least {
-                    period +
-                    1} prices for RSI calculation")
+                f"Need at least {period + 1} prices for RSI calculation"
+            )
 
         if period <= 0:
             raise ValidationError("RSI period must be positive")

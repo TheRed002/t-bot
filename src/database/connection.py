@@ -86,8 +86,8 @@ class DatabaseConnectionManager:
                         "Failed to initialize database connections",
                         error=str(e))
                     raise DataSourceError(
-                        f"Database initialization failed: {
-                            str(e)}")
+                        f"Database initialization failed: {str(e)}"
+                    )
                 else:
                     logger.info(
                         "Database connections recovered after error handling")
@@ -101,7 +101,6 @@ class DatabaseConnectionManager:
                 db_port = self.config.database.postgresql_port
                 logger.info(
                     f"Starting health monitoring for {db_host}:{db_port}")
-                # Health monitoring interval from utils constants
                 monitor_interval = getattr(
                     TIMEOUTS, 'HEALTH_CHECK_INTERVAL', 30)
                 logger.debug(f"Health check interval: {monitor_interval}s")
@@ -212,8 +211,8 @@ class DatabaseConnectionManager:
             if not handled:
                 logger.error("PostgreSQL connection failed", error=str(e))
                 raise DataSourceError(
-                    f"PostgreSQL connection failed: {
-                        str(e)}")
+                    f"PostgreSQL connection failed: {str(e)}"
+                )
             else:
                 logger.info(
                     "PostgreSQL connection recovered after error handling")
@@ -271,18 +270,21 @@ class DatabaseConnectionManager:
                 self.influxdb_client.ping()
             except Exception as e:
                 raise DataSourceError(
-                    f"InfluxDB health check failed: {
-                        str(e)}")
+                    f"InfluxDB health check failed: {str(e)}"
+                )
 
             logger.info("InfluxDB connection established")
 
         except Exception as e:
             # Create error context for comprehensive error handling
             error_context = self.error_handler.create_error_context(
-                error=e, component="database_connection", operation="setup_influxdb", details={
-                    "influxdb_url": f"http: // {
-                        self.config.database.influxdb_host}: {
-                        self.config.database.influxdb_port}"})
+                error=e,
+                component="database_connection",
+                operation="setup_influxdb",
+                details={
+                    "influxdb_url": f"http://{self.config.database.influxdb_host}:{self.config.database.influxdb_port}"
+                }
+            )
 
             # Use ErrorHandler for sophisticated error management
             recovery_scenario = NetworkDisconnectionRecovery(self.config)
@@ -295,43 +297,8 @@ class DatabaseConnectionManager:
                 logger.info(
                     "InfluxDB connection recovered after error handling")
 
-    async def _start_health_monitoring(self) -> None:
-        """Start background health monitoring."""
-        self._health_check_task = asyncio.create_task(self._health_monitor())
-        logger.info("Database health monitoring started")
-
-    async def _health_monitor(self) -> None:
-        """Background health monitoring for all database connections."""
-        while True:
-            try:
-                # Check PostgreSQL
-                async with self.async_engine.begin() as conn:
-                    await conn.execute(text("SELECT 1"))
-
-                # Check Redis
-                await self.redis_client.ping()
-
-                # Check InfluxDB
-                try:
-                    self.influxdb_client.ping()
-                except Exception as e:
-                    # TODO: Remove in production
-                    logger.warning(f"InfluxDB health check failed: {str(e)}")
-                    # Don't raise generic exception, just log the warning
-
-                if not self._connection_healthy:
-                    logger.info("Database connections recovered")
-                    self._connection_healthy = True
-
-                await asyncio.sleep(30)  # Check every 30 seconds
-
-            except Exception as e:
-                if self._connection_healthy:
-                    logger.warning(
-                        "Database health check failed", error=str(e))
-                    self._connection_healthy = False
-
-                await asyncio.sleep(10)  # Retry sooner on failure
+    # Removed duplicate async _start_health_monitoring and _health_monitor.
+    # Single health monitor loop is implemented in _health_check_loop.
 
     @time_execution
     async def get_async_session(self) -> AsyncSession:
@@ -387,7 +354,8 @@ class DatabaseConnectionManager:
                 self.sync_engine.dispose()
 
             if self.redis_client:
-                await self.redis_client.disconnect()
+                # Use proper shutdown for redis.asyncio client
+                await self.redis_client.close()
 
             if self.influxdb_client:
                 self.influxdb_client.close()
@@ -527,14 +495,15 @@ async def debug_connection_info() -> Dict[str, Any]:
     debug_data = {
         "postgresql_url": _connection_manager.config.get_database_url().replace(
             _connection_manager.config.database.postgresql_password,
-            "***"),
+            "***"
+        ),
         "redis_url": _connection_manager.config.get_redis_url().replace(
             _connection_manager.config.database.redis_password or "",
-            "***"),
-        "influxdb_url": f"http: // {
-            _connection_manager.config.database.influxdb_host}: {
-            _connection_manager.config.database.influxdb_port}",
-        "health_status": is_database_healthy()}
+            "***"
+        ),
+        "influxdb_url": f"http://{_connection_manager.config.database.influxdb_host}:{_connection_manager.config.database.influxdb_port}",
+        "health_status": is_database_healthy(),
+    }
     return format_api_response(
         debug_data,
         success=True,

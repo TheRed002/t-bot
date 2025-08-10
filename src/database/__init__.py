@@ -12,7 +12,8 @@ from .models import Base, User, BotInstance, Trade, Position, BalanceSnapshot
 from .models import StrategyConfig, MLModel, PerformanceMetrics, Alert, AuditLog
 from .connection import get_sync_session, get_async_session
 from .redis_client import RedisClient
-from .influxdb_client import InfluxDBClient
+# Expose wrapper with a consistent name
+from .influxdb_client import InfluxDBClientWrapper as InfluxDBClient
 
 __all__ = [
     # Models
