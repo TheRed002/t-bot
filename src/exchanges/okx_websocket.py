@@ -49,30 +49,30 @@ logger = get_logger(__name__)
 class OKXWebSocketManager:
     """
     OKX WebSocket manager for real-time data streaming.
-    
+
     Handles WebSocket connections to OKX for:
     - Public market data streams (tickers, order books, trades)
     - Private account data streams (orders, positions, balances)
     - Automatic reconnection and error handling
     """
-    
+
     def __init__(self, config: Config, exchange_name: str = "okx"):
         """
         Initialize OKX WebSocket manager.
-        
+
         Args:
             config: Application configuration
             exchange_name: Exchange name (default: "okx")
         """
         self.config = config
         self.exchange_name = exchange_name
-        
+
         # OKX API credentials
         self.api_key = config.exchanges.okx_api_key
         self.api_secret = config.exchanges.okx_api_secret
         self.passphrase = config.exchanges.okx_passphrase
         self.sandbox = config.exchanges.okx_sandbox
-        
+
         # WebSocket URLs
         if self.sandbox:
             self.public_ws_url = "wss://wspap.okx.com:8443/ws/v5/public"
@@ -80,99 +80,104 @@ class OKXWebSocketManager:
         else:
             self.public_ws_url = "wss://ws.okx.com:8443/ws/v5/public"
             self.private_ws_url = "wss://ws.okx.com:8443/ws/v5/private"
-        
+
         # WebSocket connections
         self.public_ws: Optional[websockets.WebSocketServerProtocol] = None
         self.private_ws: Optional[websockets.WebSocketServerProtocol] = None
-        
+
         # Stream subscriptions
         self.public_subscriptions: Dict[str, List[Callable]] = {}
         self.private_subscriptions: Dict[str, List[Callable]] = {}
-        
+
         # Connection state
         self.connected = False
         self.last_heartbeat = None
         self.reconnect_attempts = 0
         self.max_reconnect_attempts = 5
-        
+
         # Message queue for reconnection
         self.message_queue: List[Dict] = []
-        
+
         # Initialize error handling
         self.error_handler = ErrorHandler(config.error_handling)
-        
+
         logger.info(f"Initialized OKX WebSocket manager: {exchange_name}")
-    
+
     async def connect(self) -> bool:
         """
         Establish WebSocket connections to OKX.
-        
+
         Returns:
             bool: True if connection successful, False otherwise
         """
         try:
             logger.info("Connecting to OKX WebSocket...")
-            
+
             # Connect to public WebSocket
             await self._connect_public_websocket()
-            
+
             # Connect to private WebSocket (if credentials provided)
             if self.api_key and self.api_secret and self.passphrase:
                 await self._connect_private_websocket()
-            
+
             self.connected = True
             self.last_heartbeat = datetime.now(timezone.utc)
             self.reconnect_attempts = 0
-            
+
             logger.info("Successfully connected to OKX WebSocket")
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to connect to OKX WebSocket: {str(e)}")
             self.connected = False
-            raise ExchangeConnectionError(f"Failed to connect to OKX WebSocket: {str(e)}")
-    
+            raise ExchangeConnectionError(
+                f"Failed to connect to OKX WebSocket: {str(e)}")
+
     async def disconnect(self) -> None:
         """Disconnect from OKX WebSocket."""
         try:
             logger.info("Disconnecting from OKX WebSocket...")
-            
+
             # Close public WebSocket
             if self.public_ws:
                 await self.public_ws.close()
                 self.public_ws = None
-            
+
             # Close private WebSocket
             if self.private_ws:
                 await self.private_ws.close()
                 self.private_ws = None
-            
+
             self.connected = False
             self.public_subscriptions.clear()
             self.private_subscriptions.clear()
-            
+
             logger.info("Successfully disconnected from OKX WebSocket")
-            
+
         except Exception as e:
             logger.error(f"Error disconnecting from OKX WebSocket: {str(e)}")
-            raise ExchangeConnectionError(f"Error disconnecting from OKX WebSocket: {str(e)}")
-    
-    async def subscribe_to_ticker(self, symbol: str, callback: Callable) -> None:
+            raise ExchangeConnectionError(
+                f"Error disconnecting from OKX WebSocket: {str(e)}")
+
+    async def subscribe_to_ticker(
+            self,
+            symbol: str,
+            callback: Callable) -> None:
         """
         Subscribe to ticker stream for a symbol.
-        
+
         Args:
             symbol: Trading symbol (e.g., 'BTC-USDT')
             callback: Callback function to handle ticker data
         """
         try:
             stream_name = f"tickers.{symbol}"
-            
+
             if stream_name not in self.public_subscriptions:
                 self.public_subscriptions[stream_name] = []
-            
+
             self.public_subscriptions[stream_name].append(callback)
-            
+
             # Subscribe to stream
             subscribe_message = {
                 "op": "subscribe",
@@ -181,30 +186,33 @@ class OKXWebSocketManager:
                     "instId": symbol
                 }]
             }
-            
+
             await self._send_public_message(subscribe_message)
             logger.info(f"Subscribed to ticker stream for {symbol}")
-            
+
         except Exception as e:
-            logger.error(f"Failed to subscribe to ticker for {symbol}: {str(e)}")
+            logger.error(
+                f"Failed to subscribe to ticker for {symbol}: {
+                    str(e)}")
             raise ExchangeError(f"Failed to subscribe to ticker: {str(e)}")
-    
-    async def subscribe_to_orderbook(self, symbol: str, callback: Callable) -> None:
+
+    async def subscribe_to_orderbook(
+            self, symbol: str, callback: Callable) -> None:
         """
         Subscribe to order book stream for a symbol.
-        
+
         Args:
             symbol: Trading symbol (e.g., 'BTC-USDT')
             callback: Callback function to handle order book data
         """
         try:
             stream_name = f"books.{symbol}"
-            
+
             if stream_name not in self.public_subscriptions:
                 self.public_subscriptions[stream_name] = []
-            
+
             self.public_subscriptions[stream_name].append(callback)
-            
+
             # Subscribe to stream
             subscribe_message = {
                 "op": "subscribe",
@@ -213,30 +221,35 @@ class OKXWebSocketManager:
                     "instId": symbol
                 }]
             }
-            
+
             await self._send_public_message(subscribe_message)
             logger.info(f"Subscribed to order book stream for {symbol}")
-            
+
         except Exception as e:
-            logger.error(f"Failed to subscribe to order book for {symbol}: {str(e)}")
+            logger.error(
+                f"Failed to subscribe to order book for {symbol}: {
+                    str(e)}")
             raise ExchangeError(f"Failed to subscribe to order book: {str(e)}")
-    
-    async def subscribe_to_trades(self, symbol: str, callback: Callable) -> None:
+
+    async def subscribe_to_trades(
+            self,
+            symbol: str,
+            callback: Callable) -> None:
         """
         Subscribe to trades stream for a symbol.
-        
+
         Args:
             symbol: Trading symbol (e.g., 'BTC-USDT')
             callback: Callback function to handle trade data
         """
         try:
             stream_name = f"trades.{symbol}"
-            
+
             if stream_name not in self.public_subscriptions:
                 self.public_subscriptions[stream_name] = []
-            
+
             self.public_subscriptions[stream_name].append(callback)
-            
+
             # Subscribe to stream
             subscribe_message = {
                 "op": "subscribe",
@@ -245,32 +258,35 @@ class OKXWebSocketManager:
                     "instId": symbol
                 }]
             }
-            
+
             await self._send_public_message(subscribe_message)
             logger.info(f"Subscribed to trades stream for {symbol}")
-            
+
         except Exception as e:
-            logger.error(f"Failed to subscribe to trades for {symbol}: {str(e)}")
+            logger.error(
+                f"Failed to subscribe to trades for {symbol}: {
+                    str(e)}")
             raise ExchangeError(f"Failed to subscribe to trades: {str(e)}")
-    
+
     async def subscribe_to_account(self, callback: Callable) -> None:
         """
         Subscribe to account data stream.
-        
+
         Args:
             callback: Callback function to handle account data
         """
         try:
             if not self.private_ws:
-                raise ExchangeConnectionError("Private WebSocket not connected")
-            
+                raise ExchangeConnectionError(
+                    "Private WebSocket not connected")
+
             stream_name = "account"
-            
+
             if stream_name not in self.private_subscriptions:
                 self.private_subscriptions[stream_name] = []
-            
+
             self.private_subscriptions[stream_name].append(callback)
-            
+
             # Subscribe to account stream
             subscribe_message = {
                 "op": "subscribe",
@@ -278,14 +294,16 @@ class OKXWebSocketManager:
                     "channel": "account"
                 }]
             }
-            
+
             await self._send_private_message(subscribe_message)
             logger.info("Subscribed to account stream")
-            
+
         except Exception as e:
             logger.error(f"Failed to subscribe to account stream: {str(e)}")
-            raise ExchangeError(f"Failed to subscribe to account stream: {str(e)}")
-    
+            raise ExchangeError(
+                f"Failed to subscribe to account stream: {
+                    str(e)}")
+
     async def _connect_public_websocket(self) -> None:
         """
         Connect to OKX public WebSocket.
@@ -296,16 +314,19 @@ class OKXWebSocketManager:
                 ping_interval=20,
                 ping_timeout=10
             )
-            
+
             # Start listening for messages
             asyncio.create_task(self._listen_public_messages())
-            
+
             logger.info("Connected to OKX public WebSocket")
-            
+
         except Exception as e:
-            logger.error(f"Failed to connect to OKX public WebSocket: {str(e)}")
-            raise ExchangeConnectionError(f"Failed to connect to public WebSocket: {str(e)}")
-    
+            logger.error(
+                f"Failed to connect to OKX public WebSocket: {
+                    str(e)}")
+            raise ExchangeConnectionError(
+                f"Failed to connect to public WebSocket: {str(e)}")
+
     async def _connect_private_websocket(self) -> None:
         """
         Connect to OKX private WebSocket with authentication.
@@ -316,26 +337,29 @@ class OKXWebSocketManager:
                 ping_interval=20,
                 ping_timeout=10
             )
-            
+
             # Authenticate private WebSocket
             await self._authenticate_private_websocket()
-            
+
             # Start listening for messages
             asyncio.create_task(self._listen_private_messages())
-            
+
             logger.info("Connected to OKX private WebSocket")
-            
+
         except Exception as e:
-            logger.error(f"Failed to connect to OKX private WebSocket: {str(e)}")
-            raise ExchangeConnectionError(f"Failed to connect to private WebSocket: {str(e)}")
-    
+            logger.error(
+                f"Failed to connect to OKX private WebSocket: {
+                    str(e)}")
+            raise ExchangeConnectionError(
+                f"Failed to connect to private WebSocket: {str(e)}")
+
     async def _authenticate_private_websocket(self) -> None:
         """
         Authenticate private WebSocket connection.
         """
         try:
             timestamp = str(int(time.time()))
-            
+
             # Create signature
             message = timestamp + 'GET' + '/users/self/verify'
             signature = base64.b64encode(
@@ -345,7 +369,7 @@ class OKXWebSocketManager:
                     hashlib.sha256
                 ).digest()
             ).decode('utf-8')
-            
+
             # Authentication message
             auth_message = {
                 "op": "login",
@@ -356,22 +380,25 @@ class OKXWebSocketManager:
                     "sign": signature
                 }]
             }
-            
+
             await self._send_private_message(auth_message)
-            
+
             # Wait for authentication response
             response = await self.private_ws.recv()
             response_data = json.loads(response)
-            
+
             if response_data.get('code') != '0':
-                raise ExchangeError(f"Authentication failed: {response_data.get('msg', 'Unknown error')}")
-            
+                raise ExchangeError(
+                    f"Authentication failed: {
+                        response_data.get(
+                            'msg', 'Unknown error')}")
+
             logger.info("Successfully authenticated private WebSocket")
-            
+
         except Exception as e:
             logger.error(f"Failed to authenticate private WebSocket: {str(e)}")
             raise ExchangeError(f"Authentication failed: {str(e)}")
-    
+
     async def _listen_public_messages(self) -> None:
         """
         Listen for messages from public WebSocket.
@@ -386,13 +413,13 @@ class OKXWebSocketManager:
                     break
                 except Exception as e:
                     logger.error(f"Error handling public message: {str(e)}")
-                    
+
         except Exception as e:
             logger.error(f"Error in public message listener: {str(e)}")
         finally:
             if self.connected:
                 await self._reconnect_public_websocket()
-    
+
     async def _listen_private_messages(self) -> None:
         """
         Listen for messages from private WebSocket.
@@ -407,23 +434,23 @@ class OKXWebSocketManager:
                     break
                 except Exception as e:
                     logger.error(f"Error handling private message: {str(e)}")
-                    
+
         except Exception as e:
             logger.error(f"Error in private message listener: {str(e)}")
         finally:
             if self.connected:
                 await self._reconnect_private_websocket()
-    
+
     async def _handle_public_message(self, message: str) -> None:
         """
         Handle incoming public WebSocket message.
-        
+
         Args:
             message: Raw WebSocket message
         """
         try:
             data = json.loads(message)
-            
+
             # Handle different message types
             if 'event' in data:
                 # Event message (subscription confirmation, etc.)
@@ -433,22 +460,22 @@ class OKXWebSocketManager:
                 await self._handle_data_message(data)
             else:
                 logger.warning(f"Unknown public message format: {data}")
-                
+
         except json.JSONDecodeError:
             logger.error(f"Failed to parse public message: {message}")
         except Exception as e:
             logger.error(f"Error handling public message: {str(e)}")
-    
+
     async def _handle_private_message(self, message: str) -> None:
         """
         Handle incoming private WebSocket message.
-        
+
         Args:
             message: Raw WebSocket message
         """
         try:
             data = json.loads(message)
-            
+
             # Handle different message types
             if 'event' in data:
                 # Event message (authentication, subscription confirmation)
@@ -458,50 +485,64 @@ class OKXWebSocketManager:
                 await self._handle_private_data_message(data)
             else:
                 logger.warning(f"Unknown private message format: {data}")
-                
+
         except json.JSONDecodeError:
             logger.error(f"Failed to parse private message: {message}")
         except Exception as e:
             logger.error(f"Error handling private message: {str(e)}")
-    
+
     async def _handle_event_message(self, data: Dict) -> None:
         """
         Handle event messages from public WebSocket.
-        
+
         Args:
             data: Event message data
         """
         event = data.get('event', '')
-        
+
         if event == 'subscribe':
-            logger.info(f"Successfully subscribed to channel: {data.get('arg', {})}")
+            logger.info(
+                f"Successfully subscribed to channel: {
+                    data.get(
+                        'arg', {})}")
         elif event == 'error':
-            logger.error(f"Public WebSocket error: {data.get('msg', 'Unknown error')}")
+            logger.error(
+                f"Public WebSocket error: {
+                    data.get(
+                        'msg',
+                        'Unknown error')}")
         else:
             logger.debug(f"Public event: {event}")
-    
+
     async def _handle_private_event_message(self, data: Dict) -> None:
         """
         Handle event messages from private WebSocket.
-        
+
         Args:
             data: Event message data
         """
         event = data.get('event', '')
-        
+
         if event == 'login':
             logger.info("Successfully logged in to private WebSocket")
         elif event == 'subscribe':
-            logger.info(f"Successfully subscribed to private channel: {data.get('arg', {})}")
+            logger.info(
+                f"Successfully subscribed to private channel: {
+                    data.get(
+                        'arg', {})}")
         elif event == 'error':
-            logger.error(f"Private WebSocket error: {data.get('msg', 'Unknown error')}")
+            logger.error(
+                f"Private WebSocket error: {
+                    data.get(
+                        'msg',
+                        'Unknown error')}")
         else:
             logger.debug(f"Private event: {event}")
-    
+
     async def _handle_data_message(self, data: Dict) -> None:
         """
         Handle data messages from public WebSocket.
-        
+
         Args:
             data: Data message
         """
@@ -510,10 +551,10 @@ class OKXWebSocketManager:
             channel = arg.get('channel', '')
             inst_id = arg.get('instId', '')
             stream_data = data.get('data', [])
-            
+
             if not stream_data:
                 return
-            
+
             # Route to appropriate handlers
             if channel == 'tickers':
                 await self._handle_ticker_data(inst_id, stream_data)
@@ -523,14 +564,14 @@ class OKXWebSocketManager:
                 await self._handle_trades_data(inst_id, stream_data)
             else:
                 logger.debug(f"Unhandled public channel: {channel}")
-                
+
         except Exception as e:
             logger.error(f"Error handling data message: {str(e)}")
-    
+
     async def _handle_private_data_message(self, data: Dict) -> None:
         """
         Handle data messages from private WebSocket.
-        
+
         Args:
             data: Data message
         """
@@ -538,30 +579,30 @@ class OKXWebSocketManager:
             arg = data.get('arg', {})
             channel = arg.get('channel', '')
             stream_data = data.get('data', [])
-            
+
             if not stream_data:
                 return
-            
+
             # Route to appropriate handlers
             if channel == 'account':
                 await self._handle_account_data(stream_data)
             else:
                 logger.debug(f"Unhandled private channel: {channel}")
-                
+
         except Exception as e:
             logger.error(f"Error handling private data message: {str(e)}")
-    
+
     async def _handle_ticker_data(self, symbol: str, data: List[Dict]) -> None:
         """
         Handle ticker data from WebSocket.
-        
+
         Args:
             symbol: Trading symbol
             data: Ticker data
         """
         try:
             stream_name = f"tickers.{symbol}"
-            
+
             if stream_name in self.public_subscriptions:
                 for ticker_data in data:
                     # Convert to unified Ticker format
@@ -574,95 +615,103 @@ class OKXWebSocketManager:
                         price_change_24h=Decimal(ticker_data.get('change24h', '0')),
                         timestamp=datetime.now(timezone.utc)
                     )
-                    
+
                     # Call all registered callbacks
                     for callback in self.public_subscriptions[stream_name]:
                         try:
                             await callback(ticker)
                         except Exception as e:
                             logger.error(f"Error in ticker callback: {str(e)}")
-                            
+
         except Exception as e:
             logger.error(f"Error handling ticker data: {str(e)}")
-    
-    async def _handle_orderbook_data(self, symbol: str, data: List[Dict]) -> None:
+
+    async def _handle_orderbook_data(
+            self, symbol: str, data: List[Dict]) -> None:
         """
         Handle order book data from WebSocket.
-        
+
         Args:
             symbol: Trading symbol
             data: Order book data
         """
         try:
             stream_name = f"books.{symbol}"
-            
+
             if stream_name in self.public_subscriptions:
                 for book_data in data:
                     # Convert to unified OrderBook format
-                    bids = [[Decimal(price), Decimal(size)] for price, size in book_data.get('bids', [])]
-                    asks = [[Decimal(price), Decimal(size)] for price, size in book_data.get('asks', [])]
-                    
+                    bids = [[Decimal(price), Decimal(size)]
+                            for price, size in book_data.get('bids', [])]
+                    asks = [[Decimal(price), Decimal(size)]
+                            for price, size in book_data.get('asks', [])]
+
                     order_book = OrderBook(
                         symbol=symbol,
                         bids=bids,
                         asks=asks,
                         timestamp=datetime.now(timezone.utc)
                     )
-                    
+
                     # Call all registered callbacks
                     for callback in self.public_subscriptions[stream_name]:
                         try:
                             await callback(order_book)
                         except Exception as e:
-                            logger.error(f"Error in order book callback: {str(e)}")
-                            
+                            logger.error(
+                                f"Error in order book callback: {
+                                    str(e)}")
+
         except Exception as e:
             logger.error(f"Error handling order book data: {str(e)}")
-    
+
     async def _handle_trades_data(self, symbol: str, data: List[Dict]) -> None:
         """
         Handle trades data from WebSocket.
-        
+
         Args:
             symbol: Trading symbol
             data: Trades data
         """
         try:
             stream_name = f"trades.{symbol}"
-            
+
             if stream_name in self.public_subscriptions:
                 for trade_data in data:
                     # Convert to unified Trade format
                     trade = Trade(
                         id=trade_data.get('tradeId', ''),
                         symbol=symbol,
-                        side=OrderSide.BUY if trade_data.get('side') == 'buy' else OrderSide.SELL,
+                        side=OrderSide.BUY if trade_data.get(
+                            'side') == 'buy' else OrderSide.SELL,
                         quantity=Decimal(trade_data.get('sz', '0')),
                         price=Decimal(trade_data.get('px', '0')),
-                        timestamp=datetime.fromtimestamp(int(trade_data.get('ts', 0)) / 1000, tz=timezone.utc),
-                        fee=Decimal('0')  # OKX doesn't provide fee in trade data
+                        timestamp=datetime.fromtimestamp(
+                            int(trade_data.get('ts', 0)) / 1000, tz=timezone.utc),
+                        # OKX doesn't provide fee in trade data
+                        fee=Decimal('0')
                     )
-                    
+
                     # Call all registered callbacks
                     for callback in self.public_subscriptions[stream_name]:
                         try:
                             await callback(trade)
                         except Exception as e:
                             logger.error(f"Error in trades callback: {str(e)}")
-                            
+
         except Exception as e:
             logger.error(f"Error handling trades data: {str(e)}")
-    
+
     async def _handle_account_data(self, data: List[Dict]) -> None:
         """
         Handle account data from WebSocket.
-        
+
         Args:
             data: Account data
         """
         try:
             stream_name = "account"
-            
+
             if stream_name in self.private_subscriptions:
                 # Call all registered callbacks
                 for callback in self.private_subscriptions[stream_name]:
@@ -670,97 +719,108 @@ class OKXWebSocketManager:
                         await callback(data)
                     except Exception as e:
                         logger.error(f"Error in account callback: {str(e)}")
-                        
+
         except Exception as e:
             logger.error(f"Error handling account data: {str(e)}")
-    
+
     async def _send_public_message(self, message: Dict) -> None:
         """
         Send message to public WebSocket.
-        
+
         Args:
             message: Message to send
         """
         try:
             if not self.public_ws:
                 raise ExchangeConnectionError("Public WebSocket not connected")
-            
+
             await self.public_ws.send(json.dumps(message))
-            
+
         except Exception as e:
             logger.error(f"Failed to send public message: {str(e)}")
             raise ExchangeError(f"Failed to send public message: {str(e)}")
-    
+
     async def _send_private_message(self, message: Dict) -> None:
         """
         Send message to private WebSocket.
-        
+
         Args:
             message: Message to send
         """
         try:
             if not self.private_ws:
-                raise ExchangeConnectionError("Private WebSocket not connected")
-            
+                raise ExchangeConnectionError(
+                    "Private WebSocket not connected")
+
             await self.private_ws.send(json.dumps(message))
-            
+
         except Exception as e:
             logger.error(f"Failed to send private message: {str(e)}")
             raise ExchangeError(f"Failed to send private message: {str(e)}")
-    
+
     async def _reconnect_public_websocket(self) -> None:
         """
         Reconnect to public WebSocket with exponential backoff.
         """
         try:
             if self.reconnect_attempts >= self.max_reconnect_attempts:
-                logger.error("Max reconnection attempts reached for public WebSocket")
+                logger.error(
+                    "Max reconnection attempts reached for public WebSocket")
                 return
-            
+
             self.reconnect_attempts += 1
-            delay = min(2 ** self.reconnect_attempts, 60)  # Exponential backoff, max 60s
-            
-            logger.info(f"Reconnecting to public WebSocket in {delay} seconds (attempt {self.reconnect_attempts})")
+            delay = min(
+                2 ** self.reconnect_attempts,
+                60)  # Exponential backoff, max 60s
+
+            logger.info(
+                f"Reconnecting to public WebSocket in {delay} seconds(attempt {
+                    self.reconnect_attempts})")
             await asyncio.sleep(delay)
-            
+
             await self._connect_public_websocket()
-            
+
         except Exception as e:
             logger.error(f"Failed to reconnect to public WebSocket: {str(e)}")
-    
+
     async def _reconnect_private_websocket(self) -> None:
         """
         Reconnect to private WebSocket with exponential backoff.
         """
         try:
             if self.reconnect_attempts >= self.max_reconnect_attempts:
-                logger.error("Max reconnection attempts reached for private WebSocket")
+                logger.error(
+                    "Max reconnection attempts reached for private WebSocket")
                 return
-            
+
             self.reconnect_attempts += 1
-            delay = min(2 ** self.reconnect_attempts, 60)  # Exponential backoff, max 60s
-            
-            logger.info(f"Reconnecting to private WebSocket in {delay} seconds (attempt {self.reconnect_attempts})")
+            delay = min(
+                2 ** self.reconnect_attempts,
+                60)  # Exponential backoff, max 60s
+
+            logger.info(
+                f"Reconnecting to private WebSocket in {delay} seconds(attempt {
+                    self.reconnect_attempts})")
             await asyncio.sleep(delay)
-            
+
             await self._connect_private_websocket()
-            
+
         except Exception as e:
             logger.error(f"Failed to reconnect to private WebSocket: {str(e)}")
-    
+
     def is_connected(self) -> bool:
         """
         Check if WebSocket is connected.
-        
+
         Returns:
             bool: True if connected, False otherwise
         """
         return self.connected and (self.public_ws or self.private_ws)
-    
+
     def get_status(self) -> str:
         """
         Get WebSocket connection status.
-        
+
         Returns:
             str: Connection status
         """
@@ -771,4 +831,4 @@ class OKXWebSocketManager:
         elif self.public_ws:
             return "public_only"
         else:
-            return "error" 
+            return "error"

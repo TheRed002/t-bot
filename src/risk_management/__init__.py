@@ -8,7 +8,7 @@ This module provides comprehensive risk management capabilities including:
 - Real-time risk metrics calculation
 - Circuit breakers and emergency controls
 
-CRITICAL: This module integrates with P-001 (types, exceptions, config), 
+CRITICAL: This module integrates with P-001 (types, exceptions, config),
 P-002A (error handling), and P-007A (utils) components.
 """
 
@@ -22,7 +22,7 @@ from .emergency_controls import EmergencyControls
 
 __all__ = [
     "BaseRiskManager",
-    "PositionSizer", 
+    "PositionSizer",
     "PortfolioLimits",
     "RiskCalculator",
     "RiskManager",
@@ -34,4 +34,4 @@ __all__ = [
 # Version information
 __version__ = "1.0.0"
 __author__ = "Trading Bot Framework"
-__description__ = "Risk Management Framework with Circuit Breakers (P-008, P-009)" 
+__description__ = "Risk Management Framework with Circuit Breakers (P-008, P-009)"

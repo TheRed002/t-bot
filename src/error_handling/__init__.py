@@ -24,18 +24,18 @@ from .pattern_analytics import ErrorPatternAnalytics, ErrorPattern
 __all__ = [
     # Core error handling
     'ErrorHandler', 'ErrorSeverity', 'ErrorContext',
-    
+
     # Recovery scenarios
     'PartialFillRecovery', 'NetworkDisconnectionRecovery',
     'ExchangeMaintenanceRecovery', 'DataFeedInterruptionRecovery',
     'OrderRejectionRecovery', 'APIRateLimitRecovery',
-    
+
     # Connection management
     'ConnectionManager', 'ConnectionState',
-    
+
     # State monitoring
     'StateMonitor', 'StateConsistencyError',
-    
+
     # Pattern analytics
     'ErrorPatternAnalytics', 'ErrorPattern',
-] 
+]

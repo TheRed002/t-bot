@@ -16,10 +16,6 @@ Dependencies:
 - P-001: Core types, exceptions, logging
 """
 
-from typing import Dict, List, Any
-from datetime import time, timedelta
-from decimal import Decimal
-
 
 # =============================================================================
 # Trading Constants
@@ -34,14 +30,14 @@ MARKET_HOURS = {
         "description": "24/7 crypto trading"
     },
     "okx": {
-        "open": "00:00", 
+        "open": "00:00",
         "close": "23:59",
         "timezone": "UTC",
         "description": "24/7 crypto trading"
     },
     "coinbase": {
         "open": "00:00",
-        "close": "23:59", 
+        "close": "23:59",
         "timezone": "UTC",
         "description": "24/7 crypto trading"
     },
@@ -58,21 +54,21 @@ SETTLEMENT_TIMES = {
     "crypto": "T+0",  # Immediate settlement
     "forex": "T+2",   # 2 business days
     "stocks": "T+2",  # 2 business days
-    "options": "T+1", # 1 business day
+    "options": "T+1",  # 1 business day
     "futures": "T+0"  # Daily settlement
 }
 
 # Precision levels for different asset types
 PRECISION_LEVELS = {
-    "BTC": 8,      # Bitcoin precision
-    "ETH": 6,      # Ethereum precision
-    "USDT": 2,     # Tether precision
-    "USD": 2,      # US Dollar precision
-    "JPY": 0,      # Japanese Yen (no decimals)
-    "default": 4,  # Default precision
-    "fee": 6,      # Fee calculation precision
-    "price": 8,    # Price calculation precision
-    "position": 8  # Position size precision
+    "BTC": 8,        # Bitcoin precision
+    "ETH": 6,        # Ethereum precision
+    "USDT": 2,       # Tether precision
+    "USD": 2,        # US Dollar precision
+    "JPY": 0,        # Japanese Yen (no decimals)
+    "default": 4,    # Default precision
+    "fee": 6,        # Fee calculation precision
+    "price": 8,      # Price calculation precision
+    "position": 8    # Position size precision
 }
 
 # Trading session definitions
@@ -84,14 +80,14 @@ TRADING_SESSIONS = {
         "description": "Asian trading session"
     },
     "european": {
-        "start": "08:00", 
+        "start": "08:00",
         "end": "16:00",
         "timezone": "UTC",
         "description": "European trading session"
     },
     "american": {
         "start": "13:30",
-        "end": "20:00", 
+        "end": "20:00",
         "timezone": "UTC",
         "description": "American trading session"
     }
@@ -283,7 +279,7 @@ THRESHOLDS = {
     "performance": {
         "max_execution_time_ms": 1000,   # Maximum function execution time
         "max_api_latency_ms": 500,       # Maximum API latency
-        "max_database_query_time_ms": 100, # Maximum database query time
+        "max_database_query_time_ms": 100,  # Maximum database query time
         "min_throughput_requests_per_second": 10  # Minimum throughput
     },
     "risk": {
@@ -315,7 +311,7 @@ ERROR_CODES = {
     "NETWORK_ERROR": 1003,
     "TIMEOUT_ERROR": 1004,
     "MEMORY_ERROR": 1005,
-    
+
     # Exchange errors (2000-2999)
     "EXCHANGE_ERROR": 2000,
     "EXCHANGE_CONNECTION_ERROR": 2001,
@@ -324,7 +320,7 @@ ERROR_CODES = {
     "EXCHANGE_INVALID_ORDER": 2004,
     "EXCHANGE_ORDER_REJECTED": 2005,
     "EXCHANGE_SYMBOL_NOT_FOUND": 2006,
-    
+
     # Trading errors (3000-3999)
     "TRADING_ERROR": 3000,
     "INSUFFICIENT_BALANCE": 3001,
@@ -333,7 +329,7 @@ ERROR_CODES = {
     "POSITION_LIMIT_EXCEEDED": 3004,
     "RISK_LIMIT_VIOLATION": 3005,
     "SLIPPAGE_TOO_HIGH": 3006,
-    
+
     # Data errors (4000-4999)
     "DATA_ERROR": 4000,
     "DATA_VALIDATION_ERROR": 4001,
@@ -341,21 +337,21 @@ ERROR_CODES = {
     "DATA_NOT_AVAILABLE": 4003,
     "DATA_FORMAT_ERROR": 4004,
     "DATA_TIMEOUT_ERROR": 4005,
-    
+
     # Strategy errors (5000-5999)
     "STRATEGY_ERROR": 5000,
     "STRATEGY_CONFIGURATION_ERROR": 5001,
     "STRATEGY_EXECUTION_ERROR": 5002,
     "SIGNAL_GENERATION_ERROR": 5003,
     "SIGNAL_VALIDATION_ERROR": 5004,
-    
+
     # Risk management errors (6000-6999)
     "RISK_MANAGEMENT_ERROR": 6000,
     "POSITION_LIMIT_ERROR": 6001,
     "DRAWDOWN_LIMIT_ERROR": 6002,
     "VAR_LIMIT_ERROR": 6003,
     "CORRELATION_LIMIT_ERROR": 6004,
-    
+
     # Validation errors (7000-7999)
     "VALIDATION_ERROR": 7000,
     "INPUT_VALIDATION_ERROR": 7001,
@@ -437,37 +433,51 @@ EXCHANGE_SPECIFICATIONS = {
     "binance": {
         "name": "Binance",
         "type": "crypto",
-        "supported_markets": ["spot", "futures", "options"],
-        "supported_order_types": ["market", "limit", "stop_loss", "take_profit", "oco"],
+        "supported_markets": [
+            "spot",
+            "futures",
+            "options"],
+        "supported_order_types": [
+            "market",
+            "limit",
+            "stop_loss",
+            "take_profit",
+            "oco"],
         "supports_margin_trading": True,
         "supports_short_selling": True,
         "max_leverage": 125,
         "min_order_size": 0.00001,
-        "fee_structure": "maker_taker"
-    },
+        "fee_structure": "maker_taker"},
     "okx": {
         "name": "OKX",
         "type": "crypto",
-        "supported_markets": ["spot", "futures", "options"],
-        "supported_order_types": ["market", "limit", "stop_loss", "take_profit"],
+        "supported_markets": [
+            "spot",
+            "futures",
+            "options"],
+        "supported_order_types": [
+            "market",
+            "limit",
+            "stop_loss",
+            "take_profit"],
         "supports_margin_trading": True,
         "supports_short_selling": True,
         "max_leverage": 125,
         "min_order_size": 0.00001,
-        "fee_structure": "maker_taker"
-    },
+        "fee_structure": "maker_taker"},
     "coinbase": {
         "name": "Coinbase Pro",
         "type": "crypto",
         "supported_markets": ["spot"],
-        "supported_order_types": ["market", "limit", "stop_loss"],
+        "supported_order_types": [
+            "market",
+            "limit",
+            "stop_loss"],
         "supports_margin_trading": False,
         "supports_short_selling": False,
         "max_leverage": 1,
         "min_order_size": 10.0,
-        "fee_structure": "maker_taker"
-    }
-}
+        "fee_structure": "maker_taker"}}
 
 # Trading pairs with their specifications
 TRADING_PAIRS = {
@@ -560,4 +570,4 @@ RISK_LEVEL_VALUES = {
     "MEDIUM": "medium",
     "HIGH": "high",
     "CRITICAL": "critical"
-} 
+}

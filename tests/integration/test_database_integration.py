@@ -27,14 +27,14 @@ from src.database.influxdb_client import InfluxDBClientWrapper
 @pytest.mark.asyncio
 class TestDatabaseConnection:
     """Test database connection and health check."""
-    
+
     async def test_database_connection(self, config, database_setup):
         """Test database connection and health check."""
         from src.database.connection import initialize_database, close_database
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             # The database_setup fixture should have already initialized the database
             # and run a health check. Let's verify it's working.
             health_status = await health_check()
@@ -42,11 +42,13 @@ class TestDatabaseConnection:
             # Check if any database is available
             if isinstance(health_status, dict):
                 # New format with individual database status
-                assert any(health_status.values()), "No databases are available"
+                assert any(health_status.values()
+                           ), "No databases are available"
             else:
                 # Old format with overall status
                 assert "status" in health_status
-                assert health_status["status"] in ["healthy", "degraded", "unhealthy"]
+                assert health_status["status"] in [
+                    "healthy", "degraded", "unhealthy"]
         finally:
             await close_database()
 
@@ -54,17 +56,17 @@ class TestDatabaseConnection:
 @pytest.mark.asyncio
 class TestDatabaseModels:
     """Test database model creation and validation."""
-    
+
     async def test_user_creation(self, config, database_setup):
         """Test user creation and validation."""
         from src.database.connection import initialize_database, close_database, get_async_session
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             async with get_async_session() as session:
                 queries = DatabaseQueries(session)
-                
+
                 # Create test user
                 unique_id = str(uuid.uuid4())[:8]
                 user = User(
@@ -74,7 +76,7 @@ class TestDatabaseModels:
                     is_active=True,
                     is_verified=True
                 )
-                
+
                 created_user = await queries.create(user)
                 assert created_user.id is not None
                 assert created_user.username.startswith("test_user_")
@@ -83,17 +85,17 @@ class TestDatabaseModels:
                 assert created_user.is_verified is True
         finally:
             await close_database()
-    
+
     async def test_bot_instance_creation(self, config, database_setup):
         """Test bot instance creation and validation."""
         from src.database.connection import initialize_database, close_database, get_async_session
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             async with get_async_session() as session:
                 queries = DatabaseQueries(session)
-                
+
                 # Create test user first
                 unique_id = str(uuid.uuid4())[:8]
                 user = User(
@@ -104,7 +106,7 @@ class TestDatabaseModels:
                     is_verified=True
                 )
                 created_user = await queries.create(user)
-                
+
                 # Create bot instance
                 bot_instance = BotInstance(
                     name="test_bot",
@@ -114,7 +116,7 @@ class TestDatabaseModels:
                     status="stopped",
                     config={"param1": "value1"}
                 )
-                
+
                 created_bot = await queries.create(bot_instance)
                 assert created_bot.id is not None
                 assert created_bot.name == "test_bot"
@@ -124,17 +126,17 @@ class TestDatabaseModels:
                 assert created_bot.status == "stopped"
         finally:
             await close_database()
-    
+
     async def test_trade_creation(self, config, database_setup):
         """Test trade creation and validation."""
         from src.database.connection import initialize_database, close_database, get_async_session
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             async with get_async_session() as session:
                 queries = DatabaseQueries(session)
-            
+
             # Create test user and bot
             unique_id = str(uuid.uuid4())[:8]
             user = User(
@@ -145,7 +147,7 @@ class TestDatabaseModels:
                 is_verified=True
             )
             created_user = await queries.create(user)
-            
+
             bot_instance = BotInstance(
                 name="test_bot",
                 user_id=created_user.id,
@@ -155,7 +157,7 @@ class TestDatabaseModels:
                 config={"param1": "value1"}
             )
             created_bot = await queries.create(bot_instance)
-            
+
             # Create trade
             trade = Trade(
                 bot_id=created_bot.id,
@@ -171,7 +173,7 @@ class TestDatabaseModels:
                 fee=Decimal("0.0001"),
                 fee_currency="USDT"
             )
-            
+
             created_trade = await queries.create(trade)
             assert created_trade.id is not None
             assert created_trade.bot_id == created_bot.id
@@ -181,17 +183,17 @@ class TestDatabaseModels:
             assert created_trade.status == "filled"
         finally:
             await close_database()
-    
+
     async def test_position_creation(self, config, database_setup):
         """Test position creation and validation."""
         from src.database.connection import initialize_database, close_database, get_async_session
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             async with get_async_session() as session:
                 queries = DatabaseQueries(session)
-            
+
             # Create test user and bot
             unique_id = str(uuid.uuid4())[:8]
             user = User(
@@ -202,7 +204,7 @@ class TestDatabaseModels:
                 is_verified=True
             )
             created_user = await queries.create(user)
-            
+
             bot_instance = BotInstance(
                 name="test_bot",
                 user_id=created_user.id,
@@ -212,7 +214,7 @@ class TestDatabaseModels:
                 config={"param1": "value1"}
             )
             created_bot = await queries.create(bot_instance)
-            
+
             # Create position
             position = Position(
                 bot_id=created_bot.id,
@@ -225,7 +227,7 @@ class TestDatabaseModels:
                 unrealized_pnl=Decimal("10.00"),
                 realized_pnl=Decimal("0.00")
             )
-            
+
             created_position = await queries.create(position)
             assert created_position.id is not None
             assert created_position.bot_id == created_bot.id
@@ -235,17 +237,17 @@ class TestDatabaseModels:
             assert created_position.entry_price == Decimal("50000.00")
         finally:
             await close_database()
-    
+
     async def test_balance_snapshot_creation(self, config, database_setup):
         """Test balance snapshot creation and validation."""
         from src.database.connection import initialize_database, close_database, get_async_session
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             async with get_async_session() as session:
                 queries = DatabaseQueries(session)
-            
+
             # Create test user
             unique_id = str(uuid.uuid4())[:8]
             user = User(
@@ -256,7 +258,7 @@ class TestDatabaseModels:
                 is_verified=True
             )
             created_user = await queries.create(user)
-            
+
             # Create balance snapshot
             balance_snapshot = BalanceSnapshot(
                 user_id=created_user.id,
@@ -266,7 +268,7 @@ class TestDatabaseModels:
                 locked_balance=Decimal("0.00"),
                 total_balance=Decimal("1000.00")
             )
-            
+
             created_balance = await queries.create(balance_snapshot)
             assert created_balance.id is not None
             assert created_balance.user_id == created_user.id
@@ -281,17 +283,17 @@ class TestDatabaseModels:
 @pytest.mark.asyncio
 class TestDatabaseQueries:
     """Test database query operations."""
-    
+
     async def test_get_by_id(self, config, database_setup):
         """Test get_by_id query."""
         from src.database.connection import initialize_database, close_database, get_async_session
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             async with get_async_session() as session:
                 queries = DatabaseQueries(session)
-            
+
             # Create test user
             unique_id = str(uuid.uuid4())[:8]
             user = User(
@@ -302,7 +304,7 @@ class TestDatabaseQueries:
                 is_verified=True
             )
             created_user = await queries.create(user)
-            
+
             # Test get_by_id
             retrieved_user = await queries.get_by_id(User, created_user.id)
             assert retrieved_user is not None
@@ -310,17 +312,17 @@ class TestDatabaseQueries:
             assert retrieved_user.username == created_user.username
         finally:
             await close_database()
-    
+
     async def test_get_all(self, config, database_setup):
         """Test get_all query."""
         from src.database.connection import initialize_database, close_database, get_async_session
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             async with get_async_session() as session:
                 queries = DatabaseQueries(session)
-            
+
             # Create test users
             unique_id = str(uuid.uuid4())[:8]
             user1 = User(
@@ -337,26 +339,26 @@ class TestDatabaseQueries:
                 is_active=True,
                 is_verified=True
             )
-            
+
             await queries.create(user1)
             await queries.create(user2)
-            
+
             # Test get_all
             all_users = await queries.get_all(User)
             assert len(all_users) >= 2
         finally:
             await close_database()
-    
+
     async def test_get_trades_by_bot(self, config, database_setup):
         """Test get_trades_by_bot query."""
         from src.database.connection import initialize_database, close_database, get_async_session
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             async with get_async_session() as session:
                 queries = DatabaseQueries(session)
-            
+
             # Create test user and bot
             unique_id = str(uuid.uuid4())[:8]
             user = User(
@@ -367,7 +369,7 @@ class TestDatabaseQueries:
                 is_verified=True
             )
             created_user = await queries.create(user)
-            
+
             bot_instance = BotInstance(
                 name="test_bot",
                 user_id=created_user.id,
@@ -377,7 +379,7 @@ class TestDatabaseQueries:
                 config={"param1": "value1"}
             )
             created_bot = await queries.create(bot_instance)
-            
+
             # Create trades
             trade1 = Trade(
                 bot_id=created_bot.id,
@@ -393,7 +395,7 @@ class TestDatabaseQueries:
                 fee=Decimal("0.0001"),
                 fee_currency="USDT"
             )
-            
+
             trade2 = Trade(
                 bot_id=created_bot.id,
                 exchange_order_id="test_order_2",
@@ -408,10 +410,10 @@ class TestDatabaseQueries:
                 fee=Decimal("0.0001"),
                 fee_currency="USDT"
             )
-            
+
             await queries.create(trade1)
             await queries.create(trade2)
-            
+
             # Test get_trades_by_bot
             trades = await queries.get_trades_by_bot(created_bot.id)
             assert len(trades) >= 2
@@ -419,17 +421,17 @@ class TestDatabaseQueries:
                 assert trade.bot_id == created_bot.id
         finally:
             await close_database()
-    
+
     async def test_get_positions_by_bot(self, config, database_setup):
         """Test get_positions_by_bot query."""
         from src.database.connection import initialize_database, close_database, get_async_session
-        
+
         try:
             await initialize_database(database_setup)
-            
+
             async with get_async_session() as session:
                 queries = DatabaseQueries(session)
-            
+
             # Create test user and bot
             unique_id = str(uuid.uuid4())[:8]
             user = User(
@@ -440,7 +442,7 @@ class TestDatabaseQueries:
                 is_verified=True
             )
             created_user = await queries.create(user)
-            
+
             bot_instance = BotInstance(
                 name="test_bot",
                 user_id=created_user.id,
@@ -450,7 +452,7 @@ class TestDatabaseQueries:
                 config={"param1": "value1"}
             )
             created_bot = await queries.create(bot_instance)
-            
+
             # Create positions
             position1 = Position(
                 bot_id=created_bot.id,
@@ -463,7 +465,7 @@ class TestDatabaseQueries:
                 unrealized_pnl=Decimal("10.00"),
                 realized_pnl=Decimal("0.00")
             )
-            
+
             position2 = Position(
                 bot_id=created_bot.id,
                 exchange="binance",
@@ -475,10 +477,10 @@ class TestDatabaseQueries:
                 unrealized_pnl=Decimal("10.00"),
                 realized_pnl=Decimal("0.00")
             )
-            
+
             await queries.create(position1)
             await queries.create(position2)
-            
+
             # Test get_positions_by_bot
             positions = await queries.get_positions_by_bot(created_bot.id)
             assert len(positions) >= 2
@@ -491,30 +493,30 @@ class TestDatabaseQueries:
 @pytest.mark.asyncio
 class TestRedisIntegration:
     """Test Redis client integration."""
-    
+
     async def test_redis_basic_operations(self, config):
         """Test Redis basic operations."""
         redis_client = RedisClient(config.get_redis_url())
-        
+
         # Connect to Redis
         await redis_client.connect()
-        
+
         # Test basic operations
         await redis_client.set("test_key", "test_value")
         value = await redis_client.get("test_key")
         assert value == "test_value"
-        
+
         # Test hash operations
         await redis_client.hset("test_hash", "field1", "value1")
         hash_value = await redis_client.hget("test_hash", "field1")
         assert hash_value == "value1"
-    
+
     async def test_redis_trading_operations(self, config):
         """Test Redis trading-specific operations."""
         redis_client = RedisClient(config.get_redis_url())
-        
+
         await redis_client.connect()
-        
+
         # Test market data storage
         market_data = {
             "symbol": "BTCUSDT",
@@ -522,12 +524,12 @@ class TestRedisIntegration:
             "volume": "100.5",
             "timestamp": datetime.now().isoformat()
         }
-        
+
         await redis_client.store_market_data("BTCUSDT", market_data)
         retrieved_data = await redis_client.get_market_data("BTCUSDT")
         assert retrieved_data is not None
         assert retrieved_data["symbol"] == "BTCUSDT"
-        
+
         # Test position storage
         position_data = {
             "symbol": "BTCUSDT",
@@ -535,7 +537,7 @@ class TestRedisIntegration:
             "side": "long",
             "entry_price": "50000.00"
         }
-        
+
         await redis_client.store_position("test_bot", position_data)
         retrieved_position = await redis_client.get_position("test_bot")
         assert retrieved_position is not None
@@ -545,7 +547,7 @@ class TestRedisIntegration:
 @pytest.mark.asyncio
 class TestInfluxDBIntegration:
     """Test InfluxDB client integration."""
-    
+
     async def test_influxdb_connection(self, config):
         """Test InfluxDB connection."""
         influx_client = InfluxDBClientWrapper(
@@ -554,16 +556,16 @@ class TestInfluxDBIntegration:
             org=config.database.influxdb_org,
             bucket=config.database.influxdb_bucket
         )
-        
+
         # Test connection
         influx_client.connect()
-        
+
         # Test health check
         health_status = influx_client.health_check()
         assert health_status is not None
-        
+
         influx_client.disconnect()
-    
+
     async def test_influxdb_data_writing(self, config):
         """Test InfluxDB data writing."""
         influx_client = InfluxDBClientWrapper(
@@ -572,9 +574,9 @@ class TestInfluxDBIntegration:
             org=config.database.influxdb_org,
             bucket=config.database.influxdb_bucket
         )
-        
+
         influx_client.connect()
-        
+
         # Test market data writing
         market_data_point = {
             "symbol": "BTCUSDT",
@@ -582,9 +584,9 @@ class TestInfluxDBIntegration:
             "volume": 100.5,
             "timestamp": datetime.now(timezone.utc)
         }
-        
+
         influx_client.write_market_data("BTCUSDT", market_data_point)
-        
+
         # Test trade data writing
         trade_data_point = {
             "bot_id": "test_bot",
@@ -595,9 +597,9 @@ class TestInfluxDBIntegration:
             "commission": 0.0001,
             "timestamp": datetime.now(timezone.utc)
         }
-        
+
         influx_client.write_trade(trade_data_point)
-        
+
         # Test performance metrics writing
         performance_point = {
             "bot_id": "test_bot",
@@ -607,46 +609,46 @@ class TestInfluxDBIntegration:
             "max_drawdown": -50.0,
             "timestamp": datetime.now(timezone.utc)
         }
-        
+
         influx_client.write_performance_metrics("test_bot", performance_point)
-        
+
         influx_client.disconnect()
 
 
 @pytest.mark.asyncio
 class TestMigrationSystem:
     """Test database migration system."""
-    
+
     async def test_migration_configuration(self):
         """Test migration configuration."""
         from alembic import command
         from alembic.config import Config as AlembicConfig
-        
+
         # Test migration configuration
         alembic_cfg = AlembicConfig("alembic.ini")
-        
+
         # Test current revision
         from alembic.script import ScriptDirectory
         script_dir = ScriptDirectory.from_config(alembic_cfg)
         current_revision = script_dir.get_current_head()
-        
+
         assert current_revision is not None
-        
+
         # Test migration history
         revisions = list(script_dir.walk_revisions())
         assert len(revisions) > 0
-    
+
     async def test_migration_file_structure(self):
         """Test migration file structure."""
         migration_file = "src/database/migrations/versions/001_initial_schema.py"
-        
+
         # Test migration file exists
         import os
         assert os.path.exists(migration_file)
-        
+
         # Test migration content
         with open(migration_file, 'r') as f:
             content = f.read()
             assert "def upgrade()" in content
             assert "def downgrade()" in content
-            assert "op.create_table" in content 
+            assert "op.create_table" in content

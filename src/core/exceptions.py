@@ -18,8 +18,12 @@ from typing import Optional, Dict, Any
 
 class TradingBotError(Exception):
     """Base exception for all trading bot errors."""
-    
-    def __init__(self, message: str, error_code: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
+
+    def __init__(self,
+                 message: str,
+                 error_code: Optional[str] = None,
+                 details: Optional[Dict[str,
+                                        Any]] = None):
         super().__init__(message)
         self.message = message
         self.error_code = error_code
@@ -354,5 +358,5 @@ class CurrencyError(CapitalManagementError):
     pass
 
 
-# REVERSE INTEGRATION: Future prompts may add specific sub-exceptions but must 
-# extend these base classes, never replace them. 
+# REVERSE INTEGRATION: Future prompts may add specific sub-exceptions but must
+# extend these base classes, never replace them.

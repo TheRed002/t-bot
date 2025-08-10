@@ -1,0 +1,1052 @@
+{
+  "$defs": {
+    "CapitalManagementConfig": {
+      "description": "Capital management configuration for P-010A framework.",
+      "properties": {
+        "base_currency": {
+          "default": "USDT",
+          "description": "Base currency for all calculations",
+          "pattern": "^[A-Z]{3,10}$",
+          "title": "Base Currency",
+          "type": "string"
+        },
+        "total_capital": {
+          "default": 10000.0,
+          "description": "Total available capital",
+          "exclusiveMinimum": 0,
+          "title": "Total Capital",
+          "type": "number"
+        },
+        "emergency_reserve_pct": {
+          "default": 0.1,
+          "description": "Emergency reserve percentage (10%)",
+          "title": "Emergency Reserve Pct",
+          "type": "number"
+        },
+        "allocation_strategy": {
+          "default": "risk_parity",
+          "description": "Capital allocation strategy",
+          "title": "Allocation Strategy",
+          "type": "string"
+        },
+        "rebalance_frequency_hours": {
+          "default": 24,
+          "description": "Rebalancing frequency in hours",
+          "title": "Rebalance Frequency Hours",
+          "type": "integer"
+        },
+        "min_allocation_pct": {
+          "default": 0.01,
+          "description": "Minimum allocation percentage (1%)",
+          "title": "Min Allocation Pct",
+          "type": "number"
+        },
+        "max_allocation_pct": {
+          "default": 0.25,
+          "description": "Maximum allocation percentage (25%)",
+          "title": "Max Allocation Pct",
+          "type": "number"
+        },
+        "max_exchange_allocation_pct": {
+          "default": 0.6,
+          "description": "Maximum exchange allocation (60%)",
+          "title": "Max Exchange Allocation Pct",
+          "type": "number"
+        },
+        "min_exchange_balance": {
+          "default": 100.0,
+          "description": "Minimum exchange balance",
+          "title": "Min Exchange Balance",
+          "type": "number"
+        },
+        "max_daily_reallocation_pct": {
+          "default": 0.2,
+          "description": "Maximum daily reallocation (20%)",
+          "title": "Max Daily Reallocation Pct",
+          "type": "number"
+        },
+        "fund_flow_cooldown_minutes": {
+          "default": 60,
+          "description": "Fund flow cooldown in minutes",
+          "title": "Fund Flow Cooldown Minutes",
+          "type": "integer"
+        },
+        "min_deposit_amount": {
+          "default": 1000.0,
+          "description": "Minimum deposit amount",
+          "title": "Min Deposit Amount",
+          "type": "number"
+        },
+        "min_withdrawal_amount": {
+          "default": 100.0,
+          "description": "Minimum withdrawal amount",
+          "title": "Min Withdrawal Amount",
+          "type": "number"
+        },
+        "max_withdrawal_pct": {
+          "default": 0.2,
+          "description": "Maximum withdrawal percentage (20%)",
+          "title": "Max Withdrawal Pct",
+          "type": "number"
+        },
+        "supported_currencies": {
+          "default": [
+            "USDT",
+            "BUSD",
+            "USDC",
+            "BTC",
+            "ETH"
+          ],
+          "description": "Supported currencies for trading",
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Currencies",
+          "type": "array"
+        },
+        "hedging_enabled": {
+          "default": true,
+          "description": "Enable currency hedging",
+          "title": "Hedging Enabled",
+          "type": "boolean"
+        },
+        "hedging_threshold": {
+          "default": 0.1,
+          "description": "Hedging threshold (10% exposure)",
+          "title": "Hedging Threshold",
+          "type": "number"
+        },
+        "hedge_ratio": {
+          "default": 0.8,
+          "description": "Hedge coverage ratio (80%)",
+          "title": "Hedge Ratio",
+          "type": "number"
+        },
+        "withdrawal_rules": {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "default": {
+            "profit_only": {
+              "description": "Only withdraw realized profits",
+              "enabled": true
+            },
+            "maintain_minimum": {
+              "description": "Keep minimum capital for each strategy",
+              "enabled": true
+            },
+            "performance_based": {
+              "description": "Allow withdrawals only if performance > threshold",
+              "enabled": false,
+              "threshold": 0.05
+            }
+          },
+          "description": "Withdrawal rule configurations",
+          "title": "Withdrawal Rules",
+          "type": "object"
+        },
+        "auto_compound_enabled": {
+          "default": true,
+          "description": "Enable auto-compounding",
+          "title": "Auto Compound Enabled",
+          "type": "boolean"
+        },
+        "auto_compound_frequency": {
+          "default": "weekly",
+          "description": "Auto-compound frequency",
+          "title": "Auto Compound Frequency",
+          "type": "string"
+        },
+        "profit_threshold": {
+          "default": 100.0,
+          "description": "Minimum profit for compounding",
+          "title": "Profit Threshold",
+          "type": "number"
+        },
+        "max_daily_loss_pct": {
+          "default": 0.05,
+          "description": "Maximum daily loss (5%)",
+          "title": "Max Daily Loss Pct",
+          "type": "number"
+        },
+        "max_weekly_loss_pct": {
+          "default": 0.1,
+          "description": "Maximum weekly loss (10%)",
+          "title": "Max Weekly Loss Pct",
+          "type": "number"
+        },
+        "max_monthly_loss_pct": {
+          "default": 0.15,
+          "description": "Maximum monthly loss (15%)",
+          "title": "Max Monthly Loss Pct",
+          "type": "number"
+        },
+        "profit_lock_pct": {
+          "default": 0.5,
+          "description": "Profit lock percentage (50%)",
+          "title": "Profit Lock Pct",
+          "type": "number"
+        },
+        "per_strategy_minimum": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "default": {
+            "mean_reversion": 5000.0,
+            "trend_following": 10000.0,
+            "ml_strategy": 15000.0,
+            "arbitrage": 20000.0,
+            "market_making": 25000.0
+          },
+          "description": "Minimum capital requirements per strategy",
+          "title": "Per Strategy Minimum",
+          "type": "object"
+        },
+        "exchange_allocation_weights": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "default": {
+            "binance": 0.5,
+            "okx": 0.3,
+            "coinbase": 0.2
+          },
+          "description": "Default exchange allocation weights",
+          "title": "Exchange Allocation Weights",
+          "type": "object"
+        }
+      },
+      "title": "CapitalManagementConfig",
+      "type": "object"
+    },
+    "DatabaseConfig": {
+      "description": "Database configuration for PostgreSQL, Redis, and InfluxDB.",
+      "properties": {
+        "postgresql_host": {
+          "default": "localhost",
+          "description": "PostgreSQL host",
+          "title": "Postgresql Host",
+          "type": "string"
+        },
+        "postgresql_port": {
+          "default": 5432,
+          "description": "PostgreSQL port",
+          "title": "Postgresql Port",
+          "type": "integer"
+        },
+        "postgresql_database": {
+          "default": "trading_bot",
+          "description": "PostgreSQL database name",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "title": "Postgresql Database",
+          "type": "string"
+        },
+        "postgresql_username": {
+          "default": "trading_bot",
+          "description": "PostgreSQL username",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "title": "Postgresql Username",
+          "type": "string"
+        },
+        "postgresql_password": {
+          "default": "trading_bot_password",
+          "description": "PostgreSQL password",
+          "minLength": 8,
+          "title": "Postgresql Password",
+          "type": "string"
+        },
+        "postgresql_pool_size": {
+          "default": 10,
+          "description": "PostgreSQL connection pool size",
+          "title": "Postgresql Pool Size",
+          "type": "integer"
+        },
+        "redis_host": {
+          "default": "localhost",
+          "description": "Redis host",
+          "title": "Redis Host",
+          "type": "string"
+        },
+        "redis_port": {
+          "default": 6379,
+          "description": "Redis port",
+          "title": "Redis Port",
+          "type": "integer"
+        },
+        "redis_password": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Redis password",
+          "title": "Redis Password"
+        },
+        "redis_db": {
+          "default": 0,
+          "description": "Redis database number",
+          "title": "Redis Db",
+          "type": "integer"
+        },
+        "influxdb_host": {
+          "default": "localhost",
+          "description": "InfluxDB host",
+          "title": "Influxdb Host",
+          "type": "string"
+        },
+        "influxdb_port": {
+          "default": 8086,
+          "description": "InfluxDB port",
+          "title": "Influxdb Port",
+          "type": "integer"
+        },
+        "influxdb_token": {
+          "default": "test-token",
+          "description": "InfluxDB token",
+          "title": "Influxdb Token",
+          "type": "string"
+        },
+        "influxdb_org": {
+          "default": "test-org",
+          "description": "InfluxDB organization",
+          "title": "Influxdb Org",
+          "type": "string"
+        },
+        "influxdb_bucket": {
+          "default": "trading-data",
+          "description": "InfluxDB bucket",
+          "title": "Influxdb Bucket",
+          "type": "string"
+        }
+      },
+      "title": "DatabaseConfig",
+      "type": "object"
+    },
+    "ErrorHandlingConfig": {
+      "description": "Error handling configuration for P-002A framework.",
+      "properties": {
+        "circuit_breaker_failure_threshold": {
+          "default": 5,
+          "description": "Circuit breaker failure threshold",
+          "title": "Circuit Breaker Failure Threshold",
+          "type": "integer"
+        },
+        "circuit_breaker_recovery_timeout": {
+          "default": 30,
+          "description": "Circuit breaker recovery timeout in seconds",
+          "title": "Circuit Breaker Recovery Timeout",
+          "type": "integer"
+        },
+        "max_retry_attempts": {
+          "default": 3,
+          "description": "Maximum retry attempts",
+          "title": "Max Retry Attempts",
+          "type": "integer"
+        },
+        "retry_backoff_factor": {
+          "default": 2.0,
+          "description": "Retry backoff factor",
+          "title": "Retry Backoff Factor",
+          "type": "number"
+        },
+        "retry_max_delay": {
+          "default": 60,
+          "description": "Maximum retry delay in seconds",
+          "title": "Retry Max Delay",
+          "type": "integer"
+        },
+        "pattern_detection_enabled": {
+          "default": true,
+          "description": "Enable error pattern detection",
+          "title": "Pattern Detection Enabled",
+          "type": "boolean"
+        },
+        "correlation_analysis_enabled": {
+          "default": true,
+          "description": "Enable correlation analysis",
+          "title": "Correlation Analysis Enabled",
+          "type": "boolean"
+        },
+        "predictive_alerts_enabled": {
+          "default": true,
+          "description": "Enable predictive alerts",
+          "title": "Predictive Alerts Enabled",
+          "type": "boolean"
+        },
+        "state_validation_frequency": {
+          "default": 60,
+          "description": "State validation frequency in seconds",
+          "title": "State Validation Frequency",
+          "type": "integer"
+        },
+        "auto_reconciliation_enabled": {
+          "default": true,
+          "description": "Enable automatic reconciliation",
+          "title": "Auto Reconciliation Enabled",
+          "type": "boolean"
+        },
+        "max_discrepancy_threshold": {
+          "default": 0.01,
+          "description": "Maximum discrepancy threshold",
+          "title": "Max Discrepancy Threshold",
+          "type": "number"
+        },
+        "partial_fill_min_percentage": {
+          "default": 0.5,
+          "description": "Minimum fill percentage for partial orders",
+          "title": "Partial Fill Min Percentage",
+          "type": "number"
+        },
+        "network_max_offline_duration": {
+          "default": 300,
+          "description": "Maximum offline duration in seconds",
+          "title": "Network Max Offline Duration",
+          "type": "integer"
+        },
+        "data_feed_max_staleness": {
+          "default": 30,
+          "description": "Maximum data staleness in seconds",
+          "title": "Data Feed Max Staleness",
+          "type": "integer"
+        },
+        "order_rejection_max_retries": {
+          "default": 2,
+          "description": "Maximum retry attempts for rejected orders",
+          "title": "Order Rejection Max Retries",
+          "type": "integer"
+        }
+      },
+      "title": "ErrorHandlingConfig",
+      "type": "object"
+    },
+    "ExchangeConfig": {
+      "description": "Exchange configuration for API credentials and rate limits.",
+      "properties": {
+        "default_timeout": {
+          "default": 30,
+          "description": "Default exchange API timeout",
+          "title": "Default Timeout",
+          "type": "integer"
+        },
+        "max_retries": {
+          "default": 3,
+          "description": "Maximum retry attempts for exchange API calls",
+          "title": "Max Retries",
+          "type": "integer"
+        },
+        "binance_api_key": {
+          "default": "",
+          "description": "Binance API key",
+          "minLength": 0,
+          "title": "Binance Api Key",
+          "type": "string"
+        },
+        "binance_api_secret": {
+          "default": "",
+          "description": "Binance API secret",
+          "minLength": 0,
+          "title": "Binance Api Secret",
+          "type": "string"
+        },
+        "binance_testnet": {
+          "default": true,
+          "description": "Use Binance testnet",
+          "title": "Binance Testnet",
+          "type": "boolean"
+        },
+        "okx_api_key": {
+          "default": "",
+          "description": "OKX API key",
+          "minLength": 0,
+          "title": "Okx Api Key",
+          "type": "string"
+        },
+        "okx_api_secret": {
+          "default": "",
+          "description": "OKX API secret",
+          "minLength": 0,
+          "title": "Okx Api Secret",
+          "type": "string"
+        },
+        "okx_passphrase": {
+          "default": "",
+          "description": "OKX API passphrase",
+          "minLength": 0,
+          "title": "Okx Passphrase",
+          "type": "string"
+        },
+        "okx_sandbox": {
+          "default": true,
+          "description": "Use OKX sandbox",
+          "title": "Okx Sandbox",
+          "type": "boolean"
+        },
+        "coinbase_api_key": {
+          "default": "",
+          "description": "Coinbase API key",
+          "minLength": 0,
+          "title": "Coinbase Api Key",
+          "type": "string"
+        },
+        "coinbase_api_secret": {
+          "default": "",
+          "description": "Coinbase API secret",
+          "minLength": 0,
+          "title": "Coinbase Api Secret",
+          "type": "string"
+        },
+        "coinbase_sandbox": {
+          "default": true,
+          "description": "Use Coinbase sandbox",
+          "title": "Coinbase Sandbox",
+          "type": "boolean"
+        },
+        "rate_limits": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object"
+          },
+          "default": {
+            "binance": {
+              "orders_per_second": 10,
+              "requests_per_minute": 1200,
+              "websocket_connections": 5
+            },
+            "okx": {
+              "orders_per_second": 20,
+              "requests_per_minute": 600,
+              "websocket_connections": 3
+            },
+            "coinbase": {
+              "orders_per_second": 15,
+              "requests_per_minute": 600,
+              "websocket_connections": 4
+            }
+          },
+          "description": "Exchange-specific rate limits",
+          "title": "Rate Limits",
+          "type": "object"
+        },
+        "supported_exchanges": {
+          "default": [
+            "binance",
+            "okx",
+            "coinbase"
+          ],
+          "description": "List of supported exchanges",
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Exchanges",
+          "type": "array"
+        }
+      },
+      "title": "ExchangeConfig",
+      "type": "object"
+    },
+    "RiskConfig": {
+      "description": "Risk management configuration for P-008 framework.",
+      "properties": {
+        "default_position_size_method": {
+          "default": "fixed_percentage",
+          "description": "Default position sizing method",
+          "title": "Default Position Size Method",
+          "type": "string"
+        },
+        "default_position_size_pct": {
+          "default": 0.02,
+          "description": "Default position size percentage (2%)",
+          "title": "Default Position Size Pct",
+          "type": "number"
+        },
+        "max_position_size_pct": {
+          "default": 0.1,
+          "description": "Maximum position size percentage (10%)",
+          "title": "Max Position Size Pct",
+          "type": "number"
+        },
+        "max_total_positions": {
+          "default": 10,
+          "description": "Maximum total positions",
+          "title": "Max Total Positions",
+          "type": "integer"
+        },
+        "max_positions_per_symbol": {
+          "default": 1,
+          "description": "Maximum positions per symbol",
+          "title": "Max Positions Per Symbol",
+          "type": "integer"
+        },
+        "max_portfolio_exposure": {
+          "default": 0.95,
+          "description": "Maximum portfolio exposure (95%)",
+          "title": "Max Portfolio Exposure",
+          "type": "number"
+        },
+        "max_sector_exposure": {
+          "default": 0.25,
+          "description": "Maximum sector exposure (25%)",
+          "title": "Max Sector Exposure",
+          "type": "number"
+        },
+        "max_correlation_exposure": {
+          "default": 0.5,
+          "description": "Maximum correlation exposure (50%)",
+          "title": "Max Correlation Exposure",
+          "type": "number"
+        },
+        "max_leverage": {
+          "default": 1.0,
+          "description": "Maximum leverage (no leverage by default)",
+          "title": "Max Leverage",
+          "type": "number"
+        },
+        "max_daily_loss_pct": {
+          "default": 0.05,
+          "description": "Maximum daily loss percentage (5%)",
+          "title": "Max Daily Loss Pct",
+          "type": "number"
+        },
+        "max_drawdown_pct": {
+          "default": 0.15,
+          "description": "Maximum drawdown percentage (15%)",
+          "title": "Max Drawdown Pct",
+          "type": "number"
+        },
+        "var_confidence_level": {
+          "default": 0.95,
+          "description": "VaR confidence level (95%)",
+          "maximum": 0.999,
+          "minimum": 0.5,
+          "title": "Var Confidence Level",
+          "type": "number"
+        },
+        "kelly_lookback_days": {
+          "default": 30,
+          "description": "Kelly Criterion lookback period in days",
+          "title": "Kelly Lookback Days",
+          "type": "integer"
+        },
+        "kelly_max_fraction": {
+          "default": 0.25,
+          "description": "Maximum Kelly fraction (25%)",
+          "title": "Kelly Max Fraction",
+          "type": "number"
+        },
+        "volatility_window": {
+          "default": 20,
+          "description": "Volatility calculation window",
+          "title": "Volatility Window",
+          "type": "integer"
+        },
+        "volatility_target": {
+          "default": 0.02,
+          "description": "Volatility target (2% daily)",
+          "title": "Volatility Target",
+          "type": "number"
+        },
+        "var_calculation_window": {
+          "default": 252,
+          "description": "VaR calculation window (trading days)",
+          "title": "Var Calculation Window",
+          "type": "integer"
+        },
+        "drawdown_calculation_window": {
+          "default": 252,
+          "description": "Drawdown calculation window (trading days)",
+          "title": "Drawdown Calculation Window",
+          "type": "integer"
+        },
+        "correlation_calculation_window": {
+          "default": 60,
+          "description": "Correlation calculation window (days)",
+          "title": "Correlation Calculation Window",
+          "type": "integer"
+        },
+        "emergency_close_positions": {
+          "default": true,
+          "description": "Close all positions during emergency stop",
+          "title": "Emergency Close Positions",
+          "type": "boolean"
+        },
+        "emergency_recovery_timeout_hours": {
+          "default": 1,
+          "description": "Recovery timeout in hours after emergency stop",
+          "title": "Emergency Recovery Timeout Hours",
+          "type": "integer"
+        },
+        "emergency_manual_override_enabled": {
+          "default": true,
+          "description": "Enable manual override for emergency controls",
+          "title": "Emergency Manual Override Enabled",
+          "type": "boolean"
+        }
+      },
+      "title": "RiskConfig",
+      "type": "object"
+    },
+    "SecurityConfig": {
+      "description": "Security configuration for authentication and encryption.",
+      "properties": {
+        "secret_key": {
+          "default": "test-secret-key-32-chars-long-for-testing",
+          "description": "Secret key for JWT",
+          "title": "Secret Key",
+          "type": "string"
+        },
+        "jwt_algorithm": {
+          "default": "HS256",
+          "description": "JWT algorithm",
+          "pattern": "^(HS256|HS384|HS512|RS256|RS384|RS512)$",
+          "title": "Jwt Algorithm",
+          "type": "string"
+        },
+        "jwt_expire_minutes": {
+          "default": 30,
+          "description": "JWT expiration time in minutes",
+          "title": "Jwt Expire Minutes",
+          "type": "integer"
+        },
+        "encryption_key": {
+          "default": "test-encryption-key-32-chars-long-for-testing",
+          "description": "Encryption key",
+          "title": "Encryption Key",
+          "type": "string"
+        }
+      },
+      "title": "SecurityConfig",
+      "type": "object"
+    },
+    "StrategyManagementConfig": {
+      "description": "Strategy management configuration for P-011 framework.",
+      "properties": {
+        "max_concurrent_strategies": {
+          "default": 10,
+          "description": "Maximum concurrent strategies",
+          "title": "Max Concurrent Strategies",
+          "type": "integer"
+        },
+        "strategy_restart_delay": {
+          "default": 60,
+          "description": "Strategy restart delay in seconds",
+          "title": "Strategy Restart Delay",
+          "type": "integer"
+        },
+        "performance_window_days": {
+          "default": 30,
+          "description": "Performance evaluation window in days",
+          "title": "Performance Window Days",
+          "type": "integer"
+        },
+        "default_min_confidence": {
+          "default": 0.6,
+          "description": "Default minimum signal confidence",
+          "title": "Default Min Confidence",
+          "type": "number"
+        },
+        "default_position_size": {
+          "default": 0.02,
+          "description": "Default position size percentage",
+          "title": "Default Position Size",
+          "type": "number"
+        },
+        "default_stop_loss": {
+          "default": 0.02,
+          "description": "Default stop loss percentage",
+          "title": "Default Stop Loss",
+          "type": "number"
+        },
+        "default_take_profit": {
+          "default": 0.04,
+          "description": "Default take profit percentage",
+          "title": "Default Take Profit",
+          "type": "number"
+        },
+        "enable_hot_reload": {
+          "default": true,
+          "description": "Enable hot reloading of strategies",
+          "title": "Enable Hot Reload",
+          "type": "boolean"
+        },
+        "config_check_interval": {
+          "default": 30,
+          "description": "Configuration check interval in seconds",
+          "title": "Config Check Interval",
+          "type": "integer"
+        },
+        "min_win_rate": {
+          "default": 0.4,
+          "description": "Minimum acceptable win rate",
+          "title": "Min Win Rate",
+          "type": "number"
+        },
+        "min_sharpe_ratio": {
+          "default": 0.5,
+          "description": "Minimum acceptable Sharpe ratio",
+          "title": "Min Sharpe Ratio",
+          "type": "number"
+        },
+        "max_drawdown_threshold": {
+          "default": 0.15,
+          "description": "Maximum acceptable drawdown",
+          "title": "Max Drawdown Threshold",
+          "type": "number"
+        },
+        "performance_evaluation_frequency": {
+          "default": 24,
+          "description": "Performance evaluation frequency in hours",
+          "title": "Performance Evaluation Frequency",
+          "type": "integer"
+        },
+        "auto_disable_poor_performers": {
+          "default": true,
+          "description": "Auto-disable poorly performing strategies",
+          "title": "Auto Disable Poor Performers",
+          "type": "boolean"
+        },
+        "performance_alert_threshold": {
+          "default": 0.3,
+          "description": "Performance alert threshold",
+          "title": "Performance Alert Threshold",
+          "type": "number"
+        }
+      },
+      "title": "StrategyManagementConfig",
+      "type": "object"
+    }
+  },
+  "description": "Master configuration class for the entire application.\n\nAggregates all configuration classes and provides utility methods\nfor database URLs, environment checks, and schema generation.\n\nAttributes:\n    environment: Application environment (development/staging/production)\n    debug: Debug mode flag\n    app_name: Application name\n    app_version: Application version\n    database: Database configuration settings\n    security: Security configuration settings\n    error_handling: Error handling configuration\n    exchanges: Exchange API configuration\n    risk: Risk management configuration\n    capital_management: Capital management configuration\n    strategies: Strategy management configuration",
+  "properties": {
+    "environment": {
+      "default": "development",
+      "description": "Application environment",
+      "title": "Environment",
+      "type": "string"
+    },
+    "debug": {
+      "default": false,
+      "description": "Debug mode",
+      "title": "Debug",
+      "type": "boolean"
+    },
+    "app_name": {
+      "default": "trading-bot-suite",
+      "description": "Application name",
+      "title": "App Name",
+      "type": "string"
+    },
+    "app_version": {
+      "default": "1.0.0",
+      "description": "Application version",
+      "title": "App Version",
+      "type": "string"
+    },
+    "database": {
+      "$ref": "#/$defs/DatabaseConfig",
+      "default": {
+        "postgresql_host": "localhost",
+        "postgresql_port": 5432,
+        "postgresql_database": "trading_bot",
+        "postgresql_username": "trading_bot",
+        "postgresql_password": "trading_bot_password",
+        "postgresql_pool_size": 10,
+        "redis_host": "172.27.176.1",
+        "redis_port": 6379,
+        "redis_password": "redis_password",
+        "redis_db": 0,
+        "influxdb_host": "172.27.176.1",
+        "influxdb_port": 8086,
+        "influxdb_token": "trading_bot_token",
+        "influxdb_org": "trading_bot_dev",
+        "influxdb_bucket": "trading_data_dev"
+      }
+    },
+    "security": {
+      "$ref": "#/$defs/SecurityConfig",
+      "default": {
+        "secret_key": "your-super-secret-key-32-chars-long-for-production",
+        "jwt_algorithm": "HS256",
+        "jwt_expire_minutes": 30,
+        "encryption_key": "your-encryption-key-32-chars-long-for-production"
+      }
+    },
+    "error_handling": {
+      "$ref": "#/$defs/ErrorHandlingConfig",
+      "default": {
+        "circuit_breaker_failure_threshold": 5,
+        "circuit_breaker_recovery_timeout": 30,
+        "max_retry_attempts": 3,
+        "retry_backoff_factor": 2.0,
+        "retry_max_delay": 60,
+        "pattern_detection_enabled": true,
+        "correlation_analysis_enabled": true,
+        "predictive_alerts_enabled": true,
+        "state_validation_frequency": 60,
+        "auto_reconciliation_enabled": true,
+        "max_discrepancy_threshold": 0.01,
+        "partial_fill_min_percentage": 0.5,
+        "network_max_offline_duration": 300,
+        "data_feed_max_staleness": 30,
+        "order_rejection_max_retries": 2
+      }
+    },
+    "exchanges": {
+      "$ref": "#/$defs/ExchangeConfig",
+      "default": {
+        "default_timeout": 30,
+        "max_retries": 3,
+        "binance_api_key": "",
+        "binance_api_secret": "",
+        "binance_testnet": true,
+        "okx_api_key": "",
+        "okx_api_secret": "",
+        "okx_passphrase": "",
+        "okx_sandbox": true,
+        "coinbase_api_key": "",
+        "coinbase_api_secret": "",
+        "coinbase_sandbox": true,
+        "rate_limits": {
+          "binance": {
+            "orders_per_second": 10,
+            "requests_per_minute": 1200,
+            "websocket_connections": 5
+          },
+          "coinbase": {
+            "orders_per_second": 15,
+            "requests_per_minute": 600,
+            "websocket_connections": 4
+          },
+          "okx": {
+            "orders_per_second": 20,
+            "requests_per_minute": 600,
+            "websocket_connections": 3
+          }
+        },
+        "supported_exchanges": [
+          "binance",
+          "okx",
+          "coinbase"
+        ]
+      }
+    },
+    "risk": {
+      "$ref": "#/$defs/RiskConfig",
+      "default": {
+        "default_position_size_method": "fixed_percentage",
+        "default_position_size_pct": 0.02,
+        "max_position_size_pct": 0.1,
+        "max_total_positions": 10,
+        "max_positions_per_symbol": 1,
+        "max_portfolio_exposure": 0.95,
+        "max_sector_exposure": 0.25,
+        "max_correlation_exposure": 0.5,
+        "max_leverage": 1.0,
+        "max_daily_loss_pct": 0.05,
+        "max_drawdown_pct": 0.15,
+        "var_confidence_level": 0.95,
+        "kelly_lookback_days": 30,
+        "kelly_max_fraction": 0.25,
+        "volatility_window": 20,
+        "volatility_target": 0.02,
+        "var_calculation_window": 252,
+        "drawdown_calculation_window": 252,
+        "correlation_calculation_window": 60,
+        "emergency_close_positions": true,
+        "emergency_recovery_timeout_hours": 1,
+        "emergency_manual_override_enabled": true
+      }
+    },
+    "capital_management": {
+      "$ref": "#/$defs/CapitalManagementConfig",
+      "default": {
+        "base_currency": "USDT",
+        "total_capital": 10000.0,
+        "emergency_reserve_pct": 0.1,
+        "allocation_strategy": "risk_parity",
+        "rebalance_frequency_hours": 24,
+        "min_allocation_pct": 0.01,
+        "max_allocation_pct": 0.25,
+        "max_exchange_allocation_pct": 0.6,
+        "min_exchange_balance": 100.0,
+        "max_daily_reallocation_pct": 0.2,
+        "fund_flow_cooldown_minutes": 60,
+        "min_deposit_amount": 1000.0,
+        "min_withdrawal_amount": 100.0,
+        "max_withdrawal_pct": 0.2,
+        "supported_currencies": [
+          "USDT",
+          "BUSD",
+          "USDC",
+          "BTC",
+          "ETH"
+        ],
+        "hedging_enabled": true,
+        "hedging_threshold": 0.1,
+        "hedge_ratio": 0.8,
+        "withdrawal_rules": {
+          "maintain_minimum": {
+            "description": "Keep minimum capital for each strategy",
+            "enabled": true
+          },
+          "performance_based": {
+            "description": "Allow withdrawals only if performance > threshold",
+            "enabled": false,
+            "threshold": 0.05
+          },
+          "profit_only": {
+            "description": "Only withdraw realized profits",
+            "enabled": true
+          }
+        },
+        "auto_compound_enabled": true,
+        "auto_compound_frequency": "weekly",
+        "profit_threshold": 100.0,
+        "max_daily_loss_pct": 0.05,
+        "max_weekly_loss_pct": 0.1,
+        "max_monthly_loss_pct": 0.15,
+        "profit_lock_pct": 0.5,
+        "per_strategy_minimum": {
+          "arbitrage": 20000.0,
+          "market_making": 25000.0,
+          "mean_reversion": 5000.0,
+          "ml_strategy": 15000.0,
+          "trend_following": 10000.0
+        },
+        "exchange_allocation_weights": {
+          "binance": 0.5,
+          "coinbase": 0.2,
+          "okx": 0.3
+        }
+      }
+    },
+    "strategies": {
+      "$ref": "#/$defs/StrategyManagementConfig",
+      "default": {
+        "max_concurrent_strategies": 10,
+        "strategy_restart_delay": 60,
+        "performance_window_days": 30,
+        "default_min_confidence": 0.6,
+        "default_position_size": 0.02,
+        "default_stop_loss": 0.02,
+        "default_take_profit": 0.04,
+        "enable_hot_reload": true,
+        "config_check_interval": 30,
+        "min_win_rate": 0.4,
+        "min_sharpe_ratio": 0.5,
+        "max_drawdown_threshold": 0.15,
+        "performance_evaluation_frequency": 24,
+        "auto_disable_poor_performers": true,
+        "performance_alert_threshold": 0.3
+      }
+    }
+  },
+  "title": "Config",
+  "type": "object"
+}

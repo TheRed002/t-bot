@@ -4,7 +4,7 @@ Data Sources Module
 This module provides data source integrations for the trading bot:
 - Market data from exchanges (OHLCV, order book, trades)
 - News sentiment from NewsAPI
-- Social media sentiment (Twitter/Reddit APIs)  
+- Social media sentiment (Twitter/Reddit APIs)
 - Economic indicators (FRED API)
 - Alternative data (weather, satellite data)
 
@@ -22,7 +22,7 @@ from .alternative_data import AlternativeDataSource
 
 __all__ = [
     'MarketDataSource',
-    'NewsDataSource', 
+    'NewsDataSource',
     'SocialMediaDataSource',
     'AlternativeDataSource'
 ]

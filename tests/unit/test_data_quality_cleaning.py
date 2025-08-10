@@ -27,7 +27,7 @@ from src.core.exceptions import DataError, DataValidationError, ValidationError
 
 class TestDataCleaner:
     """Test cases for DataCleaner class"""
-    
+
     @pytest.fixture
     def cleaner_config(self) -> Dict[str, Any]:
         """Test configuration for cleaner"""
@@ -39,12 +39,12 @@ class TestDataCleaner:
             'max_history_size': 100,
             'outlier_strategy': CleaningStrategy.ADJUST
         }
-    
+
     @pytest.fixture
     def cleaner(self, cleaner_config: Dict[str, Any]) -> DataCleaner:
         """Create cleaner instance for testing"""
         return DataCleaner(cleaner_config)
-    
+
     @pytest.fixture
     def valid_market_data(self) -> MarketData:
         """Create valid market data for testing"""
@@ -59,7 +59,7 @@ class TestDataCleaner:
             high_price=Decimal("50100.00"),
             low_price=Decimal("49800.00")
         )
-    
+
     @pytest.fixture
     def valid_signals(self) -> List[Signal]:
         """Create valid signals for testing"""
@@ -79,7 +79,7 @@ class TestDataCleaner:
                 strategy_name="test_strategy"
             )
         ]
-    
+
     @pytest.mark.asyncio
     async def test_cleaner_initialization(self, cleaner: DataCleaner):
         """Test cleaner initialization with configuration"""
@@ -89,20 +89,24 @@ class TestDataCleaner:
         assert cleaner.smoothing_window == 5
         assert cleaner.duplicate_threshold == 1.0
         assert cleaner.max_history_size == 100
-    
+
     @pytest.mark.asyncio
-    async def test_clean_market_data_valid(self, cleaner: DataCleaner, valid_market_data: MarketData):
+    async def test_clean_market_data_valid(
+            self,
+            cleaner: DataCleaner,
+            valid_market_data: MarketData):
         """Test cleaning of valid market data"""
         cleaned_data, cleaning_result = await cleaner.clean_market_data(valid_market_data)
-        
+
         assert cleaned_data is not None
         assert cleaning_result.original_data == valid_market_data
         assert cleaning_result.cleaned_data == cleaned_data
         assert cleaning_result.removed_count == 0
         assert cleaning_result.adjusted_count == 0
         assert cleaning_result.imputed_count == 0
-        assert len(cleaning_result.applied_strategies) > 0  # Should apply normalization
-    
+        # Should apply normalization
+        assert len(cleaning_result.applied_strategies) > 0
+
     @pytest.mark.asyncio
     async def test_clean_market_data_missing_price(self, cleaner: DataCleaner):
         """Test cleaning with missing price data"""
@@ -113,7 +117,7 @@ class TestDataCleaner:
             volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         # Add some historical data for imputation
         for i in range(10):
             historical_data = MarketData(
@@ -123,14 +127,14 @@ class TestDataCleaner:
                 timestamp=datetime.now(timezone.utc)
             )
             await cleaner.clean_market_data(historical_data)
-        
+
         cleaned_data, cleaning_result = await cleaner.clean_market_data(data_with_zero_price)
-        
+
         assert cleaned_data is not None
         assert cleaned_data.price is not None  # Should be imputed
         assert cleaning_result.imputed_count > 0
         assert "missing_data_imputation" in cleaning_result.applied_strategies
-    
+
     @pytest.mark.asyncio
     async def test_clean_market_data_missing_ohlc(self, cleaner: DataCleaner):
         """Test cleaning with missing OHLC data"""
@@ -141,17 +145,18 @@ class TestDataCleaner:
             timestamp=datetime.now(timezone.utc)
             # Missing OHLC data
         )
-        
+
         cleaned_data, cleaning_result = await cleaner.clean_market_data(data_with_missing_ohlc)
-        
+
         assert cleaned_data is not None
         assert cleaned_data.open_price is not None  # Should be imputed
         assert cleaned_data.high_price is not None  # Should be imputed
         assert cleaned_data.low_price is not None   # Should be imputed
         assert cleaning_result.imputed_count > 0
-    
+
     @pytest.mark.asyncio
-    async def test_clean_market_data_outlier_detection(self, cleaner: DataCleaner):
+    async def test_clean_market_data_outlier_detection(
+            self, cleaner: DataCleaner):
         """Test outlier detection and handling"""
         # Add historical data to create distribution
         symbol = "BTCUSDT"
@@ -164,7 +169,7 @@ class TestDataCleaner:
                 timestamp=datetime.now(timezone.utc)
             )
             await cleaner.clean_market_data(data)
-        
+
         # Now add an outlier
         outlier_data = MarketData(
             symbol=symbol,
@@ -172,13 +177,13 @@ class TestDataCleaner:
             volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         cleaned_data, cleaning_result = await cleaner.clean_market_data(outlier_data)
-        
+
         # Should handle outlier (adjust or remove based on strategy)
         assert "outlier_handling" in cleaning_result.applied_strategies
         assert cleaning_result.adjusted_count > 0 or cleaning_result.removed_count > 0
-    
+
     @pytest.mark.asyncio
     async def test_clean_market_data_smoothing(self, cleaner: DataCleaner):
         """Test data smoothing functionality"""
@@ -193,7 +198,7 @@ class TestDataCleaner:
                 timestamp=datetime.now(timezone.utc)
             )
             await cleaner.clean_market_data(data)
-        
+
         # Add current data point
         current_data = MarketData(
             symbol=symbol,
@@ -201,23 +206,24 @@ class TestDataCleaner:
             volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         cleaned_data, cleaning_result = await cleaner.clean_market_data(current_data)
-        
+
         # Should apply smoothing
         assert "data_smoothing" in cleaning_result.applied_strategies
-    
+
     @pytest.mark.asyncio
-    async def test_clean_market_data_duplicate_removal(self, cleaner: DataCleaner, valid_market_data: MarketData):
+    async def test_clean_market_data_duplicate_removal(
+            self, cleaner: DataCleaner, valid_market_data: MarketData):
         """Test duplicate detection and removal"""
         # Clean the same data twice
         cleaned_data1, _ = await cleaner.clean_market_data(valid_market_data)
         cleaned_data2, cleaning_result = await cleaner.clean_market_data(valid_market_data)
-        
+
         # Second cleaning should detect duplicate
         assert "duplicate_removal" in cleaning_result.applied_strategies
         assert cleaning_result.removed_count > 0
-    
+
     @pytest.mark.asyncio
     async def test_clean_market_data_normalization(self, cleaner: DataCleaner):
         """Test data normalization"""
@@ -227,27 +233,31 @@ class TestDataCleaner:
             volume=Decimal("100.123456789"),
             timestamp=datetime.now()  # No timezone
         )
-        
+
         cleaned_data, cleaning_result = await cleaner.clean_market_data(data_with_issues)
-        
+
         # Should normalize data
         assert "data_normalization" in cleaning_result.applied_strategies
         assert cleaned_data.symbol == "BTCUSDT"  # Should be uppercase
         assert cleaned_data.timestamp.tzinfo is not None  # Should have timezone
-    
+
     @pytest.mark.asyncio
-    async def test_clean_signal_data_valid(self, cleaner: DataCleaner, valid_signals: List[Signal]):
+    async def test_clean_signal_data_valid(
+            self,
+            cleaner: DataCleaner,
+            valid_signals: List[Signal]):
         """Test cleaning of valid signal data"""
         cleaned_signals, cleaning_result = await cleaner.clean_signal_data(valid_signals)
-        
+
         assert len(cleaned_signals) == len(valid_signals)
         assert cleaning_result.original_data == valid_signals
         assert cleaning_result.cleaned_data == cleaned_signals
         assert cleaning_result.removed_count == 0
         assert cleaning_result.adjusted_count == 0
-    
+
     @pytest.mark.asyncio
-    async def test_clean_signal_data_invalid_signals(self, cleaner: DataCleaner):
+    async def test_clean_signal_data_invalid_signals(
+            self, cleaner: DataCleaner):
         """Test cleaning with invalid signals"""
         # Since Pydantic prevents invalid data, test with edge cases
         edge_signals = [
@@ -266,16 +276,17 @@ class TestDataCleaner:
                 strategy_name="test_strategy"
             )
         ]
-        
+
         cleaned_signals, cleaning_result = await cleaner.clean_signal_data(edge_signals)
-        
+
         # Should clean edge cases appropriately
         assert len(cleaned_signals) <= len(edge_signals)
         assert cleaning_result.original_data == edge_signals
         assert cleaning_result.cleaned_data == cleaned_signals
-    
+
     @pytest.mark.asyncio
-    async def test_clean_signal_data_duplicate_signals(self, cleaner: DataCleaner):
+    async def test_clean_signal_data_duplicate_signals(
+            self, cleaner: DataCleaner):
         """Test cleaning with duplicate signals"""
         duplicate_signals = [
             Signal(
@@ -288,20 +299,22 @@ class TestDataCleaner:
             Signal(
                 direction=SignalDirection.BUY,
                 confidence=0.75,
-                timestamp=datetime.now(timezone.utc) + timedelta(seconds=0.5),  # Very close timestamp
+                # Very close timestamp
+                timestamp=datetime.now(timezone.utc) + timedelta(seconds=0.5),
                 symbol="BTCUSDT",
                 strategy_name="test_strategy"
             )
         ]
-        
+
         cleaned_signals, cleaning_result = await cleaner.clean_signal_data(duplicate_signals)
-        
+
         # Should remove duplicates
         assert len(cleaned_signals) < len(duplicate_signals)
         assert cleaning_result.removed_count > 0
-    
+
     @pytest.mark.asyncio
-    async def test_clean_signal_data_confidence_adjustment(self, cleaner: DataCleaner):
+    async def test_clean_signal_data_confidence_adjustment(
+            self, cleaner: DataCleaner):
         """Test signal confidence adjustment"""
         # Test with valid signals that might need confidence adjustment
         signals_with_edge_confidence = [
@@ -320,16 +333,16 @@ class TestDataCleaner:
                 strategy_name="test_strategy"
             )
         ]
-        
+
         cleaned_signals, cleaning_result = await cleaner.clean_signal_data(signals_with_edge_confidence)
-        
+
         # Should adjust confidence values appropriately
         for signal in cleaned_signals:
             assert 0.0 <= signal.confidence <= 1.0
-        
+
         assert cleaning_result.original_data == signals_with_edge_confidence
         assert cleaning_result.cleaned_data == cleaned_signals
-    
+
     @pytest.mark.asyncio
     async def test_handle_missing_data(self, cleaner: DataCleaner):
         """Test missing data handling"""
@@ -340,7 +353,7 @@ class TestDataCleaner:
             volume=Decimal("0"),  # Zero volume
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         # Add historical data for imputation
         for i in range(10):
             historical_data = MarketData(
@@ -350,12 +363,12 @@ class TestDataCleaner:
                 timestamp=datetime.now(timezone.utc)
             )
             await cleaner.clean_market_data(historical_data)
-        
+
         cleaned_data, imputed_count = await cleaner._handle_missing_data(data_with_zeros)
-        
+
         assert cleaned_data is not None
         assert imputed_count > 0  # Should impute some data
-    
+
     @pytest.mark.asyncio
     async def test_handle_outliers(self, cleaner: DataCleaner):
         """Test outlier handling"""
@@ -370,7 +383,7 @@ class TestDataCleaner:
                 timestamp=datetime.now(timezone.utc)
             )
             await cleaner.clean_market_data(data)
-        
+
         # Add outlier
         outlier_data = MarketData(
             symbol=symbol,
@@ -378,12 +391,12 @@ class TestDataCleaner:
             volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         cleaned_data, removed_count, adjusted_count = await cleaner._handle_outliers(outlier_data)
-        
+
         # Should handle outlier
         assert removed_count > 0 or adjusted_count > 0
-    
+
     @pytest.mark.asyncio
     async def test_smooth_data(self, cleaner: DataCleaner):
         """Test data smoothing"""
@@ -398,7 +411,7 @@ class TestDataCleaner:
                 timestamp=datetime.now(timezone.utc)
             )
             await cleaner.clean_market_data(data)
-        
+
         # Add current data
         current_data = MarketData(
             symbol=symbol,
@@ -406,25 +419,28 @@ class TestDataCleaner:
             volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         smoothed_data = await cleaner._smooth_data(current_data)
-        
+
         assert smoothed_data is not None
         assert smoothed_data.price is not None
-    
+
     @pytest.mark.asyncio
-    async def test_remove_duplicates(self, cleaner: DataCleaner, valid_market_data: MarketData):
+    async def test_remove_duplicates(
+            self,
+            cleaner: DataCleaner,
+            valid_market_data: MarketData):
         """Test duplicate removal"""
         # First data point
         cleaned_data1, removed_count1 = await cleaner._remove_duplicates(valid_market_data)
         assert removed_count1 == 0
         assert cleaned_data1 is not None
-        
+
         # Same data point (duplicate)
         cleaned_data2, removed_count2 = await cleaner._remove_duplicates(valid_market_data)
         assert removed_count2 > 0
         assert cleaned_data2 is None
-    
+
     @pytest.mark.asyncio
     async def test_normalize_data(self, cleaner: DataCleaner):
         """Test data normalization"""
@@ -434,14 +450,14 @@ class TestDataCleaner:
             volume=Decimal("100.123456789"),
             timestamp=datetime.now()  # No timezone
         )
-        
+
         normalized_data = await cleaner._normalize_data(data_to_normalize)
-        
+
         assert normalized_data.symbol == "BTCUSDT"
         assert normalized_data.timestamp.tzinfo is not None
         assert str(normalized_data.price).count('.') == 1
         assert len(str(normalized_data.price).split('.')[1]) <= 8
-    
+
     @pytest.mark.asyncio
     async def test_is_valid_signal(self, cleaner: DataCleaner):
         """Test signal validation"""
@@ -454,7 +470,7 @@ class TestDataCleaner:
             strategy_name="test_strategy"
         )
         assert await cleaner._is_valid_signal(valid_signal) is True
-        
+
         # Test with edge case signal
         edge_signal = Signal(
             direction=SignalDirection.SELL,
@@ -464,7 +480,7 @@ class TestDataCleaner:
             strategy_name="test_strategy"
         )
         assert await cleaner._is_valid_signal(edge_signal) is True
-    
+
     @pytest.mark.asyncio
     async def test_clean_confidence(self, cleaner: DataCleaner):
         """Test confidence cleaning"""
@@ -472,10 +488,10 @@ class TestDataCleaner:
         assert await cleaner._clean_confidence(1.5) == 1.0
         assert await cleaner._clean_confidence(-0.1) == 0.0
         assert await cleaner._clean_confidence(0.75) == 0.75
-        
+
         # Test rounding
         assert await cleaner._clean_confidence(0.123456789) == 0.123
-    
+
     @pytest.mark.asyncio
     async def test_is_duplicate_signal(self, cleaner: DataCleaner):
         """Test duplicate signal detection"""
@@ -486,9 +502,9 @@ class TestDataCleaner:
             symbol="BTCUSDT",
             strategy_name="test_strategy"
         )
-        
+
         existing_signals = [base_signal]
-        
+
         # Same signal (duplicate)
         duplicate_signal = Signal(
             direction=SignalDirection.BUY,
@@ -498,7 +514,7 @@ class TestDataCleaner:
             strategy_name="test_strategy"
         )
         assert await cleaner._is_duplicate_signal(duplicate_signal, existing_signals) is True
-        
+
         # Different signal (not duplicate)
         different_signal = Signal(
             direction=SignalDirection.SELL,
@@ -508,15 +524,18 @@ class TestDataCleaner:
             strategy_name="test_strategy"
         )
         assert await cleaner._is_duplicate_signal(different_signal, existing_signals) is False
-    
+
     @pytest.mark.asyncio
-    async def test_create_data_hash(self, cleaner: DataCleaner, valid_market_data: MarketData):
+    async def test_create_data_hash(
+            self,
+            cleaner: DataCleaner,
+            valid_market_data: MarketData):
         """Test data hash creation for duplicate detection"""
         hash1 = cleaner._create_data_hash(valid_market_data)
         hash2 = cleaner._create_data_hash(valid_market_data)
-        
+
         assert hash1 == hash2  # Same data should produce same hash
-        
+
         # Different data should produce different hash
         different_data = MarketData(
             symbol="ETHUSDT",
@@ -526,23 +545,23 @@ class TestDataCleaner:
         )
         hash3 = cleaner._create_data_hash(different_data)
         assert hash1 != hash3
-    
+
     @pytest.mark.asyncio
     async def test_cleaning_summary(self, cleaner: DataCleaner):
         """Test cleaning summary generation"""
         summary = await cleaner.get_cleaning_summary()
-        
+
         assert 'cleaning_stats' in summary
         assert 'price_history_size' in summary
         assert 'volume_history_size' in summary
         assert 'cleaning_config' in summary
-        
+
         # Check config values
         config = summary['cleaning_config']
         assert config['outlier_threshold'] == 3.0
         assert config['smoothing_window'] == 5
         assert config['duplicate_threshold'] == 1.0
-    
+
     @pytest.mark.asyncio
     async def test_cleaner_error_handling(self, cleaner: DataCleaner):
         """Test cleaner error handling"""
@@ -551,7 +570,7 @@ class TestDataCleaner:
         assert cleaned_data is None
         assert cleaning_result.original_data is None
         assert 'error' in cleaning_result.metadata
-        
+
         # Test with data that has validation issues but is still valid Pydantic
         malformed_data = MarketData(
             symbol="BTCUSDT",
@@ -559,28 +578,31 @@ class TestDataCleaner:
             volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         cleaned_data, cleaning_result = await cleaner.clean_market_data(malformed_data)
         assert cleaned_data is not None  # Should still clean what it can
         assert cleaning_result.original_data == malformed_data
-    
+
     @pytest.mark.asyncio
-    async def test_cleaner_performance(self, cleaner: DataCleaner, valid_market_data: MarketData):
+    async def test_cleaner_performance(
+            self,
+            cleaner: DataCleaner,
+            valid_market_data: MarketData):
         """Test cleaner performance"""
         import time
-        
+
         start_time = time.perf_counter()
-        
+
         # Perform multiple cleanings
         for _ in range(100):
             await cleaner.clean_market_data(valid_market_data)
-        
+
         end_time = time.perf_counter()
         total_time = end_time - start_time
-        
+
         # Should complete 100 cleanings in reasonable time (< 2 seconds)
         assert total_time < 2.0
-        
+
         # Average time per cleaning should be < 20ms
         avg_time = total_time / 100
         assert avg_time < 0.02
@@ -588,7 +610,7 @@ class TestDataCleaner:
 
 class TestCleaningStrategy:
     """Test cases for CleaningStrategy enum"""
-    
+
     def test_cleaning_strategies(self):
         """Test cleaning strategy enum values"""
         assert CleaningStrategy.REMOVE.value == "remove"
@@ -599,7 +621,7 @@ class TestCleaningStrategy:
 
 class TestOutlierMethod:
     """Test cases for OutlierMethod enum"""
-    
+
     def test_outlier_methods(self):
         """Test outlier method enum values"""
         assert OutlierMethod.Z_SCORE.value == "z_score"
@@ -610,7 +632,7 @@ class TestOutlierMethod:
 
 class TestCleaningResult:
     """Test cases for CleaningResult dataclass"""
-    
+
     def test_cleaning_result_creation(self):
         """Test cleaning result creation"""
         result = CleaningResult(
@@ -623,7 +645,7 @@ class TestCleaningResult:
             timestamp=datetime.now(timezone.utc),
             metadata={"test": "value"}
         )
-        
+
         assert result.original_data == "original"
         assert result.cleaned_data == "cleaned"
         assert result.applied_strategies == ["normalization"]

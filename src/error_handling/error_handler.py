@@ -61,14 +61,14 @@ class ErrorContext:
 
 class CircuitBreaker:
     """Circuit breaker pattern implementation for preventing cascading failures."""
-    
+
     def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 30):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.failure_count = 0
         self.last_failure_time = None
         self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
-        
+
     def call(self, func: Callable, *args, **kwargs):
         """Execute function with circuit breaker protection."""
         if self.state == "OPEN":
@@ -76,7 +76,7 @@ class CircuitBreaker:
                 self.state = "HALF_OPEN"
             else:
                 raise TradingBotError("Circuit breaker is OPEN")
-        
+
         try:
             result = func(*args, **kwargs)
             if self.state == "HALF_OPEN":
@@ -86,12 +86,12 @@ class CircuitBreaker:
         except Exception as e:
             self.failure_count += 1
             self.last_failure_time = time.time()
-            
+
             if self.failure_count >= self.failure_threshold:
                 self.state = "OPEN"
-            
+
             raise e
-    
+
     def should_transition_to_half_open(self) -> bool:
         """Check if circuit breaker should transition to HALF_OPEN state."""
         if self.state == "OPEN" and self.last_failure_time:
@@ -101,7 +101,7 @@ class CircuitBreaker:
 
 class ErrorHandler:
     """Comprehensive error handling and recovery system."""
-    
+
     def __init__(self, config: Config):
         self.config = config
         self.error_patterns: Dict[str, ErrorPattern] = {}
@@ -127,10 +127,10 @@ class ErrorHandler:
                 "max_delay": 10
             }
         }
-        
+
         # Initialize circuit breakers for critical components
         self._initialize_circuit_breakers()
-        
+
     def _initialize_circuit_breakers(self):
         """Initialize circuit breakers for critical system components."""
         self.circuit_breakers = {
@@ -139,7 +139,7 @@ class ErrorHandler:
             "exchange_connections": CircuitBreaker(failure_threshold=3, recovery_timeout=20),
             "model_inference": CircuitBreaker(failure_threshold=2, recovery_timeout=60)
         }
-    
+
     @time_execution
     def classify_error(self, error: Exception) -> ErrorSeverity:
         """Classify error severity based on error type and context."""
@@ -153,7 +153,7 @@ class ErrorHandler:
             return ErrorSeverity.LOW
         else:
             return ErrorSeverity.MEDIUM
-    
+
     @time_execution
     def create_error_context(
         self,
@@ -164,13 +164,13 @@ class ErrorHandler:
     ) -> ErrorContext:
         """Create error context for tracking and recovery."""
         import uuid
-        
+
         # Extract kwargs that should be passed to ErrorContext
         context_kwargs = {}
         for key in ['user_id', 'bot_id', 'symbol', 'order_id']:
             if key in kwargs:
                 context_kwargs[key] = kwargs.pop(key)
-        
+
         return ErrorContext(
             error_id=str(uuid.uuid4()),
             timestamp=datetime.now(timezone.utc),
@@ -186,12 +186,12 @@ class ErrorHandler:
             stack_trace=self._get_stack_trace(),
             **context_kwargs
         )
-    
+
     def _get_stack_trace(self) -> str:
         """Get current stack trace for debugging."""
         import traceback
         return "".join(traceback.format_stack())
-    
+
     @time_execution
     async def handle_error(
         self,
@@ -200,7 +200,7 @@ class ErrorHandler:
         recovery_strategy: Optional[Callable] = None
     ) -> bool:
         """Handle error with appropriate recovery strategy."""
-        
+
         # Log error with structured data
         logger.error(
             "Error occurred",
@@ -212,10 +212,10 @@ class ErrorHandler:
             error_message=str(error),
             details=context.details
         )
-        
+
         # Update error patterns
         self._update_error_patterns(context)
-        
+
         # Check if error should trigger circuit breaker
         circuit_breaker_triggered = False
         circuit_breaker_key = self._get_circuit_breaker_key(context)
@@ -231,7 +231,7 @@ class ErrorHandler:
                     error_id=context.error_id
                 )
                 circuit_breaker_triggered = True
-        
+
         # Attempt recovery if strategy provided and not at max attempts
         if recovery_strategy and context.recovery_attempts < context.max_recovery_attempts:
             try:
@@ -250,17 +250,17 @@ class ErrorHandler:
                     recovery_error=str(recovery_error),
                     recovery_attempts=context.recovery_attempts
                 )
-        
+
         # Escalate if critical or high severity
         if context.severity in [ErrorSeverity.CRITICAL, ErrorSeverity.HIGH]:
             await self._escalate_error(context)
-        
+
         return False
-    
+
     def _update_error_patterns(self, context: ErrorContext):
         """Update error pattern tracking for analytics."""
         pattern_key = f"{context.component}:{type(context.error).__name__}"
-        
+
         if pattern_key not in self.error_patterns:
             self.error_patterns[pattern_key] = ErrorPattern(
                 pattern_id=pattern_key,
@@ -276,10 +276,10 @@ class ErrorHandler:
                 description=f"Error pattern for {context.component}",
                 suggested_action="Monitor and investigate"
             )
-        
+
         self.error_patterns[pattern_key].occurrence_count += 1
         self.error_patterns[pattern_key].last_detected = context.timestamp
-    
+
     @time_execution
     def _get_circuit_breaker_key(self, context: ErrorContext) -> Optional[str]:
         """Determine which circuit breaker should be triggered."""
@@ -292,11 +292,11 @@ class ErrorHandler:
         elif "model" in context.component.lower():
             return "model_inference"
         return None
-    
+
     def _raise_error(self, error: Exception):
         """Helper method to raise error for circuit breaker."""
         raise error
-    
+
     async def _escalate_error(self, context: ErrorContext):
         """Escalate critical errors for immediate attention."""
         escalation_message = {
@@ -307,25 +307,25 @@ class ErrorHandler:
             "timestamp": context.timestamp.isoformat(),
             "details": context.details
         }
-        
+
         logger.critical(
             "Error escalation required",
             escalation_data=escalation_message
         )
-        
+
         # TODO: Implement notification channels (Discord, email, SMS)
         # This will be implemented in P-031 (Alerting and Notification System)
-    
+
     def get_retry_policy(self, error_type: str) -> Dict[str, Any]:
         """Get retry policy for specific error type."""
-        return self.retry_policies.get(error_type, self.retry_policies["network_errors"])
-    
+        return self.retry_policies.get(
+            error_type, self.retry_policies["network_errors"])
+
     def get_circuit_breaker_status(self) -> Dict[str, str]:
         """Get status of all circuit breakers."""
-        return {
-            name: breaker.state for name, breaker in self.circuit_breakers.items()
-        }
-    
+        return {name: breaker.state for name,
+                breaker in self.circuit_breakers.items()}
+
     def get_error_patterns(self) -> Dict[str, ErrorPattern]:
         """Get current error patterns for analysis."""
         return self.error_patterns.copy()
@@ -348,17 +348,17 @@ def error_handler_decorator(
                 from src.core.config import Config
                 config = Config()
                 handler = ErrorHandler(config)
-                
+
                 context = handler.create_error_context(
                     error=e,
                     component=component,
                     operation=operation,
                     **kwargs
                 )
-                
+
                 await handler.handle_error(e, context, recovery_strategy)
                 raise e
-        
+
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
             try:
@@ -368,14 +368,14 @@ def error_handler_decorator(
                 from src.core.config import Config
                 config = Config()
                 handler = ErrorHandler(config)
-                
+
                 context = handler.create_error_context(
                     error=e,
                     component=component,
                     operation=operation,
                     **kwargs
                 )
-                
+
                 # For sync functions, we can't await, so just log
                 logger.error(
                     "Error in sync function",
@@ -387,6 +387,7 @@ def error_handler_decorator(
                     error_message=str(e)
                 )
                 raise e
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    return decorator 
+
+        return async_wrapper if asyncio.iscoroutinefunction(
+            func) else sync_wrapper
+    return decorator

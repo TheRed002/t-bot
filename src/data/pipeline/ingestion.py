@@ -85,21 +85,21 @@ class IngestionMetrics:
 class DataIngestionPipeline:
     """
     Comprehensive data ingestion pipeline for multi-source data collection.
-    
+
     This class orchestrates data ingestion from multiple sources including
     market data, news, social media, and alternative data sources.
     """
-    
+
     def __init__(self, config: Config):
         """
         Initialize data ingestion pipeline.
-        
+
         Args:
             config: Application configuration
         """
         self.config = config
         self.error_handler = ErrorHandler(config)
-        
+
         # Pipeline configuration
         pipeline_config = getattr(config, 'data_pipeline', {})
         if hasattr(pipeline_config, 'get'):
@@ -124,18 +124,18 @@ class DataIngestionPipeline:
                 error_threshold=10,
                 retry_attempts=3
             )
-        
+
         # Data sources
         self.market_data_source: Optional[MarketDataSource] = None
         self.news_data_source: Optional[NewsDataSource] = None
         self.social_media_source: Optional[SocialMediaDataSource] = None
         self.alternative_data_source: Optional[AlternativeDataSource] = None
-        
+
         # Pipeline state
         self.status = PipelineStatus.STOPPED
         self.active_tasks: Dict[str, asyncio.Task] = {}
         self.data_buffers: Dict[str, List[Any]] = {}
-        
+
         # Metrics and monitoring
         self.metrics = IngestionMetrics(
             total_records_processed=0,
@@ -147,7 +147,7 @@ class DataIngestionPipeline:
             error_rate=0.0,
             last_update_time=datetime.now(timezone.utc)
         )
-        
+
         # Data callbacks
         self.data_callbacks: Dict[str, List[Callable]] = {
             'market_data': [],
@@ -155,46 +155,51 @@ class DataIngestionPipeline:
             'social_data': [],
             'alternative_data': []
         }
-        
-        logger.info("DataIngestionPipeline initialized", config=self.ingestion_config)
-    
+
+        logger.info(
+            "DataIngestionPipeline initialized",
+            config=self.ingestion_config)
+
     async def initialize(self) -> None:
         """Initialize data ingestion pipeline and sources."""
         try:
             self.status = PipelineStatus.STARTING
-            
+
             # Initialize data sources based on configuration
             if 'market_data' in self.ingestion_config.sources:
                 self.market_data_source = MarketDataSource(self.config)
                 await self.market_data_source.initialize()
                 logger.info("Market data source initialized")
-            
+
             if 'news_data' in self.ingestion_config.sources:
                 self.news_data_source = NewsDataSource(self.config)
                 await self.news_data_source.initialize()
                 logger.info("News data source initialized")
-            
+
             if 'social_media' in self.ingestion_config.sources:
                 self.social_media_source = SocialMediaDataSource(self.config)
                 await self.social_media_source.initialize()
                 logger.info("Social media source initialized")
-            
+
             if 'alternative_data' in self.ingestion_config.sources:
-                self.alternative_data_source = AlternativeDataSource(self.config)
+                self.alternative_data_source = AlternativeDataSource(
+                    self.config)
                 await self.alternative_data_source.initialize()
                 logger.info("Alternative data source initialized")
-            
+
             # Initialize data buffers
             for source in self.ingestion_config.sources:
                 self.data_buffers[source] = []
-            
+
             logger.info("DataIngestionPipeline initialization completed")
-            
+
         except Exception as e:
             self.status = PipelineStatus.ERROR
-            logger.error(f"Failed to initialize DataIngestionPipeline: {str(e)}")
+            logger.error(
+                f"Failed to initialize DataIngestionPipeline: {
+                    str(e)}")
             raise DataSourceError(f"Pipeline initialization failed: {str(e)}")
-    
+
     @time_execution
     async def start(self) -> None:
         """Start the data ingestion pipeline."""
@@ -202,33 +207,35 @@ class DataIngestionPipeline:
             if self.status == PipelineStatus.RUNNING:
                 logger.warning("Pipeline is already running")
                 return
-            
+
             self.status = PipelineStatus.RUNNING
-            
+
             # Start ingestion tasks based on mode
-            if self.ingestion_config.mode in [IngestionMode.REAL_TIME, IngestionMode.HYBRID]:
+            if self.ingestion_config.mode in [
+                    IngestionMode.REAL_TIME, IngestionMode.HYBRID]:
                 await self._start_real_time_ingestion()
-            
-            if self.ingestion_config.mode in [IngestionMode.BATCH, IngestionMode.HYBRID]:
+
+            if self.ingestion_config.mode in [
+                    IngestionMode.BATCH, IngestionMode.HYBRID]:
                 await self._start_batch_ingestion()
-            
+
             # Start buffer processing task
             self.active_tasks['buffer_processor'] = asyncio.create_task(
                 self._process_buffers()
             )
-            
+
             # Start metrics collection task
             self.active_tasks['metrics_collector'] = asyncio.create_task(
                 self._collect_metrics()
             )
-            
+
             logger.info("DataIngestionPipeline started successfully")
-            
+
         except Exception as e:
             self.status = PipelineStatus.ERROR
             logger.error(f"Failed to start DataIngestionPipeline: {str(e)}")
             raise DataSourceError(f"Pipeline start failed: {str(e)}")
-    
+
     async def _start_real_time_ingestion(self) -> None:
         """Start real-time data ingestion tasks."""
         try:
@@ -240,25 +247,25 @@ class DataIngestionPipeline:
                         self._ingest_market_data_real_time(symbol)
                     )
                 logger.info("Real-time market data ingestion started")
-            
+
             # News data real-time ingestion
             if self.news_data_source:
                 self.active_tasks['news_data'] = asyncio.create_task(
                     self._ingest_news_data_real_time()
                 )
                 logger.info("Real-time news data ingestion started")
-            
+
             # Social media real-time ingestion
             if self.social_media_source:
                 self.active_tasks['social_media'] = asyncio.create_task(
                     self._ingest_social_data_real_time()
                 )
                 logger.info("Real-time social media ingestion started")
-            
+
         except Exception as e:
             logger.error(f"Failed to start real-time ingestion: {str(e)}")
             raise
-    
+
     async def _start_batch_ingestion(self) -> None:
         """Start batch data ingestion tasks."""
         try:
@@ -268,18 +275,17 @@ class DataIngestionPipeline:
                     self._ingest_alternative_data_batch()
                 )
                 logger.info("Batch alternative data ingestion started")
-            
+
             # Historical market data batch ingestion
             if self.market_data_source:
                 self.active_tasks['historical_market_data'] = asyncio.create_task(
-                    self._ingest_historical_market_data()
-                )
+                    self._ingest_historical_market_data())
                 logger.info("Batch historical market data ingestion started")
-            
+
         except Exception as e:
             logger.error(f"Failed to start batch ingestion: {str(e)}")
             raise
-    
+
     @retry(max_attempts=3, delay=1.0)
     async def _ingest_market_data_real_time(self, symbol: str) -> None:
         """Ingest real-time market data for a symbol."""
@@ -288,20 +294,23 @@ class DataIngestionPipeline:
             subscription_id = await self.market_data_source.subscribe_to_ticker(
                 exchange_name='binance',  # Primary exchange
                 symbol=symbol,
-                callback=lambda ticker: self._handle_market_data(ticker, symbol)
+                callback=lambda ticker: self._handle_market_data(
+                    ticker, symbol)
             )
-            
-            logger.info(f"Started real-time market data ingestion for {symbol}")
-            
+
+            logger.info(
+                f"Started real-time market data ingestion for {symbol}")
+
             # Keep the task alive
             while self.status == PipelineStatus.RUNNING:
                 await asyncio.sleep(1)
-                
+
         except Exception as e:
-            logger.error(f"Real-time market data ingestion failed for {symbol}: {str(e)}")
+            logger.error(
+                f"Real-time market data ingestion failed for {symbol}: {str(e)}")
             self.metrics.failed_ingestions += 1
             raise
-    
+
     async def _ingest_news_data_real_time(self) -> None:
         """Ingest real-time news data."""
         try:
@@ -312,25 +321,29 @@ class DataIngestionPipeline:
                         news_articles = await self.news_data_source.get_news_for_symbol(
                             symbol, hours_back=1
                         )
-                        
+
                         # Add to buffer
                         for article in news_articles:
                             self._add_to_buffer('news_data', article)
-                        
-                        self.metrics.successful_ingestions += len(news_articles)
-                        
+
+                        self.metrics.successful_ingestions += len(
+                            news_articles)
+
                     except Exception as e:
-                        logger.warning(f"Failed to ingest news for {symbol}: {str(e)}")
+                        logger.warning(
+                            f"Failed to ingest news for {symbol}: {
+                                str(e)}")
                         self.metrics.failed_ingestions += 1
                         continue
-                
+
                 # Wait before next collection
-                await asyncio.sleep(self.ingestion_config.update_interval * 60)  # Convert to seconds
-                
+                # Convert to seconds
+                await asyncio.sleep(self.ingestion_config.update_interval * 60)
+
         except Exception as e:
             logger.error(f"Real-time news data ingestion failed: {str(e)}")
             raise
-    
+
     async def _ingest_social_data_real_time(self) -> None:
         """Ingest real-time social media data."""
         try:
@@ -341,23 +354,25 @@ class DataIngestionPipeline:
                         social_metrics = await self.social_media_source.get_social_sentiment(
                             symbol, hours_back=1
                         )
-                        
+
                         # Add to buffer
                         self._add_to_buffer('social_data', social_metrics)
                         self.metrics.successful_ingestions += 1
-                        
+
                     except Exception as e:
-                        logger.warning(f"Failed to ingest social data for {symbol}: {str(e)}")
+                        logger.warning(
+                            f"Failed to ingest social data for {symbol}: {
+                                str(e)}")
                         self.metrics.failed_ingestions += 1
                         continue
-                
+
                 # Wait before next collection
                 await asyncio.sleep(self.ingestion_config.update_interval * 60)
-                
+
         except Exception as e:
             logger.error(f"Real-time social data ingestion failed: {str(e)}")
             raise
-    
+
     async def _ingest_alternative_data_batch(self) -> None:
         """Ingest alternative data in batch mode."""
         try:
@@ -368,41 +383,44 @@ class DataIngestionPipeline:
                     economic_data = await self.alternative_data_source.get_economic_indicators(
                         indicators, days_back=7
                     )
-                    
+
                     # Add to buffer
                     for indicator in economic_data:
                         self._add_to_buffer('alternative_data', indicator)
-                    
+
                     # Get weather data
                     weather_data = await self.alternative_data_source.get_weather_data(
                         ['New York', 'London'], days_back=7
                     )
-                    
+
                     # Add to buffer
                     for weather_point in weather_data:
                         self._add_to_buffer('alternative_data', weather_point)
-                    
-                    self.metrics.successful_ingestions += len(economic_data) + len(weather_data)
-                    
+
+                    self.metrics.successful_ingestions += len(
+                        economic_data) + len(weather_data)
+
                     # Wait before next batch (1 hour)
                     await asyncio.sleep(3600)
-                    
+
                 except Exception as e:
-                    logger.warning(f"Failed to ingest alternative data batch: {str(e)}")
+                    logger.warning(
+                        f"Failed to ingest alternative data batch: {
+                            str(e)}")
                     self.metrics.failed_ingestions += 1
                     await asyncio.sleep(300)  # Wait 5 minutes on error
-                    
+
         except Exception as e:
             logger.error(f"Batch alternative data ingestion failed: {str(e)}")
             raise
-    
+
     async def _ingest_historical_market_data(self) -> None:
         """Ingest historical market data in batch mode."""
         try:
             # Get historical data for the last 30 days
             end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(days=30)
-            
+
             for symbol in self.ingestion_config.symbols:
                 try:
                     historical_data = await self.market_data_source.get_historical_data(
@@ -412,23 +430,27 @@ class DataIngestionPipeline:
                         end_time=end_time,
                         interval='1h'
                     )
-                    
+
                     # Add to buffer
                     for data_point in historical_data:
                         self._add_to_buffer('market_data', data_point)
-                    
+
                     self.metrics.successful_ingestions += len(historical_data)
-                    logger.info(f"Ingested {len(historical_data)} historical data points for {symbol}")
-                    
+                    logger.info(
+                        f"Ingested {
+                            len(historical_data)} historical data points for {symbol}")
+
                 except Exception as e:
-                    logger.warning(f"Failed to ingest historical data for {symbol}: {str(e)}")
+                    logger.warning(
+                        f"Failed to ingest historical data for {symbol}: {
+                            str(e)}")
                     self.metrics.failed_ingestions += 1
                     continue
-                
+
         except Exception as e:
             logger.error(f"Historical market data ingestion failed: {str(e)}")
             raise
-    
+
     def _handle_market_data(self, ticker: Ticker, symbol: str) -> None:
         """Handle incoming market data from real-time streams."""
         try:
@@ -445,41 +467,44 @@ class DataIngestionPipeline:
                 high_price=getattr(ticker, 'high_price', None),
                 low_price=getattr(ticker, 'low_price', None)
             )
-            
+
             # Add to buffer
             self._add_to_buffer('market_data', market_data)
             self.metrics.successful_ingestions += 1
-            
+
             # Call registered callbacks
             for callback in self.data_callbacks['market_data']:
                 try:
                     callback(market_data)
                 except Exception as e:
                     logger.warning(f"Market data callback failed: {str(e)}")
-                    
+
         except Exception as e:
-            logger.error(f"Failed to handle market data for {symbol}: {str(e)}")
+            logger.error(
+                f"Failed to handle market data for {symbol}: {
+                    str(e)}")
             self.metrics.failed_ingestions += 1
-    
+
     def _add_to_buffer(self, source: str, data: Any) -> None:
         """Add data to the appropriate buffer."""
         try:
             if source not in self.data_buffers:
                 self.data_buffers[source] = []
-            
+
             self.data_buffers[source].append({
                 'data': data,
                 'timestamp': datetime.now(timezone.utc),
                 'source': source
             })
-            
+
             # Maintain buffer size
-            if len(self.data_buffers[source]) > self.ingestion_config.buffer_size:
+            if len(self.data_buffers[source]
+                   ) > self.ingestion_config.buffer_size:
                 self.data_buffers[source].pop(0)
-                
+
         except Exception as e:
             logger.error(f"Failed to add data to buffer {source}: {str(e)}")
-    
+
     async def _process_buffers(self) -> None:
         """Process data buffers and persist to storage."""
         try:
@@ -490,92 +515,102 @@ class DataIngestionPipeline:
                             # Extract batch
                             batch = buffer[:self.ingestion_config.batch_size]
                             self.data_buffers[source] = buffer[self.ingestion_config.batch_size:]
-                            
+
                             # Process batch
                             await self._process_data_batch(source, batch)
-                            
+
                         except Exception as e:
-                            logger.error(f"Failed to process buffer for {source}: {str(e)}")
+                            logger.error(
+                                f"Failed to process buffer for {source}: {
+                                    str(e)}")
                             continue
-                
+
                 # Wait before next processing cycle
                 await asyncio.sleep(10)
-                
+
         except Exception as e:
             logger.error(f"Buffer processing failed: {str(e)}")
             raise
-    
+
     @time_execution
-    async def _process_data_batch(self, source: str, batch: List[Dict[str, Any]]) -> None:
+    async def _process_data_batch(
+            self, source: str, batch: List[Dict[str, Any]]) -> None:
         """Process a batch of data and store it."""
         try:
             # Import storage manager for database operations
             from .storage import DataStorageManager
-            
+
             # Initialize storage manager if not already done
             if not hasattr(self, 'storage_manager'):
                 self.storage_manager = DataStorageManager(self.config)
-            
+
             # Process and store each item in the batch
             for item in batch:
                 if item.get('type') == 'market_data' and item.get('data'):
                     # Store market data to database
                     await self.storage_manager.store_market_data(item['data'])
                 # Add other data type handling as needed
-            
+
             processed_count = len(batch)
             self.metrics.total_records_processed += processed_count
-            
-            logger.debug(f"Processed and stored {processed_count} records from {source}")
-            
+
+            logger.debug(
+                f"Processed and stored {processed_count} records from {source}")
+
         except Exception as e:
-            logger.error(f"Failed to process data batch for {source}: {str(e)}")
+            logger.error(
+                f"Failed to process data batch for {source}: {
+                    str(e)}")
             raise
-    
+
     async def _collect_metrics(self) -> None:
         """Collect and update pipeline metrics."""
         try:
             last_time = datetime.now(timezone.utc)
             last_processed = self.metrics.total_records_processed
-            
+
             while self.status == PipelineStatus.RUNNING:
                 await asyncio.sleep(60)  # Update metrics every minute
-                
+
                 current_time = datetime.now(timezone.utc)
                 current_processed = self.metrics.total_records_processed
-                
+
                 # Calculate rates
                 time_diff = (current_time - last_time).total_seconds()
                 records_diff = current_processed - last_processed
-                
+
                 if time_diff > 0:
                     self.metrics.records_per_second = records_diff / time_diff
-                
+
                 # Calculate buffer utilization
-                total_buffer_items = sum(len(buffer) for buffer in self.data_buffers.values())
-                max_buffer_size = len(self.data_buffers) * self.ingestion_config.buffer_size
-                
+                total_buffer_items = sum(len(buffer)
+                                         for buffer in self.data_buffers.values())
+                max_buffer_size = len(
+                    self.data_buffers) * self.ingestion_config.buffer_size
+
                 if max_buffer_size > 0:
                     self.metrics.buffer_utilization = total_buffer_items / max_buffer_size
-                
+
                 # Calculate error rate
-                total_operations = self.metrics.successful_ingestions + self.metrics.failed_ingestions
+                total_operations = self.metrics.successful_ingestions + \
+                    self.metrics.failed_ingestions
                 if total_operations > 0:
                     self.metrics.error_rate = self.metrics.failed_ingestions / total_operations
-                
+
                 self.metrics.last_update_time = current_time
-                
+
                 # Update for next iteration
                 last_time = current_time
                 last_processed = current_processed
-                
+
         except Exception as e:
             logger.error(f"Metrics collection failed: {str(e)}")
-    
-    def register_callback(self, data_type: str, callback: Callable[[Any], None]) -> None:
+
+    def register_callback(self, data_type: str,
+                          callback: Callable[[Any], None]) -> None:
         """
         Register a callback for specific data type.
-        
+
         Args:
             data_type: Type of data ('market_data', 'news_data', etc.)
             callback: Callback function to handle data
@@ -585,34 +620,34 @@ class DataIngestionPipeline:
             logger.info(f"Registered callback for {data_type}")
         else:
             logger.warning(f"Unknown data type for callback: {data_type}")
-    
+
     async def pause(self) -> None:
         """Pause the data ingestion pipeline."""
         if self.status == PipelineStatus.RUNNING:
             self.status = PipelineStatus.PAUSED
             logger.info("DataIngestionPipeline paused")
-    
+
     async def resume(self) -> None:
         """Resume the data ingestion pipeline."""
         if self.status == PipelineStatus.PAUSED:
             self.status = PipelineStatus.RUNNING
             logger.info("DataIngestionPipeline resumed")
-    
+
     async def stop(self) -> None:
         """Stop the data ingestion pipeline."""
         try:
             self.status = PipelineStatus.STOPPING
-            
+
             # Cancel all active tasks
             for task_name, task in self.active_tasks.items():
                 if not task.done():
                     task.cancel()
                     logger.info(f"Cancelled task: {task_name}")
-            
+
             # Wait for tasks to complete
             if self.active_tasks:
                 await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
-            
+
             # Cleanup data sources
             if self.market_data_source:
                 await self.market_data_source.cleanup()
@@ -622,15 +657,15 @@ class DataIngestionPipeline:
                 await self.social_media_source.cleanup()
             if self.alternative_data_source:
                 await self.alternative_data_source.cleanup()
-            
+
             self.status = PipelineStatus.STOPPED
             logger.info("DataIngestionPipeline stopped successfully")
-            
+
         except Exception as e:
             self.status = PipelineStatus.ERROR
             logger.error(f"Failed to stop DataIngestionPipeline: {str(e)}")
             raise
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Get current pipeline status and metrics."""
         return {
@@ -640,8 +675,7 @@ class DataIngestionPipeline:
                 "sources": self.ingestion_config.sources,
                 "symbols": self.ingestion_config.symbols,
                 "batch_size": self.ingestion_config.batch_size,
-                "update_interval": self.ingestion_config.update_interval
-            },
+                "update_interval": self.ingestion_config.update_interval},
             "metrics": {
                 "total_records_processed": self.metrics.total_records_processed,
                 "successful_ingestions": self.metrics.successful_ingestions,
@@ -649,10 +683,9 @@ class DataIngestionPipeline:
                 "records_per_second": self.metrics.records_per_second,
                 "buffer_utilization": self.metrics.buffer_utilization,
                 "error_rate": self.metrics.error_rate,
-                "last_update_time": self.metrics.last_update_time.isoformat()
-            },
+                "last_update_time": self.metrics.last_update_time.isoformat()},
             "buffer_sizes": {
-                source: len(buffer) for source, buffer in self.data_buffers.items()
-            },
-            "active_tasks": list(self.active_tasks.keys())
-        }
+                source: len(buffer) for source,
+                buffer in self.data_buffers.items()},
+            "active_tasks": list(
+                self.active_tasks.keys())}

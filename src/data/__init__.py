@@ -46,21 +46,21 @@ from .features.alternative_features import AlternativeFeatureCalculator
 __all__ = [
     # Data Quality Management
     'DataValidator',
-    'DataCleaner', 
+    'DataCleaner',
     'QualityMonitor',
-    
+
     # Data Sources
     'MarketDataSource',
     'NewsDataSource',
     'SocialMediaDataSource',
     'AlternativeDataSource',
-    
+
     # Data Pipeline
     'DataIngestionPipeline',
     'DataProcessor',
     'PipelineValidator',
     'DataStorageManager',
-    
+
     # Feature Engineering
     'TechnicalIndicatorCalculator',
     'StatisticalFeatureCalculator',

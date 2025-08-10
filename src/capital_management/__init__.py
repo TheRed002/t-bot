@@ -31,10 +31,10 @@ from .fund_flow_manager import FundFlowManager
 
 __all__ = [
     'CapitalAllocator',
-    'ExchangeDistributor', 
+    'ExchangeDistributor',
     'CurrencyManager',
     'FundFlowManager'
 ]
 
 __version__ = "1.0.0"
-__author__ = "Trading Bot Framework" 
+__author__ = "Trading Bot Framework"

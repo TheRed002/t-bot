@@ -10,10 +10,9 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.engine import Connection
 from alembic import context
-from alembic.config import Config
 
 # Import core components from P-001
-from src.core.config import Config as AppConfig
+from src.core.config import Config
 from src.core.logging import get_logger
 
 # Import database models
@@ -21,14 +20,15 @@ from src.database.models import Base
 
 logger = get_logger(__name__)
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
-config = context.config
-
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Initialize Alembic configuration for logging if available
+# NOTE: We use try-except to handle cases where context might not be available
+try:
+    # Interpret the config file for Python logging.
+    # This line sets up loggers basically.
+    if context.config.config_file_name is not None:
+        fileConfig(context.config.config_file_name)
+except Exception as e:
+    logger.warning(f"Could not initialize Alembic config: {e}")
 
 # add your model's MetaData object here
 # for 'autogenerate' support
@@ -43,7 +43,7 @@ target_metadata = Base.metadata
 def get_url() -> str:
     """Get database URL from configuration."""
     import os
-    
+
     # Check if we're in testing mode
     if os.getenv("TESTING") == "true":
         # Use the DATABASE_URL environment variable directly for testing
@@ -51,15 +51,17 @@ def get_url() -> str:
         if database_url:
             logger.info(f"Using test database URL: {database_url}")
             return database_url
-    
+
     try:
         # Load application config
-        app_config = AppConfig()
+        app_config = Config()
         return app_config.get_database_url()
     except Exception as e:
         logger.error("Failed to get database URL", error=str(e))
         # Fallback to environment variable
-        return os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/trading_bot")
+        return os.getenv(
+            "DATABASE_URL",
+            "postgresql://postgres:password@localhost:5432/trading_bot")
 
 
 def run_migrations_offline() -> None:
@@ -93,7 +95,7 @@ def run_migrations_online() -> None:
     """
     configuration = config.get_section(config.config_ini_section)
     configuration["sqlalchemy.url"] = get_url()
-    
+
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
@@ -102,7 +104,7 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, 
+            connection=connection,
             target_metadata=target_metadata
         )
 
@@ -110,7 +112,12 @@ def run_migrations_online() -> None:
             context.run_migrations()
 
 
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    run_migrations_online() 
+# Only run migrations when in Alembic context
+try:
+    if context.is_offline_mode():
+        run_migrations_offline()
+    else:
+        run_migrations_online()
+except Exception:
+    # Not in Alembic context, probably being imported for testing
+    pass

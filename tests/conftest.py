@@ -26,7 +26,7 @@ from src.database.connection import initialize_database, close_database, health_
 def config():
     """Provide application configuration for tests."""
     from src.core.config import DatabaseConfig
-    
+
     return Config(
         environment="development",
         debug=True,
@@ -83,13 +83,13 @@ def check_database_availability(config: Config) -> Dict[str, bool]:
     import psycopg2
     import redis
     from influxdb_client import InfluxDBClient
-    
+
     status = {
         "postgresql": False,
         "redis": False,
         "influxdb": False
     }
-    
+
     # Check PostgreSQL - try to connect as trading_bot user first
     try:
         conn = psycopg2.connect(
@@ -103,7 +103,7 @@ def check_database_availability(config: Config) -> Dict[str, bool]:
         status["postgresql"] = True
     except Exception:
         pass
-    
+
     # Check Redis
     try:
         r = redis.Redis(
@@ -118,7 +118,7 @@ def check_database_availability(config: Config) -> Dict[str, bool]:
         status["redis"] = True
     except Exception:
         pass
-    
+
     # Check InfluxDB
     try:
         client = InfluxDBClient(
@@ -131,7 +131,7 @@ def check_database_availability(config: Config) -> Dict[str, bool]:
         status["influxdb"] = True
     except Exception:
         pass
-    
+
     return status
 
 
@@ -145,7 +145,7 @@ def setup_test_databases(config: Config) -> None:
     import subprocess
     import os
     from influxdb_client import InfluxDBClient
-    
+
     # Setup PostgreSQL
     try:
         conn = psycopg2.connect(
@@ -157,29 +157,40 @@ def setup_test_databases(config: Config) -> None:
         )
         conn.autocommit = True
         cursor = conn.cursor()
-        
+
         # Create test user if it doesn't exist
-        cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (config.database.postgresql_username,))
+        cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = %s",
+                       (config.database.postgresql_username,))
         if not cursor.fetchone():
-            cursor.execute(f"CREATE USER {config.database.postgresql_username} WITH PASSWORD '{config.database.postgresql_password}' CREATEDB")
+            cursor.execute(
+                f"CREATE USER {
+                    config.database.postgresql_username} WITH PASSWORD '{
+                    config.database.postgresql_password}' CREATEDB")
         else:
             # Update password if user exists
-            cursor.execute(f"ALTER USER {config.database.postgresql_username} WITH PASSWORD '{config.database.postgresql_password}'")
-        
+            cursor.execute(
+                f"ALTER USER {
+                    config.database.postgresql_username} WITH PASSWORD '{
+                    config.database.postgresql_password}'")
+
         # Create test database if it doesn't exist
-        cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (config.database.postgresql_database,))
+        cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s",
+                       (config.database.postgresql_database,))
         if not cursor.fetchone():
-            cursor.execute(f"CREATE DATABASE {config.database.postgresql_database} OWNER {config.database.postgresql_username}")
-        
+            cursor.execute(
+                f"CREATE DATABASE {
+                    config.database.postgresql_database} OWNER {
+                    config.database.postgresql_username}")
+
         cursor.close()
         conn.close()
-        
+
         # Run migrations for test database
         env = os.environ.copy()
         env['DATABASE_URL'] = config.get_database_url()
         env['ALEMBIC_CONFIG'] = 'alembic.ini'
         env['TESTING'] = 'true'
-        
+
         # Run alembic upgrade using Python module
         result = subprocess.run(
             ['python3', '-m', 'alembic', 'upgrade', 'head'],
@@ -188,13 +199,15 @@ def setup_test_databases(config: Config) -> None:
             capture_output=True,
             text=True
         )
-        
+
         if result.returncode != 0:
             raise DataSourceError(f"Migration failed: {result.stderr}")
-        
+
     except Exception as e:
-        raise DataSourceError(f"Failed to setup PostgreSQL test database: {str(e)}")
-    
+        raise DataSourceError(
+            f"Failed to setup PostgreSQL test database: {
+                str(e)}")
+
     # Setup Redis
     try:
         r = redis.Redis(
@@ -207,10 +220,10 @@ def setup_test_databases(config: Config) -> None:
         # Clear the test database
         r.flushdb()
         r.close()
-        
+
     except Exception as e:
         raise DataSourceError(f"Failed to setup Redis test database: {str(e)}")
-    
+
     # Setup InfluxDB
     try:
         client = InfluxDBClient(
@@ -218,24 +231,27 @@ def setup_test_databases(config: Config) -> None:
             token=config.database.influxdb_token,
             org=config.database.influxdb_org
         )
-        
+
         # Check if bucket exists
         buckets_api = client.buckets_api()
         buckets = buckets_api.find_buckets().buckets
-        
-        bucket_exists = any(bucket.name == config.database.influxdb_bucket for bucket in buckets)
-        
+
+        bucket_exists = any(
+            bucket.name == config.database.influxdb_bucket for bucket in buckets)
+
         if not bucket_exists:
             # Create test bucket
             buckets_api.create_bucket(
                 bucket_name=config.database.influxdb_bucket,
                 org=config.database.influxdb_org
             )
-        
+
         client.close()
-        
+
     except Exception as e:
-        raise DataSourceError(f"Failed to setup InfluxDB test bucket: {str(e)}")
+        raise DataSourceError(
+            f"Failed to setup InfluxDB test bucket: {
+                str(e)}")
 
 
 def cleanup_test_databases(config: Config) -> None:
@@ -246,7 +262,7 @@ def cleanup_test_databases(config: Config) -> None:
     import psycopg2
     import redis
     from influxdb_client import InfluxDBClient
-    
+
     # Clean up PostgreSQL
     try:
         conn = psycopg2.connect(
@@ -258,19 +274,23 @@ def cleanup_test_databases(config: Config) -> None:
         )
         conn.autocommit = True
         cursor = conn.cursor()
-        
+
         # Drop test database
-        cursor.execute(f"DROP DATABASE IF EXISTS {config.database.postgresql_database}")
-        
+        cursor.execute(
+            f"DROP DATABASE IF EXISTS {
+                config.database.postgresql_database}")
+
         # Drop test user
-        cursor.execute(f"DROP USER IF EXISTS {config.database.postgresql_username}")
-        
+        cursor.execute(
+            f"DROP USER IF EXISTS {
+                config.database.postgresql_username}")
+
         cursor.close()
         conn.close()
-        
+
     except Exception as e:
         print(f"Warning: Failed to cleanup PostgreSQL: {str(e)}")
-    
+
     # Clean up Redis
     try:
         r = redis.Redis(
@@ -281,10 +301,10 @@ def cleanup_test_databases(config: Config) -> None:
         )
         r.flushdb()
         r.close()
-        
+
     except Exception as e:
         print(f"Warning: Failed to cleanup Redis: {str(e)}")
-    
+
     # Clean up InfluxDB
     try:
         client = InfluxDBClient(
@@ -293,11 +313,12 @@ def cleanup_test_databases(config: Config) -> None:
             org=config.database.influxdb_org
         )
         buckets_api = client.buckets_api()
-        bucket = buckets_api.find_bucket_by_name(config.database.influxdb_bucket)
+        bucket = buckets_api.find_bucket_by_name(
+            config.database.influxdb_bucket)
         if bucket:
             buckets_api.delete_bucket(bucket)
         client.close()
-        
+
     except Exception as e:
         print(f"Warning: Failed to cleanup InfluxDB: {str(e)}")
 
@@ -310,20 +331,20 @@ def database_setup(config, test_db_config):
     """
     # Check database availability first
     status = check_database_availability(config)
-    
+
     if not any(status.values()):
         raise DataSourceError(
             "No databases are available for testing. "
             "Please ensure PostgreSQL, Redis, and/or InfluxDB are running. "
             f"Status: {status}"
         )
-    
+
     # Set up test databases
     try:
         setup_test_databases(config)
     except Exception as e:
         raise DataSourceError(f"Failed to setup test databases: {str(e)}")
-    
+
     # Return the config - the test will handle async initialization
     return config
 
@@ -335,14 +356,14 @@ async def cleanup_after_all_tests():
     This ensures no lingering connections cause warnings.
     """
     yield
-    
+
     # Clean up any remaining connections
     from src.database.connection import close_database
     try:
         await close_database()
     except Exception:
         pass  # Ignore cleanup errors
-    
+
     # Force garbage collection to clean up any remaining connections
     import gc
     gc.collect()
@@ -356,38 +377,38 @@ async def clean_database(database_setup):
     """
     from src.database.connection import get_async_session, initialize_database, close_database
     from sqlalchemy import text
-    
+
     # Initialize database for this test
     await initialize_database(database_setup)
-    
+
     try:
         # Get a session and clean all tables
         async with get_async_session() as session:
             try:
                 # Disable foreign key checks temporarily
                 await session.execute(text("SET session_replication_role = replica;"))
-                
+
                 # Get all table names
                 result = await session.execute(text(
                     "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
                 ))
                 tables = [row[0] for row in result.fetchall()]
-                
+
                 # Truncate all tables
                 for table in tables:
                     await session.execute(text(f"TRUNCATE TABLE {table} CASCADE"))
-                
+
                 # Re-enable foreign key checks
                 await session.execute(text("SET session_replication_role = DEFAULT;"))
                 await session.commit()
-                
+
             except Exception as e:
                 await session.rollback()
                 raise DataSourceError(f"Failed to clean database: {str(e)}")
-        
+
         # Yield the config - database stays initialized during test
         yield database_setup
-        
+
     finally:
         # Clean up after test completes
         await close_database()
@@ -420,7 +441,9 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.integration)
         elif "tests/performance/" in str(item.fspath):
             item.add_marker(pytest.mark.performance)
-        
+
         # Mark tests that take longer than 1 second as slow
-        if "performance" in str(item.fspath) or "integration" in str(item.fspath):
-            item.add_marker(pytest.mark.slow) 
+        if "performance" in str(
+                item.fspath) or "integration" in str(
+                item.fspath):
+            item.add_marker(pytest.mark.slow)

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional, Dict, Any, List
 from sqlalchemy import (
-    Column, String, Integer, Float, DateTime, Boolean, Text, 
+    Column, String, Integer, Float, DateTime, Boolean, Text,
     ForeignKey, CheckConstraint, Index, UniqueConstraint, JSON
 )
 from sqlalchemy import DECIMAL
@@ -21,40 +21,60 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship, Mapped, mapped_column, declarative_base
 from sqlalchemy.sql import func
 
-# Import core types from P-001
-from src.core.types import TradingMode, OrderSide, OrderType, SignalDirection
-from src.core.exceptions import ValidationError
+# Import core types from P-001 - only the ones actually used
+from src.core.types import (
+    OrderSide, OrderType, OrderStatus, StrategyType, StrategyStatus
+)
 
 Base = declarative_base()
 
 
 class User(Base):
     """User model for authentication and account management."""
-    
+
     __tablename__ = "users"
-    
+
     # Primary key using UUID
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # User credentials
-    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    username: Mapped[str] = mapped_column(
+        String(50), unique=True, nullable=False, index=True)
+    email: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    
+
     # User status
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False)
+    is_verified: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False)
+
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False)
+
     # Relationships
-    bot_instances: Mapped[List["BotInstance"]] = relationship("BotInstance", back_populates="user", cascade="all, delete-orphan")
-    balance_snapshots: Mapped[List["BalanceSnapshot"]] = relationship("BalanceSnapshot", back_populates="user", cascade="all, delete-orphan")
-    alerts: Mapped[List["Alert"]] = relationship("Alert", back_populates="user", cascade="all, delete-orphan")
-    audit_logs: Mapped[List["AuditLog"]] = relationship("AuditLog", back_populates="user", cascade="all, delete-orphan")
-    
+    bot_instances: Mapped[List["BotInstance"]] = relationship(
+        "BotInstance", back_populates="user", cascade="all, delete-orphan")
+    balance_snapshots: Mapped[List["BalanceSnapshot"]] = relationship(
+        "BalanceSnapshot", back_populates="user", cascade="all, delete-orphan")
+    alerts: Mapped[List["Alert"]] = relationship(
+        "Alert", back_populates="user", cascade="all, delete-orphan")
+    audit_logs: Mapped[List["AuditLog"]] = relationship(
+        "AuditLog", back_populates="user", cascade="all, delete-orphan")
+
     # Constraints
     __table_args__ = (
         CheckConstraint("length(username) >= 3", name="username_min_length"),
@@ -67,84 +87,136 @@ class User(Base):
 
 class BotInstance(Base):
     """Bot instance model for managing individual trading bots."""
-    
+
     __tablename__ = "bot_instances"
-    
+
     # Primary key
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # Bot identification
     name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False, index=True)
-    
+    user_id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True)
+
     # Bot configuration
-    strategy_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    exchange: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(String(20), default="stopped", nullable=False, index=True)
-    
+    strategy_type: Mapped[StrategyType] = mapped_column(
+        String(50), nullable=False, index=True)  # Use core StrategyType enum
+    exchange: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True)
+    status: Mapped[StrategyStatus] = mapped_column(
+        String(20),
+        default="stopped",
+        nullable=False,
+        index=True)  # Use core StrategyStatus enum
+
     # Configuration and settings
-    config: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    
+    config: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict)
+
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    last_active: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False)
+    last_active: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="bot_instances")
-    trades: Mapped[List["Trade"]] = relationship("Trade", back_populates="bot_instance", cascade="all, delete-orphan")
-    positions: Mapped[List["Position"]] = relationship("Position", back_populates="bot_instance", cascade="all, delete-orphan")
-    performance_metrics: Mapped[List["PerformanceMetrics"]] = relationship("PerformanceMetrics", back_populates="bot_instance", cascade="all, delete-orphan")
-    
+    trades: Mapped[List["Trade"]] = relationship(
+        "Trade", back_populates="bot_instance", cascade="all, delete-orphan")
+    positions: Mapped[List["Position"]] = relationship(
+        "Position", back_populates="bot_instance", cascade="all, delete-orphan")
+    performance_metrics: Mapped[List["PerformanceMetrics"]] = relationship(
+        "PerformanceMetrics", back_populates="bot_instance", cascade="all, delete-orphan")
+
     # Constraints
     __table_args__ = (
-        CheckConstraint("status IN ('stopped', 'running', 'paused', 'error')", name="valid_bot_status"),
-        Index("idx_bot_instances_user_id", "user_id"),
-        Index("idx_bot_instances_strategy_type", "strategy_type"),
-        Index("idx_bot_instances_exchange", "exchange"),
-        Index("idx_bot_instances_status", "status"),
-        UniqueConstraint("user_id", "name", name="unique_user_bot_name"),
-    )
+        CheckConstraint(
+            "status IN ('stopped', 'running', 'paused', 'error')", name="valid_bot_status"), Index(
+            "idx_bot_instances_user_id", "user_id"), Index(
+                "idx_bot_instances_strategy_type", "strategy_type"), Index(
+                    "idx_bot_instances_exchange", "exchange"), Index(
+                        "idx_bot_instances_status", "status"), UniqueConstraint(
+                            "user_id", "name", name="unique_user_bot_name"), )
 
 
 class Trade(Base):
     """Trade model for tracking executed trades."""
-    
+
     __tablename__ = "trades"
-    
+
     # Primary key
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # Trade identification
-    bot_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=False, index=True)
-    exchange_order_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    
+    bot_id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        ForeignKey("bot_instances.id"),
+        nullable=False,
+        index=True)
+    exchange_order_id: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True)
+
     # Trade details
-    exchange: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    exchange: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    side: Mapped[str] = mapped_column(String(10), nullable=False)  # 'buy' or 'sell'
-    order_type: Mapped[str] = mapped_column(String(20), nullable=False)  # 'market', 'limit', etc.
-    
+    side: Mapped[OrderSide] = mapped_column(
+        String(10), nullable=False)  # Use core OrderSide enum
+    order_type: Mapped[OrderType] = mapped_column(
+        String(20), nullable=False)  # Use core OrderType enum
+
     # Quantities and prices
     quantity: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
     price: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    executed_price: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    
+    executed_price: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False)
+
     # Fees and costs
-    fee: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=Decimal("0"), nullable=False)
-    fee_currency: Mapped[str] = mapped_column(String(10), default="USDT", nullable=False)
-    
+    fee: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), default=Decimal("0"), nullable=False)
+    fee_currency: Mapped[str] = mapped_column(
+        String(10), default="USDT", nullable=False)
+
     # Status and P&L
-    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    pnl: Mapped[Optional[Decimal]] = mapped_column(DECIMAL(20, 8), nullable=True)
-    
+    status: Mapped[OrderStatus] = mapped_column(
+        String(20), nullable=False, index=True)  # Use core OrderStatus enum
+    pnl: Mapped[Optional[Decimal]] = mapped_column(
+        DECIMAL(20, 8), nullable=True)
+
     # Timestamps
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        nullable=False)
+    executed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
     # Relationships
-    bot_instance: Mapped["BotInstance"] = relationship("BotInstance", back_populates="trades")
-    
+    bot_instance: Mapped["BotInstance"] = relationship(
+        "BotInstance", back_populates="trades")
+
     # Constraints
     __table_args__ = (
         CheckConstraint("side IN ('buy', 'sell')", name="valid_trade_side"),
@@ -162,39 +234,68 @@ class Trade(Base):
 
 class Position(Base):
     """Position model for tracking open positions."""
-    
+
     __tablename__ = "positions"
-    
+
     # Primary key
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # Position identification
-    bot_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=False, index=True)
-    exchange: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    bot_id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        ForeignKey("bot_instances.id"),
+        nullable=False,
+        index=True)
+    exchange: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
-    
+
     # Position details
-    side: Mapped[str] = mapped_column(String(10), nullable=False)  # 'long' or 'short'
+    side: Mapped[OrderSide] = mapped_column(
+        String(10), nullable=False)  # Use core OrderSide enum
     quantity: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    entry_price: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    current_price: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    
+    entry_price: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False)
+    current_price: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False)
+
     # P&L tracking
-    unrealized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=Decimal("0"), nullable=False)
-    realized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=Decimal("0"), nullable=False)
-    
+    unrealized_pnl: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), default=Decimal("0"), nullable=False)
+    realized_pnl: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), default=Decimal("0"), nullable=False)
+
     # Risk management
-    stop_loss_price: Mapped[Optional[Decimal]] = mapped_column(DECIMAL(20, 8), nullable=True)
-    take_profit_price: Mapped[Optional[Decimal]] = mapped_column(DECIMAL(20, 8), nullable=True)
-    
+    stop_loss_price: Mapped[Optional[Decimal]] = mapped_column(
+        DECIMAL(20, 8), nullable=True)
+    take_profit_price: Mapped[Optional[Decimal]] = mapped_column(
+        DECIMAL(20, 8), nullable=True)
+
     # Timestamps
-    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
     # Relationships
-    bot_instance: Mapped["BotInstance"] = relationship("BotInstance", back_populates="positions")
-    
+    bot_instance: Mapped["BotInstance"] = relationship(
+        "BotInstance", back_populates="positions")
+
     # Constraints
     __table_args__ = (
         CheckConstraint("side IN ('long', 'short')", name="valid_position_side"),
@@ -211,32 +312,54 @@ class Position(Base):
 
 class BalanceSnapshot(Base):
     """Balance snapshot model for tracking account balances."""
-    
+
     __tablename__ = "balance_snapshots"
-    
+
     # Primary key
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # Balance identification
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False, index=True)
-    exchange: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    currency: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
-    
+    user_id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True)
+    exchange: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True)
+    currency: Mapped[str] = mapped_column(
+        String(10), nullable=False, index=True)
+
     # Balance amounts
-    free_balance: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    locked_balance: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    total_balance: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    
+    free_balance: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False)
+    locked_balance: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False)
+    total_balance: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False)
+
     # Value conversions
-    btc_value: Mapped[Optional[Decimal]] = mapped_column(DECIMAL(20, 8), nullable=True)
-    usd_value: Mapped[Optional[Decimal]] = mapped_column(DECIMAL(20, 8), nullable=True)
-    
+    btc_value: Mapped[Optional[Decimal]] = mapped_column(
+        DECIMAL(20, 8), nullable=True)
+    usd_value: Mapped[Optional[Decimal]] = mapped_column(
+        DECIMAL(20, 8), nullable=True)
+
     # Timestamp
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        nullable=False)
+
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="balance_snapshots")
-    
+    user: Mapped["User"] = relationship(
+        "User", back_populates="balance_snapshots")
+
     # Constraints
     __table_args__ = (
         CheckConstraint("free_balance >= 0", name="non_negative_free_balance"),
@@ -251,28 +374,44 @@ class BalanceSnapshot(Base):
 
 class StrategyConfig(Base):
     """Strategy configuration model for storing strategy parameters."""
-    
+
     __tablename__ = "strategy_configs"
-    
+
     # Primary key
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # Configuration identification
     name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    strategy_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    
+    strategy_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True)
+
     # Configuration data
-    parameters: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    risk_parameters: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    
+    parameters: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict)
+    risk_parameters: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict)
+
     # Status
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
-    version: Mapped[str] = mapped_column(String(20), default="1.0.0", nullable=False)
-    
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, index=True)
+    version: Mapped[str] = mapped_column(
+        String(20), default="1.0.0", nullable=False)
+
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False)
+
     # Constraints
     __table_args__ = (
         Index("idx_strategy_configs_name", "name"),
@@ -284,30 +423,46 @@ class StrategyConfig(Base):
 
 class MLModel(Base):
     """Machine learning model model for tracking ML models."""
-    
+
     __tablename__ = "ml_models"
-    
+
     # Primary key
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # Model identification
     name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    model_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    model_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True)
     version: Mapped[str] = mapped_column(String(20), nullable=False)
-    
+
     # Model data
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    metrics: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    parameters: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    
+    metrics: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict)
+    parameters: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict)
+
     # Training information
-    training_data_range: Mapped[str] = mapped_column(String(100), nullable=False)  # e.g., "2023-01-01 to 2023-12-31"
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
-    
+    training_data_range: Mapped[str] = mapped_column(
+        String(100), nullable=False)  # e.g., "2023-01-01 to 2023-12-31"
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, index=True)
+
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False)
+
     # Constraints
     __table_args__ = (
         Index("idx_ml_models_name", "name"),
@@ -319,38 +474,58 @@ class MLModel(Base):
 
 class PerformanceMetrics(Base):
     """Performance metrics model for tracking bot performance."""
-    
+
     __tablename__ = "performance_metrics"
-    
+
     # Primary key
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # Metrics identification
-    bot_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=False, index=True)
-    metric_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
-    
+    bot_id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        ForeignKey("bot_instances.id"),
+        nullable=False,
+        index=True)
+    metric_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+
     # Trade counts
-    total_trades: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    winning_trades: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    losing_trades: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    
+    total_trades: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False)
+    winning_trades: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False)
+    losing_trades: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False)
+
     # P&L values
-    total_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=Decimal("0"), nullable=False)
-    realized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=Decimal("0"), nullable=False)
-    unrealized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), default=Decimal("0"), nullable=False)
-    
+    total_pnl: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), default=Decimal("0"), nullable=False)
+    realized_pnl: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), default=Decimal("0"), nullable=False)
+    unrealized_pnl: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), default=Decimal("0"), nullable=False)
+
     # Performance ratios
     win_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    profit_factor: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    profit_factor: Mapped[float] = mapped_column(
+        Float, default=0.0, nullable=False)
     sharpe_ratio: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     max_drawdown: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    
+
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False)
+
     # Relationships
-    bot_instance: Mapped["BotInstance"] = relationship("BotInstance", back_populates="performance_metrics")
-    
+    bot_instance: Mapped["BotInstance"] = relationship(
+        "BotInstance", back_populates="performance_metrics")
+
     # Constraints
     __table_args__ = (
         CheckConstraint("total_trades >= 0", name="non_negative_total_trades"),
@@ -366,75 +541,112 @@ class PerformanceMetrics(Base):
 
 class Alert(Base):
     """Alert model for system notifications and alerts."""
-    
+
     __tablename__ = "alerts"
-    
+
     # Primary key
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # Alert identification
-    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False, index=True)
-    bot_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=True, index=True)
-    
+    user_id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True)
+    bot_id: Mapped[Optional[str]] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=True, index=True)
+
     # Alert details
-    alert_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    severity: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    alert_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(
+        String(20), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    alert_metadata: Mapped[Dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
-    
+    alert_metadata: Mapped[Dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict)
+
     # Status
-    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
-    
+    is_read: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, index=True)
+
     # Timestamp
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        nullable=False)
+
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="alerts")
     bot_instance: Mapped[Optional["BotInstance"]] = relationship("BotInstance")
-    
+
     # Constraints
     __table_args__ = (
-        CheckConstraint("severity IN ('low', 'medium', 'high', 'critical')", name="valid_alert_severity"),
-        Index("idx_alerts_user_id", "user_id"),
-        Index("idx_alerts_bot_id", "bot_id"),
-        Index("idx_alerts_type", "alert_type"),
-        Index("idx_alerts_severity", "severity"),
-        Index("idx_alerts_read", "is_read"),
-        Index("idx_alerts_timestamp", "timestamp"),
-    )
+        CheckConstraint(
+            "severity IN ('low', 'medium', 'high', 'critical')", name="valid_alert_severity"), Index(
+            "idx_alerts_user_id", "user_id"), Index(
+                "idx_alerts_bot_id", "bot_id"), Index(
+                    "idx_alerts_type", "alert_type"), Index(
+                        "idx_alerts_severity", "severity"), Index(
+                            "idx_alerts_read", "is_read"), Index(
+                                "idx_alerts_timestamp", "timestamp"), )
 
 
 class AuditLog(Base):
     """Audit log model for tracking system changes and user actions."""
-    
+
     __tablename__ = "audit_logs"
-    
+
     # Primary key
-    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
-    
+    id: Mapped[str] = mapped_column(
+        UUID(
+            as_uuid=False),
+        primary_key=True,
+        default=lambda: str(
+            uuid.uuid4()))
+
     # Audit identification
-    user_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True, index=True)
-    
+    user_id: Mapped[Optional[str]] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("users.id"), nullable=True, index=True)
+
     # Action details
-    action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    resource_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    resource_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
-    
+    action: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True)
+    resource_id: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True, index=True)
+
     # Change tracking
-    old_value: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    new_value: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSONB, nullable=True)
-    
+    old_value: Mapped[Optional[Dict[str, Any]]
+                      ] = mapped_column(JSONB, nullable=True)
+    new_value: Mapped[Optional[Dict[str, Any]]
+                      ] = mapped_column(JSONB, nullable=True)
+
     # Request details
-    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)  # IPv6 compatible
-    user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    
+    ip_address: Mapped[Optional[str]] = mapped_column(
+        String(45), nullable=True)  # IPv6 compatible
+    user_agent: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True)
+
     # Timestamp
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(
+            timezone=True),
+        server_default=func.now(),
+        nullable=False)
+
     # Relationships
-    user: Mapped[Optional["User"]] = relationship("User", back_populates="audit_logs")
-    
+    user: Mapped[Optional["User"]] = relationship(
+        "User", back_populates="audit_logs")
+
     # Constraints
     __table_args__ = (
         Index("idx_audit_logs_user_id", "user_id"),
@@ -442,4 +654,4 @@ class AuditLog(Base):
         Index("idx_audit_logs_resource_type", "resource_type"),
         Index("idx_audit_logs_resource_id", "resource_id"),
         Index("idx_audit_logs_timestamp", "timestamp"),
-    ) 
+    )

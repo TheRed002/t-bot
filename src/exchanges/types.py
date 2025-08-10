@@ -24,62 +24,67 @@ from src.core.types import (
 class ExchangeTypes:
     """
     Exchange-specific type definitions and utilities.
-    
+
     This class provides exchange-specific data structures and validation
     methods that are used across different exchange implementations.
     """
-    
+
     @staticmethod
     def validate_symbol(symbol: str) -> bool:
         """
         Validate a trading symbol format.
-        
+
         Args:
             symbol: Trading symbol to validate
-            
+
         Returns:
             bool: True if valid, False otherwise
         """
         if not symbol or not isinstance(symbol, str):
             return False
-        
-        # Basic validation - symbol should be alphanumeric with possible separators
+
+        # Basic validation - symbol should be alphanumeric with possible
+        # separators
         import re
         pattern = r'^[A-Z0-9]+$'
         return bool(re.match(pattern, symbol))
-    
+
     @staticmethod
-    def validate_quantity(quantity: Decimal, min_quantity: Decimal = Decimal("0")) -> bool:
+    def validate_quantity(
+            quantity: Decimal,
+            min_quantity: Decimal = Decimal("0")) -> bool:
         """
         Validate order quantity.
-        
+
         Args:
             quantity: Quantity to validate
             min_quantity: Minimum allowed quantity
-            
+
         Returns:
             bool: True if valid, False otherwise
         """
         if not isinstance(quantity, Decimal):
             return False
-        
+
         return quantity > min_quantity
-    
+
     @staticmethod
-    def validate_price(price: Decimal, min_price: Decimal = Decimal("0")) -> bool:
+    def validate_price(
+            price: Decimal,
+            min_price: Decimal = Decimal("0")) -> bool:
         """
         Validate order price.
-        
+
         Args:
             price: Price to validate
             min_price: Minimum allowed price
-            
+
         Returns:
             bool: True if valid, False otherwise
         """
         if not isinstance(price, Decimal):
             return False
-        
+
         return price > min_price
 
 
@@ -109,10 +114,16 @@ class ExchangeTradingPair(BaseModel):
 
 class ExchangeFee(BaseModel):
     """Exchange fee structure."""
-    maker_fee: Decimal = Field(default=Decimal("0.001"), description="Maker fee rate")
-    taker_fee: Decimal = Field(default=Decimal("0.001"), description="Taker fee rate")
+    maker_fee: Decimal = Field(
+        default=Decimal("0.001"),
+        description="Maker fee rate")
+    taker_fee: Decimal = Field(
+        default=Decimal("0.001"),
+        description="Taker fee rate")
     min_fee: Decimal = Field(default=Decimal("0"), description="Minimum fee")
-    max_fee: Decimal = Field(default=Decimal("0.01"), description="Maximum fee")
+    max_fee: Decimal = Field(
+        default=Decimal("0.01"),
+        description="Maximum fee")
 
 
 class ExchangeRateLimit(BaseModel):
@@ -229,4 +240,4 @@ class ExchangeHealthStatus(BaseModel):
     latency_ms: Optional[float] = None
     last_heartbeat: Optional[datetime] = None
     error_count: int = 0
-    success_rate: float = 1.0 
+    success_rate: float = 1.0

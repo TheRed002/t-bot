@@ -1,9 +1,9 @@
 """
 Common Decorators for Cross-Cutting Concerns
 
-This module provides reusable decorators for performance monitoring, error handling,
-caching, logging, validation, and rate limiting that are used across all components
-of the trading bot system.
+This module provides reusable decorators for performance monitoring, error
+handling, caching, logging, validation, and rate limiting that are used across
+all components of the trading bot system.
 
 Key Decorators:
 - Performance Monitoring: @time_execution, @memory_usage, @cpu_usage
@@ -18,45 +18,38 @@ Dependencies:
 - P-002A: Error handling framework
 """
 
+import threading
 import time
 import functools
 import asyncio
 import inspect
 import psutil
-from typing import Callable, Any, Optional, Dict, List, Union
-from decimal import Decimal
-from datetime import datetime, timedelta
-import hashlib
-import json
-
-# Import from P-001 core components
-from src.core.exceptions import (
-    ValidationError, ExecutionError, ExchangeError, 
-    TimeoutError as TradingTimeoutError
-)
+from typing import Callable, Any, Dict, List
+from src.core.exceptions import ValidationError, TimeoutError
 from src.core.logging import get_logger
 
 
 logger = get_logger(__name__)
 
 # Thread-safe cache for decorators
-import threading
 _cache_lock = threading.Lock()
 _memory_cache: Dict[str, Any] = {}
+
 
 def time_execution(func: Callable) -> Callable:
     """
     Decorator to measure and log execution time for both sync and async functions.
-    
+
     This is the primary performance monitoring decorator used throughout the system.
-    It measures execution time and logs performance metrics for monitoring and optimization.
-    
+    It measures execution time and logs performance metrics for monitoring and
+    optimization.
+
     Args:
         func: The function to decorate
-        
+
     Returns:
         Decorated function with execution time logging
-        
+
     Example:
         @time_execution
         async def api_call():
@@ -91,7 +84,7 @@ def time_execution(func: Callable) -> Callable:
                 kwargs_keys=list(kwargs.keys()) if kwargs else []
             )
             raise
-    
+
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs) -> Any:
         start_time = time.perf_counter()
@@ -120,20 +113,20 @@ def time_execution(func: Callable) -> Callable:
                 kwargs_keys=list(kwargs.keys()) if kwargs else []
             )
             raise
-    
+
             # Track function execution for monitoring
         logger.debug(f"Function {func.__name__} executed successfully")
-    
+
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def memory_usage(func: Callable) -> Callable:
     """
     Decorator to monitor memory usage during function execution.
-    
+
     Args:
         func: The function to decorate
-        
+
     Returns:
         Decorated function with memory usage logging
     """
@@ -162,7 +155,7 @@ def memory_usage(func: Callable) -> Callable:
                 error=str(e)
             )
             raise
-    
+
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs) -> Any:
         process = psutil.Process()
@@ -188,17 +181,17 @@ def memory_usage(func: Callable) -> Callable:
                 error=str(e)
             )
             raise
-    
+
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def cpu_usage(func: Callable) -> Callable:
     """
     Decorator to monitor CPU usage during function execution.
-    
+
     Args:
         func: The function to decorate
-        
+
     Returns:
         Decorated function with CPU usage logging
     """
@@ -233,7 +226,7 @@ def cpu_usage(func: Callable) -> Callable:
                 error=str(e)
             )
             raise
-    
+
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs) -> Any:
         process = psutil.Process()
@@ -265,7 +258,7 @@ def cpu_usage(func: Callable) -> Callable:
                 error=str(e)
             )
             raise
-    
+
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
@@ -278,14 +271,14 @@ def retry(
 ) -> Callable:
     """
     Decorator to retry function execution with exponential backoff.
-    
+
     Args:
         max_attempts: Maximum number of retry attempts
         base_delay: Initial delay between retries in seconds
         max_delay: Maximum delay between retries in seconds
         backoff_factor: Multiplier for exponential backoff
         exceptions: Tuple of exceptions to retry on
-        
+
     Returns:
         Decorated function with retry logic
     """
@@ -306,8 +299,9 @@ def retry(
                             final_error=str(e)
                         )
                         raise
-                    
-                    delay = min(base_delay * (backoff_factor ** attempt), max_delay)
+
+                    delay = min(
+                        base_delay * (backoff_factor ** attempt), max_delay)
                     logger.warning(
                         "Function failed, retrying",
                         function=func.__name__,
@@ -317,9 +311,9 @@ def retry(
                         error=str(e)
                     )
                     await asyncio.sleep(delay)
-            
+
             raise last_exception
-        
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             last_exception = None
@@ -336,8 +330,9 @@ def retry(
                             final_error=str(e)
                         )
                         raise
-                    
-                    delay = min(base_delay * (backoff_factor ** attempt), max_delay)
+
+                    delay = min(
+                        base_delay * (backoff_factor ** attempt), max_delay)
                     logger.warning(
                         "Function failed, retrying",
                         function=func.__name__,
@@ -347,11 +342,12 @@ def retry(
                         error=str(e)
                     )
                     time.sleep(delay)
-            
+
             raise last_exception
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    
+
+        return async_wrapper if asyncio.iscoroutinefunction(
+            func) else sync_wrapper
+
     return decorator
 
 
@@ -362,12 +358,12 @@ def circuit_breaker(
 ) -> Callable:
     """
     Circuit breaker decorator to prevent cascading failures.
-    
+
     Args:
         failure_threshold: Number of failures before opening circuit
         recovery_timeout: Time to wait before attempting recovery
         expected_exception: Exception type that triggers circuit breaker
-        
+
     Returns:
         Decorated function with circuit breaker logic
     """
@@ -376,28 +372,30 @@ def circuit_breaker(
         failure_count = 0
         last_failure_time = 0
         circuit_state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
-        
+
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
             nonlocal failure_count, last_failure_time, circuit_state
-            
+
             current_time = time.time()
-            
+
             # Check if circuit is open and recovery timeout has passed
-            if circuit_state == "OPEN" and current_time - last_failure_time > recovery_timeout:
+            if circuit_state == "OPEN" and current_time - \
+                    last_failure_time > recovery_timeout:
                 circuit_state = "HALF_OPEN"
                 logger.info(
                     "Circuit breaker transitioning to HALF_OPEN",
                     function=func.__name__
                 )
-            
+
             # If circuit is open, reject the call
             if circuit_state == "OPEN":
-                raise TradingTimeoutError(f"Circuit breaker is OPEN for {func.__name__}")
-            
+                raise TimeoutError(
+                    f"Circuit breaker is OPEN for {func.__name__}")
+
             try:
                 result = await func(*args, **kwargs)
-                
+
                 # Success - close circuit if it was half-open
                 if circuit_state == "HALF_OPEN":
                     circuit_state = "CLOSED"
@@ -406,13 +404,13 @@ def circuit_breaker(
                         "Circuit breaker CLOSED after successful recovery",
                         function=func.__name__
                     )
-                
+
                 return result
-                
-            except expected_exception as e:
+
+            except expected_exception:
                 failure_count += 1
                 last_failure_time = current_time
-                
+
                 # Check if we should open the circuit
                 if failure_count >= failure_threshold:
                     circuit_state = "OPEN"
@@ -422,30 +420,32 @@ def circuit_breaker(
                         failure_count=failure_count,
                         threshold=failure_threshold
                     )
-                
+
                 raise
-        
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             nonlocal failure_count, last_failure_time, circuit_state
-            
+
             current_time = time.time()
-            
+
             # Check if circuit is open and recovery timeout has passed
-            if circuit_state == "OPEN" and current_time - last_failure_time > recovery_timeout:
+            if circuit_state == "OPEN" and current_time - \
+                    last_failure_time > recovery_timeout:
                 circuit_state = "HALF_OPEN"
                 logger.info(
                     "Circuit breaker transitioning to HALF_OPEN",
                     function=func.__name__
                 )
-            
+
             # If circuit is open, reject the call
             if circuit_state == "OPEN":
-                raise TradingTimeoutError(f"Circuit breaker is OPEN for {func.__name__}")
-            
+                raise TimeoutError(
+                    f"Circuit breaker is OPEN for {func.__name__}")
+
             try:
                 result = func(*args, **kwargs)
-                
+
                 # Success - close circuit if it was half-open
                 if circuit_state == "HALF_OPEN":
                     circuit_state = "CLOSED"
@@ -454,13 +454,13 @@ def circuit_breaker(
                         "Circuit breaker CLOSED after successful recovery",
                         function=func.__name__
                     )
-                
+
                 return result
-                
-            except expected_exception as e:
+
+            except expected_exception:
                 failure_count += 1
                 last_failure_time = current_time
-                
+
                 # Check if we should open the circuit
                 if failure_count >= failure_threshold:
                     circuit_state = "OPEN"
@@ -470,21 +470,22 @@ def circuit_breaker(
                         failure_count=failure_count,
                         threshold=failure_threshold
                     )
-                
+
                 raise
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    
+
+        return async_wrapper if asyncio.iscoroutinefunction(
+            func) else sync_wrapper
+
     return decorator
 
 
 def timeout(seconds: float) -> Callable:
     """
     Decorator to add timeout to function execution.
-    
+
     Args:
         seconds: Timeout duration in seconds
-        
+
     Returns:
         Decorated function with timeout logic
     """
@@ -499,12 +500,14 @@ def timeout(seconds: float) -> Callable:
                     function=func.__name__,
                     timeout_seconds=seconds
                 )
-                raise TradingTimeoutError(f"Function {func.__name__} timed out after {seconds} seconds")
-        
+                raise TimeoutError(
+                    f"Function {
+                        func.__name__} timed out after {seconds} seconds")
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             import concurrent.futures
-            
+
             # Use ThreadPoolExecutor to implement timeout for sync functions
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(func, *args, **kwargs)
@@ -517,7 +520,9 @@ def timeout(seconds: float) -> Callable:
                         function=func.__name__,
                         timeout_seconds=seconds
                     )
-                    raise TradingTimeoutError(f"Function {func.__name__} timed out after {seconds} seconds")
+                    raise TimeoutError(
+                        f"Function {
+                            func.__name__} timed out after {seconds} seconds")
                 except Exception as e:
                     logger.error(
                         "Function execution failed",
@@ -525,9 +530,10 @@ def timeout(seconds: float) -> Callable:
                         error=str(e)
                     )
                     raise
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    
+
+        return async_wrapper if asyncio.iscoroutinefunction(
+            func) else sync_wrapper
+
     return decorator
 
 
@@ -539,10 +545,10 @@ _cache_timestamps: Dict[str, float] = {}
 def cache_result(ttl_seconds: float = 300) -> Callable:
     """
     Decorator to cache function results in memory.
-    
+
     Args:
         ttl_seconds: Time to live for cached results in seconds
-        
+
     Returns:
         Decorated function with caching logic
     """
@@ -550,81 +556,94 @@ def cache_result(ttl_seconds: float = 300) -> Callable:
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
             # Create cache key from function name and arguments
-            cache_key = f"{func.__name__}:{hash(str(args) + str(sorted(kwargs.items())))}"
-            
+            cache_key = f"{
+                func.__name__}: {
+                hash(
+                    str(args) + str(
+                        sorted(
+                            kwargs.items())))}"
+
             current_time = time.time()
-            
+
             # Check if cached result exists and is still valid
             with _cache_lock:
-                if cache_key in _cache and current_time - _cache_timestamps[cache_key] < ttl_seconds:
+                if cache_key in _cache and current_time - \
+                        _cache_timestamps[cache_key] < ttl_seconds:
                     logger.debug(
                         "Returning cached result",
                         function=func.__name__,
                         cache_key=cache_key
                     )
                     return _cache[cache_key]
-            
+
             # Execute function and cache result
             result = await func(*args, **kwargs)
-            
+
             with _cache_lock:
                 _cache[cache_key] = result
                 _cache_timestamps[cache_key] = current_time
-            
+
             logger.debug(
                 "Cached function result",
                 function=func.__name__,
                 cache_key=cache_key,
                 ttl_seconds=ttl_seconds
             )
-            
+
             return result
-        
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             # Create cache key from function name and arguments
-            cache_key = f"{func.__name__}:{hash(str(args) + str(sorted(kwargs.items())))}"
-            
+            cache_key = f"{
+                func.__name__}: {
+                hash(
+                    str(args) + str(
+                        sorted(
+                            kwargs.items())))}"
+
             current_time = time.time()
-            
+
             # Check if cached result exists and is still valid
             with _cache_lock:
-                if cache_key in _cache and current_time - _cache_timestamps[cache_key] < ttl_seconds:
+                if cache_key in _cache and current_time - \
+                        _cache_timestamps[cache_key] < ttl_seconds:
                     logger.debug(
                         "Returning cached result",
                         function=func.__name__,
                         cache_key=cache_key
                     )
                     return _cache[cache_key]
-            
+
             # Execute function and cache result
             result = func(*args, **kwargs)
-            
+
             with _cache_lock:
                 _cache[cache_key] = result
                 _cache_timestamps[cache_key] = current_time
-            
+
             logger.debug(
                 "Cached function result",
                 function=func.__name__,
                 cache_key=cache_key,
                 ttl_seconds=ttl_seconds
             )
-            
+
             return result
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    
+
+        return async_wrapper if asyncio.iscoroutinefunction(
+            func) else sync_wrapper
+
     return decorator
 
 
 def redis_cache(ttl_seconds: float = 300) -> Callable:
     """
     Decorator to cache function results in Redis.
-    
+
     Args:
         ttl_seconds: Time to live for cached results in seconds
-        
+
     Returns:
         Decorated function with Redis caching logic
     """
@@ -638,33 +657,39 @@ def redis_cache(ttl_seconds: float = 300) -> Callable:
                 function=func.__name__
             )
             # Use the same cache mechanism as cache_result
-            cache_key = f"redis:{func.__name__}:{hash(str(args) + str(sorted(kwargs.items())))}"
-            
+            cache_key = f"redis: {
+                func.__name__}: {
+                hash(
+                    str(args) + str(
+                        sorted(
+                            kwargs.items())))}"
+
             current_time = time.time()
-            
+
             # Check if cached result exists and is still valid
-            if cache_key in _cache and current_time - _cache_timestamps[cache_key] < ttl_seconds:
+            if cache_key in _cache and current_time - \
+                    _cache_timestamps[cache_key] < ttl_seconds:
                 logger.debug(
                     "Returning cached result (Redis fallback)",
                     function=func.__name__,
                     cache_key=cache_key
                 )
                 return _cache[cache_key]
-            
+
             # Execute function and cache result
             result = await func(*args, **kwargs)
             _cache[cache_key] = result
             _cache_timestamps[cache_key] = current_time
-            
+
             logger.debug(
                 "Cached function result (Redis fallback)",
                 function=func.__name__,
                 cache_key=cache_key,
                 ttl_seconds=ttl_seconds
             )
-            
+
             return result
-        
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             # TODO: Implement Redis caching
@@ -674,45 +699,52 @@ def redis_cache(ttl_seconds: float = 300) -> Callable:
                 function=func.__name__
             )
             # Use the same cache mechanism as cache_result
-            cache_key = f"redis:{func.__name__}:{hash(str(args) + str(sorted(kwargs.items())))}"
-            
+            cache_key = f"redis: {
+                func.__name__}: {
+                hash(
+                    str(args) + str(
+                        sorted(
+                            kwargs.items())))}"
+
             current_time = time.time()
-            
+
             # Check if cached result exists and is still valid
-            if cache_key in _cache and current_time - _cache_timestamps[cache_key] < ttl_seconds:
+            if cache_key in _cache and current_time - \
+                    _cache_timestamps[cache_key] < ttl_seconds:
                 logger.debug(
                     "Returning cached result (Redis fallback)",
                     function=func.__name__,
                     cache_key=cache_key
                 )
                 return _cache[cache_key]
-            
+
             # Execute function and cache result
             result = func(*args, **kwargs)
             _cache[cache_key] = result
             _cache_timestamps[cache_key] = current_time
-            
+
             logger.debug(
                 "Cached function result (Redis fallback)",
                 function=func.__name__,
                 cache_key=cache_key,
                 ttl_seconds=ttl_seconds
             )
-            
+
             return result
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    
+
+        return async_wrapper if asyncio.iscoroutinefunction(
+            func) else sync_wrapper
+
     return decorator
 
 
 def ttl_cache(ttl_seconds: float = 300) -> Callable:
     """
     Alias for cache_result with TTL.
-    
+
     Args:
         ttl_seconds: Time to live for cached results in seconds
-        
+
     Returns:
         Decorated function with TTL caching logic
     """
@@ -722,10 +754,10 @@ def ttl_cache(ttl_seconds: float = 300) -> Callable:
 def log_calls(func: Callable) -> Callable:
     """
     Decorator to log all function calls with parameters.
-    
+
     Args:
         func: The function to decorate
-        
+
     Returns:
         Decorated function with call logging
     """
@@ -754,7 +786,7 @@ def log_calls(func: Callable) -> Callable:
                 success=False
             )
             raise
-    
+
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs) -> Any:
         logger.info(
@@ -780,17 +812,17 @@ def log_calls(func: Callable) -> Callable:
                 success=False
             )
             raise
-    
+
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def log_performance(func: Callable) -> Callable:
     """
     Decorator to log performance metrics for function execution.
-    
+
     Args:
         func: The function to decorate
-        
+
     Returns:
         Decorated function with performance logging
     """
@@ -798,16 +830,16 @@ def log_performance(func: Callable) -> Callable:
     async def async_wrapper(*args, **kwargs) -> Any:
         start_time = time.perf_counter()
         start_memory = psutil.Process().memory_info().rss
-        
+
         try:
             result = await func(*args, **kwargs)
-            
+
             end_time = time.perf_counter()
             end_memory = psutil.Process().memory_info().rss
-            
+
             execution_time = end_time - start_time
             memory_used = end_memory - start_memory
-            
+
             logger.info(
                 "Performance metrics",
                 function=func.__name__,
@@ -815,15 +847,15 @@ def log_performance(func: Callable) -> Callable:
                 memory_used_mb=round(memory_used / 1024 / 1024, 2),
                 success=True
             )
-            
+
             return result
         except Exception as e:
             end_time = time.perf_counter()
             end_memory = psutil.Process().memory_info().rss
-            
+
             execution_time = end_time - start_time
             memory_used = end_memory - start_memory
-            
+
             logger.error(
                 "Performance metrics (error)",
                 function=func.__name__,
@@ -833,21 +865,21 @@ def log_performance(func: Callable) -> Callable:
                 success=False
             )
             raise
-    
+
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs) -> Any:
         start_time = time.perf_counter()
         start_memory = psutil.Process().memory_info().rss
-        
+
         try:
             result = func(*args, **kwargs)
-            
+
             end_time = time.perf_counter()
             end_memory = psutil.Process().memory_info().rss
-            
+
             execution_time = end_time - start_time
             memory_used = end_memory - start_memory
-            
+
             logger.info(
                 "Performance metrics",
                 function=func.__name__,
@@ -855,15 +887,15 @@ def log_performance(func: Callable) -> Callable:
                 memory_used_mb=round(memory_used / 1024 / 1024, 2),
                 success=True
             )
-            
+
             return result
         except Exception as e:
             end_time = time.perf_counter()
             end_memory = psutil.Process().memory_info().rss
-            
+
             execution_time = end_time - start_time
             memory_used = end_memory - start_memory
-            
+
             logger.error(
                 "Performance metrics (error)",
                 function=func.__name__,
@@ -873,17 +905,17 @@ def log_performance(func: Callable) -> Callable:
                 success=False
             )
             raise
-    
+
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def log_errors(func: Callable) -> Callable:
     """
     Decorator to log all errors with detailed context.
-    
+
     Args:
         func: The function to decorate
-        
+
     Returns:
         Decorated function with error logging
     """
@@ -902,7 +934,7 @@ def log_errors(func: Callable) -> Callable:
                 kwargs_keys=list(kwargs.keys()) if kwargs else []
             )
             raise
-    
+
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs) -> Any:
         try:
@@ -918,17 +950,17 @@ def log_errors(func: Callable) -> Callable:
                 kwargs_keys=list(kwargs.keys()) if kwargs else []
             )
             raise
-    
+
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def validate_input(validation_func: Callable) -> Callable:
     """
     Decorator to validate function input parameters.
-    
+
     Args:
         validation_func: Function that validates the input parameters
-        
+
     Returns:
         Decorated function with input validation
     """
@@ -944,8 +976,9 @@ def validate_input(validation_func: Callable) -> Callable:
                     function=func.__name__,
                     validation_error=str(e)
                 )
-                raise ValidationError(f"Input validation failed for {func.__name__}: {str(e)}")
-        
+                raise ValidationError(
+                    f"Input validation failed for {func.__name__}: {str(e)}")
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             try:
@@ -957,20 +990,22 @@ def validate_input(validation_func: Callable) -> Callable:
                     function=func.__name__,
                     validation_error=str(e)
                 )
-                raise ValidationError(f"Input validation failed for {func.__name__}: {str(e)}")
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    
+                raise ValidationError(
+                    f"Input validation failed for {func.__name__}: {str(e)}")
+
+        return async_wrapper if asyncio.iscoroutinefunction(
+            func) else sync_wrapper
+
     return decorator
 
 
 def validate_output(validation_func: Callable) -> Callable:
     """
     Decorator to validate function output.
-    
+
     Args:
         validation_func: Function that validates the output
-        
+
     Returns:
         Decorated function with output validation
     """
@@ -987,8 +1022,9 @@ def validate_output(validation_func: Callable) -> Callable:
                     function=func.__name__,
                     validation_error=str(e)
                 )
-                raise ValidationError(f"Output validation failed for {func.__name__}: {str(e)}")
-        
+                raise ValidationError(
+                    f"Output validation failed for {func.__name__}: {str(e)}")
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             result = func(*args, **kwargs)
@@ -1001,20 +1037,22 @@ def validate_output(validation_func: Callable) -> Callable:
                     function=func.__name__,
                     validation_error=str(e)
                 )
-                raise ValidationError(f"Output validation failed for {func.__name__}: {str(e)}")
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    
+                raise ValidationError(
+                    f"Output validation failed for {func.__name__}: {str(e)}")
+
+        return async_wrapper if asyncio.iscoroutinefunction(
+            func) else sync_wrapper
+
     return decorator
 
 
 def type_check(func: Callable) -> Callable:
     """
     Decorator to perform runtime type checking of function parameters and return value.
-    
+
     Args:
         func: The function to decorate
-        
+
     Returns:
         Decorated function with type checking
     """
@@ -1022,88 +1060,89 @@ def type_check(func: Callable) -> Callable:
     async def async_wrapper(*args, **kwargs) -> Any:
         # Get function signature
         sig = inspect.signature(func)
-        
+
         # Check argument types
         bound_args = sig.bind(*args, **kwargs)
         bound_args.apply_defaults()
-        
+
         for param_name, param_value in bound_args.arguments.items():
             param = sig.parameters[param_name]
             if param.annotation != inspect.Parameter.empty:
                 if not isinstance(param_value, param.annotation):
                     raise ValidationError(
-                        f"Type mismatch for parameter '{param_name}': "
-                        f"expected {param.annotation.__name__}, got {type(param_value).__name__}"
-                    )
-        
+                        f"Type mismatch for parameter '{param_name}': " f"expected {
+                            param.annotation.__name__}, got {
+                            type(param_value).__name__}")
+
         result = await func(*args, **kwargs)
-        
+
         # Check return type
         if sig.return_annotation != inspect.Parameter.empty:
             if not isinstance(result, sig.return_annotation):
                 raise ValidationError(
-                    f"Return type mismatch: expected {sig.return_annotation.__name__}, "
-                    f"got {type(result).__name__}"
-                )
-        
+                    f"Return type mismatch: expected {
+                        sig.return_annotation.__name__}, " f"got {
+                        type(result).__name__}")
+
         return result
-    
+
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs) -> Any:
         # Get function signature
         sig = inspect.signature(func)
-        
+
         # Check argument types
         bound_args = sig.bind(*args, **kwargs)
         bound_args.apply_defaults()
-        
+
         for param_name, param_value in bound_args.arguments.items():
             param = sig.parameters[param_name]
             if param.annotation != inspect.Parameter.empty:
                 if not isinstance(param_value, param.annotation):
                     raise ValidationError(
-                        f"Type mismatch for parameter '{param_name}': "
-                        f"expected {param.annotation.__name__}, got {type(param_value).__name__}"
-                    )
-        
+                        f"Type mismatch for parameter '{param_name}': " f"expected {
+                            param.annotation.__name__}, got {
+                            type(param_value).__name__}")
+
         result = func(*args, **kwargs)
-        
+
         # Check return type
         if sig.return_annotation != inspect.Parameter.empty:
             if not isinstance(result, sig.return_annotation):
                 raise ValidationError(
-                    f"Return type mismatch: expected {sig.return_annotation.__name__}, "
-                    f"got {type(result).__name__}"
-                )
-        
+                    f"Return type mismatch: expected {
+                        sig.return_annotation.__name__}, " f"got {
+                        type(result).__name__}")
+
         return result
-    
+
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
 def rate_limit(max_calls: int, time_window: float) -> Callable:
     """
     Decorator to implement rate limiting for function calls.
-    
+
     Args:
         max_calls: Maximum number of calls allowed in the time window
         time_window: Time window in seconds
-        
+
     Returns:
         Decorated function with rate limiting
     """
     def decorator(func: Callable) -> Callable:
         # Rate limiting state
         call_times: List[float] = []
-        
+
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
             nonlocal call_times
             current_time = time.time()
-            
+
             # Remove old calls outside the time window
-            call_times = [t for t in call_times if current_time - t < time_window]
-            
+            call_times = [
+                t for t in call_times if current_time - t < time_window]
+
             # Check if we're at the rate limit
             if len(call_times) >= max_calls:
                 oldest_call = min(call_times)
@@ -1116,20 +1155,21 @@ def rate_limit(max_calls: int, time_window: float) -> Callable:
                     time_window=time_window
                 )
                 await asyncio.sleep(wait_time)
-            
+
             # Record this call
             call_times.append(current_time)
-            
+
             return await func(*args, **kwargs)
-        
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs) -> Any:
             nonlocal call_times
             current_time = time.time()
-            
+
             # Remove old calls outside the time window
-            call_times = [t for t in call_times if current_time - t < time_window]
-            
+            call_times = [
+                t for t in call_times if current_time - t < time_window]
+
             # Check if we're at the rate limit
             if len(call_times) >= max_calls:
                 oldest_call = min(call_times)
@@ -1142,26 +1182,27 @@ def rate_limit(max_calls: int, time_window: float) -> Callable:
                     time_window=time_window
                 )
                 time.sleep(wait_time)
-            
+
             # Record this call
             call_times.append(current_time)
-            
+
             return func(*args, **kwargs)
-        
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-    
+
+        return async_wrapper if asyncio.iscoroutinefunction(
+            func) else sync_wrapper
+
     return decorator
 
 
 def api_throttle(max_calls: int, time_window: float) -> Callable:
     """
     Alias for rate_limit specifically for API calls.
-    
+
     Args:
         max_calls: Maximum number of API calls allowed in the time window
         time_window: Time window in seconds
-        
+
     Returns:
         Decorated function with API rate limiting
     """
-    return rate_limit(max_calls, time_window) 
+    return rate_limit(max_calls, time_window)

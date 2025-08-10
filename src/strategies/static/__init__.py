@@ -6,7 +6,7 @@ This module contains static trading strategies that have been implemented in P-0
 
 # Import strategy classes implemented in P-012
 from .mean_reversion import MeanReversionStrategy
-from .trend_following import TrendFollowingStrategy  
+from .trend_following import TrendFollowingStrategy
 from .breakout import BreakoutStrategy
 
 # Import arbitrage strategy classes implemented in P-013A
@@ -22,14 +22,14 @@ from .spread_optimizer import SpreadOptimizer
 __all__ = [
     # Static strategies (implemented in P-012)
     "MeanReversionStrategy",
-    "TrendFollowingStrategy", 
+    "TrendFollowingStrategy",
     "BreakoutStrategy",
-    
+
     # Arbitrage strategies (implemented in P-013A)
     "CrossExchangeArbitrageStrategy",
-    "TriangularArbitrageStrategy", 
+    "TriangularArbitrageStrategy",
     "ArbitrageOpportunity",
-    
+
     # Market making strategies (implemented in P-013B)
     "MarketMakingStrategy",
     "InventoryManager",
@@ -38,4 +38,4 @@ __all__ = [
 
 # Version information
 __version__ = "1.0.0"
-__description__ = "Static trading strategies for algorithmic trading including arbitrage and market making strategies" 
+__description__ = "Static trading strategies for algorithmic trading including arbitrage and market making strategies"

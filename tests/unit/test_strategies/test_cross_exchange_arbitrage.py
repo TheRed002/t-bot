@@ -21,7 +21,7 @@ from src.core.exceptions import ArbitrageError, ValidationError
 
 class TestCrossExchangeArbitrageStrategy:
     """Test cases for CrossExchangeArbitrageStrategy."""
-    
+
     @pytest.fixture
     def config(self):
         """Create test configuration."""
@@ -43,12 +43,12 @@ class TestCrossExchangeArbitrageStrategy:
                 "max_open_arbitrages": 5
             }
         }
-    
+
     @pytest.fixture
     def strategy(self, config):
         """Create test strategy instance."""
         return CrossExchangeArbitrageStrategy(config)
-    
+
     @pytest.fixture
     def market_data(self):
         """Create test market data."""
@@ -61,7 +61,7 @@ class TestCrossExchangeArbitrageStrategy:
             timestamp=datetime.now(),
             metadata={"exchange": "binance"}
         )
-    
+
     def test_initialization(self, strategy):
         """Test strategy initialization."""
         assert strategy.name == "cross_exchange_arbitrage"
@@ -74,17 +74,19 @@ class TestCrossExchangeArbitrageStrategy:
         assert strategy.slippage_limit == Decimal("0.0005")
         assert strategy.active_arbitrages == {}
         assert strategy.exchange_prices == {}
-    
+
     @pytest.mark.asyncio
-    async def test_generate_signals_no_opportunities(self, strategy, market_data):
+    async def test_generate_signals_no_opportunities(
+            self, strategy, market_data):
         """Test signal generation when no opportunities exist."""
         signals = await strategy._generate_signals_impl(market_data)
-        
+
         assert isinstance(signals, list)
         assert len(signals) == 0
-    
+
     @pytest.mark.asyncio
-    async def test_generate_signals_with_opportunities(self, strategy, market_data):
+    async def test_generate_signals_with_opportunities(
+            self, strategy, market_data):
         """Test signal generation when opportunities exist."""
         # Setup price data for cross-exchange arbitrage with larger spread
         strategy.exchange_prices = {
@@ -111,13 +113,13 @@ class TestCrossExchangeArbitrageStrategy:
                 )
             }
         }
-        
+
         signals = await strategy._detect_arbitrage_opportunities("BTCUSDT")
-        
+
         assert isinstance(signals, list)
         # Should find cross-exchange arbitrage opportunity
         assert len(signals) > 0
-    
+
     @pytest.mark.asyncio
     async def test_detect_arbitrage_opportunities(self, strategy):
         """Test arbitrage opportunity detection."""
@@ -146,9 +148,9 @@ class TestCrossExchangeArbitrageStrategy:
                 )
             }
         }
-        
+
         signals = await strategy._detect_arbitrage_opportunities("BTCUSDT")
-        
+
         assert isinstance(signals, list)
         if signals:
             signal = signals[0]
@@ -156,23 +158,25 @@ class TestCrossExchangeArbitrageStrategy:
             assert "buy_exchange" in signal.metadata
             assert "sell_exchange" in signal.metadata
             assert "net_profit_percentage" in signal.metadata
-    
+
     def test_calculate_total_fees(self, strategy):
         """Test fee calculation."""
         buy_price = Decimal("50000")
-        sell_price = Decimal("50200")  # Larger spread to make arbitrage profitable
-        
+        # Larger spread to make arbitrage profitable
+        sell_price = Decimal("50200")
+
         fees = strategy._calculate_total_fees(buy_price, sell_price)
-        
+
         assert isinstance(fees, Decimal)
         assert fees > 0
-        assert fees < (sell_price - buy_price)  # Fees should be less than spread
-    
+        # Fees should be less than spread
+        assert fees < (sell_price - buy_price)
+
     def test_calculate_total_fees_invalid_input(self, strategy):
         """Test fee calculation with invalid input."""
         with pytest.raises(ArbitrageError):
             strategy._calculate_total_fees(Decimal("-1"), Decimal("50000"))
-    
+
     @pytest.mark.asyncio
     async def test_validate_execution_timing_valid(self, strategy):
         """Test execution timing validation with valid data."""
@@ -190,11 +194,11 @@ class TestCrossExchangeArbitrageStrategy:
                 )
             }
         }
-        
+
         result = await strategy._validate_execution_timing("BTCUSDT")
-        
+
         assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_validate_execution_timing_old_data(self, strategy):
         """Test execution timing validation with old data."""
@@ -212,11 +216,11 @@ class TestCrossExchangeArbitrageStrategy:
                 )
             }
         }
-        
+
         result = await strategy._validate_execution_timing("BTCUSDT")
-        
+
         assert result is False
-    
+
     @pytest.mark.asyncio
     async def test_validate_signal_valid(self, strategy):
         """Test signal validation with valid signal."""
@@ -235,11 +239,11 @@ class TestCrossExchangeArbitrageStrategy:
                 "net_profit_percentage": 0.5
             }
         )
-        
+
         result = await strategy.validate_signal(signal)
-        
+
         assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_validate_signal_invalid(self, strategy):
         """Test signal validation with invalid signal."""
@@ -254,11 +258,11 @@ class TestCrossExchangeArbitrageStrategy:
                 "net_profit_percentage": 0.05  # Below threshold
             }
         )
-        
+
         result = await strategy.validate_signal(signal)
-        
+
         assert result is False
-    
+
     def test_get_position_size(self, strategy):
         """Test position size calculation."""
         signal = Signal(
@@ -272,19 +276,20 @@ class TestCrossExchangeArbitrageStrategy:
                 "net_profit_percentage": 0.5
             }
         )
-        
+
         position_size = strategy.get_position_size(signal)
-        
+
         assert isinstance(position_size, Decimal)
         assert position_size > 0
-    
+
     def test_get_position_size_invalid_signal(self, strategy):
         """Test position size calculation with invalid signal."""
         with pytest.raises(ArbitrageError):
             strategy.get_position_size(None)
-    
+
     @pytest.mark.asyncio
-    async def test_should_exit_not_arbitrage_position(self, strategy, market_data):
+    async def test_should_exit_not_arbitrage_position(
+            self, strategy, market_data):
         """Test exit condition for non-arbitrage position."""
         position = Position(
             symbol="BTCUSDT",
@@ -296,11 +301,11 @@ class TestCrossExchangeArbitrageStrategy:
             timestamp=datetime.now(),
             metadata={}  # No arbitrage_type
         )
-        
+
         result = await strategy.should_exit(position, market_data)
-        
+
         assert result is False
-    
+
     @pytest.mark.asyncio
     async def test_should_exit_timeout(self, strategy, market_data):
         """Test exit condition for timeout."""
@@ -317,11 +322,11 @@ class TestCrossExchangeArbitrageStrategy:
                 "execution_timeout": 500  # 500ms timeout
             }
         )
-        
+
         result = await strategy.should_exit(position, market_data)
-        
+
         assert result is True
-    
+
     @pytest.mark.asyncio
     async def test_get_current_spread(self, strategy):
         """Test current spread calculation."""
@@ -349,12 +354,12 @@ class TestCrossExchangeArbitrageStrategy:
                 )
             }
         }
-        
+
         spread = await strategy._get_current_spread("BTCUSDT", "binance", "okx")
-        
+
         assert isinstance(spread, Decimal)
         assert spread > 0  # Should be positive for profitable arbitrage
-    
+
     @pytest.mark.asyncio
     async def test_post_trade_processing(self, strategy):
         """Test post-trade processing."""
@@ -363,15 +368,15 @@ class TestCrossExchangeArbitrageStrategy:
             "pnl": 50.0,
             "execution_time_ms": 100
         }
-        
+
         initial_trades = strategy.metrics.total_trades
         initial_pnl = strategy.metrics.total_pnl
-        
+
         await strategy.post_trade_processing(trade_result)
-        
+
         assert strategy.metrics.total_trades == initial_trades + 1
         assert strategy.metrics.total_pnl == initial_pnl + Decimal("50.0")
-    
+
     @pytest.mark.asyncio
     async def test_post_trade_processing_error(self, strategy):
         """Test post-trade processing with error."""
@@ -380,9 +385,9 @@ class TestCrossExchangeArbitrageStrategy:
             "pnl": "invalid_pnl",  # Invalid P&L
             "execution_time_ms": 100
         }
-        
+
         # Should not raise exception, should handle gracefully
         await strategy.post_trade_processing(trade_result)
-        
+
         # Metrics should still be updated
         assert strategy.metrics.total_trades > 0

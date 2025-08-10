@@ -24,6 +24,6 @@ from .alternative_features import AlternativeFeatureCalculator
 
 __all__ = [
     'TechnicalIndicatorCalculator',
-    'StatisticalFeatureCalculator', 
+    'StatisticalFeatureCalculator',
     'AlternativeFeatureCalculator'
 ]

@@ -13,7 +13,7 @@ from .script import template
 
 __all__ = [
     "get_url",
-    "run_migrations_online", 
+    "run_migrations_online",
     "run_migrations_offline",
     "template"
-] 
+]

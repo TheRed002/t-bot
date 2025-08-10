@@ -20,14 +20,14 @@ from src.core.types import (
 __all__ = [
     # Base strategy interface
     "BaseStrategy",
-    
+
     # Factory and management
     "StrategyFactory",
     "StrategyConfigurationManager",
-    
+
     # Types
     "StrategyConfig",
-    "StrategyStatus", 
+    "StrategyStatus",
     "StrategyMetrics",
     "StrategyType"
 ]
@@ -35,4 +35,4 @@ __all__ = [
 # Version information
 __version__ = "1.0.0"
 __author__ = "Trading Bot Team"
-__description__ = "Strategy framework for algorithmic trading" 
+__description__ = "Strategy framework for algorithmic trading"

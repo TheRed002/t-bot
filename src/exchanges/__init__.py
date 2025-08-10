@@ -109,7 +109,7 @@ except ImportError as e:
 def register_exchanges(factory: ExchangeFactory) -> None:
     """
     Register all available exchanges with the factory.
-    
+
     Args:
         factory: Exchange factory instance
     """
@@ -119,23 +119,23 @@ def register_exchanges(factory: ExchangeFactory) -> None:
         print("Registered Binance exchange")
     else:
         print("Warning: Binance exchange not registered - dependencies missing")
-    
+
     # Register OKX exchange (P-005)
     if OKX_AVAILABLE:
         factory.register_exchange("okx", OKXExchange)
         print("Registered OKX exchange")
     else:
         print("Warning: OKX exchange not registered - dependencies missing")
-    
+
     # Register Coinbase exchange (P-006)
     if COINBASE_AVAILABLE:
         factory.register_exchange("coinbase", CoinbaseExchange)
         print("Registered Coinbase exchange")
     else:
         print("Warning: Coinbase exchange not registered - dependencies missing")
-    
+
     # TODO: Register other exchanges as they are implemented
-    
+
     print(f"Registered {len(factory.get_supported_exchanges())} exchanges")
 
 
@@ -146,7 +146,7 @@ __all__ = [
     'ExchangeFactory',
     'RateLimiter',
     'ConnectionManager',
-    
+
     # Types
     'ExchangeInfo',
     'Ticker',
@@ -156,22 +156,22 @@ __all__ = [
     'ExchangeCapability',
     'ExchangeTradingPair',
     'ExchangeRateLimit',
-    
+
     # Binance implementation (P-004)
     'BinanceExchange',
     'BinanceWebSocketHandler',
     'BinanceOrderManager',
-    
+
     # OKX implementation (P-005)
     'OKXExchange',
     'OKXWebSocketManager',
     'OKXOrderManager',
-    
+
     # Coinbase implementation (P-006)
     'CoinbaseExchange',
     'CoinbaseWebSocketHandler',
     'CoinbaseOrderManager',
-    
+
     # Utility function
     'register_exchanges',
-] 
+]

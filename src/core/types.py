@@ -17,14 +17,14 @@ from dataclasses import dataclass
 
 class TradingMode(Enum):
     """Trading mode enumeration for different execution environments.
-    
+
     Attributes:
         LIVE: Live trading with real money
         PAPER: Paper trading for testing
         BACKTEST: Historical backtesting mode
     """
     LIVE = "live"
-    PAPER = "paper" 
+    PAPER = "paper"
     BACKTEST = "backtest"
 
 
@@ -146,7 +146,7 @@ class StorageMode(Enum):
 
 class Signal(BaseModel):
     """Trading signal with direction, confidence, and metadata.
-    
+
     Attributes:
         direction: Signal direction (buy/sell/hold)
         confidence: Signal confidence level (0.0 to 1.0)
@@ -156,16 +156,20 @@ class Signal(BaseModel):
         metadata: Additional signal metadata
     """
     direction: SignalDirection
-    confidence: float = Field(ge=0.0, le=1.0, description="Signal confidence between 0 and 1")
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Signal confidence between 0 and 1")
     timestamp: datetime
     symbol: str
     strategy_name: str
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional signal metadata")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional signal metadata")
 
 
 class MarketData(BaseModel):
     """Market data structure for price and volume information.
-    
+
     Attributes:
         symbol: Trading symbol
         price: Current market price
@@ -178,14 +182,24 @@ class MarketData(BaseModel):
         low_price: Low price (optional)
     """
     symbol: str = Field(min_length=3, description="Trading symbol")
-    price: Decimal = Field(gt=0, description="Current price (must be positive)")
+    price: Decimal = Field(
+        gt=0, description="Current price (must be positive)")
     volume: Decimal = Field(ge=0, description="Volume (must be non-negative)")
     timestamp: datetime
-    bid: Optional[Decimal] = Field(default=None, gt=0, description="Bid price (must be positive if set)")
-    ask: Optional[Decimal] = Field(default=None, gt=0, description="Ask price (must be positive if set)")
-    open_price: Optional[Decimal] = Field(default=None, gt=0, description="Open price (must be positive if set)")
-    high_price: Optional[Decimal] = Field(default=None, gt=0, description="High price (must be positive if set)")
-    low_price: Optional[Decimal] = Field(default=None, gt=0, description="Low price (must be positive if set)")
+    bid: Optional[Decimal] = Field(
+        default=None,
+        gt=0,
+        description="Bid price (must be positive if set)")
+    ask: Optional[Decimal] = Field(
+        default=None,
+        gt=0,
+        description="Ask price (must be positive if set)")
+    open_price: Optional[Decimal] = Field(
+        default=None, gt=0, description="Open price (must be positive if set)")
+    high_price: Optional[Decimal] = Field(
+        default=None, gt=0, description="High price (must be positive if set)")
+    low_price: Optional[Decimal] = Field(
+        default=None, gt=0, description="Low price (must be positive if set)")
 
 
 class OrderRequest(BaseModel):
@@ -193,10 +207,18 @@ class OrderRequest(BaseModel):
     symbol: str = Field(min_length=3, description="Trading symbol")
     side: OrderSide
     order_type: OrderType
-    quantity: Decimal = Field(gt=0, description="Order quantity (must be positive)")
-    price: Optional[Decimal] = Field(default=None, gt=0, description="Order price (must be positive if set)")
-    stop_price: Optional[Decimal] = Field(default=None, gt=0, description="Stop price (must be positive if set)")
-    time_in_force: str = Field(default="GTC", pattern=r"^(GTC|IOC|FOK)$", description="Time in force")
+    quantity: Decimal = Field(
+        gt=0, description="Order quantity (must be positive)")
+    price: Optional[Decimal] = Field(
+        default=None,
+        gt=0,
+        description="Order price (must be positive if set)")
+    stop_price: Optional[Decimal] = Field(
+        default=None, gt=0, description="Stop price (must be positive if set)")
+    time_in_force: str = Field(
+        default="GTC",
+        pattern=r"^(GTC|IOC|FOK)$",
+        description="Time in force")
     client_order_id: Optional[str] = None
 
 
@@ -216,7 +238,7 @@ class OrderResponse(BaseModel):
 
 class Position(BaseModel):
     """Position structure for tracking open positions.
-    
+
     Attributes:
         symbol: Trading symbol
         quantity: Position size (must be positive)
@@ -228,18 +250,22 @@ class Position(BaseModel):
         metadata: Additional position metadata
     """
     symbol: str = Field(min_length=3, description="Trading symbol")
-    quantity: Decimal = Field(gt=0, description="Position quantity (must be positive)")
-    entry_price: Decimal = Field(gt=0, description="Entry price (must be positive)")
-    current_price: Decimal = Field(gt=0, description="Current price (must be positive)")
+    quantity: Decimal = Field(
+        gt=0, description="Position quantity (must be positive)")
+    entry_price: Decimal = Field(
+        gt=0, description="Entry price (must be positive)")
+    current_price: Decimal = Field(
+        gt=0, description="Current price (must be positive)")
     unrealized_pnl: Decimal
     side: OrderSide
     timestamp: datetime
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional position metadata")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Additional position metadata")
 
 
 # TODO:REVERSE INTEGRATION POINTS: Future prompts will add:
 # - P-011: Strategy types (StrategyConfig, StrategyStatus)
-# - P-017: ML types (ModelPrediction, ModelMetadata) 
+# - P-017: ML types (ModelPrediction, ModelMetadata)
 
 class ExchangeInfo(BaseModel):
     """Exchange information including supported symbols and features."""
@@ -248,6 +274,7 @@ class ExchangeInfo(BaseModel):
     rate_limits: Dict[str, int]
     features: List[str]
     api_version: str
+
 
 class Ticker(BaseModel):
     """Real-time ticker information for a symbol."""
@@ -259,6 +286,7 @@ class Ticker(BaseModel):
     price_change_24h: Decimal
     timestamp: datetime
 
+
 class OrderBook(BaseModel):
     """Order book with bid and ask levels."""
     symbol: str
@@ -266,11 +294,13 @@ class OrderBook(BaseModel):
     asks: List[List[Decimal]]  # [[price, quantity], ...]
     timestamp: datetime
 
+
 class ExchangeStatus(Enum):
     """Exchange connection status."""
     ONLINE = "online"
     OFFLINE = "offline"
     MAINTENANCE = "maintenance"
+
 
 class OrderStatus(Enum):
     """Order status enumeration."""
@@ -282,16 +312,24 @@ class OrderStatus(Enum):
     EXPIRED = "expired"
     UNKNOWN = "unknown"
 
+
 class Trade(BaseModel):
     """Trade execution record."""
     id: str = Field(min_length=1, description="Trade ID")
     symbol: str = Field(min_length=3, description="Trading symbol")
     side: OrderSide
-    quantity: Decimal = Field(gt=0, description="Trade quantity (must be positive)")
+    quantity: Decimal = Field(
+        gt=0, description="Trade quantity (must be positive)")
     price: Decimal = Field(gt=0, description="Trade price (must be positive)")
     timestamp: datetime
-    fee: Decimal = Field(ge=0, default=Decimal("0"), description="Trade fee (must be non-negative)")
-    fee_currency: str = Field(default="USDT", pattern=r"^[A-Z]{3,10}$", description="Fee currency code")
+    fee: Decimal = Field(
+        ge=0,
+        default=Decimal("0"),
+        description="Trade fee (must be non-negative)")
+    fee_currency: str = Field(
+        default="USDT",
+        pattern=r"^[A-Z]{3,10}$",
+        description="Fee currency code")
 
 
 # Risk Management Types (P-008)
@@ -315,10 +353,14 @@ class RiskMetrics(BaseModel):
     """Risk metrics for portfolio risk assessment."""
     var_1d: Decimal = Field(description="1-day Value at Risk")
     var_5d: Decimal = Field(description="5-day Value at Risk")
-    expected_shortfall: Decimal = Field(description="Expected shortfall (Conditional VaR)")
+    expected_shortfall: Decimal = Field(
+        description="Expected shortfall (Conditional VaR)")
     max_drawdown: Decimal = Field(description="Maximum historical drawdown")
-    sharpe_ratio: Optional[Decimal] = Field(default=None, description="Sharpe ratio")
-    current_drawdown: Decimal = Field(default=Decimal("0"), description="Current drawdown")
+    sharpe_ratio: Optional[Decimal] = Field(
+        default=None, description="Sharpe ratio")
+    current_drawdown: Decimal = Field(
+        default=Decimal("0"),
+        description="Current drawdown")
     risk_level: RiskLevel = Field(description="Current risk level")
     timestamp: datetime = Field(description="Timestamp of risk calculation")
 
@@ -326,12 +368,21 @@ class RiskMetrics(BaseModel):
 class PositionLimits(BaseModel):
     """Position limits for risk management."""
     max_position_size: Decimal = Field(description="Maximum position size")
-    max_positions_per_symbol: int = Field(default=1, description="Maximum positions per symbol")
-    max_total_positions: int = Field(default=10, description="Maximum total positions")
-    max_portfolio_exposure: Decimal = Field(default=Decimal("0.95"), description="Maximum portfolio exposure (95%)")
-    max_sector_exposure: Decimal = Field(default=Decimal("0.25"), description="Maximum sector exposure (25%)")
-    max_correlation_exposure: Decimal = Field(default=Decimal("0.5"), description="Maximum correlated exposure (50%)")
-    max_leverage: Decimal = Field(default=Decimal("1.0"), description="Maximum leverage (no leverage by default)")
+    max_positions_per_symbol: int = Field(
+        default=1, description="Maximum positions per symbol")
+    max_total_positions: int = Field(
+        default=10, description="Maximum total positions")
+    max_portfolio_exposure: Decimal = Field(
+        default=Decimal("0.95"),
+        description="Maximum portfolio exposure (95%)")
+    max_sector_exposure: Decimal = Field(
+        default=Decimal("0.25"),
+        description="Maximum sector exposure (25%)")
+    max_correlation_exposure: Decimal = Field(default=Decimal(
+        "0.5"), description="Maximum correlated exposure (50%)")
+    max_leverage: Decimal = Field(
+        default=Decimal("1.0"),
+        description="Maximum leverage (no leverage by default)")
 
 
 # Circuit Breaker Types (P-009)
@@ -397,36 +448,56 @@ class AllocationStrategy(Enum):
 
 class CapitalAllocation(BaseModel):
     """Capital allocation record for strategies and exchanges."""
-    strategy_id: str = Field(min_length=1, pattern=r"^[a-zA-Z0-9_-]+$", description="Strategy identifier")
-    exchange: str = Field(min_length=3, pattern=r"^[a-z]+$", description="Exchange name")
-    allocated_amount: Decimal = Field(gt=0, description="Total allocated capital")
-    utilized_amount: Decimal = Field(default=Decimal("0"), ge=0, description="Currently utilized capital")
-    available_amount: Decimal = Field(ge=0, description="Available capital for trading")
-    allocation_percentage: float = Field(description="Allocation percentage of total capital")
+    strategy_id: str = Field(
+        min_length=1,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="Strategy identifier")
+    exchange: str = Field(
+        min_length=3,
+        pattern=r"^[a-z]+$",
+        description="Exchange name")
+    allocated_amount: Decimal = Field(
+        gt=0, description="Total allocated capital")
+    utilized_amount: Decimal = Field(default=Decimal(
+        "0"), ge=0, description="Currently utilized capital")
+    available_amount: Decimal = Field(
+        ge=0, description="Available capital for trading")
+    allocation_percentage: float = Field(
+        description="Allocation percentage of total capital")
     last_rebalance: datetime = Field(description="Last rebalancing timestamp")
-    
+
     @field_validator('allocation_percentage')
     @classmethod
     def validate_allocation_percentage(cls, v: float) -> float:
         """Validate allocation percentage is between 0 and 1."""
         if not 0.0 <= v <= 1.0:
-            raise ValueError(f'Allocation percentage must be between 0 and 1, got {v}')
+            raise ValueError(
+                f'Allocation percentage must be between 0 and 1, got {v}')
         return v
 
 
 class FundFlow(BaseModel):
     """Fund flow record for capital movements."""
-    from_strategy: Optional[str] = Field(default=None, description="Source strategy")
-    to_strategy: Optional[str] = Field(default=None, description="Target strategy")
-    from_exchange: Optional[str] = Field(default=None, description="Source exchange")
-    to_exchange: Optional[str] = Field(default=None, description="Target exchange")
+    from_strategy: Optional[str] = Field(
+        default=None, description="Source strategy")
+    to_strategy: Optional[str] = Field(
+        default=None, description="Target strategy")
+    from_exchange: Optional[str] = Field(
+        default=None, description="Source exchange")
+    to_exchange: Optional[str] = Field(
+        default=None, description="Target exchange")
     amount: Decimal = Field(description="Flow amount")
-    currency: str = Field(default="USDT", pattern=r"^[A-Z]{3,10}$", description="Currency code")
+    currency: str = Field(
+        default="USDT",
+        pattern=r"^[A-Z]{3,10}$",
+        description="Currency code")
     reason: str = Field(min_length=1, description="Flow reason")
     timestamp: datetime = Field(description="Flow timestamp")
-    converted_amount: Optional[Decimal] = Field(default=None, gt=0, description="Converted amount for currency flows")
-    exchange_rate: Optional[Decimal] = Field(default=None, gt=0, description="Exchange rate for currency conversion")
-    
+    converted_amount: Optional[Decimal] = Field(
+        default=None, gt=0, description="Converted amount for currency flows")
+    exchange_rate: Optional[Decimal] = Field(
+        default=None, gt=0, description="Exchange rate for currency conversion")
+
     @field_validator('amount')
     @classmethod
     def validate_amount(cls, v: Decimal) -> Decimal:
@@ -443,54 +514,66 @@ class CapitalMetrics(BaseModel):
     available_capital: Decimal = Field(description="Unallocated capital")
     utilization_rate: float = Field(description="Capital utilization rate")
     allocation_efficiency: float = Field(
-        ge=0.0, 
+        ge=0.0,
         le=3.0,  # Allow up to 300% efficiency for exceptional performance
         description="Real allocation efficiency based on utilization, performance, and market conditions"
     )
-    rebalance_frequency_hours: int = Field(description="Rebalancing frequency in hours")
+    rebalance_frequency_hours: int = Field(
+        description="Rebalancing frequency in hours")
     emergency_reserve: Decimal = Field(description="Emergency reserve amount")
     last_updated: datetime = Field(description="Last metrics update timestamp")
     allocation_count: int = Field(description="Number of active allocations")
-    
+
     @field_validator('utilization_rate')
     @classmethod
     def validate_utilization_rate(cls, v):
         """Validate utilization rate is between 0 and 1."""
         if not 0.0 <= v <= 1.0:
-            raise ValueError(f'Utilization rate must be between 0 and 1, got {v}')
+            raise ValueError(
+                f'Utilization rate must be between 0 and 1, got {v}')
         return v
-    
+
     @field_validator('allocation_efficiency')
     @classmethod
     def validate_allocation_efficiency(cls, v):
         """Validate allocation efficiency is between 0 and 3 (300% efficiency allowed)."""
         if not 0.0 <= v <= 3.0:
-            raise ValueError(f'Allocation efficiency must be between 0 and 3, got {v}')
+            raise ValueError(
+                f'Allocation efficiency must be between 0 and 3, got {v}')
         return v
 
 
 class CurrencyExposure(BaseModel):
     """Currency exposure tracking."""
     currency: str = Field(description="Currency code")
-    total_exposure: Decimal = Field(description="Total exposure in this currency")
-    base_currency_equivalent: Decimal = Field(description="Equivalent in base currency")
-    exposure_percentage: float = Field(description="Percentage of total portfolio")
+    total_exposure: Decimal = Field(
+        description="Total exposure in this currency")
+    base_currency_equivalent: Decimal = Field(
+        description="Equivalent in base currency")
+    exposure_percentage: float = Field(
+        description="Percentage of total portfolio")
     hedging_required: bool = Field(description="Whether hedging is required")
-    hedge_amount: Decimal = Field(default=Decimal("0"), description="Amount to hedge")
+    hedge_amount: Decimal = Field(
+        default=Decimal("0"),
+        description="Amount to hedge")
     timestamp: datetime = Field(description="Exposure calculation timestamp")
-    
+
     @field_validator('exposure_percentage')
     @classmethod
     def validate_exposure_percentage(cls, v):
         """Validate exposure percentage is between 0 and 1."""
         if not 0.0 <= v <= 1.0:
-            raise ValueError(f'Exposure percentage must be between 0 and 1, got {v}')
+            raise ValueError(
+                f'Exposure percentage must be between 0 and 1, got {v}')
         return v
 
 
 class ExchangeAllocation(BaseModel):
     """Exchange-specific capital allocation."""
-    exchange: str = Field(min_length=3, pattern=r"^[a-z]+$", description="Exchange name")
+    exchange: str = Field(
+        min_length=3,
+        pattern=r"^[a-z]+$",
+        description="Exchange name")
     allocated_amount: Decimal = Field(gt=0, description="Allocated capital")
     available_amount: Decimal = Field(ge=0, description="Available capital")
     utilization_rate: float = Field(description="Utilization rate")
@@ -498,8 +581,9 @@ class ExchangeAllocation(BaseModel):
     fee_efficiency: float = Field(description="Fee efficiency score (0-1)")
     reliability_score: float = Field(description="API reliability score (0-1)")
     last_rebalance: datetime = Field(description="Last rebalancing timestamp")
-    
-    @field_validator('utilization_rate', 'liquidity_score', 'fee_efficiency', 'reliability_score')
+
+    @field_validator('utilization_rate', 'liquidity_score',
+                     'fee_efficiency', 'reliability_score')
     @classmethod
     def validate_score_fields(cls, v):
         """Validate score fields are between 0 and 1."""
@@ -513,11 +597,15 @@ class WithdrawalRule(BaseModel):
     name: str = Field(description="Rule name")
     description: str = Field(description="Rule description")
     enabled: bool = Field(default=True, description="Whether rule is enabled")
-    threshold: Optional[float] = Field(default=None, description="Performance threshold")
-    min_amount: Optional[Decimal] = Field(default=None, description="Minimum withdrawal amount")
-    max_percentage: Optional[float] = Field(default=None, description="Maximum withdrawal percentage")
-    cooldown_hours: Optional[int] = Field(default=None, description="Cooldown period in hours")
-    
+    threshold: Optional[float] = Field(
+        default=None, description="Performance threshold")
+    min_amount: Optional[Decimal] = Field(
+        default=None, description="Minimum withdrawal amount")
+    max_percentage: Optional[float] = Field(
+        default=None, description="Maximum withdrawal percentage")
+    cooldown_hours: Optional[int] = Field(
+        default=None, description="Cooldown period in hours")
+
     @field_validator('threshold', 'max_percentage')
     @classmethod
     def validate_percentage_fields(cls, v):
@@ -529,17 +617,29 @@ class WithdrawalRule(BaseModel):
 
 class CapitalProtection(BaseModel):
     """Capital protection configuration."""
-    emergency_reserve_pct: float = Field(default=0.1, description="Emergency reserve percentage")
-    max_daily_loss_pct: float = Field(default=0.05, description="Maximum daily loss percentage")
-    max_weekly_loss_pct: float = Field(default=0.10, description="Maximum weekly loss percentage")
-    max_monthly_loss_pct: float = Field(default=0.15, description="Maximum monthly loss percentage")
-    profit_lock_pct: float = Field(default=0.5, description="Profit lock percentage")
-    auto_compound_enabled: bool = Field(default=True, description="Enable auto-compounding")
-    auto_compound_frequency: str = Field(default="weekly", description="Auto-compound frequency")
-    profit_threshold: Decimal = Field(default=Decimal("100"), description="Minimum profit for compounding")
-    
-    @field_validator('emergency_reserve_pct', 'max_daily_loss_pct', 'max_weekly_loss_pct', 
-                    'max_monthly_loss_pct', 'profit_lock_pct')
+    emergency_reserve_pct: float = Field(
+        default=0.1, description="Emergency reserve percentage")
+    max_daily_loss_pct: float = Field(
+        default=0.05, description="Maximum daily loss percentage")
+    max_weekly_loss_pct: float = Field(
+        default=0.10, description="Maximum weekly loss percentage")
+    max_monthly_loss_pct: float = Field(
+        default=0.15, description="Maximum monthly loss percentage")
+    profit_lock_pct: float = Field(
+        default=0.5, description="Profit lock percentage")
+    auto_compound_enabled: bool = Field(
+        default=True, description="Enable auto-compounding")
+    auto_compound_frequency: str = Field(
+        default="weekly", description="Auto-compound frequency")
+    profit_threshold: Decimal = Field(
+        default=Decimal("100"),
+        description="Minimum profit for compounding")
+
+    @field_validator('emergency_reserve_pct',
+                     'max_daily_loss_pct',
+                     'max_weekly_loss_pct',
+                     'max_monthly_loss_pct',
+                     'profit_lock_pct')
     @classmethod
     def validate_percentage_fields(cls, v):
         """Validate percentage fields are between 0 and 1."""
@@ -547,15 +647,17 @@ class CapitalProtection(BaseModel):
             raise ValueError(f'Percentage must be between 0 and 1, got {v}')
         return v
 
+
 class StrategyType(Enum):
     """Strategy type enumeration for different trading strategies."""
     STATIC = "static"
-    DYNAMIC = "dynamic" 
+    DYNAMIC = "dynamic"
     ARBITRAGE = "arbitrage"
     MARKET_MAKING = "market_making"
     EVOLUTIONARY = "evolutionary"
     HYBRID = "hybrid"
     AI_ML = "ai_ml"
+
 
 class StrategyStatus(Enum):
     """Strategy status enumeration for tracking strategy state."""
@@ -565,20 +667,44 @@ class StrategyStatus(Enum):
     PAUSED = "paused"
     ERROR = "error"
 
+
 class StrategyConfig(BaseModel):
     """Strategy configuration model for storing strategy parameters."""
     name: str = Field(min_length=1, description="Strategy name")
     strategy_type: StrategyType = Field(description="Strategy type")
-    enabled: bool = Field(default=True, description="Whether strategy is enabled")
+    enabled: bool = Field(
+        default=True,
+        description="Whether strategy is enabled")
     symbols: List[str] = Field(min_length=1, description="Trading symbols")
-    timeframe: str = Field(default="1h", pattern=r"^(1m|5m|15m|30m|1h|4h|1d)$", description="Trading timeframe")
-    min_confidence: float = Field(default=0.6, ge=0.0, le=1.0, description="Minimum signal confidence")
-    max_positions: int = Field(default=5, ge=1, description="Maximum positions")
-    position_size_pct: float = Field(default=0.02, ge=0.001, le=0.1, description="Position size percentage")
-    stop_loss_pct: float = Field(default=0.02, ge=0.001, le=0.1, description="Stop loss percentage")
-    take_profit_pct: float = Field(default=0.04, ge=0.001, le=0.2, description="Take profit percentage")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Strategy-specific parameters")
-    
+    timeframe: str = Field(
+        default="1h",
+        pattern=r"^(1m|5m|15m|30m|1h|4h|1d)$",
+        description="Trading timeframe")
+    min_confidence: float = Field(
+        default=0.6,
+        ge=0.0,
+        le=1.0,
+        description="Minimum signal confidence")
+    max_positions: int = Field(
+        default=5, ge=1, description="Maximum positions")
+    position_size_pct: float = Field(
+        default=0.02,
+        ge=0.001,
+        le=0.1,
+        description="Position size percentage")
+    stop_loss_pct: float = Field(
+        default=0.02,
+        ge=0.001,
+        le=0.1,
+        description="Stop loss percentage")
+    take_profit_pct: float = Field(
+        default=0.04,
+        ge=0.001,
+        le=0.2,
+        description="Take profit percentage")
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict, description="Strategy-specific parameters")
+
     @field_validator('symbols')
     @classmethod
     def validate_symbols(cls, v: List[str]) -> List[str]:
@@ -589,15 +715,16 @@ class StrategyConfig(BaseModel):
             if not isinstance(symbol, str) or len(symbol) < 3:
                 raise ValueError(f'Invalid symbol format: {symbol}')
         return v
-    
-    @field_validator('min_confidence', 'position_size_pct', 'stop_loss_pct', 'take_profit_pct')
+
+    @field_validator('min_confidence', 'position_size_pct',
+                     'stop_loss_pct', 'take_profit_pct')
     @classmethod
     def validate_percentage_fields(cls, v: float) -> float:
         """Validate percentage fields are between 0 and 1."""
         if not 0.0 <= v <= 1.0:
             raise ValueError(f'Percentage must be between 0 and 1, got {v}')
         return v
-    
+
     @field_validator('max_positions')
     @classmethod
     def validate_positive_integer(cls, v: int) -> int:
@@ -606,17 +733,25 @@ class StrategyConfig(BaseModel):
             raise ValueError(f'Value must be positive, got {v}')
         return v
 
+
 class StrategyMetrics(BaseModel):
     """Strategy performance metrics model."""
     total_trades: int = Field(default=0, description="Total number of trades")
-    winning_trades: int = Field(default=0, description="Number of winning trades")
-    losing_trades: int = Field(default=0, description="Number of losing trades")
+    winning_trades: int = Field(
+        default=0, description="Number of winning trades")
+    losing_trades: int = Field(
+        default=0, description="Number of losing trades")
     total_pnl: Decimal = Field(default=Decimal("0"), description="Total P&L")
     win_rate: float = Field(default=0.0, description="Win rate percentage")
-    sharpe_ratio: Optional[float] = Field(default=None, description="Sharpe ratio")
-    max_drawdown: Optional[float] = Field(default=None, description="Maximum drawdown")
-    last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Last metrics update timestamp")
-    
+    sharpe_ratio: Optional[float] = Field(
+        default=None, description="Sharpe ratio")
+    max_drawdown: Optional[float] = Field(
+        default=None, description="Maximum drawdown")
+    last_updated: datetime = Field(
+        default_factory=lambda: datetime.now(
+            timezone.utc),
+        description="Last metrics update timestamp")
+
     @field_validator('win_rate')
     @classmethod
     def validate_win_rate(cls, v: float) -> float:
@@ -666,7 +801,7 @@ class ErrorPattern:
     description: str
     suggested_action: str
     is_active: bool = True
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         return {

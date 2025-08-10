@@ -7,23 +7,56 @@ These tests cover additional types and enums not covered in the basic types test
 import pytest
 from decimal import Decimal
 from datetime import datetime, timezone
+from pydantic import ValidationError
 
 from src.core.types import (
-    ExchangeType, RequestType, ConnectionType, ValidationLevel, ValidationResult,
-    QualityLevel, DriftType, IngestionMode, PipelineStatus, ProcessingStep,
-    StorageMode, NewsSentiment, SocialSentiment, ExchangeInfo, Ticker,
-    OrderBook, ExchangeStatus, OrderStatus, Trade, RiskLevel, PositionSizeMethod,
-    RiskMetrics, PositionLimits, CircuitBreakerStatus, CircuitBreakerType,
-    CircuitBreakerEvent, MarketRegime, RegimeChangeEvent, AllocationStrategy,
-    CapitalAllocation, FundFlow, CapitalMetrics, CurrencyExposure,
-    ExchangeAllocation, WithdrawalRule, CapitalProtection, StrategyType,
-    StrategyStatus, StrategyConfig, StrategyMetrics, ErrorPattern, OrderSide
-)
+    ExchangeType,
+    RequestType,
+    ConnectionType,
+    ValidationLevel,
+    ValidationResult,
+    QualityLevel,
+    DriftType,
+    IngestionMode,
+    PipelineStatus,
+    ProcessingStep,
+    StorageMode,
+    NewsSentiment,
+    SocialSentiment,
+    ExchangeInfo,
+    Ticker,
+    OrderBook,
+    ExchangeStatus,
+    OrderStatus,
+    Trade,
+    RiskLevel,
+    PositionSizeMethod,
+    RiskMetrics,
+    PositionLimits,
+    CircuitBreakerStatus,
+    CircuitBreakerType,
+    CircuitBreakerEvent,
+    MarketRegime,
+    RegimeChangeEvent,
+    AllocationStrategy,
+    CapitalAllocation,
+    FundFlow,
+    CapitalMetrics,
+    CurrencyExposure,
+    ExchangeAllocation,
+    WithdrawalRule,
+    CapitalProtection,
+    StrategyType,
+    StrategyStatus,
+    StrategyConfig,
+    StrategyMetrics,
+    ErrorPattern,
+    OrderSide)
 
 
 class TestExchangeType:
     """Test ExchangeType enum values."""
-    
+
     def test_exchange_type_enum(self):
         """Test ExchangeType enum values."""
         assert ExchangeType.BINANCE.value == "binance"
@@ -33,7 +66,7 @@ class TestExchangeType:
 
 class TestRequestType:
     """Test RequestType enum values."""
-    
+
     def test_request_type_enum(self):
         """Test RequestType enum values."""
         assert RequestType.MARKET_DATA.value == "market_data"
@@ -43,7 +76,7 @@ class TestRequestType:
 
 class TestConnectionType:
     """Test ConnectionType enum values."""
-    
+
     def test_connection_type_enum(self):
         """Test ConnectionType enum values."""
         assert ConnectionType.TICKER.value == "ticker"
@@ -53,7 +86,7 @@ class TestConnectionType:
 
 class TestValidationLevel:
     """Test ValidationLevel enum values."""
-    
+
     def test_validation_level_enum(self):
         """Test ValidationLevel enum values."""
         assert ValidationLevel.CRITICAL.value == "critical"
@@ -64,7 +97,7 @@ class TestValidationLevel:
 
 class TestValidationResult:
     """Test ValidationResult enum values."""
-    
+
     def test_validation_result_enum(self):
         """Test ValidationResult enum values."""
         assert ValidationResult.PASS.value == "pass"
@@ -74,7 +107,7 @@ class TestValidationResult:
 
 class TestQualityLevel:
     """Test QualityLevel enum values."""
-    
+
     def test_quality_level_enum(self):
         """Test QualityLevel enum values."""
         assert QualityLevel.EXCELLENT.value == "excellent"
@@ -86,7 +119,7 @@ class TestQualityLevel:
 
 class TestDriftType:
     """Test DriftType enum values."""
-    
+
     def test_drift_type_enum(self):
         """Test DriftType enum values."""
         assert DriftType.CONCEPT_DRIFT.value == "concept_drift"
@@ -97,7 +130,7 @@ class TestDriftType:
 
 class TestIngestionMode:
     """Test IngestionMode enum values."""
-    
+
     def test_ingestion_mode_enum(self):
         """Test IngestionMode enum values."""
         assert IngestionMode.REAL_TIME.value == "real_time"
@@ -107,7 +140,7 @@ class TestIngestionMode:
 
 class TestPipelineStatus:
     """Test PipelineStatus enum values."""
-    
+
     def test_pipeline_status_enum(self):
         """Test PipelineStatus enum values."""
         assert PipelineStatus.STOPPED.value == "stopped"
@@ -120,7 +153,7 @@ class TestPipelineStatus:
 
 class TestProcessingStep:
     """Test ProcessingStep enum values."""
-    
+
     def test_processing_step_enum(self):
         """Test ProcessingStep enum values."""
         assert ProcessingStep.NORMALIZE.value == "normalize"
@@ -133,7 +166,7 @@ class TestProcessingStep:
 
 class TestStorageMode:
     """Test StorageMode enum values."""
-    
+
     def test_storage_mode_enum(self):
         """Test StorageMode enum values."""
         assert StorageMode.REAL_TIME.value == "real_time"
@@ -143,7 +176,7 @@ class TestStorageMode:
 
 class TestNewsSentiment:
     """Test NewsSentiment enum values."""
-    
+
     def test_news_sentiment_enum(self):
         """Test NewsSentiment enum values."""
         assert NewsSentiment.VERY_POSITIVE.value == "very_positive"
@@ -155,7 +188,7 @@ class TestNewsSentiment:
 
 class TestSocialSentiment:
     """Test SocialSentiment enum values."""
-    
+
     def test_social_sentiment_enum(self):
         """Test SocialSentiment enum values."""
         assert SocialSentiment.VERY_BULLISH.value == "very_bullish"
@@ -167,7 +200,7 @@ class TestSocialSentiment:
 
 class TestExchangeInfo:
     """Test ExchangeInfo model creation."""
-    
+
     def test_exchange_info_creation(self):
         """Test ExchangeInfo model creation."""
         exchange_info = ExchangeInfo(
@@ -177,7 +210,7 @@ class TestExchangeInfo:
             features=["spot_trading", "futures_trading"],
             api_version="v1"
         )
-        
+
         assert exchange_info.name == "test_exchange"
         assert exchange_info.supported_symbols == ["BTC/USDT", "ETH/USDT"]
         assert exchange_info.rate_limits["requests_per_minute"] == 1000
@@ -187,7 +220,7 @@ class TestExchangeInfo:
 
 class TestTicker:
     """Test Ticker model creation."""
-    
+
     def test_ticker_creation(self):
         """Test Ticker model creation."""
         ticker = Ticker(
@@ -199,7 +232,7 @@ class TestTicker:
             price_change_24h=Decimal("500.00"),
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         assert ticker.symbol == "BTC/USDT"
         assert ticker.bid == Decimal("50000.00")
         assert ticker.ask == Decimal("50001.00")
@@ -210,7 +243,7 @@ class TestTicker:
 
 class TestOrderBook:
     """Test OrderBook model creation."""
-    
+
     def test_order_book_creation(self):
         """Test OrderBook model creation."""
         order_book = OrderBook(
@@ -219,7 +252,7 @@ class TestOrderBook:
             asks=[[Decimal("50001.00"), Decimal("1.0")], [Decimal("50002.00"), Decimal("2.0")]],
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         assert order_book.symbol == "BTC/USDT"
         assert len(order_book.bids) == 2
         assert len(order_book.asks) == 2
@@ -229,7 +262,7 @@ class TestOrderBook:
 
 class TestExchangeStatus:
     """Test ExchangeStatus enum values."""
-    
+
     def test_exchange_status_enum(self):
         """Test ExchangeStatus enum values."""
         assert ExchangeStatus.ONLINE.value == "online"
@@ -239,7 +272,7 @@ class TestExchangeStatus:
 
 class TestOrderStatus:
     """Test OrderStatus enum values."""
-    
+
     def test_order_status_enum(self):
         """Test OrderStatus enum values."""
         assert OrderStatus.PENDING.value == "pending"
@@ -253,7 +286,7 @@ class TestOrderStatus:
 
 class TestTrade:
     """Test Trade model creation."""
-    
+
     def test_trade_creation(self):
         """Test Trade model creation."""
         trade = Trade(
@@ -266,7 +299,7 @@ class TestTrade:
             fee=Decimal("25.00"),
             fee_currency="USDT"
         )
-        
+
         assert trade.id == "trade_123"
         assert trade.symbol == "BTC/USDT"
         assert trade.side == OrderSide.BUY
@@ -278,7 +311,7 @@ class TestTrade:
 
 class TestRiskLevel:
     """Test RiskLevel enum values."""
-    
+
     def test_risk_level_enum(self):
         """Test RiskLevel enum values."""
         assert RiskLevel.LOW.value == "low"
@@ -289,7 +322,7 @@ class TestRiskLevel:
 
 class TestPositionSizeMethod:
     """Test PositionSizeMethod enum values."""
-    
+
     def test_position_size_method_enum(self):
         """Test PositionSizeMethod enum values."""
         assert PositionSizeMethod.FIXED_PCT.value == "fixed_percentage"
@@ -300,7 +333,7 @@ class TestPositionSizeMethod:
 
 class TestRiskMetrics:
     """Test RiskMetrics model creation."""
-    
+
     def test_risk_metrics_creation(self):
         """Test RiskMetrics model creation."""
         risk_metrics = RiskMetrics(
@@ -313,7 +346,7 @@ class TestRiskMetrics:
             risk_level=RiskLevel.MEDIUM,
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         assert risk_metrics.var_1d == Decimal("1000.00")
         assert risk_metrics.var_5d == Decimal("2500.00")
         assert risk_metrics.expected_shortfall == Decimal("1500.00")
@@ -325,7 +358,7 @@ class TestRiskMetrics:
 
 class TestPositionLimits:
     """Test PositionLimits model creation."""
-    
+
     def test_position_limits_creation(self):
         """Test PositionLimits model creation."""
         position_limits = PositionLimits(
@@ -337,7 +370,7 @@ class TestPositionLimits:
             max_correlation_exposure=Decimal("0.5"),
             max_leverage=Decimal("2.0")
         )
-        
+
         assert position_limits.max_position_size == Decimal("10000.00")
         assert position_limits.max_positions_per_symbol == 2
         assert position_limits.max_total_positions == 20
@@ -349,7 +382,7 @@ class TestPositionLimits:
 
 class TestCircuitBreakerStatus:
     """Test CircuitBreakerStatus enum values."""
-    
+
     def test_circuit_breaker_status_enum(self):
         """Test CircuitBreakerStatus enum values."""
         assert CircuitBreakerStatus.CLOSED.value == "closed"
@@ -359,7 +392,7 @@ class TestCircuitBreakerStatus:
 
 class TestCircuitBreakerType:
     """Test CircuitBreakerType enum values."""
-    
+
     def test_circuit_breaker_type_enum(self):
         """Test CircuitBreakerType enum values."""
         assert CircuitBreakerType.DAILY_LOSS_LIMIT.value == "daily_loss_limit"
@@ -372,7 +405,7 @@ class TestCircuitBreakerType:
 
 class TestCircuitBreakerEvent:
     """Test CircuitBreakerEvent model creation."""
-    
+
     def test_circuit_breaker_event_creation(self):
         """Test CircuitBreakerEvent model creation."""
         event = CircuitBreakerEvent(
@@ -383,7 +416,7 @@ class TestCircuitBreakerEvent:
             description="Daily loss limit exceeded",
             metadata={"strategy": "test_strategy"}
         )
-        
+
         assert event.trigger_type == CircuitBreakerType.DAILY_LOSS_LIMIT
         assert event.threshold == Decimal("0.05")
         assert event.actual_value == Decimal("0.06")
@@ -393,7 +426,7 @@ class TestCircuitBreakerEvent:
 
 class TestMarketRegime:
     """Test MarketRegime enum values."""
-    
+
     def test_market_regime_enum(self):
         """Test MarketRegime enum values."""
         assert MarketRegime.LOW_VOLATILITY.value == "low_volatility"
@@ -409,7 +442,7 @@ class TestMarketRegime:
 
 class TestRegimeChangeEvent:
     """Test RegimeChangeEvent model creation."""
-    
+
     def test_regime_change_event_creation(self):
         """Test RegimeChangeEvent model creation."""
         event = RegimeChangeEvent(
@@ -420,7 +453,7 @@ class TestRegimeChangeEvent:
             trigger_metrics={"volatility": 0.05},
             description="Volatility spike detected"
         )
-        
+
         assert event.from_regime == MarketRegime.LOW_VOLATILITY
         assert event.to_regime == MarketRegime.HIGH_VOLATILITY
         assert event.confidence == 0.8
@@ -430,7 +463,7 @@ class TestRegimeChangeEvent:
 
 class TestAllocationStrategy:
     """Test AllocationStrategy enum values."""
-    
+
     def test_allocation_strategy_enum(self):
         """Test AllocationStrategy enum values."""
         assert AllocationStrategy.EQUAL_WEIGHT.value == "equal_weight"
@@ -442,7 +475,7 @@ class TestAllocationStrategy:
 
 class TestCapitalAllocation:
     """Test CapitalAllocation model creation."""
-    
+
     def test_capital_allocation_creation(self):
         """Test CapitalAllocation model creation."""
         allocation = CapitalAllocation(
@@ -454,7 +487,7 @@ class TestCapitalAllocation:
             allocation_percentage=0.1,
             last_rebalance=datetime.now(timezone.utc)
         )
-        
+
         assert allocation.strategy_id == "test_strategy"
         assert allocation.exchange == "binance"
         assert allocation.allocated_amount == Decimal("10000.00")
@@ -465,7 +498,7 @@ class TestCapitalAllocation:
 
 class TestFundFlow:
     """Test FundFlow model creation."""
-    
+
     def test_fund_flow_creation(self):
         """Test FundFlow model creation."""
         fund_flow = FundFlow(
@@ -480,7 +513,7 @@ class TestFundFlow:
             converted_amount=Decimal("1000.00"),
             exchange_rate=Decimal("1.0")
         )
-        
+
         assert fund_flow.from_strategy == "strategy_a"
         assert fund_flow.to_strategy == "strategy_b"
         assert fund_flow.from_exchange == "binance"
@@ -494,7 +527,7 @@ class TestFundFlow:
 
 class TestCapitalMetrics:
     """Test CapitalMetrics model creation."""
-    
+
     def test_capital_metrics_creation(self):
         """Test CapitalMetrics model creation."""
         metrics = CapitalMetrics(
@@ -508,7 +541,7 @@ class TestCapitalMetrics:
             last_updated=datetime.now(timezone.utc),
             allocation_count=5
         )
-        
+
         assert metrics.total_capital == Decimal("100000.00")
         assert metrics.allocated_capital == Decimal("80000.00")
         assert metrics.available_capital == Decimal("20000.00")
@@ -521,7 +554,7 @@ class TestCapitalMetrics:
 
 class TestCurrencyExposure:
     """Test CurrencyExposure model creation."""
-    
+
     def test_currency_exposure_creation(self):
         """Test CurrencyExposure model creation."""
         exposure = CurrencyExposure(
@@ -533,7 +566,7 @@ class TestCurrencyExposure:
             hedge_amount=Decimal("0.5"),
             timestamp=datetime.now(timezone.utc)
         )
-        
+
         assert exposure.currency == "BTC"
         assert exposure.total_exposure == Decimal("2.5")
         assert exposure.base_currency_equivalent == Decimal("125000.00")
@@ -544,7 +577,7 @@ class TestCurrencyExposure:
 
 class TestExchangeAllocation:
     """Test ExchangeAllocation model creation."""
-    
+
     def test_exchange_allocation_creation(self):
         """Test ExchangeAllocation model creation."""
         allocation = ExchangeAllocation(
@@ -557,7 +590,7 @@ class TestExchangeAllocation:
             reliability_score=0.95,
             last_rebalance=datetime.now(timezone.utc)
         )
-        
+
         assert allocation.exchange == "binance"
         assert allocation.allocated_amount == Decimal("50000.00")
         assert allocation.available_amount == Decimal("30000.00")
@@ -569,7 +602,7 @@ class TestExchangeAllocation:
 
 class TestWithdrawalRule:
     """Test WithdrawalRule model creation."""
-    
+
     def test_withdrawal_rule_creation(self):
         """Test WithdrawalRule model creation."""
         rule = WithdrawalRule(
@@ -581,7 +614,7 @@ class TestWithdrawalRule:
             max_percentage=0.2,
             cooldown_hours=24
         )
-        
+
         assert rule.name == "profit_only"
         assert rule.description == "Only withdraw realized profits"
         assert rule.enabled is True
@@ -593,7 +626,7 @@ class TestWithdrawalRule:
 
 class TestCapitalProtection:
     """Test CapitalProtection model creation."""
-    
+
     def test_capital_protection_creation(self):
         """Test CapitalProtection model creation."""
         protection = CapitalProtection(
@@ -606,7 +639,7 @@ class TestCapitalProtection:
             auto_compound_frequency="weekly",
             profit_threshold=Decimal("100.00")
         )
-        
+
         assert protection.emergency_reserve_pct == 0.1
         assert protection.max_daily_loss_pct == 0.05
         assert protection.max_weekly_loss_pct == 0.10
@@ -619,7 +652,7 @@ class TestCapitalProtection:
 
 class TestStrategyType:
     """Test StrategyType enum values."""
-    
+
     def test_strategy_type_enum(self):
         """Test StrategyType enum values."""
         assert StrategyType.STATIC.value == "static"
@@ -633,7 +666,7 @@ class TestStrategyType:
 
 class TestStrategyStatus:
     """Test StrategyStatus enum values."""
-    
+
     def test_strategy_status_enum(self):
         """Test StrategyStatus enum values."""
         assert StrategyStatus.STOPPED.value == "stopped"
@@ -645,7 +678,7 @@ class TestStrategyStatus:
 
 class TestStrategyConfig:
     """Test StrategyConfig model creation."""
-    
+
     def test_strategy_config_creation(self):
         """Test StrategyConfig model creation."""
         config = StrategyConfig(
@@ -661,7 +694,7 @@ class TestStrategyConfig:
             take_profit_pct=0.04,
             parameters={"param1": "value1"}
         )
-        
+
         assert config.name == "test_strategy"
         assert config.strategy_type == StrategyType.STATIC
         assert config.enabled is True
@@ -677,7 +710,7 @@ class TestStrategyConfig:
 
 class TestStrategyMetrics:
     """Test StrategyMetrics model creation."""
-    
+
     def test_strategy_metrics_creation(self):
         """Test StrategyMetrics model creation."""
         metrics = StrategyMetrics(
@@ -690,7 +723,7 @@ class TestStrategyMetrics:
             max_drawdown=Decimal("2000.00"),
             last_updated=datetime.now(timezone.utc)
         )
-        
+
         assert metrics.total_trades == 100
         assert metrics.winning_trades == 60
         assert metrics.losing_trades == 40
@@ -702,7 +735,7 @@ class TestStrategyMetrics:
 
 class TestErrorPattern:
     """Test ErrorPattern model creation."""
-    
+
     def test_error_pattern_creation(self):
         """Test ErrorPattern model creation."""
         pattern = ErrorPattern(
@@ -720,7 +753,7 @@ class TestErrorPattern:
             suggested_action="Restart component",
             is_active=True
         )
-        
+
         assert pattern.pattern_id == "test_pattern"
         assert pattern.pattern_type == "frequency"
         assert pattern.component == "test_component"
@@ -732,7 +765,7 @@ class TestErrorPattern:
         assert pattern.description == "Test error pattern"
         assert pattern.suggested_action == "Restart component"
         assert pattern.is_active is True
-    
+
     def test_error_pattern_to_dict(self):
         """Test ErrorPattern to_dict method."""
         now = datetime.now(timezone.utc)
@@ -751,9 +784,9 @@ class TestErrorPattern:
             suggested_action="Restart component",
             is_active=True
         )
-        
+
         pattern_dict = pattern.to_dict()
-        
+
         assert pattern_dict["pattern_id"] == "test_pattern"
         assert pattern_dict["pattern_type"] == "frequency"
         assert pattern_dict["component"] == "test_component"
@@ -767,3 +800,255 @@ class TestErrorPattern:
         assert pattern_dict["is_active"] is True
         assert "first_detected" in pattern_dict
         assert "last_detected" in pattern_dict
+
+
+class TestValidationErrorScenarios:
+    """Test validation error scenarios for field validators."""
+
+    def test_capital_allocation_invalid_percentage(self):
+        """Test CapitalAllocation validation with invalid allocation percentage."""
+        with pytest.raises(ValidationError):
+            CapitalAllocation(
+                strategy_id="test_strategy",
+                exchange="binance",
+                allocated_amount=Decimal("1000"),
+                available_amount=Decimal("1000"),
+                allocation_percentage=1.5,  # Invalid: > 1.0
+                last_rebalance=datetime.now(timezone.utc)
+            )
+
+    def test_capital_allocation_negative_percentage(self):
+        """Test CapitalAllocation validation with negative allocation percentage."""
+        with pytest.raises(ValidationError):
+            CapitalAllocation(
+                strategy_id="test_strategy",
+                exchange="binance",
+                allocated_amount=Decimal("1000"),
+                available_amount=Decimal("1000"),
+                allocation_percentage=-0.1,  # Invalid: < 0.0
+                last_rebalance=datetime.now(timezone.utc)
+            )
+
+    def test_fund_flow_invalid_amount(self):
+        """Test FundFlow validation with invalid amount."""
+        with pytest.raises(ValueError, match="Fund flow amount must be positive"):
+            FundFlow(
+                amount=Decimal("-100"),  # Invalid: negative amount
+                currency="USDT",
+                reason="Test flow",
+                timestamp=datetime.now(timezone.utc)
+            )
+
+    def test_fund_flow_zero_amount(self):
+        """Test FundFlow validation with zero amount."""
+        with pytest.raises(ValueError, match="Fund flow amount must be positive"):
+            FundFlow(
+                amount=Decimal("0"),  # Invalid: zero amount
+                currency="USDT",
+                reason="Test flow",
+                timestamp=datetime.now(timezone.utc)
+            )
+
+    def test_capital_metrics_invalid_utilization_rate(self):
+        """Test CapitalMetrics validation with invalid utilization rate."""
+        with pytest.raises(ValidationError):
+            CapitalMetrics(
+                total_capital=Decimal("10000"),
+                allocated_capital=Decimal("8000"),
+                available_capital=Decimal("2000"),
+                utilization_rate=1.2,  # Invalid: > 1.0
+                allocation_efficiency=1.0,
+                rebalance_frequency_hours=24,
+                emergency_reserve=Decimal("1000"),
+                last_updated=datetime.now(timezone.utc),
+                allocation_count=5
+            )
+
+    def test_capital_metrics_invalid_allocation_efficiency(self):
+        """Test CapitalMetrics validation with invalid allocation efficiency."""
+        with pytest.raises(ValidationError):
+            CapitalMetrics(
+                total_capital=Decimal("10000"),
+                allocated_capital=Decimal("8000"),
+                available_capital=Decimal("2000"),
+                utilization_rate=0.8,
+                allocation_efficiency=3.5,  # Invalid: > 3.0
+                rebalance_frequency_hours=24,
+                emergency_reserve=Decimal("1000"),
+                last_updated=datetime.now(timezone.utc),
+                allocation_count=5
+            )
+
+    def test_currency_exposure_invalid_percentage(self):
+        """Test CurrencyExposure validation with invalid exposure percentage."""
+        with pytest.raises(ValueError, match="Exposure percentage must be between 0 and 1"):
+            CurrencyExposure(
+                currency="BTC",
+                total_exposure=Decimal("1000"),
+                base_currency_equivalent=Decimal("1000"),
+                exposure_percentage=1.1,  # Invalid: > 1.0
+                hedging_required=False,
+                timestamp=datetime.now(timezone.utc)
+            )
+
+    def test_exchange_allocation_invalid_score_fields(self):
+        """Test ExchangeAllocation validation with invalid score fields."""
+        with pytest.raises(ValueError, match="Score must be between 0 and 1"):
+            ExchangeAllocation(
+                exchange="binance",
+                allocated_amount=Decimal("1000"),
+                available_amount=Decimal("1000"),
+                utilization_rate=0.8,
+                liquidity_score=1.2,  # Invalid: > 1.0
+                fee_efficiency=0.7,
+                reliability_score=0.9,
+                last_rebalance=datetime.now(timezone.utc)
+            )
+
+    def test_withdrawal_rule_invalid_percentage_fields(self):
+        """Test WithdrawalRule validation with invalid percentage fields."""
+        with pytest.raises(ValueError, match="Percentage must be between 0 and 1"):
+            WithdrawalRule(
+                name="Test Rule",
+                description="Test description",
+                threshold=1.5,  # Invalid: > 1.0
+                min_amount=Decimal("100"),
+                max_percentage=0.8,
+                cooldown_hours=24
+            )
+
+    def test_capital_protection_invalid_percentage_fields(self):
+        """Test CapitalProtection validation with invalid percentage fields."""
+        with pytest.raises(ValueError, match="Percentage must be between 0 and 1"):
+            CapitalProtection(
+                emergency_reserve_pct=1.2,  # Invalid: > 1.0
+                max_daily_loss_pct=0.05,
+                max_weekly_loss_pct=0.10,
+                max_monthly_loss_pct=0.15,
+                profit_lock_pct=0.5
+            )
+
+    def test_strategy_config_invalid_percentage_fields(self):
+        """Test StrategyConfig validation with invalid percentage fields."""
+        with pytest.raises(ValidationError):
+            StrategyConfig(
+                name="Test Strategy",
+                strategy_type=StrategyType.STATIC,
+                symbols=["BTCUSDT"],
+                min_confidence=1.2,  # Invalid: > 1.0
+                position_size_pct=0.02,
+                stop_loss_pct=0.02,
+                take_profit_pct=0.04
+            )
+
+    def test_strategy_config_invalid_positive_integer(self):
+        """Test StrategyConfig validation with invalid positive integer."""
+        with pytest.raises(ValidationError):
+            StrategyConfig(
+                name="Test Strategy",
+                strategy_type=StrategyType.STATIC,
+                symbols=["BTCUSDT"],
+                max_positions=0,  # Invalid: not positive
+                position_size_pct=0.02,
+                stop_loss_pct=0.02,
+                take_profit_pct=0.04
+            )
+
+    def test_strategy_metrics_invalid_win_rate(self):
+        """Test StrategyMetrics validation with invalid win rate."""
+        with pytest.raises(ValueError, match="Win rate must be between 0 and 1"):
+            StrategyMetrics(
+                total_trades=100,
+                winning_trades=60,
+                losing_trades=40,
+                total_pnl=Decimal("1000"),
+                win_rate=1.1,  # Invalid: > 1.0
+                last_updated=datetime.now(timezone.utc)
+            )
+
+    def test_strategy_config_invalid_symbols_empty_list(self):
+        """Test StrategyConfig validation with empty symbols list."""
+        with pytest.raises(ValidationError):
+            StrategyConfig(
+                name="Test Strategy",
+                strategy_type=StrategyType.STATIC,
+                symbols=[],  # Invalid: empty list
+                position_size_pct=0.02,
+                stop_loss_pct=0.02,
+                take_profit_pct=0.04
+            )
+
+    def test_strategy_config_invalid_symbols_none_list(self):
+        """Test StrategyConfig validation with None symbols list."""
+        with pytest.raises(ValidationError):
+            StrategyConfig(
+                name="Test Strategy",
+                strategy_type=StrategyType.STATIC,
+                symbols=None,  # Invalid: None
+                position_size_pct=0.02,
+                stop_loss_pct=0.02,
+                take_profit_pct=0.04
+            )
+
+    def test_strategy_config_invalid_symbol_format(self):
+        """Test StrategyConfig validation with invalid symbol format."""
+        with pytest.raises(ValueError, match="Invalid symbol format: AB"):
+            StrategyConfig(
+                name="Test Strategy",
+                strategy_type=StrategyType.STATIC,
+                symbols=["AB"],  # Invalid: too short (< 3 chars)
+                position_size_pct=0.02,
+                stop_loss_pct=0.02,
+                take_profit_pct=0.04
+            )
+
+    def test_strategy_config_invalid_symbol_type(self):
+        """Test StrategyConfig validation with non-string symbol."""
+        with pytest.raises(ValidationError):
+            StrategyConfig(
+                name="Test Strategy",
+                strategy_type=StrategyType.STATIC,
+                symbols=[123],  # Invalid: not a string
+                position_size_pct=0.02,
+                stop_loss_pct=0.02,
+                take_profit_pct=0.04
+            )
+
+    def test_strategy_config_invalid_percentage_fields_negative(self):
+        """Test StrategyConfig validation with negative percentage fields."""
+        with pytest.raises(ValidationError):
+            StrategyConfig(
+                name="Test Strategy",
+                strategy_type=StrategyType.STATIC,
+                symbols=["BTCUSDT"],
+                min_confidence=-0.1,  # Invalid: negative
+                position_size_pct=0.02,
+                stop_loss_pct=0.02,
+                take_profit_pct=0.04
+            )
+
+    def test_strategy_config_invalid_percentage_fields_above_one(self):
+        """Test StrategyConfig validation with percentage fields above 1."""
+        with pytest.raises(ValidationError):
+            StrategyConfig(
+                name="Test Strategy",
+                strategy_type=StrategyType.STATIC,
+                symbols=["BTCUSDT"],
+                min_confidence=0.6,
+                position_size_pct=1.1,  # Invalid: > 1.0
+                stop_loss_pct=0.02,
+                take_profit_pct=0.04
+            )
+
+    def test_strategy_config_invalid_positive_integer_negative(self):
+        """Test StrategyConfig validation with negative max_positions."""
+        with pytest.raises(ValidationError):
+            StrategyConfig(
+                name="Test Strategy",
+                strategy_type=StrategyType.STATIC,
+                symbols=["BTCUSDT"],
+                max_positions=-1,  # Invalid: negative
+                position_size_pct=0.02,
+                stop_loss_pct=0.02,
+                take_profit_pct=0.04
+            )
