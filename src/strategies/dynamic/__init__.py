@@ -10,7 +10,4 @@ CRITICAL: All strategies must inherit from BaseStrategy and follow the exact int
 from .adaptive_momentum import AdaptiveMomentumStrategy
 from .volatility_breakout import VolatilityBreakoutStrategy
 
-__all__ = [
-    'AdaptiveMomentumStrategy',
-    'VolatilityBreakoutStrategy'
-]
+__all__ = ["AdaptiveMomentumStrategy", "VolatilityBreakoutStrategy"]

@@ -12,30 +12,26 @@ This module tests the circuit breaker functionality including:
 CRITICAL: Tests must achieve 90% coverage for P-009 implementation.
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch
-from typing import Dict, Any
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import CircuitBreakerTriggeredError
 
 # Import from P-001
-from src.core.types import (
-    RiskMetrics, RiskLevel, Position, MarketData,
-    CircuitBreakerStatus, CircuitBreakerType, CircuitBreakerEvent
-)
-from src.core.exceptions import (
-    RiskManagementError, CircuitBreakerTriggeredError
-)
-from src.core.config import Config
-
 # Import from P-008
 from src.risk_management.base import BaseRiskManager
 from src.risk_management.circuit_breakers import (
-    CircuitBreakerManager, BaseCircuitBreaker,
-    DailyLossLimitBreaker, DrawdownLimitBreaker,
-    VolatilitySpikeBreaker, ModelConfidenceBreaker,
-    SystemErrorRateBreaker, CircuitBreakerState
+    CircuitBreakerManager,
+    CircuitBreakerState,
+    DailyLossLimitBreaker,
+    DrawdownLimitBreaker,
+    ModelConfidenceBreaker,
+    SystemErrorRateBreaker,
+    VolatilitySpikeBreaker,
 )
 
 
@@ -66,7 +62,7 @@ class TestBaseCircuitBreaker:
     @pytest.fixture
     def circuit_breaker(self, mock_config, mock_risk_manager):
         """Create test circuit breaker instance."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
             return DailyLossLimitBreaker(mock_config, mock_risk_manager)
 
     def test_circuit_breaker_initialization(self, circuit_breaker):
@@ -127,7 +123,7 @@ class TestDailyLossLimitBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create daily loss limit breaker."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
             return DailyLossLimitBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
@@ -141,7 +137,7 @@ class TestDailyLossLimitBreaker:
         """Test current value calculation with no loss."""
         data = {
             "portfolio_value": Decimal("10000"),
-            "daily_pnl": Decimal("100")  # Positive PnL
+            "daily_pnl": Decimal("100"),  # Positive PnL
         }
 
         current_value = await breaker.get_current_value(data)
@@ -152,7 +148,7 @@ class TestDailyLossLimitBreaker:
         """Test current value calculation with loss."""
         data = {
             "portfolio_value": Decimal("10000"),
-            "daily_pnl": Decimal("-500")  # Negative PnL
+            "daily_pnl": Decimal("-500"),  # Negative PnL
         }
 
         current_value = await breaker.get_current_value(data)
@@ -161,10 +157,7 @@ class TestDailyLossLimitBreaker:
     @pytest.mark.asyncio
     async def test_get_current_value_zero_portfolio(self, breaker):
         """Test current value calculation with zero portfolio."""
-        data = {
-            "portfolio_value": Decimal("0"),
-            "daily_pnl": Decimal("-100")
-        }
+        data = {"portfolio_value": Decimal("0"), "daily_pnl": Decimal("-100")}
 
         current_value = await breaker.get_current_value(data)
         assert current_value == Decimal("0")
@@ -174,7 +167,7 @@ class TestDailyLossLimitBreaker:
         """Test condition check when no trigger should occur."""
         data = {
             "portfolio_value": Decimal("10000"),
-            "daily_pnl": Decimal("-200")  # 2% loss, below 5% threshold
+            "daily_pnl": Decimal("-200"),  # 2% loss, below 5% threshold
         }
 
         triggered = await breaker.check_condition(data)
@@ -185,7 +178,7 @@ class TestDailyLossLimitBreaker:
         """Test condition check when trigger should occur."""
         data = {
             "portfolio_value": Decimal("10000"),
-            "daily_pnl": Decimal("-600")  # 6% loss, above 5% threshold
+            "daily_pnl": Decimal("-600"),  # 6% loss, above 5% threshold
         }
 
         triggered = await breaker.check_condition(data)
@@ -194,10 +187,7 @@ class TestDailyLossLimitBreaker:
     @pytest.mark.asyncio
     async def test_evaluate_no_trigger(self, breaker):
         """Test evaluation when no trigger occurs."""
-        data = {
-            "portfolio_value": Decimal("10000"),
-            "daily_pnl": Decimal("-200")
-        }
+        data = {"portfolio_value": Decimal("10000"), "daily_pnl": Decimal("-200")}
 
         triggered = await breaker.evaluate(data)
         assert triggered is False
@@ -206,10 +196,7 @@ class TestDailyLossLimitBreaker:
     @pytest.mark.asyncio
     async def test_evaluate_with_trigger(self, breaker):
         """Test evaluation when trigger occurs."""
-        data = {
-            "portfolio_value": Decimal("10000"),
-            "daily_pnl": Decimal("-600")
-        }
+        data = {"portfolio_value": Decimal("10000"), "daily_pnl": Decimal("-600")}
 
         with pytest.raises(CircuitBreakerTriggeredError):
             await breaker.evaluate(data)
@@ -238,7 +225,7 @@ class TestDrawdownLimitBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create drawdown limit breaker."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
             return DrawdownLimitBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
@@ -252,7 +239,7 @@ class TestDrawdownLimitBreaker:
         """Test current value calculation with no drawdown."""
         data = {
             "current_portfolio_value": Decimal("11000"),  # Higher than peak
-            "peak_portfolio_value": Decimal("10000")
+            "peak_portfolio_value": Decimal("10000"),
         }
 
         current_value = await breaker.get_current_value(data)
@@ -263,7 +250,7 @@ class TestDrawdownLimitBreaker:
         """Test current value calculation with drawdown."""
         data = {
             "current_portfolio_value": Decimal("8500"),  # 15% below peak
-            "peak_portfolio_value": Decimal("10000")
+            "peak_portfolio_value": Decimal("10000"),
         }
 
         current_value = await breaker.get_current_value(data)
@@ -274,7 +261,7 @@ class TestDrawdownLimitBreaker:
         """Test condition check when no trigger should occur."""
         data = {
             "current_portfolio_value": Decimal("9000"),  # 10% drawdown
-            "peak_portfolio_value": Decimal("10000")
+            "peak_portfolio_value": Decimal("10000"),
         }
 
         triggered = await breaker.check_condition(data)
@@ -285,7 +272,7 @@ class TestDrawdownLimitBreaker:
         """Test condition check when trigger should occur."""
         data = {
             "current_portfolio_value": Decimal("8000"),  # 20% drawdown
-            "peak_portfolio_value": Decimal("10000")
+            "peak_portfolio_value": Decimal("10000"),
         }
 
         triggered = await breaker.check_condition(data)
@@ -310,7 +297,7 @@ class TestVolatilitySpikeBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create volatility spike breaker."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
             return VolatilitySpikeBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
@@ -378,7 +365,7 @@ class TestModelConfidenceBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create model confidence breaker."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
             return ModelConfidenceBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
@@ -438,7 +425,7 @@ class TestSystemErrorRateBreaker:
     @pytest.fixture
     def breaker(self, mock_config, mock_risk_manager):
         """Create system error rate breaker."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
             return SystemErrorRateBreaker(mock_config, mock_risk_manager)
 
     @pytest.mark.asyncio
@@ -514,7 +501,7 @@ class TestCircuitBreakerManager:
     @pytest.fixture
     def manager(self, mock_config, mock_risk_manager):
         """Create circuit breaker manager."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
             return CircuitBreakerManager(mock_config, mock_risk_manager)
 
     def test_initialization(self, manager):
@@ -537,7 +524,7 @@ class TestCircuitBreakerManager:
             "price_history": [100, 101, 102],
             "model_confidence": Decimal("0.8"),
             "total_requests": 100,
-            "error_occurred": False
+            "error_occurred": False,
         }
 
         results = await manager.evaluate_all(data)
@@ -556,7 +543,7 @@ class TestCircuitBreakerManager:
             "price_history": [100, 101, 102],
             "model_confidence": Decimal("0.8"),
             "total_requests": 100,
-            "error_occurred": False
+            "error_occurred": False,
         }
 
         with pytest.raises(CircuitBreakerTriggeredError):
@@ -626,10 +613,9 @@ class TestCircuitBreakerIntegration:
         return Mock(spec=BaseRiskManager)
 
     @pytest.mark.asyncio
-    async def test_circuit_breaker_recovery_cycle(
-            self, mock_config, mock_risk_manager):
+    async def test_circuit_breaker_recovery_cycle(self, mock_config, mock_risk_manager):
         """Test complete circuit breaker recovery cycle."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
             breaker = DailyLossLimitBreaker(mock_config, mock_risk_manager)
 
             # Initial state
@@ -638,7 +624,7 @@ class TestCircuitBreakerIntegration:
             # Trigger circuit breaker
             data = {
                 "portfolio_value": Decimal("10000"),
-                "daily_pnl": Decimal("-600")  # 6% loss
+                "daily_pnl": Decimal("-600"),  # 6% loss
             }
 
             with pytest.raises(CircuitBreakerTriggeredError):
@@ -653,7 +639,7 @@ class TestCircuitBreakerIntegration:
             # Test recovery
             data = {
                 "portfolio_value": Decimal("10000"),
-                "daily_pnl": Decimal("100")  # Positive PnL
+                "daily_pnl": Decimal("100"),  # Positive PnL
             }
 
             triggered = await breaker.evaluate(data)
@@ -661,10 +647,9 @@ class TestCircuitBreakerIntegration:
             assert breaker.state == CircuitBreakerState.CLOSED
 
     @pytest.mark.asyncio
-    async def test_multiple_circuit_breakers(
-            self, mock_config, mock_risk_manager):
+    async def test_multiple_circuit_breakers(self, mock_config, mock_risk_manager):
         """Test multiple circuit breakers working together."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
             manager = CircuitBreakerManager(mock_config, mock_risk_manager)
 
             # Test data that should trigger multiple breakers
@@ -676,7 +661,7 @@ class TestCircuitBreakerIntegration:
                 "price_history": [100, 90, 110, 80, 120],  # High volatility
                 "model_confidence": Decimal("0.2"),  # Low confidence
                 "total_requests": 100,
-                "error_occurred": False
+                "error_occurred": False,
             }
 
             # This should trigger multiple breakers

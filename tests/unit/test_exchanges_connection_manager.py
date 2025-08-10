@@ -5,17 +5,14 @@ This module tests the ConnectionManager and WebSocketConnection classes
 to ensure proper connection management and error handling.
 """
 
+from datetime import datetime, timedelta
+
 import pytest
-import asyncio
-import time
-from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+
+from src.core.config import Config
 
 # Import the components to test
 from src.exchanges.connection_manager import ConnectionManager, WebSocketConnection
-from src.core.exceptions import ExchangeConnectionError
-from src.core.config import Config
 
 
 class TestWebSocketConnection:
@@ -29,8 +26,7 @@ class TestWebSocketConnection:
     @pytest.fixture
     def ws_connection(self, config):
         """Create a WebSocket connection instance."""
-        return WebSocketConnection(
-            "wss://test.com/ws", "test_exchange", config)
+        return WebSocketConnection("wss://test.com/ws", "test_exchange", config)
 
     def test_websocket_initialization(self, config):
         """Test WebSocket connection initialization."""
@@ -213,7 +209,7 @@ class TestWebSocketConnection:
         ws_connection.message_queue = [
             {"test": "message1"},
             {"test": "message2"},
-            {"test": "message3"}
+            {"test": "message3"},
         ]
 
         # Connect
@@ -285,8 +281,7 @@ class TestConnectionManager:
         assert "test_conn" in connection_manager.websocket_connections
 
     @pytest.mark.asyncio
-    async def test_create_websocket_connection_existing(
-            self, connection_manager):
+    async def test_create_websocket_connection_existing(self, connection_manager):
         """Test creating WebSocket connection when it already exists."""
         # Create first connection
         ws1 = await connection_manager.create_websocket_connection("wss://test.com/ws", "test_conn")
@@ -297,17 +292,20 @@ class TestConnectionManager:
         assert ws2 == ws1  # Should return the existing connection
 
     @pytest.mark.asyncio
-    async def test_create_websocket_connection_max_limit(
-            self, connection_manager):
+    async def test_create_websocket_connection_max_limit(self, connection_manager):
         """Test creating WebSocket connection when at max limit."""
         # Create maximum number of connections
         connections = []
         for i in range(5):
-            ws = await connection_manager.create_websocket_connection(f"wss://test{i}.com/ws", f"conn_{i}")
+            ws = await connection_manager.create_websocket_connection(
+                f"wss://test{i}.com/ws", f"conn_{i}"
+            )
             connections.append(ws)
 
         # Try to create one more
-        ws_extra = await connection_manager.create_websocket_connection("wss://extra.com/ws", "extra_conn")
+        ws_extra = await connection_manager.create_websocket_connection(
+            "wss://extra.com/ws", "extra_conn"
+        )
 
         # Should return the first connection instead
         assert ws_extra == connections[0]
@@ -324,8 +322,7 @@ class TestConnectionManager:
         assert retrieved_ws == ws
 
     @pytest.mark.asyncio
-    async def test_get_websocket_connection_not_found(
-            self, connection_manager):
+    async def test_get_websocket_connection_not_found(self, connection_manager):
         """Test getting non-existent WebSocket connection."""
         ws = await connection_manager.get_websocket_connection("nonexistent")
         assert ws is None
@@ -343,8 +340,7 @@ class TestConnectionManager:
         assert "test_conn" not in connection_manager.websocket_connections
 
     @pytest.mark.asyncio
-    async def test_remove_websocket_connection_not_found(
-            self, connection_manager):
+    async def test_remove_websocket_connection_not_found(self, connection_manager):
         """Test removing non-existent WebSocket connection."""
         result = await connection_manager.remove_websocket_connection("nonexistent")
         assert not result
@@ -517,8 +513,7 @@ class TestWebSocketConnectionErrorHandling:
     @pytest.fixture
     def ws_connection(self, config):
         """Create a WebSocket connection instance."""
-        return WebSocketConnection(
-            "wss://test.com/ws", "test_exchange", config)
+        return WebSocketConnection("wss://test.com/ws", "test_exchange", config)
 
     @pytest.mark.asyncio
     async def test_connect_exception_handling(self, ws_connection):

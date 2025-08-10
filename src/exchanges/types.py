@@ -8,17 +8,14 @@ CRITICAL: This integrates with P-001 (core types) and provides
 exchange-specific extensions.
 """
 
-from typing import Dict, List, Optional, Any
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 # MANDATORY: Import from P-001
-from src.core.types import (
-    OrderRequest, OrderResponse, MarketData, Position,
-    ExchangeInfo, Ticker, OrderBook, Trade, OrderStatus
-)
 
 
 class ExchangeTypes:
@@ -46,13 +43,12 @@ class ExchangeTypes:
         # Basic validation - symbol should be alphanumeric with possible
         # separators
         import re
-        pattern = r'^[A-Z0-9]+$'
+
+        pattern = r"^[A-Z0-9]+$"
         return bool(re.match(pattern, symbol))
 
     @staticmethod
-    def validate_quantity(
-            quantity: Decimal,
-            min_quantity: Decimal = Decimal("0")) -> bool:
+    def validate_quantity(quantity: Decimal, min_quantity: Decimal = Decimal("0")) -> bool:
         """
         Validate order quantity.
 
@@ -69,9 +65,7 @@ class ExchangeTypes:
         return quantity > min_quantity
 
     @staticmethod
-    def validate_price(
-            price: Decimal,
-            min_price: Decimal = Decimal("0")) -> bool:
+    def validate_price(price: Decimal, min_price: Decimal = Decimal("0")) -> bool:
         """
         Validate order price.
 
@@ -90,6 +84,7 @@ class ExchangeTypes:
 
 class ExchangeCapability(Enum):
     """Exchange capabilities enumeration."""
+
     SPOT_TRADING = "spot_trading"
     FUTURES_TRADING = "futures_trading"
     MARGIN_TRADING = "margin_trading"
@@ -100,6 +95,7 @@ class ExchangeCapability(Enum):
 
 class ExchangeTradingPair(BaseModel):
     """Trading pair information."""
+
     symbol: str
     base_asset: str
     quote_asset: str
@@ -114,20 +110,16 @@ class ExchangeTradingPair(BaseModel):
 
 class ExchangeFee(BaseModel):
     """Exchange fee structure."""
-    maker_fee: Decimal = Field(
-        default=Decimal("0.001"),
-        description="Maker fee rate")
-    taker_fee: Decimal = Field(
-        default=Decimal("0.001"),
-        description="Taker fee rate")
+
+    maker_fee: Decimal = Field(default=Decimal("0.001"), description="Maker fee rate")
+    taker_fee: Decimal = Field(default=Decimal("0.001"), description="Taker fee rate")
     min_fee: Decimal = Field(default=Decimal("0"), description="Minimum fee")
-    max_fee: Decimal = Field(
-        default=Decimal("0.01"),
-        description="Maximum fee")
+    max_fee: Decimal = Field(default=Decimal("0.01"), description="Maximum fee")
 
 
 class ExchangeRateLimit(BaseModel):
     """Exchange rate limit configuration."""
+
     requests_per_minute: int
     orders_per_second: int
     websocket_connections: int
@@ -136,11 +128,12 @@ class ExchangeRateLimit(BaseModel):
 
 class ExchangeConnectionConfig(BaseModel):
     """Exchange connection configuration."""
+
     base_url: str
     websocket_url: str
     api_key: str
     api_secret: str
-    passphrase: Optional[str] = None
+    passphrase: str | None = None
     timeout: int = 30
     max_retries: int = 3
     testnet: bool = True
@@ -148,6 +141,7 @@ class ExchangeConnectionConfig(BaseModel):
 
 class ExchangeOrderBookLevel(BaseModel):
     """Order book level information."""
+
     price: Decimal
     quantity: Decimal
     total_quantity: Decimal = Decimal("0")
@@ -155,15 +149,17 @@ class ExchangeOrderBookLevel(BaseModel):
 
 class ExchangeOrderBookSnapshot(BaseModel):
     """Order book snapshot."""
+
     symbol: str
-    bids: List[ExchangeOrderBookLevel]
-    asks: List[ExchangeOrderBookLevel]
+    bids: list[ExchangeOrderBookLevel]
+    asks: list[ExchangeOrderBookLevel]
     timestamp: datetime
-    sequence_number: Optional[int] = None
+    sequence_number: int | None = None
 
 
 class ExchangeTrade(BaseModel):
     """Exchange trade information."""
+
     id: str
     symbol: str
     side: str  # 'buy' or 'sell'
@@ -177,16 +173,18 @@ class ExchangeTrade(BaseModel):
 
 class ExchangeBalance(BaseModel):
     """Exchange balance information."""
+
     asset: str
     free_balance: Decimal
     locked_balance: Decimal
     total_balance: Decimal
-    usd_value: Optional[Decimal] = None
+    usd_value: Decimal | None = None
     last_updated: datetime
 
 
 class ExchangePosition(BaseModel):
     """Exchange position information."""
+
     symbol: str
     side: str  # 'long' or 'short'
     quantity: Decimal
@@ -195,19 +193,20 @@ class ExchangePosition(BaseModel):
     unrealized_pnl: Decimal
     margin_type: str = "isolated"
     leverage: Decimal = Decimal("1")
-    liquidation_price: Optional[Decimal] = None
+    liquidation_price: Decimal | None = None
 
 
 class ExchangeOrder(BaseModel):
     """Exchange order information."""
+
     id: str
-    client_order_id: Optional[str]
+    client_order_id: str | None
     symbol: str
     side: str  # 'buy' or 'sell'
     order_type: str  # 'market', 'limit', 'stop', etc.
     quantity: Decimal
-    price: Optional[Decimal] = None
-    stop_price: Optional[Decimal] = None
+    price: Decimal | None = None
+    stop_price: Decimal | None = None
     filled_quantity: Decimal = Decimal("0")
     remaining_quantity: Decimal = Decimal("0")
     status: str
@@ -219,25 +218,28 @@ class ExchangeOrder(BaseModel):
 
 class ExchangeWebSocketMessage(BaseModel):
     """WebSocket message structure."""
+
     channel: str
-    symbol: Optional[str] = None
-    data: Dict[str, Any]
+    symbol: str | None = None
+    data: dict[str, Any]
     timestamp: datetime
 
 
 class ExchangeErrorResponse(BaseModel):
     """Exchange error response structure."""
+
     code: int
     message: str
-    details: Optional[Dict[str, Any]] = None
+    details: dict[str, Any] | None = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
 
 class ExchangeHealthStatus(BaseModel):
     """Exchange health status."""
+
     exchange_name: str
     status: str  # 'online', 'offline', 'maintenance'
-    latency_ms: Optional[float] = None
-    last_heartbeat: Optional[datetime] = None
+    latency_ms: float | None = None
+    last_heartbeat: datetime | None = None
     error_count: int = 0
     success_rate: float = 1.0

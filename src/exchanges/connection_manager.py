@@ -10,24 +10,26 @@ and P-002A (error handling) components.
 
 import asyncio
 import time
-from typing import Dict, List, Optional, Callable, Any
-from datetime import datetime, timedelta
 from collections import defaultdict
+from collections.abc import Callable
+from datetime import datetime
+from typing import Any
+
+from src.core.config import Config
 
 # MANDATORY: Import from P-001
-from src.core.exceptions import ExchangeConnectionError, ExchangeError
-from src.core.config import Config
+from src.core.exceptions import ExchangeConnectionError
 from src.core.logging import get_logger
+from src.core.types import ConnectionType
+from src.error_handling.connection_manager import ConnectionManager as ErrorConnectionManager
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.connection_manager import ConnectionManager as ErrorConnectionManager
 
 # MANDATORY: Import from P-007 (advanced rate limiting)
 from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
 from src.exchanges.health_monitor import ConnectionHealthMonitor
 from src.exchanges.websocket_pool import WebSocketConnectionPool
-from src.core.types import ConnectionType
 
 logger = get_logger(__name__)
 
@@ -61,7 +63,7 @@ class WebSocketConnection:
         self.last_message = None
 
         # Message queue for reconnection
-        self.message_queue: List[Dict[str, Any]] = []
+        self.message_queue: list[dict[str, Any]] = []
         self.max_queue_size = 1000
 
         # Reconnection settings
@@ -71,10 +73,10 @@ class WebSocketConnection:
         self.heartbeat_interval = 30.0
 
         # Callbacks
-        self.on_message: Optional[Callable] = None
-        self.on_connect: Optional[Callable] = None
-        self.on_disconnect: Optional[Callable] = None
-        self.on_error: Optional[Callable] = None
+        self.on_message: Callable | None = None
+        self.on_connect: Callable | None = None
+        self.on_disconnect: Callable | None = None
+        self.on_error: Callable | None = None
 
         logger.info(f"Initialized WebSocket connection for {exchange_name}")
 
@@ -94,10 +96,7 @@ class WebSocketConnection:
             try:
                 # TODO: Remove in production - Implement actual WebSocket connection
                 # This is a placeholder implementation
-                logger.info(
-                    f"Connecting to WebSocket {
-                        self.url}(attempt {
-                            attempt + 1})")
+                logger.info(f"Connecting to WebSocket {self.url}(attempt {attempt + 1})")
 
                 # Simulate connection delay
                 await asyncio.sleep(0.1)
@@ -113,21 +112,14 @@ class WebSocketConnection:
                 return True
 
             except Exception as e:
-                logger.error(
-                    f"WebSocket connection failed(attempt {
-                        attempt +
-                        1}): {
-                        str(e)}")
+                logger.error(f"WebSocket connection failed(attempt {attempt + 1}): {e!s}")
 
                 if attempt < self.max_reconnect_attempts - 1:
-                    delay = min(self.reconnect_delay *
-                                (2 ** attempt), self.max_reconnect_delay)
+                    delay = min(self.reconnect_delay * (2**attempt), self.max_reconnect_delay)
                     await asyncio.sleep(delay)
 
         self.connecting = False
-        logger.error(
-            f"Failed to connect to WebSocket after {
-                self.max_reconnect_attempts} attempts")
+        logger.error(f"Failed to connect to WebSocket after {self.max_reconnect_attempts} attempts")
         return False
 
     async def disconnect(self) -> None:
@@ -148,9 +140,9 @@ class WebSocketConnection:
             logger.info(f"WebSocket disconnected from {self.exchange_name}")
 
         except Exception as e:
-            logger.error(f"Error during WebSocket disconnection: {str(e)}")
+            logger.error(f"Error during WebSocket disconnection: {e!s}")
 
-    async def send_message(self, message: Dict[str, Any]) -> bool:
+    async def send_message(self, message: dict[str, Any]) -> bool:
         """
         Send a message through the WebSocket.
 
@@ -178,16 +170,10 @@ class WebSocketConnection:
             return True
 
         except Exception as e:
-            logger.error(
-                f"Failed to send message to {
-                    self.exchange_name}: {
-                    str(e)}")
+            logger.error(f"Failed to send message to {self.exchange_name}: {e!s}")
             return False
 
-    async def subscribe(
-            self,
-            channel: str,
-            symbol: Optional[str] = None) -> bool:
+    async def subscribe(self, channel: str, symbol: str | None = None) -> bool:
         """
         Subscribe to a WebSocket channel.
 
@@ -201,15 +187,12 @@ class WebSocketConnection:
         subscribe_message = {
             "method": "SUBSCRIBE",
             "params": [f"{channel}{f'@{symbol}' if symbol else ''}"],
-            "id": int(time.time() * 1000)
+            "id": int(time.time() * 1000),
         }
 
         return await self.send_message(subscribe_message)
 
-    async def unsubscribe(
-            self,
-            channel: str,
-            symbol: Optional[str] = None) -> bool:
+    async def unsubscribe(self, channel: str, symbol: str | None = None) -> bool:
         """
         Unsubscribe from a WebSocket channel.
 
@@ -223,7 +206,7 @@ class WebSocketConnection:
         unsubscribe_message = {
             "method": "UNSUBSCRIBE",
             "params": [f"{channel}{f'@{symbol}' if symbol else ''}"],
-            "id": int(time.time() * 1000)
+            "id": int(time.time() * 1000),
         }
 
         return await self.send_message(unsubscribe_message)
@@ -249,10 +232,7 @@ class WebSocketConnection:
             return success
 
         except Exception as e:
-            logger.error(
-                f"Heartbeat failed for {
-                    self.exchange_name}: {
-                    str(e)}")
+            logger.error(f"Heartbeat failed for {self.exchange_name}: {e!s}")
             return False
 
     def is_healthy(self) -> bool:
@@ -290,9 +270,7 @@ class WebSocketConnection:
             else:
                 break
 
-        logger.info(
-            f"Processed {processed} queued messages for {
-                self.exchange_name}")
+        logger.info(f"Processed {processed} queued messages for {self.exchange_name}")
         return processed
 
 
@@ -316,8 +294,7 @@ class ConnectionManager:
         self.config = config
         self.exchange_name = exchange_name
         self.error_handler = ErrorHandler(config.error_handling)
-        self.error_connection_manager = ErrorConnectionManager(
-            config.error_handling)
+        self.error_connection_manager = ErrorConnectionManager(config.error_handling)
 
         # P-007: Advanced rate limiting and connection management integration
         self.advanced_rate_limiter = AdvancedRateLimiter(config)
@@ -326,16 +303,16 @@ class ConnectionManager:
             exchange=exchange_name,
             max_connections=10,
             max_messages_per_second=100,
-            max_subscriptions=50
+            max_subscriptions=50,
         )
 
         # Connection pools
         # Will be populated by actual implementations
-        self.rest_connections: Dict[str, Any] = {}
-        self.websocket_connections: Dict[str, WebSocketConnection] = {}
+        self.rest_connections: dict[str, Any] = {}
+        self.websocket_connections: dict[str, WebSocketConnection] = {}
 
         # Connection monitoring
-        self.connection_health: Dict[str, bool] = defaultdict(lambda: True)
+        self.connection_health: dict[str, bool] = defaultdict(lambda: True)
         self.last_health_check = datetime.now()
         self.health_check_interval = 60.0  # seconds
 
@@ -344,12 +321,10 @@ class ConnectionManager:
         self.max_websocket_connections = 5
 
         # TODO: Remove in production
-        logger.debug(
-            f"ConnectionManager initialized with P-007 components for {exchange_name}")
+        logger.debug(f"ConnectionManager initialized with P-007 components for {exchange_name}")
         logger.info(f"Initialized connection manager for {exchange_name}")
 
-    async def get_rest_connection(
-            self, endpoint: str = "default") -> Optional[Any]:
+    async def get_rest_connection(self, endpoint: str = "default") -> Any | None:
         """
         Get a REST API connection.
 
@@ -364,13 +339,13 @@ class ConnectionManager:
         if endpoint not in self.rest_connections:
             logger.debug(f"Creating new REST connection for {endpoint}")
             # Simulate connection creation
-            self.rest_connections[endpoint] = {
-                "endpoint": endpoint, "connected": True}
+            self.rest_connections[endpoint] = {"endpoint": endpoint, "connected": True}
 
         return self.rest_connections.get(endpoint)
 
     async def create_websocket_connection(
-            self, url: str, connection_id: str = "default") -> WebSocketConnection:
+        self, url: str, connection_id: str = "default"
+    ) -> WebSocketConnection:
         """
         Create a new WebSocket connection.
 
@@ -382,29 +357,21 @@ class ConnectionManager:
             WebSocketConnection: WebSocket connection instance
         """
         if connection_id in self.websocket_connections:
-            logger.warning(
-                f"WebSocket connection {connection_id} already exists")
+            logger.warning(f"WebSocket connection {connection_id} already exists")
             return self.websocket_connections[connection_id]
 
         if len(self.websocket_connections) >= self.max_websocket_connections:
-            logger.warning(
-                f"Maximum WebSocket connections reached for {
-                    self.exchange_name}")
+            logger.warning(f"Maximum WebSocket connections reached for {self.exchange_name}")
             # Return the first available connection
             return list(self.websocket_connections.values())[0]
 
         connection = WebSocketConnection(url, self.exchange_name, self.config)
         self.websocket_connections[connection_id] = connection
 
-        logger.info(
-            f"Created WebSocket connection {connection_id} for {
-                self.exchange_name}")
+        logger.info(f"Created WebSocket connection {connection_id} for {self.exchange_name}")
         return connection
 
-    async def get_connection(
-            self,
-            exchange: str,
-            stream_type: str) -> Optional[Any]:
+    async def get_connection(self, exchange: str, stream_type: str) -> Any | None:
         """
         Get a WebSocket connection from the pool.
 
@@ -437,25 +404,26 @@ class ConnectionManager:
                 # Register with health monitor
                 await self.health_monitor.monitor_connection(pooled_connection.connection)
 
-                logger.debug("Retrieved connection from pool",
-                             exchange=exchange, stream_type=stream_type,
-                             connection_id=pooled_connection.connection_id)
+                logger.debug(
+                    "Retrieved connection from pool",
+                    exchange=exchange,
+                    stream_type=stream_type,
+                    connection_id=pooled_connection.connection_id,
+                )
                 return pooled_connection.connection
             else:
-                logger.warning("No available connection in pool",
-                               exchange=exchange, stream_type=stream_type)
+                logger.warning(
+                    "No available connection in pool", exchange=exchange, stream_type=stream_type
+                )
                 return None
 
         except (ValidationError, ExchangeConnectionError):
             raise
         except Exception as e:
             logger.error(
-                "Failed to get connection",
-                exchange=exchange,
-                stream_type=stream_type,
-                error=str(e))
-            raise ExchangeConnectionError(
-                f"Connection retrieval failed: {str(e)}")
+                "Failed to get connection", exchange=exchange, stream_type=stream_type, error=str(e)
+            )
+            raise ExchangeConnectionError(f"Connection retrieval failed: {e!s}")
 
     async def release_connection(self, exchange: str, connection: Any) -> None:
         """
@@ -475,7 +443,7 @@ class ConnectionManager:
                 raise ValidationError("Exchange and connection are required")
 
             # Find the pooled connection
-            connection_id = getattr(connection, 'id', str(id(connection)))
+            connection_id = getattr(connection, "id", str(id(connection)))
 
             # Release to pool
             for pooled_conn in self.websocket_pool.active_connections.values():
@@ -488,22 +456,21 @@ class ConnectionManager:
                     logger.debug(
                         "Released connection back to pool",
                         exchange=exchange,
-                        connection_id=connection_id)
+                        connection_id=connection_id,
+                    )
                     return
 
-            logger.warning("Connection not found in pool",
-                           exchange=exchange, connection_id=connection_id)
+            logger.warning(
+                "Connection not found in pool", exchange=exchange, connection_id=connection_id
+            )
 
         except ValidationError:
             raise
         except Exception as e:
-            logger.error("Failed to release connection",
-                         exchange=exchange, error=str(e))
-            raise ExchangeConnectionError(
-                f"Connection release failed: {str(e)}")
+            logger.error("Failed to release connection", exchange=exchange, error=str(e))
+            raise ExchangeConnectionError(f"Connection release failed: {e!s}")
 
-    async def handle_connection_failure(
-            self, exchange: str, connection: Any) -> None:
+    async def handle_connection_failure(self, exchange: str, connection: Any) -> None:
         """
         Handle connection failure and trigger recovery.
 
@@ -527,24 +494,24 @@ class ConnectionManager:
             await self.error_handler.handle_error(
                 RecoveryScenario.CONNECTION_FAILURE,
                 exchange=exchange,
-                connection_id=getattr(connection, 'id', str(id(connection)))
+                connection_id=getattr(connection, "id", str(id(connection))),
             )
 
             logger.warning(
-                "Handled connection failure", exchange=exchange, connection_id=getattr(
-                    connection, 'id', str(
-                        id(connection))))
+                "Handled connection failure",
+                exchange=exchange,
+                connection_id=getattr(connection, "id", str(id(connection))),
+            )
 
         except ValidationError:
             raise
         except Exception as e:
-            logger.error("Failed to handle connection failure",
-                         exchange=exchange, error=str(e))
-            raise ExchangeConnectionError(
-                f"Connection failure handling failed: {str(e)}")
+            logger.error("Failed to handle connection failure", exchange=exchange, error=str(e))
+            raise ExchangeConnectionError(f"Connection failure handling failed: {e!s}")
 
     async def get_websocket_connection(
-            self, connection_id: str = "default") -> Optional[WebSocketConnection]:
+        self, connection_id: str = "default"
+    ) -> WebSocketConnection | None:
         """
         Get an existing WebSocket connection.
 
@@ -575,7 +542,7 @@ class ConnectionManager:
 
         return False
 
-    async def health_check_all(self) -> Dict[str, bool]:
+    async def health_check_all(self) -> dict[str, bool]:
         """
         Perform health check on all connections.
 
@@ -589,12 +556,9 @@ class ConnectionManager:
             try:
                 # TODO: Remove in production - Implement actual REST health
                 # check
-                health_status[f"rest_{endpoint}"] = connection.get(
-                    "connected", False)
+                health_status[f"rest_{endpoint}"] = connection.get("connected", False)
             except Exception as e:
-                logger.error(
-                    f"REST health check failed for {endpoint}: {
-                        str(e)}")
+                logger.error(f"REST health check failed for {endpoint}: {e!s}")
                 health_status[f"rest_{endpoint}"] = False
 
         # Check WebSocket connections
@@ -602,15 +566,13 @@ class ConnectionManager:
             try:
                 health_status[f"ws_{connection_id}"] = connection.is_healthy()
             except Exception as e:
-                logger.error(
-                    f"WebSocket health check failed for {connection_id}: {
-                        str(e)}")
+                logger.error(f"WebSocket health check failed for {connection_id}: {e!s}")
                 health_status[f"ws_{connection_id}"] = False
 
         self.last_health_check = datetime.now()
         return health_status
 
-    async def reconnect_all(self) -> Dict[str, bool]:
+    async def reconnect_all(self) -> dict[str, bool]:
         """
         Reconnect all unhealthy connections.
 
@@ -631,9 +593,7 @@ class ConnectionManager:
                         await connection.process_queued_messages()
 
                 except Exception as e:
-                    logger.error(
-                        f"Failed to reconnect WebSocket {connection_id}: {
-                            str(e)}")
+                    logger.error(f"Failed to reconnect WebSocket {connection_id}: {e!s}")
                     reconnection_results[f"ws_{connection_id}"] = False
 
         # TODO: Remove in production - Implement REST connection reconnection
@@ -643,7 +603,7 @@ class ConnectionManager:
 
         return reconnection_results
 
-    def get_connection_stats(self) -> Dict[str, Any]:
+    def get_connection_stats(self) -> dict[str, Any]:
         """
         Get connection statistics.
 
@@ -656,7 +616,9 @@ class ConnectionManager:
             "websocket_connections": len(self.websocket_connections),
             "max_rest_connections": self.max_rest_connections,
             "max_websocket_connections": self.max_websocket_connections,
-            "last_health_check": self.last_health_check.isoformat() if self.last_health_check else None
+            "last_health_check": self.last_health_check.isoformat()
+            if self.last_health_check
+            else None,
         }
 
     async def disconnect_all(self) -> None:
@@ -666,9 +628,7 @@ class ConnectionManager:
             try:
                 await connection.disconnect()
             except Exception as e:
-                logger.error(
-                    f"Error disconnecting WebSocket {connection_id}: {
-                        str(e)}")
+                logger.error(f"Error disconnecting WebSocket {connection_id}: {e!s}")
 
         # Clear connection pools
         self.websocket_connections.clear()

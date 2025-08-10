@@ -7,19 +7,15 @@ This module provides fixtures and configuration for all test types:
 - Performance tests: Measure system performance
 """
 
+import os
+import subprocess
+
 import pytest
 import pytest_asyncio
-import asyncio
-import os
-import tempfile
-import subprocess
-import time
-from typing import Dict, Any, Optional
-from pathlib import Path
 
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
-from src.database.connection import initialize_database, close_database, health_check
+from src.database.connection import close_database, initialize_database
 
 
 @pytest.fixture(scope="session")
@@ -44,8 +40,8 @@ def config():
             influxdb_port=8086,
             influxdb_bucket="trading_data_test",
             influxdb_org="trading_bot_dev",
-            influxdb_token="trading_bot_token"
-        )
+            influxdb_token="trading_bot_token",
+        ),
     )
 
 
@@ -58,24 +54,20 @@ def test_db_config():
             "port": 5432,
             "database": "trading_bot_test",
             "username": "trading_bot_test",
-            "password": "test_password"
+            "password": "test_password",
         },
-        "redis": {
-            "host": "localhost",
-            "port": 6379,
-            "db": 1
-        },
+        "redis": {"host": "localhost", "port": 6379, "db": 1},
         "influxdb": {
             "host": "localhost",
             "port": 8086,
             "bucket": "trading_data_test",
             "org": "test-org",
-            "token": "test-token"
-        }
+            "token": "test-token",
+        },
     }
 
 
-def check_database_availability(config: Config) -> Dict[str, bool]:
+def check_database_availability(config: Config) -> dict[str, bool]:
     """
     Check if required databases are available.
     Returns a dict with database status.
@@ -84,11 +76,7 @@ def check_database_availability(config: Config) -> Dict[str, bool]:
     import redis
     from influxdb_client import InfluxDBClient
 
-    status = {
-        "postgresql": False,
-        "redis": False,
-        "influxdb": False
-    }
+    status = {"postgresql": False, "redis": False, "influxdb": False}
 
     # Check PostgreSQL - try to connect as trading_bot user first
     try:
@@ -97,7 +85,7 @@ def check_database_availability(config: Config) -> Dict[str, bool]:
             port=config.database.postgresql_port,
             database="trading_bot",
             user="trading_bot",  # Use trading_bot user for availability check
-            password="trading_bot_password"  # Default password from docker-compose
+            password="trading_bot_password",  # Default password from docker-compose
         )
         conn.close()
         status["postgresql"] = True
@@ -111,7 +99,7 @@ def check_database_availability(config: Config) -> Dict[str, bool]:
             port=config.database.redis_port,
             db=config.database.redis_db,
             password=config.database.redis_password,
-            socket_connect_timeout=5
+            socket_connect_timeout=5,
         )
         r.ping()
         r.close()
@@ -124,7 +112,7 @@ def check_database_availability(config: Config) -> Dict[str, bool]:
         client = InfluxDBClient(
             url=f"http://{config.database.influxdb_host}:{config.database.influxdb_port}",
             token=config.database.influxdb_token,
-            org=config.database.influxdb_org
+            org=config.database.influxdb_org,
         )
         client.ping()
         client.close()
@@ -142,8 +130,6 @@ def setup_test_databases(config: Config) -> None:
     """
     import psycopg2
     import redis
-    import subprocess
-    import os
     from influxdb_client import InfluxDBClient
 
     # Setup PostgreSQL
@@ -153,14 +139,15 @@ def setup_test_databases(config: Config) -> None:
             port=config.database.postgresql_port,
             database="trading_bot",
             user="trading_bot",  # Use trading_bot user
-            password="trading_bot_password"  # Default password from docker-compose
+            password="trading_bot_password",  # Default password from docker-compose
         )
         conn.autocommit = True
         cursor = conn.cursor()
 
         # Create test user if it doesn't exist
-        cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = %s",
-                       (config.database.postgresql_username,))
+        cursor.execute(
+            "SELECT 1 FROM pg_roles WHERE rolname = %s", (config.database.postgresql_username,)
+        )
         if not cursor.fetchone():
             cursor.execute(
                 f"CREATE USER {config.database.postgresql_username} WITH PASSWORD '{config.database.postgresql_password}' CREATEDB"
@@ -172,8 +159,9 @@ def setup_test_databases(config: Config) -> None:
             )
 
         # Create test database if it doesn't exist
-        cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s",
-                       (config.database.postgresql_database,))
+        cursor.execute(
+            "SELECT 1 FROM pg_database WHERE datname = %s", (config.database.postgresql_database,)
+        )
         if not cursor.fetchone():
             cursor.execute(
                 f"CREATE DATABASE {config.database.postgresql_database} OWNER {config.database.postgresql_username}"
@@ -184,26 +172,24 @@ def setup_test_databases(config: Config) -> None:
 
         # Run migrations for test database
         env = os.environ.copy()
-        env['DATABASE_URL'] = config.get_database_url()
-        env['ALEMBIC_CONFIG'] = 'alembic.ini'
-        env['TESTING'] = 'true'
+        env["DATABASE_URL"] = config.get_database_url()
+        env["ALEMBIC_CONFIG"] = "alembic.ini"
+        env["TESTING"] = "true"
 
         # Run alembic upgrade using Python module
         result = subprocess.run(
-            ['python3', '-m', 'alembic', 'upgrade', 'head'],
+            ["python3", "-m", "alembic", "upgrade", "head"],
             env=env,
             cwd=os.getcwd(),
             capture_output=True,
-            text=True
+            text=True,
         )
 
         if result.returncode != 0:
             raise DataSourceError(f"Migration failed: {result.stderr}")
 
     except Exception as e:
-        raise DataSourceError(
-            f"Failed to setup PostgreSQL test database: {str(e)}"
-        )
+        raise DataSourceError(f"Failed to setup PostgreSQL test database: {e!s}")
 
     # Setup Redis
     try:
@@ -211,7 +197,7 @@ def setup_test_databases(config: Config) -> None:
             host=config.database.redis_host,
             port=config.database.redis_port,
             db=config.database.redis_db,
-            password=config.database.redis_password
+            password=config.database.redis_password,
         )
         r.ping()
         # Clear the test database
@@ -219,36 +205,32 @@ def setup_test_databases(config: Config) -> None:
         r.close()
 
     except Exception as e:
-        raise DataSourceError(f"Failed to setup Redis test database: {str(e)}")
+        raise DataSourceError(f"Failed to setup Redis test database: {e!s}")
 
     # Setup InfluxDB
     try:
         client = InfluxDBClient(
             url=f"http://{config.database.influxdb_host}:{config.database.influxdb_port}",
             token=config.database.influxdb_token,
-            org=config.database.influxdb_org
+            org=config.database.influxdb_org,
         )
 
         # Check if bucket exists
         buckets_api = client.buckets_api()
         buckets = buckets_api.find_buckets().buckets
 
-        bucket_exists = any(
-            bucket.name == config.database.influxdb_bucket for bucket in buckets)
+        bucket_exists = any(bucket.name == config.database.influxdb_bucket for bucket in buckets)
 
         if not bucket_exists:
             # Create test bucket
             buckets_api.create_bucket(
-                bucket_name=config.database.influxdb_bucket,
-                org=config.database.influxdb_org
+                bucket_name=config.database.influxdb_bucket, org=config.database.influxdb_org
             )
 
         client.close()
 
     except Exception as e:
-        raise DataSourceError(
-            f"Failed to setup InfluxDB test bucket: {str(e)}"
-        )
+        raise DataSourceError(f"Failed to setup InfluxDB test bucket: {e!s}")
 
 
 def cleanup_test_databases(config: Config) -> None:
@@ -267,26 +249,22 @@ def cleanup_test_databases(config: Config) -> None:
             port=config.database.postgresql_port,
             database="trading_bot",
             user="trading_bot",
-            password="trading_bot_password"
+            password="trading_bot_password",
         )
         conn.autocommit = True
         cursor = conn.cursor()
 
         # Drop test database
-        cursor.execute(
-            f"DROP DATABASE IF EXISTS {config.database.postgresql_database}"
-        )
+        cursor.execute(f"DROP DATABASE IF EXISTS {config.database.postgresql_database}")
 
         # Drop test user
-        cursor.execute(
-            f"DROP USER IF EXISTS {config.database.postgresql_username}"
-        )
+        cursor.execute(f"DROP USER IF EXISTS {config.database.postgresql_username}")
 
         cursor.close()
         conn.close()
 
     except Exception as e:
-        print(f"Warning: Failed to cleanup PostgreSQL: {str(e)}")
+        print(f"Warning: Failed to cleanup PostgreSQL: {e!s}")
 
     # Clean up Redis
     try:
@@ -294,30 +272,29 @@ def cleanup_test_databases(config: Config) -> None:
             host=config.database.redis_host,
             port=config.database.redis_port,
             db=config.database.redis_db,
-            password=config.database.redis_password
+            password=config.database.redis_password,
         )
         r.flushdb()
         r.close()
 
     except Exception as e:
-        print(f"Warning: Failed to cleanup Redis: {str(e)}")
+        print(f"Warning: Failed to cleanup Redis: {e!s}")
 
     # Clean up InfluxDB
     try:
         client = InfluxDBClient(
             url=f"http://{config.database.influxdb_host}:{config.database.influxdb_port}",
             token=config.database.influxdb_token,
-            org=config.database.influxdb_org
+            org=config.database.influxdb_org,
         )
         buckets_api = client.buckets_api()
-        bucket = buckets_api.find_bucket_by_name(
-            config.database.influxdb_bucket)
+        bucket = buckets_api.find_bucket_by_name(config.database.influxdb_bucket)
         if bucket:
             buckets_api.delete_bucket(bucket)
         client.close()
 
     except Exception as e:
-        print(f"Warning: Failed to cleanup InfluxDB: {str(e)}")
+        print(f"Warning: Failed to cleanup InfluxDB: {e!s}")
 
 
 @pytest.fixture(scope="session")
@@ -340,7 +317,7 @@ def database_setup(config, test_db_config):
     try:
         setup_test_databases(config)
     except Exception as e:
-        raise DataSourceError(f"Failed to setup test databases: {str(e)}")
+        raise DataSourceError(f"Failed to setup test databases: {e!s}")
 
     # Return the config - the test will handle async initialization
     return config
@@ -355,7 +332,6 @@ async def cleanup_after_all_tests():
     yield
 
     # Clean up any remaining connections
-    from src.database.connection import close_database
     try:
         await close_database()
     except Exception:
@@ -363,6 +339,7 @@ async def cleanup_after_all_tests():
 
     # Force garbage collection to clean up any remaining connections
     import gc
+
     gc.collect()
 
 
@@ -372,8 +349,9 @@ async def clean_database(database_setup):
     Clean database tables between tests to ensure isolation.
     This runs for each test function but doesn't recreate the database.
     """
-    from src.database.connection import get_async_session, initialize_database, close_database
     from sqlalchemy import text
+
+    from src.database.connection import get_async_session
 
     # Initialize database for this test
     await initialize_database(database_setup)
@@ -386,9 +364,9 @@ async def clean_database(database_setup):
                 await session.execute(text("SET session_replication_role = replica;"))
 
                 # Get all table names
-                result = await session.execute(text(
-                    "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
-                ))
+                result = await session.execute(
+                    text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+                )
                 tables = [row[0] for row in result.fetchall()]
 
                 # Truncate all tables
@@ -401,7 +379,7 @@ async def clean_database(database_setup):
 
             except Exception as e:
                 await session.rollback()
-                raise DataSourceError(f"Failed to clean database: {str(e)}")
+                raise DataSourceError(f"Failed to clean database: {e!s}")
 
         # Yield the config - database stays initialized during test
         yield database_setup
@@ -414,18 +392,10 @@ async def clean_database(database_setup):
 # Markers for different test types
 def pytest_configure(config):
     """Configure pytest with custom markers."""
-    config.addinivalue_line(
-        "markers", "unit: mark test as a unit test"
-    )
-    config.addinivalue_line(
-        "markers", "integration: mark test as an integration test"
-    )
-    config.addinivalue_line(
-        "markers", "performance: mark test as a performance test"
-    )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
+    config.addinivalue_line("markers", "unit: mark test as a unit test")
+    config.addinivalue_line("markers", "integration: mark test as an integration test")
+    config.addinivalue_line("markers", "performance: mark test as a performance test")
+    config.addinivalue_line("markers", "slow: mark test as slow running")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -440,7 +410,5 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.performance)
 
         # Mark tests that take longer than 1 second as slow
-        if "performance" in str(
-                item.fspath) or "integration" in str(
-                item.fspath):
+        if "performance" in str(item.fspath) or "integration" in str(item.fspath):
             item.add_marker(pytest.mark.slow)

@@ -8,49 +8,51 @@ CRITICAL: This integrates with P-001 (core types, exceptions, config), P-002A (e
 and P-003 (base exchange interface) components.
 """
 
-import asyncio
-import json
-import time
-import hmac
-import hashlib
-import base64
-from typing import Dict, List, Optional, Callable, Any
-from decimal import Decimal
+from collections.abc import Callable
 from datetime import datetime, timezone
-
-# MANDATORY: Import from P-001
-from src.core.types import (
-    OrderRequest, OrderResponse, MarketData, Position,
-    Signal, TradingMode, OrderSide, OrderType,
-    ExchangeInfo, Ticker, OrderBook, Trade, OrderStatus
-)
-from src.core.exceptions import (
-    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError,
-    ExchangeInsufficientFundsError, ValidationError, ExecutionError
-)
-from src.core.config import Config
-
-# MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
-
-# MANDATORY: Import from P-003
-from src.exchanges.base import BaseExchange
-from src.exchanges.rate_limiter import RateLimiter
-from src.exchanges.connection_manager import ConnectionManager
-
-# MANDATORY: Import from P-007A (utils)
-from src.utils.constants import API_ENDPOINTS, RATE_LIMITS, TIMEOUTS
-from src.utils.decorators import time_execution
+from decimal import Decimal
+from typing import Any
 
 # Coinbase-specific imports
-import aiohttp
-import websockets
 from coinbase.rest import RESTClient
 from coinbase.websocket import WSClient
+
+from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+    ExecutionError,
+    ValidationError,
+)
+
 # Note: Using generic Exception handling for REST API as no specific exceptions are documented
 # For WebSocket, use WSClientException and
 # WSClientConnectionClosedException as per documentation
 from src.core.logging import get_logger
+
+# MANDATORY: Import from P-001
+from src.core.types import (
+    ExchangeInfo,
+    MarketData,
+    OrderBook,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Ticker,
+    Trade,
+)
+
+# MANDATORY: Import from P-002A
+# MANDATORY: Import from P-003
+from src.exchanges.base import BaseExchange
+from src.exchanges.connection_manager import ConnectionManager
+from src.exchanges.rate_limiter import RateLimiter
+
+# MANDATORY: Import from P-007A (utils)
+from src.utils.constants import API_ENDPOINTS
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -93,8 +95,8 @@ class CoinbaseExchange(BaseExchange):
             self.ws_url = coinbase_config["ws_url"]
 
         # Initialize Coinbase client
-        self.client: Optional[RESTClient] = None
-        self.ws_client: Optional[WSClient] = None
+        self.client: RESTClient | None = None
+        self.ws_client: WSClient | None = None
 
         # Initialize rate limiter for Coinbase-specific limits
         self.rate_limiter = RateLimiter(config, "coinbase")
@@ -103,15 +105,15 @@ class CoinbaseExchange(BaseExchange):
         self.connection_manager = ConnectionManager(config, exchange_name)
 
         # WebSocket streams
-        self.active_streams: Dict[str, Any] = {}
-        self.callbacks: Dict[str, List[Callable]] = {}
+        self.active_streams: dict[str, Any] = {}
+        self.callbacks: dict[str, list[Callable]] = {}
 
         # Order tracking
-        self.pending_orders: Dict[str, OrderRequest] = {}
-        self.order_status_cache: Dict[str, OrderStatus] = {}
+        self.pending_orders: dict[str, OrderRequest] = {}
+        self.order_status_cache: dict[str, OrderStatus] = {}
 
         # Balance cache
-        self.balance_cache: Dict[str, Decimal] = {}
+        self.balance_cache: dict[str, Decimal] = {}
         self.last_balance_update = None
 
         logger.info(f"Initialized {exchange_name} exchange interface")
@@ -125,22 +127,24 @@ class CoinbaseExchange(BaseExchange):
         """
         try:
             # Initialize REST client with sandbox support
-            base_url = "api-public.sandbox.exchange.coinbase.com" if self.sandbox else "api.coinbase.com"
+            base_url = (
+                "api-public.sandbox.exchange.coinbase.com" if self.sandbox else "api.coinbase.com"
+            )
             self.client = RESTClient(
-                api_key=self.api_key,
-                api_secret=self.api_secret,
-                base_url=base_url
+                api_key=self.api_key, api_secret=self.api_secret, base_url=base_url
             )
 
             # Test connection by getting account info
             await self._test_connection()
 
             # Initialize WebSocket client with sandbox support
-            ws_base_url = "wss://ws-feed-public.sandbox.exchange.coinbase.com" if self.sandbox else "wss://advanced-trade-ws.coinbase.com"
+            ws_base_url = (
+                "wss://ws-feed-public.sandbox.exchange.coinbase.com"
+                if self.sandbox
+                else "wss://advanced-trade-ws.coinbase.com"
+            )
             self.ws_client = WSClient(
-                api_key=self.api_key,
-                api_secret=self.api_secret,
-                base_url=ws_base_url
+                api_key=self.api_key, api_secret=self.api_secret, base_url=ws_base_url
             )
 
             # Initialize WebSocket connection
@@ -154,10 +158,7 @@ class CoinbaseExchange(BaseExchange):
             return True
 
         except Exception as e:
-            logger.error(
-                f"Failed to connect to {
-                    self.exchange_name}: {
-                    str(e)}")
+            logger.error(f"Failed to connect to {self.exchange_name}: {e!s}")
             self.connected = False
             self.status = "connection_failed"
             return False
@@ -179,12 +180,9 @@ class CoinbaseExchange(BaseExchange):
             logger.info(f"Disconnected from {self.exchange_name}")
 
         except Exception as e:
-            logger.error(
-                f"Error disconnecting from {
-                    self.exchange_name}: {
-                    str(e)}")
+            logger.error(f"Error disconnecting from {self.exchange_name}: {e!s}")
 
-    async def get_account_balance(self) -> Dict[str, Decimal]:
+    async def get_account_balance(self) -> dict[str, Decimal]:
         """
         Get all asset balances from Coinbase exchange.
 
@@ -203,10 +201,9 @@ class CoinbaseExchange(BaseExchange):
 
             balances = {}
             for account in accounts:
-                currency = account['currency']
-                available = Decimal(
-                    str(account.get('available_balance', {}).get('value', '0')))
-                hold = Decimal(str(account.get('hold', {}).get('value', '0')))
+                currency = account["currency"]
+                available = Decimal(str(account.get("available_balance", {}).get("value", "0")))
+                hold = Decimal(str(account.get("hold", {}).get("value", "0")))
                 total = available + hold
 
                 if total > 0:
@@ -223,8 +220,8 @@ class CoinbaseExchange(BaseExchange):
             # Re-raise connection errors as-is
             raise
         except Exception as e:
-            logger.error(f"Failed to get account balance: {str(e)}")
-            raise ExchangeError(f"Failed to get account balance: {str(e)}")
+            logger.error(f"Failed to get account balance: {e!s}")
+            raise ExchangeError(f"Failed to get account balance: {e!s}")
 
     @time_execution
     async def place_order(self, order: OrderRequest) -> OrderResponse:
@@ -271,8 +268,8 @@ class CoinbaseExchange(BaseExchange):
             # Re-raise connection errors as-is
             raise
         except Exception as e:
-            logger.error(f"Failed to place order: {str(e)}")
-            raise ExecutionError(f"Failed to place order: {str(e)}")
+            logger.error(f"Failed to place order: {e!s}")
+            raise ExecutionError(f"Failed to place order: {e!s}")
 
     @time_execution
     async def cancel_order(self, order_id: str) -> bool:
@@ -306,7 +303,7 @@ class CoinbaseExchange(BaseExchange):
             return True
 
         except Exception as e:
-            logger.error(f"Failed to cancel order {order_id}: {str(e)}")
+            logger.error(f"Failed to cancel order {order_id}: {e!s}")
             return False
 
     @time_execution
@@ -328,8 +325,7 @@ class CoinbaseExchange(BaseExchange):
             order = await self.client.get_order(order_id)
 
             # Convert status
-            status = self._convert_coinbase_status_to_order_status(
-                order['status'])
+            status = self._convert_coinbase_status_to_order_status(order["status"])
 
             # Update cache
             self.order_status_cache[order_id] = status
@@ -337,16 +333,11 @@ class CoinbaseExchange(BaseExchange):
             return status
 
         except Exception as e:
-            logger.error(
-                f"Failed to get order status for {order_id}: {
-                    str(e)}")
+            logger.error(f"Failed to get order status for {order_id}: {e!s}")
             return OrderStatus.UNKNOWN
 
     @time_execution
-    async def get_market_data(
-            self,
-            symbol: str,
-            timeframe: str = "1m") -> MarketData:
+    async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """
         Get market data for a symbol from Coinbase exchange.
 
@@ -371,32 +362,29 @@ class CoinbaseExchange(BaseExchange):
             candles = await self.client.get_product_candles(
                 product_id=symbol,
                 granularity=self._convert_timeframe_to_granularity(timeframe),
-                limit=1
+                limit=1,
             )
 
             # Build market data
             market_data = MarketData(
                 symbol=symbol,
-                price=Decimal(str(ticker['price'])),
-                volume=Decimal(str(ticker['volume_24h'])),
-                timestamp=datetime.fromisoformat(ticker['time'].replace('Z', '+00:00')),
-                bid=Decimal(str(ticker['bid'])) if ticker.get('bid') else None,
-                ask=Decimal(str(ticker['ask'])) if ticker.get('ask') else None,
-                open_price=Decimal(str(candles[0]['open'])) if candles else None,
-                high_price=Decimal(str(candles[0]['high'])) if candles else None,
-                low_price=Decimal(str(candles[0]['low'])) if candles else None
+                price=Decimal(str(ticker["price"])),
+                volume=Decimal(str(ticker["volume_24h"])),
+                timestamp=datetime.fromisoformat(ticker["time"].replace("Z", "+00:00")),
+                bid=Decimal(str(ticker["bid"])) if ticker.get("bid") else None,
+                ask=Decimal(str(ticker["ask"])) if ticker.get("ask") else None,
+                open_price=Decimal(str(candles[0]["open"])) if candles else None,
+                high_price=Decimal(str(candles[0]["high"])) if candles else None,
+                low_price=Decimal(str(candles[0]["low"])) if candles else None,
             )
 
             return market_data
 
         except Exception as e:
-            logger.error(f"Failed to get market data for {symbol}: {str(e)}")
-            raise ExchangeError(f"Failed to get market data: {str(e)}")
+            logger.error(f"Failed to get market data for {symbol}: {e!s}")
+            raise ExchangeError(f"Failed to get market data: {e!s}")
 
-    async def subscribe_to_stream(
-            self,
-            symbol: str,
-            callback: Callable) -> None:
+    async def subscribe_to_stream(self, symbol: str, callback: Callable) -> None:
         """
         Subscribe to real-time data stream for a symbol.
 
@@ -419,8 +407,8 @@ class CoinbaseExchange(BaseExchange):
             logger.info(f"Subscribed to {symbol} stream")
 
         except Exception as e:
-            logger.error(f"Failed to subscribe to {symbol} stream: {str(e)}")
-            raise ExchangeError(f"Failed to subscribe to stream: {str(e)}")
+            logger.error(f"Failed to subscribe to {symbol} stream: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to stream: {e!s}")
 
     @time_execution
     async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook:
@@ -444,22 +432,25 @@ class CoinbaseExchange(BaseExchange):
             # Convert to unified format
             order_book = OrderBook(
                 symbol=symbol,
-                bids=[[Decimal(str(level[0])), Decimal(str(level[1]))] for level in book['bids'][:depth]],
-                asks=[[Decimal(str(level[0])), Decimal(str(level[1]))] for level in book['asks'][:depth]],
-                timestamp=datetime.now(timezone.utc)
+                bids=[
+                    [Decimal(str(level[0])), Decimal(str(level[1]))]
+                    for level in book["bids"][:depth]
+                ],
+                asks=[
+                    [Decimal(str(level[0])), Decimal(str(level[1]))]
+                    for level in book["asks"][:depth]
+                ],
+                timestamp=datetime.now(timezone.utc),
             )
 
             return order_book
 
         except Exception as e:
-            logger.error(f"Failed to get order book for {symbol}: {str(e)}")
-            raise ExchangeError(f"Failed to get order book: {str(e)}")
+            logger.error(f"Failed to get order book for {symbol}: {e!s}")
+            raise ExchangeError(f"Failed to get order book: {e!s}")
 
     @time_execution
-    async def get_trade_history(
-            self,
-            symbol: str,
-            limit: int = 100) -> List[Trade]:
+    async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]:
         """
         Get trade history for a symbol from Coinbase exchange.
 
@@ -481,24 +472,23 @@ class CoinbaseExchange(BaseExchange):
             trades = []
             for trade_data in trades_data:
                 trade = Trade(
-                    id=trade_data['trade_id'],
+                    id=trade_data["trade_id"],
                     symbol=symbol,
-                    side=OrderSide.BUY if trade_data['side'] == 'buy' else OrderSide.SELL,
-                    quantity=Decimal(str(trade_data['size'])),
-                    price=Decimal(str(trade_data['price'])),
-                    timestamp=datetime.fromisoformat(
-                        trade_data['time'].replace('Z', '+00:00')),
+                    side=OrderSide.BUY if trade_data["side"] == "buy" else OrderSide.SELL,
+                    quantity=Decimal(str(trade_data["size"])),
+                    price=Decimal(str(trade_data["price"])),
+                    timestamp=datetime.fromisoformat(trade_data["time"].replace("Z", "+00:00")),
                     fee=Decimal("0"),
                     # Coinbase doesn't provide fee in trade data
-                    fee_currency="USD"
+                    fee_currency="USD",
                 )
                 trades.append(trade)
 
             return trades
 
         except Exception as e:
-            logger.error(f"Failed to get trade history for {symbol}: {str(e)}")
-            raise ExchangeError(f"Failed to get trade history: {str(e)}")
+            logger.error(f"Failed to get trade history for {symbol}: {e!s}")
+            raise ExchangeError(f"Failed to get trade history: {e!s}")
 
     @time_execution
     async def get_exchange_info(self) -> ExchangeInfo:
@@ -516,8 +506,9 @@ class CoinbaseExchange(BaseExchange):
             products = await self.client.get_products()
 
             # Extract supported symbols
-            supported_symbols = [product['product_id']
-                                 for product in products if product['status'] == 'online']
+            supported_symbols = [
+                product["product_id"] for product in products if product["status"] == "online"
+            ]
 
             # Build exchange info
             exchange_info = ExchangeInfo(
@@ -526,19 +517,17 @@ class CoinbaseExchange(BaseExchange):
                 rate_limits={
                     "requests_per_minute": 600,
                     "orders_per_second": 15,
-                    "websocket_connections": 4},
-                features=[
-                    "spot_trading",
-                    "websocket_streams",
-                    "order_book",
-                    "trade_history"],
-                api_version="v3")
+                    "websocket_connections": 4,
+                },
+                features=["spot_trading", "websocket_streams", "order_book", "trade_history"],
+                api_version="v3",
+            )
 
             return exchange_info
 
         except Exception as e:
-            logger.error(f"Failed to get exchange info: {str(e)}")
-            raise ExchangeError(f"Failed to get exchange info: {str(e)}")
+            logger.error(f"Failed to get exchange info: {e!s}")
+            raise ExchangeError(f"Failed to get exchange info: {e!s}")
 
     @time_execution
     async def get_ticker(self, symbol: str) -> Ticker:
@@ -561,19 +550,19 @@ class CoinbaseExchange(BaseExchange):
             # Convert to unified format
             ticker = Ticker(
                 symbol=symbol,
-                bid=Decimal(str(ticker_data['bid'])) if ticker_data.get('bid') else Decimal("0"),
-                ask=Decimal(str(ticker_data['ask'])) if ticker_data.get('ask') else Decimal("0"),
-                last_price=Decimal(str(ticker_data['price'])),
-                volume_24h=Decimal(str(ticker_data['volume_24h'])),
-                price_change_24h=Decimal(str(ticker_data.get('price_change_24h', '0'))),
-                timestamp=datetime.fromisoformat(ticker_data['time'].replace('Z', '+00:00'))
+                bid=Decimal(str(ticker_data["bid"])) if ticker_data.get("bid") else Decimal("0"),
+                ask=Decimal(str(ticker_data["ask"])) if ticker_data.get("ask") else Decimal("0"),
+                last_price=Decimal(str(ticker_data["price"])),
+                volume_24h=Decimal(str(ticker_data["volume_24h"])),
+                price_change_24h=Decimal(str(ticker_data.get("price_change_24h", "0"))),
+                timestamp=datetime.fromisoformat(ticker_data["time"].replace("Z", "+00:00")),
             )
 
             return ticker
 
         except Exception as e:
-            logger.error(f"Failed to get ticker for {symbol}: {str(e)}")
-            raise ExchangeError(f"Failed to get ticker: {str(e)}")
+            logger.error(f"Failed to get ticker for {symbol}: {e!s}")
+            raise ExchangeError(f"Failed to get ticker: {e!s}")
 
     async def health_check(self) -> bool:
         """
@@ -593,21 +582,17 @@ class CoinbaseExchange(BaseExchange):
             return True
 
         except Exception as e:
-            logger.warning(f"Health check failed: {str(e)}")
+            logger.warning(f"Health check failed: {e!s}")
             return False
 
-    def get_rate_limits(self) -> Dict[str, int]:
+    def get_rate_limits(self) -> dict[str, int]:
         """
         Get current rate limits for Coinbase.
 
         Returns:
             Dict[str, int]: Rate limits dictionary
         """
-        return {
-            "requests_per_minute": 600,
-            "orders_per_second": 15,
-            "websocket_connections": 4
-        }
+        return {"requests_per_minute": 600, "orders_per_second": 15, "websocket_connections": 4}
 
     # Helper methods
 
@@ -617,8 +602,7 @@ class CoinbaseExchange(BaseExchange):
             # Test connection by getting products (this should always work)
             await self.client.get_products()
         except Exception as e:
-            raise ExchangeConnectionError(
-                f"Failed to connect to Coinbase: {str(e)}")
+            raise ExchangeConnectionError(f"Failed to connect to Coinbase: {e!s}")
 
     async def _initialize_websocket(self) -> None:
         """Initialize WebSocket connection."""
@@ -626,24 +610,23 @@ class CoinbaseExchange(BaseExchange):
             await self.ws_client.open()
             logger.info("WebSocket connection initialized")
         except Exception as e:
-            logger.error(f"Failed to initialize WebSocket: {str(e)}")
+            logger.error(f"Failed to initialize WebSocket: {e!s}")
 
-    def _convert_order_to_coinbase(
-            self, order: OrderRequest) -> Dict[str, Any]:
+    def _convert_order_to_coinbase(self, order: OrderRequest) -> dict[str, Any]:
         """Convert unified order to Coinbase format."""
         coinbase_order = {
             "product_id": order.symbol,
             "side": order.side.value,
             "order_configuration": {
-                "market_market_ioc": {
-                    "quote_size": str(order.quantity)
-                } if order.order_type == OrderType.MARKET else {
+                "market_market_ioc": {"quote_size": str(order.quantity)}
+                if order.order_type == OrderType.MARKET
+                else {
                     "limit_limit_gtc": {
                         "base_size": str(order.quantity),
-                        "limit_price": str(order.price)
+                        "limit_price": str(order.price),
                     }
                 }
-            }
+            },
         }
 
         if order.client_order_id:
@@ -651,32 +634,34 @@ class CoinbaseExchange(BaseExchange):
 
         return coinbase_order
 
-    def _convert_coinbase_order_to_response(
-            self, result: Dict) -> OrderResponse:
+    def _convert_coinbase_order_to_response(self, result: dict) -> OrderResponse:
         """Convert Coinbase order response to unified format."""
         return OrderResponse(
-            id=result['order_id'],
-            client_order_id=result.get('client_order_id'),
-            symbol=result['product_id'],
-            side=OrderSide.BUY if result['side'] == 'BUY' else OrderSide.SELL,
-            order_type=OrderType.MARKET if result['order_configuration'].get('market_market_ioc') else OrderType.LIMIT,
-            quantity=Decimal(str(result.get('filled_size', '0'))),
-            price=Decimal(str(result.get('limit_price', '0'))) if result.get('limit_price') else None,
-            filled_quantity=Decimal(str(result.get('filled_size', '0'))),
-            status=result['status'],
-            timestamp=datetime.fromisoformat(result['created_time'].replace('Z', '+00:00'))
+            id=result["order_id"],
+            client_order_id=result.get("client_order_id"),
+            symbol=result["product_id"],
+            side=OrderSide.BUY if result["side"] == "BUY" else OrderSide.SELL,
+            order_type=OrderType.MARKET
+            if result["order_configuration"].get("market_market_ioc")
+            else OrderType.LIMIT,
+            quantity=Decimal(str(result.get("filled_size", "0"))),
+            price=Decimal(str(result.get("limit_price", "0")))
+            if result.get("limit_price")
+            else None,
+            filled_quantity=Decimal(str(result.get("filled_size", "0"))),
+            status=result["status"],
+            timestamp=datetime.fromisoformat(result["created_time"].replace("Z", "+00:00")),
         )
 
-    def _convert_coinbase_status_to_order_status(
-            self, status: str) -> OrderStatus:
+    def _convert_coinbase_status_to_order_status(self, status: str) -> OrderStatus:
         """Convert Coinbase order status to unified OrderStatus."""
         status_mapping = {
-            'OPEN': OrderStatus.PENDING,
-            'FILLED': OrderStatus.FILLED,
-            'CANCELLED': OrderStatus.CANCELLED,
-            'EXPIRED': OrderStatus.EXPIRED,
-            'REJECTED': OrderStatus.REJECTED,
-            'PARTIALLY_FILLED': OrderStatus.PARTIALLY_FILLED
+            "OPEN": OrderStatus.PENDING,
+            "FILLED": OrderStatus.FILLED,
+            "CANCELLED": OrderStatus.CANCELLED,
+            "EXPIRED": OrderStatus.EXPIRED,
+            "REJECTED": OrderStatus.REJECTED,
+            "PARTIALLY_FILLED": OrderStatus.PARTIALLY_FILLED,
         }
         return status_mapping.get(status, OrderStatus.UNKNOWN)
 
@@ -688,6 +673,6 @@ class CoinbaseExchange(BaseExchange):
             "15m": "FIFTEEN_MINUTE",
             "1h": "ONE_HOUR",
             "6h": "SIX_HOUR",
-            "1d": "ONE_DAY"
+            "1d": "ONE_DAY",
         }
         return mapping.get(timeframe, "ONE_MINUTE")

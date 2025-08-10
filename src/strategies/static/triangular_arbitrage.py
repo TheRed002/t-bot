@@ -9,39 +9,34 @@ CRITICAL: This strategy requires rapid execution sequencing and careful
 slippage management across the arbitrage chain.
 """
 
-import asyncio
-from typing import List, Dict, Optional, Tuple, Any
-from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import Any
+
+from src.core.exceptions import ArbitrageError
+from src.core.logging import get_logger
+
+# From P-001 - Use existing types
+from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
 
 # MANDATORY: Import from P-011 - NEVER recreate the base strategy
 from src.strategies.base import BaseStrategy
-
-# From P-001 - Use existing types
-from src.core.types import (
-    Signal, MarketData, Position, SignalDirection,
-    StrategyConfig, StrategyType, OrderRequest, OrderResponse
-)
-from src.core.logging import get_logger
-from src.core.exceptions import (
-    ValidationError, ExecutionError, ArbitrageError,
-    ArbitrageOpportunityError, ArbitrageExecutionError, ArbitrageTimingError
-)
+from src.utils.constants import GLOBAL_FEE_STRUCTURE, GLOBAL_MINIMUM_AMOUNTS, PRECISION_LEVELS
 
 # From P-007A - Use decorators and validators
-from src.utils.decorators import time_execution, retry, circuit_breaker, log_errors
-from src.utils.validators import validate_price, validate_quantity, validate_decimal, validate_percentage
-from src.utils.helpers import round_to_precision, round_to_precision_decimal, calculate_volatility
-from src.utils.formatters import format_currency, format_percentage, format_pnl
-from src.utils.constants import FEE_STRUCTURES, GLOBAL_FEE_STRUCTURE, GLOBAL_MINIMUM_AMOUNTS, PRECISION_LEVELS
+from src.utils.decorators import log_errors, time_execution
+from src.utils.formatters import format_currency, format_percentage
+from src.utils.helpers import round_to_precision_decimal
+from src.utils.validators import (
+    validate_decimal,
+    validate_percentage,
+    validate_price,
+    validate_quantity,
+)
 
 # From P-008+ - Use risk management
-from src.risk_management.base import BaseRiskManager
-from src.risk_management.position_sizing import PositionSizer
-from src.risk_management.risk_metrics import RiskCalculator
 
 # From P-003+ - Use exchange interfaces
-from src.exchanges.base import BaseExchange
 
 logger = get_logger(__name__)
 
@@ -66,23 +61,20 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
         # Strategy-specific configuration
         self.min_profit_threshold = Decimal(
-            str(config.get("min_profit_threshold", "0.001")))  # 0.1%
-        self.max_execution_time = config.get(
-            "max_execution_time", 500)  # milliseconds
-        self.latency_threshold = config.get(
-            "latency_threshold", 100)  # milliseconds
-        self.triangular_paths = config.get("triangular_paths", [
-            ["BTCUSDT", "ETHBTC", "ETHUSDT"],
-            ["BTCUSDT", "BNBBTC", "BNBUSDT"]
-        ])
+            str(config.get("min_profit_threshold", "0.001"))
+        )  # 0.1%
+        self.max_execution_time = config.get("max_execution_time", 500)  # milliseconds
+        self.latency_threshold = config.get("latency_threshold", 100)  # milliseconds
+        self.triangular_paths = config.get(
+            "triangular_paths", [["BTCUSDT", "ETHBTC", "ETHUSDT"], ["BTCUSDT", "BNBBTC", "BNBUSDT"]]
+        )
         # Single exchange for triangular
         self.exchange = config.get("exchange", "binance")
-        self.slippage_limit = Decimal(
-            str(config.get("slippage_limit", "0.0005")))  # 0.05%
+        self.slippage_limit = Decimal(str(config.get("slippage_limit", "0.0005")))  # 0.05%
 
         # State tracking
-        self.active_triangular_arbitrages: Dict[str, Dict] = {}
-        self.pair_prices: Dict[str, MarketData] = {}
+        self.active_triangular_arbitrages: dict[str, dict] = {}
+        self.pair_prices: dict[str, MarketData] = {}
         self.last_opportunity_check = datetime.now()
 
         logger.info(
@@ -90,11 +82,11 @@ class TriangularArbitrageStrategy(BaseStrategy):
             strategy=self.name,
             exchange=self.exchange,
             triangular_paths=self.triangular_paths,
-            min_profit_threshold=self.min_profit_threshold
+            min_profit_threshold=self.min_profit_threshold,
         )
 
     @time_execution
-    async def _generate_signals_impl(self, data: MarketData) -> List[Signal]:
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """
         Generate triangular arbitrage signals based on three-pair price relationships.
 
@@ -118,7 +110,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                     strategy=self.name,
                     symbol=data.symbol,
                     signal_count=len(signals),
-                    signals=[s.direction.value for s in signals]
+                    signals=[s.direction.value for s in signals],
                 )
 
             return signals
@@ -128,12 +120,11 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 "Triangular arbitrage signal generation failed",
                 strategy=self.name,
                 symbol=data.symbol,
-                error=str(e)
+                error=str(e),
             )
             return []  # Graceful degradation
 
-    async def _detect_triangular_opportunities(
-            self, symbol: str) -> List[Signal]:
+    async def _detect_triangular_opportunities(self, symbol: str) -> list[Signal]:
         """
         Detect triangular arbitrage opportunities for given symbol.
 
@@ -158,13 +149,12 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 "Triangular opportunity detection failed",
                 strategy=self.name,
                 symbol=symbol,
-                error=str(e)
+                error=str(e),
             )
 
         return signals
 
-    async def _check_triangular_path(
-            self, path: List[str]) -> Optional[Signal]:
+    async def _check_triangular_path(self, path: list[str]) -> Signal | None:
         """
         Check a specific triangular path for arbitrage opportunities.
 
@@ -192,7 +182,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
             # Step 1: Calculate conversion rates
             btc_usdt_rate = price1.price  # BTC/USDT rate
-            eth_btc_rate = price2.price   # ETH/BTC rate
+            eth_btc_rate = price2.price  # ETH/BTC rate
             eth_usdt_rate = price3.price  # ETH/USDT rate
 
             # Step 2: Calculate triangular conversion
@@ -210,17 +200,14 @@ class TriangularArbitrageStrategy(BaseStrategy):
             profit_percentage = (profit / start_usdt) * 100
 
             # Account for fees and slippage
-            total_fees = self._calculate_triangular_fees(
-                btc_usdt_rate, eth_btc_rate, eth_usdt_rate)
+            total_fees = self._calculate_triangular_fees(btc_usdt_rate, eth_btc_rate, eth_usdt_rate)
             net_profit = profit - total_fees
             net_profit_percentage = (net_profit / start_usdt) * 100
 
             # Check if profit meets threshold
             if net_profit_percentage >= float(self.min_profit_threshold * 100):
-
                 # Validate execution timing
                 if await self._validate_triangular_timing(path):
-
                     # Create triangular arbitrage signal
                     signal = Signal(
                         direction=SignalDirection.BUY,  # Direction doesn't matter for triangular
@@ -241,14 +228,11 @@ class TriangularArbitrageStrategy(BaseStrategy):
                             "estimated_fees": float(total_fees),
                             "execution_timeout": self.max_execution_time,
                             "execution_sequence": [
-                                {"pair": pair1, "action": "buy",
-                                    "rate": float(btc_usdt_rate)},
-                                {"pair": pair2, "action": "sell",
-                                    "rate": float(eth_btc_rate)},
-                                {"pair": pair3, "action": "sell",
-                                    "rate": float(eth_usdt_rate)}
-                            ]
-                        }
+                                {"pair": pair1, "action": "buy", "rate": float(btc_usdt_rate)},
+                                {"pair": pair2, "action": "sell", "rate": float(eth_btc_rate)},
+                                {"pair": pair3, "action": "sell", "rate": float(eth_usdt_rate)},
+                            ],
+                        },
                     )
 
                     logger.info(
@@ -257,27 +241,20 @@ class TriangularArbitrageStrategy(BaseStrategy):
                         path=path,
                         profit_percentage=float(profit_percentage),
                         net_profit_percentage=float(net_profit_percentage),
-                        exchange=self.exchange
+                        exchange=self.exchange,
                     )
 
                     return signal
 
         except Exception as e:
             logger.error(
-                "Triangular path check failed",
-                strategy=self.name,
-                path=path,
-                error=str(e)
+                "Triangular path check failed", strategy=self.name, path=path, error=str(e)
             )
 
         return None
 
     @log_errors
-    def _calculate_triangular_fees(
-            self,
-            rate1: Decimal,
-            rate2: Decimal,
-            rate3: Decimal) -> Decimal:
+    def _calculate_triangular_fees(self, rate1: Decimal, rate2: Decimal, rate3: Decimal) -> Decimal:
         """
         Calculate total fees for triangular arbitrage execution using proper validation and formatting.
 
@@ -295,34 +272,38 @@ class TriangularArbitrageStrategy(BaseStrategy):
         """
         try:
             # Validate input rates using utils
-            for rate, name in [
-                    (rate1, "rate1"), (rate2, "rate2"), (rate3, "rate3")]:
+            for rate, name in [(rate1, "rate1"), (rate2, "rate2"), (rate3, "rate3")]:
                 validate_decimal(rate)
                 validate_price(rate, name)
 
             # Get fee structure from constants and convert to Decimal
-            taker_fee_rate = Decimal(
-                str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
+            taker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
 
             # Calculate fees for each step using proper rounding
-            step1_fees = round_to_precision_decimal(
-                rate1 * taker_fee_rate, PRECISION_LEVELS["fee"])
-            step2_fees = round_to_precision_decimal(
-                rate2 * taker_fee_rate, PRECISION_LEVELS["fee"])
-            step3_fees = round_to_precision_decimal(
-                rate3 * taker_fee_rate, PRECISION_LEVELS["fee"])
+            step1_fees = round_to_precision_decimal(rate1 * taker_fee_rate, PRECISION_LEVELS["fee"])
+            step2_fees = round_to_precision_decimal(rate2 * taker_fee_rate, PRECISION_LEVELS["fee"])
+            step3_fees = round_to_precision_decimal(rate3 * taker_fee_rate, PRECISION_LEVELS["fee"])
 
             # Calculate slippage costs for each step
             slippage_cost1 = round_to_precision_decimal(
-                rate1 * self.slippage_limit, PRECISION_LEVELS["price"])
+                rate1 * self.slippage_limit, PRECISION_LEVELS["price"]
+            )
             slippage_cost2 = round_to_precision_decimal(
-                rate2 * self.slippage_limit, PRECISION_LEVELS["price"])
+                rate2 * self.slippage_limit, PRECISION_LEVELS["price"]
+            )
             slippage_cost3 = round_to_precision_decimal(
-                rate3 * self.slippage_limit, PRECISION_LEVELS["price"])
+                rate3 * self.slippage_limit, PRECISION_LEVELS["price"]
+            )
 
             # Calculate total fees
-            total_fees = step1_fees + step2_fees + step3_fees + \
-                slippage_cost1 + slippage_cost2 + slippage_cost3
+            total_fees = (
+                step1_fees
+                + step2_fees
+                + step3_fees
+                + slippage_cost1
+                + slippage_cost2
+                + slippage_cost3
+            )
 
             # Validate final result
             validate_decimal(total_fees)
@@ -337,11 +318,11 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 step2_fees=format_currency(step2_fees),
                 step3_fees=format_currency(step3_fees),
                 slippage_costs=[
-                    format_currency(cost) for cost in [
-                        slippage_cost1,
-                        slippage_cost2,
-                        slippage_cost3]],
-                total_fees=format_currency(total_fees))
+                    format_currency(cost)
+                    for cost in [slippage_cost1, slippage_cost2, slippage_cost3]
+                ],
+                total_fees=format_currency(total_fees),
+            )
 
             return total_fees
 
@@ -352,13 +333,11 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 rate1=float(rate1),
                 rate2=float(rate2),
                 rate3=float(rate3),
-                error=str(e)
+                error=str(e),
             )
-            raise ArbitrageError(
-                f"Triangular fee calculation failed: {
-                    str(e)}")
+            raise ArbitrageError(f"Triangular fee calculation failed: {e!s}")
 
-    async def _validate_triangular_timing(self, path: List[str]) -> bool:
+    async def _validate_triangular_timing(self, path: list[str]) -> bool:
         """
         Validate that triangular arbitrage execution timing constraints are met.
 
@@ -381,32 +360,28 @@ class TriangularArbitrageStrategy(BaseStrategy):
                             "Price data too old for triangular arbitrage",
                             strategy=self.name,
                             pair=pair,
-                            age_ms=(
-                                current_time -
-                                price_data.timestamp).total_seconds() *
-                            1000)
+                            age_ms=(current_time - price_data.timestamp).total_seconds() * 1000,
+                        )
                         return False
                 else:
                     logger.warning(
-                        "Missing price data for triangular arbitrage",
-                        strategy=self.name,
-                        pair=pair
+                        "Missing price data for triangular arbitrage", strategy=self.name, pair=pair
                     )
                     return False
 
             # Check if we have too many active triangular arbitrages
-            active_count = len([a for a in self.active_triangular_arbitrages.values()
-                                if a.get("path") == path])
+            active_count = len(
+                [a for a in self.active_triangular_arbitrages.values() if a.get("path") == path]
+            )
 
-            max_arbitrages = self.config.parameters.get(
-                "max_open_arbitrages", 3)
+            max_arbitrages = self.config.parameters.get("max_open_arbitrages", 3)
             if active_count >= max_arbitrages:
                 logger.warning(
                     "Too many active triangular arbitrages",
                     strategy=self.name,
                     path=path,
                     active_count=active_count,
-                    max_allowed=max_arbitrages
+                    max_allowed=max_arbitrages,
                 )
                 return False
 
@@ -414,10 +389,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
         except Exception as e:
             logger.error(
-                "Triangular timing validation failed",
-                strategy=self.name,
-                path=path,
-                error=str(e)
+                "Triangular timing validation failed", strategy=self.name, path=path, error=str(e)
             )
             return False
 
@@ -438,11 +410,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
             # Validate triangular-specific metadata
             metadata = signal.metadata
-            required_fields = [
-                "arbitrage_type",
-                "path",
-                "exchange",
-                "net_profit_percentage"]
+            required_fields = ["arbitrage_type", "path", "exchange", "net_profit_percentage"]
 
             for field in required_fields:
                 if field not in metadata:
@@ -450,7 +418,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                         "Missing required metadata field",
                         strategy=self.name,
                         field=field,
-                        signal_id=signal.timestamp
+                        signal_id=signal.timestamp,
                     )
                     return False
 
@@ -465,7 +433,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                     "Invalid triangular path length",
                     strategy=self.name,
                     path_length=len(path),
-                    expected=3
+                    expected=3,
                 )
                 return False
 
@@ -482,11 +450,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error(
-                "Triangular signal validation failed",
-                strategy=self.name,
-                error=str(e)
-            )
+            logger.error("Triangular signal validation failed", strategy=self.name, error=str(e))
             return False
 
     @log_errors
@@ -506,17 +470,15 @@ class TriangularArbitrageStrategy(BaseStrategy):
         try:
             # Validate signal using utils
             if not signal:
-                raise ArbitrageError(
-                    "Invalid signal for triangular position sizing")
+                raise ArbitrageError("Invalid signal for triangular position sizing")
             validate_percentage(signal.confidence, "signal_confidence")
 
             # Get configuration parameters
-            total_capital = Decimal(
-                str(self.config.parameters.get("total_capital", 10000)))
-            risk_per_trade = self.config.parameters.get(
-                "risk_per_trade", 0.02) * 0.7  # Lower risk for triangular
-            max_position_size = self.config.parameters.get(
-                "max_position_size", 0.05)
+            total_capital = Decimal(str(self.config.parameters.get("total_capital", 10000)))
+            risk_per_trade = (
+                self.config.parameters.get("risk_per_trade", 0.02) * 0.7
+            )  # Lower risk for triangular
+            max_position_size = self.config.parameters.get("max_position_size", 0.05)
 
             # Calculate base position size using simple percentage method
             base_size = total_capital * Decimal(str(risk_per_trade))
@@ -528,27 +490,26 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
             # Scale by arbitrage-specific factors
             metadata = signal.metadata
-            profit_potential = Decimal(
-                str(metadata.get("net_profit_percentage", 0))) / Decimal("100")
+            profit_potential = Decimal(str(metadata.get("net_profit_percentage", 0))) / Decimal(
+                "100"
+            )
             validate_percentage(profit_potential * 100, "profit_potential")
 
             # Apply triangular arbitrage-specific adjustments
             triangular_multiplier = min(
-                Decimal("1.5"),
-                profit_potential *
-                Decimal("8"))  # More conservative
+                Decimal("1.5"), profit_potential * Decimal("8")
+            )  # More conservative
             confidence_multiplier = Decimal(str(signal.confidence))
 
             # Calculate final position size with proper validation
             position_size = round_to_precision_decimal(
                 base_size * confidence_multiplier * triangular_multiplier,
-                PRECISION_LEVELS["position"]
+                PRECISION_LEVELS["position"],
             )
 
             # Apply minimum position size from constants (smaller for
             # triangular)
-            min_size = Decimal(str(GLOBAL_MINIMUM_AMOUNTS.get(
-                "position", 0.001))) * Decimal("0.5")
+            min_size = Decimal(str(GLOBAL_MINIMUM_AMOUNTS.get("position", 0.001))) * Decimal("0.5")
             if position_size < min_size:
                 position_size = min_size
 
@@ -563,7 +524,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 profit_potential=format_percentage(profit_potential * 100),
                 confidence=format_percentage(signal.confidence * 100),
                 triangular_multiplier=triangular_multiplier,
-                final_size=format_currency(position_size)
+                final_size=format_currency(position_size),
             )
 
             return position_size
@@ -573,11 +534,9 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 "Triangular position size calculation failed",
                 strategy=self.name,
                 signal_confidence=signal.confidence if signal else None,
-                error=str(e)
+                error=str(e),
             )
-            raise ArbitrageError(
-                f"Triangular position size calculation failed: {
-                    str(e)}")
+            raise ArbitrageError(f"Triangular position size calculation failed: {e!s}")
 
     async def should_exit(self, position: Position, data: MarketData) -> bool:
         """
@@ -592,15 +551,15 @@ class TriangularArbitrageStrategy(BaseStrategy):
         """
         try:
             # Check if this is a triangular arbitrage position
-            if "arbitrage_type" not in position.metadata or position.metadata.get(
-                    "arbitrage_type") != "triangular":
+            if (
+                "arbitrage_type" not in position.metadata
+                or position.metadata.get("arbitrage_type") != "triangular"
+            ):
                 return False  # Not a triangular arbitrage position
 
             # Check execution timeout
-            execution_timeout = position.metadata.get(
-                "execution_timeout", self.max_execution_time)
-            position_age = (
-                datetime.now() - position.timestamp).total_seconds() * 1000
+            execution_timeout = position.metadata.get("execution_timeout", self.max_execution_time)
+            position_age = (datetime.now() - position.timestamp).total_seconds() * 1000
 
             if position_age > execution_timeout:
                 logger.info(
@@ -608,7 +567,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                     strategy=self.name,
                     symbol=position.symbol,
                     age_ms=position_age,
-                    timeout_ms=execution_timeout
+                    timeout_ms=execution_timeout,
                 )
                 return True
 
@@ -625,7 +584,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                         "Triangular arbitrage opportunity closed",
                         strategy=self.name,
                         symbol=position.symbol,
-                        path=path
+                        path=path,
                     )
                     return True
 
@@ -636,12 +595,11 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 "Triangular exit condition check failed",
                 strategy=self.name,
                 symbol=position.symbol,
-                error=str(e)
+                error=str(e),
             )
             return False
 
-    async def post_trade_processing(
-            self, trade_result: Dict[str, Any]) -> None:
+    async def post_trade_processing(self, trade_result: dict[str, Any]) -> None:
         """
         Process completed triangular arbitrage trade.
 
@@ -672,12 +630,10 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 symbol=trade_result.get("symbol"),
                 path=trade_result.get("path"),
                 pnl=float(trade_result.get("pnl", 0)),
-                execution_time_ms=trade_result.get("execution_time_ms", 0)
+                execution_time_ms=trade_result.get("execution_time_ms", 0),
             )
 
         except Exception as e:
             logger.error(
-                "Triangular post-trade processing failed",
-                strategy=self.name,
-                error=str(e)
+                "Triangular post-trade processing failed", strategy=self.name, error=str(e)
             )

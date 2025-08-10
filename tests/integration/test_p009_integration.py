@@ -11,30 +11,30 @@ This module demonstrates the complete P-009 functionality working together:
 CRITICAL: This demonstrates the complete P-009 implementation working together.
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch
-from typing import Dict, Any
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import CircuitBreakerTriggeredError
 
 # Import from P-001
 from src.core.types import (
-    Position, OrderRequest, OrderResponse, MarketData,
-    CircuitBreakerType, OrderSide, OrderType, RiskLevel
+    CircuitBreakerType,
+    OrderRequest,
+    OrderSide,
+    OrderType,
 )
-from src.core.exceptions import (
-    CircuitBreakerTriggeredError, EmergencyStopError
-)
-from src.core.config import Config
+
+# Import from P-003+
+from src.exchanges.base import BaseExchange
 
 # Import from P-008
 from src.risk_management.base import BaseRiskManager
 from src.risk_management.circuit_breakers import CircuitBreakerManager
 from src.risk_management.emergency_controls import EmergencyControls, EmergencyState
-
-# Import from P-003+
-from src.exchanges.base import BaseExchange
 
 
 class TestP009Integration:
@@ -46,7 +46,7 @@ class TestP009Integration:
         config = Mock(spec=Config)
         config.risk = Mock()
         config.risk.max_daily_loss_pct = 0.05  # 5%
-        config.risk.max_drawdown_pct = 0.15    # 15%
+        config.risk.max_drawdown_pct = 0.15  # 15%
         config.risk.emergency_close_positions = True
         config.risk.emergency_recovery_timeout_hours = 1
         config.risk.emergency_manual_override_enabled = True
@@ -68,22 +68,21 @@ class TestP009Integration:
         exchange.get_positions = AsyncMock(return_value=[])
         exchange.cancel_order = AsyncMock(return_value=True)
         exchange.place_order = AsyncMock(return_value=Mock(status="filled"))
-        exchange.get_account_balance = AsyncMock(
-            return_value={"USDT": Decimal("10000")})
+        exchange.get_account_balance = AsyncMock(return_value={"USDT": Decimal("10000")})
         return exchange
 
     @pytest.mark.asyncio
-    async def test_complete_emergency_cycle(
-            self, mock_config, mock_risk_manager, mock_exchange):
+    async def test_complete_emergency_cycle(self, mock_config, mock_risk_manager, mock_exchange):
         """Test complete emergency cycle from circuit breaker to recovery."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()), \
-                patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
-
+        with (
+            patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()),
+            patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()),
+        ):
             # Initialize components
-            circuit_breaker_manager = CircuitBreakerManager(
-                mock_config, mock_risk_manager)
+            circuit_breaker_manager = CircuitBreakerManager(mock_config, mock_risk_manager)
             emergency_controls = EmergencyControls(
-                mock_config, mock_risk_manager, circuit_breaker_manager)
+                mock_config, mock_risk_manager, circuit_breaker_manager
+            )
 
             # Register exchange
             emergency_controls.register_exchange("binance", mock_exchange)
@@ -102,7 +101,7 @@ class TestP009Integration:
                 "price_history": [100, 90, 110, 80, 120],  # High volatility
                 "model_confidence": Decimal("0.2"),  # Low confidence
                 "total_requests": 100,
-                "error_occurred": False
+                "error_occurred": False,
             }
 
             # This should trigger circuit breakers and emergency controls
@@ -118,8 +117,7 @@ class TestP009Integration:
 
             # Simulate emergency controls activation
             await emergency_controls.activate_emergency_stop(
-                "Circuit breakers triggered",
-                CircuitBreakerType.DAILY_LOSS_LIMIT
+                "Circuit breakers triggered", CircuitBreakerType.DAILY_LOSS_LIMIT
             )
 
             assert emergency_controls.state.value == "emergency"
@@ -136,43 +134,36 @@ class TestP009Integration:
 
     @pytest.mark.asyncio
     async def test_emergency_with_positions_and_orders(
-            self, mock_config, mock_risk_manager, mock_exchange):
+        self, mock_config, mock_risk_manager, mock_exchange
+    ):
         """Test emergency procedures with actual positions and orders."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()), \
-                patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
-
+        with (
+            patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()),
+            patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()),
+        ):
             # Initialize components
-            circuit_breaker_manager = CircuitBreakerManager(
-                mock_config, mock_risk_manager)
+            circuit_breaker_manager = CircuitBreakerManager(mock_config, mock_risk_manager)
             emergency_controls = EmergencyControls(
-                mock_config, mock_risk_manager, circuit_breaker_manager)
+                mock_config, mock_risk_manager, circuit_breaker_manager
+            )
 
             # Register exchange
             emergency_controls.register_exchange("binance", mock_exchange)
 
             # Mock pending orders
-            mock_orders = [
-                Mock(id="order1", symbol="BTCUSDT"),
-                Mock(id="order2", symbol="ETHUSDT")
-            ]
+            mock_orders = [Mock(id="order1", symbol="BTCUSDT"), Mock(id="order2", symbol="ETHUSDT")]
             mock_exchange.get_pending_orders.return_value = mock_orders
 
             # Mock positions
             mock_positions = [
-                Mock(
-                    symbol="BTCUSDT",
-                    quantity=Decimal("1.0"),
-                    side=OrderSide.BUY),
-                Mock(
-                    symbol="ETHUSDT",
-                    quantity=Decimal("10.0"),
-                    side=OrderSide.SELL)]
+                Mock(symbol="BTCUSDT", quantity=Decimal("1.0"), side=OrderSide.BUY),
+                Mock(symbol="ETHUSDT", quantity=Decimal("10.0"), side=OrderSide.SELL),
+            ]
             mock_exchange.get_positions.return_value = mock_positions
 
             # Activate emergency stop
             await emergency_controls.activate_emergency_stop(
-                "Test emergency",
-                CircuitBreakerType.DAILY_LOSS_LIMIT
+                "Test emergency", CircuitBreakerType.DAILY_LOSS_LIMIT
             )
 
             # Verify orders were cancelled
@@ -190,17 +181,17 @@ class TestP009Integration:
             assert event.positions_affected == 2
 
     @pytest.mark.asyncio
-    async def test_manual_override_functionality(
-            self, mock_config, mock_risk_manager):
+    async def test_manual_override_functionality(self, mock_config, mock_risk_manager):
         """Test manual override functionality."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()), \
-                patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
-
+        with (
+            patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()),
+            patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()),
+        ):
             # Initialize components
-            circuit_breaker_manager = CircuitBreakerManager(
-                mock_config, mock_risk_manager)
+            circuit_breaker_manager = CircuitBreakerManager(mock_config, mock_risk_manager)
             emergency_controls = EmergencyControls(
-                mock_config, mock_risk_manager, circuit_breaker_manager)
+                mock_config, mock_risk_manager, circuit_breaker_manager
+            )
 
             # Start in emergency state
             emergency_controls.state = EmergencyState.EMERGENCY
@@ -218,7 +209,7 @@ class TestP009Integration:
                 symbol="BTCUSDT",
                 side=OrderSide.BUY,
                 order_type=OrderType.MARKET,
-                quantity=Decimal("1.0")
+                quantity=Decimal("1.0"),
             )
 
             allowed = await emergency_controls.validate_order_during_emergency(order)
@@ -231,13 +222,10 @@ class TestP009Integration:
             assert emergency_controls.manual_override_user is None
 
     @pytest.mark.asyncio
-    async def test_circuit_breaker_recovery_cycle(
-            self, mock_config, mock_risk_manager):
+    async def test_circuit_breaker_recovery_cycle(self, mock_config, mock_risk_manager):
         """Test circuit breaker recovery cycle."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
-
-            circuit_breaker_manager = CircuitBreakerManager(
-                mock_config, mock_risk_manager)
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
+            circuit_breaker_manager = CircuitBreakerManager(mock_config, mock_risk_manager)
 
             # Get daily loss breaker
             daily_loss_breaker = circuit_breaker_manager.circuit_breakers["daily_loss_limit"]
@@ -248,7 +236,7 @@ class TestP009Integration:
             # Trigger circuit breaker
             data = {
                 "portfolio_value": Decimal("10000"),
-                "daily_pnl": Decimal("-600")  # 6% loss
+                "daily_pnl": Decimal("-600"),  # 6% loss
             }
 
             with pytest.raises(CircuitBreakerTriggeredError):
@@ -263,7 +251,7 @@ class TestP009Integration:
             # Test recovery with good data
             data = {
                 "portfolio_value": Decimal("10000"),
-                "daily_pnl": Decimal("100")  # Positive PnL
+                "daily_pnl": Decimal("100"),  # Positive PnL
             }
 
             triggered = await daily_loss_breaker.evaluate(data)
@@ -271,13 +259,10 @@ class TestP009Integration:
             assert daily_loss_breaker.state.value == "closed"
 
     @pytest.mark.asyncio
-    async def test_multiple_circuit_breakers_coordination(
-            self, mock_config, mock_risk_manager):
+    async def test_multiple_circuit_breakers_coordination(self, mock_config, mock_risk_manager):
         """Test coordination between multiple circuit breakers."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()):
-
-            circuit_breaker_manager = CircuitBreakerManager(
-                mock_config, mock_risk_manager)
+        with patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()):
+            circuit_breaker_manager = CircuitBreakerManager(mock_config, mock_risk_manager)
 
             # Test data that should trigger multiple breakers
             data = {
@@ -288,7 +273,7 @@ class TestP009Integration:
                 "price_history": [100, 90, 110, 80, 120],  # High volatility
                 "model_confidence": Decimal("0.2"),  # Low confidence
                 "total_requests": 100,
-                "error_occurred": False
+                "error_occurred": False,
             }
 
             # This should trigger multiple breakers
@@ -303,16 +288,16 @@ class TestP009Integration:
             assert circuit_breaker_manager.is_trading_allowed() is False
 
     @pytest.mark.asyncio
-    async def test_emergency_controls_status_reporting(
-            self, mock_config, mock_risk_manager):
+    async def test_emergency_controls_status_reporting(self, mock_config, mock_risk_manager):
         """Test emergency controls status reporting."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()), \
-                patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
-
-            circuit_breaker_manager = CircuitBreakerManager(
-                mock_config, mock_risk_manager)
+        with (
+            patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()),
+            patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()),
+        ):
+            circuit_breaker_manager = CircuitBreakerManager(mock_config, mock_risk_manager)
             emergency_controls = EmergencyControls(
-                mock_config, mock_risk_manager, circuit_breaker_manager)
+                mock_config, mock_risk_manager, circuit_breaker_manager
+            )
 
             # Test normal state status
             status = emergency_controls.get_status()
@@ -320,7 +305,9 @@ class TestP009Integration:
             assert status["trading_allowed"] is True
 
             # Activate emergency
-            await emergency_controls.activate_emergency_stop("Test", CircuitBreakerType.DAILY_LOSS_LIMIT)
+            await emergency_controls.activate_emergency_stop(
+                "Test", CircuitBreakerType.DAILY_LOSS_LIMIT
+            )
 
             # Test emergency state status
             status = emergency_controls.get_status()
@@ -343,9 +330,10 @@ class TestP009RealWorldScenario:
     @pytest.mark.asyncio
     async def test_market_crash_scenario(self):
         """Test P-009 response to a simulated market crash scenario."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()), \
-                patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
-
+        with (
+            patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()),
+            patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()),
+        ):
             # Simulate market crash scenario
             config = Mock(spec=Config)
             config.risk = Mock()
@@ -354,10 +342,8 @@ class TestP009RealWorldScenario:
             config.risk.emergency_close_positions = True
 
             risk_manager = Mock(spec=BaseRiskManager)
-            circuit_breaker_manager = CircuitBreakerManager(
-                config, risk_manager)
-            emergency_controls = EmergencyControls(
-                config, risk_manager, circuit_breaker_manager)
+            circuit_breaker_manager = CircuitBreakerManager(config, risk_manager)
+            emergency_controls = EmergencyControls(config, risk_manager, circuit_breaker_manager)
 
             # Simulate market crash data
             crash_data = {
@@ -368,7 +354,7 @@ class TestP009RealWorldScenario:
                 "price_history": [100, 80, 60, 40, 30],  # Extreme volatility
                 "model_confidence": Decimal("0.1"),  # Very low confidence
                 "total_requests": 100,
-                "error_occurred": True  # System errors
+                "error_occurred": True,  # System errors
             }
 
             # This should trigger multiple circuit breakers
@@ -377,8 +363,7 @@ class TestP009RealWorldScenario:
 
             # Verify emergency controls activate
             await emergency_controls.activate_emergency_stop(
-                "Market crash detected",
-                CircuitBreakerType.DAILY_LOSS_LIMIT
+                "Market crash detected", CircuitBreakerType.DAILY_LOSS_LIMIT
             )
 
             assert emergency_controls.state.value == "emergency"
@@ -391,9 +376,10 @@ class TestP009RealWorldScenario:
     @pytest.mark.asyncio
     async def test_system_failure_scenario(self):
         """Test P-009 response to system failure scenario."""
-        with patch('src.risk_management.circuit_breakers.ErrorHandler', return_value=Mock()), \
-                patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
-
+        with (
+            patch("src.risk_management.circuit_breakers.ErrorHandler", return_value=Mock()),
+            patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()),
+        ):
             config = Mock(spec=Config)
             config.risk = Mock()
             config.risk.max_daily_loss_pct = 0.05
@@ -401,10 +387,8 @@ class TestP009RealWorldScenario:
             config.risk.emergency_close_positions = True
 
             risk_manager = Mock(spec=BaseRiskManager)
-            circuit_breaker_manager = CircuitBreakerManager(
-                config, risk_manager)
-            emergency_controls = EmergencyControls(
-                config, risk_manager, circuit_breaker_manager)
+            circuit_breaker_manager = CircuitBreakerManager(config, risk_manager)
+            emergency_controls = EmergencyControls(config, risk_manager, circuit_breaker_manager)
 
             # Simulate system failure data
             failure_data = {
@@ -416,7 +400,7 @@ class TestP009RealWorldScenario:
                 # Low confidence due to system issues
                 "model_confidence": Decimal("0.1"),
                 "total_requests": 50,
-                "error_occurred": True  # High error rate
+                "error_occurred": True,  # High error rate
             }
 
             # This should trigger system error rate breaker
@@ -425,8 +409,7 @@ class TestP009RealWorldScenario:
 
             # Verify emergency controls activate
             await emergency_controls.activate_emergency_stop(
-                "System failure detected",
-                CircuitBreakerType.SYSTEM_ERROR_RATE
+                "System failure detected", CircuitBreakerType.SYSTEM_ERROR_RATE
             )
 
             assert emergency_controls.state.value == "emergency"

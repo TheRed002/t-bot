@@ -4,18 +4,22 @@ Unit tests for BaseStrategy interface.
 Tests the abstract base strategy interface and its core functionality.
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock, patch
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock
+
+import pytest
 
 # Import from P-001
 from src.core.types import (
-    Signal, MarketData, Position, StrategyConfig,
-    StrategyStatus, StrategyMetrics, SignalDirection, OrderSide
+    MarketData,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyMetrics,
+    StrategyStatus,
 )
-from src.core.exceptions import ValidationError
 
 # Import from P-011
 from src.strategies.base import BaseStrategy
@@ -36,7 +40,7 @@ class MockStrategy(BaseStrategy):
             timestamp=datetime.now(timezone.utc),
             symbol=data.symbol,
             strategy_name=self.name,
-            metadata={"test": True}
+            metadata={"test": True},
         )
 
         return [signal]
@@ -71,7 +75,7 @@ class TestBaseStrategy:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {"test_param": "test_value"}
+            "parameters": {"test_param": "test_value"},
         }
 
     @pytest.fixture
@@ -91,7 +95,7 @@ class TestBaseStrategy:
             ask=Decimal("50001"),
             open_price=Decimal("49900"),
             high_price=Decimal("50100"),
-            low_price=Decimal("49800")
+            low_price=Decimal("49800"),
         )
 
     @pytest.fixture
@@ -104,7 +108,7 @@ class TestBaseStrategy:
             current_price=Decimal("50100"),
             unrealized_pnl=Decimal("10"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
     def test_strategy_initialization(self, mock_strategy, mock_config):
@@ -151,7 +155,7 @@ class TestBaseStrategy:
             symbol="BTCUSDT",
             price=Decimal("0"),
             volume=Decimal("0"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
         signals = await mock_strategy.generate_signals(empty_data)
         assert signals == []
@@ -166,7 +170,7 @@ class TestBaseStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={}
+            metadata={},
         )
         assert await mock_strategy.validate_signal(valid_signal) is True
 
@@ -177,7 +181,7 @@ class TestBaseStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={}
+            metadata={},
         )
         assert await mock_strategy.validate_signal(invalid_signal) is False
 
@@ -189,7 +193,7 @@ class TestBaseStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={}
+            metadata={},
         )
 
         position_size = mock_strategy.get_position_size(signal)
@@ -199,8 +203,7 @@ class TestBaseStrategy:
     def test_should_exit(self, mock_strategy, mock_position, mock_market_data):
         """Test exit condition checking."""
         # Position with positive P&L
-        assert mock_strategy.should_exit(
-            mock_position, mock_market_data) is False
+        assert mock_strategy.should_exit(mock_position, mock_market_data) is False
 
         # Position with negative P&L
         negative_position = Position(
@@ -210,10 +213,9 @@ class TestBaseStrategy:
             current_price=Decimal("49900"),
             unrealized_pnl=Decimal("-10"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
-        assert mock_strategy.should_exit(
-            negative_position, mock_market_data) is True
+        assert mock_strategy.should_exit(negative_position, mock_market_data) is True
 
     @pytest.mark.asyncio
     async def test_pre_trade_validation(self, mock_strategy):
@@ -225,7 +227,7 @@ class TestBaseStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={}
+            metadata={},
         )
         assert await mock_strategy.pre_trade_validation(valid_signal) is True
 
@@ -236,7 +238,7 @@ class TestBaseStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={}
+            metadata={},
         )
         assert await mock_strategy.pre_trade_validation(invalid_signal) is False
 
@@ -254,15 +256,14 @@ class TestBaseStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={}
+            metadata={},
         )
 
         assert await mock_strategy.pre_trade_validation(signal) is True
         mock_risk_manager.validate_signal.assert_called_once_with(signal)
 
     @pytest.mark.asyncio
-    async def test_pre_trade_validation_with_risk_manager_failure(
-            self, mock_strategy):
+    async def test_pre_trade_validation_with_risk_manager_failure(self, mock_strategy):
         """Test pre-trade validation with risk manager failure."""
         # Mock risk manager
         mock_risk_manager = Mock()
@@ -275,7 +276,7 @@ class TestBaseStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={}
+            metadata={},
         )
 
         assert await mock_strategy.pre_trade_validation(signal) is False
@@ -315,6 +316,7 @@ class TestBaseStrategy:
     @pytest.mark.asyncio
     async def test_strategy_start_error(self, mock_strategy):
         """Test strategy start with error."""
+
         # Mock _on_start to raise exception
         async def mock_on_start():
             raise Exception("Start error")
@@ -329,6 +331,7 @@ class TestBaseStrategy:
     @pytest.mark.asyncio
     async def test_strategy_stop_error(self, mock_strategy):
         """Test strategy stop with error."""
+
         # Mock _on_stop to raise exception
         async def mock_on_stop():
             raise Exception("Stop error")
@@ -355,7 +358,7 @@ class TestBaseStrategy:
             "position_size_pct": 0.03,
             "stop_loss_pct": 0.03,
             "take_profit_pct": 0.06,
-            "parameters": {"updated_param": "updated_value"}
+            "parameters": {"updated_param": "updated_value"},
         }
 
         mock_strategy.update_config(new_config)
@@ -421,8 +424,10 @@ class TestBaseStrategy:
 
     def test_abstract_methods_required(self):
         """Test that concrete strategies must implement abstract methods."""
+
         class IncompleteStrategy(BaseStrategy):
             """Incomplete strategy implementation."""
+
             pass
 
         with pytest.raises(TypeError):

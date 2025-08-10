@@ -5,20 +5,24 @@ These tests measure performance of core components like configuration,
 logging, and type validation.
 """
 
-import pytest
 import time
-import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
-import statistics
+
+import pytest
 
 from src.core.config import Config
-from src.core.logging import setup_logging, get_logger, log_performance, log_async_performance
-from src.core.types import (
-    TradingMode, SignalDirection, OrderSide, OrderType,
-    Signal, MarketData, OrderRequest, OrderResponse, Position
-)
 from src.core.exceptions import TradingBotError, ValidationError
+from src.core.logging import get_logger, log_async_performance, log_performance, setup_logging
+from src.core.types import (
+    MarketData,
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    Position,
+    Signal,
+    SignalDirection,
+)
 
 
 @pytest.fixture(scope="session")
@@ -112,10 +116,7 @@ class TestLoggingPerformance:
 
         # Log messages multiple times
         for i in range(1000):
-            logger.info(
-                f"Test message {i}",
-                user_id="test_user",
-                operation="test")
+            logger.info(f"Test message {i}", user_id="test_user", operation="test")
 
         end_time = time.time()
         total_time = end_time - start_time
@@ -126,6 +127,7 @@ class TestLoggingPerformance:
 
     def test_performance_decorator_overhead(self, setup_logging_for_tests):
         """Test performance decorator overhead."""
+
         @log_performance
         def test_function():
             return "test_result"
@@ -144,9 +146,9 @@ class TestLoggingPerformance:
         assert avg_time < 0.001  # Should be under 1ms per call
 
     @pytest.mark.asyncio
-    async def test_async_performance_decorator_overhead(
-            self, setup_logging_for_tests):
+    async def test_async_performance_decorator_overhead(self, setup_logging_for_tests):
         """Test async performance decorator overhead."""
+
         @log_async_performance
         async def test_async_function():
             return "test_async_result"
@@ -161,9 +163,7 @@ class TestLoggingPerformance:
         total_time = end_time - start_time
         avg_time = total_time / 1000
 
-        print(
-            f"Async performance decorator overhead: {
-                avg_time: .6f}s per call")
+        print(f"Async performance decorator overhead: {avg_time: .6f}s per call")
         assert avg_time < 0.001  # Should be under 1ms per call
 
 
@@ -182,7 +182,7 @@ class TestTypeValidationPerformance:
                 timestamp=datetime.now(timezone.utc),
                 symbol="BTC/USDT",
                 strategy_name="test_strategy",
-                metadata={"test": "data"}
+                metadata={"test": "data"},
             )
 
         end_time = time.time()
@@ -207,7 +207,7 @@ class TestTypeValidationPerformance:
                 ask=Decimal("50001.00"),
                 open_price=Decimal("49900.00"),
                 high_price=Decimal("50100.00"),
-                low_price=Decimal("49800.00")
+                low_price=Decimal("49800.00"),
             )
 
         end_time = time.time()
@@ -230,7 +230,7 @@ class TestTypeValidationPerformance:
                 quantity=Decimal("1.0"),
                 price=Decimal("50000.00"),
                 time_in_force="GTC",
-                client_order_id=f"test_order_{i}"
+                client_order_id=f"test_order_{i}",
             )
 
         end_time = time.time()
@@ -253,7 +253,7 @@ class TestTypeValidationPerformance:
                 current_price=Decimal("51000.00"),
                 unrealized_pnl=Decimal("2000.00"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
 
         end_time = time.time()
@@ -274,9 +274,7 @@ class TestExceptionPerformance:
         # Create exceptions multiple times
         for i in range(1000):
             error = TradingBotError(
-                f"Test error message {i}",
-                error_code="TEST_ERROR",
-                details={"test": "data"}
+                f"Test error message {i}", error_code="TEST_ERROR", details={"test": "data"}
             )
 
         end_time = time.time()
@@ -321,7 +319,7 @@ class TestBulkOperationsPerformance:
                 timestamp=datetime.now(timezone.utc),
                 symbol="BTC/USDT",
                 strategy_name="test_strategy",
-                metadata={"test": "data", "index": i}
+                metadata={"test": "data", "index": i},
             )
             signals.append(signal)
 
@@ -329,10 +327,7 @@ class TestBulkOperationsPerformance:
         total_time = end_time - start_time
         avg_time = total_time / 10000
 
-        print(
-            f"Bulk signal creation: {
-                avg_time: .6f}s per signal({
-                    len(signals)} signals)")
+        print(f"Bulk signal creation: {avg_time: .6f}s per signal({len(signals)} signals)")
         assert avg_time < 0.001  # Should be under 1ms per signal
         assert len(signals) == 10000
 
@@ -352,7 +347,7 @@ class TestBulkOperationsPerformance:
                 ask=Decimal("50001.00") + Decimal(str(i)),
                 open_price=Decimal("49900.00") + Decimal(str(i)),
                 high_price=Decimal("50100.00") + Decimal(str(i)),
-                low_price=Decimal("49800.00") + Decimal(str(i))
+                low_price=Decimal("49800.00") + Decimal(str(i)),
             )
             market_data_list.append(market_data)
 
@@ -361,9 +356,10 @@ class TestBulkOperationsPerformance:
         avg_time = total_time / 10000
 
         print(
-            f"Bulk market data creation: {
-                avg_time: .6f}s per market data({
-                    len(market_data_list)} items)")
+            f"Bulk market data creation: {avg_time: .6f}s per market data({
+                len(market_data_list)
+            } items)"
+        )
         assert avg_time < 0.001  # Should be under 1ms per market data
         assert len(market_data_list) == 10000
 
@@ -386,7 +382,7 @@ class TestMemoryUsagePerformance:
                 timestamp=datetime.now(timezone.utc),
                 symbol="BTC/USDT",
                 strategy_name="test_strategy",
-                metadata={"test": "data"}
+                metadata={"test": "data"},
             )
             objects.append(signal)
 
@@ -414,7 +410,7 @@ class TestMemoryUsagePerformance:
                 ask=Decimal("50001.00"),
                 open_price=Decimal("49900.00"),
                 high_price=Decimal("50100.00"),
-                low_price=Decimal("49800.00")
+                low_price=Decimal("49800.00"),
             )
             objects.append(market_data)
 

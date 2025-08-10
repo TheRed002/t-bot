@@ -5,12 +5,9 @@ These tests verify the configuration loading, validation, and management.
 """
 
 import pytest
-import os
-from pathlib import Path
-from unittest.mock import patch
 from pydantic import ValidationError
 
-from src.core.config import Config, DatabaseConfig, SecurityConfig, ErrorHandlingConfig
+from src.core.config import Config, DatabaseConfig, ErrorHandlingConfig, SecurityConfig
 
 
 class TestDatabaseConfig:
@@ -238,7 +235,7 @@ class TestConfig:
         config.to_yaml(str(yaml_file))
 
         assert yaml_file.exists()
-        with open(yaml_file, 'r') as f:
+        with open(yaml_file) as f:
             content = f.read()
             # Check that the file contains expected configuration structure
             assert "app_name:" in content
@@ -325,17 +322,17 @@ class TestConfigIntegration:
         config = Config()
 
         # Test database sub-config
-        assert hasattr(config, 'database')
+        assert hasattr(config, "database")
         assert isinstance(config.database, DatabaseConfig)
         assert config.database.postgresql_host == "localhost"
 
         # Test security sub-config
-        assert hasattr(config, 'security')
+        assert hasattr(config, "security")
         assert isinstance(config.security, SecurityConfig)
         assert config.security.jwt_algorithm == "HS256"
 
         # Test error handling sub-config
-        assert hasattr(config, 'error_handling')
+        assert hasattr(config, "error_handling")
         assert isinstance(config.error_handling, ErrorHandlingConfig)
         assert config.error_handling.circuit_breaker_failure_threshold == 5
 

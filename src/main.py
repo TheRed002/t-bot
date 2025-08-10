@@ -16,21 +16,21 @@ Features:
 import asyncio
 import signal
 import sys
-from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
+from typing import Any
 
 from src.core.config import Config
-from src.core.logging import get_logger, setup_logging, correlation_context
-from src.core.exceptions import TradingBotError, ConfigurationError
+from src.core.exceptions import ConfigurationError
+from src.core.logging import get_logger, setup_logging
 
 
 class Application:
     """Main application class for the trading bot framework."""
 
     def __init__(self):
-        self.config: Optional[Config] = None
+        self.config: Config | None = None
         self.logger = get_logger(__name__)
-        self.components: Dict[str, Any] = {}
+        self.components: dict[str, Any] = {}
         self.shutdown_event = asyncio.Event()
         self.health_status = {"status": "starting", "components": {}}
 
@@ -72,13 +72,13 @@ class Application:
         # TODO: Remove in production - Debug logging setup
         if self.config and self.config.debug:
             from src.core.logging import setup_debug_logging
+
             setup_debug_logging()
 
         # Setup logging based on environment
-        environment = getattr(
-            self.config,
-            'environment',
-            'development') if self.config else 'development'
+        environment = (
+            getattr(self.config, "environment", "development") if self.config else "development"
+        )
         setup_logging(environment=environment)
 
         self.logger.info("Logging system initialized")
@@ -99,9 +99,9 @@ class Application:
 
         except Exception as e:
             raise ConfigurationError(
-                f"Failed to load configuration: {str(e)}",
+                f"Failed to load configuration: {e!s}",
                 error_code="CONFIG_LOAD_ERROR",
-                details={"error": str(e)}
+                details={"error": str(e)},
             )
 
     async def _initialize_components(self) -> None:
@@ -135,8 +135,7 @@ class Application:
     async def _initialize_database(self) -> None:
         """Initialize database connections."""
         # Placeholder for P-002 database implementation
-        self.logger.info(
-            "Database initialization placeholder - will be implemented in P-002")
+        self.logger.info("Database initialization placeholder - will be implemented in P-002")
         self.health_status["components"]["database"] = "initialized"
 
     async def _initialize_exchanges(self) -> None:
@@ -153,25 +152,22 @@ class Application:
             # Initialize supported exchanges from configuration
             supported_exchanges = self.config.exchanges.supported_exchanges
             for exchange_name in supported_exchanges:
-                if self.components["exchange_factory"].is_exchange_supported(
-                        exchange_name):
+                if self.components["exchange_factory"].is_exchange_supported(exchange_name):
                     try:
-                        exchange = await self.components["exchange_factory"].create_exchange(exchange_name)
-                        self.logger.info(
-                            f"Initialized exchange: {exchange_name}")
+                        exchange = await self.components["exchange_factory"].create_exchange(
+                            exchange_name
+                        )
+                        self.logger.info(f"Initialized exchange: {exchange_name}")
                     except Exception as e:
-                        self.logger.error(
-                            f"Failed to initialize exchange {exchange_name}: {
-                                str(e)}")
+                        self.logger.error(f"Failed to initialize exchange {exchange_name}: {e!s}")
                 else:
-                    self.logger.warning(
-                        f"Exchange {exchange_name} not supported")
+                    self.logger.warning(f"Exchange {exchange_name} not supported")
 
             self.health_status["components"]["exchanges"] = "initialized"
             self.logger.info("Exchange initialization completed")
 
         except Exception as e:
-            self.logger.error(f"Exchange initialization failed: {str(e)}")
+            self.logger.error(f"Exchange initialization failed: {e!s}")
             self.health_status["components"]["exchanges"] = "error"
             raise
 
@@ -190,20 +186,17 @@ class Application:
             self.logger.info("Risk management system initialized successfully")
 
         except Exception as e:
-            self.logger.error(
-                f"Risk management initialization failed: {
-                    str(e)}")
+            self.logger.error(f"Risk management initialization failed: {e!s}")
             self.health_status["components"]["risk_management"] = "error"
             raise
 
     async def _initialize_strategies(self) -> None:
         """Initialize trading strategies."""
         try:
-            from src.strategies import StrategyFactory, StrategyConfigurationManager
+            from src.strategies import StrategyConfigurationManager, StrategyFactory
 
             # Create strategy configuration manager
-            self.components["strategy_config_manager"] = StrategyConfigurationManager(
-            )
+            self.components["strategy_config_manager"] = StrategyConfigurationManager()
 
             # Create strategy factory
             self.components["strategy_factory"] = StrategyFactory()
@@ -211,54 +204,54 @@ class Application:
             # Set dependencies for strategy factory
             if "risk_manager" in self.components:
                 self.components["strategy_factory"].set_risk_manager(
-                    self.components["risk_manager"])
+                    self.components["risk_manager"]
+                )
 
             if "exchange_factory" in self.components:
                 # Get first available exchange for strategies
-                exchanges = self.components["exchange_factory"].get_all_exchanges(
-                )
+                exchanges = self.components["exchange_factory"].get_all_exchanges()
                 if exchanges:
                     first_exchange = list(exchanges.values())[0]
-                    self.components["strategy_factory"].set_exchange(
-                        first_exchange)
+                    self.components["strategy_factory"].set_exchange(first_exchange)
 
             # Load and create strategies from configuration
-            available_strategies = self.components["strategy_config_manager"].get_available_strategies(
-            )
+            available_strategies = self.components[
+                "strategy_config_manager"
+            ].get_available_strategies()
             for strategy_name in available_strategies:
                 try:
                     # Load strategy configuration
                     config = self.components["strategy_config_manager"].load_strategy_config(
-                        strategy_name)
+                        strategy_name
+                    )
 
                     # Create strategy instance
                     strategy = self.components["strategy_factory"].create_strategy(
-                        strategy_name, config.dict())
+                        strategy_name, config.dict()
+                    )
 
                     self.logger.info(f"Initialized strategy: {strategy_name}")
 
                 except Exception as e:
-                    self.logger.error(
-                        f"Failed to initialize strategy {strategy_name}: {
-                            str(e)}")
+                    self.logger.error(f"Failed to initialize strategy {strategy_name}: {e!s}")
 
             self.health_status["components"]["strategies"] = "initialized"
             self.logger.info("Strategy initialization completed successfully")
 
         except Exception as e:
-            self.logger.error(f"Strategy initialization failed: {str(e)}")
+            self.logger.error(f"Strategy initialization failed: {e!s}")
             self.health_status["components"]["strategies"] = "error"
             raise
 
     async def _initialize_ml_models(self) -> None:
         """Initialize machine learning models."""
         # Placeholder for P-017 ML implementation
-        self.logger.info(
-            "ML models initialization placeholder - will be implemented in P-017")
+        self.logger.info("ML models initialization placeholder - will be implemented in P-017")
         self.health_status["components"]["ml_models"] = "initialized"
 
     def _setup_signal_handlers(self) -> None:
         """Setup signal handlers for graceful shutdown."""
+
         def signal_handler(signum, frame):
             self.logger.info(
                 f"Received signal {signum}, initiating graceful shutdown",
@@ -299,8 +292,7 @@ class Application:
     async def _shutdown_database(self) -> None:
         """Shutdown database connections."""
         # Placeholder for P-002 database shutdown
-        self.logger.info(
-            "Database shutdown placeholder - will be implemented in P-002")
+        self.logger.info("Database shutdown placeholder - will be implemented in P-002")
         self.health_status["components"]["database"] = "shutdown"
 
     async def _shutdown_exchanges(self) -> None:
@@ -313,7 +305,7 @@ class Application:
             self.health_status["components"]["exchanges"] = "shutdown"
 
         except Exception as e:
-            self.logger.error(f"Exchange shutdown error: {str(e)}")
+            self.logger.error(f"Exchange shutdown error: {e!s}")
             self.health_status["components"]["exchanges"] = "error"
 
     async def _shutdown_risk_management(self) -> None:
@@ -321,10 +313,10 @@ class Application:
         try:
             if "risk_manager" in self.components:
                 # Get final risk summary before shutdown
-                risk_summary = await self.components["risk_manager"].get_comprehensive_risk_summary()
-                self.logger.info(
-                    "Final risk summary",
-                    risk_summary=risk_summary)
+                risk_summary = await self.components[
+                    "risk_manager"
+                ].get_comprehensive_risk_summary()
+                self.logger.info("Final risk summary", risk_summary=risk_summary)
 
                 # Clear components
                 del self.components["risk_manager"]
@@ -333,7 +325,7 @@ class Application:
             self.logger.info("Risk management system shutdown completed")
 
         except Exception as e:
-            self.logger.error(f"Risk management shutdown failed: {str(e)}")
+            self.logger.error(f"Risk management shutdown failed: {e!s}")
             self.health_status["components"]["risk_management"] = "error"
 
     async def _shutdown_strategies(self) -> None:
@@ -343,22 +335,20 @@ class Application:
                 await self.components["strategy_factory"].shutdown_all_strategies()
                 self.logger.info("All strategies shutdown successfully")
             else:
-                self.logger.warning(
-                    "Strategy factory not found during shutdown")
+                self.logger.warning("Strategy factory not found during shutdown")
 
         except Exception as e:
-            self.logger.error(f"Strategy shutdown failed: {str(e)}")
+            self.logger.error(f"Strategy shutdown failed: {e!s}")
             # Continue with shutdown even if strategy shutdown fails
         self.health_status["components"]["strategies"] = "shutdown"
 
     async def _shutdown_ml_models(self) -> None:
         """Shutdown machine learning models."""
         # Placeholder for P-017 ML shutdown
-        self.logger.info(
-            "ML models shutdown placeholder - will be implemented in P-017")
+        self.logger.info("ML models shutdown placeholder - will be implemented in P-017")
         self.health_status["components"]["ml_models"] = "shutdown"
 
-    def get_health_status(self) -> Dict[str, Any]:
+    def get_health_status(self) -> dict[str, Any]:
         """Get current application health status."""
         return self.health_status.copy()
 

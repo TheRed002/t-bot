@@ -4,19 +4,15 @@ Unit tests for PortfolioLimits class.
 This module tests the portfolio limits enforcement and validation.
 """
 
-import pytest
-import numpy as np
-from decimal import Decimal
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock, patch
+from decimal import Decimal
+from unittest.mock import Mock
 
-from src.core.types import (
-    Position, OrderSide, MarketData
-)
-from src.core.exceptions import (
-    PositionLimitError, ValidationError
-)
+import pytest
+
 from src.core.config import Config
+from src.core.exceptions import PositionLimitError
+from src.core.types import OrderSide, Position
 from src.risk_management.portfolio_limits import PortfolioLimits
 
 
@@ -43,7 +39,7 @@ class TestPortfolioLimits:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
     @pytest.fixture
@@ -56,7 +52,7 @@ class TestPortfolioLimits:
             current_price=Decimal("3100"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
     @pytest.fixture
@@ -69,7 +65,7 @@ class TestPortfolioLimits:
             current_price=Decimal("0.52"),
             unrealized_pnl=Decimal("20"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
     def test_initialization(self, portfolio_limits, config):
@@ -85,8 +81,7 @@ class TestPortfolioLimits:
         assert "USDT" in portfolio_limits.sector_mapping
 
     @pytest.mark.asyncio
-    async def test_check_portfolio_limits_valid(
-            self, portfolio_limits, new_position):
+    async def test_check_portfolio_limits_valid(self, portfolio_limits, new_position):
         """Test portfolio limits check with valid position."""
         # Set up portfolio state
         portfolio_limits.positions = []
@@ -97,19 +92,16 @@ class TestPortfolioLimits:
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_check_portfolio_limits_invalid_position(
-            self, portfolio_limits):
+    async def test_check_portfolio_limits_invalid_position(self, portfolio_limits):
         """Test portfolio limits check with invalid position."""
         with pytest.raises(PositionLimitError):
             await portfolio_limits.check_portfolio_limits(None)
 
     @pytest.mark.asyncio
-    async def test_check_total_positions_limit(
-            self, portfolio_limits, new_position):
+    async def test_check_total_positions_limit(self, portfolio_limits, new_position):
         """Test total positions limit checking."""
         # Add maximum positions
-        portfolio_limits.positions = [Mock()
-                                      for _ in range(10)]  # Max positions
+        portfolio_limits.positions = [Mock() for _ in range(10)]  # Max positions
         portfolio_limits.total_portfolio_value = Decimal("10000")
 
         result = await portfolio_limits._check_total_positions_limit(new_position)
@@ -117,8 +109,7 @@ class TestPortfolioLimits:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_check_positions_per_symbol_limit(
-            self, portfolio_limits, new_position):
+    async def test_check_positions_per_symbol_limit(self, portfolio_limits, new_position):
         """Test positions per symbol limit checking."""
         # Add maximum positions for the same symbol
         portfolio_limits.positions = [
@@ -129,7 +120,7 @@ class TestPortfolioLimits:
                 current_price=Decimal("0.52"),
                 unrealized_pnl=Decimal("2"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         ]
         portfolio_limits.total_portfolio_value = Decimal("10000")
@@ -139,8 +130,7 @@ class TestPortfolioLimits:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_check_portfolio_exposure_limit(
-            self, portfolio_limits, new_position):
+    async def test_check_portfolio_exposure_limit(self, portfolio_limits, new_position):
         """Test portfolio exposure limit checking."""
         # Add positions that would exceed exposure limit
         portfolio_limits.positions = [
@@ -151,7 +141,7 @@ class TestPortfolioLimits:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         ]
         portfolio_limits.total_portfolio_value = Decimal("10000")
@@ -165,8 +155,7 @@ class TestPortfolioLimits:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_check_sector_exposure_limit(
-            self, portfolio_limits, new_position):
+    async def test_check_sector_exposure_limit(self, portfolio_limits, new_position):
         """Test sector exposure limit checking."""
         # Add positions in the same sector (cryptocurrency)
         portfolio_limits.positions = [
@@ -177,7 +166,7 @@ class TestPortfolioLimits:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             Position(
                 symbol="ETHUSDT",
@@ -186,8 +175,8 @@ class TestPortfolioLimits:
                 current_price=Decimal("3100"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         ]
         portfolio_limits.total_portfolio_value = Decimal("10000")
 
@@ -200,8 +189,7 @@ class TestPortfolioLimits:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_check_correlation_exposure_limit(
-            self, portfolio_limits, new_position):
+    async def test_check_correlation_exposure_limit(self, portfolio_limits, new_position):
         """Test correlation exposure limit checking."""
         # Add positions with high correlation
         portfolio_limits.positions = [
@@ -212,16 +200,20 @@ class TestPortfolioLimits:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         ]
         portfolio_limits.total_portfolio_value = Decimal("10000")
 
         # Add correlation data
-        portfolio_limits.return_history["BTCUSDT"] = [
-            0.01, 0.02, 0.01, 0.02, 0.01] * 10
+        portfolio_limits.return_history["BTCUSDT"] = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
         portfolio_limits.return_history["ADAUSDT"] = [
-            0.01, 0.02, 0.01, 0.02, 0.01] * 10  # High correlation
+            0.01,
+            0.02,
+            0.01,
+            0.02,
+            0.01,
+        ] * 10  # High correlation
 
         result = await portfolio_limits._check_correlation_exposure_limit(new_position)
 
@@ -239,10 +231,8 @@ class TestPortfolioLimits:
     def test_get_correlation(self, portfolio_limits):
         """Test correlation calculation."""
         # Add return histories
-        portfolio_limits.return_history["BTCUSDT"] = [
-            0.01, 0.02, 0.01, 0.02, 0.01] * 10
-        portfolio_limits.return_history["ETHUSDT"] = [
-            0.01, 0.02, 0.01, 0.02, 0.01] * 10
+        portfolio_limits.return_history["BTCUSDT"] = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
+        portfolio_limits.return_history["ETHUSDT"] = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
 
         correlation = portfolio_limits._get_correlation("BTCUSDT", "ETHUSDT")
 
@@ -266,8 +256,7 @@ class TestPortfolioLimits:
         assert correlation == 0.0
 
     @pytest.mark.asyncio
-    async def test_update_portfolio_state(
-            self, portfolio_limits, sample_position):
+    async def test_update_portfolio_state(self, portfolio_limits, sample_position):
         """Test portfolio state update."""
         positions = [sample_position]
         portfolio_value = Decimal("10000")
@@ -290,8 +279,7 @@ class TestPortfolioLimits:
         assert len(portfolio_limits.return_history[symbol]) == 0
 
     @pytest.mark.asyncio
-    async def test_update_return_history_with_previous_price(
-            self, portfolio_limits):
+    async def test_update_return_history_with_previous_price(self, portfolio_limits):
         """Test return history update with previous price."""
         symbol = "BTCUSDT"
 
@@ -321,10 +309,8 @@ class TestPortfolioLimits:
 
     @pytest.mark.asyncio
     async def test_get_portfolio_summary(
-            self,
-            portfolio_limits,
-            sample_position,
-            sample_position_eth):
+        self, portfolio_limits, sample_position, sample_position_eth
+    ):
         """Test portfolio summary generation."""
         positions = [sample_position, sample_position_eth]
         portfolio_value = Decimal("10000")
@@ -376,8 +362,7 @@ class TestPortfolioLimits:
         assert portfolio_limits.sector_mapping["USDC"] == "stablecoin"
 
         # Test unknown symbol
-        assert portfolio_limits.sector_mapping.get(
-            "UNKNOWN", "other") == "other"
+        assert portfolio_limits.sector_mapping.get("UNKNOWN", "other") == "other"
 
     def test_sector_exposure_calculation(self, portfolio_limits):
         """Test sector exposure calculation."""
@@ -389,7 +374,7 @@ class TestPortfolioLimits:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
         usdt_position = Position(
@@ -399,7 +384,7 @@ class TestPortfolioLimits:
             current_price=Decimal("1"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
         portfolio_limits.positions = [btc_position, usdt_position]
@@ -407,15 +392,11 @@ class TestPortfolioLimits:
 
         # Test cryptocurrency sector exposure
         crypto_exposure = btc_position.quantity * btc_position.current_price
-        crypto_percentage = float(
-            crypto_exposure /
-            portfolio_limits.total_portfolio_value)
+        crypto_percentage = float(crypto_exposure / portfolio_limits.total_portfolio_value)
 
         # Test stablecoin sector exposure
         stablecoin_exposure = usdt_position.quantity * usdt_position.current_price
-        stablecoin_percentage = float(
-            stablecoin_exposure /
-            portfolio_limits.total_portfolio_value)
+        stablecoin_percentage = float(stablecoin_exposure / portfolio_limits.total_portfolio_value)
 
         assert crypto_percentage > 0
         assert stablecoin_percentage > 0
@@ -439,8 +420,7 @@ class TestPortfolioLimits:
         """Test correlation calculation with negative correlation."""
         # Create negatively correlated returns
         returns1 = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
-        returns2 = [-0.01, -0.02, -0.01, -0.02, -0.01] * \
-            10  # Negative correlation
+        returns2 = [-0.01, -0.02, -0.01, -0.02, -0.01] * 10  # Negative correlation
 
         portfolio_limits.return_history["BTCUSDT"] = returns1
         portfolio_limits.return_history["ETHUSDT"] = returns2
@@ -454,8 +434,7 @@ class TestPortfolioLimits:
         """Test correlation calculation with uncorrelated returns."""
         # Create uncorrelated returns
         returns1 = [0.01, 0.02, 0.01, 0.02, 0.01] * 10
-        returns2 = [0.005, -0.01, 0.015, -0.005, 0.01] * \
-            10  # Different pattern
+        returns2 = [0.005, -0.01, 0.015, -0.005, 0.01] * 10  # Different pattern
 
         portfolio_limits.return_history["BTCUSDT"] = returns1
         portfolio_limits.return_history["ETHUSDT"] = returns2

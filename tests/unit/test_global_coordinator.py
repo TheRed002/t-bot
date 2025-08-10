@@ -7,19 +7,17 @@ cross-exchange rate limit management and global limits.
 CRITICAL: Tests must achieve 90% coverage for P-007 components.
 """
 
+from datetime import datetime
+from unittest.mock import Mock
+
 import pytest
-import asyncio
-from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, AsyncMock
-from decimal import Decimal
+
+from src.core.config import Config
+from src.core.exceptions import ValidationError
+from src.core.types import RequestType
 
 # Import the components to test
 from src.exchanges.global_coordinator import GlobalRateCoordinator
-from src.core.types import RequestType
-from src.core.exceptions import (
-    ExchangeRateLimitError, ValidationError
-)
-from src.core.config import Config
 
 
 class TestGlobalRateCoordinator:
@@ -38,11 +36,11 @@ class TestGlobalRateCoordinator:
     def test_initialization(self, coordinator):
         """Test that the coordinator initializes correctly."""
         assert coordinator is not None
-        assert hasattr(coordinator, 'global_limits')
-        assert hasattr(coordinator, 'request_history')
-        assert hasattr(coordinator, 'order_history')
-        assert hasattr(coordinator, 'connection_history')
-        assert hasattr(coordinator, 'exchange_usage')
+        assert hasattr(coordinator, "global_limits")
+        assert hasattr(coordinator, "request_history")
+        assert hasattr(coordinator, "order_history")
+        assert hasattr(coordinator, "connection_history")
+        assert hasattr(coordinator, "exchange_usage")
 
         # Check global limits
         expected_limits = {
@@ -63,7 +61,7 @@ class TestGlobalRateCoordinator:
     async def test_check_global_limits_invalid_request_type(self, coordinator):
         """Test global limits check with invalid request type."""
         with pytest.raises(ValidationError, match="Invalid request type"):
-            await coordinator.check_global_limits('invalid_type', 1)
+            await coordinator.check_global_limits("invalid_type", 1)
 
     @pytest.mark.asyncio
     async def test_check_global_limits_invalid_count(self, coordinator):
@@ -75,31 +73,41 @@ class TestGlobalRateCoordinator:
     async def test_check_global_limits_missing_request_type(self, coordinator):
         """Test global limits check with missing request type."""
         with pytest.raises(ValidationError, match="Request type is required"):
-            await coordinator.check_global_limits('', 1)
+            await coordinator.check_global_limits("", 1)
 
     @pytest.mark.asyncio
     async def test_coordinate_request_valid(self, coordinator):
         """Test request coordination with valid parameters."""
-        result = await coordinator.coordinate_request('binance', '/api/v3/ticker/price', RequestType.MARKET_DATA.value)
+        result = await coordinator.coordinate_request(
+            "binance", "/api/v3/ticker/price", RequestType.MARKET_DATA.value
+        )
         assert result is True
 
     @pytest.mark.asyncio
     async def test_coordinate_request_invalid_exchange(self, coordinator):
         """Test request coordination with invalid exchange."""
-        with pytest.raises(ValidationError, match="Exchange, endpoint, and request_type are required"):
-            await coordinator.coordinate_request('', '/api/v3/ticker/price', RequestType.MARKET_DATA.value)
+        with pytest.raises(
+            ValidationError, match="Exchange, endpoint, and request_type are required"
+        ):
+            await coordinator.coordinate_request(
+                "", "/api/v3/ticker/price", RequestType.MARKET_DATA.value
+            )
 
     @pytest.mark.asyncio
     async def test_coordinate_request_invalid_endpoint(self, coordinator):
         """Test request coordination with invalid endpoint."""
-        with pytest.raises(ValidationError, match="Exchange, endpoint, and request_type are required"):
-            await coordinator.coordinate_request('binance', '', RequestType.MARKET_DATA.value)
+        with pytest.raises(
+            ValidationError, match="Exchange, endpoint, and request_type are required"
+        ):
+            await coordinator.coordinate_request("binance", "", RequestType.MARKET_DATA.value)
 
     @pytest.mark.asyncio
     async def test_coordinate_request_invalid_request_type(self, coordinator):
         """Test request coordination with invalid request type."""
-        with pytest.raises(ValidationError, match="Exchange, endpoint, and request_type are required"):
-            await coordinator.coordinate_request('binance', '/api/v3/ticker/price', '')
+        with pytest.raises(
+            ValidationError, match="Exchange, endpoint, and request_type are required"
+        ):
+            await coordinator.coordinate_request("binance", "/api/v3/ticker/price", "")
 
     @pytest.mark.asyncio
     async def test_check_order_limits_valid(self, coordinator):
@@ -177,8 +185,8 @@ class TestGlobalRateCoordinator:
 
     def test_record_exchange_usage(self, coordinator):
         """Test recording exchange usage."""
-        exchange = 'binance'
-        endpoint = '/api/v3/ticker/price'
+        exchange = "binance"
+        endpoint = "/api/v3/ticker/price"
         request_type = RequestType.MARKET_DATA.value
 
         coordinator._record_exchange_usage(exchange, endpoint, request_type)
@@ -189,14 +197,13 @@ class TestGlobalRateCoordinator:
 
     def test_record_exchange_usage_cleanup(self, coordinator):
         """Test that old exchange usage is cleaned up."""
-        exchange = 'binance'
-        endpoint = '/api/v3/ticker/price'
+        exchange = "binance"
+        endpoint = "/api/v3/ticker/price"
         request_type = RequestType.MARKET_DATA.value
 
         # Add more than 1000 requests
         for _ in range(1001):
-            coordinator._record_exchange_usage(
-                exchange, endpoint, request_type)
+            coordinator._record_exchange_usage(exchange, endpoint, request_type)
 
         assert len(coordinator.exchange_usage[exchange][endpoint]) == 1000
 
@@ -222,13 +229,13 @@ class TestGlobalRateCoordinator:
 
     def test_get_exchange_usage_stats_empty(self, coordinator):
         """Test getting exchange usage stats for non-existent exchange."""
-        stats = coordinator.get_exchange_usage_stats('nonexistent')
+        stats = coordinator.get_exchange_usage_stats("nonexistent")
         assert stats == {}
 
     def test_get_exchange_usage_stats_with_data(self, coordinator):
         """Test getting exchange usage stats with data."""
-        exchange = 'binance'
-        endpoint = '/api/v3/ticker/price'
+        exchange = "binance"
+        endpoint = "/api/v3/ticker/price"
         request_type = RequestType.MARKET_DATA.value
 
         # Add some test data
@@ -249,10 +256,11 @@ class TestGlobalRateCoordinator:
         assert result == 0.0
 
     @pytest.mark.asyncio
-    async def test_wait_for_global_capacity_websocket_connection(
-            self, coordinator):
+    async def test_wait_for_global_capacity_websocket_connection(self, coordinator):
         """Test waiting for websocket connection capacity."""
-        result = await coordinator.wait_for_global_capacity(RequestType.WEBSOCKET_CONNECTION.value, 1)
+        result = await coordinator.wait_for_global_capacity(
+            RequestType.WEBSOCKET_CONNECTION.value, 1
+        )
         assert result == 0.0
 
     @pytest.mark.asyncio
@@ -262,11 +270,10 @@ class TestGlobalRateCoordinator:
         assert result == 0.0
 
     @pytest.mark.asyncio
-    async def test_wait_for_global_capacity_invalid_request_type(
-            self, coordinator):
+    async def test_wait_for_global_capacity_invalid_request_type(self, coordinator):
         """Test waiting for capacity with invalid request type."""
         with pytest.raises(ValidationError, match="Request type is required"):
-            await coordinator.wait_for_global_capacity('', 1)
+            await coordinator.wait_for_global_capacity("", 1)
 
     @pytest.mark.asyncio
     async def test_wait_for_global_capacity_invalid_count(self, coordinator):
@@ -392,15 +399,13 @@ class TestGlobalRateCoordinatorIntegration:
         """Test coordination across different exchanges."""
         coordinator = GlobalRateCoordinator(config)
 
-        exchanges = ['binance', 'okx', 'coinbase']
-        endpoints = [
-            '/api/v3/ticker/price',
-            '/api/v5/market/ticker',
-            '/products/BTC-USD/ticker']
+        exchanges = ["binance", "okx", "coinbase"]
+        endpoints = ["/api/v3/ticker/price", "/api/v5/market/ticker", "/products/BTC-USD/ticker"]
         request_types = [RequestType.MARKET_DATA.value] * 3
 
         for exchange, endpoint, request_type in zip(
-                exchanges, endpoints, request_types):
+            exchanges, endpoints, request_types, strict=False
+        ):
             result = await coordinator.coordinate_request(exchange, endpoint, request_type)
             assert result is True
 
@@ -432,7 +437,7 @@ class TestGlobalRateCoordinatorIntegration:
 
         # Test with invalid request type
         with pytest.raises(ValidationError):
-            await coordinator.check_global_limits('invalid_type', 1)
+            await coordinator.check_global_limits("invalid_type", 1)
 
         # Test with invalid count
         with pytest.raises(ValidationError):
@@ -440,7 +445,7 @@ class TestGlobalRateCoordinatorIntegration:
 
         # Test with missing parameters
         with pytest.raises(ValidationError):
-            await coordinator.coordinate_request('', '/api/test', RequestType.MARKET_DATA.value)
+            await coordinator.coordinate_request("", "/api/test", RequestType.MARKET_DATA.value)
 
     @pytest.mark.asyncio
     async def test_usage_tracking(self, config):

@@ -10,66 +10,65 @@ This module tests the integration between all data quality components:
 Test Coverage: 90%+
 """
 
-import pytest
 import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import Any
+
+import pytest
+
+from src.core.types import MarketData, Signal, SignalDirection
+from src.data.quality.cleaning import CleaningStrategy, DataCleaner
+from src.data.quality.monitoring import QualityMonitor
 
 # Import the components to test
-from src.data.quality.validation import DataValidator, ValidationLevel, ValidationIssue
-from src.data.quality.cleaning import DataCleaner, CleaningStrategy, CleaningResult
-from src.data.quality.monitoring import QualityMonitor, QualityLevel, DriftAlert
-from src.core.types import MarketData, Signal, SignalDirection
-from src.core.exceptions import DataError, DataValidationError, ValidationError
+from src.data.quality.validation import DataValidator
 
 
 class TestDataQualityIntegration:
     """Integration tests for data quality management system"""
 
     @pytest.fixture
-    def validator_config(self) -> Dict[str, Any]:
+    def validator_config(self) -> dict[str, Any]:
         """Test configuration for validator"""
         return {
-            'price_change_threshold': 0.5,
-            'volume_change_threshold': 10.0,
-            'outlier_std_threshold': 3.0,
-            'max_data_age_seconds': 60,
-            'max_history_size': 100,
-            'consistency_threshold': 0.01
+            "price_change_threshold": 0.5,
+            "volume_change_threshold": 10.0,
+            "outlier_std_threshold": 3.0,
+            "max_data_age_seconds": 60,
+            "max_history_size": 100,
+            "consistency_threshold": 0.01,
         }
 
     @pytest.fixture
-    def cleaner_config(self) -> Dict[str, Any]:
+    def cleaner_config(self) -> dict[str, Any]:
         """Test configuration for cleaner"""
         return {
-            'outlier_threshold': 3.0,
-            'missing_threshold': 0.1,
-            'smoothing_window': 5,
-            'duplicate_threshold': 1.0,
-            'max_history_size': 100,
-            'outlier_strategy': CleaningStrategy.ADJUST
+            "outlier_threshold": 3.0,
+            "missing_threshold": 0.1,
+            "smoothing_window": 5,
+            "duplicate_threshold": 1.0,
+            "max_history_size": 100,
+            "outlier_strategy": CleaningStrategy.ADJUST,
         }
 
     @pytest.fixture
-    def monitor_config(self) -> Dict[str, Any]:
+    def monitor_config(self) -> dict[str, Any]:
         """Test configuration for monitor"""
         return {
-            'quality_thresholds': {
-                'excellent': 0.95,
-                'good': 0.85,
-                'fair': 0.70,
-                'poor': 0.50
-            },
-            'drift_threshold': 0.1,
-            'distribution_window': 100,
-            'alert_cooldown': 3600
+            "quality_thresholds": {"excellent": 0.95, "good": 0.85, "fair": 0.70, "poor": 0.50},
+            "drift_threshold": 0.1,
+            "distribution_window": 100,
+            "alert_cooldown": 3600,
         }
 
     @pytest.fixture
-    def data_quality_system(self, validator_config: Dict[str, Any],
-                            cleaner_config: Dict[str, Any],
-                            monitor_config: Dict[str, Any]):
+    def data_quality_system(
+        self,
+        validator_config: dict[str, Any],
+        cleaner_config: dict[str, Any],
+        monitor_config: dict[str, Any],
+    ):
         """Create integrated data quality system"""
         validator = DataValidator(validator_config)
         cleaner = DataCleaner(cleaner_config)
@@ -77,46 +76,51 @@ class TestDataQualityIntegration:
         return validator, cleaner, monitor
 
     @pytest.fixture
-    def sample_market_data(self) -> List[MarketData]:
+    def sample_market_data(self) -> list[MarketData]:
         """Create sample market data for testing"""
         base_time = datetime.now(timezone.utc)
         data = []
 
         for i in range(20):
-            data.append(MarketData(
-                symbol="BTCUSDT",
-                price=Decimal(str(50000 + i * 10)),
-                volume=Decimal(str(100 + i * 2)),
-                timestamp=base_time + timedelta(seconds=i),
-                bid=Decimal(str(49999 + i * 10)),
-                ask=Decimal(str(50001 + i * 10)),
-                open_price=Decimal(str(49900 + i * 10)),
-                high_price=Decimal(str(50100 + i * 10)),
-                low_price=Decimal(str(49800 + i * 10))
-            ))
+            data.append(
+                MarketData(
+                    symbol="BTCUSDT",
+                    price=Decimal(str(50000 + i * 10)),
+                    volume=Decimal(str(100 + i * 2)),
+                    timestamp=base_time + timedelta(seconds=i),
+                    bid=Decimal(str(49999 + i * 10)),
+                    ask=Decimal(str(50001 + i * 10)),
+                    open_price=Decimal(str(49900 + i * 10)),
+                    high_price=Decimal(str(50100 + i * 10)),
+                    low_price=Decimal(str(49800 + i * 10)),
+                )
+            )
 
         return data
 
     @pytest.fixture
-    def sample_signals(self) -> List[Signal]:
+    def sample_signals(self) -> list[Signal]:
         """Create sample signals for testing"""
         base_time = datetime.now(timezone.utc)
         signals = []
 
         for i in range(10):
-            signals.append(Signal(
-                direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
-                confidence=0.7 + (i * 0.02),
-                timestamp=base_time + timedelta(seconds=i),
-                symbol="BTCUSDT",
-                strategy_name=f"test_strategy_{i % 3}"
-            ))
+            signals.append(
+                Signal(
+                    direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
+                    confidence=0.7 + (i * 0.02),
+                    timestamp=base_time + timedelta(seconds=i),
+                    symbol="BTCUSDT",
+                    strategy_name=f"test_strategy_{i % 3}",
+                )
+            )
 
         return signals
 
     @pytest.mark.asyncio
     async def test_end_to_end_data_quality_pipeline(
-            self, data_quality_system, sample_market_data: List[MarketData]):
+        self, data_quality_system, sample_market_data: list[MarketData]
+    ):
         """Test complete data quality pipeline from validation to monitoring"""
         validator, cleaner, monitor = data_quality_system
 
@@ -132,31 +136,31 @@ class TestDataQualityIntegration:
             # Step 3: Monitor quality
             quality_score, drift_alerts = await monitor.monitor_data_quality(cleaned_data)
 
-            results.append({
-                'original_data': data,
-                'is_valid': is_valid,
-                'validation_issues': validation_issues,
-                'cleaned_data': cleaned_data,
-                'cleaning_result': cleaning_result,
-                'quality_score': quality_score,
-                'drift_alerts': drift_alerts
-            })
+            results.append(
+                {
+                    "original_data": data,
+                    "is_valid": is_valid,
+                    "validation_issues": validation_issues,
+                    "cleaned_data": cleaned_data,
+                    "cleaning_result": cleaning_result,
+                    "quality_score": quality_score,
+                    "drift_alerts": drift_alerts,
+                }
+            )
 
         # Verify pipeline results
         assert len(results) == len(sample_market_data)
 
         # All data should be valid
-        valid_count = sum(1 for r in results if r['is_valid'])
+        valid_count = sum(1 for r in results if r["is_valid"])
         assert valid_count == len(sample_market_data)
 
         # All data should be cleaned
-        cleaned_count = sum(
-            1 for r in results if r['cleaned_data'] is not None)
+        cleaned_count = sum(1 for r in results if r["cleaned_data"] is not None)
         assert cleaned_count == len(sample_market_data)
 
         # Quality scores should be reasonable
-        avg_quality_score = sum(r['quality_score']
-                                for r in results) / len(results)
+        avg_quality_score = sum(r["quality_score"] for r in results) / len(results)
         assert 0.7 <= avg_quality_score <= 1.0
 
     @pytest.mark.asyncio
@@ -169,15 +173,15 @@ class TestDataQualityIntegration:
             symbol="BTCUSDT",
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Create outlier data
         outlier_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("100000.00"),  # Significant outlier
-            volume=Decimal("1000.5"),    # Volume outlier
-            timestamp=datetime.now(timezone.utc)
+            volume=Decimal("1000.5"),  # Volume outlier
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Build up history with normal data first (need at least 10 points for
@@ -187,26 +191,37 @@ class TestDataQualityIntegration:
                 symbol="BTCUSDT",
                 price=Decimal(str(50000 + i * 10)),  # Stable progression
                 volume=Decimal(str(100 + i)),  # Stable progression
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             await validator.validate_market_data(historical_data)
             # Build cleaner history
             await cleaner.clean_market_data(historical_data)
 
         # Process normal data
-        is_valid_normal, validation_issues_normal = await validator.validate_market_data(normal_data)
+        is_valid_normal, validation_issues_normal = await validator.validate_market_data(
+            normal_data
+        )
         cleaned_normal, cleaning_result_normal = await cleaner.clean_market_data(normal_data)
-        quality_score_normal, drift_alerts_normal = await monitor.monitor_data_quality(cleaned_normal)
+        quality_score_normal, drift_alerts_normal = await monitor.monitor_data_quality(
+            cleaned_normal
+        )
 
         # Process outlier data
-        is_valid_outlier, validation_issues_outlier = await validator.validate_market_data(outlier_data)
+        is_valid_outlier, validation_issues_outlier = await validator.validate_market_data(
+            outlier_data
+        )
         cleaned_outlier, cleaning_result_outlier = await cleaner.clean_market_data(outlier_data)
-        quality_score_outlier, drift_alerts_outlier = await monitor.monitor_data_quality(cleaned_outlier)
+        quality_score_outlier, drift_alerts_outlier = await monitor.monitor_data_quality(
+            cleaned_outlier
+        )
 
         # Verify outlier handling
         assert len(validation_issues_outlier) > len(
-            validation_issues_normal)  # More validation issues
-        assert cleaning_result_outlier.adjusted_count > 0 or cleaning_result_outlier.removed_count > 0  # Outlier handled
+            validation_issues_normal
+        )  # More validation issues
+        assert (
+            cleaning_result_outlier.adjusted_count > 0 or cleaning_result_outlier.removed_count > 0
+        )  # Outlier handled
         # Note: Quality score may be the same after cleaning since outliers are adjusted to reasonable values
         # The key indicator is that outliers were detected and handled
         # (adjusted_count > 0)
@@ -221,7 +236,7 @@ class TestDataQualityIntegration:
             symbol="BTCUSDT",
             price=Decimal("0"),  # Zero price (treated as missing)
             volume=Decimal("0"),  # Zero volume (treated as missing)
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Process incomplete data
@@ -246,14 +261,14 @@ class TestDataQualityIntegration:
             symbol="BTCUSDT",
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         source2_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("50001.00"),  # Small difference
             volume=Decimal("100.0"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Test consistency validation
@@ -270,22 +285,20 @@ class TestDataQualityIntegration:
             symbol="BTCUSDT",
             price=Decimal("51000.00"),  # Large difference
             volume=Decimal("200.0"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
-        is_consistent_inconsistent, consistency_issues_inconsistent = await validator.validate_cross_source_consistency(
-            source1_data, inconsistent_data
-        )
+        (
+            is_consistent_inconsistent,
+            consistency_issues_inconsistent,
+        ) = await validator.validate_cross_source_consistency(source1_data, inconsistent_data)
 
         # Should detect inconsistency
         assert not is_consistent_inconsistent
         assert len(consistency_issues_inconsistent) > 0
 
     @pytest.mark.asyncio
-    async def test_signal_quality_pipeline(
-            self,
-            data_quality_system,
-            sample_signals: List[Signal]):
+    async def test_signal_quality_pipeline(self, data_quality_system, sample_signals: list[Signal]):
         """Test signal quality pipeline"""
         validator, cleaner, monitor = data_quality_system
 
@@ -302,8 +315,7 @@ class TestDataQualityIntegration:
         quality_score, drift_alerts = await monitor.monitor_signal_quality(cleaned_signals)
 
         # Verify signal processing
-        assert len(cleaned_signals) <= len(
-            sample_signals)  # May remove invalid signals
+        assert len(cleaned_signals) <= len(sample_signals)  # May remove invalid signals
         assert 0.0 <= quality_score <= 1.0
         assert isinstance(drift_alerts, list)
 
@@ -326,7 +338,7 @@ class TestDataQualityIntegration:
                 symbol=symbol,
                 price=Decimal(str(50000 + i * 10)),  # Stable progression
                 volume=Decimal("100.5"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
 
             # Process through pipeline
@@ -344,7 +356,7 @@ class TestDataQualityIntegration:
                 symbol=symbol,
                 price=Decimal(str(60000 + i * 100)),  # Different pattern
                 volume=Decimal("200.5"),  # Different volume
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
 
             # Process through pipeline
@@ -361,7 +373,8 @@ class TestDataQualityIntegration:
 
     @pytest.mark.asyncio
     async def test_quality_reporting_integration(
-            self, data_quality_system, sample_market_data: List[MarketData]):
+        self, data_quality_system, sample_market_data: list[MarketData]
+    ):
         """Test quality reporting integration"""
         validator, cleaner, monitor = data_quality_system
 
@@ -378,11 +391,11 @@ class TestDataQualityIntegration:
         quality_report = await monitor.generate_quality_report()
 
         # Verify report generation
-        assert 'price_history_size' in validation_summary
-        assert 'cleaning_stats' in cleaning_summary
-        assert 'monitoring_stats' in monitoring_summary
-        assert 'overall_quality_score' in quality_report
-        assert 'recommendations' in quality_report
+        assert "price_history_size" in validation_summary
+        assert "cleaning_stats" in cleaning_summary
+        assert "monitoring_stats" in monitoring_summary
+        assert "overall_quality_score" in quality_report
+        assert "recommendations" in quality_report
 
     @pytest.mark.asyncio
     async def test_error_handling_integration(self, data_quality_system):
@@ -400,13 +413,18 @@ class TestDataQualityIntegration:
             symbol="",  # Empty symbol (invalid but Pydantic-valid)
             price=Decimal("-100.00"),  # Negative price
             volume=Decimal("-50.00"),  # Negative volume
-            timestamp=datetime.now(timezone.utc) +
-            timedelta(hours=1)  # Future timestamp
+            timestamp=datetime.now(timezone.utc) + timedelta(hours=1),  # Future timestamp
         )
 
-        is_valid_malformed, validation_issues_malformed = await validator.validate_market_data(malformed_data)
-        cleaned_malformed, cleaning_result_malformed = await cleaner.clean_market_data(malformed_data)
-        quality_score_malformed, drift_alerts_malformed = await monitor.monitor_data_quality(cleaned_malformed)
+        is_valid_malformed, validation_issues_malformed = await validator.validate_market_data(
+            malformed_data
+        )
+        cleaned_malformed, cleaning_result_malformed = await cleaner.clean_market_data(
+            malformed_data
+        )
+        quality_score_malformed, drift_alerts_malformed = await monitor.monitor_data_quality(
+            cleaned_malformed
+        )
 
         # Verify error handling
         assert not is_valid_none
@@ -424,12 +442,14 @@ class TestDataQualityIntegration:
         # Create test data
         test_data = []
         for i in range(100):
-            test_data.append(MarketData(
-                symbol="BTCUSDT",
-                price=Decimal(str(50000 + i * 10)),
-                volume=Decimal(str(100 + i)),
-                timestamp=datetime.now(timezone.utc)
-            ))
+            test_data.append(
+                MarketData(
+                    symbol="BTCUSDT",
+                    price=Decimal(str(50000 + i * 10)),
+                    volume=Decimal(str(100 + i)),
+                    timestamp=datetime.now(timezone.utc),
+                )
+            )
 
         start_time = time.perf_counter()
 
@@ -454,8 +474,9 @@ class TestDataQualityIntegration:
         """Test memory usage of integrated system"""
         validator, cleaner, monitor = data_quality_system
 
-        import psutil
         import os
+
+        import psutil
 
         process = psutil.Process(os.getpid())
         initial_memory = process.memory_info().rss / 1024 / 1024  # MB
@@ -466,7 +487,7 @@ class TestDataQualityIntegration:
                 symbol="BTCUSDT",
                 price=Decimal(str(50000 + i)),
                 volume=Decimal(str(100 + i)),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
 
             is_valid, _ = await validator.validate_market_data(data)
@@ -492,18 +513,16 @@ class TestDataQualityIntegration:
                     symbol=symbol,
                     price=Decimal(str(start_price + i * 10)),
                     volume=Decimal(str(100 + i)),
-                    timestamp=datetime.now(timezone.utc)
+                    timestamp=datetime.now(timezone.utc),
                 )
 
                 is_valid, _ = await validator.validate_market_data(data)
                 cleaned_data, _ = await cleaner.clean_market_data(data)
                 quality_score, _ = await monitor.monitor_data_quality(cleaned_data)
 
-                results.append({
-                    'symbol': symbol,
-                    'is_valid': is_valid,
-                    'quality_score': quality_score
-                })
+                results.append(
+                    {"symbol": symbol, "is_valid": is_valid, "quality_score": quality_score}
+                )
 
             return results
 
@@ -511,7 +530,7 @@ class TestDataQualityIntegration:
         tasks = [
             process_data_stream("BTCUSDT", 50000),
             process_data_stream("ETHUSDT", 3000),
-            process_data_stream("ADAUSDT", 1)
+            process_data_stream("ADAUSDT", 1),
         ]
 
         results = await asyncio.gather(*tasks)
@@ -521,8 +540,8 @@ class TestDataQualityIntegration:
         for stream_results in results:
             assert len(stream_results) == 10
             for result in stream_results:
-                assert result['is_valid']
-                assert 0.0 <= result['quality_score'] <= 1.0
+                assert result["is_valid"]
+                assert 0.0 <= result["quality_score"] <= 1.0
 
 
 class TestDataQualityRealWorldScenarios:
@@ -532,29 +551,24 @@ class TestDataQualityRealWorldScenarios:
     async def test_market_crash_scenario(self):
         """Test data quality during market crash scenario"""
         validator_config = {
-            'price_change_threshold': 0.5,
-            'volume_change_threshold': 10.0,
-            'outlier_std_threshold': 3.0,
-            'max_data_age_seconds': 60,
-            'consistency_threshold': 0.01
+            "price_change_threshold": 0.5,
+            "volume_change_threshold": 10.0,
+            "outlier_std_threshold": 3.0,
+            "max_data_age_seconds": 60,
+            "consistency_threshold": 0.01,
         }
 
         cleaner_config = {
-            'outlier_threshold': 3.0,
-            'missing_threshold': 0.1,
-            'smoothing_window': 5,
-            'outlier_strategy': CleaningStrategy.ADJUST
+            "outlier_threshold": 3.0,
+            "missing_threshold": 0.1,
+            "smoothing_window": 5,
+            "outlier_strategy": CleaningStrategy.ADJUST,
         }
 
         monitor_config = {
-            'quality_thresholds': {
-                'excellent': 0.95,
-                'good': 0.85,
-                'fair': 0.70,
-                'poor': 0.50
-            },
-            'drift_threshold': 0.1,
-            'distribution_window': 100
+            "quality_thresholds": {"excellent": 0.95, "good": 0.85, "fair": 0.70, "poor": 0.50},
+            "drift_threshold": 0.1,
+            "distribution_window": 100,
         }
 
         validator = DataValidator(validator_config)
@@ -567,7 +581,7 @@ class TestDataQualityRealWorldScenarios:
                 symbol="BTCUSDT",
                 price=Decimal(str(50000 + i * 10)),  # Stable progression
                 volume=Decimal(str(100 + i)),  # Stable progression
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             await validator.validate_market_data(historical_data)
             # Build cleaner history
@@ -580,7 +594,7 @@ class TestDataQualityRealWorldScenarios:
             symbol="BTCUSDT",
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         is_valid_normal, _ = await validator.validate_market_data(normal_data)
@@ -591,8 +605,8 @@ class TestDataQualityRealWorldScenarios:
         crash_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("25000.00"),  # 50% drop
-            volume=Decimal("1000.5"),   # 10x volume increase
-            timestamp=datetime.now(timezone.utc)
+            volume=Decimal("1000.5"),  # 10x volume increase
+            timestamp=datetime.now(timezone.utc),
         )
 
         is_valid_crash, validation_issues_crash = await validator.validate_market_data(crash_data)
@@ -612,29 +626,24 @@ class TestDataQualityRealWorldScenarios:
     async def test_data_source_failure_scenario(self):
         """Test data quality during data source failure"""
         validator_config = {
-            'price_change_threshold': 0.5,
-            'volume_change_threshold': 10.0,
-            'outlier_std_threshold': 3.0,
-            'max_data_age_seconds': 60,
-            'consistency_threshold': 0.01
+            "price_change_threshold": 0.5,
+            "volume_change_threshold": 10.0,
+            "outlier_std_threshold": 3.0,
+            "max_data_age_seconds": 60,
+            "consistency_threshold": 0.01,
         }
 
         cleaner_config = {
-            'outlier_threshold': 3.0,
-            'missing_threshold': 0.1,
-            'smoothing_window': 5,
-            'outlier_strategy': CleaningStrategy.IMPUTE
+            "outlier_threshold": 3.0,
+            "missing_threshold": 0.1,
+            "smoothing_window": 5,
+            "outlier_strategy": CleaningStrategy.IMPUTE,
         }
 
         monitor_config = {
-            'quality_thresholds': {
-                'excellent': 0.95,
-                'good': 0.85,
-                'fair': 0.70,
-                'poor': 0.50
-            },
-            'drift_threshold': 0.1,
-            'distribution_window': 100
+            "quality_thresholds": {"excellent": 0.95, "good": 0.85, "fair": 0.70, "poor": 0.50},
+            "drift_threshold": 0.1,
+            "distribution_window": 100,
         }
 
         validator = DataValidator(validator_config)
@@ -646,10 +655,12 @@ class TestDataQualityRealWorldScenarios:
             symbol="BTCUSDT",
             price=Decimal("0"),  # Zero price (treated as missing)
             volume=Decimal("0"),  # Zero volume (treated as missing)
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
-        is_valid_failed, validation_issues_failed = await validator.validate_market_data(failed_data)
+        is_valid_failed, validation_issues_failed = await validator.validate_market_data(
+            failed_data
+        )
         cleaned_failed, cleaning_result_failed = await cleaner.clean_market_data(failed_data)
         quality_score_failed, _ = await monitor.monitor_data_quality(cleaned_failed)
 

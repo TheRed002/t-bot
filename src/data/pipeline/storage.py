@@ -14,17 +14,15 @@ Dependencies:
 - P-007A: Utility functions and decorators
 """
 
-import asyncio
-from typing import Dict, List, Any, Optional
-from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
-from enum import Enum
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from src.core.config import Config
+from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import MarketData, StorageMode
-from src.core.exceptions import DataError, DatabaseError
-from src.core.config import Config
-from src.core.logging import get_logger
 
 # Import from P-002 database components
 from src.database.connection import get_async_session
@@ -34,7 +32,7 @@ from src.database.influxdb_client import InfluxDBClientWrapper
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
-from src.utils.decorators import time_execution, retry
+from src.utils.decorators import retry, time_execution
 
 logger = get_logger(__name__)
 
@@ -45,6 +43,7 @@ logger = get_logger(__name__)
 @dataclass
 class StorageMetrics:
     """Storage operation metrics"""
+
     total_records_stored: int
     successful_stores: int
     failed_stores: int
@@ -67,40 +66,49 @@ class DataStorageManager:
         self.error_handler = ErrorHandler(config)
 
         # Storage configuration
-        storage_config = getattr(config, 'data_storage', {})
-        if hasattr(storage_config, 'get'):
+        storage_config = getattr(config, "data_storage", {})
+        if hasattr(storage_config, "get"):
             self.storage_mode = StorageMode(
-                storage_config.get('mode', 'batch'))
-            self.batch_size = storage_config.get('batch_size', 100)
-            self.buffer_threshold = storage_config.get('buffer_threshold', 50)
+                storage_config.get("mode", "batch"))
+            self.batch_size = storage_config.get("batch_size", 100)
+            self.buffer_threshold = storage_config.get("buffer_threshold", 50)
             self.cleanup_interval = storage_config.get(
-                'cleanup_interval', 3600)
+                "cleanup_interval", 3600)
         else:
-            self.storage_mode = StorageMode('batch')
+            self.storage_mode = StorageMode("batch")
             self.batch_size = 100
             self.buffer_threshold = 50
             self.cleanup_interval = 3600
 
         # Initialize InfluxDB client for time series market data
-        influx_config = getattr(config, 'influxdb', {})
-        if hasattr(influx_config, 'get'):
+        influx_config = getattr(config, "influxdb", {})
+        if hasattr(influx_config, "get"):
             self.influx_client = InfluxDBClientWrapper(
-                url=influx_config.get('url', 'http://localhost:8086'),
-                token=influx_config.get('token', ''),
-                org=influx_config.get('org', 'trading-bot'),
-                bucket=influx_config.get('bucket', 'market-data')
+                url=influx_config.get("url", "http://localhost:8086"),
+                token=influx_config.get("token", ""),
+                org=influx_config.get("org", "trading-bot"),
+                bucket=influx_config.get("bucket", "market-data"),
             )
+            # Ensure connection is established
+            try:
+                self.influx_client.connect()
+            except Exception:
+                logger.warning(
+                    "InfluxDB connection could not be established during initialization")
         else:
             # Default InfluxDB configuration
             self.influx_client = InfluxDBClientWrapper(
-                url='http://localhost:8086',
-                token='',
-                org='trading-bot',
-                bucket='market-data'
+                url="http://localhost:8086", token="", org="trading-bot", bucket="market-data"
             )
+            try:
+                self.influx_client.connect()
+            except Exception:
+                logger.warning(
+                    "InfluxDB connection could not be established during initialization (default)"
+                )
 
         # Storage buffers
-        self.storage_buffer: List[Dict[str, Any]] = []
+        self.storage_buffer: list[dict[str, Any]] = []
 
         # Storage metrics
         self.metrics = StorageMetrics(
@@ -109,13 +117,13 @@ class DataStorageManager:
             failed_stores=0,
             avg_storage_time=0.0,
             storage_rate=0.0,
-            last_storage_time=datetime.now(timezone.utc)
+            last_storage_time=datetime.now(timezone.utc),
         )
 
         logger.info("DataStorageManager initialized")
 
     @time_execution
-    @retry(max_attempts=3, delay=1.0)
+    @retry(max_attempts=3, base_delay=1.0)
     async def store_market_data(self, data: MarketData) -> bool:
         """
         Store market data to database.
@@ -135,7 +143,7 @@ class DataStorageManager:
                 return await self._store_to_buffer(data)
 
         except Exception as e:
-            logger.error(f"Failed to store market data: {str(e)}")
+            logger.error(f"Failed to store market data: {e!s}")
             self.metrics.failed_stores += 1
             return False
 
@@ -143,17 +151,24 @@ class DataStorageManager:
         """Store data immediately to InfluxDB."""
         try:
             # Write market data to InfluxDB
-            await self.influx_client.write_market_data(
-                data.symbol,
-                data.exchange,
-                data.price,
-                data.volume,
-                bid=data.bid,
-                ask=data.ask,
-                high=data.high_price,
-                low=data.low_price,
-                open_price=data.open_price,
-                timestamp=data.timestamp
+            # Prepare fields dict per client wrapper API
+            fields = {
+                "price": float(data.price),
+                "volume": float(data.volume) if data.volume is not None else 0.0,
+            }
+            if data.bid is not None:
+                fields["bid"] = float(data.bid)
+            if data.ask is not None:
+                fields["ask"] = float(data.ask)
+            if data.high_price is not None:
+                fields["high"] = float(data.high_price)
+            if data.low_price is not None:
+                fields["low"] = float(data.low_price)
+            if data.open_price is not None:
+                fields["open"] = float(data.open_price)
+
+            self.influx_client.write_market_data(
+                symbol=data.symbol, data=fields, timestamp=data.timestamp
             )
 
             self.metrics.successful_stores += 1
@@ -163,7 +178,7 @@ class DataStorageManager:
             return True
 
         except Exception as e:
-            logger.error(f"Real-time storage failed: {str(e)}")
+            logger.error(f"Real-time storage failed: {e!s}")
             self.metrics.failed_stores += 1
             return False
 
@@ -171,9 +186,9 @@ class DataStorageManager:
         """Add data to storage buffer."""
         try:
             buffer_item = {
-                'data': data,
-                'timestamp': datetime.now(timezone.utc),
-                'type': 'market_data'
+                "data": data,
+                "timestamp": datetime.now(timezone.utc),
+                "type": "market_data",
             }
 
             self.storage_buffer.append(buffer_item)
@@ -185,7 +200,7 @@ class DataStorageManager:
             return True
 
         except Exception as e:
-            logger.error(f"Buffer storage failed: {str(e)}")
+            logger.error(f"Buffer storage failed: {e!s}")
             return False
 
     @time_execution
@@ -199,13 +214,30 @@ class DataStorageManager:
             market_data_points = []
 
             for item in self.storage_buffer:
-                if item['type'] == 'market_data':
-                    data = item['data']
+                if item["type"] == "market_data":
+                    data = item["data"]
                     market_data_points.append(data)
 
             # Bulk write to InfluxDB
             if market_data_points:
-                await self.influx_client.write_market_data_batch(market_data_points)
+                # Write individually to ensure type safety and avoid missing API
+                for md in market_data_points:
+                    fields = {
+                        "price": float(md.price),
+                        "volume": float(md.volume) if md.volume is not None else 0.0,
+                    }
+                    if md.bid is not None:
+                        fields["bid"] = float(md.bid)
+                    if md.ask is not None:
+                        fields["ask"] = float(md.ask)
+                    if md.high_price is not None:
+                        fields["high"] = float(md.high_price)
+                    if md.low_price is not None:
+                        fields["low"] = float(md.low_price)
+                    if md.open_price is not None:
+                        fields["open"] = float(md.open_price)
+                    self.influx_client.write_market_data(
+                        md.symbol, fields, md.timestamp)
 
                 # Update metrics
                 stored_count = len(market_data_points)
@@ -217,11 +249,11 @@ class DataStorageManager:
                 return True
 
         except Exception as e:
-            logger.error(f"Buffer flush failed: {str(e)}")
+            logger.error(f"Buffer flush failed: {e!s}")
             self.metrics.failed_stores += len(self.storage_buffer)
             return False
 
-    async def store_batch(self, data_list: List[MarketData]) -> int:
+    async def store_batch(self, data_list: list[MarketData]) -> int:
         """
         Store a batch of data records.
 
@@ -245,7 +277,7 @@ class DataStorageManager:
             return stored_count
 
         except Exception as e:
-            logger.error(f"Batch storage failed: {str(e)}")
+            logger.error(f"Batch storage failed: {e!s}")
             self.metrics.failed_stores += len(data_list)
             return 0
 
@@ -276,15 +308,16 @@ class DataStorageManager:
                 return deleted_count
 
         except Exception as e:
-            logger.error(f"Data cleanup failed: {str(e)}")
+            logger.error(f"Data cleanup failed: {e!s}")
             return 0
 
-    def get_storage_metrics(self) -> Dict[str, Any]:
+    def get_storage_metrics(self) -> dict[str, Any]:
         """Get storage operation metrics."""
         success_rate = (
-            self.metrics.successful_stores /
-            (self.metrics.successful_stores + self.metrics.failed_stores)
-            if (self.metrics.successful_stores + self.metrics.failed_stores) > 0 else 0.0
+            self.metrics.successful_stores
+            / (self.metrics.successful_stores + self.metrics.failed_stores)
+            if (self.metrics.successful_stores + self.metrics.failed_stores) > 0
+            else 0.0
         )
 
         return {
@@ -300,8 +333,8 @@ class DataStorageManager:
             "configuration": {
                 "batch_size": self.batch_size,
                 "buffer_threshold": self.buffer_threshold,
-                "cleanup_interval": self.cleanup_interval
-            }
+                "cleanup_interval": self.cleanup_interval,
+            },
         }
 
     async def force_flush(self) -> bool:
@@ -312,7 +345,7 @@ class DataStorageManager:
             return True
 
         except Exception as e:
-            logger.error(f"Force flush failed: {str(e)}")
+            logger.error(f"Force flush failed: {e!s}")
             return False
 
     async def cleanup(self) -> None:
@@ -323,4 +356,4 @@ class DataStorageManager:
             logger.info("DataStorageManager cleanup completed")
 
         except Exception as e:
-            logger.error(f"Error during DataStorageManager cleanup: {str(e)}")
+            logger.error(f"Error during DataStorageManager cleanup: {e!s}")

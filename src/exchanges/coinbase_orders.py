@@ -8,29 +8,23 @@ CRITICAL: This integrates with P-001 (core types, exceptions, config), P-002A (e
 and P-003 (base exchange interface) components.
 """
 
-import asyncio
-import json
-import time
-from typing import Dict, List, Optional, Any
+from datetime import datetime
 from decimal import Decimal
-from datetime import datetime, timezone
+from typing import Any
+
+# Coinbase-specific imports
+from coinbase.rest import RESTClient
+
+from src.core.config import Config
+from src.core.exceptions import ExchangeConnectionError, ExecutionError, ValidationError
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import (
-    OrderRequest, OrderResponse, OrderSide, OrderType, OrderStatus
-)
-from src.core.exceptions import (
-    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError,
-    ExchangeInsufficientFundsError, ValidationError, ExecutionError
-)
-from src.core.config import Config
-from src.core.logging import get_logger
+from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
-# Coinbase-specific imports
-from coinbase.rest import RESTClient
 # Note: Using generic Exception handling for REST API as no specific
 # exceptions are documented
 
@@ -67,19 +61,20 @@ class CoinbaseOrderManager:
         self.sandbox = config.exchanges.coinbase_sandbox
 
         # REST client
-        self.client: Optional[RESTClient] = None
+        self.client: RESTClient | None = None
 
         # Order tracking
-        self.pending_orders: Dict[str, OrderRequest] = {}
-        self.order_status_cache: Dict[str, OrderStatus] = {}
-        self.order_history: List[OrderResponse] = []
+        self.pending_orders: dict[str, OrderRequest] = {}
+        self.order_status_cache: dict[str, OrderStatus] = {}
+        self.order_history: list[OrderResponse] = []
 
         # Fee tracking
-        self.total_fees: Dict[str, Decimal] = {}
+        self.total_fees: dict[str, Decimal] = {}
         self.fee_currency = "USD"
 
         # Initialize rate limiter
         from src.exchanges.rate_limiter import RateLimiter
+
         self.rate_limiter = RateLimiter(config, exchange_name)
 
         logger.info(f"Initialized {exchange_name} order manager")
@@ -93,26 +88,21 @@ class CoinbaseOrderManager:
         """
         try:
             # Initialize REST client with sandbox support
-            base_url = "api-public.sandbox.exchange.coinbase.com" if self.sandbox else "api.coinbase.com"
+            base_url = (
+                "api-public.sandbox.exchange.coinbase.com" if self.sandbox else "api.coinbase.com"
+            )
             self.client = RESTClient(
-                api_key=self.api_key,
-                api_secret=self.api_secret,
-                base_url=base_url
+                api_key=self.api_key, api_secret=self.api_secret, base_url=base_url
             )
 
             # Test connection
             await self._test_connection()
 
-            logger.info(
-                f"Successfully initialized {
-                    self.exchange_name} order manager")
+            logger.info(f"Successfully initialized {self.exchange_name} order manager")
             return True
 
         except Exception as e:
-            logger.error(
-                f"Failed to initialize {
-                    self.exchange_name} order manager: {
-                    str(e)}")
+            logger.error(f"Failed to initialize {self.exchange_name} order manager: {e!s}")
             return False
 
     async def place_order(self, order: OrderRequest) -> OrderResponse:
@@ -157,8 +147,8 @@ class CoinbaseOrderManager:
             # Re-raise connection errors as-is
             raise
         except Exception as e:
-            logger.error(f"Failed to place order: {str(e)}")
-            raise ExecutionError(f"Failed to place order: {str(e)}")
+            logger.error(f"Failed to place order: {e!s}")
+            raise ExecutionError(f"Failed to place order: {e!s}")
 
     async def cancel_order(self, order_id: str) -> bool:
         """
@@ -188,7 +178,7 @@ class CoinbaseOrderManager:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to cancel order {order_id}: {str(e)}")
+            logger.error(f"Failed to cancel order {order_id}: {e!s}")
             return False
 
     async def get_order_status(self, order_id: str) -> OrderStatus:
@@ -209,8 +199,7 @@ class CoinbaseOrderManager:
             order = await self.client.get_order(order_id)
 
             # Convert status
-            status = self._convert_coinbase_status_to_order_status(
-                order['status'])
+            status = self._convert_coinbase_status_to_order_status(order["status"])
 
             # Update cache
             self.order_status_cache[order_id] = status
@@ -218,13 +207,10 @@ class CoinbaseOrderManager:
             return status
 
         except Exception as e:
-            logger.error(
-                f"Failed to get order status for {order_id}: {
-                    str(e)}")
+            logger.error(f"Failed to get order status for {order_id}: {e!s}")
             return OrderStatus.UNKNOWN
 
-    async def get_order_details(
-            self, order_id: str) -> Optional[OrderResponse]:
+    async def get_order_details(self, order_id: str) -> OrderResponse | None:
         """
         Get detailed information about an order.
 
@@ -247,14 +233,10 @@ class CoinbaseOrderManager:
             return order_response
 
         except Exception as e:
-            logger.error(
-                f"Failed to get order details for {order_id}: {
-                    str(e)}")
+            logger.error(f"Failed to get order details for {order_id}: {e!s}")
             return None
 
-    async def get_open_orders(
-            self,
-            symbol: Optional[str] = None) -> List[OrderResponse]:
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
         """
         Get all open orders.
 
@@ -269,28 +251,23 @@ class CoinbaseOrderManager:
                 raise ExchangeConnectionError("Not connected to Coinbase")
 
             # Get open orders
-            orders = await self.client.list_orders(
-                product_id=symbol,
-                order_status="OPEN"
-            )
+            orders = await self.client.list_orders(product_id=symbol, order_status="OPEN")
 
             # Convert to unified format
             order_responses = []
             for order in orders:
-                order_response = self._convert_coinbase_order_to_response(
-                    order)
+                order_response = self._convert_coinbase_order_to_response(order)
                 order_responses.append(order_response)
 
             return order_responses
 
         except Exception as e:
-            logger.error(f"Failed to get open orders: {str(e)}")
+            logger.error(f"Failed to get open orders: {e!s}")
             return []
 
     async def get_order_history(
-            self,
-            symbol: Optional[str] = None,
-            limit: int = 100) -> List[OrderResponse]:
+        self, symbol: str | None = None, limit: int = 100
+    ) -> list[OrderResponse]:
         """
         Get order history.
 
@@ -306,28 +283,21 @@ class CoinbaseOrderManager:
                 raise ExchangeConnectionError("Not connected to Coinbase")
 
             # Get order history
-            orders = await self.client.list_orders(
-                product_id=symbol,
-                limit=limit
-            )
+            orders = await self.client.list_orders(product_id=symbol, limit=limit)
 
             # Convert to unified format
             order_responses = []
             for order in orders:
-                order_response = self._convert_coinbase_order_to_response(
-                    order)
+                order_response = self._convert_coinbase_order_to_response(order)
                 order_responses.append(order_response)
 
             return order_responses
 
         except Exception as e:
-            logger.error(f"Failed to get order history: {str(e)}")
+            logger.error(f"Failed to get order history: {e!s}")
             return []
 
-    async def get_fills(
-            self,
-            order_id: Optional[str] = None,
-            symbol: Optional[str] = None) -> List[Dict]:
+    async def get_fills(self, order_id: str | None = None, symbol: str | None = None) -> list[dict]:
         """
         Get fill information for orders.
 
@@ -343,18 +313,15 @@ class CoinbaseOrderManager:
                 raise ExchangeConnectionError("Not connected to Coinbase")
 
             # Get fills
-            fills = await self.client.list_fills(
-                order_id=order_id,
-                product_id=symbol
-            )
+            fills = await self.client.list_fills(order_id=order_id, product_id=symbol)
 
             return fills
 
         except Exception as e:
-            logger.error(f"Failed to get fills: {str(e)}")
+            logger.error(f"Failed to get fills: {e!s}")
             return []
 
-    async def calculate_fees(self, order: OrderRequest) -> Dict[str, Decimal]:
+    async def calculate_fees(self, order: OrderRequest) -> dict[str, Decimal]:
         """
         Calculate estimated fees for an order.
 
@@ -382,18 +349,18 @@ class CoinbaseOrderManager:
             return {
                 "fee_rate": fee_rate,
                 "fee_amount": fee_amount,
-                "fee_currency": self.fee_currency
+                "fee_currency": self.fee_currency,
             }
 
         except Exception as e:
-            logger.error(f"Failed to calculate fees: {str(e)}")
+            logger.error(f"Failed to calculate fees: {e!s}")
             return {
                 "fee_rate": Decimal("0"),
                 "fee_amount": Decimal("0"),
-                "fee_currency": self.fee_currency
+                "fee_currency": self.fee_currency,
             }
 
-    def get_total_fees(self) -> Dict[str, Decimal]:
+    def get_total_fees(self) -> dict[str, Decimal]:
         """
         Get total fees paid.
 
@@ -402,7 +369,7 @@ class CoinbaseOrderManager:
         """
         return self.total_fees.copy()
 
-    def get_order_statistics(self) -> Dict[str, Any]:
+    def get_order_statistics(self) -> dict[str, Any]:
         """
         Get order statistics.
 
@@ -410,18 +377,16 @@ class CoinbaseOrderManager:
             Dict[str, Any]: Order statistics
         """
         total_orders = len(self.order_history)
-        filled_orders = len(
-            [o for o in self.order_history if o.status == "FILLED"])
-        cancelled_orders = len(
-            [o for o in self.order_history if o.status == "CANCELLED"])
+        filled_orders = len([o for o in self.order_history if o.status == "FILLED"])
+        cancelled_orders = len([o for o in self.order_history if o.status == "CANCELLED"])
 
         return {
             "total_orders": total_orders,
             "filled_orders": filled_orders,
             "cancelled_orders": cancelled_orders,
-            "fill_rate": filled_orders /
-            total_orders if total_orders > 0 else 0,
-            "total_fees": self.total_fees}
+            "fill_rate": filled_orders / total_orders if total_orders > 0 else 0,
+            "total_fees": self.total_fees,
+        }
 
     # Helper methods
 
@@ -431,8 +396,7 @@ class CoinbaseOrderManager:
             # Test connection by getting products (this should always work)
             await self.client.get_products()
         except Exception as e:
-            raise ExchangeConnectionError(
-                f"Failed to connect to Coinbase: {str(e)}")
+            raise ExchangeConnectionError(f"Failed to connect to Coinbase: {e!s}")
 
     async def _validate_order(self, order: OrderRequest) -> bool:
         """
@@ -456,8 +420,7 @@ class CoinbaseOrderManager:
                 return False
 
             # Check price for limit orders
-            if order.order_type == OrderType.LIMIT and (
-                    not order.price or order.price <= 0):
+            if order.order_type == OrderType.LIMIT and (not order.price or order.price <= 0):
                 logger.error("Limit orders must have a positive price")
                 return False
 
@@ -469,11 +432,10 @@ class CoinbaseOrderManager:
             return True
 
         except Exception as e:
-            logger.error(f"Order validation failed: {str(e)}")
+            logger.error(f"Order validation failed: {e!s}")
             return False
 
-    def _convert_order_to_coinbase(
-            self, order: OrderRequest) -> Dict[str, Any]:
+    def _convert_order_to_coinbase(self, order: OrderRequest) -> dict[str, Any]:
         """
         Convert unified order to Coinbase format.
 
@@ -486,21 +448,19 @@ class CoinbaseOrderManager:
         coinbase_order = {
             "product_id": order.symbol,
             "side": order.side.value.upper(),
-            "order_configuration": {}
+            "order_configuration": {},
         }
 
         # Configure order based on type
         if order.order_type == OrderType.MARKET:
             coinbase_order["order_configuration"] = {
-                "market_market_ioc": {
-                    "quote_size": str(order.quantity)
-                }
+                "market_market_ioc": {"quote_size": str(order.quantity)}
             }
         elif order.order_type == OrderType.LIMIT:
             coinbase_order["order_configuration"] = {
                 "limit_limit_gtc": {
                     "base_size": str(order.quantity),
-                    "limit_price": str(order.price)
+                    "limit_price": str(order.price),
                 }
             }
         elif order.order_type == OrderType.STOP_LOSS:
@@ -508,7 +468,7 @@ class CoinbaseOrderManager:
                 "stop_limit_stop_limit_gtc": {
                     "base_size": str(order.quantity),
                     "limit_price": str(order.price),
-                    "stop_price": str(order.stop_price)
+                    "stop_price": str(order.stop_price),
                 }
             }
 
@@ -518,8 +478,7 @@ class CoinbaseOrderManager:
 
         return coinbase_order
 
-    def _convert_coinbase_order_to_response(
-            self, result: Dict) -> OrderResponse:
+    def _convert_coinbase_order_to_response(self, result: dict) -> OrderResponse:
         """
         Convert Coinbase order response to unified format.
 
@@ -530,13 +489,13 @@ class CoinbaseOrderManager:
             OrderResponse: Unified order response
         """
         # Extract order configuration
-        order_config = result.get('order_configuration', {})
+        order_config = result.get("order_configuration", {})
 
         # Determine order type
         order_type = OrderType.LIMIT  # Default
-        if 'market_market_ioc' in order_config:
+        if "market_market_ioc" in order_config:
             order_type = OrderType.MARKET
-        elif 'stop_limit_stop_limit_gtc' in order_config:
+        elif "stop_limit_stop_limit_gtc" in order_config:
             order_type = OrderType.STOP_LOSS
 
         # Extract quantity and price
@@ -544,28 +503,27 @@ class CoinbaseOrderManager:
         price = None
 
         if order_type == OrderType.MARKET:
-            market_config = order_config.get('market_market_ioc', {})
-            quantity = Decimal(str(market_config.get('quote_size', '0')))
+            market_config = order_config.get("market_market_ioc", {})
+            quantity = Decimal(str(market_config.get("quote_size", "0")))
         else:
-            limit_config = order_config.get('limit_limit_gtc', {})
-            quantity = Decimal(str(limit_config.get('base_size', '0')))
-            price = Decimal(str(limit_config.get('limit_price', '0')))
+            limit_config = order_config.get("limit_limit_gtc", {})
+            quantity = Decimal(str(limit_config.get("base_size", "0")))
+            price = Decimal(str(limit_config.get("limit_price", "0")))
 
         return OrderResponse(
-            id=result['order_id'],
-            client_order_id=result.get('client_order_id'),
-            symbol=result['product_id'],
-            side=OrderSide.BUY if result['side'] == 'BUY' else OrderSide.SELL,
+            id=result["order_id"],
+            client_order_id=result.get("client_order_id"),
+            symbol=result["product_id"],
+            side=OrderSide.BUY if result["side"] == "BUY" else OrderSide.SELL,
             order_type=order_type,
             quantity=quantity,
             price=price,
-            filled_quantity=Decimal(str(result.get('filled_size', '0'))),
-            status=result['status'],
-            timestamp=datetime.fromisoformat(result['created_time'].replace('Z', '+00:00'))
+            filled_quantity=Decimal(str(result.get("filled_size", "0"))),
+            status=result["status"],
+            timestamp=datetime.fromisoformat(result["created_time"].replace("Z", "+00:00")),
         )
 
-    def _convert_coinbase_status_to_order_status(
-            self, status: str) -> OrderStatus:
+    def _convert_coinbase_status_to_order_status(self, status: str) -> OrderStatus:
         """
         Convert Coinbase order status to unified OrderStatus.
 
@@ -576,12 +534,12 @@ class CoinbaseOrderManager:
             OrderStatus: Unified order status
         """
         status_mapping = {
-            'OPEN': OrderStatus.PENDING,
-            'FILLED': OrderStatus.FILLED,
-            'CANCELLED': OrderStatus.CANCELLED,
-            'EXPIRED': OrderStatus.EXPIRED,
-            'REJECTED': OrderStatus.REJECTED,
-            'PARTIALLY_FILLED': OrderStatus.PARTIALLY_FILLED
+            "OPEN": OrderStatus.PENDING,
+            "FILLED": OrderStatus.FILLED,
+            "CANCELLED": OrderStatus.CANCELLED,
+            "EXPIRED": OrderStatus.EXPIRED,
+            "REJECTED": OrderStatus.REJECTED,
+            "PARTIALLY_FILLED": OrderStatus.PARTIALLY_FILLED,
         }
         return status_mapping.get(status, OrderStatus.UNKNOWN)
 

@@ -4,27 +4,25 @@ Unit tests for concrete RiskManager implementation.
 This module tests the concrete RiskManager class that integrates all risk management components.
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock, patch
+from decimal import Decimal
+from unittest.mock import patch
 
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import PositionLimitError, RiskManagementError, ValidationError
 from src.core.types import (
-    Signal,
-    SignalDirection,
     MarketData,
-    Position,
     OrderRequest,
     OrderSide,
     OrderType,
-    RiskMetrics,
+    Position,
     RiskLevel,
-    PositionSizeMethod)
-from src.core.exceptions import (
-    RiskManagementError, PositionLimitError, ValidationError
+    RiskMetrics,
+    Signal,
+    SignalDirection,
 )
-from src.core.config import Config
 from src.risk_management.risk_manager import RiskManager
 
 
@@ -49,7 +47,7 @@ class TestRiskManager:
             confidence=0.8,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
     @pytest.fixture
@@ -62,7 +60,7 @@ class TestRiskManager:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
     @pytest.fixture
@@ -77,7 +75,7 @@ class TestRiskManager:
             ask=Decimal("51010"),
             open_price=Decimal("50000"),
             high_price=Decimal("52000"),
-            low_price=Decimal("49000")
+            low_price=Decimal("49000"),
         )
 
     @pytest.fixture
@@ -91,7 +89,7 @@ class TestRiskManager:
             price=None,
             stop_price=None,
             time_in_force="GTC",
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
     def test_initialization(self, risk_manager, config):
@@ -108,10 +106,12 @@ class TestRiskManager:
         """Test position size calculation."""
         portfolio_value = Decimal("10000")
 
-        with patch.object(risk_manager.position_sizer, 'calculate_position_size') as mock_calc:
+        with patch.object(risk_manager.position_sizer, "calculate_position_size") as mock_calc:
             mock_calc.return_value = Decimal("1000")
 
-            position_size = await risk_manager.calculate_position_size(sample_signal, portfolio_value)
+            position_size = await risk_manager.calculate_position_size(
+                sample_signal, portfolio_value
+            )
 
             assert position_size == Decimal("1000")
             mock_calc.assert_called_once_with(sample_signal, portfolio_value)
@@ -125,7 +125,7 @@ class TestRiskManager:
             confidence=0.0,  # Invalid confidence
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         with pytest.raises(RiskManagementError):
@@ -145,7 +145,7 @@ class TestRiskManager:
             confidence=0.3,  # Below threshold
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         result = await risk_manager.validate_signal(invalid_signal)
@@ -159,7 +159,7 @@ class TestRiskManager:
             confidence=0.8,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         with pytest.raises(ValidationError):
@@ -184,7 +184,7 @@ class TestRiskManager:
             price=None,
             stop_price=None,
             time_in_force="GTC",
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
         portfolio_value = Decimal("10000")
@@ -203,7 +203,7 @@ class TestRiskManager:
             price=Decimal("50000"),
             stop_price=None,
             time_in_force="GTC",
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
         portfolio_value = Decimal("10000")
@@ -212,16 +212,12 @@ class TestRiskManager:
             await risk_manager.validate_order(large_order, portfolio_value)
 
     @pytest.mark.asyncio
-    async def test_calculate_risk_metrics(
-            self,
-            risk_manager,
-            sample_position,
-            sample_market_data):
+    async def test_calculate_risk_metrics(self, risk_manager, sample_position, sample_market_data):
         """Test risk metrics calculation."""
         positions = [sample_position]
         market_data = [sample_market_data]
 
-        with patch.object(risk_manager.risk_calculator, 'calculate_risk_metrics') as mock_calc:
+        with patch.object(risk_manager.risk_calculator, "calculate_risk_metrics") as mock_calc:
             mock_metrics = RiskMetrics(
                 var_1d=Decimal("500"),
                 var_5d=Decimal("1000"),
@@ -230,7 +226,7 @@ class TestRiskManager:
                 sharpe_ratio=Decimal("1.5"),
                 current_drawdown=Decimal("0.05"),
                 risk_level=RiskLevel.MEDIUM,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
             mock_calc.return_value = mock_metrics
 
@@ -241,12 +237,13 @@ class TestRiskManager:
 
     @pytest.mark.asyncio
     async def test_calculate_risk_metrics_critical_level(
-            self, risk_manager, sample_position, sample_market_data):
+        self, risk_manager, sample_position, sample_market_data
+    ):
         """Test risk metrics calculation with critical risk level."""
         positions = [sample_position]
         market_data = [sample_market_data]
 
-        with patch.object(risk_manager.risk_calculator, 'calculate_risk_metrics') as mock_calc:
+        with patch.object(risk_manager.risk_calculator, "calculate_risk_metrics") as mock_calc:
             mock_metrics = RiskMetrics(
                 var_1d=Decimal("500"),
                 var_5d=Decimal("1000"),
@@ -255,19 +252,18 @@ class TestRiskManager:
                 sharpe_ratio=Decimal("1.5"),
                 current_drawdown=Decimal("0.05"),
                 risk_level=RiskLevel.CRITICAL,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
             mock_calc.return_value = mock_metrics
 
-            with patch.object(risk_manager, 'emergency_stop') as mock_emergency:
+            with patch.object(risk_manager, "emergency_stop") as mock_emergency:
                 await risk_manager.calculate_risk_metrics(positions, market_data)
-                mock_emergency.assert_called_once_with(
-                    "Critical risk level detected")
+                mock_emergency.assert_called_once_with("Critical risk level detected")
 
     @pytest.mark.asyncio
     async def test_check_portfolio_limits(self, risk_manager, sample_position):
         """Test portfolio limits checking."""
-        with patch.object(risk_manager.portfolio_limits, 'check_portfolio_limits') as mock_check:
+        with patch.object(risk_manager.portfolio_limits, "check_portfolio_limits") as mock_check:
             mock_check.return_value = True
 
             result = await risk_manager.check_portfolio_limits(sample_position)
@@ -277,7 +273,8 @@ class TestRiskManager:
 
     @pytest.mark.asyncio
     async def test_should_exit_position_stop_loss(
-            self, risk_manager, sample_position, sample_market_data):
+        self, risk_manager, sample_position, sample_market_data
+    ):
         """Test position exit evaluation with stop loss."""
         # Modify market data to create a large loss
         # Large loss (from 50000 to 40000)
@@ -288,7 +285,8 @@ class TestRiskManager:
 
     @pytest.mark.asyncio
     async def test_should_exit_position_drawdown_limit(
-            self, risk_manager, sample_position, sample_market_data):
+        self, risk_manager, sample_position, sample_market_data
+    ):
         """Test position exit evaluation with drawdown limit."""
         # Set up risk metrics with high drawdown
         risk_manager.risk_metrics = RiskMetrics(
@@ -299,7 +297,7 @@ class TestRiskManager:
             sharpe_ratio=Decimal("1.5"),
             current_drawdown=Decimal("0.2"),  # High drawdown
             risk_level=RiskLevel.HIGH,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
         result = await risk_manager.should_exit_position(sample_position, sample_market_data)
@@ -307,7 +305,8 @@ class TestRiskManager:
 
     @pytest.mark.asyncio
     async def test_should_exit_position_high_risk_level(
-            self, risk_manager, sample_position, sample_market_data):
+        self, risk_manager, sample_position, sample_market_data
+    ):
         """Test position exit evaluation with high risk level."""
         risk_manager.current_risk_level = RiskLevel.HIGH
 
@@ -316,7 +315,8 @@ class TestRiskManager:
 
     @pytest.mark.asyncio
     async def test_should_exit_position_no_exit(
-            self, risk_manager, sample_position, sample_market_data):
+        self, risk_manager, sample_position, sample_market_data
+    ):
         """Test position exit evaluation when no exit is needed."""
         # Set up normal conditions
         sample_position.unrealized_pnl = Decimal("100")  # Profit
@@ -329,7 +329,7 @@ class TestRiskManager:
             sharpe_ratio=Decimal("1.5"),
             current_drawdown=Decimal("0.02"),  # Low drawdown
             risk_level=RiskLevel.LOW,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
         result = await risk_manager.should_exit_position(sample_position, sample_market_data)
@@ -341,7 +341,7 @@ class TestRiskManager:
         positions = [sample_position]
         portfolio_value = Decimal("10000")
 
-        with patch.object(risk_manager.portfolio_limits, 'update_portfolio_state') as mock_update:
+        with patch.object(risk_manager.portfolio_limits, "update_portfolio_state") as mock_update:
             await risk_manager.update_portfolio_state(positions, portfolio_value)
 
             assert risk_manager.positions == positions
@@ -351,9 +351,11 @@ class TestRiskManager:
     @pytest.mark.asyncio
     async def test_get_comprehensive_risk_summary(self, risk_manager):
         """Test comprehensive risk summary generation."""
-        with patch.object(risk_manager, 'get_risk_summary') as mock_base_summary:
-            with patch.object(risk_manager.portfolio_limits, 'get_portfolio_summary') as mock_portfolio:
-                with patch.object(risk_manager.risk_calculator, 'get_risk_summary') as mock_risk:
+        with patch.object(risk_manager, "get_risk_summary") as mock_base_summary:
+            with patch.object(
+                risk_manager.portfolio_limits, "get_portfolio_summary"
+            ) as mock_portfolio:
+                with patch.object(risk_manager.risk_calculator, "get_risk_summary") as mock_risk:
                     mock_base_summary.return_value = {"base": "summary"}
                     mock_portfolio.return_value = {"portfolio": "summary"}
                     mock_risk.return_value = {"risk": "summary"}
@@ -369,7 +371,7 @@ class TestRiskManager:
     @pytest.mark.asyncio
     async def test_validate_risk_parameters(self, risk_manager):
         """Test risk parameter validation."""
-        with patch.object(risk_manager, 'validate_risk_parameters') as mock_validate:
+        with patch.object(risk_manager, "validate_risk_parameters") as mock_validate:
             mock_validate.return_value = True
 
             result = await risk_manager.validate_risk_parameters()
@@ -378,20 +380,21 @@ class TestRiskManager:
     @pytest.mark.asyncio
     async def test_validate_risk_parameters_failure(self, risk_manager):
         """Test risk parameter validation failure."""
-        with patch.object(risk_manager, 'validate_risk_parameters') as mock_validate:
+        with patch.object(risk_manager, "validate_risk_parameters") as mock_validate:
             mock_validate.return_value = False
 
             result = await risk_manager.validate_risk_parameters()
             assert result is False
 
     @pytest.mark.asyncio
-    async def test_position_size_validation_failure(
-            self, risk_manager, sample_signal):
+    async def test_position_size_validation_failure(self, risk_manager, sample_signal):
         """Test position size calculation when validation fails."""
         portfolio_value = Decimal("10000")
 
-        with patch.object(risk_manager.position_sizer, 'calculate_position_size') as mock_calc:
-            with patch.object(risk_manager.position_sizer, 'validate_position_size') as mock_validate:
+        with patch.object(risk_manager.position_sizer, "calculate_position_size") as mock_calc:
+            with patch.object(
+                risk_manager.position_sizer, "validate_position_size"
+            ) as mock_validate:
                 mock_calc.return_value = Decimal("1000")
                 mock_validate.return_value = False
 
@@ -399,26 +402,24 @@ class TestRiskManager:
                     await risk_manager.calculate_position_size(sample_signal, portfolio_value)
 
     @pytest.mark.asyncio
-    async def test_portfolio_limits_check_failure(
-            self, risk_manager, sample_position):
+    async def test_portfolio_limits_check_failure(self, risk_manager, sample_position):
         """Test portfolio limits check when it fails."""
-        with patch.object(risk_manager.portfolio_limits, 'check_portfolio_limits') as mock_check:
-            mock_check.side_effect = PositionLimitError(
-                "Portfolio limits violated")
+        with patch.object(risk_manager.portfolio_limits, "check_portfolio_limits") as mock_check:
+            mock_check.side_effect = PositionLimitError("Portfolio limits violated")
 
             with pytest.raises(PositionLimitError):
                 await risk_manager.check_portfolio_limits(sample_position)
 
     @pytest.mark.asyncio
     async def test_risk_metrics_calculation_failure(
-            self, risk_manager, sample_position, sample_market_data):
+        self, risk_manager, sample_position, sample_market_data
+    ):
         """Test risk metrics calculation when it fails."""
         positions = [sample_position]
         market_data = [sample_market_data]
 
-        with patch.object(risk_manager.risk_calculator, 'calculate_risk_metrics') as mock_calc:
-            mock_calc.side_effect = RiskManagementError(
-                "Risk calculation failed")
+        with patch.object(risk_manager.risk_calculator, "calculate_risk_metrics") as mock_calc:
+            mock_calc.side_effect = RiskManagementError("Risk calculation failed")
 
             with pytest.raises(RiskManagementError):
                 await risk_manager.calculate_risk_metrics(positions, market_data)
@@ -427,32 +428,39 @@ class TestRiskManager:
         """Test that position limits are properly initialized."""
         assert risk_manager.position_limits is not None
         assert risk_manager.position_limits.max_position_size == Decimal(
-            str(config.risk.max_position_size_pct))
-        assert risk_manager.position_limits.max_positions_per_symbol == config.risk.max_positions_per_symbol
+            str(config.risk.max_position_size_pct)
+        )
+        assert (
+            risk_manager.position_limits.max_positions_per_symbol
+            == config.risk.max_positions_per_symbol
+        )
         assert risk_manager.position_limits.max_total_positions == config.risk.max_total_positions
         assert risk_manager.position_limits.max_portfolio_exposure == Decimal(
-            str(config.risk.max_portfolio_exposure))
+            str(config.risk.max_portfolio_exposure)
+        )
         assert risk_manager.position_limits.max_sector_exposure == Decimal(
-            str(config.risk.max_sector_exposure))
+            str(config.risk.max_sector_exposure)
+        )
         assert risk_manager.position_limits.max_correlation_exposure == Decimal(
-            str(config.risk.max_correlation_exposure))
-        assert risk_manager.position_limits.max_leverage == Decimal(
-            str(config.risk.max_leverage))
+            str(config.risk.max_correlation_exposure)
+        )
+        assert risk_manager.position_limits.max_leverage == Decimal(str(config.risk.max_leverage))
 
     @pytest.mark.asyncio
     async def test_component_integration(
-            self,
-            risk_manager,
-            sample_signal,
-            sample_position,
-            sample_market_data):
+        self, risk_manager, sample_signal, sample_position, sample_market_data
+    ):
         """Test integration between all risk management components."""
         portfolio_value = Decimal("10000")
 
         # Test full workflow
-        with patch.object(risk_manager.position_sizer, 'calculate_position_size') as mock_calc:
-            with patch.object(risk_manager.portfolio_limits, 'check_portfolio_limits') as mock_check:
-                with patch.object(risk_manager.risk_calculator, 'calculate_risk_metrics') as mock_metrics:
+        with patch.object(risk_manager.position_sizer, "calculate_position_size") as mock_calc:
+            with patch.object(
+                risk_manager.portfolio_limits, "check_portfolio_limits"
+            ) as mock_check:
+                with patch.object(
+                    risk_manager.risk_calculator, "calculate_risk_metrics"
+                ) as mock_metrics:
                     mock_calc.return_value = Decimal("1000")
                     mock_check.return_value = True
                     mock_metrics.return_value = RiskMetrics(
@@ -463,11 +471,13 @@ class TestRiskManager:
                         sharpe_ratio=Decimal("1.5"),
                         current_drawdown=Decimal("0.05"),
                         risk_level=RiskLevel.LOW,
-                        timestamp=datetime.now()
+                        timestamp=datetime.now(),
                     )
 
                     # Calculate position size
-                    position_size = await risk_manager.calculate_position_size(sample_signal, portfolio_value)
+                    position_size = await risk_manager.calculate_position_size(
+                        sample_signal, portfolio_value
+                    )
                     assert position_size == Decimal("1000")
 
                     # Check portfolio limits
@@ -475,5 +485,7 @@ class TestRiskManager:
                     assert result is True
 
                     # Calculate risk metrics
-                    risk_metrics = await risk_manager.calculate_risk_metrics([sample_position], [sample_market_data])
+                    risk_metrics = await risk_manager.calculate_risk_metrics(
+                        [sample_position], [sample_market_data]
+                    )
                     assert risk_metrics.risk_level == RiskLevel.LOW

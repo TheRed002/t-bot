@@ -18,12 +18,12 @@ Dependencies:
 - P-000A: Data pipeline integration
 """
 
-from .technical_indicators import TechnicalIndicatorCalculator
-from .statistical_features import StatisticalFeatureCalculator
 from .alternative_features import AlternativeFeatureCalculator
+from .statistical_features import StatisticalFeatureCalculator
+from .technical_indicators import TechnicalIndicatorCalculator
 
 __all__ = [
-    'TechnicalIndicatorCalculator',
-    'StatisticalFeatureCalculator',
-    'AlternativeFeatureCalculator'
+    "AlternativeFeatureCalculator",
+    "StatisticalFeatureCalculator",
+    "TechnicalIndicatorCalculator",
 ]

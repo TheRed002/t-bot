@@ -14,38 +14,35 @@ Dependencies:
 - P-007A: Utility functions and decorators
 """
 
-import asyncio
-from typing import Dict, List, Any, Optional, Tuple, Union
-from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-import statistics
-import numpy as np
-from dataclasses import dataclass
-from enum import Enum
 import hashlib
 import json
+import statistics
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from enum import Enum
+from typing import Any
 
-# Import from P-001 core components
-from src.core.types import MarketData, Signal, Position, Ticker, OrderBook
-from src.core.exceptions import (
-    DataError, DataValidationError, ValidationError
-)
+import numpy as np
+
 from src.core.config import Config
 from src.core.logging import get_logger
+
+# Import from P-001 core components
+from src.core.types import MarketData, Signal
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
-from src.utils.decorators import time_execution, retry
-from src.utils.validators import validate_price, validate_quantity
-from src.utils.helpers import calculate_percentage_change
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
 
 class CleaningStrategy(Enum):
     """Data cleaning strategy enumeration"""
+
     REMOVE = "remove"
     ADJUST = "adjust"
     IMPUTE = "impute"
@@ -54,6 +51,7 @@ class CleaningStrategy(Enum):
 
 class OutlierMethod(Enum):
     """Outlier detection method enumeration"""
+
     Z_SCORE = "z_score"
     IQR = "iqr"
     ISOLATION_FOREST = "isolation_forest"
@@ -63,14 +61,15 @@ class OutlierMethod(Enum):
 @dataclass
 class CleaningResult:
     """Data cleaning result record"""
+
     original_data: Any
     cleaned_data: Any
-    applied_strategies: List[str]
+    applied_strategies: list[str]
     removed_count: int
     adjusted_count: int
     imputed_count: int
     timestamp: datetime
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 
 class DataCleaner:
@@ -92,35 +91,32 @@ class DataCleaner:
         self.error_handler = ErrorHandler(config)
 
         # Cleaning thresholds
-        self.outlier_threshold = getattr(
-            config, 'outlier_threshold', 3.0)  # Z-score threshold
+        self.outlier_threshold = getattr(config, "outlier_threshold", 3.0)  # Z-score threshold
         self.missing_threshold = getattr(
-            config, 'missing_threshold', 0.1)  # 10% missing data threshold
-        self.smoothing_window = getattr(
-            config, 'smoothing_window', 5)  # Moving average window
-        self.duplicate_threshold = getattr(
-            config, 'duplicate_threshold', 1.0)  # 1 second threshold
+            config, "missing_threshold", 0.1
+        )  # 10% missing data threshold
+        self.smoothing_window = getattr(config, "smoothing_window", 5)  # Moving average window
+        self.duplicate_threshold = getattr(config, "duplicate_threshold", 1.0)  # 1 second threshold
 
         # Data history for cleaning
-        self.price_history: Dict[str, List[float]] = {}
-        self.volume_history: Dict[str, List[float]] = {}
-        self.max_history_size = getattr(config, 'max_history_size', 1000)
+        self.price_history: dict[str, list[float]] = {}
+        self.volume_history: dict[str, list[float]] = {}
+        self.max_history_size = getattr(config, "max_history_size", 1000)
 
         # Cleaning statistics
         self.cleaning_stats = {
-            'total_processed': 0,
-            'total_cleaned': 0,
-            'outliers_removed': 0,
-            'outliers_adjusted': 0,
-            'missing_imputed': 0,
-            'duplicates_removed': 0
+            "total_processed": 0,
+            "total_cleaned": 0,
+            "outliers_removed": 0,
+            "outliers_adjusted": 0,
+            "missing_imputed": 0,
+            "duplicates_removed": 0,
         }
 
         logger.info("DataCleaner initialized", config=config)
 
     @time_execution
-    async def clean_market_data(
-            self, data: MarketData) -> Tuple[MarketData, CleaningResult]:
+    async def clean_market_data(self, data: MarketData) -> tuple[MarketData, CleaningResult]:
         """
         Clean market data using comprehensive cleaning pipeline.
 
@@ -148,9 +144,9 @@ class DataCleaner:
                     imputed_count=0,
                     timestamp=datetime.now(timezone.utc),
                     metadata={
-                        'error': 'Data is None',
-                        'cleaning_stats': self.cleaning_stats.copy()
-                    }
+                        "error": "Data is None",
+                        "cleaning_stats": self.cleaning_stats.copy(),
+                    },
                 )
                 return None, cleaning_result
 
@@ -181,13 +177,13 @@ class DataCleaner:
             applied_strategies.append("data_normalization")
 
             # Update statistics
-            self.cleaning_stats['total_processed'] += 1
+            self.cleaning_stats["total_processed"] += 1
             if applied_strategies:
-                self.cleaning_stats['total_cleaned'] += 1
-            self.cleaning_stats['outliers_removed'] += outlier_removed
-            self.cleaning_stats['outliers_adjusted'] += outlier_adjusted
-            self.cleaning_stats['missing_imputed'] += imputed_count
-            self.cleaning_stats['duplicates_removed'] += duplicate_removed
+                self.cleaning_stats["total_cleaned"] += 1
+            self.cleaning_stats["outliers_removed"] += outlier_removed
+            self.cleaning_stats["outliers_adjusted"] += outlier_adjusted
+            self.cleaning_stats["missing_imputed"] += imputed_count
+            self.cleaning_stats["duplicates_removed"] += duplicate_removed
 
             # Create cleaning result
             cleaning_result = CleaningResult(
@@ -199,9 +195,9 @@ class DataCleaner:
                 imputed_count=imputed_count,
                 timestamp=datetime.now(timezone.utc),
                 metadata={
-                    'symbol': data.symbol if data else "unknown",
-                    'cleaning_stats': self.cleaning_stats.copy()
-                }
+                    "symbol": data.symbol if data else "unknown",
+                    "cleaning_stats": self.cleaning_stats.copy(),
+                },
             )
 
             if applied_strategies:
@@ -211,12 +207,13 @@ class DataCleaner:
                     applied_strategies=applied_strategies,
                     removed_count=removed_count,
                     adjusted_count=adjusted_count,
-                    imputed_count=imputed_count
+                    imputed_count=imputed_count,
                 )
             else:
                 logger.debug(
                     "Market data passed cleaning without changes",
-                    symbol=data.symbol if data else "unknown")
+                    symbol=data.symbol if data else "unknown",
+                )
 
             return data, cleaning_result
 
@@ -224,7 +221,8 @@ class DataCleaner:
             logger.error(
                 "Market data cleaning failed",
                 symbol=data.symbol if data and data.symbol else "unknown",
-                error=str(e))
+                error=str(e),
+            )
             cleaning_result = CleaningResult(
                 original_data=original_data,
                 cleaned_data=original_data,
@@ -234,16 +232,15 @@ class DataCleaner:
                 imputed_count=0,
                 timestamp=datetime.now(timezone.utc),
                 metadata={
-                    'error': str(e),
-                    'error_type': type(e).__name__,
-                    'cleaning_stats': self.cleaning_stats.copy()
-                }
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "cleaning_stats": self.cleaning_stats.copy(),
+                },
             )
             return original_data, cleaning_result
 
     @time_execution
-    async def clean_signal_data(
-            self, signals: List[Signal]) -> Tuple[List[Signal], CleaningResult]:
+    async def clean_signal_data(self, signals: list[Signal]) -> tuple[list[Signal], CleaningResult]:
         """
         Clean trading signal data.
 
@@ -285,11 +282,11 @@ class DataCleaner:
                 applied_strategies.append("signal_adjustment")
 
             # Update statistics
-            self.cleaning_stats['total_processed'] += len(signals)
+            self.cleaning_stats["total_processed"] += len(signals)
             if applied_strategies:
-                self.cleaning_stats['total_cleaned'] += 1
-            self.cleaning_stats['outliers_removed'] += removed_count
-            self.cleaning_stats['outliers_adjusted'] += adjusted_count
+                self.cleaning_stats["total_cleaned"] += 1
+            self.cleaning_stats["outliers_removed"] += removed_count
+            self.cleaning_stats["outliers_adjusted"] += adjusted_count
 
             cleaning_result = CleaningResult(
                 original_data=original_signals,
@@ -300,9 +297,9 @@ class DataCleaner:
                 imputed_count=imputed_count,
                 timestamp=datetime.now(timezone.utc),
                 metadata={
-                    'signal_count': len(cleaned_signals),
-                    'cleaning_stats': self.cleaning_stats.copy()
-                }
+                    "signal_count": len(cleaned_signals),
+                    "cleaning_stats": self.cleaning_stats.copy(),
+                },
             )
 
             if applied_strategies:
@@ -310,7 +307,7 @@ class DataCleaner:
                     "Signal data cleaned successfully",
                     original_count=len(signals),
                     cleaned_count=len(cleaned_signals),
-                    applied_strategies=applied_strategies
+                    applied_strategies=applied_strategies,
                 )
             else:
                 logger.debug("Signal data passed cleaning without changes")
@@ -327,15 +324,11 @@ class DataCleaner:
                 adjusted_count=0,
                 imputed_count=0,
                 timestamp=datetime.now(timezone.utc),
-                metadata={
-                    'error': str(e),
-                    'error_type': type(e).__name__
-                }
+                metadata={"error": str(e), "error_type": type(e).__name__},
             )
             return original_signals, cleaning_result
 
-    async def _handle_missing_data(
-            self, data: MarketData) -> Tuple[MarketData, int]:
+    async def _handle_missing_data(self, data: MarketData) -> tuple[MarketData, int]:
         """Handle missing data using imputation strategies"""
         imputed_count = 0
 
@@ -371,19 +364,18 @@ class DataCleaner:
 
         # Bid/Ask imputation
         if not data.bid and data.price:
-            spread = data.price * Decimal('0.001')  # 0.1% spread
+            spread = data.price * Decimal("0.001")  # 0.1% spread
             data.bid = data.price - spread
             imputed_count += 1
 
         if not data.ask and data.price:
-            spread = data.price * Decimal('0.001')  # 0.1% spread
+            spread = data.price * Decimal("0.001")  # 0.1% spread
             data.ask = data.price + spread
             imputed_count += 1
 
         return data, imputed_count
 
-    async def _handle_outliers(
-            self, data: MarketData) -> Tuple[MarketData, int, int]:
+    async def _handle_outliers(self, data: MarketData) -> tuple[MarketData, int, int]:
         """Detect and handle outliers in price and volume data"""
         removed_count = 0
         adjusted_count = 0
@@ -407,20 +399,18 @@ class DataCleaner:
 
         # Outlier detection (need at least 10 data points)
         if len(price_history) >= 10:
-            mean_price = statistics.mean(
-                price_history[:-1])  # Exclude current price
-            std_price = statistics.stdev(
-                price_history[:-1]) if len(price_history) > 1 else 0
+            mean_price = statistics.mean(price_history[:-1])  # Exclude current price
+            std_price = statistics.stdev(price_history[:-1]) if len(price_history) > 1 else 0
 
             if std_price > 0:
                 z_score = abs(current_price - mean_price) / std_price
 
                 if z_score > self.outlier_threshold:
                     # Strategy: adjust to mean + threshold * std
-                    if self.config.get(
-                            'outlier_strategy') == CleaningStrategy.ADJUST:
-                        adjusted_price = mean_price + \
-                            (self.outlier_threshold * std_price * np.sign(current_price - mean_price))
+                    if self.config.get("outlier_strategy") == CleaningStrategy.ADJUST:
+                        adjusted_price = mean_price + (
+                            self.outlier_threshold * std_price * np.sign(current_price - mean_price)
+                        )
                         data.price = Decimal(str(adjusted_price))
                         adjusted_count += 1
                         logger.warning(
@@ -428,7 +418,7 @@ class DataCleaner:
                             symbol=data.symbol,
                             original_price=current_price,
                             adjusted_price=adjusted_price,
-                            z_score=z_score
+                            z_score=z_score,
                         )
                     else:
                         # Strategy: remove by setting to None
@@ -438,7 +428,7 @@ class DataCleaner:
                             "Price outlier removed",
                             symbol=data.symbol,
                             original_price=current_price,
-                            z_score=z_score
+                            z_score=z_score,
                         )
 
         # Volume outlier detection
@@ -456,17 +446,18 @@ class DataCleaner:
 
             if len(volume_history) >= 10:
                 mean_volume = statistics.mean(volume_history[:-1])
-                std_volume = statistics.stdev(
-                    volume_history[:-1]) if len(volume_history) > 1 else 0
+                std_volume = statistics.stdev(volume_history[:-1]) if len(volume_history) > 1 else 0
 
                 if std_volume > 0:
                     z_score = abs(current_volume - mean_volume) / std_volume
 
                     if z_score > self.outlier_threshold:
-                        if self.config.get(
-                                'outlier_strategy') == CleaningStrategy.ADJUST:
-                            adjusted_volume = mean_volume + \
-                                (self.outlier_threshold * std_volume * np.sign(current_volume - mean_volume))
+                        if self.config.get("outlier_strategy") == CleaningStrategy.ADJUST:
+                            adjusted_volume = mean_volume + (
+                                self.outlier_threshold
+                                * std_volume
+                                * np.sign(current_volume - mean_volume)
+                            )
                             data.volume = Decimal(str(adjusted_volume))
                             adjusted_count += 1
                         else:
@@ -497,22 +488,19 @@ class DataCleaner:
         # Apply smoothing if enough data points
         if len(price_history) >= self.smoothing_window:
             # Simple moving average smoothing
-            smoothed_price = statistics.mean(
-                price_history[-self.smoothing_window:])
+            smoothed_price = statistics.mean(price_history[-self.smoothing_window :])
             data.price = Decimal(str(smoothed_price))
 
             # Smooth volume if available
             if data.volume and data.symbol in self.volume_history:
                 volume_history = self.volume_history[data.symbol]
                 if len(volume_history) >= self.smoothing_window:
-                    smoothed_volume = statistics.mean(
-                        volume_history[-self.smoothing_window:])
+                    smoothed_volume = statistics.mean(volume_history[-self.smoothing_window :])
                     data.volume = Decimal(str(smoothed_volume))
 
         return data
 
-    async def _remove_duplicates(
-            self, data: MarketData) -> Tuple[MarketData, int]:
+    async def _remove_duplicates(self, data: MarketData) -> tuple[MarketData, int]:
         """Remove duplicate data points"""
         removed_count = 0
 
@@ -520,9 +508,7 @@ class DataCleaner:
         data_hash = self._create_data_hash(data)
 
         # Check if this data point is a duplicate
-        if hasattr(
-                self,
-                '_last_data_hash') and self._last_data_hash == data_hash:
+        if hasattr(self, "_last_data_hash") and self._last_data_hash == data_hash:
             # This is a duplicate, mark for removal
             removed_count = 1
             data = None  # Mark for removal
@@ -548,17 +534,15 @@ class DataCleaner:
         # Ensure price precision
         if data.price:
             # Round to 8 decimal places for crypto
-            data.price = Decimal(str(float(data.price))).quantize(
-                Decimal('0.00000001'))
+            data.price = Decimal(str(float(data.price))).quantize(Decimal("0.00000001"))
 
         # Ensure volume precision
         if data.volume:
-            data.volume = Decimal(str(float(data.volume))
-                                  ).quantize(Decimal('0.00000001'))
+            data.volume = Decimal(str(float(data.volume))).quantize(Decimal("0.00000001"))
 
         return data
 
-    async def _impute_price(self, symbol: str) -> Optional[Decimal]:
+    async def _impute_price(self, symbol: str) -> Decimal | None:
         """Impute missing price using historical data"""
         if symbol not in self.price_history or not self.price_history[symbol]:
             # Return default price if no history available
@@ -572,7 +556,7 @@ class DataCleaner:
 
         return Decimal("50000.00")  # Default price
 
-    async def _impute_volume(self, symbol: str) -> Optional[Decimal]:
+    async def _impute_volume(self, symbol: str) -> Decimal | None:
         """Impute missing volume using historical data"""
         if symbol not in self.volume_history or not self.volume_history[symbol]:
             # Return default volume if no history available
@@ -594,8 +578,7 @@ class DataCleaner:
         if not (0.0 <= signal.confidence <= 1.0):
             return False
 
-        if signal.timestamp > datetime.now(
-                timezone.utc) + timedelta(seconds=60):
+        if signal.timestamp > datetime.now(timezone.utc) + timedelta(seconds=60):
             return False
 
         return True
@@ -608,14 +591,15 @@ class DataCleaner:
         # Round to 3 decimal places
         return round(confidence, 3)
 
-    async def _is_duplicate_signal(
-            self,
-            signal: Signal,
-            existing_signals: List[Signal]) -> bool:
+    async def _is_duplicate_signal(self, signal: Signal, existing_signals: list[Signal]) -> bool:
         """Check if signal is a duplicate"""
         for existing_signal in existing_signals:
-            if (signal.symbol == existing_signal.symbol and signal.direction == existing_signal.direction and abs(
-                    (signal.timestamp - existing_signal.timestamp).total_seconds()) < self.duplicate_threshold):
+            if (
+                signal.symbol == existing_signal.symbol
+                and signal.direction == existing_signal.direction
+                and abs((signal.timestamp - existing_signal.timestamp).total_seconds())
+                < self.duplicate_threshold
+            ):
                 return True
         return False
 
@@ -626,28 +610,30 @@ class DataCleaner:
 
         # Create hash from key fields
         hash_data = {
-            'symbol': data.symbol,
-            'price': float(data.price) if data.price else 0,
-            'volume': float(data.volume) if data.volume else 0,
-            'timestamp': data.timestamp.isoformat() if data.timestamp else ""
+            "symbol": data.symbol,
+            "price": float(data.price) if data.price else 0,
+            "volume": float(data.volume) if data.volume else 0,
+            "timestamp": data.timestamp.isoformat() if data.timestamp else "",
         }
 
         hash_string = json.dumps(hash_data, sort_keys=True)
         return hashlib.md5(hash_string.encode()).hexdigest()
 
     @time_execution
-    async def get_cleaning_summary(self) -> Dict[str, Any]:
+    async def get_cleaning_summary(self) -> dict[str, Any]:
         """Get cleaning statistics and summary"""
         return {
             "cleaning_stats": self.cleaning_stats.copy(),
             "price_history_size": {
-                symbol: len(history) for symbol,
-                history in self.price_history.items()},
+                symbol: len(history) for symbol, history in self.price_history.items()
+            },
             "volume_history_size": {
-                symbol: len(history) for symbol,
-                history in self.volume_history.items()},
+                symbol: len(history) for symbol, history in self.volume_history.items()
+            },
             "cleaning_config": {
                 "outlier_threshold": self.outlier_threshold,
                 "missing_threshold": self.missing_threshold,
                 "smoothing_window": self.smoothing_window,
-                "duplicate_threshold": self.duplicate_threshold}}
+                "duplicate_threshold": self.duplicate_threshold,
+            },
+        }

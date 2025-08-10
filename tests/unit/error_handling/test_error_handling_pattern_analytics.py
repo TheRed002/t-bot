@@ -4,16 +4,13 @@ Unit tests for pattern analytics functionality.
 Tests error pattern detection, trend analysis, and predictive analytics.
 """
 
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
 import pytest
-import asyncio
-import time
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, AsyncMock, MagicMock
-from src.error_handling.pattern_analytics import (
-    ErrorPattern, ErrorTrend, ErrorPatternAnalytics
-)
-from src.core.exceptions import TradingBotError
+
 from src.core.config import Config
+from src.error_handling.pattern_analytics import ErrorPattern, ErrorPatternAnalytics, ErrorTrend
 
 
 class TestErrorPattern:
@@ -34,7 +31,7 @@ class TestErrorPattern:
             occurrence_count=5,
             confidence=0.8,
             description="Test pattern",
-            suggested_action="Monitor"
+            suggested_action="Monitor",
         )
 
         assert pattern.pattern_id == "test_pattern"
@@ -63,7 +60,7 @@ class TestErrorPattern:
             occurrence_count=3,
             confidence=0.7,
             description="Test pattern",
-            suggested_action="Investigate"
+            suggested_action="Investigate",
         )
 
         pattern_dict = pattern.to_dict()
@@ -91,7 +88,7 @@ class TestErrorTrend:
             (start_time + timedelta(minutes=15), 8),
             (start_time + timedelta(minutes=30), 12),
             (start_time + timedelta(minutes=45), 15),
-            (end_time, 18)
+            (end_time, 18),
         ]
 
         trend = ErrorTrend(
@@ -102,7 +99,7 @@ class TestErrorTrend:
             trend_strength=0.8,
             start_time=start_time,
             end_time=end_time,
-            data_points=data_points
+            data_points=data_points,
         )
 
         assert trend.component == "api"
@@ -145,11 +142,11 @@ class TestErrorPatternAnalytics:
             "error_type": "timeout",
             "component": "exchange",
             "severity": "high",
-            "message": "API timeout"
+            "message": "API timeout",
         }
 
         # Mock the _analyze_patterns method to avoid async issues
-        with patch.object(analytics, '_analyze_patterns') as mock_analyze:
+        with patch.object(analytics, "_analyze_patterns") as mock_analyze:
             analytics.add_error_event(error_event)
 
             # Verify the event was added
@@ -167,16 +164,17 @@ class TestErrorPatternAnalytics:
                 "timestamp": datetime.now(timezone.utc),
                 "error_type": "timeout",
                 "component": "exchange",
-                "severity": "high"
+                "severity": "high",
             }
         ]
 
         # Mock the internal methods to avoid complex async operations
-        with patch.object(analytics, '_analyze_frequency_patterns') as mock_freq, \
-                patch.object(analytics, '_analyze_correlations') as mock_corr, \
-                patch.object(analytics, '_analyze_trends') as mock_trend, \
-                patch.object(analytics, '_predictive_analysis') as mock_pred:
-
+        with (
+            patch.object(analytics, "_analyze_frequency_patterns") as mock_freq,
+            patch.object(analytics, "_analyze_correlations") as mock_corr,
+            patch.object(analytics, "_analyze_trends") as mock_trend,
+            patch.object(analytics, "_predictive_analysis") as mock_pred,
+        ):
             await analytics._analyze_patterns()
 
             # Verify the internal methods were called
@@ -192,17 +190,20 @@ class TestErrorPatternAnalytics:
         """Test frequency pattern analysis."""
         # Add enough test events to exceed the frequency threshold (5)
         for i in range(6):  # 6 errors > 5 threshold
-            analytics.error_history.append({
-                "timestamp": datetime.now(timezone.utc),
-                "error_type": "timeout",
-                "component": "exchange",
-                "severity": "high"
-            })
+            analytics.error_history.append(
+                {
+                    "timestamp": datetime.now(timezone.utc),
+                    "error_type": "timeout",
+                    "component": "exchange",
+                    "severity": "high",
+                }
+            )
 
         # Mock the internal methods to avoid complex async operations
-        with patch.object(analytics, '_trigger_pattern_alert') as mock_alert, \
-                patch.object(analytics, '_get_recent_errors', return_value=analytics.error_history):
-
+        with (
+            patch.object(analytics, "_trigger_pattern_alert") as mock_alert,
+            patch.object(analytics, "_get_recent_errors", return_value=analytics.error_history),
+        ):
             await analytics._analyze_frequency_patterns()
 
             # Verify the method completed without errors
@@ -218,15 +219,16 @@ class TestErrorPatternAnalytics:
                 "timestamp": datetime.now(timezone.utc),
                 "error_type": "timeout",
                 "component": "exchange",
-                "severity": "high"
+                "severity": "high",
             }
         ]
 
         # Mock the internal methods to avoid complex async operations
-        with patch.object(analytics, '_get_recent_errors', return_value=analytics.error_history), \
-                patch.object(analytics, '_create_time_windows', return_value=[]), \
-                patch.object(analytics, '_calculate_correlation', return_value=0.5):
-
+        with (
+            patch.object(analytics, "_get_recent_errors", return_value=analytics.error_history),
+            patch.object(analytics, "_create_time_windows", return_value=[]),
+            patch.object(analytics, "_calculate_correlation", return_value=0.5),
+        ):
             await analytics._analyze_correlations()
 
             # Verify the method completed without errors
@@ -241,13 +243,12 @@ class TestErrorPatternAnalytics:
                 "timestamp": datetime.now(timezone.utc),
                 "error_type": "timeout",
                 "component": "exchange",
-                "severity": "high"
+                "severity": "high",
             }
         ]
 
         # Mock the internal methods to avoid complex async operations
-        with patch.object(analytics, '_calculate_trend', return_value=None):
-
+        with patch.object(analytics, "_calculate_trend", return_value=None):
             await analytics._analyze_trends()
 
             # Verify the method completed without errors
@@ -270,24 +271,27 @@ class TestErrorPatternAnalytics:
             confidence=0.9,  # Above 0.8 threshold
             description="Test pattern",
             suggested_action="Test action",
-            is_active=True  # Ensure pattern is active
+            is_active=True,  # Ensure pattern is active
         )
         analytics.detected_patterns["test_pattern"] = pattern
 
         # Add some error history
         for i in range(10):
-            analytics.error_history.append({
-                "timestamp": datetime.now(timezone.utc),
-                "error_type": "timeout",
-                "component": "exchange",
-                "severity": "high"
-            })
+            analytics.error_history.append(
+                {
+                    "timestamp": datetime.now(timezone.utc),
+                    "error_type": "timeout",
+                    "component": "exchange",
+                    "severity": "high",
+                }
+            )
 
         # Mock the internal methods to ensure conditions are met
-        with patch.object(analytics, '_predict_issues', return_value="Test prediction"), \
-                patch.object(analytics, '_trigger_predictive_alert') as mock_alert, \
-                patch.object(analytics, '_get_recent_frequency', return_value=20):  # > 10 * 1.5 = 15
-
+        with (
+            patch.object(analytics, "_predict_issues", return_value="Test prediction"),
+            patch.object(analytics, "_trigger_predictive_alert") as mock_alert,
+            patch.object(analytics, "_get_recent_frequency", return_value=20),
+        ):  # > 10 * 1.5 = 15
             await analytics._predictive_analysis()
 
             # Verify the method completed without errors
@@ -309,7 +313,7 @@ class TestErrorPatternAnalytics:
                 occurrence_count=5,
                 confidence=0.8,
                 description="Test pattern",
-                suggested_action="Monitor"
+                suggested_action="Monitor",
             )
         }
 
@@ -320,9 +324,7 @@ class TestErrorPatternAnalytics:
     def test_get_correlation_summary(self, analytics):
         """Test getting correlation summary."""
         # Add test correlations
-        analytics.correlation_matrix = {
-            "test_correlation": 0.8
-        }
+        analytics.correlation_matrix = {"test_correlation": 0.8}
 
         summary = analytics.get_correlation_summary()
         assert "total_correlations" in summary
@@ -340,7 +342,7 @@ class TestErrorPatternAnalytics:
             trend_strength=0.8,
             start_time=base_time,
             end_time=base_time + timedelta(hours=1),
-            data_points=[]
+            data_points=[],
         )
         trend2 = ErrorTrend(
             component="database",
@@ -350,7 +352,7 @@ class TestErrorPatternAnalytics:
             trend_strength=0.6,
             start_time=base_time,
             end_time=base_time + timedelta(days=1),
-            data_points=[]
+            data_points=[],
         )
 
         analytics.error_trends["trend1"] = trend1
@@ -372,15 +374,16 @@ class TestErrorPatternAnalytics:
                 "timestamp": datetime.now(timezone.utc),
                 "error_type": "timeout",
                 "component": "exchange",
-                "severity": "high"
+                "severity": "high",
             }
         ]
 
         # Mock the internal methods to avoid complex async operations
-        with patch.object(analytics, '_analyze_frequency_patterns') as mock_freq, \
-                patch.object(analytics, '_analyze_correlations') as mock_corr, \
-                patch.object(analytics, '_analyze_trends') as mock_trend:
-
+        with (
+            patch.object(analytics, "_analyze_frequency_patterns") as mock_freq,
+            patch.object(analytics, "_analyze_correlations") as mock_corr,
+            patch.object(analytics, "_analyze_trends") as mock_trend,
+        ):
             await analytics._analyze_patterns()
 
             # Verify integration works

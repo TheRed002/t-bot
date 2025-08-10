@@ -8,12 +8,7 @@ CRITICAL: This module integrates with P-001 core framework and will be
 used by all subsequent prompts for database schema changes.
 """
 
-from .env import get_url, run_migrations_online, run_migrations_offline
+from .env import get_url, run_migrations_offline, run_migrations_online
 from .script import template
 
-__all__ = [
-    "get_url",
-    "run_migrations_online",
-    "run_migrations_offline",
-    "template"
-]
+__all__ = ["get_url", "run_migrations_offline", "run_migrations_online", "template"]

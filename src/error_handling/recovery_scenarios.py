@@ -10,22 +10,16 @@ for error logging and will be used by all subsequent prompts.
 """
 
 import asyncio
-import time
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Callable
 from decimal import Decimal
+from typing import Any
+
+from src.core.config import Config
 from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001 core framework
-from src.core.types import OrderRequest, OrderResponse, Position, MarketData
-from src.core.exceptions import (
-    TradingBotError, ExchangeError, ExecutionError,
-    OrderRejectionError, SlippageError
-)
-from src.core.config import Config
-
 # MANDATORY: Import from P-007A utils framework
-from src.utils.decorators import time_execution, retry
+from src.utils.decorators import retry, time_execution
 
 logger = get_logger(__name__)
 
@@ -54,15 +48,13 @@ class PartialFillRecovery(RecoveryScenario):
 
     @time_execution
     @retry(max_attempts=3)
-    async def execute_recovery(self, context: Dict[str, Any]) -> bool:
+    async def execute_recovery(self, context: dict[str, Any]) -> bool:
         """Handle partial order fill recovery."""
         order = context.get("order")
         filled_quantity = context.get("filled_quantity", Decimal("0"))
 
         if not order or not filled_quantity:
-            logger.error(
-                "Invalid context for partial fill recovery",
-                context=context)
+            logger.error("Invalid context for partial fill recovery", context=context)
             return False
 
         fill_percentage = float(filled_quantity / order.quantity)
@@ -72,7 +64,7 @@ class PartialFillRecovery(RecoveryScenario):
             order_id=order.get("id"),
             fill_percentage=fill_percentage,
             filled_quantity=filled_quantity,
-            total_quantity=order.quantity
+            total_quantity=order.quantity,
         )
 
         if fill_percentage < self.min_fill_percentage:
@@ -95,13 +87,9 @@ class PartialFillRecovery(RecoveryScenario):
             # Engine)
             logger.info("Cancelling order", order_id=order_id)
         except Exception as e:
-            logger.error(
-                "Failed to cancel order",
-                order_id=order_id,
-                error=str(e))
+            logger.error("Failed to cancel order", order_id=order_id, error=str(e))
 
-    async def _log_partial_fill(
-            self, order: Dict[str, Any], filled_quantity: Decimal) -> None:
+    async def _log_partial_fill(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
         """Log partial fill details for analysis."""
         if self.log_details:
             logger.info(
@@ -109,23 +97,19 @@ class PartialFillRecovery(RecoveryScenario):
                 order_id=order.get("id"),
                 filled_quantity=filled_quantity,
                 fill_percentage=float(filled_quantity / order["quantity"]),
-                timestamp=datetime.now(timezone.utc).isoformat()
+                timestamp=datetime.now(timezone.utc).isoformat(),
             )
 
-    async def _reevaluate_signal(self, signal: Dict[str, Any]) -> None:
+    async def _reevaluate_signal(self, signal: dict[str, Any]) -> None:
         """Re-evaluate the original trading signal."""
         try:
             # TODO: Implement signal re-evaluation
             # This will be implemented in P-011+ (Strategy Framework)
             logger.info("Re-evaluating signal", signal_id=signal.get("id"))
         except Exception as e:
-            logger.error(
-                "Failed to re-evaluate signal",
-                signal_id=signal.get("id"),
-                error=str(e))
+            logger.error("Failed to re-evaluate signal", signal_id=signal.get("id"), error=str(e))
 
-    async def _update_position(
-            self, order: Dict[str, Any], filled_quantity: Decimal) -> None:
+    async def _update_position(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
         """Update position tracking with partial fill."""
         try:
             # TODO: Implement position update
@@ -134,16 +118,12 @@ class PartialFillRecovery(RecoveryScenario):
             logger.info(
                 "Updating position with partial fill",
                 order_id=order.get("id"),
-                filled_quantity=filled_quantity
+                filled_quantity=filled_quantity,
             )
         except Exception as e:
-            logger.error(
-                "Failed to update position",
-                order_id=order.get("id"),
-                error=str(e))
+            logger.error("Failed to update position", order_id=order.get("id"), error=str(e))
 
-    async def _adjust_stop_loss(
-            self, order: Dict[str, Any], filled_quantity: Decimal) -> None:
+    async def _adjust_stop_loss(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
         """Adjust stop loss based on partial fill."""
         try:
             # TODO: Implement stop loss adjustment
@@ -151,13 +131,10 @@ class PartialFillRecovery(RecoveryScenario):
             logger.info(
                 "Adjusting stop loss for partial fill",
                 order_id=order.get("id"),
-                filled_quantity=filled_quantity
+                filled_quantity=filled_quantity,
             )
         except Exception as e:
-            logger.error(
-                "Failed to adjust stop loss",
-                order_id=order.get("id"),
-                error=str(e))
+            logger.error("Failed to adjust stop loss", order_id=order.get("id"), error=str(e))
 
 
 class NetworkDisconnectionRecovery(RecoveryScenario):
@@ -172,14 +149,14 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
 
     @time_execution
     @retry(max_attempts=5, base_delay=2.0)
-    async def execute_recovery(self, context: Dict[str, Any]) -> bool:
+    async def execute_recovery(self, context: dict[str, Any]) -> bool:
         """Handle network disconnection recovery."""
         component = context.get("component", "unknown")
 
         logger.warning(
             "Network disconnection detected",
             component=component,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         # Switch to offline mode
@@ -199,7 +176,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 return True
 
             # Exponential backoff
-            await asyncio.sleep(2 ** attempt)
+            await asyncio.sleep(2**attempt)
 
         # Enter safe mode if reconnection fails
         await self._enter_safe_mode(component)
@@ -212,10 +189,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             # This will be implemented in P-021+ (Bot Instance Management)
             logger.info("Switching to offline mode", component=component)
         except Exception as e:
-            logger.error(
-                "Failed to switch to offline mode",
-                component=component,
-                error=str(e))
+            logger.error("Failed to switch to offline mode", component=component, error=str(e))
 
     async def _persist_pending_operations(self, component: str) -> None:
         """Persist any pending operations to prevent data loss."""
@@ -225,10 +199,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             # Recovery)
             logger.info("Persisting pending operations", component=component)
         except Exception as e:
-            logger.error(
-                "Failed to persist operations",
-                component=component,
-                error=str(e))
+            logger.error("Failed to persist operations", component=component, error=str(e))
 
     async def _try_reconnect(self, component: str) -> bool:
         """Attempt to reconnect to the service."""
@@ -240,10 +211,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             await asyncio.sleep(1)
             return True  # Simulate successful reconnection
         except Exception as e:
-            logger.error(
-                "Reconnection attempt failed",
-                component=component,
-                error=str(e))
+            logger.error("Reconnection attempt failed", component=component, error=str(e))
             return False
 
     async def _reconcile_positions(self, component: str) -> None:
@@ -254,10 +222,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             # Engine)
             logger.info("Reconciling positions", component=component)
         except Exception as e:
-            logger.error(
-                "Failed to reconcile positions",
-                component=component,
-                error=str(e))
+            logger.error("Failed to reconcile positions", component=component, error=str(e))
 
     async def _reconcile_orders(self, component: str) -> None:
         """Reconcile orders with exchange data."""
@@ -267,10 +232,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             # Engine)
             logger.info("Reconciling orders", component=component)
         except Exception as e:
-            logger.error(
-                "Failed to reconcile orders",
-                component=component,
-                error=str(e))
+            logger.error("Failed to reconcile orders", component=component, error=str(e))
 
     async def _verify_balances(self, component: str) -> None:
         """Verify account balances are consistent."""
@@ -279,10 +241,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             # This will be implemented in P-003+ (Exchange Integrations)
             logger.info("Verifying balances", component=component)
         except Exception as e:
-            logger.error(
-                "Failed to verify balances",
-                component=component,
-                error=str(e))
+            logger.error("Failed to verify balances", component=component, error=str(e))
 
     async def _switch_to_online_mode(self, component: str) -> None:
         """Switch component back to online mode."""
@@ -291,10 +250,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             # This will be implemented in P-021+ (Bot Instance Management)
             logger.info("Switching to online mode", component=component)
         except Exception as e:
-            logger.error(
-                "Failed to switch to online mode",
-                component=component,
-                error=str(e))
+            logger.error("Failed to switch to online mode", component=component, error=str(e))
 
     async def _enter_safe_mode(self, component: str) -> None:
         """Enter safe mode when reconnection fails."""
@@ -304,10 +260,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             # Controls)
             logger.warning("Entering safe mode", component=component)
         except Exception as e:
-            logger.error(
-                "Failed to enter safe mode",
-                component=component,
-                error=str(e))
+            logger.error("Failed to enter safe mode", component=component, error=str(e))
 
 
 class ExchangeMaintenanceRecovery(RecoveryScenario):
@@ -320,14 +273,14 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
         self.pause_new_orders = True  # Default behavior
 
     @time_execution
-    async def execute_recovery(self, context: Dict[str, Any]) -> bool:
+    async def execute_recovery(self, context: dict[str, Any]) -> bool:
         """Handle exchange maintenance recovery."""
         exchange = context.get("exchange", "unknown")
 
         logger.warning(
             "Exchange maintenance detected",
             exchange=exchange,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         if self.detect_maintenance:
@@ -348,10 +301,7 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
             # This will be implemented in P-003+ (Exchange Integrations)
             logger.info("Detecting maintenance schedule", exchange=exchange)
         except Exception as e:
-            logger.error(
-                "Failed to detect maintenance schedule",
-                exchange=exchange,
-                error=str(e))
+            logger.error("Failed to detect maintenance schedule", exchange=exchange, error=str(e))
 
     async def _redistribute_capital(self, exchange: str) -> None:
         """Redistribute capital to other exchanges."""
@@ -360,10 +310,7 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
             # This will be implemented in P-010A (Capital Management System)
             logger.info("Redistributing capital", exchange=exchange)
         except Exception as e:
-            logger.error(
-                "Failed to redistribute capital",
-                exchange=exchange,
-                error=str(e))
+            logger.error("Failed to redistribute capital", exchange=exchange, error=str(e))
 
     async def _pause_new_orders(self, exchange: str) -> None:
         """Pause new order placement on the exchange."""
@@ -373,10 +320,7 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
             # Engine)
             logger.info("Pausing new orders", exchange=exchange)
         except Exception as e:
-            logger.error(
-                "Failed to pause new orders",
-                exchange=exchange,
-                error=str(e))
+            logger.error("Failed to pause new orders", exchange=exchange, error=str(e))
 
 
 class DataFeedInterruptionRecovery(RecoveryScenario):
@@ -385,19 +329,18 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
     def __init__(self, config: Config):
         super().__init__(config)
         self.max_staleness = self.recovery_config.data_feed_max_staleness
-        self.fallback_sources = ["backup_feed",
-                                 "static_data"]  # Default fallback sources
+        self.fallback_sources = ["backup_feed", "static_data"]  # Default fallback sources
         self.conservative_trading = True  # Default behavior
 
     @time_execution
-    async def execute_recovery(self, context: Dict[str, Any]) -> bool:
+    async def execute_recovery(self, context: dict[str, Any]) -> bool:
         """Handle data feed interruption recovery."""
         data_source = context.get("data_source", "unknown")
 
         logger.warning(
             "Data feed interruption detected",
             data_source=data_source,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
         )
 
         # Check data staleness
@@ -418,10 +361,7 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
             logger.info("Checking data staleness", data_source=data_source)
             return True  # Simulate stale data
         except Exception as e:
-            logger.error(
-                "Failed to check data staleness",
-                data_source=data_source,
-                error=str(e))
+            logger.error("Failed to check data staleness", data_source=data_source, error=str(e))
             return True
 
     async def _switch_to_fallback_source(self, data_source: str) -> None:
@@ -430,28 +370,22 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
             # TODO: Implement fallback source switching
             # This will be implemented in P-014 (Data Pipeline and Sources
             # Integration)
-            logger.info(
-                "Switching to fallback source",
-                data_source=data_source)
+            logger.info("Switching to fallback source", data_source=data_source)
         except Exception as e:
             logger.error(
-                "Failed to switch to fallback source",
-                data_source=data_source,
-                error=str(e))
+                "Failed to switch to fallback source", data_source=data_source, error=str(e)
+            )
 
     async def _enable_conservative_trading(self, data_source: str) -> None:
         """Enable conservative trading mode."""
         try:
             # TODO: Implement conservative trading mode
             # This will be implemented in P-008+ (Risk Management)
-            logger.info(
-                "Enabling conservative trading",
-                data_source=data_source)
+            logger.info("Enabling conservative trading", data_source=data_source)
         except Exception as e:
             logger.error(
-                "Failed to enable conservative trading",
-                data_source=data_source,
-                error=str(e))
+                "Failed to enable conservative trading", data_source=data_source, error=str(e)
+            )
 
 
 class OrderRejectionRecovery(RecoveryScenario):
@@ -465,7 +399,7 @@ class OrderRejectionRecovery(RecoveryScenario):
 
     @time_execution
     @retry(max_attempts=2)
-    async def execute_recovery(self, context: Dict[str, Any]) -> bool:
+    async def execute_recovery(self, context: dict[str, Any]) -> bool:
         """Handle order rejection recovery."""
         order = context.get("order")
         rejection_reason = context.get("rejection_reason", "unknown")
@@ -473,7 +407,7 @@ class OrderRejectionRecovery(RecoveryScenario):
         logger.warning(
             "Order rejection detected",
             order_id=order.get("id") if order else "unknown",
-            rejection_reason=rejection_reason
+            rejection_reason=rejection_reason,
         )
 
         if self.analyze_rejection_reason:
@@ -484,8 +418,7 @@ class OrderRejectionRecovery(RecoveryScenario):
 
         return True
 
-    async def _analyze_rejection_reason(
-            self, order: Dict[str, Any], rejection_reason: str) -> None:
+    async def _analyze_rejection_reason(self, order: dict[str, Any], rejection_reason: str) -> None:
         """Analyze the rejection reason for pattern detection."""
         try:
             # TODO: Implement rejection reason analysis
@@ -494,13 +427,12 @@ class OrderRejectionRecovery(RecoveryScenario):
             logger.info(
                 "Analyzing rejection reason",
                 order_id=order.get("id") if order else "unknown",
-                rejection_reason=rejection_reason
+                rejection_reason=rejection_reason,
             )
         except Exception as e:
             logger.error("Failed to analyze rejection reason", error=str(e))
 
-    async def _adjust_order_parameters(
-            self, order: Dict[str, Any], rejection_reason: str) -> None:
+    async def _adjust_order_parameters(self, order: dict[str, Any], rejection_reason: str) -> None:
         """Adjust order parameters based on rejection reason."""
         try:
             # TODO: Implement parameter adjustment
@@ -509,7 +441,7 @@ class OrderRejectionRecovery(RecoveryScenario):
             logger.info(
                 "Adjusting order parameters",
                 order_id=order.get("id") if order else "unknown",
-                rejection_reason=rejection_reason
+                rejection_reason=rejection_reason,
             )
         except Exception as e:
             logger.error("Failed to adjust order parameters", error=str(e))
@@ -525,15 +457,13 @@ class APIRateLimitRecovery(RecoveryScenario):
         self.base_delay = 5
 
     @time_execution
-    async def execute_recovery(self, context: Dict[str, Any]) -> bool:
+    async def execute_recovery(self, context: dict[str, Any]) -> bool:
         """Handle API rate limit recovery."""
         api_endpoint = context.get("api_endpoint", "unknown")
         retry_after = context.get("retry_after", self.base_delay)
 
         logger.warning(
-            "API rate limit exceeded",
-            api_endpoint=api_endpoint,
-            retry_after=retry_after
+            "API rate limit exceeded", api_endpoint=api_endpoint, retry_after=retry_after
         )
 
         # Respect retry-after header if provided
@@ -545,19 +475,12 @@ class APIRateLimitRecovery(RecoveryScenario):
             try:
                 # TODO: Implement actual API call retry
                 # This will be implemented in P-003+ (Exchange Integrations)
-                logger.info(
-                    "Retrying API call",
-                    api_endpoint=api_endpoint,
-                    attempt=attempt + 1
-                )
-                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                logger.info("Retrying API call", api_endpoint=api_endpoint, attempt=attempt + 1)
+                await asyncio.sleep(2**attempt)  # Exponential backoff
                 return True
             except Exception as e:
                 logger.error(
-                    "API retry failed",
-                    api_endpoint=api_endpoint,
-                    attempt=attempt + 1,
-                    error=str(e)
+                    "API retry failed", api_endpoint=api_endpoint, attempt=attempt + 1, error=str(e)
                 )
 
         return False

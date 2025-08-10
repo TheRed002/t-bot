@@ -9,26 +9,21 @@ P-002A (error handling), and P-003+ (exchange interfaces).
 """
 
 import asyncio
-import time
-from typing import Dict, Optional, Any, List, Callable
-from datetime import datetime, timedelta
-from enum import Enum
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any
 
-# MANDATORY: Import from P-001
-from src.core.types import MarketData, OrderRequest, OrderResponse, Position
-from src.core.exceptions import (
-    ExchangeRateLimitError,
-    ExchangeConnectionError,
-    ExchangeError,
-    ValidationError)
 from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ValidationError,
+)
 from src.core.logging import get_logger
 
+# MANDATORY: Import from P-001
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import RecoveryScenario
-
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
 from src.utils.decorators import time_execution
 
@@ -37,6 +32,7 @@ logger = get_logger(__name__)
 
 class ConnectionStatus(Enum):
     """Connection status enumeration."""
+
     HEALTHY = "healthy"
     FAILED = "failed"
     RECOVERED = "recovered"
@@ -46,14 +42,15 @@ class ConnectionStatus(Enum):
 @dataclass
 class ConnectionInfo:
     """Connection information for health monitoring."""
+
     connection_id: str
     exchange: str
     stream_type: str
     status: ConnectionStatus
-    last_ping: Optional[datetime] = None
-    last_pong: Optional[datetime] = None
+    last_ping: datetime | None = None
+    last_pong: datetime | None = None
     failure_count: int = 0
-    last_failure: Optional[datetime] = None
+    last_failure: datetime | None = None
     recovery_attempts: int = 0
     created_at: datetime = None
 
@@ -80,22 +77,23 @@ class ConnectionHealthMonitor:
         self.config = config
 
         # Connection tracking
-        self.connections: Dict[str, ConnectionInfo] = {}
+        self.connections: dict[str, ConnectionInfo] = {}
         self.health_check_interval = 30  # seconds
         self.max_recovery_attempts = 5
         self.recovery_backoff_base = 2  # exponential backoff base
 
         # Health check callbacks
-        self.health_check_callbacks: Dict[str, Callable] = {}
-        self.recovery_callbacks: Dict[str, Callable] = {}
+        self.health_check_callbacks: dict[str, Callable] = {}
+        self.recovery_callbacks: dict[str, Callable] = {}
 
         # Monitoring task
-        self.monitoring_task: Optional[asyncio.Task] = None
+        self.monitoring_task: asyncio.Task | None = None
         self.is_monitoring = False
 
         # TODO: Remove in production
-        logger.debug("ConnectionHealthMonitor initialized",
-                     health_check_interval=self.health_check_interval)
+        logger.debug(
+            "ConnectionHealthMonitor initialized", health_check_interval=self.health_check_interval
+        )
 
     @time_execution
     async def monitor_connection(self, connection: Any) -> None:
@@ -115,16 +113,16 @@ class ConnectionHealthMonitor:
                 raise ValidationError("Connection is required")
 
             # Extract connection info
-            connection_id = getattr(connection, 'id', str(id(connection)))
-            exchange = getattr(connection, 'exchange', 'unknown')
-            stream_type = getattr(connection, 'stream_type', 'unknown')
+            connection_id = getattr(connection, "id", str(id(connection)))
+            exchange = getattr(connection, "exchange", "unknown")
+            stream_type = getattr(connection, "stream_type", "unknown")
 
             # Create connection info
             conn_info = ConnectionInfo(
                 connection_id=connection_id,
                 exchange=exchange,
                 stream_type=stream_type,
-                status=ConnectionStatus.HEALTHY
+                status=ConnectionStatus.HEALTHY,
             )
 
             # Register connection
@@ -138,15 +136,16 @@ class ConnectionHealthMonitor:
                 "Connection monitoring started",
                 connection_id=connection_id,
                 exchange=exchange,
-                stream_type=stream_type)
+                stream_type=stream_type,
+            )
 
         except ValidationError:
             raise
         except Exception as e:
-            logger.error("Failed to start connection monitoring",
-                         connection=str(connection), error=str(e))
-            raise ExchangeConnectionError(
-                f"Connection monitoring failed: {str(e)}")
+            logger.error(
+                "Failed to start connection monitoring", connection=str(connection), error=str(e)
+            )
+            raise ExchangeConnectionError(f"Connection monitoring failed: {e!s}")
 
     @time_execution
     async def mark_failed(self, connection: Any) -> None:
@@ -166,12 +165,10 @@ class ConnectionHealthMonitor:
                 raise ValidationError("Connection is required")
 
             # Get connection ID
-            connection_id = getattr(connection, 'id', str(id(connection)))
+            connection_id = getattr(connection, "id", str(id(connection)))
 
             if connection_id not in self.connections:
-                logger.warning(
-                    "Connection not found in monitor",
-                    connection_id=connection_id)
+                logger.warning("Connection not found in monitor", connection_id=connection_id)
                 return
 
             # Update connection info
@@ -180,25 +177,29 @@ class ConnectionHealthMonitor:
             conn_info.failure_count += 1
             conn_info.last_failure = datetime.now()
 
-            logger.warning("Connection marked as failed",
-                           connection_id=connection_id,
-                           failure_count=conn_info.failure_count)
+            logger.warning(
+                "Connection marked as failed",
+                connection_id=connection_id,
+                failure_count=conn_info.failure_count,
+            )
 
             # Trigger recovery if within limits
             if conn_info.recovery_attempts < self.max_recovery_attempts:
                 await self._trigger_recovery(conn_info)
             else:
-                logger.error("Max recovery attempts exceeded",
-                             connection_id=connection_id,
-                             recovery_attempts=conn_info.recovery_attempts)
+                logger.error(
+                    "Max recovery attempts exceeded",
+                    connection_id=connection_id,
+                    recovery_attempts=conn_info.recovery_attempts,
+                )
 
         except ValidationError:
             raise
         except Exception as e:
-            logger.error("Failed to mark connection as failed",
-                         connection=str(connection), error=str(e))
-            raise ExchangeConnectionError(
-                f"Failed to mark connection as failed: {str(e)}")
+            logger.error(
+                "Failed to mark connection as failed", connection=str(connection), error=str(e)
+            )
+            raise ExchangeConnectionError(f"Failed to mark connection as failed: {e!s}")
 
     async def _trigger_recovery(self, conn_info: ConnectionInfo) -> None:
         """
@@ -209,12 +210,14 @@ class ConnectionHealthMonitor:
         """
         try:
             # Calculate backoff delay
-            delay = self.recovery_backoff_base ** conn_info.recovery_attempts
+            delay = self.recovery_backoff_base**conn_info.recovery_attempts
 
-            logger.info("Triggering connection recovery",
-                        connection_id=conn_info.connection_id,
-                        recovery_attempt=conn_info.recovery_attempts + 1,
-                        delay=delay)
+            logger.info(
+                "Triggering connection recovery",
+                connection_id=conn_info.connection_id,
+                recovery_attempt=conn_info.recovery_attempts + 1,
+                delay=delay,
+            )
 
             # Wait for backoff delay
             await asyncio.sleep(delay)
@@ -227,21 +230,27 @@ class ConnectionHealthMonitor:
                 try:
                     await self.recovery_callbacks[conn_info.connection_id](conn_info)
                     conn_info.status = ConnectionStatus.RECOVERED
-                    logger.info("Connection recovery successful",
-                                connection_id=conn_info.connection_id)
+                    logger.info(
+                        "Connection recovery successful", connection_id=conn_info.connection_id
+                    )
                 except Exception as e:
                     logger.error(
                         "Connection recovery failed",
                         connection_id=conn_info.connection_id,
-                        error=str(e))
+                        error=str(e),
+                    )
                     conn_info.status = ConnectionStatus.FAILED
             else:
-                logger.warning("No recovery callback registered",
-                               connection_id=conn_info.connection_id)
+                logger.warning(
+                    "No recovery callback registered", connection_id=conn_info.connection_id
+                )
 
         except Exception as e:
-            logger.error("Failed to trigger connection recovery",
-                         connection_id=conn_info.connection_id, error=str(e))
+            logger.error(
+                "Failed to trigger connection recovery",
+                connection_id=conn_info.connection_id,
+                error=str(e),
+            )
 
     async def _start_monitoring(self) -> None:
         """Start the monitoring task."""
@@ -278,19 +287,18 @@ class ConnectionHealthMonitor:
                 is_healthy = await self._check_connection_health(conn_info)
 
                 if not is_healthy:
-                    logger.warning("Connection health check failed",
-                                   connection_id=connection_id)
+                    logger.warning("Connection health check failed", connection_id=connection_id)
                     await self.mark_failed(self._get_connection_by_id(connection_id))
                 else:
                     # Update last ping time
                     conn_info.last_ping = datetime.now()
 
             except Exception as e:
-                logger.error("Health check failed for connection",
-                             connection_id=connection_id, error=str(e))
+                logger.error(
+                    "Health check failed for connection", connection_id=connection_id, error=str(e)
+                )
 
-    async def _check_connection_health(
-            self, conn_info: ConnectionInfo) -> bool:
+    async def _check_connection_health(self, conn_info: ConnectionInfo) -> bool:
         """
         Check if a connection is healthy.
 
@@ -308,27 +316,34 @@ class ConnectionHealthMonitor:
                     logger.warning(
                         "Connection inactive for too long",
                         connection_id=conn_info.connection_id,
-                        time_since_ping=time_since_ping.total_seconds())
+                        time_since_ping=time_since_ping.total_seconds(),
+                    )
                     return False
 
             # Call health check callback if registered
             if conn_info.connection_id in self.health_check_callbacks:
                 try:
-                    is_healthy = await self.health_check_callbacks[conn_info.connection_id](conn_info)
+                    is_healthy = await self.health_check_callbacks[conn_info.connection_id](
+                        conn_info
+                    )
                     return is_healthy
                 except Exception as e:
                     logger.error(
                         "Health check callback failed",
                         connection_id=conn_info.connection_id,
-                        error=str(e))
+                        error=str(e),
+                    )
                     return False
 
             # Default health check (ping-based)
             return await self._default_health_check(conn_info)
 
         except Exception as e:
-            logger.error("Connection health check failed",
-                         connection_id=conn_info.connection_id, error=str(e))
+            logger.error(
+                "Connection health check failed",
+                connection_id=conn_info.connection_id,
+                error=str(e),
+            )
             return False
 
     async def _default_health_check(self, conn_info: ConnectionInfo) -> bool:
@@ -354,12 +369,14 @@ class ConnectionHealthMonitor:
             return True
 
         except Exception as e:
-            logger.error("Default health check failed",
-                         connection_id=conn_info.connection_id, error=str(e))
+            logger.error(
+                "Default health check failed", connection_id=conn_info.connection_id, error=str(e)
+            )
             return False
 
     def _get_connection_by_id(self, connection_id: str) -> Any:
         """Get connection object by ID (placeholder implementation)."""
+
         # This would return the actual connection object
         # For now, return a mock object
         class MockConnection:
@@ -368,10 +385,7 @@ class ConnectionHealthMonitor:
 
         return MockConnection(connection_id)
 
-    def register_health_check_callback(
-            self,
-            connection_id: str,
-            callback: Callable) -> None:
+    def register_health_check_callback(self, connection_id: str, callback: Callable) -> None:
         """
         Register a health check callback for a connection.
 
@@ -380,14 +394,9 @@ class ConnectionHealthMonitor:
             callback: Health check callback function
         """
         self.health_check_callbacks[connection_id] = callback
-        logger.debug(
-            "Health check callback registered",
-            connection_id=connection_id)
+        logger.debug("Health check callback registered", connection_id=connection_id)
 
-    def register_recovery_callback(
-            self,
-            connection_id: str,
-            callback: Callable) -> None:
+    def register_recovery_callback(self, connection_id: str, callback: Callable) -> None:
         """
         Register a recovery callback for a connection.
 
@@ -396,9 +405,7 @@ class ConnectionHealthMonitor:
             callback: Recovery callback function
         """
         self.recovery_callbacks[connection_id] = callback
-        logger.debug(
-            "Recovery callback registered",
-            connection_id=connection_id)
+        logger.debug("Recovery callback registered", connection_id=connection_id)
 
     def unregister_connection(self, connection_id: str) -> None:
         """
@@ -416,13 +423,9 @@ class ConnectionHealthMonitor:
         if connection_id in self.recovery_callbacks:
             del self.recovery_callbacks[connection_id]
 
-        logger.info(
-            "Connection unregistered from monitoring",
-            connection_id=connection_id)
+        logger.info("Connection unregistered from monitoring", connection_id=connection_id)
 
-    def get_connection_status(
-            self,
-            connection_id: str) -> Optional[ConnectionInfo]:
+    def get_connection_status(self, connection_id: str) -> ConnectionInfo | None:
         """
         Get connection status.
 
@@ -434,7 +437,7 @@ class ConnectionHealthMonitor:
         """
         return self.connections.get(connection_id)
 
-    def get_all_connection_status(self) -> Dict[str, ConnectionInfo]:
+    def get_all_connection_status(self) -> dict[str, ConnectionInfo]:
         """
         Get status of all monitored connections.
 
@@ -443,7 +446,7 @@ class ConnectionHealthMonitor:
         """
         return self.connections.copy()
 
-    def get_health_summary(self) -> Dict[str, Any]:
+    def get_health_summary(self) -> dict[str, Any]:
         """
         Get health monitoring summary.
 
@@ -451,24 +454,27 @@ class ConnectionHealthMonitor:
             Dict containing health summary
         """
         total_connections = len(self.connections)
-        healthy_connections = sum(1 for c in self.connections.values()
-                                  if c.status == ConnectionStatus.HEALTHY)
-        failed_connections = sum(1 for c in self.connections.values()
-                                 if c.status == ConnectionStatus.FAILED)
-        recovered_connections = sum(1 for c in self.connections.values()
-                                    if c.status == ConnectionStatus.RECOVERED)
+        healthy_connections = sum(
+            1 for c in self.connections.values() if c.status == ConnectionStatus.HEALTHY
+        )
+        failed_connections = sum(
+            1 for c in self.connections.values() if c.status == ConnectionStatus.FAILED
+        )
+        recovered_connections = sum(
+            1 for c in self.connections.values() if c.status == ConnectionStatus.RECOVERED
+        )
 
         return {
             "total_connections": total_connections,
             "healthy_connections": healthy_connections,
             "failed_connections": failed_connections,
             "recovered_connections": recovered_connections,
-            "health_percentage": (
-                healthy_connections /
-                total_connections *
-                100) if total_connections > 0 else 0,
+            "health_percentage": (healthy_connections / total_connections * 100)
+            if total_connections > 0
+            else 0,
             "is_monitoring": self.is_monitoring,
-            "timestamp": datetime.now().isoformat()}
+            "timestamp": datetime.now().isoformat(),
+        }
 
     async def stop_monitoring(self) -> None:
         """Stop the monitoring task."""
@@ -507,9 +513,7 @@ class ConnectionHealthMonitor:
             raise ValidationError("Max recovery attempts must be positive")
 
         self.max_recovery_attempts = max_attempts
-        logger.info(
-            "Max recovery attempts updated",
-            new_max_attempts=max_attempts)
+        logger.info("Max recovery attempts updated", new_max_attempts=max_attempts)
 
     def reset_connection_stats(self, connection_id: str) -> None:
         """
@@ -525,19 +529,20 @@ class ConnectionHealthMonitor:
             conn_info.last_failure = None
             conn_info.status = ConnectionStatus.HEALTHY
 
-            logger.info(
-                "Connection statistics reset",
-                connection_id=connection_id)
+            logger.info("Connection statistics reset", connection_id=connection_id)
 
-    def get_failed_connections(self) -> List[ConnectionInfo]:
+    def get_failed_connections(self) -> list[ConnectionInfo]:
         """
         Get list of failed connections.
 
         Returns:
             List of failed connection info
         """
-        return [conn_info for conn_info in self.connections.values()
-                if conn_info.status == ConnectionStatus.FAILED]
+        return [
+            conn_info
+            for conn_info in self.connections.values()
+            if conn_info.status == ConnectionStatus.FAILED
+        ]
 
     def get_connection_failure_rate(self) -> float:
         """

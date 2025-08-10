@@ -8,28 +8,30 @@ CRITICAL: These tests ensure the OKX implementation works correctly in
 real-world scenarios and handles all edge cases properly.
 """
 
-import pytest
-import asyncio
-from unittest.mock import Mock, AsyncMock, patch
 from decimal import Decimal
-from datetime import datetime, timezone
+from unittest.mock import patch
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeInsufficientFundsError,
+    ValidationError,
+)
 
 # Import core types and exceptions
 from src.core.types import (
-    OrderRequest, OrderResponse, MarketData, Position,
-    Signal, TradingMode, OrderSide, OrderType,
-    ExchangeInfo, Ticker, OrderBook, Trade, OrderStatus
+    OrderRequest,
+    OrderSide,
+    OrderStatus,
+    OrderType,
 )
-from src.core.exceptions import (
-    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError,
-    ExchangeInsufficientFundsError, ValidationError, ExecutionError
-)
-from src.core.config import Config
 
 # Import OKX implementation
 from src.exchanges.okx import OKXExchange
-from src.exchanges.okx_websocket import OKXWebSocketManager
 from src.exchanges.okx_orders import OKXOrderManager
+from src.exchanges.okx_websocket import OKXWebSocketManager
 
 
 class TestOKXIntegration:
@@ -48,120 +50,115 @@ class TestOKXIntegration:
     @pytest.fixture
     def mock_okx_clients(self):
         """Mock OKX API clients."""
-        with patch('src.exchanges.okx.Account') as mock_account, \
-                patch('src.exchanges.okx.Market') as mock_market, \
-                patch('src.exchanges.okx.OKXTrade') as mock_trade, \
-                patch('src.exchanges.okx.Public') as mock_public:
-
+        with (
+            patch("src.exchanges.okx.Account") as mock_account,
+            patch("src.exchanges.okx.Market") as mock_market,
+            patch("src.exchanges.okx.OKXTrade") as mock_trade,
+            patch("src.exchanges.okx.Public") as mock_public,
+        ):
             # Mock successful responses
             mock_account.return_value.get_balance.return_value = {
-                'code': '0',
-                'data': [
-                    {
-                        'ccy': 'USDT',
-                        'availBal': '10000.0',
-                        'frozenBal': '0.0'
-                    },
-                    {
-                        'ccy': 'BTC',
-                        'availBal': '1.0',
-                        'frozenBal': '0.0'
-                    }
-                ]
+                "code": "0",
+                "data": [
+                    {"ccy": "USDT", "availBal": "10000.0", "frozenBal": "0.0"},
+                    {"ccy": "BTC", "availBal": "1.0", "frozenBal": "0.0"},
+                ],
             }
 
             # Mock trade client responses
             mock_trade.return_value.place_order.return_value = {
-                'code': '0',
-                'data': [{
-                    'ordId': 'test_order_123',
-                    'instId': 'BTC-USDT',
-                    'side': 'buy',
-                    'ordType': 'market',
-                    'sz': '100',
-                    'px': '50000',
-                    'state': 'live',
-                    'cTime': '1640995200000'
-                }]
+                "code": "0",
+                "data": [
+                    {
+                        "ordId": "test_order_123",
+                        "instId": "BTC-USDT",
+                        "side": "buy",
+                        "ordType": "market",
+                        "sz": "100",
+                        "px": "50000",
+                        "state": "live",
+                        "cTime": "1640995200000",
+                    }
+                ],
             }
 
             mock_trade.return_value.cancel_order.return_value = {
-                'code': '0',
-                'data': [{
-                    'ordId': 'test_order_123',
-                    'sState': 'canceled'
-                }]
+                "code": "0",
+                "data": [{"ordId": "test_order_123", "sState": "canceled"}],
             }
 
             mock_trade.return_value.get_order_details.return_value = {
-                'code': '0',
-                'data': [{
-                    'ordId': 'test_order_123',
-                    'instId': 'BTC-USDT',
-                    'side': 'buy',
-                    'ordType': 'market',
-                    'sz': '100',
-                    'px': '50000',
-                    'state': 'filled',
-                    'cTime': '1640995200000',
-                    'fillSz': '100'
-                }]
+                "code": "0",
+                "data": [
+                    {
+                        "ordId": "test_order_123",
+                        "instId": "BTC-USDT",
+                        "side": "buy",
+                        "ordType": "market",
+                        "sz": "100",
+                        "px": "50000",
+                        "state": "filled",
+                        "cTime": "1640995200000",
+                        "fillSz": "100",
+                    }
+                ],
             }
 
-            mock_public.return_value.get_candlesticks.return_value = {'code': '0', 'data': [
-                ['1640995200000', '50000', '51000', '49000', '50500', '1000', '50000000']]}
+            mock_public.return_value.get_candlesticks.return_value = {
+                "code": "0",
+                "data": [["1640995200000", "50000", "51000", "49000", "50500", "1000", "50000000"]],
+            }
 
             mock_public.return_value.get_orderbook.return_value = {
-                'code': '0',
-                'data': [{
-                    'bids': [['50000', '1.0'], ['49999', '2.0']],
-                    'asks': [['50001', '1.0'], ['50002', '2.0']]
-                }]
+                "code": "0",
+                "data": [
+                    {
+                        "bids": [["50000", "1.0"], ["49999", "2.0"]],
+                        "asks": [["50001", "1.0"], ["50002", "2.0"]],
+                    }
+                ],
             }
 
             mock_public.return_value.get_trades.return_value = {
-                'code': '0',
-                'data': [
+                "code": "0",
+                "data": [
                     {
-                        'tradeId': '12345',
-                        'side': 'buy',
-                        'sz': '1.0',
-                        'px': '50000',
-                        'ts': '1640995200000'
+                        "tradeId": "12345",
+                        "side": "buy",
+                        "sz": "1.0",
+                        "px": "50000",
+                        "ts": "1640995200000",
                     }
-                ]
+                ],
             }
 
             mock_public.return_value.get_instruments.return_value = {
-                'code': '0',
-                'data': [
-                    {
-                        'instId': 'BTC-USDT',
-                        'baseCcy': 'BTC',
-                        'quoteCcy': 'USDT',
-                        'state': 'live'
-                    }
-                ]
+                "code": "0",
+                "data": [
+                    {"instId": "BTC-USDT", "baseCcy": "BTC", "quoteCcy": "USDT", "state": "live"}
+                ],
             }
 
             mock_public.return_value.get_ticker.return_value = {
-                'code': '0',
-                'data': [{
-                    'instId': 'BTC-USDT',
-                    'last': '50000',
-                    'bidPx': '49999',
-                    'askPx': '50001',
-                    'vol24h': '1000',
-                    'change24h': '500',
-                    'ts': '1640995200000'
-                }]
+                "code": "0",
+                "data": [
+                    {
+                        "instId": "BTC-USDT",
+                        "last": "50000",
+                        "bidPx": "49999",
+                        "askPx": "50001",
+                        "vol24h": "1000",
+                        "change24h": "500",
+                        "ts": "1640995200000",
+                    }
+                ],
             }
 
             yield {
-                'account': mock_account.return_value,
-                'market': mock_market.return_value,
-                'trade': mock_trade.return_value,
-                'public': mock_public.return_value
+                "account": mock_account.return_value,
+                "market": mock_market.return_value,
+                "trade": mock_trade.return_value,
+                "public": mock_public.return_value,
             }
 
     @pytest.mark.asyncio
@@ -197,7 +194,7 @@ class TestOKXIntegration:
             symbol="BTC-USDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("0.1")
+            quantity=Decimal("0.1"),
         )
 
         order_response = await exchange.place_order(order_request)
@@ -209,10 +206,11 @@ class TestOKXIntegration:
         ws_manager = OKXWebSocketManager(config)
 
         # Mock WebSocket connection and message sending
-        with patch.object(ws_manager, '_connect_public_websocket', return_value=None), \
-                patch.object(ws_manager, '_connect_private_websocket', return_value=None), \
-                patch.object(ws_manager, '_send_public_message', return_value=None):
-
+        with (
+            patch.object(ws_manager, "_connect_public_websocket", return_value=None),
+            patch.object(ws_manager, "_connect_private_websocket", return_value=None),
+            patch.object(ws_manager, "_send_public_message", return_value=None),
+        ):
             # Connect to WebSocket
             connected = await ws_manager.connect()
             assert connected is True
@@ -224,7 +222,7 @@ class TestOKXIntegration:
             def ticker_callback(data):
                 nonlocal ticker_callback_called
                 ticker_callback_called = True
-                assert data['symbol'] == 'BTC-USDT'
+                assert data["symbol"] == "BTC-USDT"
 
             await ws_manager.subscribe_to_ticker("BTC-USDT", ticker_callback)
             assert "tickers.BTC-USDT" in ws_manager.public_subscriptions
@@ -235,16 +233,18 @@ class TestOKXIntegration:
         # Configure the mock to return proper response
         mock_trade_instance = mock_okx_clients["trade"]
         mock_trade_instance.place_order.return_value = {
-            'code': '0',
-            'data': [{
-                'ordId': 'test_order_123',
-                'instId': 'BTC-USDT',
-                'side': 'buy',
-                'ordType': 'limit',
-                'sz': '0.1',
-                'px': '50000',
-                'state': 'live'
-            }]
+            "code": "0",
+            "data": [
+                {
+                    "ordId": "test_order_123",
+                    "instId": "BTC-USDT",
+                    "side": "buy",
+                    "ordType": "limit",
+                    "sz": "0.1",
+                    "px": "50000",
+                    "state": "live",
+                }
+            ],
         }
 
         order_manager = OKXOrderManager(config, mock_trade_instance)
@@ -255,7 +255,7 @@ class TestOKXIntegration:
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
             quantity=Decimal("0.1"),
-            price=Decimal("50000")
+            price=Decimal("50000"),
         )
 
         # Validate order
@@ -263,11 +263,11 @@ class TestOKXIntegration:
 
         # Convert to OKX format
         okx_order = order_manager._convert_order_to_okx(order_request)
-        assert okx_order['instId'] == "BTC-USDT"
-        assert okx_order['side'] == "buy"
-        assert okx_order['ordType'] == "limit"
-        assert okx_order['sz'] == "0.1"
-        assert okx_order['px'] == "50000"
+        assert okx_order["instId"] == "BTC-USDT"
+        assert okx_order["side"] == "buy"
+        assert okx_order["ordType"] == "limit"
+        assert okx_order["sz"] == "0.1"
+        assert okx_order["px"] == "50000"
 
         # Test order placement
         response = await order_manager.place_order(order_request)
@@ -279,25 +279,26 @@ class TestOKXIntegration:
         exchange = OKXExchange(config)
 
         # Test connection error handling
-        with patch('src.exchanges.okx.Account', side_effect=Exception("Connection failed")):
+        with patch("src.exchanges.okx.Account", side_effect=Exception("Connection failed")):
             with pytest.raises(ExchangeConnectionError):
                 await exchange.connect()
 
         # Test order placement error handling
-        with patch('src.exchanges.okx.OKXTrade') as mock_trade:
+        with patch("src.exchanges.okx.OKXTrade") as mock_trade:
             mock_trade.return_value.place_order.return_value = {
-                'code': '58006',
-                'msg': 'Insufficient balance'
+                "code": "58006",
+                "msg": "Insufficient balance",
             }
 
             # Need to connect first to initialize trade_client
-            with patch('src.exchanges.okx.Account') as mock_account, \
-                    patch('src.exchanges.okx.Market') as mock_market, \
-                    patch('src.exchanges.okx.Public') as mock_public:
-
+            with (
+                patch("src.exchanges.okx.Account") as mock_account,
+                patch("src.exchanges.okx.Market") as mock_market,
+                patch("src.exchanges.okx.Public") as mock_public,
+            ):
                 mock_account.return_value.get_balance.return_value = {
-                    'code': '0',
-                    'data': [{'ccy': 'USDT', 'availBal': '1000.0'}]
+                    "code": "0",
+                    "data": [{"ccy": "USDT", "availBal": "1000.0"}],
                 }
 
                 await exchange.connect()
@@ -306,7 +307,7 @@ class TestOKXIntegration:
                     symbol="BTC-USDT",
                     side=OrderSide.BUY,
                     order_type=OrderType.MARKET,
-                    quantity=Decimal("1000.0")
+                    quantity=Decimal("1000.0"),
                 )
 
                 with pytest.raises(ExchangeInsufficientFundsError):
@@ -326,11 +327,13 @@ class TestOKXIntegration:
 
         # Configure mock to return proper response
         mock_public_instance.get_orderbook.return_value = {
-            'code': '0',
-            'data': [{
-                'bids': [['50000', '1.0'], ['49999', '2.0']],
-                'asks': [['50001', '1.0'], ['50002', '2.0']]
-            }]
+            "code": "0",
+            "data": [
+                {
+                    "bids": [["50000", "1.0"], ["49999", "2.0"]],
+                    "asks": [["50001", "1.0"], ["50002", "2.0"]],
+                }
+            ],
         }
 
         # Test order book
@@ -347,7 +350,7 @@ class TestOKXIntegration:
         assert len(trades) == 1
         # Since the mock returns a MagicMock, we just verify it has the
         # expected structure
-        assert hasattr(trades[0], 'id')
+        assert hasattr(trades[0], "id")
 
     @pytest.mark.asyncio
     async def test_rate_limiting_integration(self, config):
@@ -374,18 +377,15 @@ class TestOKXIntegration:
 
         # Mock successful responses
         mock_account_instance.get_balance.return_value = {
-            'code': '0',
-            'data': [{'ccy': 'USDT', 'availBal': '1000.0'}]
+            "code": "0",
+            "data": [{"ccy": "USDT", "availBal": "1000.0"}],
         }
 
         # Connect the exchange first
         await exchange.connect()
 
         # Mock successful health check
-        mock_market_instance.get_ticker.return_value = {
-            'code': '0',
-            'data': [{'last': '50000'}]
-        }
+        mock_market_instance.get_ticker.return_value = {"code": "0", "data": [{"last": "50000"}]}
 
         # Test successful health check
         healthy = await exchange.health_check()
@@ -397,28 +397,20 @@ class TestOKXIntegration:
         exchange = OKXExchange(config)
 
         # Test all order type conversions
-        assert exchange._convert_order_type_to_okx(
-            OrderType.MARKET) == "market"
+        assert exchange._convert_order_type_to_okx(OrderType.MARKET) == "market"
         assert exchange._convert_order_type_to_okx(OrderType.LIMIT) == "limit"
-        assert exchange._convert_order_type_to_okx(
-            OrderType.STOP_LOSS) == "conditional"
-        assert exchange._convert_order_type_to_okx(
-            OrderType.TAKE_PROFIT) == "conditional"
+        assert exchange._convert_order_type_to_okx(OrderType.STOP_LOSS) == "conditional"
+        assert exchange._convert_order_type_to_okx(OrderType.TAKE_PROFIT) == "conditional"
 
         # Test status conversions
-        assert exchange._convert_okx_status_to_order_status(
-            "live") == OrderStatus.PENDING
-        assert exchange._convert_okx_status_to_order_status(
-            "filled") == OrderStatus.FILLED
-        assert exchange._convert_okx_status_to_order_status(
-            "canceled") == OrderStatus.CANCELLED
-        assert exchange._convert_okx_status_to_order_status(
-            "unknown") == OrderStatus.UNKNOWN
+        assert exchange._convert_okx_status_to_order_status("live") == OrderStatus.PENDING
+        assert exchange._convert_okx_status_to_order_status("filled") == OrderStatus.FILLED
+        assert exchange._convert_okx_status_to_order_status("canceled") == OrderStatus.CANCELLED
+        assert exchange._convert_okx_status_to_order_status("unknown") == OrderStatus.UNKNOWN
 
         # Test timeframe conversions
         assert exchange._convert_timeframe_to_okx("1m") == "1m"
-        assert exchange._convert_timeframe_to_okx(
-            "1h") == "1H"  # Correct mapping
+        assert exchange._convert_timeframe_to_okx("1h") == "1H"  # Correct mapping
         assert exchange._convert_timeframe_to_okx("1d") == "1D"
 
     @pytest.mark.asyncio
@@ -427,8 +419,14 @@ class TestOKXIntegration:
         ws_manager = OKXWebSocketManager(config)
 
         # Mock initial connection without private WebSocket
-        with patch.object(ws_manager, '_connect_public_websocket', return_value=None), \
-                patch.object(ws_manager, '_connect_private_websocket', side_effect=ExchangeConnectionError("Auth failed")):
+        with (
+            patch.object(ws_manager, "_connect_public_websocket", return_value=None),
+            patch.object(
+                ws_manager,
+                "_connect_private_websocket",
+                side_effect=ExchangeConnectionError("Auth failed"),
+            ),
+        ):
             # Should handle the exception gracefully and still connect
             try:
                 await ws_manager.connect()
@@ -450,7 +448,7 @@ class TestOKXIntegration:
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
             quantity=Decimal("1.0"),
-            price=Decimal("50000")
+            price=Decimal("50000"),
         )
 
         maker_fee = order_manager.calculate_fee(order_request, is_maker=True)
@@ -467,7 +465,7 @@ class TestOKXIntegration:
         order_manager = OKXOrderManager(config, None)
 
         # Test order history management
-        order_manager.order_history['test_order'] = {'status': 'filled'}
+        order_manager.order_history["test_order"] = {"status": "filled"}
         assert len(order_manager.order_history) == 1
 
         order_manager.clear_order_history()
@@ -489,7 +487,7 @@ class TestOKXIntegration:
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
             quantity=Decimal("1.0"),
-            price=Decimal("50000")
+            price=Decimal("50000"),
         )
 
         with pytest.raises(ValidationError):
@@ -503,10 +501,10 @@ class TestOKXIntegration:
         # Test public message handling with proper JSON format
         public_message = {
             "arg": {"channel": "tickers", "instId": "BTC-USDT"},
-            "data": [{"instId": "BTC-USDT", "last": "50000"}]
+            "data": [{"instId": "BTC-USDT", "last": "50000"}],
         }
 
-        with patch.object(ws_manager, '_handle_ticker_data') as mock_handler:
+        with patch.object(ws_manager, "_handle_ticker_data") as mock_handler:
             # Pass as JSON string
             await ws_manager._handle_public_message(str(public_message).replace("'", '"'))
             # The handler should be called if message is properly parsed
@@ -523,7 +521,7 @@ class TestOKXIntegration:
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
             quantity=Decimal("1.0"),
-            price=Decimal("50000")
+            price=Decimal("50000"),
         )
         order_manager._validate_order_request(valid_order)
 
@@ -533,7 +531,7 @@ class TestOKXIntegration:
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
             quantity=Decimal("1.0"),
-            price=Decimal("50000")
+            price=Decimal("50000"),
         )
         with pytest.raises(ValidationError):
             order_manager._validate_order_request(invalid_order)

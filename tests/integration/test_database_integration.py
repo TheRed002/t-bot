@@ -5,21 +5,22 @@ These tests verify database connections, models, and operations
 with actual database instances.
 """
 
-import pytest
-import asyncio
+import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-import uuid
 
-from src.core.config import Config
-from src.core.logging import setup_logging
-from src.core.exceptions import DataSourceError
-from src.database.connection import initialize_database, close_database, health_check, get_async_session
-from src.database.queries import DatabaseQueries
-from src.database.models import User, BotInstance, Trade, Position, BalanceSnapshot
-from src.database.redis_client import RedisClient
+import pytest
+
+from src.database.connection import (
+    close_database,
+    get_async_session,
+    health_check,
+    initialize_database,
+)
 from src.database.influxdb_client import InfluxDBClientWrapper
-
+from src.database.models import BalanceSnapshot, BotInstance, Position, Trade, User
+from src.database.queries import DatabaseQueries
+from src.database.redis_client import RedisClient
 
 # Database setup is handled by conftest.py fixtures
 
@@ -30,7 +31,6 @@ class TestDatabaseConnection:
 
     async def test_database_connection(self, config, database_setup):
         """Test database connection and health check."""
-        from src.database.connection import initialize_database, close_database
 
         try:
             await initialize_database(database_setup)
@@ -42,13 +42,11 @@ class TestDatabaseConnection:
             # Check if any database is available
             if isinstance(health_status, dict):
                 # New format with individual database status
-                assert any(health_status.values()
-                           ), "No databases are available"
+                assert any(health_status.values()), "No databases are available"
             else:
                 # Old format with overall status
                 assert "status" in health_status
-                assert health_status["status"] in [
-                    "healthy", "degraded", "unhealthy"]
+                assert health_status["status"] in ["healthy", "degraded", "unhealthy"]
         finally:
             await close_database()
 
@@ -59,7 +57,6 @@ class TestDatabaseModels:
 
     async def test_user_creation(self, config, database_setup):
         """Test user creation and validation."""
-        from src.database.connection import initialize_database, close_database, get_async_session
 
         try:
             await initialize_database(database_setup)
@@ -74,7 +71,7 @@ class TestDatabaseModels:
                     email=f"test_{unique_id}@example.com",
                     password_hash="hashed_password",
                     is_active=True,
-                    is_verified=True
+                    is_verified=True,
                 )
 
                 created_user = await queries.create(user)
@@ -88,7 +85,6 @@ class TestDatabaseModels:
 
     async def test_bot_instance_creation(self, config, database_setup):
         """Test bot instance creation and validation."""
-        from src.database.connection import initialize_database, close_database, get_async_session
 
         try:
             await initialize_database(database_setup)
@@ -103,7 +99,7 @@ class TestDatabaseModels:
                     email=f"test_{unique_id}@example.com",
                     password_hash="hashed_password",
                     is_active=True,
-                    is_verified=True
+                    is_verified=True,
                 )
                 created_user = await queries.create(user)
 
@@ -114,7 +110,7 @@ class TestDatabaseModels:
                     strategy_type="mean_reversion",
                     exchange="binance",
                     status="stopped",
-                    config={"param1": "value1"}
+                    config={"param1": "value1"},
                 )
 
                 created_bot = await queries.create(bot_instance)
@@ -129,7 +125,6 @@ class TestDatabaseModels:
 
     async def test_trade_creation(self, config, database_setup):
         """Test trade creation and validation."""
-        from src.database.connection import initialize_database, close_database, get_async_session
 
         try:
             await initialize_database(database_setup)
@@ -144,7 +139,7 @@ class TestDatabaseModels:
                 email=f"test_{unique_id}@example.com",
                 password_hash="hashed_password",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
             )
             created_user = await queries.create(user)
 
@@ -154,7 +149,7 @@ class TestDatabaseModels:
                 strategy_type="mean_reversion",
                 exchange="binance",
                 status="stopped",
-                config={"param1": "value1"}
+                config={"param1": "value1"},
             )
             created_bot = await queries.create(bot_instance)
 
@@ -171,7 +166,7 @@ class TestDatabaseModels:
                 executed_price=Decimal("50000.00"),
                 status="filled",
                 fee=Decimal("0.0001"),
-                fee_currency="USDT"
+                fee_currency="USDT",
             )
 
             created_trade = await queries.create(trade)
@@ -186,7 +181,6 @@ class TestDatabaseModels:
 
     async def test_position_creation(self, config, database_setup):
         """Test position creation and validation."""
-        from src.database.connection import initialize_database, close_database, get_async_session
 
         try:
             await initialize_database(database_setup)
@@ -201,7 +195,7 @@ class TestDatabaseModels:
                 email=f"test_{unique_id}@example.com",
                 password_hash="hashed_password",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
             )
             created_user = await queries.create(user)
 
@@ -211,7 +205,7 @@ class TestDatabaseModels:
                 strategy_type="mean_reversion",
                 exchange="binance",
                 status="stopped",
-                config={"param1": "value1"}
+                config={"param1": "value1"},
             )
             created_bot = await queries.create(bot_instance)
 
@@ -225,7 +219,7 @@ class TestDatabaseModels:
                 entry_price=Decimal("50000.00"),
                 current_price=Decimal("51000.00"),
                 unrealized_pnl=Decimal("10.00"),
-                realized_pnl=Decimal("0.00")
+                realized_pnl=Decimal("0.00"),
             )
 
             created_position = await queries.create(position)
@@ -240,7 +234,6 @@ class TestDatabaseModels:
 
     async def test_balance_snapshot_creation(self, config, database_setup):
         """Test balance snapshot creation and validation."""
-        from src.database.connection import initialize_database, close_database, get_async_session
 
         try:
             await initialize_database(database_setup)
@@ -255,7 +248,7 @@ class TestDatabaseModels:
                 email=f"test_{unique_id}@example.com",
                 password_hash="hashed_password",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
             )
             created_user = await queries.create(user)
 
@@ -266,7 +259,7 @@ class TestDatabaseModels:
                 currency="USDT",
                 free_balance=Decimal("1000.00"),
                 locked_balance=Decimal("0.00"),
-                total_balance=Decimal("1000.00")
+                total_balance=Decimal("1000.00"),
             )
 
             created_balance = await queries.create(balance_snapshot)
@@ -286,7 +279,6 @@ class TestDatabaseQueries:
 
     async def test_get_by_id(self, config, database_setup):
         """Test get_by_id query."""
-        from src.database.connection import initialize_database, close_database, get_async_session
 
         try:
             await initialize_database(database_setup)
@@ -301,7 +293,7 @@ class TestDatabaseQueries:
                 email=f"test_{unique_id}@example.com",
                 password_hash="hashed_password",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
             )
             created_user = await queries.create(user)
 
@@ -315,7 +307,6 @@ class TestDatabaseQueries:
 
     async def test_get_all(self, config, database_setup):
         """Test get_all query."""
-        from src.database.connection import initialize_database, close_database, get_async_session
 
         try:
             await initialize_database(database_setup)
@@ -330,14 +321,14 @@ class TestDatabaseQueries:
                 email=f"test1_{unique_id}@example.com",
                 password_hash="hashed_password",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
             )
             user2 = User(
                 username=f"test_user2_{unique_id}",
                 email=f"test2_{unique_id}@example.com",
                 password_hash="hashed_password",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
             )
 
             await queries.create(user1)
@@ -351,7 +342,6 @@ class TestDatabaseQueries:
 
     async def test_get_trades_by_bot(self, config, database_setup):
         """Test get_trades_by_bot query."""
-        from src.database.connection import initialize_database, close_database, get_async_session
 
         try:
             await initialize_database(database_setup)
@@ -366,7 +356,7 @@ class TestDatabaseQueries:
                 email=f"test_{unique_id}@example.com",
                 password_hash="hashed_password",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
             )
             created_user = await queries.create(user)
 
@@ -376,7 +366,7 @@ class TestDatabaseQueries:
                 strategy_type="mean_reversion",
                 exchange="binance",
                 status="stopped",
-                config={"param1": "value1"}
+                config={"param1": "value1"},
             )
             created_bot = await queries.create(bot_instance)
 
@@ -393,7 +383,7 @@ class TestDatabaseQueries:
                 executed_price=Decimal("50000.00"),
                 status="filled",
                 fee=Decimal("0.0001"),
-                fee_currency="USDT"
+                fee_currency="USDT",
             )
 
             trade2 = Trade(
@@ -408,7 +398,7 @@ class TestDatabaseQueries:
                 executed_price=Decimal("51000.00"),
                 status="filled",
                 fee=Decimal("0.0001"),
-                fee_currency="USDT"
+                fee_currency="USDT",
             )
 
             await queries.create(trade1)
@@ -424,7 +414,6 @@ class TestDatabaseQueries:
 
     async def test_get_positions_by_bot(self, config, database_setup):
         """Test get_positions_by_bot query."""
-        from src.database.connection import initialize_database, close_database, get_async_session
 
         try:
             await initialize_database(database_setup)
@@ -439,7 +428,7 @@ class TestDatabaseQueries:
                 email=f"test_{unique_id}@example.com",
                 password_hash="hashed_password",
                 is_active=True,
-                is_verified=True
+                is_verified=True,
             )
             created_user = await queries.create(user)
 
@@ -449,7 +438,7 @@ class TestDatabaseQueries:
                 strategy_type="mean_reversion",
                 exchange="binance",
                 status="stopped",
-                config={"param1": "value1"}
+                config={"param1": "value1"},
             )
             created_bot = await queries.create(bot_instance)
 
@@ -463,7 +452,7 @@ class TestDatabaseQueries:
                 entry_price=Decimal("50000.00"),
                 current_price=Decimal("51000.00"),
                 unrealized_pnl=Decimal("10.00"),
-                realized_pnl=Decimal("0.00")
+                realized_pnl=Decimal("0.00"),
             )
 
             position2 = Position(
@@ -475,7 +464,7 @@ class TestDatabaseQueries:
                 entry_price=Decimal("3000.00"),
                 current_price=Decimal("2900.00"),
                 unrealized_pnl=Decimal("10.00"),
-                realized_pnl=Decimal("0.00")
+                realized_pnl=Decimal("0.00"),
             )
 
             await queries.create(position1)
@@ -522,7 +511,7 @@ class TestRedisIntegration:
             "symbol": "BTCUSDT",
             "price": "50000.00",
             "volume": "100.5",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
         await redis_client.store_market_data("BTCUSDT", market_data)
@@ -535,7 +524,7 @@ class TestRedisIntegration:
             "symbol": "BTCUSDT",
             "quantity": "0.001",
             "side": "long",
-            "entry_price": "50000.00"
+            "entry_price": "50000.00",
         }
 
         await redis_client.store_position("test_bot", position_data)
@@ -554,7 +543,7 @@ class TestInfluxDBIntegration:
             url=f"http://{config.database.influxdb_host}:{config.database.influxdb_port}",
             token=config.database.influxdb_token,
             org=config.database.influxdb_org,
-            bucket=config.database.influxdb_bucket
+            bucket=config.database.influxdb_bucket,
         )
 
         # Test connection
@@ -572,7 +561,7 @@ class TestInfluxDBIntegration:
             url=f"http://{config.database.influxdb_host}:{config.database.influxdb_port}",
             token=config.database.influxdb_token,
             org=config.database.influxdb_org,
-            bucket=config.database.influxdb_bucket
+            bucket=config.database.influxdb_bucket,
         )
 
         influx_client.connect()
@@ -582,7 +571,7 @@ class TestInfluxDBIntegration:
             "symbol": "BTCUSDT",
             "price": 50000.0,
             "volume": 100.5,
-            "timestamp": datetime.now(timezone.utc)
+            "timestamp": datetime.now(timezone.utc),
         }
 
         influx_client.write_market_data("BTCUSDT", market_data_point)
@@ -595,7 +584,7 @@ class TestInfluxDBIntegration:
             "quantity": 0.001,
             "price": 50000.0,
             "commission": 0.0001,
-            "timestamp": datetime.now(timezone.utc)
+            "timestamp": datetime.now(timezone.utc),
         }
 
         influx_client.write_trade(trade_data_point)
@@ -607,7 +596,7 @@ class TestInfluxDBIntegration:
             "win_rate": 0.65,
             "sharpe_ratio": 1.2,
             "max_drawdown": -50.0,
-            "timestamp": datetime.now(timezone.utc)
+            "timestamp": datetime.now(timezone.utc),
         }
 
         influx_client.write_performance_metrics("test_bot", performance_point)
@@ -621,7 +610,6 @@ class TestMigrationSystem:
 
     async def test_migration_configuration(self):
         """Test migration configuration."""
-        from alembic import command
         from alembic.config import Config as AlembicConfig
 
         # Test migration configuration
@@ -629,6 +617,7 @@ class TestMigrationSystem:
 
         # Test current revision
         from alembic.script import ScriptDirectory
+
         script_dir = ScriptDirectory.from_config(alembic_cfg)
         current_revision = script_dir.get_current_head()
 
@@ -644,10 +633,11 @@ class TestMigrationSystem:
 
         # Test migration file exists
         import os
+
         assert os.path.exists(migration_file)
 
         # Test migration content
-        with open(migration_file, 'r') as f:
+        with open(migration_file) as f:
             content = f.read()
             assert "def upgrade()" in content
             assert "def downgrade()" in content

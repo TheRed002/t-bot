@@ -10,23 +10,32 @@ P-002A (error handling), and P-003 (base exchange interface) components.
 
 # Import base exchange interface
 from .base import BaseExchange
+from .connection_manager import ConnectionManager
 
 # Import exchange factory
 from .factory import ExchangeFactory
 
 # Import rate limiter and connection manager
 from .rate_limiter import RateLimiter
-from .connection_manager import ConnectionManager
 
-# Import exchange types
+# Import exchange-related types
+from src.core.types import (
+    ExchangeInfo,
+    OrderBook,
+    OrderStatus,
+    Ticker,
+    Trade,
+)
 from .types import (
-    ExchangeInfo, Ticker, OrderBook, Trade, OrderStatus,
-    ExchangeCapability, ExchangeTradingPair, ExchangeRateLimit
+    ExchangeCapability,
+    ExchangeTradingPair,
+    ExchangeRateLimit,
 )
 
 # Import Binance exchange implementation (P-004)
 try:
     from .binance import BinanceExchange
+
     BINANCE_AVAILABLE = True
 except ImportError as e:
     # TODO: Remove in production
@@ -36,6 +45,7 @@ except ImportError as e:
 # Import WebSocket handler (P-004)
 try:
     from .binance_websocket import BinanceWebSocketHandler
+
     BINANCE_WEBSOCKET_AVAILABLE = True
 except ImportError as e:
     # TODO: Remove in production
@@ -45,6 +55,7 @@ except ImportError as e:
 # Import order manager (P-004)
 try:
     from .binance_orders import BinanceOrderManager
+
     BINANCE_ORDERS_AVAILABLE = True
 except ImportError as e:
     # TODO: Remove in production
@@ -54,6 +65,7 @@ except ImportError as e:
 # Import OKX exchange implementation (P-005)
 try:
     from .okx import OKXExchange
+
     OKX_AVAILABLE = True
 except ImportError as e:
     # TODO: Remove in production
@@ -63,6 +75,7 @@ except ImportError as e:
 # Import OKX WebSocket handler (P-005)
 try:
     from .okx_websocket import OKXWebSocketManager
+
     OKX_WEBSOCKET_AVAILABLE = True
 except ImportError as e:
     # TODO: Remove in production
@@ -72,6 +85,7 @@ except ImportError as e:
 # Import OKX order manager (P-005)
 try:
     from .okx_orders import OKXOrderManager
+
     OKX_ORDERS_AVAILABLE = True
 except ImportError as e:
     # TODO: Remove in production
@@ -81,6 +95,7 @@ except ImportError as e:
 # Import Coinbase exchange implementation (P-006)
 try:
     from .coinbase import CoinbaseExchange
+
     COINBASE_AVAILABLE = True
 except ImportError as e:
     # TODO: Remove in production
@@ -90,6 +105,7 @@ except ImportError as e:
 # Import Coinbase WebSocket handler (P-006)
 try:
     from .coinbase_websocket import CoinbaseWebSocketHandler
+
     COINBASE_WEBSOCKET_AVAILABLE = True
 except ImportError as e:
     # TODO: Remove in production
@@ -99,6 +115,7 @@ except ImportError as e:
 # Import Coinbase order manager (P-006)
 try:
     from .coinbase_orders import CoinbaseOrderManager
+
     COINBASE_ORDERS_AVAILABLE = True
 except ImportError as e:
     # TODO: Remove in production
@@ -142,36 +159,31 @@ def register_exchanges(factory: ExchangeFactory) -> None:
 # Export main classes
 __all__ = [
     # Base classes
-    'BaseExchange',
-    'ExchangeFactory',
-    'RateLimiter',
-    'ConnectionManager',
-
+    "BaseExchange",
+    "ExchangeFactory",
+    "RateLimiter",
+    "ConnectionManager",
     # Types
-    'ExchangeInfo',
-    'Ticker',
-    'OrderBook',
-    'Trade',
-    'OrderStatus',
-    'ExchangeCapability',
-    'ExchangeTradingPair',
-    'ExchangeRateLimit',
-
+    "ExchangeInfo",
+    "Ticker",
+    "OrderBook",
+    "Trade",
+    "OrderStatus",
+    "ExchangeCapability",
+    "ExchangeTradingPair",
+    "ExchangeRateLimit",
     # Binance implementation (P-004)
-    'BinanceExchange',
-    'BinanceWebSocketHandler',
-    'BinanceOrderManager',
-
+    "BinanceExchange",
+    "BinanceWebSocketHandler",
+    "BinanceOrderManager",
     # OKX implementation (P-005)
-    'OKXExchange',
-    'OKXWebSocketManager',
-    'OKXOrderManager',
-
+    "OKXExchange",
+    "OKXWebSocketManager",
+    "OKXOrderManager",
     # Coinbase implementation (P-006)
-    'CoinbaseExchange',
-    'CoinbaseWebSocketHandler',
-    'CoinbaseOrderManager',
-
+    "CoinbaseExchange",
+    "CoinbaseWebSocketHandler",
+    "CoinbaseOrderManager",
     # Utility function
-    'register_exchanges',
+    "register_exchanges",
 ]

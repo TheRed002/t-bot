@@ -9,20 +9,15 @@ This module tests the multi-exchange capital distribution including:
 - Optimal distribution algorithms
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from decimal import Decimal
+from unittest.mock import Mock
 
-from src.core.types import (
-    ExchangeAllocation, FundFlow, CapitalMetrics
-)
-from src.core.exceptions import (
-    CapitalManagementError, ValidationError, ExchangeError
-)
-from src.core.config import Config
+import pytest
+
 from src.capital_management.exchange_distributor import ExchangeDistributor
+from src.core.config import Config
+from src.core.types import ExchangeAllocation
 from src.exchanges.base import BaseExchange
 
 
@@ -39,7 +34,7 @@ class TestExchangeDistributor:
         config.capital_management.exchange_allocation_weights = {
             "binance": 0.4,
             "okx": 0.35,
-            "coinbase": 0.25
+            "coinbase": 0.25,
         }
         return config
 
@@ -50,7 +45,7 @@ class TestExchangeDistributor:
         mock_exchanges = {
             "binance": Mock(spec=BaseExchange),
             "okx": Mock(spec=BaseExchange),
-            "coinbase": Mock(spec=BaseExchange)
+            "coinbase": Mock(spec=BaseExchange),
         }
         return ExchangeDistributor(config, mock_exchanges)
 
@@ -66,7 +61,7 @@ class TestExchangeDistributor:
                 liquidity_score=0.9,
                 fee_efficiency=0.85,
                 reliability_score=0.95,
-                last_rebalance=datetime.now() - timedelta(hours=2)
+                last_rebalance=datetime.now() - timedelta(hours=2),
             ),
             ExchangeAllocation(
                 exchange="okx",
@@ -76,7 +71,7 @@ class TestExchangeDistributor:
                 liquidity_score=0.8,
                 fee_efficiency=0.75,
                 reliability_score=0.9,
-                last_rebalance=datetime.now() - timedelta(hours=1)
+                last_rebalance=datetime.now() - timedelta(hours=1),
             ),
             ExchangeAllocation(
                 exchange="coinbase",
@@ -86,8 +81,8 @@ class TestExchangeDistributor:
                 liquidity_score=0.7,
                 fee_efficiency=0.65,
                 reliability_score=0.85,
-                last_rebalance=datetime.now() - timedelta(hours=3)
-            )
+                last_rebalance=datetime.now() - timedelta(hours=3),
+            ),
         ]
 
     def test_initialization(self, exchange_distributor, config):
@@ -111,10 +106,7 @@ class TestExchangeDistributor:
         assert len(result) > 0
 
         # Check that allocations sum to total amount
-        total_allocated = sum(
-            allocation.allocated_amount
-            for allocation in result.values()
-        )
+        total_allocated = sum(allocation.allocated_amount for allocation in result.values())
         assert total_allocated == total_amount
 
     @pytest.mark.asyncio
@@ -134,21 +126,15 @@ class TestExchangeDistributor:
 
         # Should follow the weights: 40%, 35%, 25%
         # Check that allocations are proportional to weights
-        total_allocated = sum(
-            allocation.allocated_amount for allocation in result.values())
-        assert binance_allocation.allocated_amount / \
-            total_allocated > 0.35  # Should be around 40%
-        assert okx_allocation.allocated_amount / \
-            total_allocated > 0.30     # Should be around 35%
-        assert coinbase_allocation.allocated_amount / \
-            total_allocated > 0.20  # Should be around 25%
+        total_allocated = sum(allocation.allocated_amount for allocation in result.values())
+        assert binance_allocation.allocated_amount / total_allocated > 0.35  # Should be around 40%
+        assert okx_allocation.allocated_amount / total_allocated > 0.30  # Should be around 35%
+        assert coinbase_allocation.allocated_amount / total_allocated > 0.20  # Should be around 25%
 
     @pytest.mark.asyncio
-    async def test_distribute_capital_insufficient_amount(
-            self, exchange_distributor):
+    async def test_distribute_capital_insufficient_amount(self, exchange_distributor):
         """Test distribution with insufficient amount."""
-        total_amount = Decimal(
-            "100")  # Too small for minimum balance requirements
+        total_amount = Decimal("100")  # Too small for minimum balance requirements
 
         # Should still work but with warnings
         result = await exchange_distributor.distribute_capital(total_amount)
@@ -178,7 +164,7 @@ class TestExchangeDistributor:
                 liquidity_score=0.9,
                 fee_efficiency=0.85,
                 reliability_score=0.95,
-                last_rebalance=datetime.now() - timedelta(hours=25)
+                last_rebalance=datetime.now() - timedelta(hours=25),
             ),
             "okx": ExchangeAllocation(
                 exchange="okx",
@@ -188,8 +174,8 @@ class TestExchangeDistributor:
                 liquidity_score=0.8,
                 fee_efficiency=0.75,
                 reliability_score=0.9,
-                last_rebalance=datetime.now() - timedelta(hours=25)
-            )
+                last_rebalance=datetime.now() - timedelta(hours=25),
+            ),
         }
 
         result = await exchange_distributor.rebalance_exchanges()
@@ -200,16 +186,12 @@ class TestExchangeDistributor:
         okx_allocation = result["okx"]
 
         # Check that allocations are proportional to weights
-        total_allocated = sum(
-            allocation.allocated_amount for allocation in result.values())
-        assert binance_allocation.allocated_amount / \
-            total_allocated > 0.35  # Should be around 40%
-        assert okx_allocation.allocated_amount / \
-            total_allocated > 0.30     # Should be around 35%
+        total_allocated = sum(allocation.allocated_amount for allocation in result.values())
+        assert binance_allocation.allocated_amount / total_allocated > 0.35  # Should be around 40%
+        assert okx_allocation.allocated_amount / total_allocated > 0.30  # Should be around 35%
 
     @pytest.mark.asyncio
-    async def test_rebalance_exchanges_no_rebalance_needed(
-            self, exchange_distributor):
+    async def test_rebalance_exchanges_no_rebalance_needed(self, exchange_distributor):
         """Test rebalancing when not needed (recent update)."""
         # Setup allocation with recent update
         exchange_distributor.exchange_allocations = {
@@ -221,7 +203,7 @@ class TestExchangeDistributor:
                 liquidity_score=0.9,
                 fee_efficiency=0.85,
                 reliability_score=0.95,
-                last_rebalance=datetime.now() - timedelta(hours=2)  # Recent update
+                last_rebalance=datetime.now() - timedelta(hours=2),  # Recent update
             )
         }
 
@@ -244,7 +226,7 @@ class TestExchangeDistributor:
                 liquidity_score=0.9,
                 fee_efficiency=0.85,
                 reliability_score=0.95,
-                last_rebalance=datetime.now()
+                last_rebalance=datetime.now(),
             )
         }
 
@@ -255,8 +237,7 @@ class TestExchangeDistributor:
         assert allocation.allocated_amount == Decimal("40000")
 
     @pytest.mark.asyncio
-    async def test_get_exchange_allocation_not_found(
-            self, exchange_distributor):
+    async def test_get_exchange_allocation_not_found(self, exchange_distributor):
         """Test getting non-existent exchange allocation."""
         allocation = await exchange_distributor.get_exchange_allocation("nonexistent")
 
@@ -278,13 +259,11 @@ class TestExchangeDistributor:
                 liquidity_score=0.9,
                 fee_efficiency=0.85,
                 reliability_score=0.95,
-                last_rebalance=datetime.now()
+                last_rebalance=datetime.now(),
             )
         }
 
-        await exchange_distributor.update_exchange_utilization(
-            exchange_name, utilized_amount
-        )
+        await exchange_distributor.update_exchange_utilization(exchange_name, utilized_amount)
 
         allocation = exchange_distributor.exchange_allocations[exchange_name]
         # The method should update the allocation
@@ -293,12 +272,9 @@ class TestExchangeDistributor:
         assert allocation is not None
 
     @pytest.mark.asyncio
-    async def test_update_exchange_utilization_not_found(
-            self, exchange_distributor):
+    async def test_update_exchange_utilization_not_found(self, exchange_distributor):
         """Test updating utilization for non-existent exchange."""
-        await exchange_distributor.update_exchange_utilization(
-            "nonexistent", Decimal("30000")
-        )
+        await exchange_distributor.update_exchange_utilization("nonexistent", Decimal("30000"))
 
         # Should not raise an exception, just do nothing
         assert "nonexistent" not in exchange_distributor.exchange_allocations
@@ -317,30 +293,21 @@ class TestExchangeDistributor:
         assert abs(total_allocated - total_amount) < Decimal("0.01")
 
         # Check that no exchange gets more than max allocation
-        max_allocation = total_amount * \
-            Decimal(str(exchange_distributor.capital_config.max_exchange_allocation_pct))
+        max_allocation = total_amount * Decimal(
+            str(exchange_distributor.capital_config.max_exchange_allocation_pct)
+        )
         for amount in distribution.values():
             assert amount <= max_allocation
 
     @pytest.mark.asyncio
-    async def test_calculate_optimal_distribution_with_metrics(
-            self, exchange_distributor):
+    async def test_calculate_optimal_distribution_with_metrics(self, exchange_distributor):
         """Test optimal distribution with exchange metrics."""
         total_amount = Decimal("100000")
 
         # Setup exchange metrics
-        exchange_distributor.liquidity_scores = {
-            "binance": 0.9,
-            "okx": 0.7
-        }
-        exchange_distributor.fee_efficiencies = {
-            "binance": 0.8,
-            "okx": 0.6
-        }
-        exchange_distributor.reliability_scores = {
-            "binance": 0.95,
-            "okx": 0.85
-        }
+        exchange_distributor.liquidity_scores = {"binance": 0.9, "okx": 0.7}
+        exchange_distributor.fee_efficiencies = {"binance": 0.8, "okx": 0.6}
+        exchange_distributor.reliability_scores = {"binance": 0.95, "okx": 0.85}
 
         distribution = await exchange_distributor.calculate_optimal_distribution(total_amount)
 
@@ -369,8 +336,7 @@ class TestExchangeDistributor:
         assert 0 <= score <= 1
 
     @pytest.mark.asyncio
-    async def test_calculate_liquidity_score_no_data(
-            self, exchange_distributor):
+    async def test_calculate_liquidity_score_no_data(self, exchange_distributor):
         """Test calculating liquidity score with no data."""
         mock_exchange = Mock(spec=BaseExchange)
         mock_exchange.__class__.__name__ = "Unknown"
@@ -391,8 +357,7 @@ class TestExchangeDistributor:
         assert 0 <= efficiency <= 1
 
     @pytest.mark.asyncio
-    async def test_calculate_fee_efficiency_no_data(
-            self, exchange_distributor):
+    async def test_calculate_fee_efficiency_no_data(self, exchange_distributor):
         """Test calculating fee efficiency with no data."""
         mock_exchange = Mock(spec=BaseExchange)
         mock_exchange.__class__.__name__ = "Unknown"
@@ -413,8 +378,7 @@ class TestExchangeDistributor:
         assert 0 <= score <= 1
 
     @pytest.mark.asyncio
-    async def test_calculate_reliability_score_no_data(
-            self, exchange_distributor):
+    async def test_calculate_reliability_score_no_data(self, exchange_distributor):
         """Test calculating reliability score with no data."""
         mock_exchange = Mock(spec=BaseExchange)
         mock_exchange.__class__.__name__ = "Unknown"
@@ -433,8 +397,7 @@ class TestExchangeDistributor:
         assert exchange_name in exchange_distributor.historical_slippage
 
     @pytest.mark.asyncio
-    async def test_update_slippage_data_max_history(
-            self, exchange_distributor):
+    async def test_update_slippage_data_max_history(self, exchange_distributor):
         """Test updating slippage data with max history limit."""
         exchange_name = "binance"
 

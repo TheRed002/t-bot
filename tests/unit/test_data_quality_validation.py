@@ -11,37 +11,40 @@ This module tests the comprehensive data validation system including:
 Test Coverage: 90%+
 """
 
-import pytest
-import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import Any
+
+import pytest
+
+from src.core.types import MarketData, Signal, SignalDirection
 
 # Import the components to test
 from src.data.quality.validation import (
-    DataValidator, ValidationLevel, ValidationResult, ValidationIssue
+    DataValidator,
+    ValidationIssue,
+    ValidationLevel,
+    ValidationResult,
 )
-from src.core.types import MarketData, Signal, SignalDirection
-from src.core.exceptions import DataError, DataValidationError, ValidationError
 
 
 class TestDataValidator:
     """Test cases for DataValidator class"""
 
     @pytest.fixture
-    def validator_config(self) -> Dict[str, Any]:
+    def validator_config(self) -> dict[str, Any]:
         """Test configuration for validator"""
         return {
-            'price_change_threshold': 0.5,
-            'volume_change_threshold': 10.0,
-            'outlier_std_threshold': 3.0,
-            'max_data_age_seconds': 60,
-            'max_history_size': 100,
-            'consistency_threshold': 0.01
+            "price_change_threshold": 0.5,
+            "volume_change_threshold": 10.0,
+            "outlier_std_threshold": 3.0,
+            "max_data_age_seconds": 60,
+            "max_history_size": 100,
+            "consistency_threshold": 0.01,
         }
 
     @pytest.fixture
-    def validator(self, validator_config: Dict[str, Any]) -> DataValidator:
+    def validator(self, validator_config: dict[str, Any]) -> DataValidator:
         """Create validator instance for testing"""
         return DataValidator(validator_config)
 
@@ -57,7 +60,7 @@ class TestDataValidator:
             ask=Decimal("50001.00"),
             open_price=Decimal("49900.00"),
             high_price=Decimal("50100.00"),
-            low_price=Decimal("49800.00")
+            low_price=Decimal("49800.00"),
         )
 
     @pytest.fixture
@@ -68,7 +71,7 @@ class TestDataValidator:
             confidence=0.75,
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
     @pytest.mark.asyncio
@@ -83,9 +86,8 @@ class TestDataValidator:
 
     @pytest.mark.asyncio
     async def test_validate_market_data_valid(
-            self,
-            validator: DataValidator,
-            valid_market_data: MarketData):
+        self, validator: DataValidator, valid_market_data: MarketData
+    ):
         """Test validation of valid market data"""
         is_valid, issues = await validator.validate_market_data(valid_market_data)
 
@@ -93,8 +95,7 @@ class TestDataValidator:
         assert len(issues) == 0
 
     @pytest.mark.asyncio
-    async def test_validate_market_data_missing_required_fields(
-            self, validator: DataValidator):
+    async def test_validate_market_data_missing_required_fields(self, validator: DataValidator):
         """Test validation with missing required fields"""
         # Since Pydantic prevents None values, test with data that has validation issues
         # but is still valid Pydantic structure
@@ -102,7 +103,7 @@ class TestDataValidator:
             symbol="BTCUSDT",
             price=Decimal("0"),  # Zero price (invalid)
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -112,17 +113,16 @@ class TestDataValidator:
 
         # Check for specific validation issues
         field_names = [issue.field for issue in issues]
-        assert 'price' in field_names
+        assert "price" in field_names
 
     @pytest.mark.asyncio
-    async def test_validate_market_data_invalid_price(
-            self, validator: DataValidator):
+    async def test_validate_market_data_invalid_price(self, validator: DataValidator):
         """Test validation with invalid price"""
         invalid_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("-100.00"),  # Negative price
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -131,12 +131,11 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for price validation issue
-        price_issues = [issue for issue in issues if issue.field == 'price']
+        price_issues = [issue for issue in issues if issue.field == "price"]
         assert len(price_issues) > 0
 
     @pytest.mark.asyncio
-    async def test_validate_market_data_invalid_bid_ask(
-            self, validator: DataValidator):
+    async def test_validate_market_data_invalid_bid_ask(self, validator: DataValidator):
         """Test validation with invalid bid/ask spread"""
         invalid_data = MarketData(
             symbol="BTCUSDT",
@@ -144,7 +143,7 @@ class TestDataValidator:
             volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
             bid=Decimal("50001.00"),  # Bid > Ask
-            ask=Decimal("49999.00")
+            ask=Decimal("49999.00"),
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -153,20 +152,18 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for bid/ask validation issue
-        bid_ask_issues = [
-            issue for issue in issues if issue.field == 'bid_ask_spread']
+        bid_ask_issues = [issue for issue in issues if issue.field == "bid_ask_spread"]
         assert len(bid_ask_issues) > 0
 
     @pytest.mark.asyncio
-    async def test_validate_market_data_future_timestamp(
-            self, validator: DataValidator):
+    async def test_validate_market_data_future_timestamp(self, validator: DataValidator):
         """Test validation with future timestamp"""
         future_time = datetime.now(timezone.utc) + timedelta(hours=1)
         invalid_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=future_time
+            timestamp=future_time,
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -175,20 +172,15 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for future timestamp issue
-        timestamp_issues = [
-            issue for issue in issues if issue.field == 'future_timestamp']
+        timestamp_issues = [issue for issue in issues if issue.field == "future_timestamp"]
         assert len(timestamp_issues) > 0
 
     @pytest.mark.asyncio
-    async def test_validate_market_data_old_data(
-            self, validator: DataValidator):
+    async def test_validate_market_data_old_data(self, validator: DataValidator):
         """Test validation with old data"""
         old_time = datetime.now(timezone.utc) - timedelta(minutes=2)
         invalid_data = MarketData(
-            symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
-            timestamp=old_time
+            symbol="BTCUSDT", price=Decimal("50000.00"), volume=Decimal("100.5"), timestamp=old_time
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -197,15 +189,11 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for data freshness issue
-        freshness_issues = [
-            issue for issue in issues if issue.field == 'data_freshness']
+        freshness_issues = [issue for issue in issues if issue.field == "data_freshness"]
         assert len(freshness_issues) > 0
 
     @pytest.mark.asyncio
-    async def test_validate_signal_valid(
-            self,
-            validator: DataValidator,
-            valid_signal: Signal):
+    async def test_validate_signal_valid(self, validator: DataValidator, valid_signal: Signal):
         """Test validation of valid signal"""
         is_valid, issues = await validator.validate_signal(valid_signal)
 
@@ -213,8 +201,7 @@ class TestDataValidator:
         assert len(issues) == 0
 
     @pytest.mark.asyncio
-    async def test_validate_signal_invalid_confidence(
-            self, validator: DataValidator):
+    async def test_validate_signal_invalid_confidence(self, validator: DataValidator):
         """Test validation with invalid confidence"""
         # Since Pydantic prevents invalid confidence values, test with edge case
         # that should still pass validation but might have business logic
@@ -224,7 +211,7 @@ class TestDataValidator:
             confidence=0.0,  # Minimum confidence (edge case)
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         is_valid, issues = await validator.validate_signal(edge_signal)
@@ -235,8 +222,7 @@ class TestDataValidator:
         assert len(issues) == 0  # No validation issues for valid Pydantic data
 
     @pytest.mark.asyncio
-    async def test_validate_signal_missing_direction(
-            self, validator: DataValidator):
+    async def test_validate_signal_missing_direction(self, validator: DataValidator):
         """Test validation with missing direction"""
         # Since Pydantic prevents None values, test with valid data
         # and test the validation logic separately
@@ -245,7 +231,7 @@ class TestDataValidator:
             confidence=0.75,
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         is_valid, issues = await validator.validate_signal(valid_signal)
@@ -255,15 +241,14 @@ class TestDataValidator:
         assert len(issues) == 0
 
     @pytest.mark.asyncio
-    async def test_validate_signal_invalid_symbol(
-            self, validator: DataValidator):
+    async def test_validate_signal_invalid_symbol(self, validator: DataValidator):
         """Test validation with invalid symbol"""
         invalid_signal = Signal(
             direction=SignalDirection.BUY,
             confidence=0.75,
             timestamp=datetime.now(timezone.utc),
             symbol="",  # Empty symbol
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         is_valid, issues = await validator.validate_signal(invalid_signal)
@@ -272,86 +257,89 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for symbol validation issue
-        symbol_issues = [issue for issue in issues if issue.field == 'symbol']
+        symbol_issues = [issue for issue in issues if issue.field == "symbol"]
         assert len(symbol_issues) > 0
 
     @pytest.mark.asyncio
-    async def test_validate_cross_source_consistency_valid(
-            self, validator: DataValidator):
+    async def test_validate_cross_source_consistency_valid(self, validator: DataValidator):
         """Test cross-source consistency validation with valid data"""
         primary_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         secondary_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("50001.00"),  # Small difference
             volume=Decimal("100.0"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
-        is_consistent, issues = await validator.validate_cross_source_consistency(primary_data, secondary_data)
+        is_consistent, issues = await validator.validate_cross_source_consistency(
+            primary_data, secondary_data
+        )
 
         assert is_consistent is True
         assert len(issues) == 0
 
     @pytest.mark.asyncio
     async def test_validate_cross_source_consistency_symbol_mismatch(
-            self, validator: DataValidator):
+        self, validator: DataValidator
+    ):
         """Test cross-source consistency with symbol mismatch"""
         primary_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         secondary_data = MarketData(
             symbol="ETHUSDT",  # Different symbol
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
-        is_consistent, issues = await validator.validate_cross_source_consistency(primary_data, secondary_data)
+        is_consistent, issues = await validator.validate_cross_source_consistency(
+            primary_data, secondary_data
+        )
 
         assert is_consistent is False
         assert len(issues) > 0
 
         # Check for symbol mismatch issue
-        symbol_issues = [
-            issue for issue in issues if issue.field == 'symbol_mismatch']
+        symbol_issues = [issue for issue in issues if issue.field == "symbol_mismatch"]
         assert len(symbol_issues) > 0
 
     @pytest.mark.asyncio
-    async def test_validate_cross_source_consistency_price_drift(
-            self, validator: DataValidator):
+    async def test_validate_cross_source_consistency_price_drift(self, validator: DataValidator):
         """Test cross-source consistency with significant price difference"""
         primary_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         secondary_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("51000.00"),  # 2% difference (above 1% threshold)
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
-        is_consistent, issues = await validator.validate_cross_source_consistency(primary_data, secondary_data)
+        is_consistent, issues = await validator.validate_cross_source_consistency(
+            primary_data, secondary_data
+        )
 
         assert is_consistent is False
         assert len(issues) > 0
 
         # Check for price consistency issue
-        price_issues = [
-            issue for issue in issues if issue.field == 'price_consistency']
+        price_issues = [issue for issue in issues if issue.field == "price_consistency"]
         assert len(price_issues) > 0
 
     @pytest.mark.asyncio
@@ -365,7 +353,7 @@ class TestDataValidator:
                 symbol=symbol,
                 price=Decimal(str(price)),
                 volume=Decimal("100.5"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             await validator.validate_market_data(data)
 
@@ -374,14 +362,13 @@ class TestDataValidator:
             symbol=symbol,
             price=Decimal("60000.00"),  # Significant outlier
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         is_valid, issues = await validator.validate_market_data(outlier_data)
 
         # Should detect outlier
-        outlier_issues = [
-            issue for issue in issues if issue.field == 'price_outlier']
+        outlier_issues = [issue for issue in issues if issue.field == "price_outlier"]
         assert len(outlier_issues) > 0
 
     @pytest.mark.asyncio
@@ -402,15 +389,15 @@ class TestDataValidator:
         """Test validation summary generation"""
         summary = await validator.get_validation_summary()
 
-        assert 'price_history_size' in summary
-        assert 'volume_history_size' in summary
-        assert 'validation_config' in summary
+        assert "price_history_size" in summary
+        assert "volume_history_size" in summary
+        assert "validation_config" in summary
 
         # Check config values
-        config = summary['validation_config']
-        assert config['price_change_threshold'] == 0.5
-        assert config['outlier_std_threshold'] == 3.0
-        assert config['max_data_age_seconds'] == 60
+        config = summary["validation_config"]
+        assert config["price_change_threshold"] == 0.5
+        assert config["outlier_std_threshold"] == 3.0
+        assert config["max_data_age_seconds"] == 60
 
     @pytest.mark.asyncio
     async def test_validator_error_handling(self, validator: DataValidator):
@@ -426,7 +413,7 @@ class TestDataValidator:
             symbol="BTCUSDT",
             price=Decimal("-100.00"),  # Negative price (invalid)
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         is_valid, issues = await validator.validate_market_data(malformed_data)
@@ -435,9 +422,8 @@ class TestDataValidator:
 
     @pytest.mark.asyncio
     async def test_validator_performance(
-            self,
-            validator: DataValidator,
-            valid_market_data: MarketData):
+        self, validator: DataValidator, valid_market_data: MarketData
+    ):
         """Test validator performance with multiple validations"""
         import time
 
@@ -492,7 +478,7 @@ class TestValidationIssue:
             level=ValidationLevel.CRITICAL,
             timestamp=datetime.now(timezone.utc),
             source="DataValidator",
-            metadata={"test": "value"}
+            metadata={"test": "value"},
         )
 
         assert issue.field == "price"

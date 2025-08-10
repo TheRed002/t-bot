@@ -5,18 +5,18 @@ This module tests the ExchangeFactory class and related components
 to ensure proper functionality and error handling.
 """
 
-import pytest
-import asyncio
 from decimal import Decimal
-from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import ExchangeError, ValidationError
+from src.core.types import ExchangeInfo, ExchangeStatus
+from src.exchanges.base import BaseExchange
 
 # Import the components to test
 from src.exchanges.factory import ExchangeFactory
-from src.exchanges.base import BaseExchange
-from src.core.types import ExchangeInfo, ExchangeStatus
-from src.core.exceptions import ExchangeError, ValidationError
-from src.core.config import Config
 
 
 class MockExchange(BaseExchange):
@@ -28,7 +28,7 @@ class MockExchange(BaseExchange):
             "balances": {"BTC": Decimal("1.0"), "USDT": Decimal("10000.0")},
             "orders": {},
             "market_data": {},
-            "connected": False
+            "connected": False,
         }
 
     async def connect(self) -> bool:
@@ -183,6 +183,7 @@ class TestExchangeFactory:
     @pytest.mark.asyncio
     async def test_create_exchange_connection_failure(self, factory):
         """Test exchange creation with connection failure."""
+
         class FailingExchange(MockExchange):
             async def connect(self) -> bool:
                 return False
@@ -382,6 +383,7 @@ class TestExchangeFactoryErrorHandling:
     @pytest.mark.asyncio
     async def test_create_exchange_exception_handling(self, factory):
         """Test handling of exceptions during exchange creation."""
+
         class ExceptionExchange(MockExchange):
             def __init__(self, config, exchange_name):
                 raise Exception("Initialization failed")

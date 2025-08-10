@@ -5,24 +5,27 @@ This module tests the adaptive momentum strategy implementation,
 including integration with existing regime detection and adaptive risk management.
 """
 
-import pytest
-import asyncio
+from datetime import datetime
 from decimal import Decimal
-from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch
-import numpy as np
+from unittest.mock import AsyncMock, Mock, patch
 
-# Import the strategy under test
-from src.strategies.dynamic.adaptive_momentum import AdaptiveMomentumStrategy
+import pytest
 
 # Import dependencies
 from src.core.types import (
-    Signal, MarketData, Position, StrategyType,
-    StrategyConfig, StrategyStatus, SignalDirection, MarketRegime, OrderSide
+    MarketData,
+    MarketRegime,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyType,
 )
-from src.core.exceptions import ValidationError
-from src.risk_management.regime_detection import MarketRegimeDetector
 from src.risk_management.adaptive_risk import AdaptiveRiskManager
+from src.risk_management.regime_detection import MarketRegimeDetector
+
+# Import the strategy under test
+from src.strategies.dynamic.adaptive_momentum import AdaptiveMomentumStrategy
 
 
 class TestAdaptiveMomentumStrategy:
@@ -32,22 +35,22 @@ class TestAdaptiveMomentumStrategy:
     def strategy_config(self):
         """Create a test configuration for the strategy."""
         return {
-            'name': 'adaptive_momentum',
-            'strategy_type': StrategyType.DYNAMIC,
-            'symbols': ['BTC/USD', 'ETH/USD'],
-            'timeframe': '1h',
-            'position_size_pct': 0.02,
-            'min_confidence': 0.6,
-            'max_positions': 5,
-            'parameters': {
-                'fast_ma_period': 20,
-                'slow_ma_period': 50,
-                'rsi_period': 14,
-                'rsi_overbought': 70,
-                'rsi_oversold': 30,
-                'momentum_lookback': 10,
-                'volume_threshold': 1.5
-            }
+            "name": "adaptive_momentum",
+            "strategy_type": StrategyType.DYNAMIC,
+            "symbols": ["BTC/USD", "ETH/USD"],
+            "timeframe": "1h",
+            "position_size_pct": 0.02,
+            "min_confidence": 0.6,
+            "max_positions": 5,
+            "parameters": {
+                "fast_ma_period": 20,
+                "slow_ma_period": 50,
+                "rsi_period": 14,
+                "rsi_overbought": 70,
+                "rsi_oversold": 30,
+                "momentum_lookback": 10,
+                "volume_threshold": 1.5,
+            },
         }
 
     @pytest.fixture
@@ -60,22 +63,24 @@ class TestAdaptiveMomentumStrategy:
         """Create a mock regime detector."""
         detector = Mock(spec=MarketRegimeDetector)
         detector.detect_comprehensive_regime = AsyncMock(
-            return_value=MarketRegime.MEDIUM_VOLATILITY)
+            return_value=MarketRegime.MEDIUM_VOLATILITY
+        )
         return detector
 
     @pytest.fixture
     def mock_adaptive_risk_manager(self):
         """Create a mock adaptive risk manager."""
         manager = Mock(spec=AdaptiveRiskManager)
-        manager.calculate_adaptive_position_size = AsyncMock(
-            return_value=Decimal("200"))
-        manager.get_adaptive_parameters = Mock(return_value={
-            'position_size_multiplier': 1.0,
-            'stop_loss_multiplier': 1.0,
-            'take_profit_multiplier': 1.0,
-            'max_positions_multiplier': 1.0,
-            'regime': 'medium_volatility'
-        })
+        manager.calculate_adaptive_position_size = AsyncMock(return_value=Decimal("200"))
+        manager.get_adaptive_parameters = Mock(
+            return_value={
+                "position_size_multiplier": 1.0,
+                "stop_loss_multiplier": 1.0,
+                "take_profit_multiplier": 1.0,
+                "max_positions_multiplier": 1.0,
+                "regime": "medium_volatility",
+            }
+        )
         return manager
 
     @pytest.fixture
@@ -85,7 +90,7 @@ class TestAdaptiveMomentumStrategy:
             symbol="BTC/USD",
             price=Decimal("50000"),
             volume=Decimal("1000"),
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
     @pytest.fixture
@@ -98,12 +103,12 @@ class TestAdaptiveMomentumStrategy:
             symbol="BTC/USD",
             strategy_name="adaptive_momentum",
             metadata={
-                'momentum_score': 0.5,
-                'volume_score': 0.7,
-                'rsi_score': 0.3,
-                'regime': 'medium_volatility',
-                'combined_score': 0.5
-            }
+                "momentum_score": 0.5,
+                "volume_score": 0.7,
+                "rsi_score": 0.3,
+                "regime": "medium_volatility",
+                "combined_score": 0.5,
+            },
         )
 
     def test_strategy_initialization(self, strategy):
@@ -123,8 +128,7 @@ class TestAdaptiveMomentumStrategy:
         strategy.set_regime_detector(mock_regime_detector)
         assert strategy.regime_detector == mock_regime_detector
 
-    def test_set_adaptive_risk_manager(
-            self, strategy, mock_adaptive_risk_manager):
+    def test_set_adaptive_risk_manager(self, strategy, mock_adaptive_risk_manager):
         """Test setting adaptive risk manager."""
         strategy.set_adaptive_risk_manager(mock_adaptive_risk_manager)
         assert strategy.adaptive_risk_manager == mock_adaptive_risk_manager
@@ -143,7 +147,8 @@ class TestAdaptiveMomentumStrategy:
 
     @pytest.mark.asyncio
     async def test_get_current_regime_with_detector(
-            self, strategy, mock_regime_detector, sample_market_data):
+        self, strategy, mock_regime_detector, sample_market_data
+    ):
         """Test getting current regime using existing regime detector."""
         strategy.set_regime_detector(mock_regime_detector)
         await strategy._update_price_history(sample_market_data)
@@ -164,8 +169,7 @@ class TestAdaptiveMomentumStrategy:
         """Test momentum score calculation."""
         # Add price history with enough data points (need at least
         # slow_ma_period = 50)
-        strategy.price_history["BTC/USD"] = [100 +
-                                             i for i in range(60)]  # 60 data points
+        strategy.price_history["BTC/USD"] = [100 + i for i in range(60)]  # 60 data points
 
         momentum_score = await strategy._calculate_momentum_score("BTC/USD")
 
@@ -194,22 +198,7 @@ class TestAdaptiveMomentumStrategy:
     async def test_calculate_rsi_score(self, strategy):
         """Test RSI score calculation."""
         # Add price history for RSI calculation
-        prices = [
-            100,
-            101,
-            102,
-            103,
-            104,
-            105,
-            106,
-            107,
-            108,
-            109,
-            110,
-            111,
-            112,
-            113,
-            114]
+        prices = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114]
         strategy.price_history["BTC/USD"] = prices
 
         rsi_score = await strategy._calculate_rsi_score("BTC/USD")
@@ -218,8 +207,7 @@ class TestAdaptiveMomentumStrategy:
         assert -1.0 <= rsi_score <= 1.0
 
     @pytest.mark.asyncio
-    async def test_generate_momentum_signals_positive_momentum(
-            self, strategy, sample_market_data):
+    async def test_generate_momentum_signals_positive_momentum(self, strategy, sample_market_data):
         """Test signal generation with positive momentum."""
         momentum_score = 0.8
         volume_score = 0.7
@@ -238,8 +226,7 @@ class TestAdaptiveMomentumStrategy:
         assert "regime" in signals[0].metadata
 
     @pytest.mark.asyncio
-    async def test_generate_momentum_signals_negative_momentum(
-            self, strategy, sample_market_data):
+    async def test_generate_momentum_signals_negative_momentum(self, strategy, sample_market_data):
         """Test signal generation with negative momentum."""
         momentum_score = -0.8
         volume_score = -0.6
@@ -255,8 +242,7 @@ class TestAdaptiveMomentumStrategy:
         assert signals[0].symbol == "BTC/USD"
 
     @pytest.mark.asyncio
-    async def test_generate_momentum_signals_weak_momentum(
-            self, strategy, sample_market_data):
+    async def test_generate_momentum_signals_weak_momentum(self, strategy, sample_market_data):
         """Test signal generation with weak momentum."""
         momentum_score = 0.1
         volume_score = 0.2
@@ -271,7 +257,8 @@ class TestAdaptiveMomentumStrategy:
 
     @pytest.mark.asyncio
     async def test_apply_regime_confidence_adjustments_with_manager(
-            self, strategy, mock_adaptive_risk_manager):
+        self, strategy, mock_adaptive_risk_manager
+    ):
         """Test regime confidence adjustments with adaptive risk manager."""
         strategy.set_adaptive_risk_manager(mock_adaptive_risk_manager)
 
@@ -282,7 +269,7 @@ class TestAdaptiveMomentumStrategy:
                 timestamp=datetime.now(),
                 symbol="BTC/USD",
                 strategy_name="adaptive_momentum",
-                metadata={'regime': 'medium_volatility'}
+                metadata={"regime": "medium_volatility"},
             )
         ]
 
@@ -295,9 +282,7 @@ class TestAdaptiveMomentumStrategy:
         assert "adaptive_params" in adjusted_signals[0].metadata
 
     @pytest.mark.asyncio
-    async def test_apply_regime_confidence_adjustments_without_manager(
-            self,
-            strategy):
+    async def test_apply_regime_confidence_adjustments_without_manager(self, strategy):
         """Test regime confidence adjustments without adaptive risk manager."""
         signals = [
             Signal(
@@ -306,7 +291,7 @@ class TestAdaptiveMomentumStrategy:
                 timestamp=datetime.now(),
                 symbol="BTC/USD",
                 strategy_name="adaptive_momentum",
-                metadata={'regime': 'medium_volatility'}
+                metadata={"regime": "medium_volatility"},
             )
         ]
 
@@ -320,14 +305,10 @@ class TestAdaptiveMomentumStrategy:
     def test_get_regime_confidence_multiplier(self, strategy):
         """Test regime confidence multiplier calculation."""
         # Test different regimes
-        assert strategy._get_regime_confidence_multiplier(
-            MarketRegime.LOW_VOLATILITY) == 1.1
-        assert strategy._get_regime_confidence_multiplier(
-            MarketRegime.MEDIUM_VOLATILITY) == 1.0
-        assert strategy._get_regime_confidence_multiplier(
-            MarketRegime.HIGH_VOLATILITY) == 0.8
-        assert strategy._get_regime_confidence_multiplier(
-            MarketRegime.CRISIS) == 0.6
+        assert strategy._get_regime_confidence_multiplier(MarketRegime.LOW_VOLATILITY) == 1.1
+        assert strategy._get_regime_confidence_multiplier(MarketRegime.MEDIUM_VOLATILITY) == 1.0
+        assert strategy._get_regime_confidence_multiplier(MarketRegime.HIGH_VOLATILITY) == 0.8
+        assert strategy._get_regime_confidence_multiplier(MarketRegime.CRISIS) == 0.6
 
     @pytest.mark.asyncio
     async def test_validate_signal_success(self, strategy, sample_signal):
@@ -339,8 +320,7 @@ class TestAdaptiveMomentumStrategy:
         assert is_valid is True
 
     @pytest.mark.asyncio
-    async def test_validate_signal_momentum_inconsistency(
-            self, strategy, sample_signal):
+    async def test_validate_signal_momentum_inconsistency(self, strategy, sample_signal):
         """Test signal validation with momentum inconsistency."""
         # Add different momentum data
         # Different from signal's 0.5
@@ -351,7 +331,8 @@ class TestAdaptiveMomentumStrategy:
 
     @pytest.mark.asyncio
     async def test_get_position_size_with_adaptive_manager(
-            self, strategy, mock_adaptive_risk_manager, sample_signal):
+        self, strategy, mock_adaptive_risk_manager, sample_signal
+    ):
         """Test position size calculation with adaptive risk manager."""
         strategy.set_adaptive_risk_manager(mock_adaptive_risk_manager)
 
@@ -361,8 +342,7 @@ class TestAdaptiveMomentumStrategy:
         mock_adaptive_risk_manager.calculate_adaptive_position_size.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_position_size_without_adaptive_manager(
-            self, strategy, sample_signal):
+    async def test_get_position_size_without_adaptive_manager(self, strategy, sample_signal):
         """Test position size calculation without adaptive risk manager."""
         position_size = await strategy.get_position_size(sample_signal)
 
@@ -379,7 +359,7 @@ class TestAdaptiveMomentumStrategy:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             timestamp=datetime.now(),
-            metadata={'entry_momentum': 0.8}
+            metadata={"entry_momentum": 0.8},
         )
 
         # Add current momentum data (reversed)
@@ -390,7 +370,7 @@ class TestAdaptiveMomentumStrategy:
             symbol="BTC/USD",
             price=Decimal("49000"),
             volume=Decimal("1000"),
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
         should_exit = strategy.should_exit(position, data)
@@ -407,7 +387,7 @@ class TestAdaptiveMomentumStrategy:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             timestamp=datetime.now(),
-            metadata={'entry_momentum': 0.8}
+            metadata={"entry_momentum": 0.8},
         )
 
         # Add current momentum data (no reversal)
@@ -418,7 +398,7 @@ class TestAdaptiveMomentumStrategy:
             symbol="BTC/USD",
             price=Decimal("51000"),
             volume=Decimal("1000"),
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
         should_exit = strategy.should_exit(position, data)
@@ -441,12 +421,10 @@ class TestAdaptiveMomentumStrategy:
         assert len(signals) == 0
 
     @pytest.mark.asyncio
-    async def test_generate_signals_impl_success(
-            self, strategy, sample_market_data):
+    async def test_generate_signals_impl_success(self, strategy, sample_market_data):
         """Test successful signal generation."""
         # Add price history
-        strategy.price_history["BTC/USD"] = [100, 101,
-                                             102, 103, 104, 105, 106, 107, 108, 109, 110]
+        strategy.price_history["BTC/USD"] = [100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110]
         strategy.volume_history["BTC/USD"] = [1000, 1100, 1200, 1300, 1400]
 
         signals = await strategy._generate_signals_impl(sample_market_data)
@@ -455,16 +433,16 @@ class TestAdaptiveMomentumStrategy:
         assert isinstance(signals, list)
 
     @pytest.mark.asyncio
-    async def test_generate_signals_impl_exception_handling(
-            self, strategy, sample_market_data):
+    async def test_generate_signals_impl_exception_handling(self, strategy, sample_market_data):
         """Test signal generation exception handling."""
         # Mock _update_price_history to raise exception
-        with patch.object(strategy, '_update_price_history', side_effect=Exception("Test error")):
+        with patch.object(strategy, "_update_price_history", side_effect=Exception("Test error")):
             signals = await strategy._generate_signals_impl(sample_market_data)
             assert len(signals) == 0  # Should return empty list on error
 
     def test_strategy_integration_with_existing_components(
-            self, strategy, mock_regime_detector, mock_adaptive_risk_manager):
+        self, strategy, mock_regime_detector, mock_adaptive_risk_manager
+    ):
         """Test integration with existing regime detection and adaptive risk management."""
         # Set up integration
         strategy.set_regime_detector(mock_regime_detector)
@@ -478,11 +456,8 @@ class TestAdaptiveMomentumStrategy:
 
     @pytest.mark.asyncio
     async def test_comprehensive_signal_generation_workflow(
-            self,
-            strategy,
-            mock_regime_detector,
-            mock_adaptive_risk_manager,
-            sample_market_data):
+        self, strategy, mock_regime_detector, mock_adaptive_risk_manager, sample_market_data
+    ):
         """Test comprehensive signal generation workflow."""
         # Set up integration
         strategy.set_regime_detector(mock_regime_detector)
@@ -510,16 +485,13 @@ class TestAdaptiveMomentumStrategy:
         """Test strategy configuration validation."""
         # Test with valid config
         valid_config = {
-            'name': 'adaptive_momentum',
-            'strategy_type': StrategyType.DYNAMIC,
-            'symbols': ['BTC/USD'],
-            'timeframe': '1h',
-            'position_size_pct': 0.02,
-            'min_confidence': 0.6,
-            'parameters': {
-                'fast_ma_period': 20,
-                'slow_ma_period': 50
-            }
+            "name": "adaptive_momentum",
+            "strategy_type": StrategyType.DYNAMIC,
+            "symbols": ["BTC/USD"],
+            "timeframe": "1h",
+            "position_size_pct": 0.02,
+            "min_confidence": 0.6,
+            "parameters": {"fast_ma_period": 20, "slow_ma_period": 50},
         }
 
         strategy = AdaptiveMomentumStrategy(valid_config)
@@ -527,9 +499,9 @@ class TestAdaptiveMomentumStrategy:
 
         # Test with missing required config
         invalid_config = {
-            'name': 'adaptive_momentum',
-            'strategy_type': StrategyType.DYNAMIC,
-            'symbols': ['BTC/USD']
+            "name": "adaptive_momentum",
+            "strategy_type": StrategyType.DYNAMIC,
+            "symbols": ["BTC/USD"],
         }
 
         # Should still work with defaults

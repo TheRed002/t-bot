@@ -10,13 +10,14 @@ and P-002A (error handling) components.
 
 import asyncio
 import time
-from typing import Dict, Optional, Callable, Any
-from datetime import datetime, timedelta
 from collections import defaultdict
+from collections.abc import Callable
+from typing import Any
+
+from src.core.config import Config
 
 # MANDATORY: Import from P-001
-from src.core.exceptions import ExchangeRateLimitError, ExchangeError
-from src.core.config import Config
+from src.core.exceptions import ExchangeRateLimitError
 from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
@@ -33,11 +34,7 @@ class TokenBucket:
     with configurable capacity and refill rate.
     """
 
-    def __init__(
-            self,
-            capacity: int,
-            refill_rate: float,
-            refill_time: float = 1.0):
+    def __init__(self, capacity: int, refill_rate: float, refill_time: float = 1.0):
         """
         Initialize token bucket.
 
@@ -123,22 +120,18 @@ class RateLimiter:
         rate_limits = config.exchanges.rate_limits.get(exchange_name, {})
 
         # Initialize token buckets for different rate limits
-        self.buckets: Dict[str, TokenBucket] = {}
+        self.buckets: dict[str, TokenBucket] = {}
 
         # Requests per minute bucket
         requests_per_minute = rate_limits.get("requests_per_minute", 1200)
         self.buckets["requests_per_minute"] = TokenBucket(
-            capacity=requests_per_minute,
-            refill_rate=requests_per_minute,
-            refill_time=60.0
+            capacity=requests_per_minute, refill_rate=requests_per_minute, refill_time=60.0
         )
 
         # Orders per second bucket
         orders_per_second = rate_limits.get("orders_per_second", 10)
         self.buckets["orders_per_second"] = TokenBucket(
-            capacity=orders_per_second,
-            refill_rate=orders_per_second,
-            refill_time=1.0
+            capacity=orders_per_second, refill_rate=orders_per_second, refill_time=1.0
         )
 
         # WebSocket connections bucket
@@ -146,17 +139,18 @@ class RateLimiter:
         self.buckets["websocket_connections"] = TokenBucket(
             capacity=websocket_connections,
             refill_rate=websocket_connections,
-            refill_time=300.0  # 5 minutes
+            refill_time=300.0,  # 5 minutes
         )
 
         # Request tracking
-        self.request_history: Dict[str, list] = defaultdict(list)
-        self.last_request_time: Dict[str, float] = defaultdict(lambda: 0.0)
+        self.request_history: dict[str, list] = defaultdict(list)
+        self.last_request_time: dict[str, float] = defaultdict(lambda: 0.0)
 
         logger.info(f"Initialized rate limiter for {exchange_name}")
 
-    async def acquire(self, bucket_name: str = "requests_per_minute",
-                      tokens: int = 1, timeout: float = 30.0) -> bool:
+    async def acquire(
+        self, bucket_name: str = "requests_per_minute", tokens: int = 1, timeout: float = 30.0
+    ) -> bool:
         """
         Acquire tokens from a rate limit bucket.
 
@@ -207,10 +201,7 @@ class RateLimiter:
             tokens: Number of tokens consumed
         """
         now = time.time()
-        self.request_history[bucket_name].append({
-            "timestamp": now,
-            "tokens": tokens
-        })
+        self.request_history[bucket_name].append({"timestamp": now, "tokens": tokens})
 
         # Clean up old history (keep last 1000 requests)
         if len(self.request_history[bucket_name]) > 1000:
@@ -218,7 +209,7 @@ class RateLimiter:
 
         self.last_request_time[bucket_name] = now
 
-    def get_bucket_status(self, bucket_name: str) -> Dict[str, Any]:
+    def get_bucket_status(self, bucket_name: str) -> dict[str, Any]:
         """
         Get status of a rate limit bucket.
 
@@ -238,10 +229,10 @@ class RateLimiter:
             "refill_rate": bucket.refill_rate,
             "refill_time": bucket.refill_time,
             "last_request": self.last_request_time.get(bucket_name, 0),
-            "request_count": len(self.request_history.get(bucket_name, []))
+            "request_count": len(self.request_history.get(bucket_name, [])),
         }
 
-    def get_all_bucket_status(self) -> Dict[str, Dict[str, Any]]:
+    def get_all_bucket_status(self) -> dict[str, dict[str, Any]]:
         """
         Get status of all rate limit buckets.
 
@@ -249,14 +240,10 @@ class RateLimiter:
             Dict[str, Dict[str, Any]]: Status of all buckets
         """
         return {
-            bucket_name: self.get_bucket_status(bucket_name)
-            for bucket_name in self.buckets.keys()
+            bucket_name: self.get_bucket_status(bucket_name) for bucket_name in self.buckets.keys()
         }
 
-    async def wait_for_capacity(
-            self,
-            bucket_name: str,
-            tokens: int = 1) -> float:
+    async def wait_for_capacity(self, bucket_name: str, tokens: int = 1) -> float:
         """
         Wait for capacity to become available.
 
@@ -311,8 +298,9 @@ class RateLimitDecorator:
     calls and handles retries with exponential backoff.
     """
 
-    def __init__(self, bucket_name: str = "requests_per_minute",
-                 tokens: int = 1, timeout: float = 30.0):
+    def __init__(
+        self, bucket_name: str = "requests_per_minute", tokens: int = 1, timeout: float = 30.0
+    ):
         """
         Initialize rate limit decorator.
 
@@ -335,21 +323,19 @@ class RateLimitDecorator:
         Returns:
             Callable: Decorated function
         """
+
         async def wrapper(*args, **kwargs):
             # Get rate limiter from the first argument (should be self)
-            if args and hasattr(args[0], 'rate_limiter'):
+            if args and hasattr(args[0], "rate_limiter"):
                 rate_limiter = args[0].rate_limiter
 
                 # Check if rate_limiter has acquire method and is awaitable
-                if hasattr(
-                        rate_limiter,
-                        'acquire') and asyncio.iscoroutinefunction(
-                        rate_limiter.acquire):
+                if hasattr(rate_limiter, "acquire") and asyncio.iscoroutinefunction(
+                    rate_limiter.acquire
+                ):
                     # Acquire tokens
                     await rate_limiter.acquire(
-                        bucket_name=self.bucket_name,
-                        tokens=self.tokens,
-                        timeout=self.timeout
+                        bucket_name=self.bucket_name, tokens=self.tokens, timeout=self.timeout
                     )
 
             # Execute the function

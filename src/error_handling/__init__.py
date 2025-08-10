@@ -8,34 +8,39 @@ CRITICAL: This module integrates with P-001 core framework and P-002 database
 layer and will be used by all subsequent prompts for robust error handling.
 """
 
-from .error_handler import ErrorHandler, ErrorSeverity, ErrorContext
-from .recovery_scenarios import (
-    PartialFillRecovery,
-    NetworkDisconnectionRecovery,
-    ExchangeMaintenanceRecovery,
-    DataFeedInterruptionRecovery,
-    OrderRejectionRecovery,
-    APIRateLimitRecovery
-)
 from .connection_manager import ConnectionManager, ConnectionState
-from .state_monitor import StateMonitor, StateConsistencyError
-from .pattern_analytics import ErrorPatternAnalytics, ErrorPattern
+from .error_handler import ErrorContext, ErrorHandler, ErrorSeverity
+from .pattern_analytics import ErrorPattern, ErrorPatternAnalytics
+from .recovery_scenarios import (
+    APIRateLimitRecovery,
+    DataFeedInterruptionRecovery,
+    ExchangeMaintenanceRecovery,
+    NetworkDisconnectionRecovery,
+    OrderRejectionRecovery,
+    PartialFillRecovery,
+)
+from .state_monitor import StateMonitor
+from src.core.exceptions import StateConsistencyError
 
 __all__ = [
     # Core error handling
-    'ErrorHandler', 'ErrorSeverity', 'ErrorContext',
-
+    "ErrorHandler",
+    "ErrorSeverity",
+    "ErrorContext",
     # Recovery scenarios
-    'PartialFillRecovery', 'NetworkDisconnectionRecovery',
-    'ExchangeMaintenanceRecovery', 'DataFeedInterruptionRecovery',
-    'OrderRejectionRecovery', 'APIRateLimitRecovery',
-
+    "PartialFillRecovery",
+    "NetworkDisconnectionRecovery",
+    "ExchangeMaintenanceRecovery",
+    "DataFeedInterruptionRecovery",
+    "OrderRejectionRecovery",
+    "APIRateLimitRecovery",
     # Connection management
-    'ConnectionManager', 'ConnectionState',
-
+    "ConnectionManager",
+    "ConnectionState",
     # State monitoring
-    'StateMonitor', 'StateConsistencyError',
-
+    "StateMonitor",
+    "StateConsistencyError",
     # Pattern analytics
-    'ErrorPatternAnalytics', 'ErrorPattern',
+    "ErrorPatternAnalytics",
+    "ErrorPattern",
 ]

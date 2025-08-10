@@ -10,20 +10,15 @@ This module tests the deposit/withdrawal management including:
 - Capital protection rules
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from decimal import Decimal
 
-from src.core.types import (
-    FundFlow, WithdrawalRule, CapitalProtection, CapitalMetrics
-)
-from src.core.exceptions import (
-    CapitalManagementError, ValidationError, WithdrawalError
-)
-from src.core.config import Config
+import pytest
+
 from src.capital_management.fund_flow_manager import FundFlowManager
+from src.core.config import Config
+from src.core.exceptions import ValidationError
+from src.core.types import FundFlow
 
 
 class TestFundFlowManager:
@@ -52,15 +47,15 @@ class TestFundFlowManager:
                 "description": "Emergency withdrawal rule",
                 "enabled": True,
                 "max_percentage": 0.5,
-                "cooldown_hours": 0
+                "cooldown_hours": 0,
             },
             "regular": {
                 "name": "regular",
                 "description": "Regular withdrawal rule",
                 "enabled": True,
                 "max_percentage": 0.2,
-                "cooldown_hours": 24
-            }
+                "cooldown_hours": 24,
+            },
         }
         return config
 
@@ -83,7 +78,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="strategy_reallocation",
-                timestamp=datetime.now() - timedelta(hours=2)
+                timestamp=datetime.now() - timedelta(hours=2),
             ),
             FundFlow(
                 from_strategy=None,
@@ -95,7 +90,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="deposit",
-                timestamp=datetime.now() - timedelta(hours=1)
+                timestamp=datetime.now() - timedelta(hours=1),
             ),
             FundFlow(
                 from_strategy="strategy_1",
@@ -107,8 +102,8 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="withdrawal",
-                timestamp=datetime.now() - timedelta(minutes=30)
-            )
+                timestamp=datetime.now() - timedelta(minutes=30),
+            ),
         ]
 
     def test_initialization(self, fund_flow_manager, config):
@@ -118,13 +113,10 @@ class TestFundFlowManager:
         assert fund_flow_manager.fund_flows == []
         assert fund_flow_manager.strategy_performance == {}
         # Check if last_compound_date is within the last 60 seconds
-        assert (
-            datetime.now() -
-            fund_flow_manager.last_compound_date).total_seconds() < 60
+        assert (datetime.now() - fund_flow_manager.last_compound_date).total_seconds() < 60
         assert fund_flow_manager.total_profit == Decimal("0")
         assert fund_flow_manager.locked_profit == Decimal("0")
-        assert fund_flow_manager.total_capital == Decimal(
-            "0")  # Initially 0 until set
+        assert fund_flow_manager.total_capital == Decimal("0")  # Initially 0 until set
 
     @pytest.mark.asyncio
     async def test_update_total_capital(self, fund_flow_manager):
@@ -217,8 +209,7 @@ class TestFundFlowManager:
             await fund_flow_manager.process_withdrawal(amount, currency, exchange, reason)
 
     @pytest.mark.asyncio
-    async def test_process_withdrawal_without_total_capital(
-            self, fund_flow_manager):
+    async def test_process_withdrawal_without_total_capital(self, fund_flow_manager):
         """Test withdrawal processing when total capital is not set."""
         amount = Decimal("2000")
         currency = "USDT"
@@ -231,8 +222,7 @@ class TestFundFlowManager:
         assert isinstance(result, FundFlow)
 
     @pytest.mark.asyncio
-    async def test_process_withdrawal_exceeds_max_percentage(
-            self, fund_flow_manager):
+    async def test_process_withdrawal_exceeds_max_percentage(self, fund_flow_manager):
         """Test withdrawal processing exceeding max percentage."""
         # Set total capital
         await fund_flow_manager.update_total_capital(Decimal("100000"))
@@ -268,8 +258,7 @@ class TestFundFlowManager:
         assert flow.reason == reason
 
     @pytest.mark.asyncio
-    async def test_process_strategy_reallocation_with_total_capital(
-            self, fund_flow_manager):
+    async def test_process_strategy_reallocation_with_total_capital(self, fund_flow_manager):
         """Test strategy reallocation with total capital set."""
         # Set total capital
         await fund_flow_manager.update_total_capital(Decimal("100000"))
@@ -297,8 +286,7 @@ class TestFundFlowManager:
             assert result.reason == "auto_compound"
 
     @pytest.mark.asyncio
-    async def test_process_auto_compound_disabled(
-            self, fund_flow_manager, config):
+    async def test_process_auto_compound_disabled(self, fund_flow_manager, config):
         """Test auto-compounding when disabled."""
         config.capital_management.auto_compound_enabled = False
 
@@ -308,8 +296,7 @@ class TestFundFlowManager:
         assert len(fund_flow_manager.fund_flows) == 0
 
     @pytest.mark.asyncio
-    async def test_process_auto_compound_below_threshold(
-            self, fund_flow_manager):
+    async def test_process_auto_compound_below_threshold(self, fund_flow_manager):
         """Test auto-compounding below profit threshold."""
 
         result = await fund_flow_manager.process_auto_compound()
@@ -355,7 +342,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="strategy_reallocation",
-                timestamp=datetime.now() - timedelta(hours=2)
+                timestamp=datetime.now() - timedelta(hours=2),
             ),
             FundFlow(
                 from_strategy=None,
@@ -367,8 +354,8 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="deposit",
-                timestamp=datetime.now() - timedelta(hours=1)
-            )
+                timestamp=datetime.now() - timedelta(hours=1),
+            ),
         ]
 
         history = await fund_flow_manager.get_flow_history()
@@ -399,7 +386,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="deposit",
-                timestamp=datetime.now() - timedelta(hours=2)
+                timestamp=datetime.now() - timedelta(hours=2),
             ),
             FundFlow(
                 from_strategy="strategy_1",
@@ -411,8 +398,8 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="withdrawal",
-                timestamp=datetime.now() - timedelta(hours=1)
-            )
+                timestamp=datetime.now() - timedelta(hours=1),
+            ),
         ]
 
         summary = await fund_flow_manager.get_flow_summary()

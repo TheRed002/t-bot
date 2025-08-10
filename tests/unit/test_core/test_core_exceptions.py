@@ -4,19 +4,31 @@ Unit tests for core exception hierarchy.
 These tests verify the exception hierarchy and error handling patterns.
 """
 
-import pytest
-from datetime import datetime, timezone
-from typing import Dict, Any
+from datetime import datetime
 
 from src.core.exceptions import (
-    TradingBotError, ExchangeError, RiskManagementError,
-    ValidationError, ExecutionError, ModelError, DataError,
-    StateConsistencyError, SecurityError, ExchangeConnectionError,
-    ExchangeRateLimitError, ExchangeInsufficientFundsError,
-    PositionLimitError, DrawdownLimitError, ConfigurationError,
-    SchemaValidationError, OrderRejectionError, DataValidationError,
-    ModelLoadError, StateCorruptionError, AuthenticationError,
-    AuthorizationError
+    AuthenticationError,
+    AuthorizationError,
+    ConfigurationError,
+    DataError,
+    DataValidationError,
+    DrawdownLimitError,
+    ExchangeConnectionError,
+    ExchangeError,
+    ExchangeInsufficientFundsError,
+    ExchangeRateLimitError,
+    ExecutionError,
+    ModelError,
+    ModelLoadError,
+    OrderRejectionError,
+    PositionLimitError,
+    RiskManagementError,
+    SchemaValidationError,
+    SecurityError,
+    StateConsistencyError,
+    StateCorruptionError,
+    TradingBotError,
+    ValidationError,
 )
 
 
@@ -26,9 +38,7 @@ class TestTradingBotError:
     def test_base_exception(self):
         """Test TradingBotError base exception."""
         error = TradingBotError(
-            "Test error message",
-            error_code="TEST_ERROR",
-            details={"test": "data"}
+            "Test error message", error_code="TEST_ERROR", details={"test": "data"}
         )
 
         assert error.message == "Test error message"
@@ -40,9 +50,7 @@ class TestTradingBotError:
     def test_base_exception_str_representation(self):
         """Test string representation of base exception."""
         error = TradingBotError(
-            "Test error message",
-            error_code="TEST_ERROR",
-            details={"test": "data"}
+            "Test error message", error_code="TEST_ERROR", details={"test": "data"}
         )
 
         error_str = str(error)
@@ -244,7 +252,7 @@ class TestExceptionHierarchy:
             ModelError("test"),
             DataError("test"),
             StateConsistencyError("test"),
-            SecurityError("test")
+            SecurityError("test"),
         ]
 
         for exception in exceptions:
@@ -255,9 +263,7 @@ class TestExceptionHierarchy:
         # Exchange exceptions
         assert isinstance(ExchangeConnectionError("test"), ExchangeError)
         assert isinstance(ExchangeRateLimitError("test"), ExchangeError)
-        assert isinstance(
-            ExchangeInsufficientFundsError("test"),
-            ExchangeError)
+        assert isinstance(ExchangeInsufficientFundsError("test"), ExchangeError)
 
         # Risk management exceptions
         assert isinstance(PositionLimitError("test"), RiskManagementError)

@@ -12,28 +12,23 @@ CRITICAL: This integrates with P-001 (types, exceptions, config),
 P-002A (error handling), and P-007A (utils) components.
 """
 
-from typing import List, Optional, Dict, Any, Tuple, Set
 from decimal import Decimal
-from datetime import datetime, timedelta
+from typing import Any
+
 import numpy as np
 
-# MANDATORY: Import from P-001
-from src.core.types import (
-    Position, MarketData, Signal, OrderRequest, PositionLimits, RiskLevel
-)
-from src.core.exceptions import (
-    RiskManagementError, PositionLimitError, ValidationError
-)
 from src.core.config import Config
+from src.core.exceptions import PositionLimitError, ValidationError
 from src.core.logging import get_logger
+
+# MANDATORY: Import from P-001
+from src.core.types import Position, PositionLimits
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
 # MANDATORY: Import from P-007A
-from src.utils.decorators import time_execution, retry
-from src.utils.validators import validate_price, validate_quantity, validate_position_limits
-from src.utils.formatters import format_percentage, format_currency
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -59,14 +54,14 @@ class PortfolioLimits:
         self.logger = logger.bind(component="portfolio_limits")
 
         # Portfolio state tracking
-        self.positions: List[Position] = []
+        self.positions: list[Position] = []
         self.total_portfolio_value = Decimal("0")
-        self.position_limits: Optional[PositionLimits] = None
+        self.position_limits: PositionLimits | None = None
 
         # Correlation tracking
-        self.correlation_matrix: Dict[str, Dict[str, float]] = {}
-        self.return_history: Dict[str, List[float]] = {}
-        self.price_history: Dict[str, List[float]] = {}
+        self.correlation_matrix: dict[str, dict[str, float]] = {}
+        self.return_history: dict[str, list[float]] = {}
+        self.price_history: dict[str, list[float]] = {}
 
         # Sector/asset classification
         self.sector_mapping = {
@@ -83,7 +78,7 @@ class PortfolioLimits:
             "USDT": "stablecoin",
             "USDC": "stablecoin",
             "BUSD": "stablecoin",
-            "DAI": "stablecoin"
+            "DAI": "stablecoin",
         }
 
         self.logger.info("Portfolio limits initialized")
@@ -105,8 +100,7 @@ class PortfolioLimits:
         try:
             # Validate input
             if not new_position or not new_position.symbol:
-                raise ValidationError(
-                    "Invalid position for portfolio limit check")
+                raise ValidationError("Invalid position for portfolio limit check")
 
             # Check total position count limit
             if not await self._check_total_positions_limit(new_position):
@@ -132,20 +126,24 @@ class PortfolioLimits:
             if not await self._check_leverage_limit(new_position):
                 return False
 
-            self.logger.info("Portfolio limits check passed",
-                             symbol=new_position.symbol,
-                             quantity=float(new_position.quantity))
+            self.logger.info(
+                "Portfolio limits check passed",
+                symbol=new_position.symbol,
+                quantity=float(new_position.quantity),
+            )
 
             return True
 
         except Exception as e:
-            self.logger.error("Portfolio limits check failed", error=str(
-                e), symbol=new_position.symbol if new_position else None)
+            self.logger.error(
+                "Portfolio limits check failed",
+                error=str(e),
+                symbol=new_position.symbol if new_position else None,
+            )
             raise PositionLimitError(f"Portfolio limits check failed: {e}")
 
     @time_execution
-    async def _check_total_positions_limit(
-            self, new_position: Position) -> bool:
+    async def _check_total_positions_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed total positions limit.
 
@@ -159,18 +157,20 @@ class PortfolioLimits:
         max_positions = self.risk_config.max_total_positions
 
         if current_positions >= max_positions:
-            await self._log_risk_violation("total_positions_limit", {
-                "current_positions": current_positions,
-                "max_positions": max_positions,
-                "new_symbol": new_position.symbol
-            })
+            await self._log_risk_violation(
+                "total_positions_limit",
+                {
+                    "current_positions": current_positions,
+                    "max_positions": max_positions,
+                    "new_symbol": new_position.symbol,
+                },
+            )
             return False
 
         return True
 
     @time_execution
-    async def _check_positions_per_symbol_limit(
-            self, new_position: Position) -> bool:
+    async def _check_positions_per_symbol_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed positions per symbol limit.
 
@@ -181,24 +181,24 @@ class PortfolioLimits:
             bool: True if within positions per symbol limit
         """
         symbol = new_position.symbol
-        current_symbol_positions = sum(
-            1 for pos in self.positions if pos.symbol == symbol
-        )
+        current_symbol_positions = sum(1 for pos in self.positions if pos.symbol == symbol)
         max_positions_per_symbol = self.risk_config.max_positions_per_symbol
 
         if current_symbol_positions >= max_positions_per_symbol:
-            await self._log_risk_violation("positions_per_symbol_limit", {
-                "symbol": symbol,
-                "current_positions": current_symbol_positions,
-                "max_positions_per_symbol": max_positions_per_symbol
-            })
+            await self._log_risk_violation(
+                "positions_per_symbol_limit",
+                {
+                    "symbol": symbol,
+                    "current_positions": current_symbol_positions,
+                    "max_positions_per_symbol": max_positions_per_symbol,
+                },
+            )
             return False
 
         return True
 
     @time_execution
-    async def _check_portfolio_exposure_limit(
-            self, new_position: Position) -> bool:
+    async def _check_portfolio_exposure_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed portfolio exposure limit.
 
@@ -212,10 +212,7 @@ class PortfolioLimits:
             return True  # No portfolio value to check against
 
         # Calculate current portfolio exposure
-        current_exposure = sum(
-            abs(pos.quantity * pos.current_price)
-            for pos in self.positions
-        )
+        current_exposure = sum(abs(pos.quantity * pos.current_price) for pos in self.positions)
 
         # Add new position exposure
         new_exposure = abs(new_position.quantity * new_position.current_price)
@@ -226,21 +223,23 @@ class PortfolioLimits:
         max_exposure = Decimal(str(self.risk_config.max_portfolio_exposure))
 
         if exposure_percentage > max_exposure:
-            await self._log_risk_violation("portfolio_exposure_limit", {
-                "current_exposure": float(current_exposure),
-                "new_exposure": float(new_exposure),
-                "total_exposure": float(total_exposure),
-                "exposure_percentage": float(exposure_percentage),
-                "max_exposure": float(max_exposure),
-                "portfolio_value": float(self.total_portfolio_value)
-            })
+            await self._log_risk_violation(
+                "portfolio_exposure_limit",
+                {
+                    "current_exposure": float(current_exposure),
+                    "new_exposure": float(new_exposure),
+                    "total_exposure": float(total_exposure),
+                    "exposure_percentage": float(exposure_percentage),
+                    "max_exposure": float(max_exposure),
+                    "portfolio_value": float(self.total_portfolio_value),
+                },
+            )
             return False
 
         return True
 
     @time_execution
-    async def _check_sector_exposure_limit(
-            self, new_position: Position) -> bool:
+    async def _check_sector_exposure_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed sector exposure limit.
 
@@ -254,25 +253,13 @@ class PortfolioLimits:
             return True
 
         # Determine sector for new position
-        symbol_base = new_position.symbol.replace(
-            "USDT",
-            "").replace(
-            "BTC",
-            "").replace(
-            "ETH",
-            "")
+        symbol_base = new_position.symbol.replace("USDT", "").replace("BTC", "").replace("ETH", "")
         sector = self.sector_mapping.get(symbol_base, "other")
 
         # Calculate current sector exposure
         sector_exposure = Decimal("0")
         for pos in self.positions:
-            pos_symbol_base = pos.symbol.replace(
-                "USDT",
-                "").replace(
-                "BTC",
-                "").replace(
-                "ETH",
-                "")
+            pos_symbol_base = pos.symbol.replace("USDT", "").replace("BTC", "").replace("ETH", "")
             pos_sector = self.sector_mapping.get(pos_symbol_base, "other")
 
             if pos_sector == sector:
@@ -284,25 +271,26 @@ class PortfolioLimits:
 
         # Calculate sector exposure percentage
         sector_exposure_percentage = total_sector_exposure / self.total_portfolio_value
-        max_sector_exposure = Decimal(
-            str(self.risk_config.max_sector_exposure))
+        max_sector_exposure = Decimal(str(self.risk_config.max_sector_exposure))
 
         if sector_exposure_percentage > max_sector_exposure:
-            await self._log_risk_violation("sector_exposure_limit", {
-                "sector": sector,
-                "current_sector_exposure": float(sector_exposure),
-                "new_exposure": float(new_exposure),
-                "total_sector_exposure": float(total_sector_exposure),
-                "sector_exposure_percentage": float(sector_exposure_percentage),
-                "max_sector_exposure": float(max_sector_exposure)
-            })
+            await self._log_risk_violation(
+                "sector_exposure_limit",
+                {
+                    "sector": sector,
+                    "current_sector_exposure": float(sector_exposure),
+                    "new_exposure": float(new_exposure),
+                    "total_sector_exposure": float(total_sector_exposure),
+                    "sector_exposure_percentage": float(sector_exposure_percentage),
+                    "max_sector_exposure": float(max_sector_exposure),
+                },
+            )
             return False
 
         return True
 
     @time_execution
-    async def _check_correlation_exposure_limit(
-            self, new_position: Position) -> bool:
+    async def _check_correlation_exposure_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed correlation exposure limit.
 
@@ -334,17 +322,19 @@ class PortfolioLimits:
         # Calculate correlated exposure percentage
         if self.total_portfolio_value > 0:
             correlated_exposure_percentage = total_correlated_exposure / self.total_portfolio_value
-            max_correlation_exposure = Decimal(
-                str(self.risk_config.max_correlation_exposure))
+            max_correlation_exposure = Decimal(str(self.risk_config.max_correlation_exposure))
 
             if correlated_exposure_percentage > max_correlation_exposure:
-                await self._log_risk_violation("correlation_exposure_limit", {
-                    "current_correlated_exposure": float(high_correlation_exposure),
-                    "new_exposure": float(new_exposure),
-                    "total_correlated_exposure": float(total_correlated_exposure),
-                    "correlated_exposure_percentage": float(correlated_exposure_percentage),
-                    "max_correlation_exposure": float(max_correlation_exposure)
-                })
+                await self._log_risk_violation(
+                    "correlation_exposure_limit",
+                    {
+                        "current_correlated_exposure": float(high_correlation_exposure),
+                        "new_exposure": float(new_exposure),
+                        "total_correlated_exposure": float(total_correlated_exposure),
+                        "correlated_exposure_percentage": float(correlated_exposure_percentage),
+                        "max_correlation_exposure": float(max_correlation_exposure),
+                    },
+                )
                 return False
 
         return True
@@ -405,8 +395,9 @@ class PortfolioLimits:
             return 0.0
 
     @time_execution
-    async def update_portfolio_state(self, positions: List[Position],
-                                     portfolio_value: Decimal) -> None:
+    async def update_portfolio_state(
+        self, positions: list[Position], portfolio_value: Decimal
+    ) -> None:
         """
         Update portfolio state for limit calculations.
 
@@ -417,9 +408,11 @@ class PortfolioLimits:
         self.positions = positions
         self.total_portfolio_value = portfolio_value
 
-        self.logger.debug("Portfolio state updated",
-                          position_count=len(positions),
-                          portfolio_value=float(portfolio_value))
+        self.logger.debug(
+            "Portfolio state updated",
+            position_count=len(positions),
+            portfolio_value=float(portfolio_value),
+        )
 
     @time_execution
     async def update_return_history(self, symbol: str, price: float) -> None:
@@ -452,7 +445,7 @@ class PortfolioLimits:
             self.price_history[symbol] = self.price_history[symbol][-max_history:]
 
     @time_execution
-    async def get_portfolio_summary(self) -> Dict[str, Any]:
+    async def get_portfolio_summary(self) -> dict[str, Any]:
         """
         Get comprehensive portfolio limits summary.
 
@@ -460,24 +453,16 @@ class PortfolioLimits:
             Dict containing current portfolio state and limits
         """
         # Calculate current exposures
-        total_exposure = sum(
-            abs(pos.quantity * pos.current_price)
-            for pos in self.positions
-        )
+        total_exposure = sum(abs(pos.quantity * pos.current_price) for pos in self.positions)
 
-        exposure_percentage = (total_exposure / self.total_portfolio_value
-                               if self.total_portfolio_value > 0 else 0)
+        exposure_percentage = (
+            total_exposure / self.total_portfolio_value if self.total_portfolio_value > 0 else 0
+        )
 
         # Calculate sector exposures
         sector_exposures = {}
         for pos in self.positions:
-            symbol_base = pos.symbol.replace(
-                "USDT",
-                "").replace(
-                "BTC",
-                "").replace(
-                "ETH",
-                "")
+            symbol_base = pos.symbol.replace("USDT", "").replace("BTC", "").replace("ETH", "")
             sector = self.sector_mapping.get(symbol_base, "other")
 
             if sector not in sector_exposures:
@@ -489,16 +474,13 @@ class PortfolioLimits:
         sector_exposure_percentages = {}
         for sector, exposure in sector_exposures.items():
             if self.total_portfolio_value > 0:
-                sector_exposure_percentages[sector] = float(
-                    exposure / self.total_portfolio_value)
+                sector_exposure_percentages[sector] = float(exposure / self.total_portfolio_value)
             else:
                 sector_exposure_percentages[sector] = 0.0
 
         summary = {
-            "total_positions": len(
-                self.positions),
-            "portfolio_value": float(
-                self.total_portfolio_value),
+            "total_positions": len(self.positions),
+            "portfolio_value": float(self.total_portfolio_value),
             "total_exposure": float(total_exposure),
             "exposure_percentage": float(exposure_percentage),
             "max_exposure_percentage": self.risk_config.max_portfolio_exposure,
@@ -506,14 +488,13 @@ class PortfolioLimits:
             "max_sector_exposure": self.risk_config.max_sector_exposure,
             "max_positions": self.risk_config.max_total_positions,
             "max_positions_per_symbol": self.risk_config.max_positions_per_symbol,
-            "max_leverage": float(
-                self.risk_config.max_leverage)}
+            "max_leverage": float(self.risk_config.max_leverage),
+        }
 
         return summary
 
     @time_execution
-    async def _log_risk_violation(
-            self, violation_type: str, details: Dict[str, Any]) -> None:
+    async def _log_risk_violation(self, violation_type: str, details: dict[str, Any]) -> None:
         """
         Log risk violation for monitoring and alerting.
 
@@ -521,11 +502,11 @@ class PortfolioLimits:
             violation_type: Type of risk violation
             details: Additional violation details
         """
-        self.logger.warning("Portfolio limit violation detected",
-                            violation_type=violation_type,
-                            details=details)
+        self.logger.warning(
+            "Portfolio limit violation detected", violation_type=violation_type, details=details
+        )
 
         # TODO: Remove in production - Debug logging
-        self.logger.debug("Portfolio limit violation details",
-                          violation_type=violation_type,
-                          details=details)
+        self.logger.debug(
+            "Portfolio limit violation details", violation_type=violation_type, details=details
+        )

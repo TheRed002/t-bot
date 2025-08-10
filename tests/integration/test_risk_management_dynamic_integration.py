@@ -5,20 +5,25 @@ This module tests the integration between market regime detection and adaptive r
 to ensure they work together properly in a real-world scenario.
 """
 
-import pytest
-import numpy as np
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import List, Dict, Any
+
+import numpy as np
+import pytest
+
+from src.core.exceptions import RiskManagementError
+from src.core.types import (
+    MarketData,
+    MarketRegime,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
+)
+from src.risk_management.adaptive_risk import AdaptiveRiskManager
 
 # Import the modules to test
 from src.risk_management.regime_detection import MarketRegimeDetector
-from src.risk_management.adaptive_risk import AdaptiveRiskManager
-from src.core.types import (
-    MarketData, MarketRegime, Position, Signal, SignalDirection,
-    OrderSide, RiskMetrics, RiskLevel
-)
-from src.core.exceptions import RiskManagementError, ValidationError
 
 
 class TestDynamicRiskManagementIntegration:
@@ -28,21 +33,21 @@ class TestDynamicRiskManagementIntegration:
     def regime_detector_config(self):
         """Configuration for regime detector."""
         return {
-            'volatility_window': 20,
-            'trend_window': 50,
-            'correlation_window': 30,
-            'regime_change_threshold': 0.7
+            "volatility_window": 20,
+            "trend_window": 50,
+            "correlation_window": 30,
+            "regime_change_threshold": 0.7,
         }
 
     @pytest.fixture
     def adaptive_risk_config(self):
         """Configuration for adaptive risk manager."""
         return {
-            'base_position_size_pct': 0.02,  # 2%
-            'base_stop_loss_pct': 0.02,      # 2%
-            'base_take_profit_pct': 0.04,    # 4%
-            'momentum_window': 20,
-            'momentum_threshold': 0.1
+            "base_position_size_pct": 0.02,  # 2%
+            "base_stop_loss_pct": 0.02,  # 2%
+            "base_take_profit_pct": 0.04,  # 4%
+            "momentum_window": 20,
+            "momentum_threshold": 0.1,
         }
 
     @pytest.fixture
@@ -64,20 +69,14 @@ class TestDynamicRiskManagementIntegration:
                 symbol="BTCUSDT",
                 price=Decimal("50000"),
                 volume=Decimal("1000"),
-                timestamp=timestamp
+                timestamp=timestamp,
             ),
             MarketData(
-                symbol="ETHUSDT",
-                price=Decimal("3000"),
-                volume=Decimal("500"),
-                timestamp=timestamp
+                symbol="ETHUSDT", price=Decimal("3000"), volume=Decimal("500"), timestamp=timestamp
             ),
             MarketData(
-                symbol="ADAUSDT",
-                price=Decimal("1.5"),
-                volume=Decimal("2000"),
-                timestamp=timestamp
-            )
+                symbol="ADAUSDT", price=Decimal("1.5"), volume=Decimal("2000"), timestamp=timestamp
+            ),
         ]
 
     @pytest.fixture
@@ -89,7 +88,7 @@ class TestDynamicRiskManagementIntegration:
             timestamp=datetime.now(),
             symbol="BTCUSDT",
             strategy_name="test_strategy",
-            metadata={}
+            metadata={},
         )
 
     @pytest.fixture
@@ -103,7 +102,7 @@ class TestDynamicRiskManagementIntegration:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             Position(
                 symbol="ETHUSDT",
@@ -112,8 +111,8 @@ class TestDynamicRiskManagementIntegration:
                 current_price=Decimal("3100"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         ]
 
     @pytest.fixture
@@ -121,11 +120,7 @@ class TestDynamicRiskManagementIntegration:
         """Create high volatility market data."""
         # Generate high volatility price data
         np.random.seed(42)
-        base_prices = {
-            "BTCUSDT": 50000,
-            "ETHUSDT": 3000,
-            "ADAUSDT": 1.5
-        }
+        base_prices = {"BTCUSDT": 50000, "ETHUSDT": 3000, "ADAUSDT": 1.5}
 
         market_data = []
         for symbol, base_price in base_prices.items():
@@ -140,12 +135,14 @@ class TestDynamicRiskManagementIntegration:
             # Create market data for each price point
             for i, price in enumerate(prices):
                 timestamp = datetime.now() - timedelta(hours=100 - i)  # Time series
-                market_data.append(MarketData(
-                    symbol=symbol,
-                    price=Decimal(str(price)),
-                    volume=Decimal("1000"),
-                    timestamp=timestamp
-                ))
+                market_data.append(
+                    MarketData(
+                        symbol=symbol,
+                        price=Decimal(str(price)),
+                        volume=Decimal("1000"),
+                        timestamp=timestamp,
+                    )
+                )
 
         return market_data
 
@@ -154,11 +151,7 @@ class TestDynamicRiskManagementIntegration:
         """Create low volatility market data."""
         # Generate low volatility price data
         np.random.seed(42)
-        base_prices = {
-            "BTCUSDT": 50000,
-            "ETHUSDT": 3000,
-            "ADAUSDT": 1.5
-        }
+        base_prices = {"BTCUSDT": 50000, "ETHUSDT": 3000, "ADAUSDT": 1.5}
 
         market_data = []
         for symbol, base_price in base_prices.items():
@@ -173,18 +166,21 @@ class TestDynamicRiskManagementIntegration:
             # Create market data for each price point
             for i, price in enumerate(prices):
                 timestamp = datetime.now() - timedelta(hours=100 - i)  # Time series
-                market_data.append(MarketData(
-                    symbol=symbol,
-                    price=Decimal(str(price)),
-                    volume=Decimal("1000"),
-                    timestamp=timestamp
-                ))
+                market_data.append(
+                    MarketData(
+                        symbol=symbol,
+                        price=Decimal(str(price)),
+                        volume=Decimal("1000"),
+                        timestamp=timestamp,
+                    )
+                )
 
         return market_data
 
     @pytest.mark.asyncio
     async def test_integration_regime_detection_and_adaptive_sizing(
-            self, adaptive_risk_manager, sample_signal, high_volatility_market_data):
+        self, adaptive_risk_manager, sample_signal, high_volatility_market_data
+    ):
         """Test integration between regime detection and adaptive position sizing."""
         # Detect regime from market data
         regime = await adaptive_risk_manager.regime_detector.detect_comprehensive_regime(
@@ -210,7 +206,8 @@ class TestDynamicRiskManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_integration_regime_detection_and_adaptive_stop_loss(
-            self, adaptive_risk_manager, sample_signal, high_volatility_market_data):
+        self, adaptive_risk_manager, sample_signal, high_volatility_market_data
+    ):
         """Test integration between regime detection and adaptive stop loss."""
         # Detect regime from market data
         regime = await adaptive_risk_manager.regime_detector.detect_comprehensive_regime(
@@ -224,13 +221,13 @@ class TestDynamicRiskManagementIntegration:
         )
 
         # Should be wider due to high volatility
-        base_stop_loss = entry_price * \
-            (1 - Decimal("0.02"))  # Base 2% stop loss
+        base_stop_loss = entry_price * (1 - Decimal("0.02"))  # Base 2% stop loss
         assert stop_loss < base_stop_loss  # Wider stop (lower price for buy)
 
     @pytest.mark.asyncio
     async def test_integration_regime_detection_and_adaptive_take_profit(
-            self, adaptive_risk_manager, sample_signal, high_volatility_market_data):
+        self, adaptive_risk_manager, sample_signal, high_volatility_market_data
+    ):
         """Test integration between regime detection and adaptive take profit."""
         # Detect regime from market data
         regime = await adaptive_risk_manager.regime_detector.detect_comprehensive_regime(
@@ -244,13 +241,13 @@ class TestDynamicRiskManagementIntegration:
         )
 
         # Should be higher due to high volatility
-        base_take_profit = entry_price * \
-            (1 + Decimal("0.04"))  # Base 4% take profit
+        base_take_profit = entry_price * (1 + Decimal("0.04"))  # Base 4% take profit
         assert take_profit > base_take_profit  # Higher target
 
     @pytest.mark.asyncio
     async def test_integration_regime_detection_and_portfolio_limits(
-            self, adaptive_risk_manager, high_volatility_market_data):
+        self, adaptive_risk_manager, high_volatility_market_data
+    ):
         """Test integration between regime detection and adaptive portfolio limits."""
         # Detect regime from market data
         regime = await adaptive_risk_manager.regime_detector.detect_comprehensive_regime(
@@ -259,9 +256,9 @@ class TestDynamicRiskManagementIntegration:
 
         # Calculate adaptive portfolio limits
         base_limits = {
-            'max_positions': 10,
-            'max_portfolio_exposure': 0.95,
-            'max_correlation_exposure': 0.5
+            "max_positions": 10,
+            "max_portfolio_exposure": 0.95,
+            "max_correlation_exposure": 0.5,
         }
 
         adaptive_limits = await adaptive_risk_manager.calculate_adaptive_portfolio_limits(
@@ -270,17 +267,20 @@ class TestDynamicRiskManagementIntegration:
 
         # Should be more restrictive due to high volatility (if detected)
         if regime in [MarketRegime.HIGH_VOLATILITY, MarketRegime.CRISIS]:
-            assert adaptive_limits['max_positions'] < base_limits['max_positions']
-            assert adaptive_limits['max_portfolio_exposure'] < base_limits['max_portfolio_exposure']
+            assert adaptive_limits["max_positions"] < base_limits["max_positions"]
+            assert adaptive_limits["max_portfolio_exposure"] < base_limits["max_portfolio_exposure"]
         else:
             # If regime detection doesn't work as expected, just verify the
             # limits are valid
-            assert adaptive_limits['max_positions'] <= base_limits['max_positions']
-            assert adaptive_limits['max_portfolio_exposure'] <= base_limits['max_portfolio_exposure']
+            assert adaptive_limits["max_positions"] <= base_limits["max_positions"]
+            assert (
+                adaptive_limits["max_portfolio_exposure"] <= base_limits["max_portfolio_exposure"]
+            )
 
     @pytest.mark.asyncio
     async def test_integration_low_volatility_scenario(
-            self, adaptive_risk_manager, sample_signal, low_volatility_market_data):
+        self, adaptive_risk_manager, sample_signal, low_volatility_market_data
+    ):
         """Test integration for low volatility scenario."""
         # Detect regime from market data
         regime = await adaptive_risk_manager.regime_detector.detect_comprehensive_regime(
@@ -288,9 +288,7 @@ class TestDynamicRiskManagementIntegration:
         )
 
         # Should detect low volatility regime
-        assert regime in [
-            MarketRegime.LOW_VOLATILITY,
-            MarketRegime.MEDIUM_VOLATILITY]
+        assert regime in [MarketRegime.LOW_VOLATILITY, MarketRegime.MEDIUM_VOLATILITY]
 
         # Calculate adaptive position size
         portfolio_value = Decimal("10000")
@@ -309,14 +307,14 @@ class TestDynamicRiskManagementIntegration:
         )
 
         # Should be tighter due to low volatility
-        base_stop_loss = entry_price * \
-            (1 - Decimal("0.02"))  # Base 2% stop loss
+        base_stop_loss = entry_price * (1 - Decimal("0.02"))  # Base 2% stop loss
         # Tighter stop (higher price for buy)
         assert stop_loss > base_stop_loss
 
     @pytest.mark.asyncio
     async def test_integration_regime_change_detection(
-            self, adaptive_risk_manager, sample_market_data):
+        self, adaptive_risk_manager, sample_market_data
+    ):
         """Test integration of regime change detection."""
         # Initial regime
         initial_regime = adaptive_risk_manager.regime_detector.get_current_regime()
@@ -338,10 +336,8 @@ class TestDynamicRiskManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_integration_stress_testing_with_regime_detection(
-            self,
-            adaptive_risk_manager,
-            sample_portfolio_positions,
-            high_volatility_market_data):
+        self, adaptive_risk_manager, sample_portfolio_positions, high_volatility_market_data
+    ):
         """Test integration of stress testing with regime detection."""
         # Detect regime from market data
         regime = await adaptive_risk_manager.regime_detector.detect_comprehensive_regime(
@@ -350,46 +346,45 @@ class TestDynamicRiskManagementIntegration:
 
         # Run stress test
         stress_results = await adaptive_risk_manager.run_stress_test(
-            sample_portfolio_positions, 'market_crash'
+            sample_portfolio_positions, "market_crash"
         )
 
         # Verify stress test results
-        assert stress_results['scenario'] == 'market_crash'
-        assert stress_results['initial_value'] > 0
-        assert stress_results['stressed_value'] < stress_results['initial_value']
-        assert stress_results['value_change'] < 0
-        assert stress_results['max_drawdown'] < 0
+        assert stress_results["scenario"] == "market_crash"
+        assert stress_results["initial_value"] > 0
+        assert stress_results["stressed_value"] < stress_results["initial_value"]
+        assert stress_results["value_change"] < 0
+        assert stress_results["max_drawdown"] < 0
 
         # Check that regime detection is still working
         current_regime = adaptive_risk_manager.regime_detector.get_current_regime()
         assert current_regime == regime  # Should not change due to stress test
 
     @pytest.mark.asyncio
-    async def test_integration_adaptive_parameters_consistency(
-            self, adaptive_risk_manager):
+    async def test_integration_adaptive_parameters_consistency(self, adaptive_risk_manager):
         """Test consistency of adaptive parameters across different regimes."""
         regimes = [
             MarketRegime.LOW_VOLATILITY,
             MarketRegime.MEDIUM_VOLATILITY,
             MarketRegime.HIGH_VOLATILITY,
-            MarketRegime.CRISIS
+            MarketRegime.CRISIS,
         ]
 
         for regime in regimes:
             params = adaptive_risk_manager.get_adaptive_parameters(regime)
 
             # Check that all required parameters are present
-            assert 'position_size_multiplier' in params
-            assert 'stop_loss_multiplier' in params
-            assert 'take_profit_multiplier' in params
-            assert 'max_positions_multiplier' in params
-            assert 'regime' in params
+            assert "position_size_multiplier" in params
+            assert "stop_loss_multiplier" in params
+            assert "take_profit_multiplier" in params
+            assert "max_positions_multiplier" in params
+            assert "regime" in params
 
             # Check that multipliers are reasonable
-            assert 0 < params['position_size_multiplier'] <= 2
-            assert 0 < params['stop_loss_multiplier'] <= 2
-            assert 0 < params['take_profit_multiplier'] <= 2
-            assert 0 < params['max_positions_multiplier'] <= 2
+            assert 0 < params["position_size_multiplier"] <= 2
+            assert 0 < params["stop_loss_multiplier"] <= 2
+            assert 0 < params["take_profit_multiplier"] <= 2
+            assert 0 < params["max_positions_multiplier"] <= 2
 
     @pytest.mark.asyncio
     async def test_integration_error_handling(self, adaptive_risk_manager):
@@ -405,7 +400,7 @@ class TestDynamicRiskManagementIntegration:
             timestamp=datetime.now(),
             symbol="",  # Invalid symbol
             strategy_name="test_strategy",
-            metadata={}
+            metadata={},
         )
 
         with pytest.raises(RiskManagementError):
@@ -414,8 +409,7 @@ class TestDynamicRiskManagementIntegration:
             )
 
     @pytest.mark.asyncio
-    async def test_integration_performance_monitoring(
-            self, adaptive_risk_manager, sample_signal):
+    async def test_integration_performance_monitoring(self, adaptive_risk_manager, sample_signal):
         """Test performance monitoring integration."""
         # Test that performance decorators are working
         portfolio_value = Decimal("10000")
@@ -453,7 +447,7 @@ class TestDynamicRiskManagementIntegration:
             timestamp=datetime.now(),
             symbol="BTCUSDT",
             strategy_name="test_strategy",
-            metadata={}
+            metadata={},
         )
 
         position_size = await adaptive_manager.calculate_adaptive_position_size(
@@ -468,23 +462,26 @@ class TestDynamicRiskManagementIntegration:
         # Get initial statistics
         initial_stats = adaptive_risk_manager.regime_detector.get_regime_statistics()
 
-        assert initial_stats['total_changes'] == 0
-        assert initial_stats['current_regime'] == MarketRegime.MEDIUM_VOLATILITY.value
+        assert initial_stats["total_changes"] == 0
+        assert initial_stats["current_regime"] == MarketRegime.MEDIUM_VOLATILITY.value
 
         # Simulate regime change
-        await adaptive_risk_manager.regime_detector._check_regime_change(MarketRegime.HIGH_VOLATILITY)
+        await adaptive_risk_manager.regime_detector._check_regime_change(
+            MarketRegime.HIGH_VOLATILITY
+        )
 
         # Get updated statistics
         updated_stats = adaptive_risk_manager.regime_detector.get_regime_statistics()
 
-        assert updated_stats['total_changes'] == 1
-        assert updated_stats['current_regime'] == MarketRegime.HIGH_VOLATILITY.value
-        assert updated_stats['regime_duration_hours'] > 0
-        assert updated_stats['last_change'] is not None
+        assert updated_stats["total_changes"] == 1
+        assert updated_stats["current_regime"] == MarketRegime.HIGH_VOLATILITY.value
+        assert updated_stats["regime_duration_hours"] > 0
+        assert updated_stats["last_change"] is not None
 
     @pytest.mark.asyncio
     async def test_integration_stress_test_scenarios(
-            self, adaptive_risk_manager, sample_portfolio_positions):
+        self, adaptive_risk_manager, sample_portfolio_positions
+    ):
         """Test integration of all stress test scenarios."""
         scenarios = adaptive_risk_manager.get_stress_test_scenarios()
 
@@ -493,19 +490,18 @@ class TestDynamicRiskManagementIntegration:
                 sample_portfolio_positions, scenario
             )
 
-            assert results['scenario'] == scenario
-            assert results['initial_value'] > 0
-            assert results['stressed_value'] < results['initial_value']
-            assert results['value_change'] < 0
-            assert results['max_drawdown'] < 0
-            assert results['positions_affected'] == 2
+            assert results["scenario"] == scenario
+            assert results["initial_value"] > 0
+            assert results["stressed_value"] < results["initial_value"]
+            assert results["value_change"] < 0
+            assert results["max_drawdown"] < 0
+            assert results["positions_affected"] == 2
 
     @pytest.mark.asyncio
-    async def test_integration_regime_detector_update(
-            self, adaptive_risk_manager):
+    async def test_integration_regime_detector_update(self, adaptive_risk_manager):
         """Test updating regime detector reference."""
         # Create new regime detector
-        new_detector = MarketRegimeDetector({'volatility_window': 30})
+        new_detector = MarketRegimeDetector({"volatility_window": 30})
 
         # Update the reference
         adaptive_risk_manager.update_regime_detector(new_detector)
@@ -521,7 +517,7 @@ class TestDynamicRiskManagementIntegration:
             timestamp=datetime.now(),
             symbol="BTCUSDT",
             strategy_name="test_strategy",
-            metadata={}
+            metadata={},
         )
 
         position_size = await adaptive_risk_manager.calculate_adaptive_position_size(

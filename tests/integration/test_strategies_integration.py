@@ -4,27 +4,32 @@ Integration tests for strategy framework.
 Tests the integration between strategy components and other system parts.
 """
 
-from src.strategies.static.breakout import BreakoutStrategy
-from src.strategies.static.trend_following import TrendFollowingStrategy
-from src.strategies.static.mean_reversion import MeanReversionStrategy
-import pytest
-import asyncio
-import numpy as np
-from decimal import Decimal
 from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock, patch
+from decimal import Decimal
+from unittest.mock import AsyncMock, Mock
 
-# Import from P-001
-from src.core.types import (
-    Signal, MarketData, Position, StrategyConfig,
-    StrategyStatus, StrategyType, SignalDirection, OrderSide
-)
+import numpy as np
+import pytest
+
 from src.core.config import Config
 from src.core.exceptions import ConfigurationError
 
+# Import from P-001
+from src.core.types import (
+    MarketData,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyStatus,
+)
+
 # Import from P-011
-from src.strategies import StrategyFactory, StrategyConfigurationManager
+from src.strategies import StrategyConfigurationManager, StrategyFactory
 from src.strategies.base import BaseStrategy
+from src.strategies.static.breakout import BreakoutStrategy
+from src.strategies.static.mean_reversion import MeanReversionStrategy
+from src.strategies.static.trend_following import TrendFollowingStrategy
 
 
 class MockStrategy(BaseStrategy):
@@ -42,7 +47,7 @@ class MockStrategy(BaseStrategy):
             timestamp=datetime.now(timezone.utc),
             symbol=data.symbol,
             strategy_name=self.name,
-            metadata={"test": True}
+            metadata={"test": True},
         )
 
         return [signal]
@@ -89,12 +94,14 @@ class TestStrategyFrameworkIntegration:
     def mock_exchange(self):
         """Create mock exchange."""
         exchange = Mock()
-        exchange.get_market_data = AsyncMock(return_value=MarketData(
-            symbol="BTCUSDT",
-            price=Decimal("50000"),
-            volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
-        ))
+        exchange.get_market_data = AsyncMock(
+            return_value=MarketData(
+                symbol="BTCUSDT",
+                price=Decimal("50000"),
+                volume=Decimal("100"),
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
         return exchange
 
     @pytest.fixture
@@ -109,15 +116,13 @@ class TestStrategyFrameworkIntegration:
             ask=Decimal("50001"),
             open_price=Decimal("49900"),
             high_price=Decimal("50100"),
-            low_price=Decimal("49800")
+            low_price=Decimal("49800"),
         )
 
-    def test_strategy_factory_with_config_manager(
-            self, strategy_factory, config_manager):
+    def test_strategy_factory_with_config_manager(self, strategy_factory, config_manager):
         """Test integration between factory and config manager."""
         # Register strategy class
-        strategy_factory._register_strategy_class(
-            "mock_strategy", MockStrategy)
+        strategy_factory._register_strategy_class("mock_strategy", MockStrategy)
 
         # Create config using config manager
         config_data = {
@@ -131,26 +136,25 @@ class TestStrategyFrameworkIntegration:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {"test_param": "test_value"}
+            "parameters": {"test_param": "test_value"},
         }
 
         # Validate config
         assert config_manager.validate_config(config_data)
 
         # Create strategy using factory
-        strategy = strategy_factory.create_strategy(
-            "mock_strategy", config_data)
+        strategy = strategy_factory.create_strategy("mock_strategy", config_data)
 
         assert isinstance(strategy, MockStrategy)
         assert strategy.config.name == "test_strategy"
 
     @pytest.mark.asyncio
     async def test_strategy_with_risk_manager_integration(
-            self, strategy_factory, mock_risk_manager):
+        self, strategy_factory, mock_risk_manager
+    ):
         """Test strategy integration with risk manager."""
         # Register strategy class
-        strategy_factory._register_strategy_class(
-            "mock_strategy", MockStrategy)
+        strategy_factory._register_strategy_class("mock_strategy", MockStrategy)
 
         # Set risk manager
         strategy_factory.set_risk_manager(mock_risk_manager)
@@ -167,11 +171,10 @@ class TestStrategyFrameworkIntegration:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {}
+            "parameters": {},
         }
 
-        strategy = strategy_factory.create_strategy(
-            "mock_strategy", config_data)
+        strategy = strategy_factory.create_strategy("mock_strategy", config_data)
 
         # Test pre-trade validation with risk manager
         signal = Signal(
@@ -180,7 +183,7 @@ class TestStrategyFrameworkIntegration:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={}
+            metadata={},
         )
 
         result = await strategy.pre_trade_validation(signal)
@@ -188,12 +191,10 @@ class TestStrategyFrameworkIntegration:
         mock_risk_manager.validate_signal.assert_called_once_with(signal)
 
     @pytest.mark.asyncio
-    async def test_strategy_with_exchange_integration(
-            self, strategy_factory, mock_exchange):
+    async def test_strategy_with_exchange_integration(self, strategy_factory, mock_exchange):
         """Test strategy integration with exchange."""
         # Register strategy class
-        strategy_factory._register_strategy_class(
-            "mock_strategy", MockStrategy)
+        strategy_factory._register_strategy_class("mock_strategy", MockStrategy)
 
         # Set exchange
         strategy_factory.set_exchange(mock_exchange)
@@ -210,11 +211,10 @@ class TestStrategyFrameworkIntegration:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {}
+            "parameters": {},
         }
 
-        strategy = strategy_factory.create_strategy(
-            "mock_strategy", config_data)
+        strategy = strategy_factory.create_strategy("mock_strategy", config_data)
 
         # Test signal generation with exchange data
         market_data = await mock_exchange.get_market_data("BTCUSDT")
@@ -228,8 +228,7 @@ class TestStrategyFrameworkIntegration:
     async def test_strategy_lifecycle_integration(self, strategy_factory):
         """Test complete strategy lifecycle."""
         # Register strategy class
-        strategy_factory._register_strategy_class(
-            "mock_strategy", MockStrategy)
+        strategy_factory._register_strategy_class("mock_strategy", MockStrategy)
 
         # Create strategy
         config_data = {
@@ -243,11 +242,10 @@ class TestStrategyFrameworkIntegration:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {}
+            "parameters": {},
         }
 
-        strategy = strategy_factory.create_strategy(
-            "mock_strategy", config_data)
+        strategy = strategy_factory.create_strategy("mock_strategy", config_data)
 
         # Test lifecycle
         assert strategy.status == StrategyStatus.STOPPED
@@ -272,8 +270,7 @@ class TestStrategyFrameworkIntegration:
     async def test_multiple_strategies_integration(self, strategy_factory):
         """Test multiple strategies working together."""
         # Register strategy class
-        strategy_factory._register_strategy_class(
-            "mock_strategy", MockStrategy)
+        strategy_factory._register_strategy_class("mock_strategy", MockStrategy)
 
         # Create multiple strategies
         configs = [
@@ -288,7 +285,7 @@ class TestStrategyFrameworkIntegration:
                 "position_size_pct": 0.02,
                 "stop_loss_pct": 0.02,
                 "take_profit_pct": 0.04,
-                "parameters": {}
+                "parameters": {},
             },
             {
                 "name": "strategy_2",
@@ -301,15 +298,14 @@ class TestStrategyFrameworkIntegration:
                 "position_size_pct": 0.03,
                 "stop_loss_pct": 0.03,
                 "take_profit_pct": 0.06,
-                "parameters": {}
-            }
+                "parameters": {},
+            },
         ]
 
         strategies = []
         for i, config in enumerate(configs):
             strategy_name = f"mock_strategy_{i}"
-            strategy_factory._register_strategy_class(
-                strategy_name, MockStrategy)
+            strategy_factory._register_strategy_class(strategy_name, MockStrategy)
             strategy = strategy_factory.create_strategy(strategy_name, config)
             strategies.append(strategy)
 
@@ -342,7 +338,7 @@ class TestStrategyFrameworkIntegration:
             strategy_type="static",  # Use string instead of enum
             symbols=["BTCUSDT", "ETHUSDT"],
             min_confidence=0.8,
-            max_positions=10
+            max_positions=10,
         )
 
         assert new_config.name == "mean_reversion"
@@ -352,9 +348,7 @@ class TestStrategyFrameworkIntegration:
         assert new_config.max_positions == 10
 
         # Test updating config parameter
-        success = config_manager.update_config_parameter(
-            "mean_reversion", "min_confidence", 0.9
-        )
+        success = config_manager.update_config_parameter("mean_reversion", "min_confidence", 0.9)
         assert success is True
 
         # Reload config to verify update
@@ -362,12 +356,10 @@ class TestStrategyFrameworkIntegration:
         assert updated_config.min_confidence == 0.9
 
     @pytest.mark.asyncio
-    async def test_strategy_performance_tracking(
-            self, strategy_factory, mock_market_data):
+    async def test_strategy_performance_tracking(self, strategy_factory, mock_market_data):
         """Test strategy performance tracking integration."""
         # Register strategy class
-        strategy_factory._register_strategy_class(
-            "mock_strategy", MockStrategy)
+        strategy_factory._register_strategy_class("mock_strategy", MockStrategy)
 
         # Create strategy
         config_data = {
@@ -381,11 +373,10 @@ class TestStrategyFrameworkIntegration:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {}
+            "parameters": {},
         }
 
-        strategy = strategy_factory.create_strategy(
-            "mock_strategy", config_data)
+        strategy = strategy_factory.create_strategy("mock_strategy", config_data)
 
         # Generate signals and simulate trades
         signals = await strategy.generate_signals(mock_market_data)
@@ -407,14 +398,13 @@ class TestStrategyFrameworkIntegration:
     @pytest.mark.asyncio
     async def test_strategy_error_handling_integration(self, strategy_factory):
         """Test strategy error handling integration."""
+
         # Create strategy that raises errors
         class ErrorStrategy(MockStrategy):
-            async def _generate_signals_impl(
-                    self, data: MarketData) -> list[Signal]:
+            async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
                 raise Exception("Signal generation error")
 
-        strategy_factory._register_strategy_class(
-            "error_strategy", ErrorStrategy)
+        strategy_factory._register_strategy_class("error_strategy", ErrorStrategy)
 
         config_data = {
             "name": "error_strategy",
@@ -427,19 +417,20 @@ class TestStrategyFrameworkIntegration:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {}
+            "parameters": {},
         }
 
-        strategy = strategy_factory.create_strategy(
-            "error_strategy", config_data)
+        strategy = strategy_factory.create_strategy("error_strategy", config_data)
 
         # Test graceful error handling
-        signals = await strategy.generate_signals(MarketData(
-            symbol="BTCUSDT",
-            price=Decimal("50000"),
-            volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
-        ))
+        signals = await strategy.generate_signals(
+            MarketData(
+                symbol="BTCUSDT",
+                price=Decimal("50000"),
+                volume=Decimal("100"),
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
 
         # Should return empty list on error (graceful degradation)
         assert signals == []
@@ -458,7 +449,7 @@ class TestStrategyFrameworkIntegration:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {}
+            "parameters": {},
         }
 
         assert config_manager.validate_config(valid_config)
@@ -468,7 +459,7 @@ class TestStrategyFrameworkIntegration:
             "name": "invalid_strategy",
             "strategy_type": "invalid_type",
             "symbols": [],
-            "timeframe": "invalid_timeframe"
+            "timeframe": "invalid_timeframe",
         }
 
         assert not config_manager.validate_config(invalid_config)
@@ -477,7 +468,7 @@ class TestStrategyFrameworkIntegration:
         """Test loading config file with unsupported format."""
         # Create a config file with unsupported format
         config_file = config_manager.config_dir / "test.txt"
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             f.write("invalid format")
 
         try:
@@ -497,8 +488,7 @@ class TestStrategyFrameworkIntegration:
     async def test_strategy_hot_swap_integration(self, strategy_factory):
         """Test strategy hot swap integration."""
         # Register strategy class
-        strategy_factory._register_strategy_class(
-            "mock_strategy", MockStrategy)
+        strategy_factory._register_strategy_class("mock_strategy", MockStrategy)
 
         # Create strategy
         config_data = {
@@ -512,11 +502,10 @@ class TestStrategyFrameworkIntegration:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {}
+            "parameters": {},
         }
 
-        strategy = strategy_factory.create_strategy(
-            "mock_strategy", config_data)
+        strategy = strategy_factory.create_strategy("mock_strategy", config_data)
 
         # Start strategy
         await strategy.start()
@@ -545,12 +534,14 @@ class TestStaticStrategiesIntegration:
     def strategy_factory(self):
         """Create strategy factory for static strategies."""
         from src.strategies.factory import StrategyFactory
+
         return StrategyFactory()
 
     @pytest.fixture
     def config_manager(self):
         """Create config manager for static strategies."""
         from src.core.config import Config
+
         config = Config()
         return config
 
@@ -575,8 +566,8 @@ class TestStaticStrategiesIntegration:
                 "volume_filter": True,
                 "min_volume_ratio": 1.5,
                 "atr_period": 14,
-                "atr_multiplier": 2.0
-            }
+                "atr_multiplier": 2.0,
+            },
         }
 
     @pytest.fixture
@@ -605,8 +596,8 @@ class TestStaticStrategiesIntegration:
                 "max_pyramiding_level": 3,
                 "trailing_stop_enabled": True,
                 "trailing_stop_pct": 0.01,
-                "max_holding_time": 24
-            }
+                "max_holding_time": 24,
+            },
         }
 
     @pytest.fixture
@@ -632,8 +623,8 @@ class TestStaticStrategiesIntegration:
                 "false_breakout_threshold": 0.02,
                 "atr_period": 14,
                 "atr_multiplier": 2.0,
-                "target_multiplier": 3.0
-            }
+                "target_multiplier": 3.0,
+            },
         }
 
     @pytest.fixture
@@ -641,15 +632,13 @@ class TestStaticStrategiesIntegration:
         """Create mock risk manager for static strategies."""
         risk_manager = Mock()
         risk_manager.validate_signal = AsyncMock(return_value=True)
-        risk_manager.calculate_position_size = Mock(
-            return_value=Decimal("0.01"))
+        risk_manager.calculate_position_size = Mock(return_value=Decimal("0.01"))
         return risk_manager
 
     @pytest.fixture
     def historical_price_data(self):
         """Create historical price data for testing."""
-        import numpy as np
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
 
         # Generate realistic price data
         base_price = 50000
@@ -676,15 +665,12 @@ class TestStaticStrategiesIntegration:
             prices.append(Decimal(str(max(price, 1000))))
             volumes.append(Decimal(str(max(np.random.normal(1000, 200), 100))))
 
-        return {
-            "timestamps": timestamps,
-            "prices": prices,
-            "volumes": volumes
-        }
+        return {"timestamps": timestamps, "prices": prices, "volumes": volumes}
 
     @pytest.mark.asyncio
     async def test_mean_reversion_strategy_integration(
-            self, mean_reversion_config, mock_risk_manager):
+        self, mean_reversion_config, mock_risk_manager
+    ):
         """Test mean reversion strategy integration with risk management."""
         # Create strategy
         strategy = MeanReversionStrategy(mean_reversion_config)
@@ -696,7 +682,7 @@ class TestStaticStrategiesIntegration:
             price=Decimal("48000"),  # Below average price
             volume=Decimal("2500"),
             # Higher volume to pass filter (1.67x average)
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Add historical data to trigger mean reversion signal
@@ -705,7 +691,7 @@ class TestStaticStrategiesIntegration:
                 symbol="BTCUSDT",
                 price=Decimal("50000"),
                 volume=Decimal("1500"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             strategy._update_price_history(historical_data)
 
@@ -730,7 +716,7 @@ class TestStaticStrategiesIntegration:
             symbol="BTCUSDT",
             price=Decimal("50100"),  # Close to mean (50000)
             volume=Decimal("1500"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         position = Position(
@@ -740,7 +726,7 @@ class TestStaticStrategiesIntegration:
             entry_price=Decimal("48000"),
             current_price=Decimal("50100"),
             unrealized_pnl=Decimal("0.04"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         should_exit = strategy.should_exit(position, exit_market_data)
@@ -749,7 +735,8 @@ class TestStaticStrategiesIntegration:
 
     @pytest.mark.asyncio
     async def test_trend_following_strategy_integration(
-            self, trend_following_config, mock_risk_manager):
+        self, trend_following_config, mock_risk_manager
+    ):
         """Test trend following strategy integration with risk management."""
         # Create strategy
         strategy = TrendFollowingStrategy(trend_following_config)
@@ -761,7 +748,7 @@ class TestStaticStrategiesIntegration:
             price=Decimal("50900"),  # Continue moderate uptrend
             volume=Decimal("3000"),
             # Higher volume to pass filter (1.5x average)
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Add historical data to create moderate uptrend with RSI in bullish
@@ -775,7 +762,7 @@ class TestStaticStrategiesIntegration:
                 symbol="BTCUSDT",
                 price=Decimal(str(price)),
                 volume=Decimal("2000"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             strategy._update_price_history(historical_data)
 
@@ -799,7 +786,7 @@ class TestStaticStrategiesIntegration:
             entry_price=Decimal("50000"),
             current_price=Decimal("49000"),  # Below trailing stop
             unrealized_pnl=Decimal("-0.01"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Create market data with price below trailing stop
@@ -807,7 +794,7 @@ class TestStaticStrategiesIntegration:
             symbol="BTCUSDT",
             price=Decimal("49000"),  # Below trailing stop
             volume=Decimal("2000"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         should_exit = strategy.should_exit(position, exit_market_data)
@@ -815,8 +802,7 @@ class TestStaticStrategiesIntegration:
         assert should_exit is True
 
     @pytest.mark.asyncio
-    async def test_breakout_strategy_integration(
-            self, breakout_config, mock_risk_manager):
+    async def test_breakout_strategy_integration(self, breakout_config, mock_risk_manager):
         """Test breakout strategy integration with risk management."""
         # Create strategy
         strategy = BreakoutStrategy(breakout_config)
@@ -828,7 +814,7 @@ class TestStaticStrategiesIntegration:
             price=Decimal("52100"),  # Above resistance + 2% threshold
             volume=Decimal("4000"),
             # Higher volume to pass filter (2.67x average)
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Add historical data to create consolidation and breakout
@@ -845,7 +831,7 @@ class TestStaticStrategiesIntegration:
 
             # Create realistic high/low prices for ATR calculation
             high_price = price + 200  # High is 200 above close
-            low_price = price - 200   # Low is 200 below close
+            low_price = price - 200  # Low is 200 below close
 
             historical_data = MarketData(
                 symbol="BTCUSDT",
@@ -853,7 +839,7 @@ class TestStaticStrategiesIntegration:
                 high_price=Decimal(str(max(high_price, 1000))),
                 low_price=Decimal(str(max(low_price, 1000))),
                 volume=Decimal("1500"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             strategy._update_price_history(historical_data)
 
@@ -889,7 +875,7 @@ class TestStaticStrategiesIntegration:
             entry_price=Decimal("52000"),
             current_price=Decimal("50000"),  # Well below ATR stop loss (50700)
             unrealized_pnl=Decimal("-0.01"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         should_exit = strategy.should_exit(position, market_data)
@@ -897,14 +883,11 @@ class TestStaticStrategiesIntegration:
         assert should_exit is True
 
     @pytest.mark.asyncio
-    async def test_static_strategies_with_factory_integration(
-            self, strategy_factory):
+    async def test_static_strategies_with_factory_integration(self, strategy_factory):
         """Test static strategies integration with strategy factory."""
         # Register static strategies
-        strategy_factory._register_strategy_class(
-            "mean_reversion", MeanReversionStrategy)
-        strategy_factory._register_strategy_class(
-            "trend_following", TrendFollowingStrategy)
+        strategy_factory._register_strategy_class("mean_reversion", MeanReversionStrategy)
+        strategy_factory._register_strategy_class("trend_following", TrendFollowingStrategy)
         strategy_factory._register_strategy_class("breakout", BreakoutStrategy)
 
         # Test mean reversion strategy creation
@@ -917,15 +900,10 @@ class TestStaticStrategiesIntegration:
             "min_confidence": 0.6,
             "max_positions": 5,
             "position_size_pct": 0.02,
-            "parameters": {
-                "lookback_period": 20,
-                "entry_threshold": 2.0,
-                "exit_threshold": 0.5
-            }
+            "parameters": {"lookback_period": 20, "entry_threshold": 2.0, "exit_threshold": 0.5},
         }
 
-        strategy = strategy_factory.create_strategy(
-            "mean_reversion", mean_reversion_config)
+        strategy = strategy_factory.create_strategy("mean_reversion", mean_reversion_config)
         assert isinstance(strategy, MeanReversionStrategy)
         assert strategy.name == "mean_reversion_test"
 
@@ -939,15 +917,10 @@ class TestStaticStrategiesIntegration:
             "min_confidence": 0.6,
             "max_positions": 5,
             "position_size_pct": 0.02,
-            "parameters": {
-                "fast_ma_period": 10,
-                "slow_ma_period": 20,
-                "rsi_period": 14
-            }
+            "parameters": {"fast_ma_period": 10, "slow_ma_period": 20, "rsi_period": 14},
         }
 
-        strategy = strategy_factory.create_strategy(
-            "trend_following", trend_following_config)
+        strategy = strategy_factory.create_strategy("trend_following", trend_following_config)
         assert isinstance(strategy, TrendFollowingStrategy)
         assert strategy.name == "trend_following_test"
 
@@ -964,21 +937,21 @@ class TestStaticStrategiesIntegration:
             "parameters": {
                 "lookback_period": 20,
                 "consolidation_period": 5,
-                "volume_confirmation": True
-            }
+                "volume_confirmation": True,
+            },
         }
 
-        strategy = strategy_factory.create_strategy(
-            "breakout", breakout_config)
+        strategy = strategy_factory.create_strategy("breakout", breakout_config)
         assert isinstance(strategy, BreakoutStrategy)
         assert strategy.name == "breakout_test"
 
     @pytest.mark.asyncio
     async def test_static_strategies_with_risk_management_integration(
-            self, mean_reversion_config, trend_following_config, breakout_config):
+        self, mean_reversion_config, trend_following_config, breakout_config
+    ):
         """Test static strategies integration with risk management system."""
-        from src.risk_management.risk_manager import RiskManager
         from src.core.config import Config
+        from src.risk_management.risk_manager import RiskManager
 
         # Create proper config object for risk manager
         config = Config()
@@ -1004,7 +977,7 @@ class TestStaticStrategiesIntegration:
             symbol="BTCUSDT",
             price=Decimal("48000"),
             volume=Decimal("2000"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Add historical data
@@ -1013,7 +986,7 @@ class TestStaticStrategiesIntegration:
                 symbol="BTCUSDT",
                 price=Decimal("50000"),
                 volume=Decimal("1500"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             strategy._update_price_history(historical_data)
 
@@ -1031,13 +1004,11 @@ class TestStaticStrategiesIntegration:
             assert position_size <= Decimal("0.1")
 
     @pytest.mark.asyncio
-    async def test_static_strategies_error_handling_integration(
-            self, mean_reversion_config):
+    async def test_static_strategies_error_handling_integration(self, mean_reversion_config):
         """Test static strategies error handling integration."""
         # Create strategy with invalid configuration
         invalid_config = mean_reversion_config.copy()
-        invalid_config["parameters"]["lookback_period"] = - \
-            1  # Invalid parameter
+        invalid_config["parameters"]["lookback_period"] = -1  # Invalid parameter
 
         strategy = MeanReversionStrategy(invalid_config)
 
@@ -1046,7 +1017,7 @@ class TestStaticStrategiesIntegration:
             symbol="BTCUSDT",
             price=Decimal("50000"),
             volume=Decimal("1000"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         signals = await strategy.generate_signals(market_data)
@@ -1056,7 +1027,8 @@ class TestStaticStrategiesIntegration:
 
     @pytest.mark.asyncio
     async def test_static_strategies_performance_integration(
-            self, mean_reversion_config, historical_price_data):
+        self, mean_reversion_config, historical_price_data
+    ):
         """Test static strategies performance tracking integration."""
         strategy = MeanReversionStrategy(mean_reversion_config)
 
@@ -1070,7 +1042,7 @@ class TestStaticStrategiesIntegration:
                 symbol="BTCUSDT",
                 price=Decimal("50000"),  # Stable baseline
                 volume=Decimal("1500"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             strategy._update_price_history(historical_data)
 
@@ -1079,7 +1051,7 @@ class TestStaticStrategiesIntegration:
                 symbol="BTCUSDT",
                 price=historical_price_data["prices"][i],
                 volume=historical_price_data["volumes"][i],
-                timestamp=historical_price_data["timestamps"][i]
+                timestamp=historical_price_data["timestamps"][i],
             )
 
             signals = await strategy.generate_signals(market_data)
@@ -1100,8 +1072,7 @@ class TestStaticStrategiesIntegration:
         assert "strategy_type" in strategy_info
 
     @pytest.mark.asyncio
-    async def test_static_strategies_multi_symbol_integration(
-            self, mean_reversion_config):
+    async def test_static_strategies_multi_symbol_integration(self, mean_reversion_config):
         """Test static strategies with multiple symbols integration."""
         # Configure strategy for multiple symbols
         multi_symbol_config = mean_reversion_config.copy()
@@ -1115,7 +1086,7 @@ class TestStaticStrategiesIntegration:
                 symbol=symbol,
                 price=Decimal("50000"),
                 volume=Decimal("1000"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
 
             # Add historical data
@@ -1124,7 +1095,7 @@ class TestStaticStrategiesIntegration:
                     symbol=symbol,
                     price=Decimal("50000"),
                     volume=Decimal("1500"),
-                    timestamp=datetime.now(timezone.utc)
+                    timestamp=datetime.now(timezone.utc),
                 )
                 strategy._update_price_history(historical_data)
 
@@ -1137,8 +1108,7 @@ class TestStaticStrategiesIntegration:
                 assert signals[0].symbol == symbol
 
     @pytest.mark.asyncio
-    async def test_static_strategies_configuration_integration(
-            self, config_manager):
+    async def test_static_strategies_configuration_integration(self, config_manager):
         """Test static strategies configuration integration."""
         # Test that config manager has required risk management settings
         assert config_manager.risk is not None

@@ -8,32 +8,31 @@ signals when prices deviate significantly from their moving average.
 CRITICAL: This strategy MUST inherit from BaseStrategy and follow the exact interface.
 """
 
-import numpy as np
-from typing import List, Optional, Dict, Any
-from decimal import Decimal
 from datetime import datetime, timedelta
-import asyncio
+from decimal import Decimal
+from typing import Any
 
-# MANDATORY: Import from P-011 - NEVER recreate the base strategy
-from src.strategies.base import BaseStrategy
-
-# From P-001 - Use existing types
-from src.core.types import (
-    Signal, MarketData, Position, SignalDirection,
-    StrategyConfig, StrategyType
-)
-from src.core.exceptions import ValidationError
-
-# From P-007A - Use decorators and validators
-from src.utils.decorators import time_execution, retry
-from src.utils.validators import validate_price, validate_quantity
-from src.utils.helpers import calculate_atr, calculate_zscore
-
-# From P-008+ - Use risk management
-from src.risk_management.base import BaseRiskManager
+import numpy as np
 
 # From P-001 - Use structured logging
 from src.core.logging import get_logger
+
+# From P-001 - Use existing types
+from src.core.types import (
+    MarketData,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyType,
+)
+
+# From P-008+ - Use risk management
+# MANDATORY: Import from P-011 - NEVER recreate the base strategy
+from src.strategies.base import BaseStrategy
+
+# From P-007A - Use decorators and validators
+from src.utils.decorators import time_execution
+from src.utils.helpers import calculate_atr, calculate_zscore
 
 logger = get_logger(__name__)
 
@@ -53,7 +52,7 @@ class MeanReversionStrategy(BaseStrategy):
     - Multi-timeframe confirmation
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize Mean Reversion Strategy.
 
         Args:
@@ -64,35 +63,31 @@ class MeanReversionStrategy(BaseStrategy):
         self.strategy_type = StrategyType.STATIC
 
         # Strategy-specific parameters with defaults
-        self.lookback_period = self.config.parameters.get(
-            "lookback_period", 20)
-        self.entry_threshold = self.config.parameters.get(
-            "entry_threshold", 2.0)
+        self.lookback_period = self.config.parameters.get("lookback_period", 20)
+        self.entry_threshold = self.config.parameters.get("entry_threshold", 2.0)
         self.exit_threshold = self.config.parameters.get("exit_threshold", 0.5)
         self.atr_period = self.config.parameters.get("atr_period", 14)
         self.atr_multiplier = self.config.parameters.get("atr_multiplier", 2.0)
         self.volume_filter = self.config.parameters.get("volume_filter", True)
-        self.min_volume_ratio = self.config.parameters.get(
-            "min_volume_ratio", 1.5)
-        self.confirmation_timeframe = self.config.parameters.get(
-            "confirmation_timeframe", "1h")
+        self.min_volume_ratio = self.config.parameters.get("min_volume_ratio", 1.5)
+        self.confirmation_timeframe = self.config.parameters.get("confirmation_timeframe", "1h")
 
         # Price history for calculations
-        self.price_history: List[float] = []
-        self.volume_history: List[float] = []
-        self.high_history: List[float] = []
-        self.low_history: List[float] = []
+        self.price_history: list[float] = []
+        self.volume_history: list[float] = []
+        self.high_history: list[float] = []
+        self.low_history: list[float] = []
 
         logger.info(
             "Mean Reversion Strategy initialized",
             strategy=self.name,
             lookback_period=self.lookback_period,
             entry_threshold=self.entry_threshold,
-            exit_threshold=self.exit_threshold
+            exit_threshold=self.exit_threshold,
         )
 
     @time_execution
-    async def _generate_signals_impl(self, data: MarketData) -> List[Signal]:
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """Generate mean reversion signals from market data.
 
         MANDATORY: Use graceful error handling and input validation.
@@ -106,18 +101,13 @@ class MeanReversionStrategy(BaseStrategy):
         try:
             # MANDATORY: Input validation
             if not data or not data.price:
-                logger.warning(
-                    "Invalid market data received",
-                    strategy=self.name)
+                logger.warning("Invalid market data received", strategy=self.name)
                 return []
 
             # Validate price data
             price = float(data.price)
             if price <= 0:
-                logger.warning(
-                    "Invalid price value",
-                    strategy=self.name,
-                    price=price)
+                logger.warning("Invalid price value", strategy=self.name, price=price)
                 return []
 
             # Update price history
@@ -129,7 +119,7 @@ class MeanReversionStrategy(BaseStrategy):
                     "Insufficient price history for signal generation",
                     strategy=self.name,
                     current_length=len(self.price_history),
-                    required_length=self.lookback_period
+                    required_length=self.lookback_period,
                 )
                 return []
 
@@ -140,11 +130,7 @@ class MeanReversionStrategy(BaseStrategy):
 
             # Check volume filter if enabled
             if self.volume_filter and not self._check_volume_filter(data):
-                logger.debug(
-                    "Volume filter rejected signal",
-                    strategy=self.name,
-                    z_score=z_score
-                )
+                logger.debug("Volume filter rejected signal", strategy=self.name, z_score=z_score)
                 return []
 
             # Generate signals based on Z-score
@@ -165,8 +151,8 @@ class MeanReversionStrategy(BaseStrategy):
                         "z_score": z_score,
                         "entry_threshold": self.entry_threshold,
                         "lookback_period": self.lookback_period,
-                        "signal_type": "entry"
-                    }
+                        "signal_type": "entry",
+                    },
                 )
 
                 if await self.validate_signal(signal):
@@ -177,7 +163,7 @@ class MeanReversionStrategy(BaseStrategy):
                         symbol=data.symbol,
                         direction=direction.value,
                         z_score=z_score,
-                        confidence=confidence
+                        confidence=confidence,
                     )
 
             # Exit signals for existing positions
@@ -186,8 +172,7 @@ class MeanReversionStrategy(BaseStrategy):
                 for direction in [SignalDirection.BUY, SignalDirection.SELL]:
                     # For exit signals, confidence should be high when Z-score is close to zero
                     # Use a different confidence calculation for exit signals
-                    confidence = max(0.8,
-                                     1.0 - (abs(z_score) / self.exit_threshold))
+                    confidence = max(0.8, 1.0 - (abs(z_score) / self.exit_threshold))
 
                     signal = Signal(
                         direction=direction,
@@ -198,8 +183,8 @@ class MeanReversionStrategy(BaseStrategy):
                         metadata={
                             "z_score": z_score,
                             "exit_threshold": self.exit_threshold,
-                            "signal_type": "exit"
-                        }
+                            "signal_type": "exit",
+                        },
                     )
 
                     if await self.validate_signal(signal):
@@ -210,7 +195,7 @@ class MeanReversionStrategy(BaseStrategy):
                             symbol=data.symbol,
                             direction=direction.value,
                             z_score=z_score,
-                            confidence=confidence
+                            confidence=confidence,
                         )
 
             return signals
@@ -220,7 +205,7 @@ class MeanReversionStrategy(BaseStrategy):
                 "Signal generation failed",
                 strategy=self.name,
                 error=str(e),
-                symbol=data.symbol if data else "unknown"
+                symbol=data.symbol if data else "unknown",
             )
             return []  # MANDATORY: Graceful degradation
 
@@ -248,7 +233,7 @@ class MeanReversionStrategy(BaseStrategy):
             self.high_history = self.high_history[-max_length:]
             self.low_history = self.low_history[-max_length:]
 
-    def _calculate_zscore(self) -> Optional[float]:
+    def _calculate_zscore(self) -> float | None:
         """Calculate Z-score for current price relative to moving average.
 
         Returns:
@@ -259,8 +244,7 @@ class MeanReversionStrategy(BaseStrategy):
                 return None
 
             # Use the helper function which handles ta-lib with fallback
-            z_score = calculate_zscore(
-                self.price_history, self.lookback_period)
+            z_score = calculate_zscore(self.price_history, self.lookback_period)
 
             # TODO: Remove in production - Debug logging
             logger.debug(f"Z-score calculation result: {z_score}")
@@ -268,10 +252,7 @@ class MeanReversionStrategy(BaseStrategy):
             return z_score
 
         except Exception as e:
-            logger.error(
-                "Z-score calculation failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Z-score calculation failed", strategy=self.name, error=str(e))
             return None
 
     def _check_volume_filter(self, data: MarketData) -> bool:
@@ -292,7 +273,7 @@ class MeanReversionStrategy(BaseStrategy):
                 return False
 
             # Calculate average volume
-            recent_volumes = self.volume_history[-self.lookback_period:]
+            recent_volumes = self.volume_history[-self.lookback_period :]
             avg_volume = np.mean(recent_volumes)
 
             if avg_volume <= 0:
@@ -303,10 +284,7 @@ class MeanReversionStrategy(BaseStrategy):
             return volume_ratio >= self.min_volume_ratio
 
         except Exception as e:
-            logger.error(
-                "Volume filter check failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Volume filter check failed", strategy=self.name, error=str(e))
             return True  # Pass on error
 
     async def validate_signal(self, signal: Signal) -> bool:
@@ -327,33 +305,26 @@ class MeanReversionStrategy(BaseStrategy):
                     "Signal confidence below threshold",
                     strategy=self.name,
                     confidence=signal.confidence if signal else 0,
-                    min_confidence=self.config.min_confidence
+                    min_confidence=self.config.min_confidence,
                 )
                 return False
 
             # Check if signal is too old (more than 5 minutes)
-            if datetime.now(signal.timestamp.tzinfo) - \
-                    signal.timestamp > timedelta(minutes=5):
-                logger.debug(
-                    "Signal too old",
-                    strategy=self.name,
-                    signal_age_minutes=5)
+            if datetime.now(signal.timestamp.tzinfo) - signal.timestamp > timedelta(minutes=5):
+                logger.debug("Signal too old", strategy=self.name, signal_age_minutes=5)
                 return False
 
             # Validate signal metadata
             metadata = signal.metadata
             if "z_score" not in metadata:
-                logger.warning(
-                    "Missing z_score in signal metadata",
-                    strategy=self.name)
+                logger.warning("Missing z_score in signal metadata", strategy=self.name)
                 return False
 
             z_score = metadata.get("z_score")
             if not isinstance(z_score, (int, float)):
                 logger.warning(
-                    "Invalid z_score type",
-                    strategy=self.name,
-                    z_score_type=type(z_score))
+                    "Invalid z_score type", strategy=self.name, z_score_type=type(z_score)
+                )
                 return False
 
             # Additional validation for entry signals
@@ -363,17 +334,14 @@ class MeanReversionStrategy(BaseStrategy):
                         "Entry signal z_score below threshold",
                         strategy=self.name,
                         z_score=z_score,
-                        threshold=self.entry_threshold
+                        threshold=self.entry_threshold,
                     )
                     return False
 
             return True
 
         except Exception as e:
-            logger.error(
-                "Signal validation failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Signal validation failed", strategy=self.name, error=str(e))
             return False
 
     def get_position_size(self, signal: Signal) -> Decimal:
@@ -396,17 +364,15 @@ class MeanReversionStrategy(BaseStrategy):
             # position)
             metadata = signal.metadata
             z_score = abs(metadata.get("z_score", 0))
-            z_score_factor = min(
-                z_score / self.entry_threshold,
-                2.0)  # Cap at 2x
+            z_score_factor = min(z_score / self.entry_threshold, 2.0)  # Cap at 2x
 
             # Calculate final position size
-            position_size = base_size * \
-                Decimal(str(confidence_factor)) * Decimal(str(z_score_factor))
+            position_size = (
+                base_size * Decimal(str(confidence_factor)) * Decimal(str(z_score_factor))
+            )
 
             # Ensure position size is within limits
-            max_size = Decimal(
-                str(self.config.parameters.get("max_position_size_pct", 0.1)))
+            max_size = Decimal(str(self.config.parameters.get("max_position_size_pct", 0.1)))
             position_size = min(position_size, max_size)
 
             logger.debug(
@@ -415,16 +381,13 @@ class MeanReversionStrategy(BaseStrategy):
                 base_size=float(base_size),
                 confidence_factor=confidence_factor,
                 z_score_factor=z_score_factor,
-                final_size=float(position_size)
+                final_size=float(position_size),
             )
 
             return position_size
 
         except Exception as e:
-            logger.error(
-                "Position size calculation failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Position size calculation failed", strategy=self.name, error=str(e))
             # Return minimum position size on error
             return Decimal(str(self.config.position_size_pct * 0.5))
 
@@ -455,35 +418,34 @@ class MeanReversionStrategy(BaseStrategy):
                     strategy=self.name,
                     symbol=position.symbol,
                     z_score=z_score,
-                    exit_threshold=self.exit_threshold
+                    exit_threshold=self.exit_threshold,
                 )
                 return True
 
             # Calculate ATR-based stop loss
-            if len(
-                    self.high_history) >= self.atr_period and len(
-                    self.low_history) >= self.atr_period and len(
-                    self.price_history) >= self.atr_period:
+            if (
+                len(self.high_history) >= self.atr_period
+                and len(self.low_history) >= self.atr_period
+                and len(self.price_history) >= self.atr_period
+            ):
                 try:
                     # Use the helper function which handles ta-lib with fallback
                     # Use more data points for ATR calculation (need at least
                     # period + 1)
-                    high_data = self.high_history[-(self.atr_period + 1):]
-                    low_data = self.low_history[-(self.atr_period + 1):]
-                    close_data = self.price_history[-(self.atr_period + 1):]
+                    high_data = self.high_history[-(self.atr_period + 1) :]
+                    low_data = self.low_history[-(self.atr_period + 1) :]
+                    close_data = self.price_history[-(self.atr_period + 1) :]
 
-                    atr = calculate_atr(
-                        high_data, low_data, close_data, period=self.atr_period)
+                    atr = calculate_atr(high_data, low_data, close_data, period=self.atr_period)
 
                     # TODO: Remove in production - Debug logging
                     logger.debug(
                         f"ATR calculation result: {atr}, high_history_len: {
-                            len(
-                                self.high_history)}, low_history_len: {
-                            len(
-                                self.low_history)}, price_history_len: {
-                            len(
-                                self.price_history)}")
+                            len(self.high_history)
+                        }, low_history_len: {len(self.low_history)}, price_history_len: {
+                            len(self.price_history)
+                        }"
+                    )
 
                     if atr is not None and atr > 0:
                         current_price = float(data.price)
@@ -503,7 +465,7 @@ class MeanReversionStrategy(BaseStrategy):
                                     symbol=position.symbol,
                                     entry_price=entry_price,
                                     current_price=current_price,
-                                    stop_price=stop_price
+                                    stop_price=stop_price,
                                 )
                                 return True
                         else:  # sell position
@@ -515,14 +477,11 @@ class MeanReversionStrategy(BaseStrategy):
                                     symbol=position.symbol,
                                     entry_price=entry_price,
                                     current_price=current_price,
-                                    stop_price=stop_price
+                                    stop_price=stop_price,
                                 )
                                 return True
                 except Exception as e:
-                    logger.error(
-                        "ATR calculation failed",
-                        strategy=self.name,
-                        error=str(e))
+                    logger.error("ATR calculation failed", strategy=self.name, error=str(e))
 
             return False
 
@@ -530,7 +489,7 @@ class MeanReversionStrategy(BaseStrategy):
             logger.error("Exit check failed", strategy=self.name, error=str(e))
             return False
 
-    def get_strategy_info(self) -> Dict[str, Any]:
+    def get_strategy_info(self) -> dict[str, Any]:
         """Get mean reversion strategy information.
 
         Returns:
@@ -550,10 +509,10 @@ class MeanReversionStrategy(BaseStrategy):
                 "atr_multiplier": self.atr_multiplier,
                 "volume_filter": self.volume_filter,
                 "min_volume_ratio": self.min_volume_ratio,
-                "confirmation_timeframe": self.confirmation_timeframe
+                "confirmation_timeframe": self.confirmation_timeframe,
             },
             "price_history_length": len(self.price_history),
-            "volume_history_length": len(self.volume_history)
+            "volume_history_length": len(self.volume_history),
         }
 
         return strategy_info

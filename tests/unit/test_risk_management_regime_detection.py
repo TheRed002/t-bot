@@ -5,16 +5,16 @@ This module tests the MarketRegimeDetector class and related functionality
 for dynamic risk management.
 """
 
-import pytest
-import numpy as np
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import List, Dict, Any
+
+import numpy as np
+import pytest
+
+from src.core.types import MarketData, MarketRegime, RegimeChangeEvent
 
 # Import the modules to test
 from src.risk_management.regime_detection import MarketRegimeDetector
-from src.core.types import MarketData, MarketRegime, RegimeChangeEvent
-from src.core.exceptions import RiskManagementError, ValidationError
 
 
 class TestMarketRegimeDetector:
@@ -24,10 +24,10 @@ class TestMarketRegimeDetector:
     def config(self):
         """Test configuration for regime detector."""
         return {
-            'volatility_window': 20,
-            'trend_window': 50,
-            'correlation_window': 30,
-            'regime_change_threshold': 0.7
+            "volatility_window": 20,
+            "trend_window": 50,
+            "correlation_window": 30,
+            "regime_change_threshold": 0.7,
         }
 
     @pytest.fixture
@@ -100,20 +100,14 @@ class TestMarketRegimeDetector:
                 symbol="BTCUSDT",
                 price=Decimal("50000"),
                 volume=Decimal("1000"),
-                timestamp=timestamp
+                timestamp=timestamp,
             ),
             MarketData(
-                symbol="ETHUSDT",
-                price=Decimal("3000"),
-                volume=Decimal("500"),
-                timestamp=timestamp
+                symbol="ETHUSDT", price=Decimal("3000"), volume=Decimal("500"), timestamp=timestamp
             ),
             MarketData(
-                symbol="ADAUSDT",
-                price=Decimal("1.5"),
-                volume=Decimal("2000"),
-                timestamp=timestamp
-            )
+                symbol="ADAUSDT", price=Decimal("1.5"), volume=Decimal("2000"), timestamp=timestamp
+            ),
         ]
 
     def test_initialization(self, config):
@@ -129,28 +123,30 @@ class TestMarketRegimeDetector:
 
     @pytest.mark.asyncio
     async def test_detect_volatility_regime_low_volatility(
-            self, regime_detector, low_volatility_data):
+        self, regime_detector, low_volatility_data
+    ):
         """Test volatility regime detection for low volatility data."""
         regime = await regime_detector.detect_volatility_regime("BTCUSDT", low_volatility_data)
         assert regime == MarketRegime.LOW_VOLATILITY
 
     @pytest.mark.asyncio
     async def test_detect_volatility_regime_medium_volatility(
-            self, regime_detector, sample_price_data):
+        self, regime_detector, sample_price_data
+    ):
         """Test volatility regime detection for medium volatility data."""
         regime = await regime_detector.detect_volatility_regime("BTCUSDT", sample_price_data)
         assert regime == MarketRegime.MEDIUM_VOLATILITY
 
     @pytest.mark.asyncio
     async def test_detect_volatility_regime_high_volatility(
-            self, regime_detector, high_volatility_data):
+        self, regime_detector, high_volatility_data
+    ):
         """Test volatility regime detection for high volatility data."""
         regime = await regime_detector.detect_volatility_regime("BTCUSDT", high_volatility_data)
         assert regime == MarketRegime.HIGH_VOLATILITY
 
     @pytest.mark.asyncio
-    async def test_detect_volatility_regime_insufficient_data(
-            self, regime_detector):
+    async def test_detect_volatility_regime_insufficient_data(self, regime_detector):
         """Test volatility regime detection with insufficient data."""
         # Test with less data than required window
         insufficient_data = [100.0, 101.0, 99.0]  # Only 3 data points
@@ -158,15 +154,13 @@ class TestMarketRegimeDetector:
         assert regime == MarketRegime.MEDIUM_VOLATILITY  # Default fallback
 
     @pytest.mark.asyncio
-    async def test_detect_trend_regime_trending_up(
-            self, regime_detector, trending_up_data):
+    async def test_detect_trend_regime_trending_up(self, regime_detector, trending_up_data):
         """Test trend regime detection for trending up data."""
         regime = await regime_detector.detect_trend_regime("BTCUSDT", trending_up_data)
         assert regime == MarketRegime.TRENDING_UP
 
     @pytest.mark.asyncio
-    async def test_detect_trend_regime_trending_down(
-            self, regime_detector, trending_down_data):
+    async def test_detect_trend_regime_trending_down(self, regime_detector, trending_down_data):
         """Test trend regime detection for trending down data."""
         regime = await regime_detector.detect_trend_regime("BTCUSDT", trending_down_data)
         assert regime == MarketRegime.TRENDING_DOWN
@@ -180,16 +174,14 @@ class TestMarketRegimeDetector:
         assert regime == MarketRegime.RANGING
 
     @pytest.mark.asyncio
-    async def test_detect_trend_regime_insufficient_data(
-            self, regime_detector):
+    async def test_detect_trend_regime_insufficient_data(self, regime_detector):
         """Test trend regime detection with insufficient data."""
         insufficient_data = [100.0, 101.0, 99.0]  # Only 3 data points
         regime = await regime_detector.detect_trend_regime("BTCUSDT", insufficient_data)
         assert regime == MarketRegime.RANGING  # Default fallback
 
     @pytest.mark.asyncio
-    async def test_detect_correlation_regime_high_correlation(
-            self, regime_detector):
+    async def test_detect_correlation_regime_high_correlation(self, regime_detector):
         """Test correlation regime detection for highly correlated data."""
         # Create highly correlated price data with deterministic generation
         np.random.seed(42)  # For reproducible tests
@@ -201,36 +193,21 @@ class TestMarketRegimeDetector:
         symbols = ["BTCUSDT", "ETHUSDT", "ADAUSDT"]
         price_data = {
             "BTCUSDT": [
-                100 +
-                0.8 *
-                common_factor[i] +
-                0.2 *
-                np.random.normal(
-                    0,
-                    1) for i in range(n_points)],
+                100 + 0.8 * common_factor[i] + 0.2 * np.random.normal(0, 1) for i in range(n_points)
+            ],
             "ETHUSDT": [
-                100 +
-                0.8 *
-                common_factor[i] +
-                0.2 *
-                np.random.normal(
-                    0,
-                    1) for i in range(n_points)],
+                100 + 0.8 * common_factor[i] + 0.2 * np.random.normal(0, 1) for i in range(n_points)
+            ],
             "ADAUSDT": [
-                100 +
-                0.8 *
-                common_factor[i] +
-                0.2 *
-                np.random.normal(
-                    0,
-                    1) for i in range(n_points)]}
+                100 + 0.8 * common_factor[i] + 0.2 * np.random.normal(0, 1) for i in range(n_points)
+            ],
+        }
 
         regime = await regime_detector.detect_correlation_regime(symbols, price_data)
         assert regime == MarketRegime.HIGH_CORRELATION
 
     @pytest.mark.asyncio
-    async def test_detect_correlation_regime_low_correlation(
-            self, regime_detector):
+    async def test_detect_correlation_regime_low_correlation(self, regime_detector):
         """Test correlation regime detection for low correlation data."""
         # Create uncorrelated price data with deterministic generation
         np.random.seed(42)  # For reproducible tests
@@ -238,15 +215,14 @@ class TestMarketRegimeDetector:
         price_data = {
             "BTCUSDT": [100 + np.random.normal(0, 1) for _ in range(50)],
             "ETHUSDT": [200 + np.random.normal(0, 1) for _ in range(50)],
-            "ADAUSDT": [1 + np.random.normal(0, 0.1) for _ in range(50)]
+            "ADAUSDT": [1 + np.random.normal(0, 0.1) for _ in range(50)],
         }
 
         regime = await regime_detector.detect_correlation_regime(symbols, price_data)
         assert regime == MarketRegime.LOW_CORRELATION
 
     @pytest.mark.asyncio
-    async def test_detect_correlation_regime_insufficient_symbols(
-            self, regime_detector):
+    async def test_detect_correlation_regime_insufficient_symbols(self, regime_detector):
         """Test correlation regime detection with insufficient symbols."""
         symbols = ["BTCUSDT"]  # Only one symbol
         price_data = {"BTCUSDT": [100, 101, 99]}
@@ -255,8 +231,7 @@ class TestMarketRegimeDetector:
         assert regime == MarketRegime.LOW_CORRELATION  # Default fallback
 
     @pytest.mark.asyncio
-    async def test_detect_comprehensive_regime(
-            self, regime_detector, sample_market_data):
+    async def test_detect_comprehensive_regime(self, regime_detector, sample_market_data):
         """Test comprehensive regime detection."""
         regime = await regime_detector.detect_comprehensive_regime(sample_market_data)
         assert regime in [
@@ -264,11 +239,11 @@ class TestMarketRegimeDetector:
             MarketRegime.LOW_VOLATILITY,
             MarketRegime.TRENDING_UP,
             MarketRegime.TRENDING_DOWN,
-            MarketRegime.RANGING]
+            MarketRegime.RANGING,
+        ]
 
     @pytest.mark.asyncio
-    async def test_detect_comprehensive_regime_empty_data(
-            self, regime_detector):
+    async def test_detect_comprehensive_regime_empty_data(self, regime_detector):
         """Test comprehensive regime detection with empty data."""
         regime = await regime_detector.detect_comprehensive_regime([])
         assert regime == MarketRegime.MEDIUM_VOLATILITY  # Default fallback
@@ -276,39 +251,36 @@ class TestMarketRegimeDetector:
     def test_combine_regimes(self, regime_detector):
         """Test regime combination logic."""
         # Test with dominant volatility regime
-        volatility_regimes = [
-            MarketRegime.HIGH_VOLATILITY,
-            MarketRegime.HIGH_VOLATILITY]
+        volatility_regimes = [MarketRegime.HIGH_VOLATILITY, MarketRegime.HIGH_VOLATILITY]
         trend_regimes = [MarketRegime.TRENDING_UP, MarketRegime.RANGING]
         correlation_regime = MarketRegime.HIGH_CORRELATION
 
         combined = regime_detector._combine_regimes(
-            volatility_regimes, trend_regimes, correlation_regime)
+            volatility_regimes, trend_regimes, correlation_regime
+        )
         # High volatility + high correlation = crisis
         assert combined == MarketRegime.CRISIS
 
     def test_combine_regimes_low_volatility(self, regime_detector):
         """Test regime combination with low volatility."""
-        volatility_regimes = [
-            MarketRegime.LOW_VOLATILITY,
-            MarketRegime.LOW_VOLATILITY]
+        volatility_regimes = [MarketRegime.LOW_VOLATILITY, MarketRegime.LOW_VOLATILITY]
         trend_regimes = [MarketRegime.TRENDING_UP, MarketRegime.RANGING]
         correlation_regime = MarketRegime.LOW_CORRELATION
 
         combined = regime_detector._combine_regimes(
-            volatility_regimes, trend_regimes, correlation_regime)
+            volatility_regimes, trend_regimes, correlation_regime
+        )
         assert combined == MarketRegime.LOW_VOLATILITY
 
     def test_combine_regimes_medium_volatility(self, regime_detector):
         """Test regime combination with medium volatility."""
-        volatility_regimes = [
-            MarketRegime.MEDIUM_VOLATILITY,
-            MarketRegime.MEDIUM_VOLATILITY]
+        volatility_regimes = [MarketRegime.MEDIUM_VOLATILITY, MarketRegime.MEDIUM_VOLATILITY]
         trend_regimes = [MarketRegime.TRENDING_UP, MarketRegime.TRENDING_UP]
         correlation_regime = MarketRegime.LOW_CORRELATION
 
         combined = regime_detector._combine_regimes(
-            volatility_regimes, trend_regimes, correlation_regime)
+            volatility_regimes, trend_regimes, correlation_regime
+        )
         # Use trend regime for medium volatility
         assert combined == MarketRegime.TRENDING_UP
 
@@ -334,8 +306,7 @@ class TestMarketRegimeDetector:
 
     def test_calculate_change_confidence_first_change(self, regime_detector):
         """Test confidence calculation for first regime change."""
-        confidence = regime_detector._calculate_change_confidence(
-            MarketRegime.HIGH_VOLATILITY)
+        confidence = regime_detector._calculate_change_confidence(MarketRegime.HIGH_VOLATILITY)
         assert confidence == 0.8  # High confidence for first change
 
     def test_calculate_change_confidence_new_regime(self, regime_detector):
@@ -347,13 +318,12 @@ class TestMarketRegimeDetector:
             confidence=0.8,
             timestamp=datetime.now(),
             trigger_metrics={},
-            description="Test event"
+            description="Test event",
         )
         regime_detector.regime_history.append(event)
 
         # Test new regime type
-        confidence = regime_detector._calculate_change_confidence(
-            MarketRegime.HIGH_VOLATILITY)
+        confidence = regime_detector._calculate_change_confidence(MarketRegime.HIGH_VOLATILITY)
         assert confidence == 0.9  # Higher confidence for new regime type
 
     def test_get_regime_history(self, regime_detector):
@@ -366,7 +336,7 @@ class TestMarketRegimeDetector:
                 confidence=0.8,
                 timestamp=datetime.now(),
                 trigger_metrics={},
-                description=f"Test event {i}"
+                description=f"Test event {i}",
             )
             regime_detector.regime_history.append(event)
 
@@ -384,10 +354,10 @@ class TestMarketRegimeDetector:
         """Test getting regime statistics with no history."""
         stats = regime_detector.get_regime_statistics()
 
-        assert stats['total_changes'] == 0
-        assert stats['current_regime'] == MarketRegime.MEDIUM_VOLATILITY.value
-        assert stats['regime_duration_hours'] == 0
-        assert stats['last_change'] is None
+        assert stats["total_changes"] == 0
+        assert stats["current_regime"] == MarketRegime.MEDIUM_VOLATILITY.value
+        assert stats["regime_duration_hours"] == 0
+        assert stats["last_change"] is None
 
     def test_get_regime_statistics_with_history(self, regime_detector):
         """Test getting regime statistics with history."""
@@ -398,17 +368,17 @@ class TestMarketRegimeDetector:
             confidence=0.8,
             timestamp=datetime.now() - timedelta(hours=2),
             trigger_metrics={},
-            description="Test event"
+            description="Test event",
         )
         regime_detector.regime_history.append(event)
         regime_detector.current_regime = MarketRegime.HIGH_VOLATILITY
 
         stats = regime_detector.get_regime_statistics()
 
-        assert stats['total_changes'] == 1
-        assert stats['current_regime'] == MarketRegime.HIGH_VOLATILITY.value
-        assert stats['regime_duration_hours'] > 0
-        assert stats['last_change'] is not None
+        assert stats["total_changes"] == 1
+        assert stats["current_regime"] == MarketRegime.HIGH_VOLATILITY.value
+        assert stats["regime_duration_hours"] > 0
+        assert stats["last_change"] is not None
 
     @pytest.mark.asyncio
     async def test_error_handling_volatility_detection(self, regime_detector):
@@ -446,10 +416,10 @@ class TestMarketRegimeDetector:
     def test_threshold_configuration(self):
         """Test threshold configuration."""
         config = {
-            'volatility_window': 30,
-            'trend_window': 60,
-            'correlation_window': 40,
-            'regime_change_threshold': 0.8
+            "volatility_window": 30,
+            "trend_window": 60,
+            "correlation_window": 40,
+            "regime_change_threshold": 0.8,
         }
         detector = MarketRegimeDetector(config)
 

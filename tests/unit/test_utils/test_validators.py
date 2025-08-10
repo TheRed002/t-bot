@@ -4,36 +4,49 @@ Unit tests for validators module.
 This module tests the validation utilities in src.utils.validators module.
 """
 
-import pytest
-import json
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
+
+import pytest
+
+from src.core.exceptions import ValidationError
+from src.core.types import (
+    MarketData,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderType,
+)
 
 # Import the functions to test
 from src.utils.validators import (
-    # Financial data validation
-    validate_price, validate_quantity, validate_symbol,
-    validate_order_request, validate_market_data,
-
-    # Configuration validation
-    validate_config, validate_risk_parameters, validate_strategy_config,
-
+    sanitize_user_input,
     # API input validation
-    validate_api_request, validate_webhook_payload, sanitize_user_input,
-
+    validate_api_request,
+    # Configuration validation
+    validate_config,
     # Data type validation
-    validate_decimal, validate_positive_number, validate_percentage, validate_timestamp,
-
-    # Business rule validation
-    validate_trading_rules, validate_risk_limits, validate_position_limits,
-
+    validate_decimal,
+    validate_exchange_info,
+    validate_market_data,
+    validate_order_request,
     # Exchange data validation
-    validate_order_response, validate_exchange_info
+    validate_order_response,
+    validate_percentage,
+    validate_position_limits,
+    validate_positive_number,
+    # Financial data validation
+    validate_price,
+    validate_quantity,
+    validate_risk_limits,
+    validate_risk_parameters,
+    validate_strategy_config,
+    validate_symbol,
+    validate_timestamp,
+    # Business rule validation
+    validate_trading_rules,
+    validate_webhook_payload,
 )
-
-from src.core.exceptions import ValidationError, DataError
-from src.core.types import OrderRequest, MarketData, OrderResponse, Trade, ExchangeInfo, OrderSide, OrderType
 
 
 class TestFinancialDataValidation:
@@ -47,7 +60,7 @@ class TestFinancialDataValidation:
         result = validate_price(price, symbol)
 
         assert isinstance(result, Decimal)
-        assert result == Decimal('50000.0')
+        assert result == Decimal("50000.0")
 
     def test_validate_price_negative(self):
         """Test price validation with negative price."""
@@ -81,7 +94,7 @@ class TestFinancialDataValidation:
         result = validate_quantity(quantity, symbol)
 
         assert isinstance(result, Decimal)
-        assert result == Decimal('1.5')
+        assert result == Decimal("1.5")
 
     def test_validate_quantity_negative(self):
         """Test quantity validation with negative quantity."""
@@ -107,7 +120,7 @@ class TestFinancialDataValidation:
         result = validate_quantity(quantity, symbol)
 
         assert isinstance(result, Decimal)
-        assert result == Decimal('0.0001')
+        assert result == Decimal("0.0001")
 
     def test_validate_symbol_valid(self):
         """Test symbol validation with valid symbol."""
@@ -160,8 +173,8 @@ class TestFinancialDataValidation:
             symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal('1.0'),
-            client_order_id="test_order_123"
+            quantity=Decimal("1.0"),
+            client_order_id="test_order_123",
         )
 
         result = validate_order_request(order_request)
@@ -175,8 +188,8 @@ class TestFinancialDataValidation:
             symbol="BTC/USDT",  # Valid symbol for creation
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal('1.0'),
-            client_order_id="test_order_123"
+            quantity=Decimal("1.0"),
+            client_order_id="test_order_123",
         )
 
         # Test with invalid symbol by modifying the object after creation
@@ -192,8 +205,8 @@ class TestFinancialDataValidation:
             symbol="BTC/USDT",
             side=OrderSide.BUY,  # Valid side for creation
             order_type=OrderType.MARKET,
-            quantity=Decimal('1.0'),
-            client_order_id="test_order_123"
+            quantity=Decimal("1.0"),
+            client_order_id="test_order_123",
         )
 
         # Test the validation function with the valid object
@@ -212,9 +225,9 @@ class TestFinancialDataValidation:
             symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
-            quantity=Decimal('1.0'),
-            price=Decimal('50000.0'),  # Valid price for creation
-            client_order_id="test_order_123"
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),  # Valid price for creation
+            client_order_id="test_order_123",
         )
 
         # Test the validation function with the valid object
@@ -230,9 +243,9 @@ class TestFinancialDataValidation:
         """Test market data validation with valid data."""
         market_data = MarketData(
             symbol="BTC/USDT",
-            price=Decimal('50000.0'),
-            volume=Decimal('1000.0'),
-            timestamp=datetime.now()
+            price=Decimal("50000.0"),
+            volume=Decimal("1000.0"),
+            timestamp=datetime.now(),
         )
 
         result = validate_market_data(market_data)
@@ -244,11 +257,11 @@ class TestFinancialDataValidation:
         # Create a valid market data first
         market_data = MarketData(
             symbol="BTC/USDT",
-            price=Decimal('50000.0'),  # Valid price for creation
-            volume=Decimal('100.0'),
+            price=Decimal("50000.0"),  # Valid price for creation
+            volume=Decimal("100.0"),
             timestamp=datetime.now(timezone.utc),
-            bid=Decimal('49999.0'),
-            ask=Decimal('50001.0')
+            bid=Decimal("49999.0"),
+            ask=Decimal("50001.0"),
         )
 
         # Test the validation function with the valid object
@@ -265,11 +278,11 @@ class TestFinancialDataValidation:
         # Create a valid market data first
         market_data = MarketData(
             symbol="BTC/USDT",
-            price=Decimal('50000.0'),
-            volume=Decimal('100.0'),  # Valid volume for creation
+            price=Decimal("50000.0"),
+            volume=Decimal("100.0"),  # Valid volume for creation
             timestamp=datetime.now(timezone.utc),
-            bid=Decimal('49999.0'),
-            ask=Decimal('50001.0')
+            bid=Decimal("49999.0"),
+            ask=Decimal("50001.0"),
         )
 
         # Test the validation function with the valid object
@@ -290,7 +303,7 @@ class TestConfigurationValidation:
         config = {
             "database_url": "postgresql://localhost/test",
             "api_key": "test_key",
-            "max_connections": 10
+            "max_connections": 10,
         }
         required_fields = ["database_url", "api_key"]
 
@@ -313,16 +326,14 @@ class TestConfigurationValidation:
         """Test config validation with invalid type."""
         config = "not_a_dict"
 
-        with pytest.raises(ValidationError, match="Configuration must be a Config object or dictionary"):
+        with pytest.raises(
+            ValidationError, match="Configuration must be a Config object or dictionary"
+        ):
             validate_config(config)
 
     def test_validate_risk_parameters_valid(self):
         """Test risk parameters validation with valid parameters."""
-        risk_params = {
-            "max_position_size": 0.1,
-            "max_daily_loss": 0.05,
-            "max_drawdown": 0.15
-        }
+        risk_params = {"max_position_size": 0.1, "max_daily_loss": 0.05, "max_drawdown": 0.15}
 
         result = validate_risk_parameters(risk_params)
 
@@ -333,7 +344,7 @@ class TestConfigurationValidation:
         risk_params = {
             "max_position_size": 0.1,
             "max_daily_loss": 0.05,
-            "max_drawdown": 1.5  # > 1
+            "max_drawdown": 1.5,  # > 1
         }
 
         with pytest.raises(ValidationError, match="max_drawdown must be between 0 and 1"):
@@ -344,7 +355,7 @@ class TestConfigurationValidation:
         risk_params = {
             "max_position_size": 0.1,
             "max_daily_loss": -0.05,  # Negative
-            "max_drawdown": 0.15
+            "max_drawdown": 0.15,
         }
 
         with pytest.raises(ValidationError, match="max_daily_loss must be between 0 and 1"):
@@ -356,7 +367,7 @@ class TestConfigurationValidation:
             "name": "test_strategy",
             "strategy_type": "static",
             "symbols": ["BTC/USDT", "ETH/USDT"],
-            "timeframe": "1h"
+            "timeframe": "1h",
         }
 
         result = validate_strategy_config(strategy_config)
@@ -368,7 +379,7 @@ class TestConfigurationValidation:
         strategy_config = {
             "strategy_type": "static",
             "symbols": ["BTC/USDT"],
-            "timeframe": "1h"
+            "timeframe": "1h",
             # Missing name
         }
 
@@ -382,7 +393,7 @@ class TestConfigurationValidation:
             "strategy_type": "static",
             "symbols": ["BTC/USDT"],
             "timeframe": "1h",
-            "min_confidence": 1.5  # > 1
+            "min_confidence": 1.5,  # > 1
         }
 
         with pytest.raises(ValidationError, match="min_confidence must be between 0 and 1"):
@@ -397,7 +408,7 @@ class TestAPIInputValidation:
         request_data = {
             "method": "GET",
             "endpoint": "/api/v1/ticker",
-            "params": {"symbol": "BTCUSDT"}
+            "params": {"symbol": "BTCUSDT"},
         }
         required_fields = ["method", "endpoint"]
 
@@ -407,10 +418,7 @@ class TestAPIInputValidation:
 
     def test_validate_api_request_invalid_method(self):
         """Test API request validation with invalid method."""
-        request_data = {
-            "method": "INVALID",
-            "endpoint": "/api/v1/ticker"
-        }
+        request_data = {"method": "INVALID", "endpoint": "/api/v1/ticker"}
 
         # Should not raise error for this validation
         result = validate_api_request(request_data)
@@ -430,11 +438,7 @@ class TestAPIInputValidation:
 
     def test_validate_api_request_invalid_params(self):
         """Test API request validation with invalid parameters."""
-        request_data = {
-            "method": "GET",
-            "endpoint": "/api/v1/ticker",
-            "params": "not_a_dict"
-        }
+        request_data = {"method": "GET", "endpoint": "/api/v1/ticker", "params": "not_a_dict"}
 
         # Should not raise error for this validation
         result = validate_api_request(request_data)
@@ -446,7 +450,7 @@ class TestAPIInputValidation:
         webhook_payload = {
             "event_type": "order_filled",
             "timestamp": "2024-01-08T12:00:00Z",
-            "data": {"order_id": "12345"}
+            "data": {"order_id": "12345"},
         }
 
         result = validate_webhook_payload(webhook_payload)
@@ -457,7 +461,7 @@ class TestAPIInputValidation:
         """Test webhook payload validation with missing event type."""
         webhook_payload = {
             "timestamp": "2024-01-08T12:00:00Z",
-            "data": {"order_id": "12345"}
+            "data": {"order_id": "12345"},
             # Missing event_type
         }
 
@@ -468,7 +472,7 @@ class TestAPIInputValidation:
         """Test webhook payload validation with invalid event type."""
         webhook_payload = {
             "event_type": "",  # Empty event type
-            "timestamp": "2024-01-08T12:00:00Z"
+            "timestamp": "2024-01-08T12:00:00Z",
         }
 
         # Should not raise error for empty event type
@@ -480,14 +484,18 @@ class TestAPIInputValidation:
         """Test user input sanitization with script injection."""
         user_input = "<script>alert('xss')</script>"
 
-        with pytest.raises(ValidationError, match="Input contains potentially dangerous script patterns"):
+        with pytest.raises(
+            ValidationError, match="Input contains potentially dangerous script patterns"
+        ):
             sanitize_user_input(user_input)
 
     def test_sanitize_user_input_with_sql_injection(self):
         """Test user input sanitization with SQL injection."""
         user_input = "'; DROP TABLE users; --"
 
-        with pytest.raises(ValidationError, match="Input contains potentially dangerous SQL patterns"):
+        with pytest.raises(
+            ValidationError, match="Input contains potentially dangerous SQL patterns"
+        ):
             sanitize_user_input(user_input)
 
     def test_sanitize_user_input_valid(self):
@@ -509,7 +517,7 @@ class TestDataTypeValidation:
         result = validate_decimal(value)
 
         assert isinstance(result, Decimal)
-        assert result == Decimal('123.45')
+        assert result == Decimal("123.45")
 
     def test_validate_decimal_string(self):
         """Test decimal validation with string value."""
@@ -518,7 +526,7 @@ class TestDataTypeValidation:
         result = validate_decimal(value)
 
         assert isinstance(result, Decimal)
-        assert result == Decimal('123.45')
+        assert result == Decimal("123.45")
 
     def test_validate_decimal_invalid_string(self):
         """Test decimal validation with invalid string."""
@@ -622,7 +630,7 @@ class TestBusinessRuleValidation:
             direction=SignalDirection.BUY,
             confidence=0.8,
             timestamp=datetime.now(timezone.utc),
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
         current_positions = []
 
@@ -639,7 +647,7 @@ class TestBusinessRuleValidation:
             direction=SignalDirection.BUY,
             confidence=0.8,
             timestamp=datetime.now(timezone.utc),
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
         current_positions = []
 
@@ -656,7 +664,7 @@ class TestBusinessRuleValidation:
             direction=SignalDirection.BUY,
             confidence=0.8,
             timestamp=datetime.now(timezone.utc),
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
         current_positions = []
 
@@ -666,13 +674,9 @@ class TestBusinessRuleValidation:
 
     def test_validate_risk_limits_valid(self):
         """Test risk limits validation with valid limits."""
-        from src.core.types import Position
 
         positions = []
-        risk_config = {
-            "max_position_size": 0.1,
-            "max_daily_loss": 0.05
-        }
+        risk_config = {"max_position_size": 0.1, "max_daily_loss": 0.05}
 
         result = validate_risk_limits(positions, risk_config)
 
@@ -680,12 +684,11 @@ class TestBusinessRuleValidation:
 
     def test_validate_risk_limits_negative_loss(self):
         """Test risk limits validation with negative loss limit."""
-        from src.core.types import Position
 
         positions = []
         risk_config = {
             "max_position_size": 0.1,
-            "max_daily_loss": -0.05  # Negative
+            "max_daily_loss": -0.05,  # Negative
         }
 
         result = validate_risk_limits(positions, risk_config)
@@ -694,13 +697,12 @@ class TestBusinessRuleValidation:
 
     def test_validate_risk_limits_excessive_leverage(self):
         """Test risk limits validation with excessive leverage."""
-        from src.core.types import Position
 
         positions = []
         risk_config = {
             "max_position_size": 0.1,
             "max_daily_loss": 0.05,
-            "max_leverage": 100  # Excessive
+            "max_leverage": 100,  # Excessive
         }
 
         result = validate_risk_limits(positions, risk_config)
@@ -709,21 +711,21 @@ class TestBusinessRuleValidation:
 
     def test_validate_position_limits_valid(self):
         """Test position limits validation with valid position."""
-        from src.core.types import Position, OrderSide
+        from src.core.types import OrderSide, Position
 
         position = Position(
             symbol="BTC/USDT",
-            quantity=Decimal('0.000001'),
+            quantity=Decimal("0.000001"),
             # Extremely small position: 0.000001 BTC
-            entry_price=Decimal('50000.0'),
-            current_price=Decimal('51000.0'),
-            unrealized_pnl=Decimal('0.01'),
+            entry_price=Decimal("50000.0"),
+            current_price=Decimal("51000.0"),
+            unrealized_pnl=Decimal("0.01"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
         risk_config = {
             "max_position_size": 0.1,  # 0.1 BTC limit
-            "max_daily_loss": 0.05
+            "max_daily_loss": 0.05,
         }
 
         # Position value = 0.000001 BTC * 51000 USD = 0.051 USD
@@ -735,22 +737,22 @@ class TestBusinessRuleValidation:
 
     def test_validate_position_limits_zero_positions(self):
         """Test position limits validation with zero position size."""
-        from src.core.types import Position, OrderSide
+        from src.core.types import OrderSide, Position
 
         # Create a valid position first (core types prevent zero quantities)
         position = Position(
             symbol="BTC/USDT",
-            quantity=Decimal('0.000001'),  # Small but valid size
-            entry_price=Decimal('50000.0'),
-            current_price=Decimal('50000.0'),
-            unrealized_pnl=Decimal('0.0'),
+            quantity=Decimal("0.000001"),  # Small but valid size
+            entry_price=Decimal("50000.0"),
+            current_price=Decimal("50000.0"),
+            unrealized_pnl=Decimal("0.0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
         risk_config = {
             "max_position_size": 0.1,
             "max_daily_loss": 0.05,
-            "min_position_size": 0.0  # Allow zero positions
+            "min_position_size": 0.0,  # Allow zero positions
         }
 
         # Test the validation function with valid position
@@ -764,23 +766,20 @@ class TestBusinessRuleValidation:
 
     def test_validate_position_limits_negative_size(self):
         """Test position limits validation with negative position size."""
-        from src.core.types import Position, OrderSide
+        from src.core.types import OrderSide, Position
 
         # Create a valid position first (core types prevent negative
         # quantities)
         position = Position(
             symbol="BTC/USDT",
-            quantity=Decimal('0.000001'),  # Small but valid size
-            entry_price=Decimal('50000.0'),
-            current_price=Decimal('49000.0'),
-            unrealized_pnl=Decimal('-0.01'),
+            quantity=Decimal("0.000001"),  # Small but valid size
+            entry_price=Decimal("50000.0"),
+            current_price=Decimal("49000.0"),
+            unrealized_pnl=Decimal("-0.01"),
             side=OrderSide.SELL,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
-        risk_config = {
-            "max_position_size": 0.1,
-            "max_daily_loss": 0.05
-        }
+        risk_config = {"max_position_size": 0.1, "max_daily_loss": 0.05}
 
         # Test the validation function with valid position
         result = validate_position_limits(position, risk_config)
@@ -802,12 +801,12 @@ class TestExchangeDataValidation:
             symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
-            quantity=Decimal('1.0'),
-            price=Decimal('50000.0'),
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
             status="filled",
-            filled_quantity=Decimal('1.0'),
+            filled_quantity=Decimal("1.0"),
             timestamp=datetime.now(),
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
         result = validate_order_response(order_response)
@@ -821,12 +820,12 @@ class TestExchangeDataValidation:
             symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
-            quantity=Decimal('1.0'),
-            price=Decimal('50000.0'),
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
             status="invalid_status",  # Invalid status
-            filled_quantity=Decimal('0.0'),
+            filled_quantity=Decimal("0.0"),
             timestamp=datetime.now(),
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
         with pytest.raises(ValidationError, match="Invalid order status"):
@@ -839,12 +838,12 @@ class TestExchangeDataValidation:
             symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
-            quantity=Decimal('1.0'),
-            price=Decimal('50000.0'),
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
             status="partially_filled",
-            filled_quantity=Decimal('2.0'),  # > total quantity
+            filled_quantity=Decimal("2.0"),  # > total quantity
             timestamp=datetime.now(),
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
         with pytest.raises(ValidationError, match="Filled quantity cannot exceed total quantity"):
@@ -855,7 +854,7 @@ class TestExchangeDataValidation:
         exchange_info = {
             "name": "binance",
             "supported_symbols": ["BTC/USDT", "ETH/USDT"],
-            "rate_limits": {"requests_per_minute": 1200}
+            "rate_limits": {"requests_per_minute": 1200},
         }
 
         result = validate_exchange_info(exchange_info)
@@ -867,7 +866,7 @@ class TestExchangeDataValidation:
         exchange_info = {
             "name": "binance",
             "supported_symbols": [],  # Empty symbols
-            "rate_limits": {"requests_per_minute": 1200}
+            "rate_limits": {"requests_per_minute": 1200},
         }
 
         # Should not raise error for empty symbols
@@ -880,7 +879,7 @@ class TestExchangeDataValidation:
         exchange_info = {
             "name": "binance",
             "supported_symbols": ["BTC/USDT"],
-            "rate_limits": {"requests_per_minute": 1200}
+            "rate_limits": {"requests_per_minute": 1200},
         }
 
         # Should not raise error for this validation
@@ -913,14 +912,14 @@ class TestValidatorFunctionsIntegration:
             "risk_parameters": {
                 "max_position_size": 0.1,
                 "max_daily_loss": 0.05,
-                "max_drawdown": 0.15
+                "max_drawdown": 0.15,
             },
             "strategy_config": {
                 "name": "test_strategy",
                 "strategy_type": "static",
                 "symbols": ["BTC/USDT"],
-                "timeframe": "1h"
-            }
+                "timeframe": "1h",
+            },
         }
 
         # All should pass validation
@@ -932,12 +931,9 @@ class TestValidatorFunctionsIntegration:
         api_request = {
             "method": "GET",
             "endpoint": "/api/v1/ticker",
-            "params": {"symbol": "BTCUSDT"}
+            "params": {"symbol": "BTCUSDT"},
         }
-        webhook_payload = {
-            "event_type": "order_filled",
-            "timestamp": "2024-01-08T12:00:00Z"
-        }
+        webhook_payload = {"event_type": "order_filled", "timestamp": "2024-01-08T12:00:00Z"}
 
         # All should pass validation
         assert validate_api_request(api_request) is True
@@ -945,7 +941,7 @@ class TestValidatorFunctionsIntegration:
 
     def test_data_type_validation_integration(self):
         """Test integration between data type validation functions."""
-        decimal_value = Decimal('123.45')
+        decimal_value = Decimal("123.45")
         positive_number = 123.45
         percentage = 15.0
         timestamp = datetime.now()
@@ -963,20 +959,17 @@ class TestValidatorFunctionsIntegration:
 
     def test_business_rule_validation_integration(self):
         """Test integration between business rule validation functions."""
-        from src.core.types import Signal, SignalDirection, Position, OrderSide
+        from src.core.types import Signal, SignalDirection
 
         signal = Signal(
             symbol="BTC/USDT",
             direction=SignalDirection.BUY,
             confidence=0.8,
             timestamp=datetime.now(timezone.utc),
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
         positions = []
-        risk_config = {
-            "max_position_size": 0.1,
-            "max_daily_loss": 0.05
-        }
+        risk_config = {"max_position_size": 0.1, "max_daily_loss": 0.05}
 
         # All should pass validation
         assert validate_trading_rules(signal, positions) is True
@@ -989,18 +982,18 @@ class TestValidatorFunctionsIntegration:
             symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
-            quantity=Decimal('1.0'),
-            price=Decimal('50000.0'),
+            quantity=Decimal("1.0"),
+            price=Decimal("50000.0"),
             status="filled",
-            filled_quantity=Decimal('1.0'),
+            filled_quantity=Decimal("1.0"),
             timestamp=datetime.now(),
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
         exchange_info = {
             "name": "binance",
             "supported_symbols": ["BTC/USDT"],
-            "rate_limits": {"requests_per_minute": 1200}
+            "rate_limits": {"requests_per_minute": 1200},
         }
 
         # All should pass validation

@@ -5,35 +5,33 @@ This module contains static trading strategies that have been implemented in P-0
 """
 
 # Import strategy classes implemented in P-012
-from .mean_reversion import MeanReversionStrategy
-from .trend_following import TrendFollowingStrategy
+from .arbitrage_scanner import ArbitrageOpportunity
 from .breakout import BreakoutStrategy
 
 # Import arbitrage strategy classes implemented in P-013A
 from .cross_exchange_arbitrage import CrossExchangeArbitrageStrategy
-from .triangular_arbitrage import TriangularArbitrageStrategy
-from .arbitrage_scanner import ArbitrageOpportunity
+from .inventory_manager import InventoryManager
 
 # Import market making strategy classes implemented in P-013B
 from .market_making import MarketMakingStrategy
-from .inventory_manager import InventoryManager
+from .mean_reversion import MeanReversionStrategy
 from .spread_optimizer import SpreadOptimizer
+from .trend_following import TrendFollowingStrategy
+from .triangular_arbitrage import TriangularArbitrageStrategy
 
 __all__ = [
     # Static strategies (implemented in P-012)
     "MeanReversionStrategy",
     "TrendFollowingStrategy",
     "BreakoutStrategy",
-
     # Arbitrage strategies (implemented in P-013A)
     "CrossExchangeArbitrageStrategy",
     "TriangularArbitrageStrategy",
     "ArbitrageOpportunity",
-
     # Market making strategies (implemented in P-013B)
     "MarketMakingStrategy",
     "InventoryManager",
-    "SpreadOptimizer"
+    "SpreadOptimizer",
 ]
 
 # Version information

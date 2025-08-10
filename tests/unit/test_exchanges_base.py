@@ -5,24 +5,32 @@ This module tests the BaseExchange abstract class and related components
 to ensure proper functionality and error handling.
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from decimal import Decimal
+from unittest.mock import Mock
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+)
+from src.core.types import (
+    ExchangeInfo,
+    MarketData,
+    OrderBook,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Ticker,
+    Trade,
+)
 
 # Import the components to test
 from src.exchanges.base import BaseExchange
-from src.core.types import (
-    OrderRequest, OrderResponse, MarketData, Position,
-    Signal, TradingMode, OrderSide, OrderType,
-    ExchangeInfo, Ticker, OrderBook, Trade, OrderStatus
-)
-from src.core.exceptions import (
-    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError,
-    ValidationError, ExecutionError
-)
-from src.core.config import Config
 
 
 class MockExchange(BaseExchange):
@@ -34,7 +42,7 @@ class MockExchange(BaseExchange):
             "balances": {"BTC": Decimal("1.0"), "USDT": Decimal("10000.0")},
             "orders": {},
             "market_data": {},
-            "connected": False
+            "connected": False,
         }
 
     async def connect(self) -> bool:
@@ -72,7 +80,7 @@ class MockExchange(BaseExchange):
             price=order.price,
             filled_quantity=Decimal("0"),
             status="pending",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         self.mock_data["orders"][order_id] = response
@@ -98,10 +106,7 @@ class MockExchange(BaseExchange):
             return OrderStatus(status_str)
         return OrderStatus.PENDING
 
-    async def get_market_data(
-            self,
-            symbol: str,
-            timeframe: str = "1m") -> MarketData:
+    async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """Mock market data retrieval."""
         if not self.connected:
             raise ExchangeConnectionError("Not connected")
@@ -115,7 +120,7 @@ class MockExchange(BaseExchange):
             ask=Decimal("50001.0"),
             open_price=Decimal("49900.0"),
             high_price=Decimal("50100.0"),
-            low_price=Decimal("49800.0")
+            low_price=Decimal("49800.0"),
         )
 
     async def subscribe_to_stream(self, symbol: str, callback) -> None:
@@ -134,7 +139,7 @@ class MockExchange(BaseExchange):
             symbol=symbol,
             bids=[[Decimal("49999.0"), Decimal("1.0")], [Decimal("49998.0"), Decimal("2.0")]],
             asks=[[Decimal("50001.0"), Decimal("1.0")], [Decimal("50002.0"), Decimal("2.0")]],
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
     async def get_trade_history(self, symbol: str, limit: int = 100) -> list:
@@ -151,7 +156,7 @@ class MockExchange(BaseExchange):
                 price=Decimal("50000.0"),
                 timestamp=datetime.now(timezone.utc),
                 fee=Decimal("0.001"),
-                fee_currency="USDT"
+                fee_currency="USDT",
             )
             for i in range(min(limit, 5))
         ]
@@ -166,7 +171,7 @@ class MockExchange(BaseExchange):
             supported_symbols=["BTCUSDT", "ETHUSDT"],
             rate_limits={"requests_per_minute": 1200},
             features=["spot_trading"],
-            api_version="1.0"
+            api_version="1.0",
         )
 
     async def get_ticker(self, symbol: str) -> Ticker:
@@ -181,7 +186,7 @@ class MockExchange(BaseExchange):
             last_price=Decimal("50000.0"),
             volume_24h=Decimal("1000.0"),
             price_change_24h=Decimal("100.0"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
 
@@ -250,7 +255,7 @@ class TestBaseExchange:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("0.1")
+            quantity=Decimal("0.1"),
         )
 
         response = await exchange.place_order(order)
@@ -272,7 +277,7 @@ class TestBaseExchange:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("0.1")
+            quantity=Decimal("0.1"),
         )
         response = await exchange.place_order(order)
 
@@ -361,7 +366,7 @@ class TestBaseExchange:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("0.1")
+            quantity=Decimal("0.1"),
         )
 
         result = await exchange.pre_trade_validation(valid_order)
@@ -369,10 +374,7 @@ class TestBaseExchange:
 
         # Test invalid order (missing symbol)
         invalid_order = OrderRequest(
-            symbol="",
-            side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
-            quantity=Decimal("0.1")
+            symbol="", side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0.1")
         )
 
         result = await exchange.pre_trade_validation(invalid_order)
@@ -383,7 +385,7 @@ class TestBaseExchange:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("-0.1")
+            quantity=Decimal("-0.1"),
         )
 
         result = await exchange.pre_trade_validation(invalid_order2)
@@ -402,7 +404,7 @@ class TestBaseExchange:
             price=None,
             filled_quantity=Decimal("0.1"),
             status="filled",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Should not raise any exceptions
@@ -491,10 +493,7 @@ class TestBaseExchangeErrorHandling:
 
         # Test invalid order validation
         invalid_order = OrderRequest(
-            symbol="",
-            side=OrderSide.BUY,
-            order_type=OrderType.MARKET,
-            quantity=Decimal("0")
+            symbol="", side=OrderSide.BUY, order_type=OrderType.MARKET, quantity=Decimal("0")
         )
 
         result = await exchange.pre_trade_validation(invalid_order)
@@ -503,6 +502,7 @@ class TestBaseExchangeErrorHandling:
     @pytest.mark.asyncio
     async def test_exchange_error_propagation(self, exchange):
         """Test that exchange errors are properly propagated."""
+
         # Mock the place_order method to raise an ExchangeError
         async def mock_place_order(order):
             raise ExchangeError("Test exchange error")
@@ -514,7 +514,7 @@ class TestBaseExchangeErrorHandling:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("0.1")
+            quantity=Decimal("0.1"),
         )
 
         with pytest.raises(ExchangeError, match="Test exchange error"):

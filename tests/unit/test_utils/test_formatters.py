@@ -4,36 +4,46 @@ Unit tests for formatters module.
 This module tests the formatting utilities in src.utils.formatters module.
 """
 
-import pytest
 import json
-import csv
-from decimal import Decimal
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
-import pandas as pd
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.core.exceptions import ValidationError
 
 # Import the functions to test
 from src.utils.formatters import (
-    # Financial formatting
-    format_currency, format_percentage, format_pnl, format_quantity, format_price,
-
+    export_to_file,
     # API response formatting
-    format_api_response, format_error_response, format_success_response, format_paginated_response,
-
-    # Log formatting
-    format_log_entry, format_correlation_id, format_structured_log, format_performance_log,
-
-    # Chart data formatting
-    format_ohlcv_data, format_indicator_data, format_chart_data,
-
-    # Report formatting
-    format_performance_report, format_risk_report, format_trade_report,
-
+    format_api_response,
+    format_chart_data,
+    format_correlation_id,
     # Export formatting
-    format_csv_data, format_excel_data, format_json_data, export_to_file
+    format_csv_data,
+    # Financial formatting
+    format_currency,
+    format_error_response,
+    format_excel_data,
+    format_indicator_data,
+    format_json_data,
+    # Log formatting
+    format_log_entry,
+    # Chart data formatting
+    format_ohlcv_data,
+    format_paginated_response,
+    format_percentage,
+    format_performance_log,
+    # Report formatting
+    format_performance_report,
+    format_pnl,
+    format_price,
+    format_quantity,
+    format_risk_report,
+    format_structured_log,
+    format_success_response,
+    format_trade_report,
 )
-
-from src.core.exceptions import ValidationError, DataError
 
 
 class TestFinancialFormatting:
@@ -408,8 +418,7 @@ class TestLogFormatting:
         execution_time_ms = 100.5
         success = True
 
-        result = format_performance_log(
-            function_name, execution_time_ms, success)
+        result = format_performance_log(function_name, execution_time_ms, success)
 
         assert isinstance(result, dict)
         assert result["function"] == function_name
@@ -422,8 +431,7 @@ class TestLogFormatting:
         execution_time_ms = 5000.0
         success = True
 
-        result = format_performance_log(
-            function_name, execution_time_ms, success)
+        result = format_performance_log(function_name, execution_time_ms, success)
 
         assert isinstance(result, dict)
         assert result["function"] == function_name
@@ -443,7 +451,7 @@ class TestChartDataFormatting:
                 "high": 51000.0,
                 "low": 49000.0,
                 "close": 50500.0,
-                "volume": 1000.0
+                "volume": 1000.0,
             }
         ]
 
@@ -481,7 +489,7 @@ class TestChartDataFormatting:
         timestamps = [
             datetime(2022, 1, 8, 0, 0, 0, tzinfo=timezone.utc),
             datetime(2022, 1, 8, 1, 0, 0, tzinfo=timezone.utc),
-            datetime(2022, 1, 8, 2, 0, 0, tzinfo=timezone.utc)
+            datetime(2022, 1, 8, 2, 0, 0, tzinfo=timezone.utc),
         ]
 
         result = format_indicator_data(indicator_name, values, timestamps)
@@ -512,7 +520,7 @@ class TestChartDataFormatting:
                 "high": 51000.0,
                 "low": 49000.0,
                 "close": 50500.0,
-                "volume": 1000.0
+                "volume": 1000.0,
             }
         ]
         indicators = {"SMA": [50000.0, 50100.0, 50200.0]}
@@ -534,7 +542,7 @@ class TestReportFormatting:
             "total_return": 0.15,
             "sharpe_ratio": 1.2,
             "max_drawdown": -0.05,
-            "volatility": 0.12
+            "volatility": 0.12,
         }
 
         result = format_performance_report(performance_data)
@@ -559,12 +567,7 @@ class TestReportFormatting:
 
     def test_format_risk_report(self):
         """Test risk report formatting."""
-        risk_data = {
-            "var_95": -0.02,
-            "var_99": -0.03,
-            "max_drawdown": -0.05,
-            "volatility": 0.12
-        }
+        risk_data = {"var_95": -0.02, "var_99": -0.03, "max_drawdown": -0.05, "volatility": 0.12}
 
         result = format_risk_report(risk_data)
 
@@ -594,7 +597,7 @@ class TestReportFormatting:
                 "side": "buy",
                 "quantity": 1.0,
                 "price": 50000.0,
-                "timestamp": datetime.now()
+                "timestamp": datetime.now(),
             }
         ]
 
@@ -620,10 +623,7 @@ class TestExportFormatting:
 
     def test_format_csv_data(self):
         """Test CSV data formatting."""
-        data = [
-            {"name": "John", "age": 30},
-            {"name": "Jane", "age": 25}
-        ]
+        data = [{"name": "John", "age": 30}, {"name": "Jane", "age": 25}]
         headers = ["name", "age"]
 
         result = format_csv_data(data, headers)
@@ -635,10 +635,7 @@ class TestExportFormatting:
 
     def test_format_csv_data_no_headers(self):
         """Test CSV data formatting without headers."""
-        data = [
-            {"name": "John", "age": 30},
-            {"name": "Jane", "age": 25}
-        ]
+        data = [{"name": "John", "age": 30}, {"name": "Jane", "age": 25}]
 
         result = format_csv_data(data)
 
@@ -647,10 +644,7 @@ class TestExportFormatting:
 
     def test_format_excel_data(self):
         """Test Excel data formatting."""
-        data = [
-            {"name": "John", "age": 30},
-            {"name": "Jane", "age": 25}
-        ]
+        data = [{"name": "John", "age": 30}, {"name": "Jane", "age": 25}]
 
         result = format_excel_data(data, "Test Sheet")
 
@@ -681,7 +675,7 @@ class TestExportFormatting:
         """Test export to file with JSON format."""
         data = {"key": "value"}
 
-        with patch('builtins.open', MagicMock()) as mock_file:
+        with patch("builtins.open", MagicMock()) as mock_file:
             export_to_file(data, "test.json", "json")
             mock_file.assert_called_once()
 
@@ -689,7 +683,7 @@ class TestExportFormatting:
         """Test export to file with CSV format."""
         data = [{"name": "John", "age": 30}]
 
-        with patch('builtins.open', MagicMock()) as mock_file:
+        with patch("builtins.open", MagicMock()) as mock_file:
             export_to_file(data, "test.csv", "csv")
             mock_file.assert_called_once()
 
@@ -755,7 +749,7 @@ class TestFormatterFunctionsIntegration:
                 "high": 51000.0,
                 "low": 49000.0,
                 "close": 50500.0,
-                "volume": 1000.0
+                "volume": 1000.0,
             }
         ]
         indicators = {"SMA": [50000.0, 50100.0, 50200.0]}
@@ -774,8 +768,7 @@ class TestFormatterFunctionsIntegration:
         """Test integration between report formatting functions."""
         performance_data = {"total_return": 0.15, "sharpe_ratio": 1.2}
         risk_data = {"var_95": -0.02, "max_drawdown": -0.05}
-        trades = [{"symbol": "BTCUSDT", "side": "buy",
-                   "quantity": 1.0, "price": 50000.0}]
+        trades = [{"symbol": "BTCUSDT", "side": "buy", "quantity": 1.0, "price": 50000.0}]
 
         # Test performance, risk, and trade report formatting
         performance_report = format_performance_report(performance_data)

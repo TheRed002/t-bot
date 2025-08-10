@@ -16,43 +16,40 @@ Circuit Breaker Types:
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Callable
-from decimal import Decimal
 from datetime import datetime, timedelta
+from decimal import Decimal
 from enum import Enum
-import asyncio
-from pydantic import BaseModel, Field
+from typing import Any
+
+from src.core.config import Config
+from src.core.exceptions import (
+    CircuitBreakerTriggeredError,
+)
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import (
-    RiskMetrics, RiskLevel, Position, MarketData,
-    CircuitBreakerStatus, CircuitBreakerType, CircuitBreakerEvent
+    CircuitBreakerEvent,
+    CircuitBreakerType,
 )
-from src.core.exceptions import (
-    RiskManagementError, DrawdownLimitError, CircuitBreakerTriggeredError
-)
-from src.core.config import Config
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
-# MANDATORY: Import from P-007A
-from src.utils.decorators import time_execution, circuit_breaker
-from src.utils.validators import validate_percentage, validate_decimal
-from src.utils.formatters import format_percentage, format_currency
-
 # MANDATORY: Import from P-008
 from src.risk_management.base import BaseRiskManager
-from src.risk_management.risk_metrics import RiskCalculator
+
+# MANDATORY: Import from P-007A
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
 
 class CircuitBreakerState(Enum):
     """Circuit breaker state enumeration."""
-    CLOSED = "closed"      # Normal operation
-    OPEN = "open"          # Circuit breaker triggered, trading halted
+
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Circuit breaker triggered, trading halted
     HALF_OPEN = "half_open"  # Testing if system has recovered
 
 
@@ -86,25 +83,24 @@ class BaseCircuitBreaker(ABC):
 
         # Circuit breaker state
         self.state = CircuitBreakerState.CLOSED
-        self.trigger_time: Optional[datetime] = None
-        self.recovery_time: Optional[datetime] = None
+        self.trigger_time: datetime | None = None
+        self.recovery_time: datetime | None = None
         self.trigger_count = 0
         self.max_trigger_count = 5
 
         # Event history
-        self.events: List[CircuitBreakerEvent] = []
+        self.events: list[CircuitBreakerEvent] = []
         self.max_events = 100
 
         # Recovery settings
         self.recovery_timeout = timedelta(minutes=30)  # 30 minutes default
-        self.test_interval = timedelta(minutes=5)      # Test every 5 minutes
+        self.test_interval = timedelta(minutes=5)  # Test every 5 minutes
 
-        self.logger.info("Circuit breaker initialized",
-                         breaker_type=self.__class__.__name__)
+        self.logger.info("Circuit breaker initialized", breaker_type=self.__class__.__name__)
 
     @abstractmethod
     @time_execution
-    async def check_condition(self, data: Dict[str, Any]) -> bool:
+    async def check_condition(self, data: dict[str, Any]) -> bool:
         """
         Check if circuit breaker condition is triggered.
 
@@ -127,7 +123,7 @@ class BaseCircuitBreaker(ABC):
         pass
 
     @abstractmethod
-    async def get_current_value(self, data: Dict[str, Any]) -> Decimal:
+    async def get_current_value(self, data: dict[str, Any]) -> Decimal:
         """
         Get the current value being monitored.
 
@@ -140,7 +136,7 @@ class BaseCircuitBreaker(ABC):
         pass
 
     @time_execution
-    async def evaluate(self, data: Dict[str, Any]) -> bool:
+    async def evaluate(self, data: dict[str, Any]) -> bool:
         """
         Evaluate circuit breaker condition and update state.
 
@@ -157,7 +153,8 @@ class BaseCircuitBreaker(ABC):
                     self.state = CircuitBreakerState.HALF_OPEN
                     self.logger.info(
                         "Circuit breaker transitioning to half-open state",
-                        breaker_type=self.__class__.__name__)
+                        breaker_type=self.__class__.__name__,
+                    )
 
             # Check condition
             if await self.check_condition(data):
@@ -174,22 +171,21 @@ class BaseCircuitBreaker(ABC):
             self.logger.error(
                 "Circuit breaker evaluation failed",
                 error=str(e),
-                breaker_type=self.__class__.__name__)
+                breaker_type=self.__class__.__name__,
+            )
             # Handle error handler call safely (for testing with Mock objects)
             try:
-                if hasattr(self.error_handler, 'handle_error'):
+                if hasattr(self.error_handler, "handle_error"):
                     await self.error_handler.handle_error(e, "circuit_breaker", "evaluate")
             except Exception as handler_error:
-                self.logger.error(
-                    "Error handler failed",
-                    error=str(handler_error))
+                self.logger.error("Error handler failed", error=str(handler_error))
 
             # Re-raise CircuitBreakerTriggeredError to allow tests to catch it
             if isinstance(e, CircuitBreakerTriggeredError):
                 raise
             return False
 
-    async def _trigger_circuit_breaker(self, data: Dict[str, Any]) -> None:
+    async def _trigger_circuit_breaker(self, data: dict[str, Any]) -> None:
         """Trigger the circuit breaker and log the event."""
         if self.state == CircuitBreakerState.CLOSED:
             self.state = CircuitBreakerState.OPEN
@@ -203,9 +199,8 @@ class BaseCircuitBreaker(ABC):
             # Use the breaker_type class attribute defined in each circuit
             # breaker class
             breaker_type = getattr(
-                self.__class__,
-                'breaker_type',
-                CircuitBreakerType.MANUAL_TRIGGER)
+                self.__class__, "breaker_type", CircuitBreakerType.MANUAL_TRIGGER
+            )
 
             event = CircuitBreakerEvent(
                 trigger_type=breaker_type,
@@ -213,18 +208,20 @@ class BaseCircuitBreaker(ABC):
                 actual_value=current_value,
                 timestamp=datetime.now(),
                 description=f"Circuit breaker triggered: {current_value} > {threshold_value}",
-                metadata={
-                    "trigger_count": self.trigger_count})
+                metadata={"trigger_count": self.trigger_count},
+            )
 
             self.events.append(event)
             if len(self.events) > self.max_events:
                 self.events.pop(0)
 
-            self.logger.warning("Circuit breaker triggered",
-                                breaker_type=self.__class__.__name__,
-                                current_value=current_value,
-                                threshold=threshold_value,
-                                trigger_count=self.trigger_count)
+            self.logger.warning(
+                "Circuit breaker triggered",
+                breaker_type=self.__class__.__name__,
+                current_value=current_value,
+                threshold=threshold_value,
+                trigger_count=self.trigger_count,
+            )
 
             # Raise exception to halt trading
             raise CircuitBreakerTriggeredError(
@@ -234,8 +231,8 @@ class BaseCircuitBreaker(ABC):
                     "breaker_type": self.__class__.__name__,
                     "current_value": current_value,
                     "threshold": threshold_value,
-                    "trigger_count": self.trigger_count
-                }
+                    "trigger_count": self.trigger_count,
+                },
             )
 
     async def _close_circuit_breaker(self) -> None:
@@ -243,19 +240,21 @@ class BaseCircuitBreaker(ABC):
         self.state = CircuitBreakerState.CLOSED
         self.recovery_time = datetime.now()
 
-        self.logger.info("Circuit breaker closed after recovery",
-                         breaker_type=self.__class__.__name__,
-                         recovery_time=self.recovery_time)
+        self.logger.info(
+            "Circuit breaker closed after recovery",
+            breaker_type=self.__class__.__name__,
+            recovery_time=self.recovery_time,
+        )
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get current circuit breaker status."""
         return {
             "state": self.state.value,
             "trigger_count": self.trigger_count,
             "trigger_time": self.trigger_time.isoformat() if self.trigger_time else None,
             "recovery_time": self.recovery_time.isoformat() if self.recovery_time else None,
-            "events_count": len(
-                self.events)}
+            "events_count": len(self.events),
+        }
 
     def reset(self) -> None:
         """Reset circuit breaker to initial state."""
@@ -265,9 +264,7 @@ class BaseCircuitBreaker(ABC):
         self.trigger_count = 0
         self.events.clear()
 
-        self.logger.info(
-            "Circuit breaker reset",
-            breaker_type=self.__class__.__name__)
+        self.logger.info("Circuit breaker reset", breaker_type=self.__class__.__name__)
 
 
 class DailyLossLimitBreaker(BaseCircuitBreaker):
@@ -289,7 +286,7 @@ class DailyLossLimitBreaker(BaseCircuitBreaker):
         """Get daily loss limit threshold."""
         return Decimal(str(self.threshold_pct))
 
-    async def get_current_value(self, data: Dict[str, Any]) -> Decimal:
+    async def get_current_value(self, data: dict[str, Any]) -> Decimal:
         """Calculate current daily loss percentage."""
         portfolio_value = data.get("portfolio_value", Decimal("0"))
         daily_pnl = data.get("daily_pnl", Decimal("0"))
@@ -301,7 +298,7 @@ class DailyLossLimitBreaker(BaseCircuitBreaker):
         return daily_loss_pct
 
     @time_execution
-    async def check_condition(self, data: Dict[str, Any]) -> bool:
+    async def check_condition(self, data: dict[str, Any]) -> bool:
         """Check if daily loss limit is exceeded."""
         current_value = await self.get_current_value(data)
         threshold_value = await self.get_threshold_value()
@@ -328,7 +325,7 @@ class DrawdownLimitBreaker(BaseCircuitBreaker):
         """Get drawdown limit threshold."""
         return Decimal(str(self.threshold_pct))
 
-    async def get_current_value(self, data: Dict[str, Any]) -> Decimal:
+    async def get_current_value(self, data: dict[str, Any]) -> Decimal:
         """Calculate current drawdown percentage."""
         current_value = data.get("current_portfolio_value", Decimal("0"))
         peak_value = data.get("peak_portfolio_value", current_value)
@@ -345,7 +342,7 @@ class DrawdownLimitBreaker(BaseCircuitBreaker):
         return drawdown_pct
 
     @time_execution
-    async def check_condition(self, data: Dict[str, Any]) -> bool:
+    async def check_condition(self, data: dict[str, Any]) -> bool:
         """Check if drawdown limit is exceeded."""
         current_value = await self.get_current_value(data)
         threshold_value = await self.get_threshold_value()
@@ -373,7 +370,7 @@ class VolatilitySpikeBreaker(BaseCircuitBreaker):
         """Get volatility spike threshold."""
         return self.volatility_threshold
 
-    async def get_current_value(self, data: Dict[str, Any]) -> Decimal:
+    async def get_current_value(self, data: dict[str, Any]) -> Decimal:
         """Calculate current market volatility."""
         price_history = data.get("price_history", [])
 
@@ -401,7 +398,7 @@ class VolatilitySpikeBreaker(BaseCircuitBreaker):
         return volatility
 
     @time_execution
-    async def check_condition(self, data: Dict[str, Any]) -> bool:
+    async def check_condition(self, data: dict[str, Any]) -> bool:
         """Check if volatility spike is detected."""
         current_value = await self.get_current_value(data)
         threshold_value = await self.get_threshold_value()
@@ -428,13 +425,13 @@ class ModelConfidenceBreaker(BaseCircuitBreaker):
         """Get minimum confidence threshold."""
         return self.confidence_threshold
 
-    async def get_current_value(self, data: Dict[str, Any]) -> Decimal:
+    async def get_current_value(self, data: dict[str, Any]) -> Decimal:
         """Get current model confidence level."""
         model_confidence = data.get("model_confidence", Decimal("1.0"))
         return model_confidence
 
     @time_execution
-    async def check_condition(self, data: Dict[str, Any]) -> bool:
+    async def check_condition(self, data: dict[str, Any]) -> bool:
         """Check if model confidence is below threshold."""
         current_value = await self.get_current_value(data)
         threshold_value = await self.get_threshold_value()
@@ -455,17 +452,17 @@ class SystemErrorRateBreaker(BaseCircuitBreaker):
     def __init__(self, config: Config, risk_manager: BaseRiskManager):
         super().__init__(config, risk_manager)
         self.error_rate_threshold = Decimal("0.1")  # 10% error rate
-        self.error_window = timedelta(minutes=15)   # 15-minute window
+        self.error_window = timedelta(minutes=15)  # 15-minute window
         self.logger = logger.bind(breaker_type="system_error_rate")
 
         # Error tracking
-        self.error_times: List[datetime] = []
+        self.error_times: list[datetime] = []
 
     async def get_threshold_value(self) -> Decimal:
         """Get error rate threshold."""
         return self.error_rate_threshold
 
-    async def get_current_value(self, data: Dict[str, Any]) -> Decimal:
+    async def get_current_value(self, data: dict[str, Any]) -> Decimal:
         """Calculate current error rate."""
         current_time = datetime.now()
         window_start = current_time - self.error_window
@@ -487,7 +484,7 @@ class SystemErrorRateBreaker(BaseCircuitBreaker):
         return error_rate
 
     @time_execution
-    async def check_condition(self, data: Dict[str, Any]) -> bool:
+    async def check_condition(self, data: dict[str, Any]) -> bool:
         """Check if error rate exceeds threshold."""
         current_value = await self.get_current_value(data)
         threshold_value = await self.get_threshold_value()
@@ -516,19 +513,20 @@ class CircuitBreakerManager:
         self.logger = logger.bind(component="circuit_breaker_manager")
 
         # Initialize all circuit breakers
-        self.circuit_breakers: Dict[str, BaseCircuitBreaker] = {
+        self.circuit_breakers: dict[str, BaseCircuitBreaker] = {
             "daily_loss_limit": DailyLossLimitBreaker(config, risk_manager),
             "drawdown_limit": DrawdownLimitBreaker(config, risk_manager),
             "volatility_spike": VolatilitySpikeBreaker(config, risk_manager),
             "model_confidence": ModelConfidenceBreaker(config, risk_manager),
-            "system_error_rate": SystemErrorRateBreaker(config, risk_manager)
+            "system_error_rate": SystemErrorRateBreaker(config, risk_manager),
         }
 
-        self.logger.info("Circuit breaker manager initialized",
-                         breaker_count=len(self.circuit_breakers))
+        self.logger.info(
+            "Circuit breaker manager initialized", breaker_count=len(self.circuit_breakers)
+        )
 
     @time_execution
-    async def evaluate_all(self, data: Dict[str, Any]) -> Dict[str, bool]:
+    async def evaluate_all(self, data: dict[str, Any]) -> dict[str, bool]:
         """
         Evaluate all circuit breakers.
 
@@ -548,18 +546,17 @@ class CircuitBreakerManager:
 
                 if triggered:
                     triggered_breakers.append(name)
-                    self.logger.warning("Circuit breaker triggered",
-                                        breaker_name=name)
+                    self.logger.warning("Circuit breaker triggered", breaker_name=name)
 
             except CircuitBreakerTriggeredError as e:
                 # Circuit breaker was triggered, record it and continue
                 triggered_breakers.append(name)
                 results[name] = True
-                self.logger.error("Circuit breaker triggered",
-                                  breaker_name=name, error=str(e))
+                self.logger.error("Circuit breaker triggered", breaker_name=name, error=str(e))
             except Exception as e:
-                self.logger.error("Circuit breaker evaluation failed",
-                                  breaker_name=name, error=str(e))
+                self.logger.error(
+                    "Circuit breaker evaluation failed", breaker_name=name, error=str(e)
+                )
                 results[name] = False
 
         # If any circuit breakers were triggered, raise an exception
@@ -571,7 +568,7 @@ class CircuitBreakerManager:
         return results
 
     @time_execution
-    async def get_status(self) -> Dict[str, Any]:
+    async def get_status(self) -> dict[str, Any]:
         """Get status of all circuit breakers."""
         status = {}
 
@@ -587,7 +584,7 @@ class CircuitBreakerManager:
 
         self.logger.info("All circuit breakers reset")
 
-    def get_triggered_breakers(self) -> List[str]:
+    def get_triggered_breakers(self) -> list[str]:
         """Get list of currently triggered circuit breakers."""
         triggered = []
 

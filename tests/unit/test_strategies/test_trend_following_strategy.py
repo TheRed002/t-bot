@@ -5,19 +5,22 @@ Tests the trend following strategy implementation with comprehensive coverage
 including signal generation, validation, position sizing, and exit conditions.
 """
 
-import pytest
-import numpy as np
-from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import asyncio
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from unittest.mock import patch
+
+import numpy as np
+import pytest
 
 # Import from P-001
 from src.core.types import (
-    Signal, MarketData, Position, StrategyConfig,
-    StrategyStatus, StrategyMetrics, SignalDirection, OrderSide
+    MarketData,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
 )
-from src.core.exceptions import ValidationError
 
 # Import from P-012
 from src.strategies.static.trend_following import TrendFollowingStrategy
@@ -50,8 +53,8 @@ class TestTrendFollowingStrategy:
                 "min_volume_ratio": 1.2,
                 "max_pyramid_levels": 3,
                 "trailing_stop_pct": 0.02,
-                "time_exit_hours": 48
-            }
+                "time_exit_hours": 48,
+            },
         }
 
     @pytest.fixture
@@ -71,7 +74,7 @@ class TestTrendFollowingStrategy:
             ask=Decimal("50001"),
             open_price=Decimal("49900"),
             high_price=Decimal("50100"),
-            low_price=Decimal("49800")
+            low_price=Decimal("49800"),
         )
 
     @pytest.fixture
@@ -84,7 +87,7 @@ class TestTrendFollowingStrategy:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
     def test_strategy_initialization(self, strategy, mock_config):
@@ -139,7 +142,7 @@ class TestTrendFollowingStrategy:
             ask=Decimal("50001"),
             open_price=Decimal("49900"),
             high_price=Decimal("50100"),
-            low_price=Decimal("49800")
+            low_price=Decimal("49800"),
         )
 
         strategy._update_price_history(data)
@@ -209,8 +212,7 @@ class TestTrendFollowingStrategy:
         assert isinstance(rsi, float)
         assert 0 <= rsi <= 100
 
-    def test_check_volume_confirmation_insufficient_data(
-            self, strategy, mock_market_data):
+    def test_check_volume_confirmation_insufficient_data(self, strategy, mock_market_data):
         """Test volume confirmation with insufficient data."""
         # Add some volume data but not enough
         for i in range(10):
@@ -219,8 +221,7 @@ class TestTrendFollowingStrategy:
         result = strategy._check_volume_confirmation(mock_market_data)
         assert result is True  # Should pass if insufficient data
 
-    def test_check_volume_confirmation_success(
-            self, strategy, mock_market_data):
+    def test_check_volume_confirmation_success(self, strategy, mock_market_data):
         """Test volume confirmation with sufficient data."""
         # Add enough volume data
         for i in range(25):
@@ -236,8 +237,7 @@ class TestTrendFollowingStrategy:
         result = strategy._check_volume_confirmation(mock_market_data)
         assert not result
 
-    def test_check_volume_confirmation_zero_volume(
-            self, strategy, mock_market_data):
+    def test_check_volume_confirmation_zero_volume(self, strategy, mock_market_data):
         """Test volume confirmation with zero volume."""
         # Add enough volume data to avoid early return
         for i in range(25):
@@ -254,7 +254,7 @@ class TestTrendFollowingStrategy:
             symbol="BTCUSDT",
             price=Decimal("50000"),
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Corrupt volume history
@@ -264,8 +264,7 @@ class TestTrendFollowingStrategy:
         assert result is True  # Should pass on error
 
     @pytest.mark.asyncio
-    async def test_generate_bullish_signal_success(
-            self, strategy, mock_market_data):
+    async def test_generate_bullish_signal_success(self, strategy, mock_market_data):
         """Test successful bullish signal generation."""
         # Add enough data for calculations
         for i in range(60):
@@ -285,8 +284,7 @@ class TestTrendFollowingStrategy:
         assert signal.metadata["trend_direction"] == "bullish"
 
     @pytest.mark.asyncio
-    async def test_generate_bullish_signal_max_pyramid_levels(
-            self, strategy, mock_market_data):
+    async def test_generate_bullish_signal_max_pyramid_levels(self, strategy, mock_market_data):
         """Test bullish signal generation with max pyramid levels reached."""
         # Set max pyramid levels
         strategy.position_levels["BTCUSDT"] = 3
@@ -300,8 +298,7 @@ class TestTrendFollowingStrategy:
         assert signal is None
 
     @pytest.mark.asyncio
-    async def test_generate_bearish_signal_success(
-            self, strategy, mock_market_data):
+    async def test_generate_bearish_signal_success(self, strategy, mock_market_data):
         """Test successful bearish signal generation."""
         # Add enough data for calculations
         for i in range(60):
@@ -321,8 +318,7 @@ class TestTrendFollowingStrategy:
         assert signal.metadata["trend_direction"] == "bearish"
 
     @pytest.mark.asyncio
-    async def test_generate_bearish_signal_max_pyramid_levels(
-            self, strategy, mock_market_data):
+    async def test_generate_bearish_signal_max_pyramid_levels(self, strategy, mock_market_data):
         """Test bearish signal generation with max pyramid levels reached."""
         # Set max pyramid levels
         strategy.position_levels["BTCUSDT"] = 3
@@ -336,10 +332,11 @@ class TestTrendFollowingStrategy:
         assert signal is None
 
     @pytest.mark.asyncio
-    async def test_generate_exit_signal_success(
-            self, strategy, mock_market_data):
+    async def test_generate_exit_signal_success(self, strategy, mock_market_data):
         """Test successful exit signal generation."""
-        signal = await strategy._generate_exit_signal(mock_market_data, SignalDirection.SELL, "trend_reversal")
+        signal = await strategy._generate_exit_signal(
+            mock_market_data, SignalDirection.SELL, "trend_reversal"
+        )
 
         assert signal is not None
         assert signal.direction == SignalDirection.SELL
@@ -353,12 +350,14 @@ class TestTrendFollowingStrategy:
         signals = await strategy.generate_signals(None)
         assert signals == []
 
-        signals = await strategy.generate_signals(MarketData(
-            symbol="BTCUSDT",
-            price=Decimal("0"),
-            volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
-        ))
+        signals = await strategy.generate_signals(
+            MarketData(
+                symbol="BTCUSDT",
+                price=Decimal("0"),
+                volume=Decimal("100"),
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
         assert signals == []
 
     @pytest.mark.asyncio
@@ -368,22 +367,20 @@ class TestTrendFollowingStrategy:
             symbol="BTCUSDT",
             price=Decimal("-100"),  # Negative price
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         signals = await strategy.generate_signals(data)
         assert signals == []
 
     @pytest.mark.asyncio
-    async def test_generate_signals_insufficient_data(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_insufficient_data(self, strategy, mock_market_data):
         """Test signal generation with insufficient data."""
         signals = await strategy.generate_signals(mock_market_data)
         assert signals == []
 
     @pytest.mark.asyncio
-    async def test_generate_signals_bullish_trend(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_bullish_trend(self, strategy, mock_market_data):
         """Test signal generation with bullish trend."""
         # Add enough data with moderate bullish trend (RSI between 50-70)
         base_price = 50000
@@ -410,8 +407,7 @@ class TestTrendFollowingStrategy:
         assert signal.metadata["trend_direction"] == "bullish"
 
     @pytest.mark.asyncio
-    async def test_generate_signals_bearish_trend(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_bearish_trend(self, strategy, mock_market_data):
         """Test signal generation with bearish trend."""
         # Add enough data with moderate bearish trend (RSI between 30-50)
         base_price = 50000
@@ -423,8 +419,7 @@ class TestTrendFollowingStrategy:
             strategy.volume_history.append(100.0)
 
         # Set current price to continue the downward trend
-        mock_market_data.price = Decimal(
-            "49910")  # Continue the downward trend
+        mock_market_data.price = Decimal("49910")  # Continue the downward trend
         # Set higher volume to pass volume confirmation (min_volume_ratio=1.2)
         mock_market_data.volume = Decimal("150")  # 1.5x average volume
 
@@ -439,8 +434,7 @@ class TestTrendFollowingStrategy:
         assert signal.metadata["trend_direction"] == "bearish"
 
     @pytest.mark.asyncio
-    async def test_generate_signals_trend_reversal_exit(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_trend_reversal_exit(self, strategy, mock_market_data):
         """Test signal generation with trend reversal exit."""
         # Add data with trend reversal conditions (downward trend but bullish
         # RSI)
@@ -451,8 +445,7 @@ class TestTrendFollowingStrategy:
             if i < 50:
                 price = base_price - i * 2  # Downward trend
             else:
-                price = base_price - 50 * 2 + \
-                    (i - 50) * 1.5  # Moderate recent recovery
+                price = base_price - 50 * 2 + (i - 50) * 1.5  # Moderate recent recovery
             strategy.price_history.append(price)
             strategy.volume_history.append(100.0)
 
@@ -470,8 +463,7 @@ class TestTrendFollowingStrategy:
             assert signal.metadata["signal_type"] == "trend_exit"
 
     @pytest.mark.asyncio
-    async def test_generate_signals_volume_confirmation_rejection(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_volume_confirmation_rejection(self, strategy, mock_market_data):
         """Test signal generation with volume confirmation rejection."""
         # Add enough data
         for i in range(60):
@@ -492,7 +484,7 @@ class TestTrendFollowingStrategy:
             symbol="BTCUSDT",
             price=Decimal("50000"),
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Corrupt price history
@@ -515,8 +507,8 @@ class TestTrendFollowingStrategy:
                 "slow_ma": 50500,
                 "rsi": 60,
                 "trend_direction": "bullish",
-                "signal_type": "trend_entry"
-            }
+                "signal_type": "trend_entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -536,8 +528,8 @@ class TestTrendFollowingStrategy:
                 "slow_ma": 50500,
                 "rsi": 60,
                 "trend_direction": "bullish",
-                "signal_type": "trend_entry"
-            }
+                "signal_type": "trend_entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -557,8 +549,8 @@ class TestTrendFollowingStrategy:
                 "slow_ma": 50500,
                 "rsi": 60,
                 "trend_direction": "bullish",
-                "signal_type": "trend_entry"
-            }
+                "signal_type": "trend_entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -573,7 +565,7 @@ class TestTrendFollowingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="trend_following",
-            metadata={}  # Missing required fields
+            metadata={},  # Missing required fields
         )
 
         result = await strategy.validate_signal(signal)
@@ -593,8 +585,8 @@ class TestTrendFollowingStrategy:
                 "slow_ma": 50500,
                 "rsi": 150,  # Invalid RSI
                 "trend_direction": "bullish",
-                "signal_type": "trend_entry"
-            }
+                "signal_type": "trend_entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -614,8 +606,8 @@ class TestTrendFollowingStrategy:
                 "slow_ma": 50500,
                 "rsi": 60,
                 "trend_direction": "bullish",
-                "signal_type": "trend_entry"
-            }
+                "signal_type": "trend_entry",
+            },
         )
 
         # Corrupt signal to cause exception
@@ -632,11 +624,7 @@ class TestTrendFollowingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="trend_following",
-            metadata={
-                "ma_strength": 0.1,
-                "rsi_strength": 0.2,
-                "pyramid_level": 1
-            }
+            metadata={"ma_strength": 0.1, "rsi_strength": 0.2, "pyramid_level": 1},
         )
 
         position_size = strategy.get_position_size(signal)
@@ -654,8 +642,8 @@ class TestTrendFollowingStrategy:
             metadata={
                 "ma_strength": 0.1,
                 "rsi_strength": 0.2,
-                "pyramid_level": 2  # Higher level = smaller position
-            }
+                "pyramid_level": 2,  # Higher level = smaller position
+            },
         )
 
         position_size = strategy.get_position_size(signal)
@@ -673,13 +661,12 @@ class TestTrendFollowingStrategy:
             metadata={
                 "ma_strength": 1.0,  # Maximum strength
                 "rsi_strength": 1.0,  # Maximum strength
-                "pyramid_level": 1
-            }
+                "pyramid_level": 1,
+            },
         )
 
         position_size = strategy.get_position_size(signal)
-        max_size = Decimal(
-            str(strategy.config.parameters.get("max_position_size_pct", 0.1)))
+        max_size = Decimal(str(strategy.config.parameters.get("max_position_size_pct", 0.1)))
         assert position_size <= max_size
 
     def test_get_position_size_exception_handling(self, strategy):
@@ -693,8 +680,8 @@ class TestTrendFollowingStrategy:
             metadata={
                 "ma_strength": "invalid",  # Will cause exception
                 "rsi_strength": 0.2,
-                "pyramid_level": 1
-            }
+                "pyramid_level": 1,
+            },
         )
 
         position_size = strategy.get_position_size(signal)
@@ -705,38 +692,34 @@ class TestTrendFollowingStrategy:
     def test_should_exit_by_time(self, strategy, mock_position):
         """Test time-based exit condition."""
         # Set old entry time
-        mock_position.timestamp = datetime.now(
-            timezone.utc) - timedelta(hours=50)
+        mock_position.timestamp = datetime.now(timezone.utc) - timedelta(hours=50)
 
         result = strategy._should_exit_by_time(mock_position)
         assert result is True
 
         # Set recent entry time
-        mock_position.timestamp = datetime.now(
-            timezone.utc) - timedelta(hours=10)
+        mock_position.timestamp = datetime.now(timezone.utc) - timedelta(hours=10)
 
         result = strategy._should_exit_by_time(mock_position)
         assert result is False
 
     def test_should_exit_by_trailing_stop_buy_position(
-            self, strategy, mock_position, mock_market_data):
+        self, strategy, mock_position, mock_market_data
+    ):
         """Test trailing stop for buy position."""
         # Set price below trailing stop
         mock_market_data.price = Decimal("49000")  # Below trailing stop
 
-        result = strategy._should_exit_by_trailing_stop(
-            mock_position, mock_market_data)
+        result = strategy._should_exit_by_trailing_stop(mock_position, mock_market_data)
         assert result
 
         # Set price above trailing stop
         mock_market_data.price = Decimal("51000")  # Above trailing stop
 
-        result = strategy._should_exit_by_trailing_stop(
-            mock_position, mock_market_data)
+        result = strategy._should_exit_by_trailing_stop(mock_position, mock_market_data)
         assert not result
 
-    def test_should_exit_by_trailing_stop_sell_position(
-            self, strategy, mock_market_data):
+    def test_should_exit_by_trailing_stop_sell_position(self, strategy, mock_market_data):
         """Test trailing stop for sell position."""
         # Create sell position
         sell_position = Position(
@@ -746,40 +729,37 @@ class TestTrendFollowingStrategy:
             current_price=Decimal("49000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.SELL,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Set price above trailing stop
         mock_market_data.price = Decimal("51000")  # Above trailing stop
 
-        result = strategy._should_exit_by_trailing_stop(
-            sell_position, mock_market_data)
+        result = strategy._should_exit_by_trailing_stop(sell_position, mock_market_data)
         assert result
 
         # Set price below trailing stop
         mock_market_data.price = Decimal("49000")  # Below trailing stop
 
-        result = strategy._should_exit_by_trailing_stop(
-            sell_position, mock_market_data)
+        result = strategy._should_exit_by_trailing_stop(sell_position, mock_market_data)
         assert not result
 
     def test_should_exit_trend_reversal_buy_position(
-            self, strategy, mock_position, mock_market_data):
+        self, strategy, mock_position, mock_market_data
+    ):
         """Test trend reversal exit for buy position."""
         # Add data for calculations
         for i in range(60):
             strategy.price_history.append(50000 + i * 5)
 
         # Set conditions for trend reversal (fast MA < slow MA and RSI < 50)
-        with patch.object(strategy, '_calculate_fast_ma', return_value=49500):
-            with patch.object(strategy, '_calculate_slow_ma', return_value=50000):
-                with patch.object(strategy, '_calculate_rsi', return_value=40):
-                    result = strategy.should_exit(
-                        mock_position, mock_market_data)
+        with patch.object(strategy, "_calculate_fast_ma", return_value=49500):
+            with patch.object(strategy, "_calculate_slow_ma", return_value=50000):
+                with patch.object(strategy, "_calculate_rsi", return_value=40):
+                    result = strategy.should_exit(mock_position, mock_market_data)
                     assert result is True
 
-    def test_should_exit_trend_reversal_sell_position(
-            self, strategy, mock_market_data):
+    def test_should_exit_trend_reversal_sell_position(self, strategy, mock_market_data):
         """Test trend reversal exit for sell position."""
         # Create sell position
         sell_position = Position(
@@ -789,7 +769,7 @@ class TestTrendFollowingStrategy:
             current_price=Decimal("49000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.SELL,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Add data for calculations
@@ -797,26 +777,23 @@ class TestTrendFollowingStrategy:
             strategy.price_history.append(50000 + i * 5)
 
         # Set conditions for trend reversal (fast MA > slow MA and RSI > 50)
-        with patch.object(strategy, '_calculate_fast_ma', return_value=50500):
-            with patch.object(strategy, '_calculate_slow_ma', return_value=50000):
-                with patch.object(strategy, '_calculate_rsi', return_value=60):
-                    result = strategy.should_exit(
-                        sell_position, mock_market_data)
+        with patch.object(strategy, "_calculate_fast_ma", return_value=50500):
+            with patch.object(strategy, "_calculate_slow_ma", return_value=50000):
+                with patch.object(strategy, "_calculate_rsi", return_value=60):
+                    result = strategy.should_exit(sell_position, mock_market_data)
                     assert result is True
 
-    def test_should_exit_no_exit_condition(
-            self, strategy, mock_position, mock_market_data):
+    def test_should_exit_no_exit_condition(self, strategy, mock_position, mock_market_data):
         """Test when no exit condition is met."""
         # Add data for calculations
         for i in range(60):
             strategy.price_history.append(50000 + i * 10)
 
         # Set conditions that don't trigger exit
-        with patch.object(strategy, '_calculate_fast_ma', return_value=50500):
-            with patch.object(strategy, '_calculate_slow_ma', return_value=50000):
-                with patch.object(strategy, '_calculate_rsi', return_value=60):
-                    result = strategy.should_exit(
-                        mock_position, mock_market_data)
+        with patch.object(strategy, "_calculate_fast_ma", return_value=50500):
+            with patch.object(strategy, "_calculate_slow_ma", return_value=50000):
+                with patch.object(strategy, "_calculate_rsi", return_value=60):
+                    result = strategy.should_exit(mock_position, mock_market_data)
                     assert result is False
 
     def test_should_exit_exception_handling(self, strategy, mock_position):
@@ -826,7 +803,7 @@ class TestTrendFollowingStrategy:
             symbol="BTCUSDT",
             price=Decimal("50000"),
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Corrupt price history
@@ -881,8 +858,8 @@ class TestTrendFollowingStrategy:
                 "min_volume_ratio": 2.0,  # Different from default
                 "max_pyramid_levels": 5,  # Different from default
                 "trailing_stop_pct": 0.03,  # Different from default
-                "time_exit_hours": 24  # Different from default
-            }
+                "time_exit_hours": 24,  # Different from default
+            },
         }
 
         strategy = TrendFollowingStrategy(config)
@@ -898,8 +875,7 @@ class TestTrendFollowingStrategy:
         assert strategy.trailing_stop_pct == 0.03
         assert strategy.time_exit_hours == 24
 
-    def test_volume_confirmation_debug_logging(
-            self, strategy, mock_market_data):
+    def test_volume_confirmation_debug_logging(self, strategy, mock_market_data):
         """Test volume confirmation debug logging."""
         # Enable volume confirmation
         strategy.volume_confirmation = True
@@ -919,8 +895,7 @@ class TestTrendFollowingStrategy:
         signals = asyncio.run(strategy.generate_signals(mock_market_data))
         assert len(signals) == 0  # Should be rejected by volume confirmation
 
-    def test_generate_signals_insufficient_ma_data(
-            self, strategy, mock_market_data):
+    def test_generate_signals_insufficient_ma_data(self, strategy, mock_market_data):
         """Test signal generation when MA data is insufficient."""
         # Add some data but not enough for MA calculation
         for i in range(10):  # Less than fast_ma (20)
@@ -929,8 +904,7 @@ class TestTrendFollowingStrategy:
         signals = asyncio.run(strategy.generate_signals(mock_market_data))
         assert len(signals) == 0
 
-    def test_generate_signals_insufficient_rsi_data(
-            self, strategy, mock_market_data):
+    def test_generate_signals_insufficient_rsi_data(self, strategy, mock_market_data):
         """Test signal generation when RSI data is insufficient."""
         # Add data for MA but not enough for RSI
         for i in range(25):  # Enough for MA but not RSI
@@ -939,8 +913,7 @@ class TestTrendFollowingStrategy:
         signals = asyncio.run(strategy.generate_signals(mock_market_data))
         assert len(signals) == 0
 
-    def test_generate_signals_trend_reversal_exit_bullish(
-            self, strategy, mock_market_data):
+    def test_generate_signals_trend_reversal_exit_bullish(self, strategy, mock_market_data):
         """Test exit signal generation for trend reversal (bullish to bearish)."""
         # Disable volume confirmation for this test
         strategy.volume_confirmation = False
@@ -954,16 +927,15 @@ class TestTrendFollowingStrategy:
         print(f"Generated signals: {len(signals)}")
         for signal in signals:
             print(
-                f"Signal: {
-                    signal.direction}, confidence: {
-                    signal.confidence}, metadata: {
-                    signal.metadata}")
+                f"Signal: {signal.direction}, confidence: {signal.confidence}, metadata: {
+                    signal.metadata
+                }"
+            )
 
         # Just test that the method runs without errors
         assert isinstance(signals, list)
 
-    def test_generate_signals_trend_reversal_exit_bearish(
-            self, strategy, mock_market_data):
+    def test_generate_signals_trend_reversal_exit_bearish(self, strategy, mock_market_data):
         """Test exit signal generation for trend reversal (bearish to bullish)."""
         # Disable volume confirmation for this test
         strategy.volume_confirmation = False
@@ -977,10 +949,10 @@ class TestTrendFollowingStrategy:
         print(f"Generated signals: {len(signals)}")
         for signal in signals:
             print(
-                f"Signal: {
-                    signal.direction}, confidence: {
-                    signal.confidence}, metadata: {
-                    signal.metadata}")
+                f"Signal: {signal.direction}, confidence: {signal.confidence}, metadata: {
+                    signal.metadata
+                }"
+            )
 
         # Just test that the method runs without errors
         assert isinstance(signals, list)
@@ -990,8 +962,7 @@ class TestTrendFollowingStrategy:
         signal = Signal(
             direction=SignalDirection.BUY,
             confidence=0.8,
-            timestamp=datetime.now(
-                timezone.utc),
+            timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
             metadata={
@@ -999,7 +970,9 @@ class TestTrendFollowingStrategy:
                 "signal_type": "trend_entry",
                 "fast_ma": 50.0,
                 "slow_ma": 45.0,
-                "trend_direction": "up"})
+                "trend_direction": "up",
+            },
+        )
 
         # Add data for validation
         for i in range(25):
@@ -1013,15 +986,16 @@ class TestTrendFollowingStrategy:
         signal = Signal(
             direction=SignalDirection.BUY,
             confidence=0.8,
-            timestamp=datetime.now(
-                timezone.utc),
+            timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
             metadata={
                 "fast_ma": "invalid",
                 "signal_type": "trend_entry",
                 "rsi": 60.0,
-                "trend_direction": "up"})
+                "trend_direction": "up",
+            },
+        )
 
         # Add data for validation
         for i in range(25):
@@ -1043,7 +1017,8 @@ class TestTrendFollowingStrategy:
                 "signal_type": "trend_entry",
                 "fast_ma": 50.0,
                 "slow_ma": 45.0,
-                "trend_direction": "up"}  # Exactly at threshold
+                "trend_direction": "up",
+            },  # Exactly at threshold
         )
 
         # Add data for validation
@@ -1064,7 +1039,7 @@ class TestTrendFollowingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={"rsi": 60.0, "signal_type": "trend_entry"}
+            metadata={"rsi": 60.0, "signal_type": "trend_entry"},
         )
 
         position_size = strategy.get_position_size(signal)
@@ -1074,8 +1049,7 @@ class TestTrendFollowingStrategy:
     def test_should_exit_by_time_edge_case(self, strategy, mock_position):
         """Test time-based exit with position exactly at time limit."""
         # Create a position that is exactly at the time limit
-        old_timestamp = datetime.now(
-            timezone.utc) - timedelta(hours=strategy.time_exit_hours)
+        old_timestamp = datetime.now(timezone.utc) - timedelta(hours=strategy.time_exit_hours)
         old_position = Position(
             symbol="BTCUSDT",
             quantity=Decimal("0.1"),
@@ -1083,14 +1057,15 @@ class TestTrendFollowingStrategy:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=old_timestamp
+            timestamp=old_timestamp,
         )
 
         result = strategy._should_exit_by_time(old_position)
         assert result is True  # Should exit when exactly at time limit
 
     def test_should_exit_by_trailing_stop_edge_case(
-            self, strategy, mock_position, mock_market_data):
+        self, strategy, mock_position, mock_market_data
+    ):
         """Test trailing stop exit with price exactly at trailing stop."""
         # Set price to exactly at trailing stop level
         entry_price = float(mock_position.entry_price)
@@ -1099,12 +1074,10 @@ class TestTrendFollowingStrategy:
 
         mock_market_data.price = Decimal(str(exact_stop_price))
 
-        result = strategy._should_exit_by_trailing_stop(
-            mock_position, mock_market_data)
+        result = strategy._should_exit_by_trailing_stop(mock_position, mock_market_data)
         assert result is True  # Should exit when exactly at trailing stop
 
-    def test_should_exit_by_trailing_stop_sell_position_edge_case(
-            self, strategy, mock_market_data):
+    def test_should_exit_by_trailing_stop_sell_position_edge_case(self, strategy, mock_market_data):
         """Test trailing stop exit for sell position with price exactly at trailing stop."""
         # Create a sell position
         sell_position = Position(
@@ -1114,7 +1087,7 @@ class TestTrendFollowingStrategy:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.SELL,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Set price to exactly at trailing stop level for sell position
@@ -1124,6 +1097,5 @@ class TestTrendFollowingStrategy:
 
         mock_market_data.price = Decimal(str(exact_stop_price))
 
-        result = strategy._should_exit_by_trailing_stop(
-            sell_position, mock_market_data)
+        result = strategy._should_exit_by_trailing_stop(sell_position, mock_market_data)
         assert result is True  # Should exit when exactly at trailing stop

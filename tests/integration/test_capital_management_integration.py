@@ -5,23 +5,23 @@ This module tests the complete capital management workflow including all compone
 working together in realistic scenarios.
 """
 
-import pytest
-import asyncio
 from decimal import Decimal
-from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock, Mock
+from unittest.mock import Mock
 
-from src.core.types import (
-    CapitalAllocation, ExchangeAllocation, CurrencyExposure, FundFlow,
-    AllocationStrategy, CapitalMetrics, WithdrawalRule
-)
-from src.core.exceptions import (
-    CapitalManagementError, ValidationError, InsufficientCapitalError,
-    WithdrawalError
-)
-from src.core.config import Config, CapitalManagementConfig
+import pytest
+
 from src.capital_management import (
-    CapitalAllocator, ExchangeDistributor, CurrencyManager, FundFlowManager
+    CapitalAllocator,
+    CurrencyManager,
+    ExchangeDistributor,
+    FundFlowManager,
+)
+from src.core.config import CapitalManagementConfig, Config
+from src.core.exceptions import (
+    ValidationError,
+)
+from src.core.types import (
+    AllocationStrategy,
 )
 
 
@@ -42,11 +42,7 @@ class TestCapitalManagementIntegration:
                 max_allocation_pct=0.4,
                 max_exchange_allocation_pct=0.4,
                 min_exchange_balance=1000.0,
-                exchange_allocation_weights={
-                    "binance": 0.4,
-                    "okx": 0.35,
-                    "coinbase": 0.25
-                },
+                exchange_allocation_weights={"binance": 0.4, "okx": 0.35, "coinbase": 0.25},
                 supported_currencies=["USDT", "BTC", "ETH", "USD"],
                 hedging_enabled=True,
                 hedging_threshold=0.2,
@@ -69,23 +65,23 @@ class TestCapitalManagementIntegration:
                         "description": "Emergency withdrawal rule",
                         "enabled": True,
                         "max_percentage": 0.5,
-                        "cooldown_hours": 0
+                        "cooldown_hours": 0,
                     },
                     "regular": {
                         "name": "regular",
                         "description": "Regular withdrawal rule",
                         "enabled": True,
                         "max_percentage": 0.2,
-                        "cooldown_hours": 24
+                        "cooldown_hours": 24,
                     },
                     "profit_only": {
                         "name": "profit_only",
                         "description": "Profit-only withdrawal rule",
                         "enabled": False,
                         "threshold": 0.1,
-                        "cooldown_hours": 0
-                    }
-                }
+                        "cooldown_hours": 0,
+                    },
+                },
             )
         )
         return config
@@ -98,21 +94,13 @@ class TestCapitalManagementIntegration:
     @pytest.fixture
     def exchange_distributor(self, config):
         """Create exchange distributor instance."""
-        mock_exchanges = {
-            "binance": Mock(),
-            "okx": Mock(),
-            "coinbase": Mock()
-        }
+        mock_exchanges = {"binance": Mock(), "okx": Mock(), "coinbase": Mock()}
         return ExchangeDistributor(config, mock_exchanges)
 
     @pytest.fixture
     def currency_manager(self, config):
         """Create currency manager instance."""
-        mock_exchanges = {
-            "binance": Mock(),
-            "okx": Mock(),
-            "coinbase": Mock()
-        }
+        mock_exchanges = {"binance": Mock(), "okx": Mock(), "coinbase": Mock()}
         return CurrencyManager(config, mock_exchanges)
 
     @pytest.fixture
@@ -122,11 +110,8 @@ class TestCapitalManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_complete_capital_management_workflow(
-            self,
-            capital_allocator,
-            exchange_distributor,
-            currency_manager,
-            fund_flow_manager):
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test complete capital management workflow."""
         # Step 1: Initial capital allocation
         await capital_allocator.allocate_capital("strategy_1", "binance", Decimal("20000"))
@@ -139,11 +124,7 @@ class TestCapitalManagementIntegration:
 
         # Step 3: Currency exposure management
         balances = {
-            "binance": {
-                "USDT": Decimal("30000"),
-                "BTC": Decimal("10000"),
-                "ETH": Decimal("5000")
-            }
+            "binance": {"USDT": Decimal("30000"), "BTC": Decimal("10000"), "ETH": Decimal("5000")}
         }
         await currency_manager.update_currency_exposures(balances)
 
@@ -162,7 +143,9 @@ class TestCapitalManagementIntegration:
         await exchange_distributor.rebalance_exchanges()
 
         # Step 7: Currency conversion
-        await currency_manager.execute_currency_conversion("USDT", "BTC", Decimal("10000"), "binance")
+        await currency_manager.execute_currency_conversion(
+            "USDT", "BTC", Decimal("10000"), "binance"
+        )
 
         # Step 8: Auto-compounding
         await fund_flow_manager.process_auto_compound()
@@ -184,11 +167,8 @@ class TestCapitalManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_capital_management_with_large_portfolio(
-            self,
-            capital_allocator,
-            exchange_distributor,
-            currency_manager,
-            fund_flow_manager):
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management with large portfolio."""
         # Setup large portfolio
         total_capital = Decimal("1000000")
@@ -207,7 +187,7 @@ class TestCapitalManagementIntegration:
             "binance": {
                 "USDT": Decimal("300000"),
                 "BTC": Decimal("100000"),
-                "ETH": Decimal("50000")
+                "ETH": Decimal("50000"),
             }
         }
         await currency_manager.update_currency_exposures(balances)
@@ -228,11 +208,8 @@ class TestCapitalManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_capital_management_with_high_volatility(
-            self,
-            capital_allocator,
-            exchange_distributor,
-            currency_manager,
-            fund_flow_manager):
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management with high volatility scenarios."""
         # Setup allocations
         await capital_allocator.allocate_capital("strategy_1", "binance", Decimal("20000"))
@@ -243,12 +220,7 @@ class TestCapitalManagementIntegration:
         await fund_flow_manager.update_performance("strategy_2", Decimal("-2000"))
 
         # Update currency exposures with high volatility
-        balances = {
-            "binance": {
-                "BTC": Decimal("25000"),
-                "ETH": Decimal("15000")
-            }
-        }
+        balances = {"binance": {"BTC": Decimal("25000"), "ETH": Decimal("15000")}}
         await currency_manager.update_currency_exposures(balances)
 
         # Check hedging requirements
@@ -265,11 +237,8 @@ class TestCapitalManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_capital_management_with_multiple_strategies(
-            self,
-            capital_allocator,
-            exchange_distributor,
-            currency_manager,
-            fund_flow_manager):
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management with multiple strategies."""
         strategies = ["strategy_1", "strategy_2", "strategy_3", "strategy_4"]
         exchanges = ["binance", "okx", "coinbase"]
@@ -302,7 +271,9 @@ class TestCapitalManagementIntegration:
         for i, strategy in enumerate(strategies):
             pnl = Decimal("500") + (Decimal("100") * i)
             await fund_flow_manager.update_performance(strategy, pnl)
-            await capital_allocator.update_utilization(strategy, exchanges[i % len(exchanges)], Decimal("0.7"))
+            await capital_allocator.update_utilization(
+                strategy, exchanges[i % len(exchanges)], Decimal("0.7")
+            )
 
         # Verify multi-strategy handling
         capital_metrics = await capital_allocator.get_capital_metrics()
@@ -319,11 +290,8 @@ class TestCapitalManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_capital_management_parameter_validation(
-            self,
-            capital_allocator,
-            exchange_distributor,
-            currency_manager,
-            fund_flow_manager):
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management parameter validation."""
         # Test invalid capital allocation
         with pytest.raises(ValidationError):
@@ -346,17 +314,18 @@ class TestCapitalManagementIntegration:
             await fund_flow_manager.process_deposit(Decimal("500"), "USDT", "binance")
 
     @pytest.mark.asyncio
-    async def test_capital_management_error_handling(self, capital_allocator,
-                                                     exchange_distributor,
-                                                     currency_manager,
-                                                     fund_flow_manager):
+    async def test_capital_management_error_handling(
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management error handling."""
         # Set total capital to enable validation
         await fund_flow_manager.update_total_capital(Decimal("100000"))
 
         # Test withdrawal with insufficient funds
         with pytest.raises(ValidationError):
-            await fund_flow_manager.process_withdrawal(Decimal("25000"), "USDT", "binance", "regular")
+            await fund_flow_manager.process_withdrawal(
+                Decimal("25000"), "USDT", "binance", "regular"
+            )
 
         # Test reallocation exceeding limits
         with pytest.raises(ValidationError):
@@ -366,25 +335,25 @@ class TestCapitalManagementIntegration:
 
         # Test currency conversion with invalid rate
         with pytest.raises(ValidationError):
-            await currency_manager.execute_currency_conversion("USDT", "BTC", Decimal("10000"), "binance")
+            await currency_manager.execute_currency_conversion(
+                "USDT", "BTC", Decimal("10000"), "binance"
+            )
 
         # Test allocation with invalid strategy
         with pytest.raises(ValidationError):
             await capital_allocator.allocate_capital("", "binance", Decimal("10000"))
 
     @pytest.mark.asyncio
-    async def test_capital_management_performance(self, capital_allocator,
-                                                  exchange_distributor,
-                                                  currency_manager,
-                                                  fund_flow_manager):
+    async def test_capital_management_performance(
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management performance under load."""
         import time
 
         start_time = time.time()
 
         # Perform many operations quickly
-        for i in range(
-                10):  # Reduced from 100 to avoid exceeding capital limits
+        for i in range(10):  # Reduced from 100 to avoid exceeding capital limits
             strategy = f"strategy_{i % 10}"
             exchange = ["binance", "okx", "coinbase"][i % 3]
             amount = Decimal("1000") + (Decimal("100") * i)
@@ -412,10 +381,9 @@ class TestCapitalManagementIntegration:
         assert len(currency_metrics) > 0  # Check that we have currency metrics
 
     @pytest.mark.asyncio
-    async def test_capital_management_edge_cases(self, capital_allocator,
-                                                 exchange_distributor,
-                                                 currency_manager,
-                                                 fund_flow_manager):
+    async def test_capital_management_edge_cases(
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management edge cases."""
         # Test minimum amounts
         await capital_allocator.allocate_capital("strategy_1", "binance", Decimal("1000"))
@@ -438,20 +406,13 @@ class TestCapitalManagementIntegration:
 
         # Test empty strings (should fail)
         with pytest.raises(ValidationError):
-            balances = {
-                "": {
-                    "total": Decimal("1000"),
-                    "available": Decimal("1000")}}
+            balances = {"": {"total": Decimal("1000"), "available": Decimal("1000")}}
             await currency_manager.update_currency_exposures(balances)
 
     @pytest.mark.asyncio
     async def test_capital_management_configuration_changes(
-            self,
-            capital_allocator,
-            exchange_distributor,
-            currency_manager,
-            fund_flow_manager,
-            config):
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager, config
+    ):
         """Test capital management with configuration changes."""
         # Initial setup
         await capital_allocator.allocate_capital("strategy_1", "binance", Decimal("20000"))
@@ -474,7 +435,9 @@ class TestCapitalManagementIntegration:
 
         with pytest.raises(ValidationError):
             # 16% > 15%
-            await fund_flow_manager.process_withdrawal(Decimal("16000"), "USDT", "binance", "regular")
+            await fund_flow_manager.process_withdrawal(
+                Decimal("16000"), "USDT", "binance", "regular"
+            )
 
         # Test hedging with new threshold
         # 18% > 15% threshold
@@ -486,11 +449,8 @@ class TestCapitalManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_capital_management_real_time_updates(
-            self,
-            capital_allocator,
-            exchange_distributor,
-            currency_manager,
-            fund_flow_manager):
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management real-time updates."""
         # Initial state
         await capital_allocator.allocate_capital("strategy_1", "binance", Decimal("20000"))
@@ -517,13 +477,13 @@ class TestCapitalManagementIntegration:
         # Verify updates
         assert updated_capital_metrics.utilization_rate != initial_capital_metrics.utilization_rate
         assert len(updated_currency_metrics) >= len(
-            initial_currency_metrics)  # Should have same or more currencies
+            initial_currency_metrics
+        )  # Should have same or more currencies
 
     @pytest.mark.asyncio
-    async def test_capital_management_data_consistency(self, capital_allocator,
-                                                       exchange_distributor,
-                                                       currency_manager,
-                                                       fund_flow_manager):
+    async def test_capital_management_data_consistency(
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management data consistency."""
         # Setup consistent data
         total_capital = Decimal("100000")
@@ -562,11 +522,8 @@ class TestCapitalManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_capital_management_integration_with_risk_management(
-            self,
-            capital_allocator,
-            exchange_distributor,
-            currency_manager,
-            fund_flow_manager):
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test capital management integration with risk management."""
         from src.risk_management.position_sizing import PositionSizer
 
@@ -598,11 +555,8 @@ class TestCapitalManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_capital_management_comprehensive_reporting(
-            self,
-            capital_allocator,
-            exchange_distributor,
-            currency_manager,
-            fund_flow_manager):
+        self, capital_allocator, exchange_distributor, currency_manager, fund_flow_manager
+    ):
         """Test comprehensive reporting across all capital management components."""
         # Setup comprehensive data
         strategies = ["strategy_1", "strategy_2", "strategy_3"]
@@ -630,7 +584,9 @@ class TestCapitalManagementIntegration:
             exchange = exchanges[i % len(exchanges)]
             amount = Decimal("2000") + (Decimal("1000") * i)
             await fund_flow_manager.process_deposit(amount, "USDT", exchange)
-            await fund_flow_manager.update_performance(strategy, {"pnl": float(Decimal("500") + (Decimal("100") * i))})
+            await fund_flow_manager.update_performance(
+                strategy, {"pnl": float(Decimal("500") + (Decimal("100") * i))}
+            )
 
         # Generate comprehensive reports
         capital_report = await capital_allocator.get_allocation_summary()

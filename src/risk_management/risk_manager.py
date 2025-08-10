@@ -9,38 +9,35 @@ CRITICAL: This integrates with P-001 (types, exceptions, config),
 P-002A (error handling), and P-007A (utils) components.
 """
 
-from typing import List, Optional, Dict, Any, Tuple
+from datetime import datetime
 from decimal import Decimal
-from datetime import datetime, timedelta
+from typing import Any
+
+from src.core.config import Config
+from src.core.exceptions import PositionLimitError, RiskManagementError, ValidationError
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import (
-    Position, MarketData, Signal, OrderRequest, OrderResponse,
-    RiskMetrics, PositionLimits, RiskLevel, PositionSizeMethod
+    MarketData,
+    OrderRequest,
+    Position,
+    PositionLimits,
+    PositionSizeMethod,
+    RiskLevel,
+    RiskMetrics,
+    Signal,
 )
-from src.core.exceptions import (
-    RiskManagementError, PositionLimitError, DrawdownLimitError,
-    ValidationError
-)
-from src.core.config import Config
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import RecoveryScenario
-
 # MANDATORY: Import from P-007A
-from src.utils.decorators import time_execution, retry, circuit_breaker
-from src.utils.validators import validate_price, validate_quantity, validate_position_limits
-from src.utils.formatters import format_percentage, format_currency
+from src.utils.decorators import time_execution
 
 # MANDATORY: Import from P-003+
-from src.exchanges.base import BaseExchange
-
 # Import risk management components
 from .base import BaseRiskManager
-from .position_sizing import PositionSizer
 from .portfolio_limits import PortfolioLimits
+from .position_sizing import PositionSizer
 from .risk_metrics import RiskCalculator
 
 logger = get_logger(__name__)
@@ -76,14 +73,13 @@ class RiskManager(BaseRiskManager):
             max_portfolio_exposure=Decimal(str(config.risk.max_portfolio_exposure)),
             max_sector_exposure=Decimal(str(config.risk.max_sector_exposure)),
             max_correlation_exposure=Decimal(str(config.risk.max_correlation_exposure)),
-            max_leverage=Decimal(str(config.risk.max_leverage))
+            max_leverage=Decimal(str(config.risk.max_leverage)),
         )
 
         self.logger.info("Risk manager initialized with all components")
 
     @time_execution
-    async def calculate_position_size(self, signal: Signal,
-                                      portfolio_value: Decimal) -> Decimal:
+    async def calculate_position_size(self, signal: Signal, portfolio_value: Decimal) -> Decimal:
         """
         Calculate optimal position size for a trading signal.
 
@@ -104,8 +100,7 @@ class RiskManager(BaseRiskManager):
                 raise ValidationError("Invalid signal for position sizing")
 
             if portfolio_value <= 0:
-                raise ValidationError(
-                    "Invalid portfolio value for position sizing")
+                raise ValidationError("Invalid portfolio value for position sizing")
 
             # Calculate position size using position sizer
             position_size = await self.position_sizer.calculate_position_size(
@@ -116,18 +111,22 @@ class RiskManager(BaseRiskManager):
             if not await self.position_sizer.validate_position_size(position_size, portfolio_value):
                 raise PositionLimitError("Position size exceeds limits")
 
-            self.logger.info("Position size calculated",
-                             symbol=signal.symbol,
-                             confidence=signal.confidence,
-                             portfolio_value=float(portfolio_value),
-                             position_size=float(position_size))
+            self.logger.info(
+                "Position size calculated",
+                symbol=signal.symbol,
+                confidence=signal.confidence,
+                portfolio_value=float(portfolio_value),
+                position_size=float(position_size),
+            )
 
             return position_size
 
         except Exception as e:
-            self.logger.error("Position size calculation failed",
-                              error=str(e),
-                              signal_symbol=signal.symbol if signal else None)
+            self.logger.error(
+                "Position size calculation failed",
+                error=str(e),
+                signal_symbol=signal.symbol if signal else None,
+            )
             raise RiskManagementError(f"Position size calculation failed: {e}")
 
     @time_execution
@@ -158,27 +157,32 @@ class RiskManager(BaseRiskManager):
             # Check minimum confidence threshold
             min_confidence = 0.6  # Can be made configurable
             if signal.confidence < min_confidence:
-                self.logger.warning("Signal confidence below threshold",
-                                    confidence=signal.confidence,
-                                    threshold=min_confidence)
+                self.logger.warning(
+                    "Signal confidence below threshold",
+                    confidence=signal.confidence,
+                    threshold=min_confidence,
+                )
                 return False
 
-            self.logger.info("Signal validation passed",
-                             symbol=signal.symbol,
-                             direction=signal.direction.value,
-                             confidence=signal.confidence)
+            self.logger.info(
+                "Signal validation passed",
+                symbol=signal.symbol,
+                direction=signal.direction.value,
+                confidence=signal.confidence,
+            )
 
             return True
 
         except Exception as e:
-            self.logger.error("Signal validation failed",
-                              error=str(e),
-                              signal_symbol=signal.symbol if signal else None)
+            self.logger.error(
+                "Signal validation failed",
+                error=str(e),
+                signal_symbol=signal.symbol if signal else None,
+            )
             raise ValidationError(f"Signal validation failed: {e}")
 
     @time_execution
-    async def validate_order(self, order: OrderRequest,
-                             portfolio_value: Decimal) -> bool:
+    async def validate_order(self, order: OrderRequest, portfolio_value: Decimal) -> bool:
         """
         Validate an order request against risk limits.
 
@@ -206,55 +210,59 @@ class RiskManager(BaseRiskManager):
 
             # Check position size limits
             order_value = order.quantity * (order.price or Decimal("0"))
-            max_position_size = portfolio_value * \
-                Decimal(str(self.risk_config.max_position_size_pct))
+            max_position_size = portfolio_value * Decimal(
+                str(self.risk_config.max_position_size_pct)
+            )
 
             if order_value > max_position_size:
-                await self._log_risk_violation("order_size_limit", {
-                    "order_value": float(order_value),
-                    "max_position_size": float(max_position_size),
-                    "symbol": order.symbol
-                })
-                raise PositionLimitError(
-                    "Order size exceeds maximum position limit")
+                await self._log_risk_violation(
+                    "order_size_limit",
+                    {
+                        "order_value": float(order_value),
+                        "max_position_size": float(max_position_size),
+                        "symbol": order.symbol,
+                    },
+                )
+                raise PositionLimitError("Order size exceeds maximum position limit")
 
             # Check portfolio exposure limit
-            current_exposure = sum(
-                abs(pos.quantity * pos.current_price)
-                for pos in self.positions
-            )
+            current_exposure = sum(abs(pos.quantity * pos.current_price) for pos in self.positions)
             total_exposure = current_exposure + order_value
-            max_exposure = portfolio_value * \
-                Decimal(str(self.risk_config.max_portfolio_exposure))
+            max_exposure = portfolio_value * Decimal(str(self.risk_config.max_portfolio_exposure))
 
             if total_exposure > max_exposure:
-                await self._log_risk_violation("portfolio_exposure_limit", {
-                    "current_exposure": float(current_exposure),
-                    "order_value": float(order_value),
-                    "total_exposure": float(total_exposure),
-                    "max_exposure": float(max_exposure)
-                })
-                raise PositionLimitError(
-                    "Order would exceed portfolio exposure limit")
+                await self._log_risk_violation(
+                    "portfolio_exposure_limit",
+                    {
+                        "current_exposure": float(current_exposure),
+                        "order_value": float(order_value),
+                        "total_exposure": float(total_exposure),
+                        "max_exposure": float(max_exposure),
+                    },
+                )
+                raise PositionLimitError("Order would exceed portfolio exposure limit")
 
-            self.logger.info("Order validation passed",
-                             symbol=order.symbol,
-                             quantity=float(order.quantity),
-                             order_value=float(order_value))
+            self.logger.info(
+                "Order validation passed",
+                symbol=order.symbol,
+                quantity=float(order.quantity),
+                order_value=float(order_value),
+            )
 
             return True
 
         except Exception as e:
-            self.logger.error("Order validation failed",
-                              error=str(e),
-                              order_symbol=order.symbol if order else None)
+            self.logger.error(
+                "Order validation failed",
+                error=str(e),
+                order_symbol=order.symbol if order else None,
+            )
             raise ValidationError(f"Order validation failed: {e}")
 
     @time_execution
     async def calculate_risk_metrics(
-            self,
-            positions: List[Position],
-            market_data: List[MarketData]) -> RiskMetrics:
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> RiskMetrics:
         """
         Calculate comprehensive risk metrics for the portfolio.
 
@@ -270,9 +278,7 @@ class RiskManager(BaseRiskManager):
         """
         try:
             # Calculate risk metrics using risk calculator
-            risk_metrics = await self.risk_calculator.calculate_risk_metrics(
-                positions, market_data
-            )
+            risk_metrics = await self.risk_calculator.calculate_risk_metrics(positions, market_data)
 
             # Update internal state
             self.risk_metrics = risk_metrics
@@ -283,10 +289,12 @@ class RiskManager(BaseRiskManager):
             if risk_metrics.risk_level == RiskLevel.CRITICAL:
                 await self.emergency_stop("Critical risk level detected")
 
-            self.logger.info("Risk metrics calculated",
-                             var_1d=float(risk_metrics.var_1d),
-                             current_drawdown=float(risk_metrics.current_drawdown),
-                             risk_level=risk_metrics.risk_level.value)
+            self.logger.info(
+                "Risk metrics calculated",
+                var_1d=float(risk_metrics.var_1d),
+                current_drawdown=float(risk_metrics.current_drawdown),
+                risk_level=risk_metrics.risk_level.value,
+            )
 
             return risk_metrics
 
@@ -318,13 +326,15 @@ class RiskManager(BaseRiskManager):
             return await self.portfolio_limits.check_portfolio_limits(new_position)
 
         except Exception as e:
-            self.logger.error("Portfolio limits check failed", error=str(
-                e), symbol=new_position.symbol if new_position else None)
+            self.logger.error(
+                "Portfolio limits check failed",
+                error=str(e),
+                symbol=new_position.symbol if new_position else None,
+            )
             raise PositionLimitError(f"Portfolio limits check failed: {e}")
 
     @time_execution
-    async def should_exit_position(self, position: Position,
-                                   market_data: MarketData) -> bool:
+    async def should_exit_position(self, position: Position, market_data: MarketData) -> bool:
         """
         Determine if a position should be closed based on risk criteria.
 
@@ -339,51 +349,56 @@ class RiskManager(BaseRiskManager):
             # Update position with current market data
             if position.symbol == market_data.symbol:
                 position.current_price = market_data.price
-                position.unrealized_pnl = (
-                    position.quantity * (market_data.price - position.entry_price)
+                position.unrealized_pnl = position.quantity * (
+                    market_data.price - position.entry_price
                 )
 
             # Check stop loss
             stop_loss_pct = self.risk_config.max_daily_loss_pct
             if position.unrealized_pnl < 0:
-                loss_pct = abs(position.unrealized_pnl) / \
-                    (position.quantity * position.entry_price)
+                loss_pct = abs(position.unrealized_pnl) / (position.quantity * position.entry_price)
                 if loss_pct >= stop_loss_pct:
-                    self.logger.warning("Position hit stop loss",
-                                        symbol=position.symbol,
-                                        loss_pct=float(loss_pct),
-                                        stop_loss_pct=stop_loss_pct)
+                    self.logger.warning(
+                        "Position hit stop loss",
+                        symbol=position.symbol,
+                        loss_pct=float(loss_pct),
+                        stop_loss_pct=stop_loss_pct,
+                    )
                     return True
 
             # Check drawdown limit
             if self.risk_metrics and self.risk_metrics.current_drawdown > Decimal(
-                    str(self.risk_config.max_drawdown_pct)):
+                str(self.risk_config.max_drawdown_pct)
+            ):
                 self.logger.warning(
                     "Position exit due to drawdown limit",
                     symbol=position.symbol,
-                    current_drawdown=float(
-                        self.risk_metrics.current_drawdown),
-                    max_drawdown=self.risk_config.max_drawdown_pct)
+                    current_drawdown=float(self.risk_metrics.current_drawdown),
+                    max_drawdown=self.risk_config.max_drawdown_pct,
+                )
                 return True
 
             # Check risk level
             if self.current_risk_level in [RiskLevel.HIGH, RiskLevel.CRITICAL]:
-                self.logger.warning("Position exit due to high risk level",
-                                    symbol=position.symbol,
-                                    risk_level=self.current_risk_level.value)
+                self.logger.warning(
+                    "Position exit due to high risk level",
+                    symbol=position.symbol,
+                    risk_level=self.current_risk_level.value,
+                )
                 return True
 
             return False
 
         except Exception as e:
-            self.logger.error("Position exit evaluation failed",
-                              error=str(e),
-                              symbol=position.symbol)
+            self.logger.error(
+                "Position exit evaluation failed", error=str(e), symbol=position.symbol
+            )
             return False
 
     @time_execution
-    async def update_portfolio_state(self, positions: List[Position],
-                                     portfolio_value: Decimal) -> None:
+    async def update_portfolio_state(
+        self, positions: list[Position], portfolio_value: Decimal
+    ) -> None:
         """
         Update portfolio state for all risk management components.
 
@@ -409,12 +424,14 @@ class RiskManager(BaseRiskManager):
                 position.symbol, float(position.current_price)
             )
 
-        self.logger.debug("Portfolio state updated across all components",
-                          position_count=len(positions),
-                          portfolio_value=float(portfolio_value))
+        self.logger.debug(
+            "Portfolio state updated across all components",
+            position_count=len(positions),
+            portfolio_value=float(portfolio_value),
+        )
 
     @time_execution
-    async def get_comprehensive_risk_summary(self) -> Dict[str, Any]:
+    async def get_comprehensive_risk_summary(self) -> dict[str, Any]:
         """
         Get comprehensive risk summary from all components.
 
@@ -439,7 +456,9 @@ class RiskManager(BaseRiskManager):
                     "max_total_positions": self.risk_config.max_total_positions,
                     "max_portfolio_exposure": self.risk_config.max_portfolio_exposure,
                     "max_drawdown_pct": self.risk_config.max_drawdown_pct,
-                    "var_confidence_level": self.risk_config.var_confidence_level}}
+                    "var_confidence_level": self.risk_config.var_confidence_level,
+                },
+            }
 
             return comprehensive_summary
 

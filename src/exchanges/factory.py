@@ -9,22 +9,17 @@ CRITICAL: This integrates with P-001 (core types, exceptions, config)
 and P-002A (error handling) components.
 """
 
-from typing import Dict, Optional, Type, List
-from datetime import datetime
+from src.core.config import Config
+from src.core.exceptions import ExchangeError, ValidationError
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import ExchangeInfo, ExchangeStatus
-from src.core.exceptions import ExchangeError, ValidationError
-from src.core.config import Config
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
 # MANDATORY: Import from P-007 (advanced rate limiting)
-from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
-from src.exchanges.connection_manager import ConnectionManager
-
 # Import base exchange interface
 from .base import BaseExchange
 
@@ -51,20 +46,17 @@ class ExchangeFactory:
         self.error_handler = ErrorHandler(config.error_handling)
 
         # Registry of supported exchanges
-        self._exchange_registry: Dict[str, Type[BaseExchange]] = {}
+        self._exchange_registry: dict[str, type[BaseExchange]] = {}
 
         # Active exchange instances
-        self._active_exchanges: Dict[str, BaseExchange] = {}
+        self._active_exchanges: dict[str, BaseExchange] = {}
 
         # Connection pool for each exchange
-        self._connection_pools: Dict[str, List[BaseExchange]] = {}
+        self._connection_pools: dict[str, list[BaseExchange]] = {}
 
         logger.info("Initialized exchange factory")
 
-    def register_exchange(
-            self,
-            exchange_name: str,
-            exchange_class: Type[BaseExchange]) -> None:
+    def register_exchange(self, exchange_name: str, exchange_class: type[BaseExchange]) -> None:
         """
         Register an exchange implementation.
 
@@ -73,13 +65,12 @@ class ExchangeFactory:
             exchange_class: Exchange class that inherits from BaseExchange
         """
         if not issubclass(exchange_class, BaseExchange):
-            raise ValidationError(
-                f"Exchange class must inherit from BaseExchange")
+            raise ValidationError("Exchange class must inherit from BaseExchange")
 
         self._exchange_registry[exchange_name] = exchange_class
         logger.info(f"Registered exchange: {exchange_name}")
 
-    def get_supported_exchanges(self) -> List[str]:
+    def get_supported_exchanges(self) -> list[str]:
         """
         Get list of supported exchanges.
 
@@ -116,8 +107,9 @@ class ExchangeFactory:
         """
         if not self.is_exchange_supported(exchange_name):
             raise ValidationError(
-                f"Exchange '{exchange_name}' is not supported. " f"Supported exchanges: {
-                    self.get_supported_exchanges()}")
+                f"Exchange '{exchange_name}' is not supported. "
+                f"Supported exchanges: {self.get_supported_exchanges()}"
+            )
 
         try:
             # Get the exchange class from registry
@@ -132,21 +124,17 @@ class ExchangeFactory:
                 raise ExchangeError(f"Failed to connect to {exchange_name}")
 
             # TODO: Remove in production
-            logger.debug(
-                f"Exchange {exchange_name} created with P-007 components")
+            logger.debug(f"Exchange {exchange_name} created with P-007 components")
             logger.info(f"Created and connected to {exchange_name}")
             return exchange
 
         except Exception as e:
-            logger.error(
-                f"Failed to create exchange {exchange_name}: {
-                    str(e)}")
-            raise ExchangeError(f"Exchange creation failed: {str(e)}")
+            logger.error(f"Failed to create exchange {exchange_name}: {e!s}")
+            raise ExchangeError(f"Exchange creation failed: {e!s}")
 
     async def get_exchange(
-            self,
-            exchange_name: str,
-            create_if_missing: bool = True) -> Optional[BaseExchange]:
+        self, exchange_name: str, create_if_missing: bool = True
+    ) -> BaseExchange | None:
         """
         Get an existing exchange instance or create a new one.
 
@@ -166,7 +154,8 @@ class ExchangeFactory:
                 return exchange
             else:
                 logger.warning(
-                    f"Exchange {exchange_name} failed health check, removing from active pool")
+                    f"Exchange {exchange_name} failed health check, removing from active pool"
+                )
                 await self.remove_exchange(exchange_name)
 
         # Create new instance if requested
@@ -176,8 +165,7 @@ class ExchangeFactory:
                 self._active_exchanges[exchange_name] = exchange
                 return exchange
             except Exception as e:
-                logger.error(
-                    f"Failed to get/create exchange {exchange_name}: {str(e)}")
+                logger.error(f"Failed to get/create exchange {exchange_name}: {e!s}")
                 return None
 
         return None
@@ -197,20 +185,17 @@ class ExchangeFactory:
                 exchange = self._active_exchanges[exchange_name]
                 await exchange.disconnect()
                 del self._active_exchanges[exchange_name]
-                logger.info(
-                    f"Removed exchange {exchange_name} from active pool")
+                logger.info(f"Removed exchange {exchange_name} from active pool")
                 return True
             except Exception as e:
-                logger.error(
-                    f"Failed to remove exchange {exchange_name}: {
-                        str(e)}")
+                logger.error(f"Failed to remove exchange {exchange_name}: {e!s}")
                 # Remove from active exchanges even if disconnect fails
                 del self._active_exchanges[exchange_name]
                 return False
 
         return False
 
-    async def get_all_active_exchanges(self) -> Dict[str, BaseExchange]:
+    async def get_all_active_exchanges(self) -> dict[str, BaseExchange]:
         """
         Get all active exchange instances.
 
@@ -219,7 +204,7 @@ class ExchangeFactory:
         """
         return self._active_exchanges.copy()
 
-    async def health_check_all(self) -> Dict[str, bool]:
+    async def health_check_all(self) -> dict[str, bool]:
         """
         Perform health check on all active exchanges.
 
@@ -232,9 +217,7 @@ class ExchangeFactory:
             try:
                 health_status[exchange_name] = await exchange.health_check()
             except Exception as e:
-                logger.error(
-                    f"Health check failed for {exchange_name}: {
-                        str(e)}")
+                logger.error(f"Health check failed for {exchange_name}: {e!s}")
                 health_status[exchange_name] = False
 
         return health_status
@@ -246,7 +229,7 @@ class ExchangeFactory:
 
         logger.info("Disconnected all active exchanges")
 
-    def get_exchange_info(self, exchange_name: str) -> Optional[ExchangeInfo]:
+    def get_exchange_info(self, exchange_name: str) -> ExchangeInfo | None:
         """
         Get information about a supported exchange.
 
@@ -267,7 +250,7 @@ class ExchangeFactory:
             supported_symbols=[],  # Will be populated by actual exchange implementation
             rate_limits=rate_limits,
             features=["spot_trading"],  # Default features
-            api_version="1.0"
+            api_version="1.0",
         )
 
     def get_exchange_status(self, exchange_name: str) -> ExchangeStatus:

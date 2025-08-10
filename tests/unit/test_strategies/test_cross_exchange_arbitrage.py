@@ -6,17 +6,21 @@ differences for the same asset across multiple exchanges and generates
 signals for simultaneous buy/sell orders.
 """
 
-import pytest
-from decimal import Decimal
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, AsyncMock
+from decimal import Decimal
 
-from src.strategies.static.cross_exchange_arbitrage import CrossExchangeArbitrageStrategy
+import pytest
+
+from src.core.exceptions import ArbitrageError
 from src.core.types import (
-    Signal, MarketData, Position, SignalDirection,
-    StrategyConfig, StrategyType, OrderSide
+    MarketData,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyType,
 )
-from src.core.exceptions import ArbitrageError, ValidationError
+from src.strategies.static.cross_exchange_arbitrage import CrossExchangeArbitrageStrategy
 
 
 class TestCrossExchangeArbitrageStrategy:
@@ -38,10 +42,7 @@ class TestCrossExchangeArbitrageStrategy:
             "risk_per_trade": 0.02,
             "position_size_pct": 0.1,
             "min_confidence": 0.5,
-            "parameters": {
-                "max_position_size": 0.1,
-                "max_open_arbitrages": 5
-            }
+            "parameters": {"max_position_size": 0.1, "max_open_arbitrages": 5},
         }
 
     @pytest.fixture
@@ -59,7 +60,7 @@ class TestCrossExchangeArbitrageStrategy:
             ask=Decimal("50001"),
             volume=Decimal("1000"),
             timestamp=datetime.now(),
-            metadata={"exchange": "binance"}
+            metadata={"exchange": "binance"},
         )
 
     def test_initialization(self, strategy):
@@ -76,8 +77,7 @@ class TestCrossExchangeArbitrageStrategy:
         assert strategy.exchange_prices == {}
 
     @pytest.mark.asyncio
-    async def test_generate_signals_no_opportunities(
-            self, strategy, market_data):
+    async def test_generate_signals_no_opportunities(self, strategy, market_data):
         """Test signal generation when no opportunities exist."""
         signals = await strategy._generate_signals_impl(market_data)
 
@@ -85,8 +85,7 @@ class TestCrossExchangeArbitrageStrategy:
         assert len(signals) == 0
 
     @pytest.mark.asyncio
-    async def test_generate_signals_with_opportunities(
-            self, strategy, market_data):
+    async def test_generate_signals_with_opportunities(self, strategy, market_data):
         """Test signal generation when opportunities exist."""
         # Setup price data for cross-exchange arbitrage with larger spread
         strategy.exchange_prices = {
@@ -98,7 +97,7 @@ class TestCrossExchangeArbitrageStrategy:
                     ask=Decimal("50001"),
                     volume=Decimal("1000"),
                     timestamp=datetime.now(),
-                    metadata={"exchange": "binance"}
+                    metadata={"exchange": "binance"},
                 )
             },
             "okx": {
@@ -109,9 +108,9 @@ class TestCrossExchangeArbitrageStrategy:
                     ask=Decimal("50301"),
                     volume=Decimal("1000"),
                     timestamp=datetime.now(),
-                    metadata={"exchange": "okx"}
+                    metadata={"exchange": "okx"},
                 )
-            }
+            },
         }
 
         signals = await strategy._detect_arbitrage_opportunities("BTCUSDT")
@@ -133,7 +132,7 @@ class TestCrossExchangeArbitrageStrategy:
                     ask=Decimal("50001"),
                     volume=Decimal("1000"),
                     timestamp=datetime.now(),
-                    metadata={"exchange": "binance"}
+                    metadata={"exchange": "binance"},
                 )
             },
             "okx": {
@@ -144,9 +143,9 @@ class TestCrossExchangeArbitrageStrategy:
                     ask=Decimal("50101"),
                     volume=Decimal("1000"),
                     timestamp=datetime.now(),
-                    metadata={"exchange": "okx"}
+                    metadata={"exchange": "okx"},
                 )
-            }
+            },
         }
 
         signals = await strategy._detect_arbitrage_opportunities("BTCUSDT")
@@ -190,7 +189,7 @@ class TestCrossExchangeArbitrageStrategy:
                     ask=Decimal("50001"),
                     volume=Decimal("1000"),
                     timestamp=datetime.now(),
-                    metadata={"exchange": "binance"}
+                    metadata={"exchange": "binance"},
                 )
             }
         }
@@ -212,7 +211,7 @@ class TestCrossExchangeArbitrageStrategy:
                     ask=Decimal("50001"),
                     volume=Decimal("1000"),
                     timestamp=datetime.now() - timedelta(seconds=1),  # Old data
-                    metadata={"exchange": "binance"}
+                    metadata={"exchange": "binance"},
                 )
             }
         }
@@ -236,8 +235,8 @@ class TestCrossExchangeArbitrageStrategy:
                 "sell_exchange": "okx",
                 "buy_price": 50000.0,
                 "sell_price": 50100.0,
-                "net_profit_percentage": 0.5
-            }
+                "net_profit_percentage": 0.5,
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -255,8 +254,8 @@ class TestCrossExchangeArbitrageStrategy:
             strategy_name="test",
             metadata={
                 "arbitrage_type": "cross_exchange",
-                "net_profit_percentage": 0.05  # Below threshold
-            }
+                "net_profit_percentage": 0.05,  # Below threshold
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -271,10 +270,7 @@ class TestCrossExchangeArbitrageStrategy:
             timestamp=datetime.now(),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={
-                "arbitrage_type": "cross_exchange",
-                "net_profit_percentage": 0.5
-            }
+            metadata={"arbitrage_type": "cross_exchange", "net_profit_percentage": 0.5},
         )
 
         position_size = strategy.get_position_size(signal)
@@ -288,8 +284,7 @@ class TestCrossExchangeArbitrageStrategy:
             strategy.get_position_size(None)
 
     @pytest.mark.asyncio
-    async def test_should_exit_not_arbitrage_position(
-            self, strategy, market_data):
+    async def test_should_exit_not_arbitrage_position(self, strategy, market_data):
         """Test exit condition for non-arbitrage position."""
         position = Position(
             symbol="BTCUSDT",
@@ -299,7 +294,7 @@ class TestCrossExchangeArbitrageStrategy:
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
             timestamp=datetime.now(),
-            metadata={}  # No arbitrage_type
+            metadata={},  # No arbitrage_type
         )
 
         result = await strategy.should_exit(position, market_data)
@@ -319,8 +314,8 @@ class TestCrossExchangeArbitrageStrategy:
             timestamp=datetime.now() - timedelta(seconds=1),  # Old position
             metadata={
                 "arbitrage_type": "cross_exchange",
-                "execution_timeout": 500  # 500ms timeout
-            }
+                "execution_timeout": 500,  # 500ms timeout
+            },
         )
 
         result = await strategy.should_exit(position, market_data)
@@ -339,7 +334,7 @@ class TestCrossExchangeArbitrageStrategy:
                     ask=Decimal("50001"),
                     volume=Decimal("1000"),
                     timestamp=datetime.now(),
-                    metadata={"exchange": "binance"}
+                    metadata={"exchange": "binance"},
                 )
             },
             "okx": {
@@ -350,9 +345,9 @@ class TestCrossExchangeArbitrageStrategy:
                     ask=Decimal("50101"),
                     volume=Decimal("1000"),
                     timestamp=datetime.now(),
-                    metadata={"exchange": "okx"}
+                    metadata={"exchange": "okx"},
                 )
-            }
+            },
         }
 
         spread = await strategy._get_current_spread("BTCUSDT", "binance", "okx")
@@ -363,11 +358,7 @@ class TestCrossExchangeArbitrageStrategy:
     @pytest.mark.asyncio
     async def test_post_trade_processing(self, strategy):
         """Test post-trade processing."""
-        trade_result = {
-            "symbol": "BTCUSDT",
-            "pnl": 50.0,
-            "execution_time_ms": 100
-        }
+        trade_result = {"symbol": "BTCUSDT", "pnl": 50.0, "execution_time_ms": 100}
 
         initial_trades = strategy.metrics.total_trades
         initial_pnl = strategy.metrics.total_pnl
@@ -383,7 +374,7 @@ class TestCrossExchangeArbitrageStrategy:
         trade_result = {
             "symbol": "BTCUSDT",
             "pnl": "invalid_pnl",  # Invalid P&L
-            "execution_time_ms": 100
+            "execution_time_ms": 100,
         }
 
         # Should not raise exception, should handle gracefully

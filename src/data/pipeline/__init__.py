@@ -17,12 +17,7 @@ Dependencies:
 
 from .ingestion import DataIngestionPipeline
 from .processing import DataProcessor
-from .validation import PipelineValidator
 from .storage import DataStorageManager
+from .validation import PipelineValidator
 
-__all__ = [
-    'DataIngestionPipeline',
-    'DataProcessor',
-    'PipelineValidator',
-    'DataStorageManager'
-]
+__all__ = ["DataIngestionPipeline", "DataProcessor", "DataStorageManager", "PipelineValidator"]

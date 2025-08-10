@@ -8,28 +8,23 @@ CRITICAL: All strategy implementations must inherit from BaseStrategy.
 """
 
 # MANDATORY: Import from P-011
-from src.strategies.base import BaseStrategy
-from src.strategies.factory import StrategyFactory
-from src.strategies.config import StrategyConfigurationManager
-
 # MANDATORY: Import from P-001
-from src.core.types import (
-    StrategyConfig, StrategyStatus, StrategyMetrics, StrategyType
-)
+from src.core.types import StrategyConfig, StrategyMetrics, StrategyStatus, StrategyType
+from src.strategies.base import BaseStrategy
+from src.strategies.config import StrategyConfigurationManager
+from src.strategies.factory import StrategyFactory
 
 __all__ = [
     # Base strategy interface
     "BaseStrategy",
-
     # Factory and management
     "StrategyFactory",
     "StrategyConfigurationManager",
-
     # Types
     "StrategyConfig",
     "StrategyStatus",
     "StrategyMetrics",
-    "StrategyType"
+    "StrategyType",
 ]
 
 # Version information

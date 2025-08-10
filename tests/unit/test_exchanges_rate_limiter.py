@@ -5,17 +5,17 @@ This module tests the RateLimiter and TokenBucket classes to ensure
 proper rate limiting functionality and error handling.
 """
 
-import pytest
 import asyncio
 import time
-from decimal import Decimal
-from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import ExchangeRateLimitError
 
 # Import the components to test
-from src.exchanges.rate_limiter import RateLimiter, TokenBucket, RateLimitDecorator
-from src.core.exceptions import ExchangeRateLimitError
-from src.core.config import Config
+from src.exchanges.rate_limiter import RateLimitDecorator, RateLimiter, TokenBucket
 
 
 class TestTokenBucket:
@@ -60,8 +60,7 @@ class TestTokenBucket:
 
         # Consume should refill tokens
         assert bucket.consume(3)
-        assert bucket.tokens == pytest.approx(
-            2, abs=0.1)  # 5 refilled - 3 consumed = 2
+        assert bucket.tokens == pytest.approx(2, abs=0.1)  # 5 refilled - 3 consumed = 2
 
     def test_token_refill_capacity_limit(self):
         """Test that tokens don't exceed capacity."""
@@ -74,8 +73,7 @@ class TestTokenBucket:
         bucket.consume(1)  # This triggers refill
         # After 3 seconds, should have refilled 3 * 5 = 15 tokens, but capped
         # at 10
-        assert bucket.tokens == pytest.approx(
-            9, abs=0.1)  # 10 - 1 consumed = 9
+        assert bucket.tokens == pytest.approx(9, abs=0.1)  # 10 - 1 consumed = 9
 
     def test_wait_time_calculation(self):
         """Test wait time calculation."""
@@ -147,7 +145,9 @@ class TestRateLimiter:
         bucket.last_refill = time.time() - 0.1  # Recent refill
 
         # Try to acquire tokens with short timeout
-        with pytest.raises(ExchangeRateLimitError, match="Rate limit exceeded for requests_per_minute"):
+        with pytest.raises(
+            ExchangeRateLimitError, match="Rate limit exceeded for requests_per_minute"
+        ):
             await rate_limiter.acquire("requests_per_minute", tokens=100, timeout=0.1)
 
     @pytest.mark.asyncio
@@ -271,8 +271,7 @@ class TestRateLimitDecorator:
 
     def test_decorator_initialization(self):
         """Test decorator initialization."""
-        decorator = RateLimitDecorator(
-            "requests_per_minute", tokens=5, timeout=10.0)
+        decorator = RateLimitDecorator("requests_per_minute", tokens=5, timeout=10.0)
 
         assert decorator.bucket_name == "requests_per_minute"
         assert decorator.tokens == 5
@@ -281,8 +280,7 @@ class TestRateLimitDecorator:
     @pytest.mark.asyncio
     async def test_decorator_success(self, mock_exchange):
         """Test successful decorator usage."""
-        decorator = RateLimitDecorator(
-            "requests_per_minute", tokens=1, timeout=1.0)
+        decorator = RateLimitDecorator("requests_per_minute", tokens=1, timeout=1.0)
 
         @decorator
         async def test_function(self, arg):
@@ -294,8 +292,7 @@ class TestRateLimitDecorator:
     @pytest.mark.asyncio
     async def test_decorator_no_rate_limiter(self):
         """Test decorator with no rate limiter."""
-        decorator = RateLimitDecorator(
-            "requests_per_minute", tokens=1, timeout=1.0)
+        decorator = RateLimitDecorator("requests_per_minute", tokens=1, timeout=1.0)
 
         @decorator
         async def test_function(self, arg):
@@ -314,8 +311,7 @@ class TestRateLimitDecorator:
         bucket.tokens = 0
         bucket.last_refill = time.time() - 0.1  # Recent refill
 
-        decorator = RateLimitDecorator(
-            "requests_per_minute", tokens=100, timeout=0.1)
+        decorator = RateLimitDecorator("requests_per_minute", tokens=100, timeout=0.1)
 
         @decorator
         async def test_function(self, arg):
@@ -342,6 +338,7 @@ class TestRateLimiterIntegration:
     @pytest.mark.asyncio
     async def test_concurrent_requests(self, rate_limiter):
         """Test concurrent requests with rate limiting."""
+
         async def make_request(request_id):
             await rate_limiter.acquire("requests_per_minute", tokens=1, timeout=1.0)
             return f"request_{request_id}"

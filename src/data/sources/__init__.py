@@ -15,14 +15,9 @@ Dependencies:
 - P-007A: Utility functions and decorators
 """
 
+from .alternative_data import AlternativeDataSource
 from .market_data import MarketDataSource
 from .news_data import NewsDataSource
 from .social_media import SocialMediaDataSource
-from .alternative_data import AlternativeDataSource
 
-__all__ = [
-    'MarketDataSource',
-    'NewsDataSource',
-    'SocialMediaDataSource',
-    'AlternativeDataSource'
-]
+__all__ = ["AlternativeDataSource", "MarketDataSource", "NewsDataSource", "SocialMediaDataSource"]

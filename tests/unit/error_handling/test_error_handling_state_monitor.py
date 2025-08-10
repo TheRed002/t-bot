@@ -4,16 +4,12 @@ Unit tests for state monitor functionality.
 Tests state validation, reconciliation, and consistency monitoring.
 """
 
+from unittest.mock import patch
+
 import pytest
-import asyncio
-import time
-from datetime import datetime, timezone
-from unittest.mock import patch, AsyncMock, MagicMock
-from src.error_handling.state_monitor import (
-    StateValidationResult, StateMonitor
-)
-from src.core.exceptions import TradingBotError, StateConsistencyError
+
 from src.core.config import Config
+from src.error_handling.state_monitor import StateMonitor, StateValidationResult
 
 
 class TestStateValidationResult:
@@ -22,10 +18,7 @@ class TestStateValidationResult:
     def test_state_validation_result_creation(self):
         """Test state validation result creation."""
         result = StateValidationResult(
-            is_consistent=True,
-            discrepancies=[],
-            component="test_component",
-            severity="low"
+            is_consistent=True, discrepancies=[], component="test_component", severity="low"
         )
 
         assert result.is_consistent is True
@@ -38,14 +31,11 @@ class TestStateValidationResult:
         """Test state validation result with errors."""
         discrepancies = [
             {"type": "balance_mismatch", "expected": 1000, "actual": 950},
-            {"type": "position_mismatch", "expected": 5, "actual": 4}
+            {"type": "position_mismatch", "expected": 5, "actual": 4},
         ]
 
         result = StateValidationResult(
-            is_consistent=False,
-            discrepancies=discrepancies,
-            component="portfolio",
-            severity="high"
+            is_consistent=False, discrepancies=discrepancies, component="portfolio", severity="high"
         )
 
         assert result.is_consistent is False
@@ -80,11 +70,11 @@ class TestStateMonitor:
     async def test_validate_state_consistency(self, state_monitor):
         """Test state consistency validation."""
         # Mock the consistency check
-        with patch.object(state_monitor, '_perform_consistency_check') as mock_check:
+        with patch.object(state_monitor, "_perform_consistency_check") as mock_check:
             mock_check.return_value = {
                 "is_consistent": True,
                 "discrepancies": [],
-                "severity": "low"
+                "severity": "low",
             }
 
             result = await state_monitor.validate_state_consistency("test_component")
@@ -98,11 +88,11 @@ class TestStateMonitor:
     async def test_validate_state_consistency_with_errors(self, state_monitor):
         """Test state consistency validation with errors."""
         # Mock the consistency check to return errors
-        with patch.object(state_monitor, '_perform_consistency_check') as mock_check:
+        with patch.object(state_monitor, "_perform_consistency_check") as mock_check:
             mock_check.return_value = {
                 "is_consistent": False,
                 "discrepancies": [{"type": "test_error"}],
-                "severity": "high"
+                "severity": "high",
             }
 
             result = await state_monitor.validate_state_consistency("test_component")
@@ -118,7 +108,9 @@ class TestStateMonitor:
         discrepancies = [{"type": "test_discrepancy"}]
 
         # Mock the reconciliation method to return True
-        with patch.object(state_monitor, '_reconcile_portfolio_balances', return_value=True) as mock_reconcile:
+        with patch.object(
+            state_monitor, "_reconcile_portfolio_balances", return_value=True
+        ) as mock_reconcile:
             result = await state_monitor.reconcile_state("portfolio_balance_sync", discrepancies)
 
             assert result is True
@@ -130,7 +122,7 @@ class TestStateMonitor:
         state_monitor.state_history = [
             StateValidationResult(is_consistent=True, component="test1"),
             StateValidationResult(is_consistent=False, component="test2"),
-            StateValidationResult(is_consistent=True, component="test3")
+            StateValidationResult(is_consistent=True, component="test3"),
         ]
 
         summary = state_monitor.get_state_summary()
@@ -146,7 +138,7 @@ class TestStateMonitor:
         # Add some validation results
         state_monitor.state_history = [
             StateValidationResult(is_consistent=True, component="test1"),
-            StateValidationResult(is_consistent=False, component="test2")
+            StateValidationResult(is_consistent=False, component="test2"),
         ]
 
         history = state_monitor.get_state_history(hours=24)
@@ -158,11 +150,11 @@ class TestStateMonitor:
     async def test_state_monitor_integration(self, state_monitor):
         """Test state monitor integration."""
         # Mock the consistency check
-        with patch.object(state_monitor, '_perform_consistency_check') as mock_check:
+        with patch.object(state_monitor, "_perform_consistency_check") as mock_check:
             mock_check.return_value = {
                 "is_consistent": True,
                 "discrepancies": [],
-                "severity": "low"
+                "severity": "low",
             }
 
             # Test validation

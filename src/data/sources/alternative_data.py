@@ -14,31 +14,31 @@ Dependencies:
 - P-007A: Utility functions and decorators
 """
 
-import asyncio
-import aiohttp
-from typing import Dict, List, Any, Optional, Callable
-from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-import json
+from typing import Any
+
+import aiohttp
+
+from src.core.config import Config
 
 # Import from P-001 core components
-from src.core.exceptions import DataError, DataSourceError, ValidationError
-from src.core.config import Config
+from src.core.exceptions import DataSourceError
 from src.core.logging import get_logger
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
-from src.utils.decorators import time_execution, retry, circuit_breaker
-from src.utils.formatters import format_currency
+from src.utils.decorators import retry, time_execution
 
 logger = get_logger(__name__)
 
 
 class DataType(Enum):
     """Alternative data type enumeration"""
+
     ECONOMIC_INDICATOR = "economic_indicator"
     WEATHER = "weather"
     SATELLITE = "satellite"
@@ -49,20 +49,22 @@ class DataType(Enum):
 @dataclass
 class AlternativeDataPoint:
     """Alternative data point structure"""
+
     source: str
     data_type: DataType
     indicator: str
     value: float
     timestamp: datetime
-    geography: Optional[str]
+    geography: str | None
     frequency: str  # daily, weekly, monthly
     unit: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
 
 @dataclass
 class EconomicIndicator:
     """Economic indicator data structure"""
+
     indicator_id: str
     name: str
     value: float
@@ -93,33 +95,33 @@ class AlternativeDataSource:
         self.error_handler = ErrorHandler(config)
 
         # API configurations
-        self.fred_config = config.alternative_data.get('fred', {})
-        self.weather_config = config.alternative_data.get('weather', {})
-        self.satellite_config = config.alternative_data.get('satellite', {})
+        self.fred_config = config.alternative_data.get("fred", {})
+        self.weather_config = config.alternative_data.get("weather", {})
+        self.satellite_config = config.alternative_data.get("satellite", {})
 
         # HTTP session
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.session: aiohttp.ClientSession | None = None
 
         # Data storage
-        self.indicators_cache: Dict[str, List[EconomicIndicator]] = {}
-        self.weather_cache: Dict[str, List[AlternativeDataPoint]] = {}
-        self.satellite_cache: Dict[str, List[AlternativeDataPoint]] = {}
+        self.indicators_cache: dict[str, list[EconomicIndicator]] = {}
+        self.weather_cache: dict[str, list[AlternativeDataPoint]] = {}
+        self.satellite_cache: dict[str, list[AlternativeDataPoint]] = {}
 
         # Monitoring settings
         self.update_interval = config.alternative_data.get(
-            'update_interval', 3600)  # 1 hour
+            "update_interval", 3600)  # 1 hour
 
         # Statistics
         self.stats = {
-            'total_data_points': 0,
-            'successful_requests': 0,
-            'failed_requests': 0,
-            'last_update_time': None,
-            'source_stats': {
-                'fred': {'requests': 0, 'data_points': 0},
-                'weather': {'requests': 0, 'data_points': 0},
-                'satellite': {'requests': 0, 'data_points': 0}
-            }
+            "total_data_points": 0,
+            "successful_requests": 0,
+            "failed_requests": 0,
+            "last_update_time": None,
+            "source_stats": {
+                "fred": {"requests": 0, "data_points": 0},
+                "weather": {"requests": 0, "data_points": 0},
+                "satellite": {"requests": 0, "data_points": 0},
+            },
         }
 
         logger.info("AlternativeDataSource initialized")
@@ -130,10 +132,8 @@ class AlternativeDataSource:
             # Create HTTP session
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=60),
-                headers={
-                    'User-Agent': 'TradingBot/1.0',
-                    'Accept': 'application/json'
-                }
+                headers={"User-Agent": "TradingBot/1.0",
+                         "Accept": "application/json"},
             )
 
             # Test available data sources
@@ -142,12 +142,9 @@ class AlternativeDataSource:
             logger.info("AlternativeDataSource initialized successfully")
 
         except Exception as e:
-            logger.error(
-                f"Failed to initialize AlternativeDataSource: {
-                    str(e)}")
+            logger.error(f"Failed to initialize AlternativeDataSource: {e!s}")
             raise DataSourceError(
-                f"Alternative data source initialization failed: {
-                    str(e)}")
+                f"Alternative data source initialization failed: {e!s}")
 
     async def _test_data_sources(self) -> None:
         """Test connections to alternative data sources."""
@@ -155,26 +152,26 @@ class AlternativeDataSource:
             available_sources = []
 
             # Test FRED API
-            if self.fred_config.get('api_key'):
+            if self.fred_config.get("api_key"):
                 try:
                     # Test FRED connection
-                    available_sources.append('fred')
+                    available_sources.append("fred")
                     logger.info("FRED API connection available")
                 except Exception as e:
-                    logger.warning(f"FRED API not available: {str(e)}")
+                    logger.warning(f"FRED API not available: {e!s}")
 
             # Test Weather API
-            if self.weather_config.get('api_key'):
+            if self.weather_config.get("api_key"):
                 try:
                     # Test weather API connection
-                    available_sources.append('weather')
+                    available_sources.append("weather")
                     logger.info("Weather API connection available")
                 except Exception as e:
-                    logger.warning(f"Weather API not available: {str(e)}")
+                    logger.warning(f"Weather API not available: {e!s}")
 
             # Test Satellite data
-            if self.satellite_config.get('enabled'):
-                available_sources.append('satellite')
+            if self.satellite_config.get("enabled"):
+                available_sources.append("satellite")
                 logger.info("Satellite data source available")
 
             if not available_sources:
@@ -184,16 +181,14 @@ class AlternativeDataSource:
                     f"Alternative data sources available: {available_sources}")
 
         except Exception as e:
-            logger.error(f"Alternative data source test failed: {str(e)}")
+            logger.error(f"Alternative data source test failed: {e!s}")
             raise
 
     @time_execution
-    @retry(max_attempts=3, delay=2.0)
+    @retry(max_attempts=3, base_delay=2.0)
     async def get_economic_indicators(
-        self,
-        indicators: List[str],
-        days_back: int = 30
-    ) -> List[EconomicIndicator]:
+        self, indicators: list[str], days_back: int = 30
+    ) -> list[EconomicIndicator]:
         """
         Get economic indicators from FRED API.
 
@@ -205,15 +200,13 @@ class AlternativeDataSource:
             List[EconomicIndicator]: Economic indicator data
         """
         try:
-            if not self.fred_config.get('api_key'):
+            if not self.fred_config.get("api_key"):
                 raise DataSourceError("FRED API key not configured")
 
             all_indicators = []
-            end_date = datetime.now().strftime('%Y-%m-%d')
-            start_date = (
-                datetime.now() -
-                timedelta(
-                    days=days_back)).strftime('%Y-%m-%d')
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() -
+                          timedelta(days=days_back)).strftime("%Y-%m-%d")
 
             for indicator_id in indicators:
                 try:
@@ -226,36 +219,31 @@ class AlternativeDataSource:
 
                 except Exception as e:
                     logger.warning(
-                        f"Failed to fetch indicator {indicator_id}: {
-                            str(e)}")
+                        f"Failed to fetch indicator {indicator_id}: {e!s}")
                     continue
 
             # Cache results
             cache_key = f"indicators_{days_back}d"
             self.indicators_cache[cache_key] = all_indicators
 
-            self.stats['total_data_points'] += len(all_indicators)
-            self.stats['successful_requests'] += 1
-            self.stats['source_stats']['fred']['requests'] += 1
-            self.stats['source_stats']['fred']['data_points'] += len(
+            self.stats["total_data_points"] += len(all_indicators)
+            self.stats["successful_requests"] += 1
+            self.stats["source_stats"]["fred"]["requests"] += 1
+            self.stats["source_stats"]["fred"]["data_points"] += len(
                 all_indicators)
 
             logger.info(f"Retrieved {len(all_indicators)} economic indicators")
             return all_indicators
 
         except Exception as e:
-            self.stats['failed_requests'] += 1
-            logger.error(f"Failed to get economic indicators: {str(e)}")
+            self.stats["failed_requests"] += 1
+            logger.error(f"Failed to get economic indicators: {e!s}")
             raise DataSourceError(
-                f"Economic indicators retrieval failed: {
-                    str(e)}")
+                f"Economic indicators retrieval failed: {e!s}")
 
     async def _fetch_fred_indicator(
-        self,
-        indicator_id: str,
-        start_date: str,
-        end_date: str
-    ) -> List[EconomicIndicator]:
+        self, indicator_id: str, start_date: str, end_date: str
+    ) -> list[EconomicIndicator]:
         """Fetch specific economic indicator from FRED (simulated)."""
         try:
             # Simulate FRED API response
@@ -265,73 +253,61 @@ class AlternativeDataSource:
 
             # Simulate indicator metadata
             indicator_metadata = {
-                'GDP': {
-                    'name': 'Gross Domestic Product',
-                    'unit': 'Billions of Dollars',
-                    'impact': 'high'},
-                'UNRATE': {
-                    'name': 'Unemployment Rate',
-                    'unit': 'Percent',
-                    'impact': 'high'},
-                'FEDFUNDS': {
-                    'name': 'Federal Funds Rate',
-                    'unit': 'Percent',
-                    'impact': 'high'},
-                'CPI': {
-                    'name': 'Consumer Price Index',
-                    'unit': 'Index',
-                    'impact': 'high'},
-                'DEXUSEU': {
-                    'name': 'USD/EUR Exchange Rate',
-                    'unit': 'Rate',
-                    'impact': 'medium'}}
+                "GDP": {
+                    "name": "Gross Domestic Product",
+                    "unit": "Billions of Dollars",
+                    "impact": "high",
+                },
+                "UNRATE": {"name": "Unemployment Rate", "unit": "Percent", "impact": "high"},
+                "FEDFUNDS": {"name": "Federal Funds Rate", "unit": "Percent", "impact": "high"},
+                "CPI": {"name": "Consumer Price Index", "unit": "Index", "impact": "high"},
+                "DEXUSEU": {"name": "USD/EUR Exchange Rate", "unit": "Rate", "impact": "medium"},
+            }
 
-            metadata = indicator_metadata.get(indicator_id, {
-                'name': f'Indicator {indicator_id}',
-                'unit': 'Value',
-                'impact': 'medium'
-            })
+            metadata = indicator_metadata.get(
+                indicator_id,
+                {"name": f"Indicator {indicator_id}",
+                    "unit": "Value", "impact": "medium"},
+            )
 
             # Simulate data points (in production, parse actual FRED response)
-            base_date = datetime.strptime(start_date, '%Y-%m-%d')
+            base_date = datetime.strptime(start_date, "%Y-%m-%d")
             for i in range(5):  # Simulate 5 data points
                 data_date = base_date + timedelta(days=i * 7)  # Weekly data
 
                 # Simulate indicator value
                 base_value = 100.0
-                if indicator_id == 'UNRATE':
+                if indicator_id == "UNRATE":
                     base_value = 4.5  # Unemployment rate around 4.5%
-                elif indicator_id == 'FEDFUNDS':
+                elif indicator_id == "FEDFUNDS":
                     base_value = 2.5  # Fed funds rate around 2.5%
 
                 value = base_value + (i * 0.1)  # Slight trend
 
                 indicator = EconomicIndicator(
                     indicator_id=indicator_id,
-                    name=metadata['name'],
+                    name=metadata["name"],
                     value=value,
                     date=data_date,
-                    frequency='weekly',
-                    unit=metadata['unit'],
-                    source='FRED',
-                    impact_level=metadata['impact'],
-                    market_relevance=0.8 if metadata['impact'] == 'high' else 0.5)
+                    frequency="weekly",
+                    unit=metadata["unit"],
+                    source="FRED",
+                    impact_level=metadata["impact"],
+                    market_relevance=0.8 if metadata["impact"] == "high" else 0.5,
+                )
                 indicators.append(indicator)
 
             return indicators
 
         except Exception as e:
             logger.error(
-                f"Failed to fetch FRED indicator {indicator_id}: {
-                    str(e)}")
+                f"Failed to fetch FRED indicator {indicator_id}: {e!s}")
             return []
 
     @time_execution
     async def get_weather_data(
-        self,
-        locations: List[str],
-        days_back: int = 7
-    ) -> List[AlternativeDataPoint]:
+        self, locations: list[str], days_back: int = 7
+    ) -> list[AlternativeDataPoint]:
         """
         Get weather data for specified locations.
 
@@ -343,7 +319,7 @@ class AlternativeDataSource:
             List[AlternativeDataPoint]: Weather data points
         """
         try:
-            if not self.weather_config.get('api_key'):
+            if not self.weather_config.get("api_key"):
                 raise DataSourceError("Weather API key not configured")
 
             all_weather_data = []
@@ -355,35 +331,31 @@ class AlternativeDataSource:
 
                 except Exception as e:
                     logger.warning(
-                        f"Failed to fetch weather for {location}: {
-                            str(e)}")
+                        f"Failed to fetch weather for {location}: {e!s}")
                     continue
 
             # Cache results
             cache_key = f"weather_{days_back}d"
             self.weather_cache[cache_key] = all_weather_data
 
-            self.stats['total_data_points'] += len(all_weather_data)
-            self.stats['successful_requests'] += 1
-            self.stats['source_stats']['weather']['requests'] += 1
-            self.stats['source_stats']['weather']['data_points'] += len(
+            self.stats["total_data_points"] += len(all_weather_data)
+            self.stats["successful_requests"] += 1
+            self.stats["source_stats"]["weather"]["requests"] += 1
+            self.stats["source_stats"]["weather"]["data_points"] += len(
                 all_weather_data)
 
             logger.info(
-                f"Retrieved {
-                    len(all_weather_data)} weather data points")
+                f"Retrieved {len(all_weather_data)} weather data points")
             return all_weather_data
 
         except Exception as e:
-            self.stats['failed_requests'] += 1
-            logger.error(f"Failed to get weather data: {str(e)}")
-            raise DataSourceError(f"Weather data retrieval failed: {str(e)}")
+            self.stats["failed_requests"] += 1
+            logger.error(f"Failed to get weather data: {e!s}")
+            raise DataSourceError(f"Weather data retrieval failed: {e!s}")
 
     async def _fetch_weather_data(
-        self,
-        location: str,
-        days_back: int
-    ) -> List[AlternativeDataPoint]:
+        self, location: str, days_back: int
+    ) -> list[AlternativeDataPoint]:
         """Fetch weather data for a location (simulated)."""
         try:
             # Simulate weather API response
@@ -411,22 +383,26 @@ class AlternativeDataSource:
                         geography=location,
                         frequency="daily",
                         unit="celsius",
-                        metadata={
-                            'location': location,
-                            'weather_type': 'temperature'}))
+                        metadata={"location": location,
+                                  "weather_type": "temperature"},
+                    )
+                )
 
                 # Humidity data point
-                weather_points.append(AlternativeDataPoint(
-                    source="weather_api",
-                    data_type=DataType.WEATHER,
-                    indicator="humidity",
-                    value=humidity,
-                    timestamp=data_date,
-                    geography=location,
-                    frequency="daily",
-                    unit="percent",
-                    metadata={'location': location, 'weather_type': 'humidity'}
-                ))
+                weather_points.append(
+                    AlternativeDataPoint(
+                        source="weather_api",
+                        data_type=DataType.WEATHER,
+                        indicator="humidity",
+                        value=humidity,
+                        timestamp=data_date,
+                        geography=location,
+                        frequency="daily",
+                        unit="percent",
+                        metadata={"location": location,
+                                  "weather_type": "humidity"},
+                    )
+                )
 
                 # Precipitation data point
                 if precipitation > 0:
@@ -440,25 +416,21 @@ class AlternativeDataSource:
                             geography=location,
                             frequency="daily",
                             unit="mm",
-                            metadata={
-                                'location': location,
-                                'weather_type': 'precipitation'}))
+                            metadata={"location": location,
+                                      "weather_type": "precipitation"},
+                        )
+                    )
 
             return weather_points
 
         except Exception as e:
-            logger.error(
-                f"Failed to fetch weather data for {location}: {
-                    str(e)}")
+            logger.error(f"Failed to fetch weather data for {location}: {e!s}")
             return []
 
     @time_execution
     async def get_satellite_data(
-        self,
-        regions: List[str],
-        indicators: List[str],
-        days_back: int = 30
-    ) -> List[AlternativeDataPoint]:
+        self, regions: list[str], indicators: list[str], days_back: int = 30
+    ) -> list[AlternativeDataPoint]:
         """
         Get satellite-based economic activity indicators.
 
@@ -471,7 +443,7 @@ class AlternativeDataSource:
             List[AlternativeDataPoint]: Satellite data points
         """
         try:
-            if not self.satellite_config.get('enabled'):
+            if not self.satellite_config.get("enabled"):
                 raise DataSourceError("Satellite data not enabled")
 
             all_satellite_data = []
@@ -486,36 +458,31 @@ class AlternativeDataSource:
 
                     except Exception as e:
                         logger.warning(
-                            f"Failed to fetch {indicator} for {region}: {
-                                str(e)}")
+                            f"Failed to fetch {indicator} for {region}: {e!s}")
                         continue
 
             # Cache results
             cache_key = f"satellite_{days_back}d"
             self.satellite_cache[cache_key] = all_satellite_data
 
-            self.stats['total_data_points'] += len(all_satellite_data)
-            self.stats['successful_requests'] += 1
-            self.stats['source_stats']['satellite']['requests'] += 1
-            self.stats['source_stats']['satellite']['data_points'] += len(
+            self.stats["total_data_points"] += len(all_satellite_data)
+            self.stats["successful_requests"] += 1
+            self.stats["source_stats"]["satellite"]["requests"] += 1
+            self.stats["source_stats"]["satellite"]["data_points"] += len(
                 all_satellite_data)
 
             logger.info(
-                f"Retrieved {
-                    len(all_satellite_data)} satellite data points")
+                f"Retrieved {len(all_satellite_data)} satellite data points")
             return all_satellite_data
 
         except Exception as e:
-            self.stats['failed_requests'] += 1
-            logger.error(f"Failed to get satellite data: {str(e)}")
-            raise DataSourceError(f"Satellite data retrieval failed: {str(e)}")
+            self.stats["failed_requests"] += 1
+            logger.error(f"Failed to get satellite data: {e!s}")
+            raise DataSourceError(f"Satellite data retrieval failed: {e!s}")
 
     async def _fetch_satellite_data(
-        self,
-        region: str,
-        indicator: str,
-        days_back: int
-    ) -> List[AlternativeDataPoint]:
+        self, region: str, indicator: str, days_back: int
+    ) -> list[AlternativeDataPoint]:
         """Fetch satellite data for a region and indicator (simulated)."""
         try:
             # Simulate satellite data
@@ -529,16 +496,16 @@ class AlternativeDataSource:
                 data_date = base_date - timedelta(weeks=i)
 
                 # Simulate different indicator values
-                if indicator == 'nightlight':
+                if indicator == "nightlight":
                     # Economic activity indicator based on nighttime lighting
                     # Simulate economic activity trend
                     value = 75.0 + (i * 2.5)
                     unit = "intensity_index"
-                elif indicator == 'shipping':
+                elif indicator == "shipping":
                     # Shipping activity in ports
                     value = 120.0 + (i * 5)  # Simulate shipping volume
                     unit = "vessel_count"
-                elif indicator == 'agriculture':
+                elif indicator == "agriculture":
                     # Agricultural activity
                     value = 85.0 + (i * 1.5)  # Simulate crop activity
                     unit = "vegetation_index"
@@ -546,34 +513,35 @@ class AlternativeDataSource:
                     value = 100.0 + (i * 3)
                     unit = "index"
 
-                satellite_points.append(AlternativeDataPoint(
-                    source="satellite_provider",
-                    data_type=DataType.SATELLITE,
-                    indicator=indicator,
-                    value=value,
-                    timestamp=data_date,
-                    geography=region,
-                    frequency="weekly",
-                    unit=unit,
-                    metadata={
-                        'region': region,
-                        'satellite_type': indicator,
-                        'processing_date': data_date.isoformat()
-                    }
-                ))
+                satellite_points.append(
+                    AlternativeDataPoint(
+                        source="satellite_provider",
+                        data_type=DataType.SATELLITE,
+                        indicator=indicator,
+                        value=value,
+                        timestamp=data_date,
+                        geography=region,
+                        frequency="weekly",
+                        unit=unit,
+                        metadata={
+                            "region": region,
+                            "satellite_type": indicator,
+                            "processing_date": data_date.isoformat(),
+                        },
+                    )
+                )
 
             return satellite_points
 
         except Exception as e:
             logger.error(
-                f"Failed to fetch satellite data for {region}/{indicator}: {str(e)}")
+                f"Failed to fetch satellite data for {region}/{indicator}: {e!s}")
             return []
 
     @time_execution
     async def get_comprehensive_dataset(
-        self,
-        config: Dict[str, Any]
-    ) -> Dict[str, List[AlternativeDataPoint]]:
+        self, config: dict[str, Any]
+    ) -> dict[str, list[AlternativeDataPoint]]:
         """
         Get comprehensive alternative dataset based on configuration.
 
@@ -584,49 +552,47 @@ class AlternativeDataSource:
             Dict with different data types and their data points
         """
         try:
-            dataset = {
-                'economic': [],
-                'weather': [],
-                'satellite': []
-            }
+            dataset = {"economic": [], "weather": [], "satellite": []}
 
             # Collect economic indicators
-            if config.get('economic', {}).get('enabled', False):
-                indicators = config['economic'].get(
-                    'indicators', ['GDP', 'UNRATE'])
+            if config.get("economic", {}).get("enabled", False):
+                indicators = config["economic"].get(
+                    "indicators", ["GDP", "UNRATE"])
                 economic_data = await self.get_economic_indicators(indicators)
                 # Convert to AlternativeDataPoint format
                 for indicator in economic_data:
-                    dataset['economic'].append(AlternativeDataPoint(
-                        source='FRED',
-                        data_type=DataType.ECONOMIC_INDICATOR,
-                        indicator=indicator.indicator_id,
-                        value=indicator.value,
-                        timestamp=indicator.date,
-                        geography=None,
-                        frequency=indicator.frequency,
-                        unit=indicator.unit,
-                        metadata={
-                            'name': indicator.name,
-                            'impact_level': indicator.impact_level,
-                            'market_relevance': indicator.market_relevance
-                        }
-                    ))
+                    dataset["economic"].append(
+                        AlternativeDataPoint(
+                            source="FRED",
+                            data_type=DataType.ECONOMIC_INDICATOR,
+                            indicator=indicator.indicator_id,
+                            value=indicator.value,
+                            timestamp=indicator.date,
+                            geography=None,
+                            frequency=indicator.frequency,
+                            unit=indicator.unit,
+                            metadata={
+                                "name": indicator.name,
+                                "impact_level": indicator.impact_level,
+                                "market_relevance": indicator.market_relevance,
+                            },
+                        )
+                    )
 
             # Collect weather data
-            if config.get('weather', {}).get('enabled', False):
-                locations = config['weather'].get(
-                    'locations', ['New York', 'London'])
+            if config.get("weather", {}).get("enabled", False):
+                locations = config["weather"].get(
+                    "locations", ["New York", "London"])
                 weather_data = await self.get_weather_data(locations)
-                dataset['weather'] = weather_data
+                dataset["weather"] = weather_data
 
             # Collect satellite data
-            if config.get('satellite', {}).get('enabled', False):
-                regions = config['satellite'].get('regions', ['US', 'EU'])
-                indicators = config['satellite'].get(
-                    'indicators', ['nightlight'])
+            if config.get("satellite", {}).get("enabled", False):
+                regions = config["satellite"].get("regions", ["US", "EU"])
+                indicators = config["satellite"].get(
+                    "indicators", ["nightlight"])
                 satellite_data = await self.get_satellite_data(regions, indicators)
-                dataset['satellite'] = satellite_data
+                dataset["satellite"] = satellite_data
 
             total_points = sum(len(data) for data in dataset.values())
             logger.info(f"Collected {total_points} alternative data points")
@@ -634,34 +600,29 @@ class AlternativeDataSource:
             return dataset
 
         except Exception as e:
-            logger.error(f"Failed to get comprehensive dataset: {str(e)}")
+            logger.error(f"Failed to get comprehensive dataset: {e!s}")
             raise DataSourceError(
-                f"Comprehensive dataset collection failed: {
-                    str(e)}")
+                f"Comprehensive dataset collection failed: {e!s}")
 
-    async def get_source_statistics(self) -> Dict[str, Any]:
+    async def get_source_statistics(self) -> dict[str, Any]:
         """Get alternative data source statistics."""
         return {
-            "total_data_points": self.stats['total_data_points'],
-            "successful_requests": self.stats['successful_requests'],
-            "failed_requests": self.stats['failed_requests'],
-            "last_update_time": self.stats['last_update_time'],
-            "source_stats": self.stats['source_stats'].copy(),
+            "total_data_points": self.stats["total_data_points"],
+            "successful_requests": self.stats["successful_requests"],
+            "failed_requests": self.stats["failed_requests"],
+            "last_update_time": self.stats["last_update_time"],
+            "source_stats": self.stats["source_stats"].copy(),
             "cache_sizes": {
-                "indicators": sum(
-                    len(indicators) for indicators in self.indicators_cache.values()),
-                "weather": sum(
-                    len(data) for data in self.weather_cache.values()),
-                "satellite": sum(
-                    len(data) for data in self.satellite_cache.values())},
+                "indicators": sum(len(indicators) for indicators in self.indicators_cache.values()),
+                "weather": sum(len(data) for data in self.weather_cache.values()),
+                "satellite": sum(len(data) for data in self.satellite_cache.values()),
+            },
             "available_sources": {
-                "fred": bool(
-                    self.fred_config.get('api_key')),
-                "weather": bool(
-                    self.weather_config.get('api_key')),
-                "satellite": self.satellite_config.get(
-                    'enabled',
-                    False)}}
+                "fred": bool(self.fred_config.get("api_key")),
+                "weather": bool(self.weather_config.get("api_key")),
+                "satellite": self.satellite_config.get("enabled", False),
+            },
+        }
 
     async def cleanup(self) -> None:
         """Cleanup alternative data source resources."""
@@ -676,6 +637,4 @@ class AlternativeDataSource:
             logger.info("AlternativeDataSource cleanup completed")
 
         except Exception as e:
-            logger.error(
-                f"Error during AlternativeDataSource cleanup: {
-                    str(e)}")
+            logger.error(f"Error during AlternativeDataSource cleanup: {e!s}")

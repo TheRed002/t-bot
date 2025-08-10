@@ -5,18 +5,20 @@ Tests the breakout strategy implementation with comprehensive coverage
 including signal generation, validation, position sizing, and exit conditions.
 """
 
-import pytest
-import numpy as np
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+
+import numpy as np
+import pytest
 
 # Import from P-001
 from src.core.types import (
-    Signal, MarketData, Position, StrategyConfig,
-    StrategyStatus, StrategyMetrics, SignalDirection, OrderSide
+    MarketData,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
 )
-from src.core.exceptions import ValidationError
 
 # Import from P-012
 from src.strategies.static.breakout import BreakoutStrategy
@@ -48,8 +50,8 @@ class TestBreakoutStrategy:
                 "false_breakout_threshold": 0.01,
                 "target_multiplier": 2.0,
                 "atr_period": 14,
-                "atr_multiplier": 2.0
-            }
+                "atr_multiplier": 2.0,
+            },
         }
 
     @pytest.fixture
@@ -69,7 +71,7 @@ class TestBreakoutStrategy:
             ask=Decimal("50001"),
             open_price=Decimal("49900"),
             high_price=Decimal("50100"),
-            low_price=Decimal("49800")
+            low_price=Decimal("49800"),
         )
 
     @pytest.fixture
@@ -82,7 +84,7 @@ class TestBreakoutStrategy:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
     def test_strategy_initialization(self, strategy, mock_config):
@@ -137,7 +139,7 @@ class TestBreakoutStrategy:
             ask=None,
             open_price=None,
             high_price=None,
-            low_price=None
+            low_price=None,
         )
 
         strategy._update_price_history(data)
@@ -147,8 +149,7 @@ class TestBreakoutStrategy:
         assert strategy.high_history[-1] == 50000.0
         assert strategy.low_history[-1] == 50000.0
 
-    def test_update_support_resistance_levels_insufficient_data(
-            self, strategy):
+    def test_update_support_resistance_levels_insufficient_data(self, strategy):
         """Test support/resistance update with insufficient data."""
         # Add some data but not enough
         for i in range(10):
@@ -224,8 +225,7 @@ class TestBreakoutStrategy:
         result = strategy._check_consolidation_period()
         assert not result
 
-    def test_check_resistance_breakout_no_breakout(
-            self, strategy, mock_market_data):
+    def test_check_resistance_breakout_no_breakout(self, strategy, mock_market_data):
         """Test resistance breakout check with no breakout."""
         # Add some resistance levels
         strategy.resistance_levels = [51000, 52000]
@@ -236,8 +236,7 @@ class TestBreakoutStrategy:
         result = strategy._check_resistance_breakout(mock_market_data)
         assert result is None
 
-    def test_check_resistance_breakout_with_breakout(
-            self, strategy, mock_market_data):
+    def test_check_resistance_breakout_with_breakout(self, strategy, mock_market_data):
         """Test resistance breakout check with breakout."""
         # Add resistance level
         strategy.resistance_levels = [51000]
@@ -256,8 +255,7 @@ class TestBreakoutStrategy:
         assert result["breakout_type"] == "resistance"
         assert result["level"] == 51000
 
-    def test_check_resistance_breakout_low_volume(
-            self, strategy, mock_market_data):
+    def test_check_resistance_breakout_low_volume(self, strategy, mock_market_data):
         """Test resistance breakout check with low volume."""
         # Add resistance level
         strategy.resistance_levels = [51000]
@@ -273,8 +271,7 @@ class TestBreakoutStrategy:
         result = strategy._check_resistance_breakout(mock_market_data)
         assert result is None
 
-    def test_check_support_breakout_no_breakout(
-            self, strategy, mock_market_data):
+    def test_check_support_breakout_no_breakout(self, strategy, mock_market_data):
         """Test support breakout check with no breakout."""
         # Add some support levels
         strategy.support_levels = [49000, 48000]
@@ -285,8 +282,7 @@ class TestBreakoutStrategy:
         result = strategy._check_support_breakout(mock_market_data)
         assert result is None
 
-    def test_check_support_breakout_with_breakout(
-            self, strategy, mock_market_data):
+    def test_check_support_breakout_with_breakout(self, strategy, mock_market_data):
         """Test support breakout check with breakout."""
         # Add support level
         strategy.support_levels = [49000]
@@ -305,8 +301,7 @@ class TestBreakoutStrategy:
         assert result["breakout_type"] == "support"
         assert result["level"] == 49000
 
-    def test_check_volume_confirmation_success(
-            self, strategy, mock_market_data):
+    def test_check_volume_confirmation_success(self, strategy, mock_market_data):
         """Test volume confirmation with sufficient data."""
         # Add volume history
         for i in range(25):
@@ -314,14 +309,12 @@ class TestBreakoutStrategy:
 
         # Test with high volume
         mock_market_data.volume = Decimal("200")  # 2x average
-        result = strategy._check_volume_confirmation(
-            float(mock_market_data.volume))
+        result = strategy._check_volume_confirmation(float(mock_market_data.volume))
         assert result
 
         # Test with low volume
         mock_market_data.volume = Decimal("50")  # 0.5x average
-        result = strategy._check_volume_confirmation(
-            float(mock_market_data.volume))
+        result = strategy._check_volume_confirmation(float(mock_market_data.volume))
         assert result is False
 
     def test_check_volume_confirmation_zero_volume(self, strategy):
@@ -345,8 +338,7 @@ class TestBreakoutStrategy:
         result = strategy._check_false_breakout(mock_market_data)
         assert result is None
 
-    def test_check_false_breakout_resistance_return(
-            self, strategy, mock_market_data):
+    def test_check_false_breakout_resistance_return(self, strategy, mock_market_data):
         """Test false breakout check with resistance return."""
         # Add resistance level
         strategy.resistance_levels = [51000]
@@ -358,8 +350,7 @@ class TestBreakoutStrategy:
         assert result is not None
         assert result["breakout_type"] == "false_resistance"
 
-    def test_check_false_breakout_support_return(
-            self, strategy, mock_market_data):
+    def test_check_false_breakout_support_return(self, strategy, mock_market_data):
         """Test false breakout check with support return."""
         # Add support level
         strategy.support_levels = [49000]
@@ -372,8 +363,7 @@ class TestBreakoutStrategy:
         assert result["breakout_type"] == "false_support"
 
     @pytest.mark.asyncio
-    async def test_generate_bullish_breakout_signal_success(
-            self, strategy, mock_market_data):
+    async def test_generate_bullish_breakout_signal_success(self, strategy, mock_market_data):
         """Test successful bullish breakout signal generation."""
         # Add support levels for target calculation
         strategy.support_levels = [48000, 47000]
@@ -382,7 +372,7 @@ class TestBreakoutStrategy:
             "level": 51000,
             "breakout_price": 52000,
             "breakout_type": "resistance",
-            "volume": 200.0
+            "volume": 200.0,
         }
 
         signal = await strategy._generate_bullish_breakout_signal(mock_market_data, breakout_info)
@@ -395,8 +385,7 @@ class TestBreakoutStrategy:
         assert "target_price" in signal.metadata
 
     @pytest.mark.asyncio
-    async def test_generate_bearish_breakout_signal_success(
-            self, strategy, mock_market_data):
+    async def test_generate_bearish_breakout_signal_success(self, strategy, mock_market_data):
         """Test successful bearish breakout signal generation."""
         # Add resistance levels for target calculation
         strategy.resistance_levels = [52000, 53000]
@@ -405,7 +394,7 @@ class TestBreakoutStrategy:
             "level": 49000,
             "breakout_price": 48000,
             "breakout_type": "support",
-            "volume": 200.0
+            "volume": 200.0,
         }
 
         signal = await strategy._generate_bearish_breakout_signal(mock_market_data, breakout_info)
@@ -418,16 +407,17 @@ class TestBreakoutStrategy:
         assert "target_price" in signal.metadata
 
     @pytest.mark.asyncio
-    async def test_generate_false_breakout_exit_signal_resistance(
-            self, strategy, mock_market_data):
+    async def test_generate_false_breakout_exit_signal_resistance(self, strategy, mock_market_data):
         """Test false breakout exit signal for resistance."""
         false_breakout_info = {
             "level": 51000,
             "current_price": 51050,
-            "breakout_type": "false_resistance"
+            "breakout_type": "false_resistance",
         }
 
-        signal = await strategy._generate_false_breakout_exit_signal(mock_market_data, false_breakout_info)
+        signal = await strategy._generate_false_breakout_exit_signal(
+            mock_market_data, false_breakout_info
+        )
 
         assert signal is not None
         assert signal.direction == SignalDirection.SELL
@@ -435,16 +425,17 @@ class TestBreakoutStrategy:
         assert signal.metadata["signal_type"] == "false_breakout_exit"
 
     @pytest.mark.asyncio
-    async def test_generate_false_breakout_exit_signal_support(
-            self, strategy, mock_market_data):
+    async def test_generate_false_breakout_exit_signal_support(self, strategy, mock_market_data):
         """Test false breakout exit signal for support."""
         false_breakout_info = {
             "level": 49000,
             "current_price": 48950,
-            "breakout_type": "false_support"
+            "breakout_type": "false_support",
         }
 
-        signal = await strategy._generate_false_breakout_exit_signal(mock_market_data, false_breakout_info)
+        signal = await strategy._generate_false_breakout_exit_signal(
+            mock_market_data, false_breakout_info
+        )
 
         assert signal is not None
         assert signal.direction == SignalDirection.BUY
@@ -457,12 +448,14 @@ class TestBreakoutStrategy:
         signals = await strategy.generate_signals(None)
         assert signals == []
 
-        signals = await strategy.generate_signals(MarketData(
-            symbol="BTCUSDT",
-            price=Decimal("0"),
-            volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
-        ))
+        signals = await strategy.generate_signals(
+            MarketData(
+                symbol="BTCUSDT",
+                price=Decimal("0"),
+                volume=Decimal("100"),
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
         assert signals == []
 
     @pytest.mark.asyncio
@@ -472,22 +465,20 @@ class TestBreakoutStrategy:
             symbol="BTCUSDT",
             price=Decimal("-100"),  # Negative price
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         signals = await strategy.generate_signals(data)
         assert signals == []
 
     @pytest.mark.asyncio
-    async def test_generate_signals_insufficient_data(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_insufficient_data(self, strategy, mock_market_data):
         """Test signal generation with insufficient data."""
         signals = await strategy.generate_signals(mock_market_data)
         assert signals == []
 
     @pytest.mark.asyncio
-    async def test_generate_signals_no_consolidation(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_no_consolidation(self, strategy, mock_market_data):
         """Test signal generation without consolidation period."""
         # Add enough data but not consolidating
         for i in range(25):
@@ -497,8 +488,7 @@ class TestBreakoutStrategy:
         assert signals == []
 
     @pytest.mark.asyncio
-    async def test_generate_signals_resistance_breakout(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_resistance_breakout(self, strategy, mock_market_data):
         """Test signal generation with resistance breakout."""
         # Add consolidating data (narrow range around 50000)
         for i in range(25):
@@ -535,8 +525,7 @@ class TestBreakoutStrategy:
         assert signal.metadata["breakout_direction"] == "bullish"
 
     @pytest.mark.asyncio
-    async def test_generate_signals_support_breakout(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_support_breakout(self, strategy, mock_market_data):
         """Test signal generation with support breakout."""
         # Add consolidating data (narrow range around 50000)
         for i in range(25):
@@ -573,8 +562,7 @@ class TestBreakoutStrategy:
         assert signal.metadata["breakout_direction"] == "bearish"
 
     @pytest.mark.asyncio
-    async def test_generate_signals_false_breakout_exit(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_false_breakout_exit(self, strategy, mock_market_data):
         """Test signal generation with false breakout exit."""
         # Add consolidating data (narrow range around 50000)
         for i in range(25):
@@ -616,7 +604,7 @@ class TestBreakoutStrategy:
             symbol="BTCUSDT",
             price=Decimal("50000"),
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Corrupt price history
@@ -639,8 +627,8 @@ class TestBreakoutStrategy:
                 "breakout_price": 52000,
                 "target_price": 53000,
                 "breakout_direction": "bullish",
-                "signal_type": "breakout_entry"
-            }
+                "signal_type": "breakout_entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -660,8 +648,8 @@ class TestBreakoutStrategy:
                 "breakout_price": 52000,
                 "target_price": 53000,
                 "breakout_direction": "bullish",
-                "signal_type": "breakout_entry"
-            }
+                "signal_type": "breakout_entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -681,8 +669,8 @@ class TestBreakoutStrategy:
                 "breakout_price": 52000,
                 "target_price": 53000,
                 "breakout_direction": "bullish",
-                "signal_type": "breakout_entry"
-            }
+                "signal_type": "breakout_entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -697,7 +685,7 @@ class TestBreakoutStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="breakout",
-            metadata={}  # Missing required fields
+            metadata={},  # Missing required fields
         )
 
         result = await strategy.validate_signal(signal)
@@ -717,8 +705,8 @@ class TestBreakoutStrategy:
                 "breakout_price": -100,  # Invalid price
                 "target_price": 53000,
                 "breakout_direction": "bullish",
-                "signal_type": "breakout_entry"
-            }
+                "signal_type": "breakout_entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -738,8 +726,8 @@ class TestBreakoutStrategy:
                 "breakout_price": 52000,
                 "target_price": 53000,
                 "breakout_direction": "bullish",
-                "signal_type": "breakout_entry"
-            }
+                "signal_type": "breakout_entry",
+            },
         )
 
         # Corrupt signal to cause exception
@@ -756,10 +744,7 @@ class TestBreakoutStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="breakout",
-            metadata={
-                "range_size": 1000,
-                "breakout_price": 52000
-            }
+            metadata={"range_size": 1000, "breakout_price": 52000},
         )
 
         position_size = strategy.get_position_size(signal)
@@ -776,13 +761,12 @@ class TestBreakoutStrategy:
             strategy_name="breakout",
             metadata={
                 "range_size": 10000,  # Large range
-                "breakout_price": 52000
-            }
+                "breakout_price": 52000,
+            },
         )
 
         position_size = strategy.get_position_size(signal)
-        max_size = Decimal(
-            str(strategy.config.parameters.get("max_position_size_pct", 0.1)))
+        max_size = Decimal(str(strategy.config.parameters.get("max_position_size_pct", 0.1)))
         assert position_size <= max_size
 
     def test_get_position_size_exception_handling(self, strategy):
@@ -795,8 +779,8 @@ class TestBreakoutStrategy:
             strategy_name="breakout",
             metadata={
                 "range_size": "invalid",  # Will cause exception
-                "breakout_price": 52000
-            }
+                "breakout_price": 52000,
+            },
         )
 
         position_size = strategy.get_position_size(signal)
@@ -804,11 +788,7 @@ class TestBreakoutStrategy:
         expected_min = Decimal(str(strategy.config.position_size_pct * 0.5))
         assert position_size == expected_min
 
-    def test_should_exit_atr_stop_loss(
-            self,
-            strategy,
-            mock_position,
-            mock_market_data):
+    def test_should_exit_atr_stop_loss(self, strategy, mock_position, mock_market_data):
         """Test exit condition based on ATR stop loss."""
         # Add data for ATR calculation (need at least atr_period + 1 data
         # points)
@@ -817,12 +797,9 @@ class TestBreakoutStrategy:
             base_price = 50000
             # Larger variations for ATR calculation
             variation = (i % 5 - 2) * 100
-            strategy.high_history.append(
-                base_price + variation + 200)  # High price
-            strategy.low_history.append(
-                base_price + variation - 200)   # Low price
-            strategy.price_history.append(
-                base_price + variation)       # Close price
+            strategy.high_history.append(base_price + variation + 200)  # High price
+            strategy.low_history.append(base_price + variation - 200)  # Low price
+            strategy.price_history.append(base_price + variation)  # Close price
 
         # Set price to trigger stop loss (well below entry price)
         mock_position.current_price = Decimal("48000")  # Far below stop loss
@@ -830,8 +807,7 @@ class TestBreakoutStrategy:
         result = strategy.should_exit(mock_position, mock_market_data)
         assert result
 
-    def test_should_exit_target_price_reached(
-            self, strategy, mock_position, mock_market_data):
+    def test_should_exit_target_price_reached(self, strategy, mock_position, mock_market_data):
         """Test exit condition based on target price."""
         # Add target price to position metadata
         mock_position.metadata = {"target_price": 53000}
@@ -842,8 +818,7 @@ class TestBreakoutStrategy:
         result = strategy.should_exit(mock_position, mock_market_data)
         assert result
 
-    def test_should_exit_target_price_not_reached(
-            self, strategy, mock_position, mock_market_data):
+    def test_should_exit_target_price_not_reached(self, strategy, mock_position, mock_market_data):
         """Test exit condition when target price not reached."""
         # Add target price to position metadata
         mock_position.metadata = {"target_price": 53000}
@@ -854,8 +829,7 @@ class TestBreakoutStrategy:
         result = strategy.should_exit(mock_position, mock_market_data)
         assert result is False
 
-    def test_should_exit_sell_position_target_price(
-            self, strategy, mock_market_data):
+    def test_should_exit_sell_position_target_price(self, strategy, mock_market_data):
         """Test exit condition for sell position target price."""
         # Create sell position with target
         sell_position = Position(
@@ -865,7 +839,7 @@ class TestBreakoutStrategy:
             current_price=Decimal("49000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.SELL,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
         sell_position.metadata = {"target_price": 47000}
 
@@ -875,8 +849,7 @@ class TestBreakoutStrategy:
         result = strategy.should_exit(sell_position, mock_market_data)
         assert result
 
-    def test_should_exit_no_exit_condition(
-            self, strategy, mock_position, mock_market_data):
+    def test_should_exit_no_exit_condition(self, strategy, mock_position, mock_market_data):
         """Test when no exit condition is met."""
         # Add data for calculations
         for i in range(25):
@@ -892,7 +865,7 @@ class TestBreakoutStrategy:
             symbol="BTCUSDT",
             price=Decimal("50000"),
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Corrupt price history
@@ -954,8 +927,8 @@ class TestBreakoutStrategy:
                 "false_breakout_threshold": 0.005,  # Different from default
                 "target_multiplier": 1.5,  # Different from default
                 "atr_period": 10,  # Different from default
-                "atr_multiplier": 1.5  # Different from default
-            }
+                "atr_multiplier": 1.5,  # Different from default
+            },
         }
 
         strategy = BreakoutStrategy(config)

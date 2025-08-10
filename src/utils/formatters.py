@@ -18,19 +18,19 @@ Dependencies:
 - P-002A: Error handling framework
 """
 
-import json
 import csv
 import io
-from typing import Any, Dict, List, Tuple
-from decimal import Decimal, ROUND_HALF_UP
+import json
 from datetime import datetime, timezone
-import pandas as pd
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from typing import Any
+
+import pandas as pd
 
 # Import from P-001 core components
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -39,10 +39,8 @@ logger = get_logger(__name__)
 # Financial Formatting
 # =============================================================================
 
-def format_currency(
-        amount: float,
-        currency: str = "USD",
-        precision: int = 2) -> str:
+
+def format_currency(amount: float, currency: str = "USD", precision: int = 2) -> str:
     """
     Format amount as currency string.
 
@@ -58,8 +56,7 @@ def format_currency(
         ValidationError: If amount is invalid
     """
     if not isinstance(amount, (int, float, Decimal)):
-        raise ValidationError(
-            f"Amount must be a number, got {type(amount).__name__}")
+        raise ValidationError(f"Amount must be a number, got {type(amount).__name__}")
 
     # Determine precision based on currency
     if currency.upper() in ["BTC", "ETH"]:
@@ -72,9 +69,8 @@ def format_currency(
     # Convert to Decimal for precise formatting
     decimal_amount = Decimal(str(amount))
     formatted_amount = decimal_amount.quantize(
-        Decimal(
-            f"0.{'0' * (precision - 1)}1") if precision > 0 else Decimal("1"),
-        rounding=ROUND_HALF_UP
+        Decimal(f"0.{'0' * (precision - 1)}1") if precision > 0 else Decimal("1"),
+        rounding=ROUND_HALF_UP,
     )
 
     # Format with thousands separators
@@ -98,8 +94,7 @@ def format_percentage(value: float, precision: int = 2) -> str:
         ValidationError: If value is invalid
     """
     if not isinstance(value, (int, float, Decimal)):
-        raise ValidationError(
-            f"Value must be a number, got {type(value).__name__}")
+        raise ValidationError(f"Value must be a number, got {type(value).__name__}")
 
     # Convert to percentage
     percentage = float(value) * 100
@@ -111,7 +106,7 @@ def format_percentage(value: float, precision: int = 2) -> str:
         return f"{percentage:.{precision}f}%"
 
 
-def format_pnl(pnl: float, currency: str = "USD") -> Tuple[str, str]:
+def format_pnl(pnl: float, currency: str = "USD") -> tuple[str, str]:
     """
     Format P&L with appropriate color coding info.
 
@@ -126,8 +121,7 @@ def format_pnl(pnl: float, currency: str = "USD") -> Tuple[str, str]:
         ValidationError: If P&L is invalid
     """
     if not isinstance(pnl, (int, float, Decimal)):
-        raise ValidationError(
-            f"P&L must be a number, got {type(pnl).__name__}")
+        raise ValidationError(f"P&L must be a number, got {type(pnl).__name__}")
 
     formatted = format_currency(pnl, currency)
 
@@ -160,8 +154,7 @@ def format_quantity(quantity: float, symbol: str) -> str:
         ValidationError: If quantity is invalid
     """
     if not isinstance(quantity, (int, float, Decimal)):
-        raise ValidationError(
-            f"Quantity must be a number, got {type(quantity).__name__}")
+        raise ValidationError(f"Quantity must be a number, got {type(quantity).__name__}")
 
     # Determine precision based on symbol
     if "BTC" in symbol.upper():
@@ -176,8 +169,7 @@ def format_quantity(quantity: float, symbol: str) -> str:
     # Convert to Decimal for precise formatting
     decimal_qty = Decimal(str(quantity))
     formatted_qty = decimal_qty.quantize(
-        Decimal(f"0.{'0' * (precision - 1)}1"),
-        rounding=ROUND_HALF_UP
+        Decimal(f"0.{'0' * (precision - 1)}1"), rounding=ROUND_HALF_UP
     )
 
     return f"{formatted_qty:,.{precision}f}"
@@ -198,8 +190,7 @@ def format_price(price: float, symbol: str) -> str:
         ValidationError: If price is invalid
     """
     if not isinstance(price, (int, float, Decimal)):
-        raise ValidationError(
-            f"Price must be a number, got {type(price).__name__}")
+        raise ValidationError(f"Price must be a number, got {type(price).__name__}")
 
     # Determine precision based on symbol
     if "BTC" in symbol.upper():
@@ -214,8 +205,7 @@ def format_price(price: float, symbol: str) -> str:
     # Convert to Decimal for precise formatting
     decimal_price = Decimal(str(price))
     formatted_price = decimal_price.quantize(
-        Decimal(f"0.{'0' * (precision - 1)}1"),
-        rounding=ROUND_HALF_UP
+        Decimal(f"0.{'0' * (precision - 1)}1"), rounding=ROUND_HALF_UP
     )
 
     return f"{formatted_price:,.{precision}f}"
@@ -225,8 +215,8 @@ def format_price(price: float, symbol: str) -> str:
 # API Response Formatting
 # =============================================================================
 
-def format_api_response(data: Any, success: bool = True,
-                        message: str = None) -> Dict[str, Any]:
+
+def format_api_response(data: Any, success: bool = True, message: str = None) -> dict[str, Any]:
     """
     Format standardized API response.
 
@@ -241,7 +231,7 @@ def format_api_response(data: Any, success: bool = True,
     response = {
         "success": success,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "data": data
+        "data": data,
     }
 
     if message:
@@ -250,8 +240,7 @@ def format_api_response(data: Any, success: bool = True,
     return response
 
 
-def format_error_response(
-        error: Exception, error_code: str = None) -> Dict[str, Any]:
+def format_error_response(error: Exception, error_code: str = None) -> dict[str, Any]:
     """
     Format error response for API.
 
@@ -268,21 +257,22 @@ def format_error_response(
         "error": {
             "type": type(error).__name__,
             "message": str(error),
-            "details": getattr(error, 'details', {})
-        }
+            "details": getattr(error, "details", {}),
+        },
     }
 
     if error_code:
         response["error"]["code"] = error_code
 
-    if hasattr(error, 'error_code'):
+    if hasattr(error, "error_code"):
         response["error"]["code"] = error.error_code
 
     return response
 
 
 def format_success_response(
-        data: Any, message: str = "Operation completed successfully") -> Dict[str, Any]:
+    data: Any, message: str = "Operation completed successfully"
+) -> dict[str, Any]:
     """
     Format success response for API.
 
@@ -297,7 +287,8 @@ def format_success_response(
 
 
 def format_paginated_response(
-        data: List[Any], page: int, page_size: int, total: int) -> Dict[str, Any]:
+    data: list[Any], page: int, page_size: int, total: int
+) -> dict[str, Any]:
     """
     Format paginated response for API.
 
@@ -322,8 +313,8 @@ def format_paginated_response(
             "total": total,
             "total_pages": total_pages,
             "has_next": page < total_pages,
-            "has_prev": page > 1
-        }
+            "has_prev": page > 1,
+        },
     }
 
     return response
@@ -333,7 +324,8 @@ def format_paginated_response(
 # Log Formatting
 # =============================================================================
 
-def format_log_entry(level: str, message: str, **kwargs) -> Dict[str, Any]:
+
+def format_log_entry(level: str, message: str, **kwargs) -> dict[str, Any]:
     """
     Format structured log entry.
 
@@ -349,7 +341,7 @@ def format_log_entry(level: str, message: str, **kwargs) -> Dict[str, Any]:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "level": level.upper(),
         "message": message,
-        **kwargs
+        **kwargs,
     }
 
     return log_entry
@@ -376,11 +368,7 @@ def format_correlation_id(correlation_id: str) -> str:
     return formatted
 
 
-def format_structured_log(
-        level: str,
-        message: str,
-        correlation_id: str = None,
-        **kwargs) -> str:
+def format_structured_log(level: str, message: str, correlation_id: str = None, **kwargs) -> str:
     """
     Format structured log as JSON string.
 
@@ -402,9 +390,8 @@ def format_structured_log(
 
 
 def format_performance_log(
-    function_name: str, execution_time_ms: float,
-    success: bool, **kwargs
-) -> Dict[str, Any]:
+    function_name: str, execution_time_ms: float, success: bool, **kwargs
+) -> dict[str, Any]:
     """
     Format performance log entry.
 
@@ -423,7 +410,7 @@ def format_performance_log(
         function=function_name,
         execution_time_ms=execution_time_ms,
         success=success,
-        **kwargs
+        **kwargs,
     )
 
 
@@ -431,8 +418,8 @@ def format_performance_log(
 # Chart Data Formatting
 # =============================================================================
 
-def format_ohlcv_data(
-        ohlcv_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+def format_ohlcv_data(ohlcv_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Format OHLCV data for charting.
 
@@ -455,16 +442,14 @@ def format_ohlcv_data(
             raise ValidationError("Each OHLCV item must be a dictionary")
 
         # Validate required fields
-        required_fields = ["timestamp", "open",
-                           "high", "low", "close", "volume"]
+        required_fields = ["timestamp", "open", "high", "low", "close", "volume"]
         for field in required_fields:
             if field not in candle:
                 raise ValidationError(f"Missing required field: {field}")
 
         # Format timestamp
         if isinstance(candle["timestamp"], (int, float)):
-            timestamp = datetime.fromtimestamp(
-                candle["timestamp"], tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(candle["timestamp"], tz=timezone.utc)
         else:
             timestamp = candle["timestamp"]
 
@@ -474,7 +459,7 @@ def format_ohlcv_data(
             "high": float(candle["high"]),
             "low": float(candle["low"]),
             "close": float(candle["close"]),
-            "volume": float(candle["volume"])
+            "volume": float(candle["volume"]),
         }
 
         formatted_data.append(formatted_candle)
@@ -483,9 +468,8 @@ def format_ohlcv_data(
 
 
 def format_indicator_data(
-    indicator_name: str, values: List[float],
-    timestamps: List[datetime] = None
-) -> Dict[str, Any]:
+    indicator_name: str, values: list[float], timestamps: list[datetime] = None
+) -> dict[str, Any]:
     """
     Format indicator data for charting.
 
@@ -504,12 +488,11 @@ def format_indicator_data(
         raise ValidationError("Indicator values must be a list")
 
     if timestamps and len(timestamps) != len(values):
-        raise ValidationError(
-            "Timestamps and values must have the same length")
+        raise ValidationError("Timestamps and values must have the same length")
 
     formatted_data = {
         "indicator": indicator_name,
-        "values": [float(v) if v is not None else None for v in values]
+        "values": [float(v) if v is not None else None for v in values],
     }
 
     if timestamps:
@@ -519,9 +502,8 @@ def format_indicator_data(
 
 
 def format_chart_data(
-    symbol: str, ohlcv_data: List[Dict[str, Any]],
-    indicators: Dict[str, List[float]] = None
-) -> Dict[str, Any]:
+    symbol: str, ohlcv_data: list[dict[str, Any]], indicators: dict[str, list[float]] = None
+) -> dict[str, Any]:
     """
     Format complete chart data.
 
@@ -536,15 +518,13 @@ def format_chart_data(
     chart_data = {
         "symbol": symbol,
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "ohlcv": format_ohlcv_data(ohlcv_data)
+        "ohlcv": format_ohlcv_data(ohlcv_data),
     }
 
     if indicators:
         chart_data["indicators"] = {}
         for indicator_name, values in indicators.items():
-            chart_data["indicators"][indicator_name] = format_indicator_data(
-                indicator_name, values
-            )
+            chart_data["indicators"][indicator_name] = format_indicator_data(indicator_name, values)
 
     return chart_data
 
@@ -553,8 +533,8 @@ def format_chart_data(
 # Report Formatting
 # =============================================================================
 
-def format_performance_report(
-        performance_data: Dict[str, Any]) -> Dict[str, Any]:
+
+def format_performance_report(performance_data: dict[str, Any]) -> dict[str, Any]:
     """
     Format performance report.
 
@@ -574,15 +554,15 @@ def format_performance_report(
             "win_rate": format_percentage(performance_data.get("win_rate", 0)),
             "total_pnl": format_currency(performance_data.get("total_pnl", 0)),
             "sharpe_ratio": f"{performance_data.get('sharpe_ratio', 0):.3f}",
-            "max_drawdown": format_percentage(performance_data.get("max_drawdown", 0))
+            "max_drawdown": format_percentage(performance_data.get("max_drawdown", 0)),
         },
-        "details": performance_data
+        "details": performance_data,
     }
 
     return report
 
 
-def format_risk_report(risk_data: Dict[str, Any]) -> Dict[str, Any]:
+def format_risk_report(risk_data: dict[str, Any]) -> dict[str, Any]:
     """
     Format risk report.
 
@@ -600,15 +580,15 @@ def format_risk_report(risk_data: Dict[str, Any]) -> Dict[str, Any]:
             "var_1d": format_currency(risk_data.get("var_1d", 0)),
             "var_5d": format_currency(risk_data.get("var_5d", 0)),
             "portfolio_exposure": format_percentage(risk_data.get("portfolio_exposure", 0)),
-            "risk_level": risk_data.get("risk_level", "unknown")
+            "risk_level": risk_data.get("risk_level", "unknown"),
         },
-        "details": risk_data
+        "details": risk_data,
     }
 
     return report
 
 
-def format_trade_report(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+def format_trade_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
     """
     Format trade report.
 
@@ -625,15 +605,14 @@ def format_trade_report(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
             "summary": {
                 "total_trades": 0,
                 "total_volume": format_currency(0),
-                "total_pnl": format_currency(0)
+                "total_pnl": format_currency(0),
             },
-            "trades": []
+            "trades": [],
         }
 
     # Calculate summary statistics
     total_volume = sum(
-        float(trade.get("quantity", 0)) * float(trade.get("price", 0))
-        for trade in trades
+        float(trade.get("quantity", 0)) * float(trade.get("price", 0)) for trade in trades
     )
     total_pnl = sum(float(trade.get("pnl", 0)) for trade in trades)
 
@@ -648,7 +627,7 @@ def format_trade_report(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
             "price": format_price(float(trade.get("price", 0)), trade.get("symbol", "")),
             "pnl": format_currency(float(trade.get("pnl", 0))),
             "timestamp": trade.get("timestamp", ""),
-            "fee": format_currency(float(trade.get("fee", 0)))
+            "fee": format_currency(float(trade.get("fee", 0))),
         }
         formatted_trades.append(formatted_trade)
 
@@ -658,9 +637,9 @@ def format_trade_report(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "summary": {
             "total_trades": len(trades),
             "total_volume": format_currency(total_volume),
-            "total_pnl": format_currency(total_pnl)
+            "total_pnl": format_currency(total_pnl),
         },
-        "trades": formatted_trades
+        "trades": formatted_trades,
     }
 
     return report
@@ -670,8 +649,8 @@ def format_trade_report(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
 # Export Formatting
 # =============================================================================
 
-def format_csv_data(data: List[Dict[str, Any]],
-                    headers: List[str] = None) -> str:
+
+def format_csv_data(data: list[dict[str, Any]], headers: list[str] = None) -> str:
     """
     Format data as CSV string.
 
@@ -711,8 +690,7 @@ def format_csv_data(data: List[Dict[str, Any]],
     return output.getvalue()
 
 
-def format_excel_data(data: List[Dict[str, Any]],
-                      sheet_name: str = "Data") -> bytes:
+def format_excel_data(data: list[dict[str, Any]], sheet_name: str = "Data") -> bytes:
     """
     Format data as Excel file bytes.
 
@@ -738,7 +716,7 @@ def format_excel_data(data: List[Dict[str, Any]],
 
     # Create Excel writer
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name=sheet_name, index=False)
 
     return output.getvalue()
@@ -764,13 +742,10 @@ def format_json_data(data: Any, pretty: bool = True) -> str:
         else:
             return json.dumps(data, default=str)
     except (TypeError, ValueError) as e:
-        raise ValidationError(f"Cannot serialize data to JSON: {str(e)}")
+        raise ValidationError(f"Cannot serialize data to JSON: {e!s}")
 
 
-def export_to_file(
-        data: Any,
-        file_path: str,
-        format_type: str = "json") -> None:
+def export_to_file(data: Any, file_path: str, format_type: str = "json") -> None:
     """
     Export data to file in specified format.
 
@@ -788,23 +763,21 @@ def export_to_file(
 
         if format_type.lower() == "json":
             content = format_json_data(data)
-            with open(path, 'w', encoding='utf-8') as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
 
         elif format_type.lower() == "csv":
             if not isinstance(data, list):
-                raise ValidationError(
-                    "CSV export requires list of dictionaries")
+                raise ValidationError("CSV export requires list of dictionaries")
             content = format_csv_data(data)
-            with open(path, 'w', encoding='utf-8', newline='') as f:
+            with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(content)
 
         elif format_type.lower() == "excel":
             if not isinstance(data, list):
-                raise ValidationError(
-                    "Excel export requires list of dictionaries")
+                raise ValidationError("Excel export requires list of dictionaries")
             content = format_excel_data(data)
-            with open(path, 'wb') as f:
+            with open(path, "wb") as f:
                 f.write(content)
 
         else:
@@ -813,4 +786,4 @@ def export_to_file(
         logger.info(f"Data exported to {file_path} in {format_type} format")
 
     except Exception as e:
-        raise ValidationError(f"Export failed: {str(e)}")
+        raise ValidationError(f"Export failed: {e!s}")

@@ -4,26 +4,25 @@ Unit tests for BaseRiskManager abstract class.
 This module tests the abstract base class for risk management implementations.
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock, patch
+from decimal import Decimal
+from unittest.mock import patch
 
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import ValidationError
 from src.core.types import (
-    Signal,
-    SignalDirection,
     MarketData,
-    Position,
     OrderRequest,
     OrderSide,
     OrderType,
+    Position,
+    RiskLevel,
     RiskMetrics,
-    RiskLevel)
-from src.core.exceptions import (
-    RiskManagementError, PositionLimitError, ValidationError
+    Signal,
+    SignalDirection,
 )
-from src.core.config import Config
 from src.risk_management.base import BaseRiskManager
 
 
@@ -38,6 +37,7 @@ class TestBaseRiskManager:
     @pytest.fixture
     def risk_manager(self, config):
         """Create a concrete implementation of BaseRiskManager for testing."""
+
         class TestRiskManager(BaseRiskManager):
             async def calculate_position_size(self, signal, portfolio_value):
                 return Decimal("1000")
@@ -57,7 +57,7 @@ class TestBaseRiskManager:
                     sharpe_ratio=Decimal("1.5"),
                     current_drawdown=Decimal("0.05"),
                     risk_level=RiskLevel.MEDIUM,
-                    timestamp=datetime.now()
+                    timestamp=datetime.now(),
                 )
 
             async def check_portfolio_limits(self, new_position):
@@ -76,7 +76,7 @@ class TestBaseRiskManager:
             confidence=0.8,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
     @pytest.fixture
@@ -89,7 +89,7 @@ class TestBaseRiskManager:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
     @pytest.fixture
@@ -104,7 +104,7 @@ class TestBaseRiskManager:
             ask=Decimal("51010"),
             open_price=Decimal("50000"),
             high_price=Decimal("52000"),
-            low_price=Decimal("49000")
+            low_price=Decimal("49000"),
         )
 
     @pytest.fixture
@@ -118,7 +118,7 @@ class TestBaseRiskManager:
             price=None,
             stop_price=None,
             time_in_force="GTC",
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
     def test_initialization(self, risk_manager, config):
@@ -130,8 +130,7 @@ class TestBaseRiskManager:
         assert risk_manager.total_portfolio_value == Decimal("0")
 
     @pytest.mark.asyncio
-    async def test_calculate_position_size_abstract(
-            self, risk_manager, sample_signal):
+    async def test_calculate_position_size_abstract(self, risk_manager, sample_signal):
         """Test position size calculation."""
         portfolio_value = Decimal("10000")
         position_size = await risk_manager.calculate_position_size(sample_signal, portfolio_value)
@@ -156,7 +155,8 @@ class TestBaseRiskManager:
 
     @pytest.mark.asyncio
     async def test_calculate_risk_metrics_abstract(
-            self, risk_manager, sample_position, sample_market_data):
+        self, risk_manager, sample_position, sample_market_data
+    ):
         """Test risk metrics calculation."""
         positions = [sample_position]
         market_data = [sample_market_data]
@@ -169,8 +169,7 @@ class TestBaseRiskManager:
         assert risk_metrics.risk_level == RiskLevel.MEDIUM
 
     @pytest.mark.asyncio
-    async def test_check_portfolio_limits_abstract(
-            self, risk_manager, sample_position):
+    async def test_check_portfolio_limits_abstract(self, risk_manager, sample_position):
         """Test portfolio limits checking."""
         result = await risk_manager.check_portfolio_limits(sample_position)
 
@@ -178,7 +177,8 @@ class TestBaseRiskManager:
 
     @pytest.mark.asyncio
     async def test_should_exit_position_abstract(
-            self, risk_manager, sample_position, sample_market_data):
+        self, risk_manager, sample_position, sample_market_data
+    ):
         """Test position exit evaluation."""
         result = await risk_manager.should_exit_position(sample_position, sample_market_data)
 
@@ -226,6 +226,7 @@ class TestBaseRiskManager:
     @pytest.mark.asyncio
     async def test_validate_risk_parameters_invalid(self, config):
         """Test risk parameter validation with invalid parameters."""
+
         class InvalidRiskManager(BaseRiskManager):
             async def calculate_position_size(self, signal, portfolio_value):
                 return Decimal("1000")
@@ -245,7 +246,7 @@ class TestBaseRiskManager:
                     sharpe_ratio=Decimal("1.5"),
                     current_drawdown=Decimal("0.05"),
                     risk_level=RiskLevel.MEDIUM,
-                    timestamp=datetime.now()
+                    timestamp=datetime.now(),
                 )
 
             async def check_portfolio_limits(self, new_position):
@@ -256,13 +257,14 @@ class TestBaseRiskManager:
 
         # Create a new config with invalid parameters
         from src.core.config import Config
+
         invalid_config = Config()
         # We can't directly modify the config due to validation, so we'll test
         # the validation logic directly
         risk_manager = InvalidRiskManager(config)
 
         # Test with invalid parameters by mocking the validation
-        with patch.object(risk_manager, 'risk_config') as mock_config:
+        with patch.object(risk_manager, "risk_config") as mock_config:
             mock_config.default_position_size_pct = 1.5  # Invalid: > 1
             with pytest.raises(ValidationError):
                 await risk_manager.validate_risk_parameters()
@@ -274,12 +276,12 @@ class TestBaseRiskManager:
 
         exposure = risk_manager._calculate_portfolio_exposure(positions)
 
-        expected_exposure = (sample_position.quantity *
-                             sample_position.current_price) / Decimal("10000")
+        expected_exposure = (sample_position.quantity * sample_position.current_price) / Decimal(
+            "10000"
+        )
         assert exposure == expected_exposure
 
-    def test_calculate_portfolio_exposure_zero_portfolio(
-            self, risk_manager, sample_position):
+    def test_calculate_portfolio_exposure_zero_portfolio(self, risk_manager, sample_position):
         """Test portfolio exposure calculation with zero portfolio value."""
         positions = [sample_position]
         risk_manager.total_portfolio_value = Decimal("0")
@@ -336,6 +338,7 @@ class TestBaseRiskManager:
 
     def test_abstract_methods_not_implemented(self, config):
         """Test that abstract methods must be implemented."""
+
         class IncompleteRiskManager(BaseRiskManager):
             pass  # No implementation of abstract methods
 

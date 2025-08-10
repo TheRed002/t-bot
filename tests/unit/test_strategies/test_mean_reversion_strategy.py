@@ -5,19 +5,22 @@ Tests the mean reversion strategy implementation with comprehensive coverage
 including signal generation, validation, position sizing, and exit conditions.
 """
 
-import pytest
-import numpy as np
-from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
 import asyncio
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from unittest.mock import patch
+
+import numpy as np
+import pytest
 
 # Import from P-001
 from src.core.types import (
-    Signal, MarketData, Position, StrategyConfig,
-    StrategyStatus, StrategyMetrics, SignalDirection, OrderSide
+    MarketData,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
 )
-from src.core.exceptions import ValidationError
 
 # Import from P-012
 from src.strategies.static.mean_reversion import MeanReversionStrategy
@@ -48,8 +51,8 @@ class TestMeanReversionStrategy:
                 "atr_multiplier": 2.0,
                 "volume_filter": True,
                 "min_volume_ratio": 1.5,
-                "confirmation_timeframe": "1h"
-            }
+                "confirmation_timeframe": "1h",
+            },
         }
 
     @pytest.fixture
@@ -69,7 +72,7 @@ class TestMeanReversionStrategy:
             ask=Decimal("50001"),
             open_price=Decimal("49900"),
             high_price=Decimal("50100"),
-            low_price=Decimal("49800")
+            low_price=Decimal("49800"),
         )
 
     @pytest.fixture
@@ -82,7 +85,7 @@ class TestMeanReversionStrategy:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
     def test_strategy_initialization(self, strategy, mock_config):
@@ -134,7 +137,7 @@ class TestMeanReversionStrategy:
             ask=None,
             open_price=None,
             high_price=None,
-            low_price=None
+            low_price=None,
         )
 
         strategy._update_price_history(data)
@@ -181,8 +184,7 @@ class TestMeanReversionStrategy:
         z_score = strategy._calculate_zscore()
         assert z_score is None
 
-    def test_check_volume_filter_insufficient_data(
-            self, strategy, mock_market_data):
+    def test_check_volume_filter_insufficient_data(self, strategy, mock_market_data):
         """Test volume filter with insufficient data."""
         # Add some volume data but not enough
         for i in range(10):
@@ -224,7 +226,7 @@ class TestMeanReversionStrategy:
             symbol="BTCUSDT",
             price=Decimal("50000"),
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Corrupt volume history
@@ -239,12 +241,14 @@ class TestMeanReversionStrategy:
         signals = await strategy.generate_signals(None)
         assert signals == []
 
-        signals = await strategy.generate_signals(MarketData(
-            symbol="BTCUSDT",
-            price=Decimal("0"),  # Invalid price
-            volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
-        ))
+        signals = await strategy.generate_signals(
+            MarketData(
+                symbol="BTCUSDT",
+                price=Decimal("0"),  # Invalid price
+                volume=Decimal("100"),
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
         assert signals == []
 
     @pytest.mark.asyncio
@@ -254,22 +258,20 @@ class TestMeanReversionStrategy:
             symbol="BTCUSDT",
             price=Decimal("-100"),  # Negative price
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         signals = await strategy.generate_signals(data)
         assert signals == []
 
     @pytest.mark.asyncio
-    async def test_generate_signals_insufficient_data(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_insufficient_data(self, strategy, mock_market_data):
         """Test signal generation with insufficient data."""
         signals = await strategy.generate_signals(mock_market_data)
         assert signals == []
 
     @pytest.mark.asyncio
-    async def test_generate_signals_bullish_entry(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_bullish_entry(self, strategy, mock_market_data):
         """Test bullish entry signal generation."""
         # Add enough data with bullish Z-score
         for i in range(25):
@@ -286,8 +288,7 @@ class TestMeanReversionStrategy:
         assert signal.metadata["signal_type"] == "entry"
 
     @pytest.mark.asyncio
-    async def test_generate_signals_bearish_entry(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_bearish_entry(self, strategy, mock_market_data):
         """Test bearish entry signal generation."""
         # Add enough data with bearish Z-score
         for i in range(25):
@@ -304,27 +305,23 @@ class TestMeanReversionStrategy:
         assert signal.metadata["signal_type"] == "entry"
 
     @pytest.mark.asyncio
-    async def test_generate_signals_exit_signals(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_exit_signals(self, strategy, mock_market_data):
         """Test exit signal generation."""
         # Temporarily modify thresholds for testing
         original_entry_threshold = strategy.entry_threshold
         original_exit_threshold = strategy.exit_threshold
         strategy.entry_threshold = 5.0  # Very high entry threshold
-        strategy.exit_threshold = 0.5   # Lower exit threshold to make it easier to trigger
+        strategy.exit_threshold = 0.5  # Lower exit threshold to make it easier to trigger
 
         # Add data with Z-score within exit threshold (very small deviation from mean)
         # Create a more predictable scenario: all prices very close to 50000
         # Use almost constant prices with tiny random variation to ensure
         # Z-score is within exit threshold
         import numpy as np
+
         np.random.seed(42)  # For reproducible results
         for i in range(25):
-            strategy.price_history.append(
-                50000.0 +
-                np.random.normal(
-                    0,
-                    0.0001))  # Almost constant
+            strategy.price_history.append(50000.0 + np.random.normal(0, 0.0001))  # Almost constant
 
         signals = await strategy.generate_signals(mock_market_data)
 
@@ -338,8 +335,7 @@ class TestMeanReversionStrategy:
         strategy.exit_threshold = original_exit_threshold
 
     @pytest.mark.asyncio
-    async def test_generate_signals_volume_filter_rejection(
-            self, strategy, mock_market_data):
+    async def test_generate_signals_volume_filter_rejection(self, strategy, mock_market_data):
         """Test signal generation with volume filter rejection."""
         # Add enough data
         for i in range(25):
@@ -360,7 +356,7 @@ class TestMeanReversionStrategy:
             symbol="BTCUSDT",
             price=Decimal("50000"),
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Corrupt price history
@@ -378,10 +374,7 @@ class TestMeanReversionStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="mean_reversion",
-            metadata={
-                "z_score": 2.5,
-                "signal_type": "entry"
-            }
+            metadata={"z_score": 2.5, "signal_type": "entry"},
         )
 
         result = await strategy.validate_signal(signal)
@@ -396,10 +389,7 @@ class TestMeanReversionStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="mean_reversion",
-            metadata={
-                "z_score": 2.5,
-                "signal_type": "entry"
-            }
+            metadata={"z_score": 2.5, "signal_type": "entry"},
         )
 
         result = await strategy.validate_signal(signal)
@@ -414,10 +404,7 @@ class TestMeanReversionStrategy:
             timestamp=datetime.now(timezone.utc) - timedelta(minutes=10),
             symbol="BTCUSDT",
             strategy_name="mean_reversion",
-            metadata={
-                "z_score": 2.5,
-                "signal_type": "entry"
-            }
+            metadata={"z_score": 2.5, "signal_type": "entry"},
         )
 
         result = await strategy.validate_signal(signal)
@@ -432,7 +419,7 @@ class TestMeanReversionStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="mean_reversion",
-            metadata={}  # Missing z_score
+            metadata={},  # Missing z_score
         )
 
         result = await strategy.validate_signal(signal)
@@ -449,8 +436,8 @@ class TestMeanReversionStrategy:
             strategy_name="mean_reversion",
             metadata={
                 "z_score": "invalid",  # Not a number
-                "signal_type": "entry"
-            }
+                "signal_type": "entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -467,8 +454,8 @@ class TestMeanReversionStrategy:
             strategy_name="mean_reversion",
             metadata={
                 "z_score": 1.5,  # Below entry threshold
-                "signal_type": "entry"
-            }
+                "signal_type": "entry",
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -483,10 +470,7 @@ class TestMeanReversionStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="mean_reversion",
-            metadata={
-                "z_score": 2.5,
-                "signal_type": "entry"
-            }
+            metadata={"z_score": 2.5, "signal_type": "entry"},
         )
 
         # Corrupt signal to cause exception
@@ -503,9 +487,7 @@ class TestMeanReversionStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name="mean_reversion",
-            metadata={
-                "z_score": 2.5
-            }
+            metadata={"z_score": 2.5},
         )
 
         position_size = strategy.get_position_size(signal)
@@ -523,12 +505,11 @@ class TestMeanReversionStrategy:
             strategy_name="mean_reversion",
             metadata={
                 "z_score": 5.0  # Very high Z-score
-            }
+            },
         )
 
         position_size = strategy.get_position_size(signal)
-        max_size = Decimal(
-            str(strategy.config.parameters.get("max_position_size_pct", 0.1)))
+        max_size = Decimal(str(strategy.config.parameters.get("max_position_size_pct", 0.1)))
         assert position_size <= max_size
 
     def test_get_position_size_exception_handling(self, strategy):
@@ -541,7 +522,7 @@ class TestMeanReversionStrategy:
             strategy_name="mean_reversion",
             metadata={
                 "z_score": "invalid"  # Will cause exception
-            }
+            },
         )
 
         position_size = strategy.get_position_size(signal)
@@ -549,28 +530,21 @@ class TestMeanReversionStrategy:
         expected_min = Decimal(str(strategy.config.position_size_pct * 0.5))
         assert position_size == expected_min
 
-    def test_should_exit_zscore_exit(
-            self,
-            strategy,
-            mock_position,
-            mock_market_data):
+    def test_should_exit_zscore_exit(self, strategy, mock_position, mock_market_data):
         """Test exit condition based on Z-score."""
         # Temporarily modify thresholds for testing
         original_entry_threshold = strategy.entry_threshold
         original_exit_threshold = strategy.exit_threshold
         strategy.entry_threshold = 5.0  # Very high entry threshold
-        strategy.exit_threshold = 0.5   # Lower exit threshold to make it easier to trigger
+        strategy.exit_threshold = 0.5  # Lower exit threshold to make it easier to trigger
 
         # Add data with Z-score within exit threshold (very small deviation)
         # Create a more predictable scenario: all prices very close to 50000
         import numpy as np
+
         np.random.seed(42)  # For reproducible results
         for i in range(25):
-            strategy.price_history.append(
-                50000.0 +
-                np.random.normal(
-                    0,
-                    0.0001))  # Almost constant
+            strategy.price_history.append(50000.0 + np.random.normal(0, 0.0001))  # Almost constant
 
         result = strategy.should_exit(mock_position, mock_market_data)
         assert result is True
@@ -579,11 +553,7 @@ class TestMeanReversionStrategy:
         strategy.entry_threshold = original_entry_threshold
         strategy.exit_threshold = original_exit_threshold
 
-    def test_should_exit_atr_stop_loss(
-            self,
-            strategy,
-            mock_position,
-            mock_market_data):
+    def test_should_exit_atr_stop_loss(self, strategy, mock_position, mock_market_data):
         """Test exit condition based on ATR stop loss."""
         # Add data for ATR calculation (need at least period + 1 = 15 data points)
         # Create more realistic price data with proper high/low/close
@@ -591,8 +561,8 @@ class TestMeanReversionStrategy:
         for i in range(30):  # More data to ensure sufficient true ranges
             base_price = 50000 + i
             strategy.high_history.append(base_price + 100)  # High
-            strategy.low_history.append(base_price - 100)   # Low
-            strategy.price_history.append(base_price)       # Close
+            strategy.low_history.append(base_price - 100)  # Low
+            strategy.price_history.append(base_price)  # Close
 
         # Set price to trigger stop loss (well below entry price)
         mock_market_data.price = Decimal("49000")  # Below stop loss
@@ -600,8 +570,7 @@ class TestMeanReversionStrategy:
         result = strategy.should_exit(mock_position, mock_market_data)
         assert result is True
 
-    def test_should_exit_no_exit_condition(
-            self, strategy, mock_position, mock_market_data):
+    def test_should_exit_no_exit_condition(self, strategy, mock_position, mock_market_data):
         """Test when no exit condition is met."""
         # Add data with Z-score outside exit threshold
         for i in range(25):
@@ -617,7 +586,7 @@ class TestMeanReversionStrategy:
             symbol="BTCUSDT",
             price=Decimal("50000"),
             volume=Decimal("100"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Corrupt price history
@@ -626,8 +595,7 @@ class TestMeanReversionStrategy:
         result = strategy.should_exit(mock_position, data)
         assert result is False
 
-    def test_should_exit_atr_calculation_exception(
-            self, strategy, mock_position, mock_market_data):
+    def test_should_exit_atr_calculation_exception(self, strategy, mock_position, mock_market_data):
         """Test exit check when ATR calculation fails."""
         # Add data for ATR calculation but with invalid data to cause exception
         for i in range(30):
@@ -636,12 +604,13 @@ class TestMeanReversionStrategy:
             strategy.price_history.append(50000 + i)
 
         # Mock the calculate_atr function to raise an exception
-        with patch('src.utils.helpers.calculate_atr', side_effect=Exception("ATR calculation failed")):
+        with patch(
+            "src.utils.helpers.calculate_atr", side_effect=Exception("ATR calculation failed")
+        ):
             result = strategy.should_exit(mock_position, mock_market_data)
             assert result is False
 
-    def test_should_exit_atr_none_result(
-            self, strategy, mock_position, mock_market_data):
+    def test_should_exit_atr_none_result(self, strategy, mock_position, mock_market_data):
         """Test exit check when ATR calculation returns None."""
         # Add data for ATR calculation
         for i in range(30):
@@ -650,12 +619,11 @@ class TestMeanReversionStrategy:
             strategy.price_history.append(50000 + i)
 
         # Mock the calculate_atr function to return None
-        with patch('src.utils.helpers.calculate_atr', return_value=None):
+        with patch("src.utils.helpers.calculate_atr", return_value=None):
             result = strategy.should_exit(mock_position, mock_market_data)
             assert result is False
 
-    def test_should_exit_atr_zero_result(
-            self, strategy, mock_position, mock_market_data):
+    def test_should_exit_atr_zero_result(self, strategy, mock_position, mock_market_data):
         """Test exit check when ATR calculation returns zero."""
         # Add data for ATR calculation
         for i in range(30):
@@ -664,12 +632,11 @@ class TestMeanReversionStrategy:
             strategy.price_history.append(50000 + i)
 
         # Mock the calculate_atr function to return 0
-        with patch('src.utils.helpers.calculate_atr', return_value=0):
+        with patch("src.utils.helpers.calculate_atr", return_value=0):
             result = strategy.should_exit(mock_position, mock_market_data)
             assert result is False
 
-    def test_should_exit_sell_position_stop_loss(
-            self, strategy, mock_market_data):
+    def test_should_exit_sell_position_stop_loss(self, strategy, mock_market_data):
         """Test exit condition for sell position based on ATR stop loss."""
         # Create a sell position
         sell_position = Position(
@@ -679,7 +646,7 @@ class TestMeanReversionStrategy:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.SELL,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Add data for ATR calculation
@@ -692,7 +659,7 @@ class TestMeanReversionStrategy:
         mock_market_data.price = Decimal("51000")  # Above stop loss
 
         # Mock ATR calculation to return a reasonable value
-        with patch('src.utils.helpers.calculate_atr', return_value=1000):
+        with patch("src.utils.helpers.calculate_atr", return_value=1000):
             result = strategy.should_exit(sell_position, mock_market_data)
             assert result is True
 
@@ -706,7 +673,7 @@ class TestMeanReversionStrategy:
             timestamp=old_timestamp,
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={"z_score": 2.5, "signal_type": "entry"}
+            metadata={"z_score": 2.5, "signal_type": "entry"},
         )
 
         # Add data for validation
@@ -724,7 +691,7 @@ class TestMeanReversionStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={"z_score": "invalid", "signal_type": "entry"}
+            metadata={"z_score": "invalid", "signal_type": "entry"},
         )
 
         result = asyncio.run(strategy.validate_signal(signal))
@@ -739,7 +706,7 @@ class TestMeanReversionStrategy:
             symbol="BTCUSDT",
             strategy_name=strategy.name,
             # Exactly at threshold
-            metadata={"z_score": 2.0, "signal_type": "entry"}
+            metadata={"z_score": 2.0, "signal_type": "entry"},
         )
 
         result = asyncio.run(strategy.validate_signal(signal))
@@ -771,11 +738,7 @@ class TestMeanReversionStrategy:
         z_score = strategy._calculate_zscore()
         assert z_score is not None
 
-    def test_atr_debug_logging(
-            self,
-            strategy,
-            mock_position,
-            mock_market_data):
+    def test_atr_debug_logging(self, strategy, mock_position, mock_market_data):
         """Test ATR calculation debug logging."""
         # Add data for ATR calculation
         for i in range(30):
@@ -826,10 +789,10 @@ class TestMeanReversionStrategy:
             "parameters": {
                 "lookback_period": 10,  # Different from default
                 "entry_threshold": 1.5,  # Different from default
-                "exit_threshold": 0.3,   # Different from default
-                "volume_filter": False,   # Different from default
-                "min_volume_ratio": 2.0  # Different from default
-            }
+                "exit_threshold": 0.3,  # Different from default
+                "volume_filter": False,  # Different from default
+                "min_volume_ratio": 2.0,  # Different from default
+            },
         }
 
         strategy = MeanReversionStrategy(config)

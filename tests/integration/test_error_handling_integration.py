@@ -5,41 +5,42 @@ These tests verify error handling, recovery scenarios, and resilience
 with actual component interactions.
 """
 
-import pytest
 import asyncio
-import time
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
-from src.core.logging import get_logger
+
+import pytest
 
 from src.core.config import Config
-from src.core.logging import setup_logging
 from src.core.exceptions import (
-    TradingBotError, ExchangeError, RiskManagementError,
-    ValidationError, ExecutionError, ModelError, DataError,
-    StateConsistencyError, SecurityError
+    DataError,
+    ExchangeError,
+    RiskManagementError,
+    StateConsistencyError,
+    TradingBotError,
+    ValidationError,
 )
-
+from src.core.logging import get_logger, setup_logging
+from src.error_handling.connection_manager import (
+    ConnectionManager,
+    ConnectionState,
+)
 from src.error_handling.error_handler import (
+    CircuitBreaker,
     ErrorHandler,
     ErrorSeverity,
-    ErrorContext,
-    CircuitBreaker,
-    error_handler_decorator)
+    error_handler_decorator,
+)
+from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 from src.error_handling.recovery_scenarios import (
-    PartialFillRecovery, NetworkDisconnectionRecovery,
-    ExchangeMaintenanceRecovery, DataFeedInterruptionRecovery,
-    OrderRejectionRecovery, APIRateLimitRecovery
+    APIRateLimitRecovery,
+    DataFeedInterruptionRecovery,
+    ExchangeMaintenanceRecovery,
+    NetworkDisconnectionRecovery,
+    OrderRejectionRecovery,
+    PartialFillRecovery,
 )
-from src.error_handling.connection_manager import (
-    ConnectionManager, ConnectionState, ConnectionHealth
-)
-from src.error_handling.state_monitor import (
-    StateMonitor, StateValidationResult
-)
-from src.error_handling.pattern_analytics import (
-    ErrorPatternAnalytics, ErrorPattern, ErrorTrend
-)
+from src.error_handling.state_monitor import StateMonitor, StateValidationResult
 
 
 @pytest.fixture(scope="session")
@@ -59,8 +60,7 @@ def setup_logging_for_tests():
 class TestErrorHandlerIntegration:
     """Test error handler integration."""
 
-    async def test_error_handler_initialization(
-            self, config, setup_logging_for_tests):
+    async def test_error_handler_initialization(self, config, setup_logging_for_tests):
         """Test error handler initialization."""
         handler = ErrorHandler(config)
         assert handler is not None
@@ -82,8 +82,7 @@ class TestErrorHandlerIntegration:
             severity = handler.classify_error(error)
             assert severity == expected_severity, f"Expected {expected_severity}, got {severity}"
 
-    async def test_error_context_creation(
-            self, config, setup_logging_for_tests):
+    async def test_error_context_creation(self, config, setup_logging_for_tests):
         """Test error context creation."""
         handler = ErrorHandler(config)
 
@@ -93,7 +92,7 @@ class TestErrorHandlerIntegration:
             operation="place_order",
             user_id="test_user",
             bot_id="test_bot",
-            symbol="BTCUSDT"
+            symbol="BTCUSDT",
         )
 
         assert context.error_id is not None
@@ -104,11 +103,9 @@ class TestErrorHandlerIntegration:
         assert context.bot_id == "test_bot"
         assert context.symbol == "BTCUSDT"
 
-    async def test_circuit_breaker_functionality(
-            self, config, setup_logging_for_tests):
+    async def test_circuit_breaker_functionality(self, config, setup_logging_for_tests):
         """Test circuit breaker functionality."""
-        circuit_breaker = CircuitBreaker(
-            failure_threshold=3, recovery_timeout=5)
+        circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_timeout=5)
 
         # Simulate successful calls
         for i in range(2):
@@ -118,10 +115,7 @@ class TestErrorHandlerIntegration:
         # Simulate failures
         for i in range(3):
             try:
-                circuit_breaker.call(
-                    lambda: (
-                        _ for _ in ()).throw(
-                        Exception("test error")))
+                circuit_breaker.call(lambda: (_ for _ in ()).throw(Exception("test error")))
             except Exception:
                 pass
 
@@ -132,9 +126,9 @@ class TestErrorHandlerIntegration:
         with pytest.raises(TradingBotError):
             circuit_breaker.call(lambda: "should not execute")
 
-    async def test_error_handler_decorator(
-            self, config, setup_logging_for_tests):
+    async def test_error_handler_decorator(self, config, setup_logging_for_tests):
         """Test error handler decorator."""
+
         @error_handler_decorator("test", "test_function")
         def test_function():
             raise ValidationError("Test validation error")
@@ -149,8 +143,7 @@ class TestErrorHandlerIntegration:
 class TestRecoveryScenariosIntegration:
     """Test recovery scenario integrations."""
 
-    async def test_partial_fill_recovery(
-            self, config, setup_logging_for_tests):
+    async def test_partial_fill_recovery(self, config, setup_logging_for_tests):
         """Test partial fill recovery scenario."""
         recovery = PartialFillRecovery(config)
 
@@ -163,67 +156,71 @@ class TestRecoveryScenariosIntegration:
             def get(self, key, default=None):
                 return getattr(self, key, default)
 
-        result = await recovery.execute_recovery({
-            "order": MockOrder("test_order", Decimal("1.0")),
-            "filled_quantity": Decimal("0.5")
-        })
+        result = await recovery.execute_recovery(
+            {"order": MockOrder("test_order", Decimal("1.0")), "filled_quantity": Decimal("0.5")}
+        )
         assert result is not None
 
-    async def test_network_disconnection_recovery(
-            self, config, setup_logging_for_tests):
+    async def test_network_disconnection_recovery(self, config, setup_logging_for_tests):
         """Test network disconnection recovery scenario."""
         recovery = NetworkDisconnectionRecovery(config)
-        result = await recovery.execute_recovery({
-            "connection_type": "exchange",
-            "offline_duration": 60,
-            "last_heartbeat": datetime.now()
-        })
+        result = await recovery.execute_recovery(
+            {
+                "connection_type": "exchange",
+                "offline_duration": 60,
+                "last_heartbeat": datetime.now(),
+            }
+        )
         assert result is not None
 
-    async def test_exchange_maintenance_recovery(
-            self, config, setup_logging_for_tests):
+    async def test_exchange_maintenance_recovery(self, config, setup_logging_for_tests):
         """Test exchange maintenance recovery scenario."""
         recovery = ExchangeMaintenanceRecovery(config)
-        result = await recovery.execute_recovery({
-            "exchange": "binance",
-            "maintenance_duration": 3600,
-            "affected_symbols": ["BTCUSDT", "ETHUSDT"]
-        })
+        result = await recovery.execute_recovery(
+            {
+                "exchange": "binance",
+                "maintenance_duration": 3600,
+                "affected_symbols": ["BTCUSDT", "ETHUSDT"],
+            }
+        )
         assert result is not None
 
-    async def test_data_feed_interruption_recovery(
-            self, config, setup_logging_for_tests):
+    async def test_data_feed_interruption_recovery(self, config, setup_logging_for_tests):
         """Test data feed interruption recovery scenario."""
         recovery = DataFeedInterruptionRecovery(config)
-        result = await recovery.execute_recovery({
-            "data_source": "market_data",
-            "staleness_duration": 45,
-            "affected_symbols": ["BTCUSDT"]
-        })
+        result = await recovery.execute_recovery(
+            {
+                "data_source": "market_data",
+                "staleness_duration": 45,
+                "affected_symbols": ["BTCUSDT"],
+            }
+        )
         assert result is not None
 
-    async def test_order_rejection_recovery(
-            self, config, setup_logging_for_tests):
+    async def test_order_rejection_recovery(self, config, setup_logging_for_tests):
         """Test order rejection recovery scenario."""
         recovery = OrderRejectionRecovery(config)
-        result = await recovery.execute_recovery({
-            "order_id": "test_order",
-            "rejection_reason": "insufficient_balance",
-            "symbol": "BTCUSDT",
-            "quantity": 0.001
-        })
+        result = await recovery.execute_recovery(
+            {
+                "order_id": "test_order",
+                "rejection_reason": "insufficient_balance",
+                "symbol": "BTCUSDT",
+                "quantity": 0.001,
+            }
+        )
         assert result is not None
 
-    async def test_api_rate_limit_recovery(
-            self, config, setup_logging_for_tests):
+    async def test_api_rate_limit_recovery(self, config, setup_logging_for_tests):
         """Test API rate limit recovery scenario."""
         recovery = APIRateLimitRecovery(config)
-        result = await recovery.execute_recovery({
-            "endpoint": "/api/v3/order",
-            "rate_limit_type": "requests_per_minute",
-            "current_usage": 1200,
-            "limit": 1200
-        })
+        result = await recovery.execute_recovery(
+            {
+                "endpoint": "/api/v3/order",
+                "rate_limit_type": "requests_per_minute",
+                "current_usage": 1200,
+                "limit": 1200,
+            }
+        )
         assert result is not None
 
 
@@ -231,8 +228,7 @@ class TestRecoveryScenariosIntegration:
 class TestConnectionManagerIntegration:
     """Test connection manager integration."""
 
-    async def test_connection_establishment(
-            self, config, setup_logging_for_tests):
+    async def test_connection_establishment(self, config, setup_logging_for_tests):
         """Test connection establishment."""
         manager = ConnectionManager(config)
 
@@ -247,7 +243,7 @@ class TestConnectionManagerIntegration:
             connection_type="exchange",
             connect_func=mock_connect,
             host="localhost",
-            port=8080
+            port=8080,
         )
 
         assert connection is not None
@@ -268,7 +264,7 @@ class TestConnectionManagerIntegration:
             connection_type="exchange",
             connect_func=mock_connect,
             host="localhost",
-            port=8080
+            port=8080,
         )
 
         # Test message queuing
@@ -289,14 +285,13 @@ class TestConnectionManagerIntegration:
             connection_type="exchange",
             connect_func=mock_connect,
             host="localhost",
-            port=8080
+            port=8080,
         )
 
         # Test connection closure
         await manager.close_connection("test_connection")
         status = manager.get_connection_status("test_connection")
-        assert status is None or status.get(
-            "state") == ConnectionState.DISCONNECTED.value
+        assert status is None or status.get("state") == ConnectionState.DISCONNECTED.value
 
 
 @pytest.mark.asyncio
@@ -317,7 +312,9 @@ class TestStateMonitorIntegration:
         monitor = StateMonitor(config)
 
         # Test state reconciliation
-        reconciliation_result = await monitor.reconcile_state("test_component", [{"type": "test_discrepancy"}])
+        reconciliation_result = await monitor.reconcile_state(
+            "test_component", [{"type": "test_discrepancy"}]
+        )
         assert reconciliation_result is not None
 
     async def test_monitoring_summary(self, config, setup_logging_for_tests):
@@ -342,20 +339,21 @@ class TestStateMonitorIntegration:
 class TestPatternAnalyticsIntegration:
     """Test pattern analytics integration."""
 
-    async def test_error_pattern_analysis(
-            self, config, setup_logging_for_tests):
+    async def test_error_pattern_analysis(self, config, setup_logging_for_tests):
         """Test error pattern analysis functionality."""
         analytics = ErrorPatternAnalytics(config)
 
         # Test error event addition
         for i in range(5):
-            analytics.add_error_event({
-                "error_type": "ValidationError",
-                "component": "order_manager",
-                "severity": "MEDIUM",
-                "timestamp": datetime.now(),
-                "details": {"field": "quantity", "value": "invalid"}
-            })
+            analytics.add_error_event(
+                {
+                    "error_type": "ValidationError",
+                    "component": "order_manager",
+                    "severity": "MEDIUM",
+                    "timestamp": datetime.now(),
+                    "details": {"field": "quantity", "value": "invalid"},
+                }
+            )
 
         # Test pattern analysis
         patterns = analytics.get_pattern_summary()
@@ -367,13 +365,15 @@ class TestPatternAnalyticsIntegration:
 
         # Add some error events
         for i in range(3):
-            analytics.add_error_event({
-                "error_type": "ConnectionError",
-                "component": "exchange",
-                "severity": "HIGH",
-                "timestamp": datetime.now(),
-                "details": {"host": "localhost", "port": 8080}
-            })
+            analytics.add_error_event(
+                {
+                    "error_type": "ConnectionError",
+                    "component": "exchange",
+                    "severity": "HIGH",
+                    "timestamp": datetime.now(),
+                    "details": {"host": "localhost", "port": 8080},
+                }
+            )
 
         # Test correlation analysis
         correlations = analytics.get_correlation_summary()
@@ -385,13 +385,15 @@ class TestPatternAnalyticsIntegration:
 
         # Add error events over time
         for i in range(10):
-            analytics.add_error_event({
-                "error_type": "DataError",
-                "component": "market_data",
-                "severity": "MEDIUM",
-                "timestamp": datetime.now(),
-                "details": {"symbol": "BTCUSDT", "issue": "stale_data"}
-            })
+            analytics.add_error_event(
+                {
+                    "error_type": "DataError",
+                    "component": "market_data",
+                    "severity": "MEDIUM",
+                    "timestamp": datetime.now(),
+                    "details": {"symbol": "BTCUSDT", "issue": "stale_data"},
+                }
+            )
 
         # Test trend analysis
         trends = analytics.get_trend_summary()
@@ -402,8 +404,7 @@ class TestPatternAnalyticsIntegration:
 class TestErrorHandlingIntegration:
     """Test comprehensive error handling integration."""
 
-    async def test_error_handling_with_connection_issues(
-            self, config, setup_logging_for_tests):
+    async def test_error_handling_with_connection_issues(self, config, setup_logging_for_tests):
         """Test error handling with connection issues."""
         error_handler = ErrorHandler(config)
         connection_manager = ConnectionManager(config)
@@ -419,7 +420,7 @@ class TestErrorHandlingIntegration:
                 connection_type="exchange",
                 connect_func=mock_failing_connect,
                 host="invalid_host",
-                port=9999
+                port=9999,
             )
         except ConnectionError:
             pass  # Expected
@@ -429,14 +430,13 @@ class TestErrorHandlingIntegration:
             error=ConnectionError("Connection failed"),
             component="connection_manager",
             operation="establish_connection",
-            user_id="test_user"
+            user_id="test_user",
         )
 
         assert error_context is not None
         assert error_context.severity == ErrorSeverity.HIGH
 
-    async def test_error_handling_with_state_monitoring(
-            self, config, setup_logging_for_tests):
+    async def test_error_handling_with_state_monitoring(self, config, setup_logging_for_tests):
         """Test error handling with state monitoring integration."""
         error_handler = ErrorHandler(config)
         state_monitor = StateMonitor(config)
@@ -450,26 +450,27 @@ class TestErrorHandlingIntegration:
             error=StateConsistencyError("State inconsistency detected"),
             component="state_monitor",
             operation="validate_state_consistency",
-            user_id="test_user"
+            user_id="test_user",
         )
 
         assert error_context is not None
         assert error_context.severity == ErrorSeverity.CRITICAL
 
-    async def test_error_handling_with_pattern_analytics(
-            self, config, setup_logging_for_tests):
+    async def test_error_handling_with_pattern_analytics(self, config, setup_logging_for_tests):
         """Test error handling with pattern analytics integration."""
         error_handler = ErrorHandler(config)
         pattern_analytics = ErrorPatternAnalytics(config)
 
         # Add error events
-        pattern_analytics.add_error_event({
-            "error_type": "ConnectionError",
-            "component": "connection_manager",
-            "severity": "HIGH",
-            "timestamp": datetime.now(),
-            "details": {"host": "invalid_host", "port": 9999}
-        })
+        pattern_analytics.add_error_event(
+            {
+                "error_type": "ConnectionError",
+                "component": "connection_manager",
+                "severity": "HIGH",
+                "timestamp": datetime.now(),
+                "details": {"host": "invalid_host", "port": 9999},
+            }
+        )
 
         # Test pattern analytics integration
         patterns = pattern_analytics.get_pattern_summary()
@@ -480,14 +481,13 @@ class TestErrorHandlingIntegration:
             error=ConnectionError("Connection failed"),
             component="connection_manager",
             operation="establish_connection",
-            user_id="test_user"
+            user_id="test_user",
         )
 
         assert error_context is not None
         assert error_context.severity == ErrorSeverity.HIGH
 
-    async def test_comprehensive_error_recovery_flow(
-            self, config, setup_logging_for_tests):
+    async def test_comprehensive_error_recovery_flow(self, config, setup_logging_for_tests):
         """Test comprehensive error recovery flow."""
         error_handler = ErrorHandler(config)
         connection_manager = ConnectionManager(config)
@@ -505,7 +505,7 @@ class TestErrorHandlingIntegration:
                 connection_type="exchange",
                 connect_func=mock_failing_connect,
                 host="invalid_host",
-                port=9999
+                port=9999,
             )
         except ConnectionError:
             # Create error context
@@ -513,17 +513,19 @@ class TestErrorHandlingIntegration:
                 error=ConnectionError("Connection failed"),
                 component="connection_manager",
                 operation="establish_connection",
-                user_id="test_user"
+                user_id="test_user",
             )
 
             # Add to pattern analytics
-            pattern_analytics.add_error_event({
-                "error_type": "ConnectionError",
-                "component": "connection_manager",
-                "severity": "HIGH",
-                "timestamp": datetime.now(),
-                "details": {"host": "invalid_host", "port": 9999}
-            })
+            pattern_analytics.add_error_event(
+                {
+                    "error_type": "ConnectionError",
+                    "component": "connection_manager",
+                    "severity": "HIGH",
+                    "timestamp": datetime.now(),
+                    "details": {"host": "invalid_host", "port": 9999},
+                }
+            )
 
             # Validate state
             validation_result = await state_monitor.validate_state_consistency()

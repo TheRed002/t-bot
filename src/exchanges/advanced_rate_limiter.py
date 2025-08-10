@@ -9,29 +9,24 @@ P-002A (error handling), and P-003+ (exchange interfaces).
 """
 
 import asyncio
-import time
-from typing import Dict, Optional, Any, List
-from datetime import datetime, timedelta
 from collections import defaultdict
-from enum import Enum
+from datetime import datetime, timedelta
+from typing import Any
+
+from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeError,
+    ExchangeRateLimitError,
+    ValidationError,
+)
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import (
-    MarketData, OrderRequest, OrderResponse, Position,
-    ExchangeType, RequestType
+    ExchangeType,
 )
-from src.core.exceptions import (
-    ExchangeRateLimitError,
-    ExchangeConnectionError,
-    ExchangeError,
-    ValidationError)
-from src.core.config import Config
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import RecoveryScenario
-
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
 from src.utils.decorators import time_execution
 
@@ -54,16 +49,17 @@ class AdvancedRateLimiter:
             config: Application configuration
         """
         self.config = config
-        self.exchange_limiters: Dict[str, Any] = {}
-        self.global_limits: Dict[str, Any] = {}
-        self.request_history: Dict[str, List[datetime]] = defaultdict(list)
+        self.exchange_limiters: dict[str, Any] = {}
+        self.global_limits: dict[str, Any] = {}
+        self.request_history: dict[str, list[datetime]] = defaultdict(list)
 
         # Initialize exchange-specific limiters
         self._initialize_exchange_limiters()
 
         # TODO: Remove in production
         logger.debug(
-            f"AdvancedRateLimiter initialized with {len(self.exchange_limiters)} exchanges")
+            f"AdvancedRateLimiter initialized with {len(self.exchange_limiters)} exchanges"
+        )
 
     def _initialize_exchange_limiters(self) -> None:
         """Initialize exchange-specific rate limiters."""
@@ -76,23 +72,15 @@ class AdvancedRateLimiter:
                 self.config)
 
             logger.info(
-                f"Exchange rate limiters initialized: {
-                    list(
-                        self.exchange_limiters.keys())}")
+                "Exchange rate limiters initialized", exchanges=list(self.exchange_limiters.keys())
+            )
         except Exception as e:
             logger.error(
-                f"Failed to initialize exchange rate limiters: {
-                    str(e)}")
-            raise ExchangeError(
-                f"Rate limiter initialization failed: {
-                    str(e)}")
+                "Failed to initialize exchange rate limiters", error=str(e))
+            raise ExchangeError(f"Rate limiter initialization failed: {e!s}")
 
     @time_execution
-    async def check_rate_limit(
-            self,
-            exchange: str,
-            endpoint: str,
-            weight: int = 1) -> bool:
+    async def check_rate_limit(self, exchange: str, endpoint: str, weight: int = 1) -> bool:
         """
         Check if rate limit allows the request.
 
@@ -125,29 +113,32 @@ class AdvancedRateLimiter:
             # Check exchange-specific limits
             if not await limiter.check_limit(endpoint, weight):
                 logger.warning(
-                    f"Rate limit exceeded: exchange {exchange}, endpoint {endpoint}, weight {weight}")
+                    f"Rate limit exceeded: exchange {exchange}, endpoint {endpoint}, weight {weight}"
+                )
                 return False
 
             # Check global limits
             if not await self._check_global_limits(exchange, endpoint, weight):
                 logger.warning(
-                    f"Global rate limit exceeded: exchange {exchange}, endpoint {endpoint}, weight {weight}")
+                    f"Global rate limit exceeded: exchange {exchange}, endpoint {endpoint}, weight {weight}"
+                )
                 return False
 
             # Record request
             self._record_request(exchange, endpoint, weight)
 
             logger.debug(
-                f"Rate limit check passed: exchange {exchange}, endpoint {endpoint}, weight {weight}")
+                f"Rate limit check passed: exchange {exchange}, endpoint {endpoint}, weight {weight}"
+            )
             return True
 
         except (ValidationError, ExchangeRateLimitError):
             raise
         except Exception as e:
             logger.error(
-                f"Rate limit check failed: exchange {exchange}, endpoint {endpoint}, error {
-                    str(e)}")
-            raise ExchangeRateLimitError(f"Rate limit check failed: {str(e)}")
+                f"Rate limit check failed: exchange {exchange}, endpoint {endpoint}, error {e!s}"
+            )
+            raise ExchangeRateLimitError(f"Rate limit check failed: {e!s}")
 
     @time_execution
     async def wait_if_needed(self, exchange: str, endpoint: str) -> float:
@@ -175,40 +166,34 @@ class AdvancedRateLimiter:
             wait_time = await limiter.wait_for_reset(endpoint)
 
             logger.debug(
-                f"Rate limit wait completed: exchange {exchange}, endpoint {endpoint}, wait_time {wait_time}")
+                f"Rate limit wait completed: exchange {exchange}, endpoint {endpoint}, wait_time {wait_time}"
+            )
             return wait_time
 
         except (ValidationError, ExchangeRateLimitError):
             raise
         except Exception as e:
             logger.error(
-                f"Rate limit wait failed: exchange {exchange}, endpoint {endpoint}, error {
-                    str(e)}")
-            raise ExchangeRateLimitError(f"Rate limit wait failed: {str(e)}")
+                f"Rate limit wait failed: exchange {exchange}, endpoint {endpoint}, error {e!s}"
+            )
+            raise ExchangeRateLimitError(f"Rate limit wait failed: {e!s}")
 
-    async def _check_global_limits(
-            self,
-            exchange: str,
-            endpoint: str,
-            weight: int) -> bool:
+    async def _check_global_limits(self, exchange: str, endpoint: str, weight: int) -> bool:
         """Check global rate limits."""
         # TODO: Implement global limit checking
         # For now, always return True
         return True
 
-    def _record_request(
-            self,
-            exchange: str,
-            endpoint: str,
-            weight: int) -> None:
+    def _record_request(self, exchange: str, endpoint: str, weight: int) -> None:
         """Record request for tracking."""
         now = datetime.now()
         self.request_history[f"{exchange}:{endpoint}"].append(now)
 
         # Clean old history (keep last 1000 requests)
         if len(self.request_history[f"{exchange}:{endpoint}"]) > 1000:
-            self.request_history[f"{exchange}:{endpoint}"] = \
-                self.request_history[f"{exchange}:{endpoint}"][-1000:]
+            self.request_history[f"{exchange}:{endpoint}"] = self.request_history[
+                f"{exchange}:{endpoint}"
+            ][-1000:]
 
 
 class BinanceRateLimiter:
@@ -231,13 +216,12 @@ class BinanceRateLimiter:
         self.order_limit_24h = 160000  # orders per 24 hours
 
         # Track usage
-        self.weight_usage: Dict[str, List[datetime]] = defaultdict(list)
-        self.order_usage: List[datetime] = []
+        self.weight_usage: dict[str, list[datetime]] = defaultdict(list)
+        self.order_usage: list[datetime] = []
 
         # TODO: Remove in production
         logger.debug(
-            f"BinanceRateLimiter initialized with weight_limit {
-                self.weight_limit}")
+            f"BinanceRateLimiter initialized with weight_limit {self.weight_limit}")
 
     async def check_limit(self, endpoint: str, weight: int = 1) -> bool:
         """
@@ -264,8 +248,7 @@ class BinanceRateLimiter:
 
             if weight > self.weight_limit:
                 raise ValidationError(
-                    f"Weight {weight} exceeds limit {
-                        self.weight_limit}")
+                    f"Weight {weight} exceeds limit {self.weight_limit}")
 
             # Check weight-based limits
             now = datetime.now()
@@ -273,9 +256,7 @@ class BinanceRateLimiter:
 
             # Clean old entries
             self.weight_usage[endpoint] = [
-                t for t in self.weight_usage[endpoint]
-                if t > minute_ago
-            ]
+                t for t in self.weight_usage[endpoint] if t > minute_ago]
 
             # Calculate current weight usage
             current_weight = sum(
@@ -287,7 +268,8 @@ class BinanceRateLimiter:
                     endpoint=endpoint,
                     weight=weight,
                     current_weight=current_weight,
-                    limit=self.weight_limit)
+                    limit=self.weight_limit,
+                )
                 return False
 
             # Check order limits if applicable
@@ -303,10 +285,9 @@ class BinanceRateLimiter:
             raise
         except Exception as e:
             logger.error(
-                f"Binance rate limit check failed: endpoint {endpoint}, error {
-                    str(e)}")
+                f"Binance rate limit check failed: endpoint {endpoint}, error {e!s}")
             raise ExchangeRateLimitError(
-                f"Binance rate limit check failed: {str(e)}")
+                f"Binance rate limit check failed: {e!s}")
 
     async def wait_for_reset(self, endpoint: str) -> float:
         """
@@ -329,9 +310,7 @@ class BinanceRateLimiter:
 
             # Clean old entries
             self.weight_usage[endpoint] = [
-                t for t in self.weight_usage[endpoint]
-                if t > minute_ago
-            ]
+                t for t in self.weight_usage[endpoint] if t > minute_ago]
 
             # Calculate time until reset
             if self.weight_usage[endpoint]:
@@ -342,8 +321,9 @@ class BinanceRateLimiter:
                 wait_time = 0
 
             if wait_time > 0:
-                logger.info("Waiting for Binance rate limit reset",
-                            endpoint=endpoint, wait_time=wait_time)
+                logger.info(
+                    "Waiting for Binance rate limit reset", endpoint=endpoint, wait_time=wait_time
+                )
                 await asyncio.sleep(wait_time)
 
             return wait_time
@@ -352,10 +332,9 @@ class BinanceRateLimiter:
             raise
         except Exception as e:
             logger.error(
-                f"Binance rate limit wait failed: endpoint {endpoint}, error {
-                    str(e)}")
+                f"Binance rate limit wait failed: endpoint {endpoint}, error {e!s}")
             raise ExchangeRateLimitError(
-                f"Binance rate limit wait failed: {str(e)}")
+                f"Binance rate limit wait failed: {e!s}")
 
     async def _check_order_limits(self) -> bool:
         """Check order-specific rate limits."""
@@ -370,18 +349,15 @@ class BinanceRateLimiter:
         recent_orders = [t for t in self.order_usage if t > ten_seconds_ago]
         if len(recent_orders) >= self.order_limit_10s:
             logger.warning(
-                f"Binance order limit exceeded(10s): {
-                    len(recent_orders)} orders, limit {
-                    self.order_limit_10s}")
+                f"Binance order limit exceeded(10s): {len(recent_orders)} orders, limit {self.order_limit_10s}"
+            )
             return False
 
         # Check 24-hour limit
         if len(self.order_usage) >= self.order_limit_24h:
             logger.warning(
-                f"Binance order limit exceeded(24h): {
-                    len(
-                        self.order_usage)} orders, limit {
-                    self.order_limit_24h}")
+                f"Binance order limit exceeded(24h): {len(self.order_usage)} orders, limit {self.order_limit_24h}"
+            )
             return False
 
         return True
@@ -413,7 +389,7 @@ class OKXRateLimiter:
         }
 
         # Track usage per endpoint type
-        self.usage: Dict[str, List[datetime]] = defaultdict(list)
+        self.usage: dict[str, list[datetime]] = defaultdict(list)
 
         # TODO: Remove in production
         logger.debug(f"OKXRateLimiter initialized with limits: {self.limits}")
@@ -450,16 +426,13 @@ class OKXRateLimiter:
 
             # Clean old entries
             self.usage[endpoint_type] = [
-                t for t in self.usage[endpoint_type]
-                if t > window_start
-            ]
+                t for t in self.usage[endpoint_type] if t > window_start]
 
             # Check if limit exceeded
             if len(self.usage[endpoint_type]) >= max_requests:
                 logger.warning(
-                    f"OKX rate limit exceeded: {endpoint_type} endpoint {endpoint}, {
-                        len(
-                            self.usage[endpoint_type])} requests, limit {max_requests}")
+                    f"OKX rate limit exceeded: {endpoint_type} endpoint {endpoint}, {len(self.usage[endpoint_type])} requests, limit {max_requests}"
+                )
                 return False
 
             logger.debug(
@@ -470,10 +443,8 @@ class OKXRateLimiter:
             raise
         except Exception as e:
             logger.error(
-                f"OKX rate limit check failed: endpoint {endpoint}, error {
-                    str(e)}")
-            raise ExchangeRateLimitError(
-                f"OKX rate limit check failed: {str(e)}")
+                f"OKX rate limit check failed: endpoint {endpoint}, error {e!s}")
+            raise ExchangeRateLimitError(f"OKX rate limit check failed: {e!s}")
 
     async def wait_for_reset(self, endpoint: str) -> float:
         """
@@ -498,9 +469,7 @@ class OKXRateLimiter:
 
             # Clean old entries
             self.usage[endpoint_type] = [
-                t for t in self.usage[endpoint_type]
-                if t > window_start
-            ]
+                t for t in self.usage[endpoint_type] if t > window_start]
 
             # Calculate wait time
             if self.usage[endpoint_type]:
@@ -511,9 +480,12 @@ class OKXRateLimiter:
                 wait_time = 0
 
             if wait_time > 0:
-                logger.info("Waiting for OKX rate limit reset",
-                            endpoint_type=endpoint_type, endpoint=endpoint,
-                            wait_time=wait_time)
+                logger.info(
+                    "Waiting for OKX rate limit reset",
+                    endpoint_type=endpoint_type,
+                    endpoint=endpoint,
+                    wait_time=wait_time,
+                )
                 await asyncio.sleep(wait_time)
 
             return wait_time
@@ -522,10 +494,8 @@ class OKXRateLimiter:
             raise
         except Exception as e:
             logger.error(
-                f"OKX rate limit wait failed: endpoint {endpoint}, error {
-                    str(e)}")
-            raise ExchangeRateLimitError(
-                f"OKX rate limit wait failed: {str(e)}")
+                f"OKX rate limit wait failed: endpoint {endpoint}, error {e!s}")
+            raise ExchangeRateLimitError(f"OKX rate limit wait failed: {e!s}")
 
     def _get_endpoint_type(self, endpoint: str) -> str:
         """Determine endpoint type for rate limiting."""
@@ -559,18 +529,15 @@ class CoinbaseRateLimiter:
         self.public_limit = 15  # requests per second for public endpoints
 
         # Track usage
-        self.points_usage: List[datetime] = []
-        self.private_usage: List[datetime] = []
-        self.public_usage: List[datetime] = []
+        self.points_usage: list[datetime] = []
+        self.private_usage: list[datetime] = []
+        self.public_usage: list[datetime] = []
 
         # TODO: Remove in production
         logger.debug("CoinbaseRateLimiter initialized",
                      points_limit=self.points_limit)
 
-    async def check_limit(
-            self,
-            endpoint: str,
-            is_private: bool = False) -> bool:
+    async def check_limit(self, endpoint: str, is_private: bool = False) -> bool:
         """
         Check if request is within Coinbase rate limits.
 
@@ -611,7 +578,8 @@ class CoinbaseRateLimiter:
                     endpoint=endpoint,
                     points=points,
                     current_points=current_points,
-                    limit=self.points_limit)
+                    limit=self.points_limit,
+                )
                 return False
 
             # Check per-second limits
@@ -626,17 +594,17 @@ class CoinbaseRateLimiter:
                 "Coinbase rate limit check passed",
                 endpoint=endpoint,
                 points=points,
-                is_private=is_private)
+                is_private=is_private,
+            )
             return True
 
         except ValidationError:
             raise
         except Exception as e:
             logger.error(
-                f"Coinbase rate limit check failed: endpoint {endpoint}, error {
-                    str(e)}")
+                f"Coinbase rate limit check failed: endpoint {endpoint}, error {e!s}")
             raise ExchangeRateLimitError(
-                f"Coinbase rate limit check failed: {str(e)}")
+                f"Coinbase rate limit check failed: {e!s}")
 
     async def wait_for_reset(self, endpoint: str) -> float:
         """
@@ -671,7 +639,8 @@ class CoinbaseRateLimiter:
 
             if wait_time > 0:
                 logger.info(
-                    f"Waiting for Coinbase rate limit reset: endpoint {endpoint}, wait time {wait_time}")
+                    f"Waiting for Coinbase rate limit reset: endpoint {endpoint}, wait time {wait_time}"
+                )
                 await asyncio.sleep(wait_time)
 
             return wait_time
@@ -680,10 +649,9 @@ class CoinbaseRateLimiter:
             raise
         except Exception as e:
             logger.error(
-                f"Coinbase rate limit wait failed: endpoint {endpoint}, error {
-                    str(e)}")
+                f"Coinbase rate limit wait failed: endpoint {endpoint}, error {e!s}")
             raise ExchangeRateLimitError(
-                f"Coinbase rate limit wait failed: {str(e)}")
+                f"Coinbase rate limit wait failed: {e!s}")
 
     def _calculate_points(self, endpoint: str) -> int:
         """
@@ -701,11 +669,11 @@ class CoinbaseRateLimiter:
         if "order" in endpoint_lower:
             return 10  # Order placement is expensive
         elif "balance" in endpoint_lower or "account" in endpoint_lower:
-            return 5   # Account queries are moderate
+            return 5  # Account queries are moderate
         elif "market" in endpoint_lower or "ticker" in endpoint_lower:
-            return 1   # Market data is cheap
+            return 1  # Market data is cheap
         else:
-            return 2   # Default cost
+            return 2  # Default cost
 
     async def _check_private_limit(self) -> bool:
         """Check private endpoint rate limits."""
@@ -717,10 +685,8 @@ class CoinbaseRateLimiter:
 
         if len(self.private_usage) >= self.private_limit:
             logger.warning(
-                f"Coinbase private rate limit exceeded: {
-                    len(
-                        self.private_usage)} requests, limit {
-                    self.private_limit}")
+                f"Coinbase private rate limit exceeded: {len(self.private_usage)} requests, limit {self.private_limit}"
+            )
             return False
 
         return True
@@ -735,10 +701,8 @@ class CoinbaseRateLimiter:
 
         if len(self.public_usage) >= self.public_limit:
             logger.warning(
-                f"Coinbase public rate limit exceeded: {
-                    len(
-                        self.public_usage)} requests, limit {
-                    self.public_limit}")
+                f"Coinbase public rate limit exceeded: {len(self.public_usage)} requests, limit {self.public_limit}"
+            )
             return False
 
         return True

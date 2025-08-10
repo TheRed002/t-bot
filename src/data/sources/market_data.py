@@ -16,39 +16,35 @@ Dependencies:
 """
 
 import asyncio
-from typing import Dict, List, Any, Optional, Callable, AsyncGenerator
-from decimal import Decimal
-from datetime import datetime, timezone, timedelta
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
+
+from src.core.config import Config
+from src.core.exceptions import DataSourceError
+from src.core.logging import get_logger
 
 # Import from P-001 core components
-from src.core.types import (
-    MarketData, Ticker, OrderBook, Trade, ExchangeInfo
-)
-from src.core.exceptions import (
-    DataError, DataSourceError, ExchangeError, ValidationError
-)
-from src.core.config import Config
-from src.core.logging import get_logger
+from src.core.types import MarketData, OrderBook, Ticker, Trade
+
+# Import from P-002A error handling
+from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-003+ exchange interfaces
 from src.exchanges.base import BaseExchange
 from src.exchanges.factory import ExchangeFactory
 
-# Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
-
 # Import from P-007A utilities
-from src.utils.decorators import time_execution, retry, circuit_breaker
-from src.utils.validators import validate_price, validate_quantity
-from src.utils.helpers import calculate_percentage_change
+from src.utils.decorators import retry, time_execution
 
 logger = get_logger(__name__)
 
 
 class DataStreamType(Enum):
     """Data stream type enumeration"""
+
     TICKER = "ticker"
     ORDER_BOOK = "order_book"
     TRADES = "trades"
@@ -59,12 +55,13 @@ class DataStreamType(Enum):
 @dataclass
 class DataSubscription:
     """Data subscription configuration"""
+
     exchange_name: str
     symbol: str
     stream_type: DataStreamType
     callback: Callable
     active: bool = True
-    last_update: Optional[datetime] = None
+    last_update: datetime | None = None
     error_count: int = 0
 
 
@@ -88,26 +85,26 @@ class MarketDataSource:
 
         # Exchange management
         self.exchange_factory = ExchangeFactory(config)
-        self.exchanges: Dict[str, BaseExchange] = {}
+        self.exchanges: dict[str, BaseExchange] = {}
 
         # Data subscription management
-        self.subscriptions: Dict[str, DataSubscription] = {}
+        self.subscriptions: dict[str, DataSubscription] = {}
 
         # Data caching
-        self.ticker_cache: Dict[str, Ticker] = {}
-        self.order_book_cache: Dict[str, OrderBook] = {}
-        self.trade_cache: Dict[str, List[Trade]] = {}
+        self.ticker_cache: dict[str, Ticker] = {}
+        self.order_book_cache: dict[str, OrderBook] = {}
+        self.trade_cache: dict[str, list[Trade]] = {}
 
         # Stream management
-        self.active_streams: Dict[str, bool] = {}
-        self.stream_tasks: Dict[str, asyncio.Task] = {}
+        self.active_streams: dict[str, bool] = {}
+        self.stream_tasks: dict[str, asyncio.Task] = {}
 
         # Statistics
         self.stats = {
-            'total_data_points': 0,
-            'successful_updates': 0,
-            'failed_updates': 0,
-            'last_update_time': None
+            "total_data_points": 0,
+            "successful_updates": 0,
+            "failed_updates": 0,
+            "last_update_time": None,
         }
 
         logger.info("MarketDataSource initialized")
@@ -116,7 +113,7 @@ class MarketDataSource:
         """Initialize exchange connections and data sources."""
         try:
             # Initialize exchanges
-            supported_exchanges = ['binance', 'okx', 'coinbase']
+            supported_exchanges = ["binance", "okx", "coinbase"]
 
             for exchange_name in supported_exchanges:
                 try:
@@ -128,9 +125,7 @@ class MarketDataSource:
                     else:
                         logger.warning(f"Failed to connect to {exchange_name}")
                 except Exception as e:
-                    logger.error(
-                        f"Error initializing {exchange_name}: {
-                            str(e)}")
+                    logger.error(f"Error initializing {exchange_name}: {e!s}")
 
             if not self.exchanges:
                 raise DataSourceError("No exchanges connected for market data")
@@ -139,17 +134,13 @@ class MarketDataSource:
                 f"MarketDataSource initialized with {len(self.exchanges)} exchanges")
 
         except Exception as e:
-            logger.error(f"Failed to initialize MarketDataSource: {str(e)}")
+            logger.error(f"Failed to initialize MarketDataSource: {e!s}")
             raise DataSourceError(
-                f"Market data source initialization failed: {
-                    str(e)}")
+                f"Market data source initialization failed: {e!s}")
 
     @time_execution
     async def subscribe_to_ticker(
-        self,
-        exchange_name: str,
-        symbol: str,
-        callback: Callable[[Ticker], None]
+        self, exchange_name: str, symbol: str, callback: Callable[[Ticker], None]
     ) -> str:
         """
         Subscribe to ticker updates for a symbol.
@@ -174,7 +165,7 @@ class MarketDataSource:
                 exchange_name=exchange_name,
                 symbol=symbol,
                 stream_type=DataStreamType.TICKER,
-                callback=callback
+                callback=callback,
             )
 
             self.subscriptions[subscription_id] = subscription
@@ -191,19 +182,18 @@ class MarketDataSource:
 
         except Exception as e:
             logger.error(
-                f"Failed to subscribe to ticker {exchange_name}: {symbol}: {
-                    str(e)}")
-            raise DataSourceError(f"Ticker subscription failed: {str(e)}")
+                f"Failed to subscribe to ticker {exchange_name}: {symbol}: {e!s}")
+            raise DataSourceError(f"Ticker subscription failed: {e!s}")
 
-    @retry(max_attempts=3, delay=1.0)
+    @retry(max_attempts=3, base_delay=1.0)
     async def get_historical_data(
         self,
         exchange_name: str,
         symbol: str,
         start_time: datetime,
         end_time: datetime,
-        interval: str = "1m"
-    ) -> List[MarketData]:
+        interval: str = "1m",
+    ) -> list[MarketData]:
         """
         Get historical market data for a symbol.
 
@@ -237,11 +227,8 @@ class MarketDataSource:
 
         except Exception as e:
             logger.error(
-                f"Failed to get historical data {exchange_name}: {symbol}: {
-                    str(e)}")
-            raise DataSourceError(
-                f"Historical data retrieval failed: {
-                    str(e)}")
+                f"Failed to get historical data {exchange_name}: {symbol}: {e!s}")
+            raise DataSourceError(f"Historical data retrieval failed: {e!s}")
 
     async def _ticker_stream(self, exchange_name: str) -> None:
         """Manage ticker data stream for an exchange."""
@@ -252,10 +239,13 @@ class MarketDataSource:
                 try:
                     # Get active ticker subscriptions for this exchange
                     ticker_subs = [
-                        sub for sub in self.subscriptions.values()
-                        if (sub.exchange_name == exchange_name and
-                            sub.stream_type == DataStreamType.TICKER and
-                            sub.active)
+                        sub
+                        for sub in self.subscriptions.values()
+                        if (
+                            sub.exchange_name == exchange_name
+                            and sub.stream_type == DataStreamType.TICKER
+                            and sub.active
+                        )
                     ]
 
                     if not ticker_subs:
@@ -268,8 +258,7 @@ class MarketDataSource:
                             ticker = await exchange.get_ticker(subscription.symbol)
                             if ticker:
                                 # Cache ticker data
-                                cache_key = f"{exchange_name}_{
-                                    subscription.symbol}"
+                                cache_key = f"{exchange_name}_{subscription.symbol}"
                                 self.ticker_cache[cache_key] = ticker
 
                                 # Call subscription callback
@@ -277,28 +266,24 @@ class MarketDataSource:
                                 subscription.last_update = datetime.now(
                                     timezone.utc)
 
-                                self.stats['successful_updates'] += 1
+                                self.stats["successful_updates"] += 1
 
                         except Exception as e:
                             subscription.error_count += 1
-                            self.stats['failed_updates'] += 1
+                            self.stats["failed_updates"] += 1
                             logger.warning(
-                                f"Ticker update failed for {
-                                    subscription.symbol}: {
-                                    str(e)}")
+                                f"Ticker update failed for {subscription.symbol}: {e!s}")
 
                     await asyncio.sleep(1)  # 1 second update interval
 
                 except Exception as e:
                     logger.error(
-                        f"Error in ticker stream {exchange_name}: {
-                            str(e)}")
+                        f"Error in ticker stream {exchange_name}: {e!s}")
                     await asyncio.sleep(5)  # Longer delay on error
 
         except Exception as e:
             logger.error(
-                f"Fatal error in ticker stream {exchange_name}: {
-                    str(e)}")
+                f"Fatal error in ticker stream {exchange_name}: {e!s}")
         finally:
             self.active_streams[f"{exchange_name}_ticker"] = False
 
@@ -327,11 +312,11 @@ class MarketDataSource:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to unsubscribe {subscription_id}: {str(e)}")
+            logger.error(f"Failed to unsubscribe {subscription_id}: {e!s}")
             return False
 
     @time_execution
-    async def get_market_data_summary(self) -> Dict[str, Any]:
+    async def get_market_data_summary(self) -> dict[str, Any]:
         """Get market data source summary and statistics."""
         return {
             "connected_exchanges": list(self.exchanges.keys()),
@@ -341,8 +326,8 @@ class MarketDataSource:
             "cache_sizes": {
                 "tickers": len(self.ticker_cache),
                 "order_books": len(self.order_book_cache),
-                "trades": sum(len(trades) for trades in self.trade_cache.values())
-            }
+                "trades": sum(len(trades) for trades in self.trade_cache.values()),
+            },
         }
 
     async def cleanup(self) -> None:
@@ -369,4 +354,4 @@ class MarketDataSource:
             logger.info("MarketDataSource cleanup completed")
 
         except Exception as e:
-            logger.error(f"Error during MarketDataSource cleanup: {str(e)}")
+            logger.error(f"Error during MarketDataSource cleanup: {e!s}")

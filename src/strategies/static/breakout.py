@@ -7,32 +7,31 @@ breakouts with volume confirmation and false breakout filtering.
 CRITICAL: This strategy MUST inherit from BaseStrategy and follow the exact interface.
 """
 
-import numpy as np
-from typing import List, Optional, Dict, Any, Tuple
-from decimal import Decimal
 from datetime import datetime, timedelta
-import asyncio
+from decimal import Decimal
+from typing import Any
 
-# MANDATORY: Import from P-011 - NEVER recreate the base strategy
-from src.strategies.base import BaseStrategy
-
-# From P-001 - Use existing types
-from src.core.types import (
-    Signal, MarketData, Position, SignalDirection,
-    StrategyConfig, StrategyType
-)
-from src.core.exceptions import ValidationError
-
-# From P-007A - Use decorators and validators
-from src.utils.decorators import time_execution, retry
-from src.utils.validators import validate_price, validate_quantity
-from src.utils.helpers import calculate_atr, calculate_support_resistance
-
-# From P-008+ - Use risk management
-from src.risk_management.base import BaseRiskManager
+import numpy as np
 
 # From P-001 - Use structured logging
 from src.core.logging import get_logger
+
+# From P-001 - Use existing types
+from src.core.types import (
+    MarketData,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyType,
+)
+
+# From P-008+ - Use risk management
+# MANDATORY: Import from P-011 - NEVER recreate the base strategy
+from src.strategies.base import BaseStrategy
+
+# From P-007A - Use decorators and validators
+from src.utils.decorators import time_execution
+from src.utils.helpers import calculate_atr
 
 logger = get_logger(__name__)
 
@@ -53,7 +52,7 @@ class BreakoutStrategy(BaseStrategy):
     - Target calculation based on range
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize Breakout Strategy.
 
         Args:
@@ -64,44 +63,39 @@ class BreakoutStrategy(BaseStrategy):
         self.strategy_type = StrategyType.STATIC
 
         # Strategy-specific parameters with defaults
-        self.lookback_period = self.config.parameters.get(
-            "lookback_period", 20)
-        self.breakout_threshold = self.config.parameters.get(
-            "breakout_threshold", 0.02)  # 2%
-        self.volume_multiplier = self.config.parameters.get(
-            "volume_multiplier", 1.5)
-        self.consolidation_periods = self.config.parameters.get(
-            "consolidation_periods", 5)
-        self.false_breakout_filter = self.config.parameters.get(
-            "false_breakout_filter", True)
+        self.lookback_period = self.config.parameters.get("lookback_period", 20)
+        self.breakout_threshold = self.config.parameters.get("breakout_threshold", 0.02)  # 2%
+        self.volume_multiplier = self.config.parameters.get("volume_multiplier", 1.5)
+        self.consolidation_periods = self.config.parameters.get("consolidation_periods", 5)
+        self.false_breakout_filter = self.config.parameters.get("false_breakout_filter", True)
         self.false_breakout_threshold = self.config.parameters.get(
-            "false_breakout_threshold", 0.01)  # 1%
-        self.target_multiplier = self.config.parameters.get(
-            "target_multiplier", 2.0)
+            "false_breakout_threshold", 0.01
+        )  # 1%
+        self.target_multiplier = self.config.parameters.get("target_multiplier", 2.0)
         self.atr_period = self.config.parameters.get("atr_period", 14)
         self.atr_multiplier = self.config.parameters.get("atr_multiplier", 2.0)
 
         # Price history for calculations
-        self.price_history: List[float] = []
-        self.volume_history: List[float] = []
-        self.high_history: List[float] = []
-        self.low_history: List[float] = []
+        self.price_history: list[float] = []
+        self.volume_history: list[float] = []
+        self.high_history: list[float] = []
+        self.low_history: list[float] = []
 
         # Support/resistance levels
-        self.support_levels: List[float] = []
-        self.resistance_levels: List[float] = []
-        self.last_breakout_time: Optional[datetime] = None
+        self.support_levels: list[float] = []
+        self.resistance_levels: list[float] = []
+        self.last_breakout_time: datetime | None = None
 
         logger.info(
             "Breakout Strategy initialized",
             strategy=self.name,
             lookback_period=self.lookback_period,
             breakout_threshold=self.breakout_threshold,
-            volume_multiplier=self.volume_multiplier
+            volume_multiplier=self.volume_multiplier,
         )
 
     @time_execution
-    async def _generate_signals_impl(self, data: MarketData) -> List[Signal]:
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """Generate breakout signals from market data.
 
         MANDATORY: Use graceful error handling and input validation.
@@ -115,18 +109,13 @@ class BreakoutStrategy(BaseStrategy):
         try:
             # MANDATORY: Input validation
             if not data or not data.price:
-                logger.warning(
-                    "Invalid market data received",
-                    strategy=self.name)
+                logger.warning("Invalid market data received", strategy=self.name)
                 return []
 
             # Validate price data
             price = float(data.price)
             if price <= 0:
-                logger.warning(
-                    "Invalid price value",
-                    strategy=self.name,
-                    price=price)
+                logger.warning("Invalid price value", strategy=self.name, price=price)
                 return []
 
             # Update price history
@@ -138,7 +127,7 @@ class BreakoutStrategy(BaseStrategy):
                     "Insufficient price history for signal generation",
                     strategy=self.name,
                     current_length=len(self.price_history),
-                    required_length=self.lookback_period
+                    required_length=self.lookback_period,
                 )
                 return []
 
@@ -152,13 +141,13 @@ class BreakoutStrategy(BaseStrategy):
                 strategy=self.name,
                 consolidation_met=consolidation_met,
                 required_periods=self.consolidation_periods,
-                price_history_length=len(self.price_history)
+                price_history_length=len(self.price_history),
             )
             if not consolidation_met:
                 logger.debug(
                     "Consolidation period not met",
                     strategy=self.name,
-                    required_periods=self.consolidation_periods
+                    required_periods=self.consolidation_periods,
                 )
                 return []
 
@@ -193,7 +182,7 @@ class BreakoutStrategy(BaseStrategy):
                 "Signal generation failed",
                 strategy=self.name,
                 error=str(e),
-                symbol=data.symbol if data else "unknown"
+                symbol=data.symbol if data else "unknown",
             )
             return []  # MANDATORY: Graceful degradation
 
@@ -228,21 +217,19 @@ class BreakoutStrategy(BaseStrategy):
                 return
 
             # Calculate support and resistance levels
-            recent_highs = self.high_history[-self.lookback_period:]
-            recent_lows = self.low_history[-self.lookback_period:]
+            recent_highs = self.high_history[-self.lookback_period :]
+            recent_lows = self.low_history[-self.lookback_period :]
 
             # Find resistance levels (local highs)
             resistance_levels = []
             for i in range(1, len(recent_highs) - 1):
-                if recent_highs[i] > recent_highs[i -
-                                                  1] and recent_highs[i] > recent_highs[i + 1]:
+                if recent_highs[i] > recent_highs[i - 1] and recent_highs[i] > recent_highs[i + 1]:
                     resistance_levels.append(recent_highs[i])
 
             # Find support levels (local lows)
             support_levels = []
             for i in range(1, len(recent_lows) - 1):
-                if recent_lows[i] < recent_lows[i -
-                                                1] and recent_lows[i] < recent_lows[i + 1]:
+                if recent_lows[i] < recent_lows[i - 1] and recent_lows[i] < recent_lows[i + 1]:
                     support_levels.append(recent_lows[i])
 
             # Update levels (keep only significant ones)
@@ -250,10 +237,7 @@ class BreakoutStrategy(BaseStrategy):
             self.support_levels = sorted(list(set(support_levels)))
 
         except Exception as e:
-            logger.error(
-                "Support/resistance update failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Support/resistance update failed", strategy=self.name, error=str(e))
 
     def _check_consolidation_period(self) -> bool:
         """Check if price has been consolidating for required periods.
@@ -270,7 +254,7 @@ class BreakoutStrategy(BaseStrategy):
                 return False
 
             # Check if price has been within a narrow range
-            recent_prices = self.price_history[-self.consolidation_periods:]
+            recent_prices = self.price_history[-self.consolidation_periods :]
             price_range = max(recent_prices) - min(recent_prices)
             avg_price = np.mean(recent_prices)
 
@@ -285,20 +269,16 @@ class BreakoutStrategy(BaseStrategy):
                 price_range=price_range,
                 avg_price=avg_price,
                 consolidation_threshold=consolidation_threshold,
-                is_consolidating=is_consolidating
+                is_consolidating=is_consolidating,
             )
 
             return is_consolidating
 
         except Exception as e:
-            logger.error(
-                "Consolidation check failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Consolidation check failed", strategy=self.name, error=str(e))
             return False
 
-    def _check_resistance_breakout(
-            self, data: MarketData) -> Optional[Dict[str, Any]]:
+    def _check_resistance_breakout(self, data: MarketData) -> dict[str, Any] | None:
         """Check for resistance breakout.
 
         Args:
@@ -317,7 +297,7 @@ class BreakoutStrategy(BaseStrategy):
                 current_price=current_price,
                 current_volume=current_volume,
                 resistance_levels=self.resistance_levels,
-                breakout_threshold=self.breakout_threshold
+                breakout_threshold=self.breakout_threshold,
             )
 
             # Check each resistance level
@@ -328,34 +308,29 @@ class BreakoutStrategy(BaseStrategy):
                     resistance=resistance,
                     breakout_price=breakout_price,
                     current_price=current_price,
-                    is_breakout=current_price > breakout_price
+                    is_breakout=current_price > breakout_price,
                 )
 
                 # Check if price broke above resistance
                 if current_price > breakout_price:
                     # Check volume confirmation
-                    volume_confirmed = self._check_volume_confirmation(
-                        current_volume)
+                    volume_confirmed = self._check_volume_confirmation(current_volume)
 
                     if volume_confirmed:
                         return {
                             "level": resistance,
                             "breakout_price": current_price,
                             "breakout_type": "resistance",
-                            "volume": current_volume
+                            "volume": current_volume,
                         }
 
             return None
 
         except Exception as e:
-            logger.error(
-                "Resistance breakout check failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Resistance breakout check failed", strategy=self.name, error=str(e))
             return None
 
-    def _check_support_breakout(
-            self, data: MarketData) -> Optional[Dict[str, Any]]:
+    def _check_support_breakout(self, data: MarketData) -> dict[str, Any] | None:
         """Check for support breakout.
 
         Args:
@@ -378,16 +353,13 @@ class BreakoutStrategy(BaseStrategy):
                             "level": support,
                             "breakout_price": current_price,
                             "breakout_type": "support",
-                            "volume": current_volume
+                            "volume": current_volume,
                         }
 
             return None
 
         except Exception as e:
-            logger.error(
-                "Support breakout check failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Support breakout check failed", strategy=self.name, error=str(e))
             return None
 
     def _check_volume_confirmation(self, current_volume: float) -> bool:
@@ -407,7 +379,7 @@ class BreakoutStrategy(BaseStrategy):
                 return True  # Pass if insufficient data
 
             # Calculate average volume
-            recent_volumes = self.volume_history[-self.lookback_period:]
+            recent_volumes = self.volume_history[-self.lookback_period :]
             avg_volume = np.mean(recent_volumes)
 
             if avg_volume <= 0:
@@ -418,14 +390,10 @@ class BreakoutStrategy(BaseStrategy):
             return bool(volume_ratio >= self.volume_multiplier)
 
         except Exception as e:
-            logger.error(
-                "Volume confirmation check failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Volume confirmation check failed", strategy=self.name, error=str(e))
             return True  # Pass on error
 
-    def _check_false_breakout(
-            self, data: MarketData) -> Optional[Dict[str, Any]]:
+    def _check_false_breakout(self, data: MarketData) -> dict[str, Any] | None:
         """Check for false breakout (price returned to level).
 
         Args:
@@ -442,35 +410,31 @@ class BreakoutStrategy(BaseStrategy):
 
             # Check if price returned to resistance level
             for resistance in self.resistance_levels:
-                if abs(current_price - resistance) / \
-                        resistance <= self.false_breakout_threshold:
+                if abs(current_price - resistance) / resistance <= self.false_breakout_threshold:
                     return {
                         "level": resistance,
                         "current_price": current_price,
-                        "breakout_type": "false_resistance"
+                        "breakout_type": "false_resistance",
                     }
 
             # Check if price returned to support level
             for support in self.support_levels:
-                if abs(current_price - support) / \
-                        support <= self.false_breakout_threshold:
+                if abs(current_price - support) / support <= self.false_breakout_threshold:
                     return {
                         "level": support,
                         "current_price": current_price,
-                        "breakout_type": "false_support"
+                        "breakout_type": "false_support",
                     }
 
             return None
 
         except Exception as e:
-            logger.error(
-                "False breakout check failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("False breakout check failed", strategy=self.name, error=str(e))
             return None
 
     async def _generate_bullish_breakout_signal(
-            self, data: MarketData, breakout_info: Dict[str, Any]) -> Optional[Signal]:
+        self, data: MarketData, breakout_info: dict[str, Any]
+    ) -> Signal | None:
         """Generate bullish breakout signal.
 
         Args:
@@ -491,21 +455,16 @@ class BreakoutStrategy(BaseStrategy):
 
             # Calculate volume strength with fallback for insufficient data
             if len(self.volume_history) >= self.lookback_period:
-                avg_volume = np.mean(
-                    self.volume_history[-self.lookback_period:])
-                volume_strength = min(
-                    volume / avg_volume,
-                    3.0) if avg_volume > 0 else 1.0
+                avg_volume = np.mean(self.volume_history[-self.lookback_period :])
+                volume_strength = min(volume / avg_volume, 3.0) if avg_volume > 0 else 1.0
             else:
                 volume_strength = 1.0  # Default strength if insufficient data
 
             confidence = min(breakout_strength + volume_strength, 1.0)
 
             # Calculate target price
-            range_size = level - \
-                min(self.support_levels) if self.support_levels else level * 0.1
-            target_price = breakout_price + \
-                (range_size * self.target_multiplier)
+            range_size = level - min(self.support_levels) if self.support_levels else level * 0.1
+            target_price = breakout_price + (range_size * self.target_multiplier)
 
             signal = Signal(
                 direction=SignalDirection.BUY,
@@ -520,8 +479,8 @@ class BreakoutStrategy(BaseStrategy):
                     "volume": volume,
                     "signal_type": "breakout_entry",
                     "breakout_direction": "bullish",
-                    "range_size": range_size
-                }
+                    "range_size": range_size,
+                },
             )
 
             if await self.validate_signal(signal):
@@ -532,7 +491,7 @@ class BreakoutStrategy(BaseStrategy):
                     symbol=data.symbol,
                     level=level,
                     breakout_price=breakout_price,
-                    confidence=confidence
+                    confidence=confidence,
                 )
                 return signal
 
@@ -540,13 +499,13 @@ class BreakoutStrategy(BaseStrategy):
 
         except Exception as e:
             logger.error(
-                "Bullish breakout signal generation failed",
-                strategy=self.name,
-                error=str(e))
+                "Bullish breakout signal generation failed", strategy=self.name, error=str(e)
+            )
             return None
 
     async def _generate_bearish_breakout_signal(
-            self, data: MarketData, breakout_info: Dict[str, Any]) -> Optional[Signal]:
+        self, data: MarketData, breakout_info: dict[str, Any]
+    ) -> Signal | None:
         """Generate bearish breakout signal.
 
         Args:
@@ -567,21 +526,18 @@ class BreakoutStrategy(BaseStrategy):
 
             # Calculate volume strength with fallback for insufficient data
             if len(self.volume_history) >= self.lookback_period:
-                avg_volume = np.mean(
-                    self.volume_history[-self.lookback_period:])
-                volume_strength = min(
-                    volume / avg_volume,
-                    3.0) if avg_volume > 0 else 1.0
+                avg_volume = np.mean(self.volume_history[-self.lookback_period :])
+                volume_strength = min(volume / avg_volume, 3.0) if avg_volume > 0 else 1.0
             else:
                 volume_strength = 1.0  # Default strength if insufficient data
 
             confidence = min(breakout_strength + volume_strength, 1.0)
 
             # Calculate target price
-            range_size = max(self.resistance_levels) - \
-                level if self.resistance_levels else level * 0.1
-            target_price = breakout_price - \
-                (range_size * self.target_multiplier)
+            range_size = (
+                max(self.resistance_levels) - level if self.resistance_levels else level * 0.1
+            )
+            target_price = breakout_price - (range_size * self.target_multiplier)
 
             signal = Signal(
                 direction=SignalDirection.SELL,
@@ -596,8 +552,8 @@ class BreakoutStrategy(BaseStrategy):
                     "volume": volume,
                     "signal_type": "breakout_entry",
                     "breakout_direction": "bearish",
-                    "range_size": range_size
-                }
+                    "range_size": range_size,
+                },
             )
 
             if await self.validate_signal(signal):
@@ -608,7 +564,7 @@ class BreakoutStrategy(BaseStrategy):
                     symbol=data.symbol,
                     level=level,
                     breakout_price=breakout_price,
-                    confidence=confidence
+                    confidence=confidence,
                 )
                 return signal
 
@@ -616,13 +572,13 @@ class BreakoutStrategy(BaseStrategy):
 
         except Exception as e:
             logger.error(
-                "Bearish breakout signal generation failed",
-                strategy=self.name,
-                error=str(e))
+                "Bearish breakout signal generation failed", strategy=self.name, error=str(e)
+            )
             return None
 
     async def _generate_false_breakout_exit_signal(
-            self, data: MarketData, false_breakout_info: Dict[str, Any]) -> Optional[Signal]:
+        self, data: MarketData, false_breakout_info: dict[str, Any]
+    ) -> Signal | None:
         """Generate false breakout exit signal.
 
         Args:
@@ -649,8 +605,8 @@ class BreakoutStrategy(BaseStrategy):
                     "signal_type": "false_breakout_exit",
                     "false_breakout_level": false_breakout_info["level"],
                     "current_price": false_breakout_info["current_price"],
-                    "breakout_type": false_breakout_info["breakout_type"]
-                }
+                    "breakout_type": false_breakout_info["breakout_type"],
+                },
             )
 
             if await self.validate_signal(signal):
@@ -659,7 +615,7 @@ class BreakoutStrategy(BaseStrategy):
                     strategy=self.name,
                     symbol=data.symbol,
                     direction=direction.value,
-                    level=false_breakout_info["level"]
+                    level=false_breakout_info["level"],
                 )
                 return signal
 
@@ -667,9 +623,8 @@ class BreakoutStrategy(BaseStrategy):
 
         except Exception as e:
             logger.error(
-                "False breakout exit signal generation failed",
-                strategy=self.name,
-                error=str(e))
+                "False breakout exit signal generation failed", strategy=self.name, error=str(e)
+            )
             return None
 
     async def validate_signal(self, signal: Signal) -> bool:
@@ -690,26 +645,20 @@ class BreakoutStrategy(BaseStrategy):
                     "Signal confidence below threshold",
                     strategy=self.name,
                     confidence=signal.confidence if signal else 0,
-                    min_confidence=self.config.min_confidence
+                    min_confidence=self.config.min_confidence,
                 )
                 return False
 
             # Check if signal is too old (more than 5 minutes for breakout
             # signals)
-            if datetime.now(signal.timestamp.tzinfo) - \
-                    signal.timestamp > timedelta(minutes=5):
-                logger.debug(
-                    "Signal too old",
-                    strategy=self.name,
-                    signal_age_minutes=5)
+            if datetime.now(signal.timestamp.tzinfo) - signal.timestamp > timedelta(minutes=5):
+                logger.debug("Signal too old", strategy=self.name, signal_age_minutes=5)
                 return False
 
             # Validate signal metadata
             metadata = signal.metadata
             if "signal_type" not in metadata:
-                logger.warning(
-                    "Missing signal_type in signal metadata",
-                    strategy=self.name)
+                logger.warning("Missing signal_type in signal metadata", strategy=self.name)
                 return False
 
             # Additional validation for breakout entry signals
@@ -718,30 +667,25 @@ class BreakoutStrategy(BaseStrategy):
                     "breakout_level",
                     "breakout_price",
                     "target_price",
-                    "breakout_direction"]
+                    "breakout_direction",
+                ]
                 for field in required_fields:
                     if field not in metadata:
-                        logger.warning(
-                            f"Missing {field} in signal metadata",
-                            strategy=self.name)
+                        logger.warning(f"Missing {field} in signal metadata", strategy=self.name)
                         return False
 
                 # Validate breakout price
                 breakout_price = metadata.get("breakout_price")
                 if breakout_price is None or breakout_price <= 0:
                     logger.warning(
-                        "Invalid breakout price",
-                        strategy=self.name,
-                        breakout_price=breakout_price)
+                        "Invalid breakout price", strategy=self.name, breakout_price=breakout_price
+                    )
                     return False
 
             return True
 
         except Exception as e:
-            logger.error(
-                "Signal validation failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Signal validation failed", strategy=self.name, error=str(e))
             return False
 
     def get_position_size(self, signal: Signal) -> Decimal:
@@ -764,23 +708,17 @@ class BreakoutStrategy(BaseStrategy):
             metadata = signal.metadata
             if "range_size" in metadata:
                 range_size = metadata.get("range_size", 0)
-                breakout_strength = min(
-                    range_size /
-                    float(
-                        metadata.get(
-                            "breakout_price",
-                            1)),
-                    1.0)
+                breakout_strength = min(range_size / float(metadata.get("breakout_price", 1)), 1.0)
             else:
                 breakout_strength = 1.0
 
             # Calculate final position size
-            position_size = base_size * \
-                Decimal(str(confidence_factor)) * Decimal(str(breakout_strength))
+            position_size = (
+                base_size * Decimal(str(confidence_factor)) * Decimal(str(breakout_strength))
+            )
 
             # Ensure position size is within limits
-            max_size = Decimal(
-                str(self.config.parameters.get("max_position_size_pct", 0.1)))
+            max_size = Decimal(str(self.config.parameters.get("max_position_size_pct", 0.1)))
             position_size = min(position_size, max_size)
 
             logger.debug(
@@ -789,16 +727,13 @@ class BreakoutStrategy(BaseStrategy):
                 base_size=float(base_size),
                 confidence_factor=confidence_factor,
                 breakout_strength=breakout_strength,
-                final_size=float(position_size)
+                final_size=float(position_size),
             )
 
             return position_size
 
         except Exception as e:
-            logger.error(
-                "Position size calculation failed",
-                strategy=self.name,
-                error=str(e))
+            logger.error("Position size calculation failed", strategy=self.name, error=str(e))
             # Return minimum position size on error
             return Decimal(str(self.config.position_size_pct * 0.5))
 
@@ -817,13 +752,14 @@ class BreakoutStrategy(BaseStrategy):
             self._update_price_history(data)
 
             # Check ATR-based stop loss
-            if len(self.high_history) >= self.atr_period + \
-                    1:  # Need at least period + 1 data points
+            if (
+                len(self.high_history) >= self.atr_period + 1
+            ):  # Need at least period + 1 data points
                 atr = calculate_atr(
                     # Pass more data for talib
-                    self.high_history[-(self.atr_period + 1):],
-                    self.low_history[-(self.atr_period + 1):],
-                    self.price_history[-(self.atr_period + 1):]
+                    self.high_history[-(self.atr_period + 1) :],
+                    self.low_history[-(self.atr_period + 1) :],
+                    self.price_history[-(self.atr_period + 1) :],
                 )
 
                 if atr is not None:
@@ -844,7 +780,7 @@ class BreakoutStrategy(BaseStrategy):
                                 symbol=position.symbol,
                                 entry_price=entry_price,
                                 current_price=current_price,
-                                stop_price=stop_price
+                                stop_price=stop_price,
                             )
                             return True
                     else:  # sell position
@@ -856,7 +792,7 @@ class BreakoutStrategy(BaseStrategy):
                                 symbol=position.symbol,
                                 entry_price=entry_price,
                                 current_price=current_price,
-                                stop_price=stop_price
+                                stop_price=stop_price,
                             )
                             return True
 
@@ -871,7 +807,7 @@ class BreakoutStrategy(BaseStrategy):
                         strategy=self.name,
                         symbol=position.symbol,
                         target_price=target_price,
-                        current_price=current_price
+                        current_price=current_price,
                     )
                     return True
                 elif position.side.value == "sell" and current_price <= target_price:
@@ -880,7 +816,7 @@ class BreakoutStrategy(BaseStrategy):
                         strategy=self.name,
                         symbol=position.symbol,
                         target_price=target_price,
-                        current_price=current_price
+                        current_price=current_price,
                     )
                     return True
 
@@ -890,7 +826,7 @@ class BreakoutStrategy(BaseStrategy):
             logger.error("Exit check failed", strategy=self.name, error=str(e))
             return False
 
-    def get_strategy_info(self) -> Dict[str, Any]:
+    def get_strategy_info(self) -> dict[str, Any]:
         """Get breakout strategy information.
 
         Returns:
@@ -911,13 +847,13 @@ class BreakoutStrategy(BaseStrategy):
                 "false_breakout_threshold": self.false_breakout_threshold,
                 "target_multiplier": self.target_multiplier,
                 "atr_period": self.atr_period,
-                "atr_multiplier": self.atr_multiplier
+                "atr_multiplier": self.atr_multiplier,
             },
             "price_history_length": len(self.price_history),
             "volume_history_length": len(self.volume_history),
             "support_levels_count": len(self.support_levels),
             "resistance_levels_count": len(self.resistance_levels),
-            "last_breakout_time": self.last_breakout_time
+            "last_breakout_time": self.last_breakout_time,
         }
 
         return strategy_info

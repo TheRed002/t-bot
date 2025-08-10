@@ -9,37 +9,38 @@ used by all subsequent prompts for data persistence.
 """
 
 import asyncio
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional, Dict, Any
-from sqlalchemy import create_engine, text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import QueuePool, AsyncAdaptedQueuePool
+from typing import Any
+
 import redis.asyncio as redis
 from influxdb_client import InfluxDBClient
-from influxdb_client.client.write_api import SYNCHRONOUS
+from sqlalchemy import create_engine, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import AsyncAdaptedQueuePool, QueuePool
 
 # Import core components from P-001
 from src.core.config import Config
-from src.core.exceptions import DataError, DataSourceError
-from src.core.logging import get_logger, PerformanceMonitor
-
-# Import utils from P-007A
-from src.utils.decorators import time_execution, retry, circuit_breaker, timeout, log_performance
-from src.utils.constants import TIMEOUTS, LIMITS
-from src.utils.formatters import format_api_response
+from src.core.exceptions import DataSourceError
+from src.core.logging import PerformanceMonitor, get_logger
 
 # Import error handling from P-002A
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
+from src.utils.constants import LIMITS, TIMEOUTS
+
+# Import utils from P-007A
+from src.utils.decorators import circuit_breaker, retry, time_execution, timeout
+from src.utils.formatters import format_api_response
 
 logger = get_logger(__name__)
 
 # Global connection instances
-_async_engine: Optional[Any] = None
-_sync_engine: Optional[Any] = None
-_redis_client: Optional[redis.Redis] = None
-_influxdb_client: Optional[InfluxDBClient] = None
+_async_engine: Any | None = None
+_sync_engine: Any | None = None
+_redis_client: redis.Redis | None = None
+_influxdb_client: InfluxDBClient | None = None
 
 
 class DatabaseConnectionManager:
@@ -74,7 +75,7 @@ class DatabaseConnectionManager:
                     error=e,
                     component="database_connection",
                     operation="initialize_all_connections",
-                    details={"failed_during": "initialization"}
+                    details={"failed_during": "initialization"},
                 )
 
                 # Use ErrorHandler for sophisticated error management
@@ -82,15 +83,10 @@ class DatabaseConnectionManager:
                 handled = await self.error_handler.handle_error(error_context, recovery_scenario)
 
                 if not handled:
-                    logger.error(
-                        "Failed to initialize database connections",
-                        error=str(e))
-                    raise DataSourceError(
-                        f"Database initialization failed: {str(e)}"
-                    )
+                    logger.error("Failed to initialize database connections", error=str(e))
+                    raise DataSourceError(f"Database initialization failed: {e!s}")
                 else:
-                    logger.info(
-                        "Database connections recovered after error handling")
+                    logger.info("Database connections recovered after error handling")
 
     def _start_health_monitoring(self) -> None:
         """Start health monitoring task with network testing."""
@@ -99,17 +95,14 @@ class DatabaseConnectionManager:
             try:
                 db_host = self.config.database.postgresql_host
                 db_port = self.config.database.postgresql_port
-                logger.info(
-                    f"Starting health monitoring for {db_host}:{db_port}")
-                monitor_interval = getattr(
-                    TIMEOUTS, 'HEALTH_CHECK_INTERVAL', 30)
+                logger.info(f"Starting health monitoring for {db_host}:{db_port}")
+                monitor_interval = getattr(TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
                 logger.debug(f"Health check interval: {monitor_interval}s")
             except Exception as e:
                 logger.warning(f"Health monitoring setup warning: {e}")
 
             # Start the monitoring task
-            self._health_check_task = asyncio.create_task(
-                self._health_check_loop())
+            self._health_check_task = asyncio.create_task(self._health_check_loop())
             logger.info("Database health monitoring started")
 
     async def _health_check_loop(self) -> None:
@@ -117,8 +110,7 @@ class DatabaseConnectionManager:
         while True:
             try:
                 # Use timeout constants from utils
-                health_check_interval = getattr(
-                    TIMEOUTS, 'HEALTH_CHECK_INTERVAL', 30)
+                health_check_interval = getattr(TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
                 await asyncio.sleep(health_check_interval)
 
                 # Use utils constants and performance monitoring
@@ -159,8 +151,8 @@ class DatabaseConnectionManager:
         """Setup PostgreSQL connections with async support."""
         try:
             # Create async engine using limits from utils
-            max_overflow = getattr(LIMITS, 'DB_MAX_OVERFLOW', 20)
-            pool_recycle = getattr(TIMEOUTS, 'DB_POOL_RECYCLE', 3600)
+            max_overflow = getattr(LIMITS, "DB_MAX_OVERFLOW", 20)
+            pool_recycle = getattr(TIMEOUTS, "DB_POOL_RECYCLE", 3600)
 
             self.async_engine = create_async_engine(
                 self.config.get_async_database_url(),
@@ -170,23 +162,19 @@ class DatabaseConnectionManager:
                 max_overflow=max_overflow,
                 pool_pre_ping=True,
                 pool_recycle=pool_recycle,  # Recycle connections every hour
-                connect_args={
-                    "server_settings": {
-                        "application_name": "trading_bot_suite"
-                    }
-                }
+                connect_args={"server_settings": {"application_name": "trading_bot_suite"}},
             )
 
             # Create sync engine for migrations using limits
-            sync_pool_size = getattr(LIMITS, 'DB_SYNC_POOL_SIZE', 5)
-            sync_max_overflow = getattr(LIMITS, 'DB_SYNC_MAX_OVERFLOW', 10)
+            sync_pool_size = getattr(LIMITS, "DB_SYNC_POOL_SIZE", 5)
+            sync_max_overflow = getattr(LIMITS, "DB_SYNC_MAX_OVERFLOW", 10)
 
             self.sync_engine = create_engine(
                 self.config.get_database_url(),
                 echo=self.config.debug,
                 poolclass=QueuePool,
                 pool_size=sync_pool_size,
-                max_overflow=sync_max_overflow
+                max_overflow=sync_max_overflow,
             )
 
             # Test connection
@@ -201,7 +189,7 @@ class DatabaseConnectionManager:
                 error=e,
                 component="database_connection",
                 operation="setup_postgresql",
-                details={"database_url": self.config.get_database_url()}
+                details={"database_url": self.config.get_database_url()},
             )
 
             # Use ErrorHandler for sophisticated error management
@@ -210,12 +198,9 @@ class DatabaseConnectionManager:
 
             if not handled:
                 logger.error("PostgreSQL connection failed", error=str(e))
-                raise DataSourceError(
-                    f"PostgreSQL connection failed: {str(e)}"
-                )
+                raise DataSourceError(f"PostgreSQL connection failed: {e!s}")
             else:
-                logger.info(
-                    "PostgreSQL connection recovered after error handling")
+                logger.info("PostgreSQL connection recovered after error handling")
 
     @time_execution
     @circuit_breaker(failure_threshold=2, recovery_timeout=15)
@@ -228,7 +213,7 @@ class DatabaseConnectionManager:
                 decode_responses=True,
                 max_connections=100,
                 retry_on_timeout=True,
-                health_check_interval=30
+                health_check_interval=30,
             )
 
             # Test connection
@@ -241,7 +226,7 @@ class DatabaseConnectionManager:
                 error=e,
                 component="database_connection",
                 operation="setup_redis",
-                details={"redis_url": self.config.get_redis_url()}
+                details={"redis_url": self.config.get_redis_url()},
             )
 
             # Use ErrorHandler for sophisticated error management
@@ -250,7 +235,7 @@ class DatabaseConnectionManager:
 
             if not handled:
                 logger.error("Redis connection failed", error=str(e))
-                raise DataSourceError(f"Redis connection failed: {str(e)}")
+                raise DataSourceError(f"Redis connection failed: {e!s}")
             else:
                 logger.info("Redis connection recovered after error handling")
 
@@ -263,15 +248,14 @@ class DatabaseConnectionManager:
             self.influxdb_client = InfluxDBClient(
                 url=f"http://{self.config.database.influxdb_host}:{self.config.database.influxdb_port}",
                 token=self.config.database.influxdb_token,
-                org=self.config.database.influxdb_org)
+                org=self.config.database.influxdb_org,
+            )
 
             # Test connection
             try:
                 self.influxdb_client.ping()
             except Exception as e:
-                raise DataSourceError(
-                    f"InfluxDB health check failed: {str(e)}"
-                )
+                raise DataSourceError(f"InfluxDB health check failed: {e!s}")
 
             logger.info("InfluxDB connection established")
 
@@ -283,7 +267,7 @@ class DatabaseConnectionManager:
                 operation="setup_influxdb",
                 details={
                     "influxdb_url": f"http://{self.config.database.influxdb_host}:{self.config.database.influxdb_port}"
-                }
+                },
             )
 
             # Use ErrorHandler for sophisticated error management
@@ -292,10 +276,9 @@ class DatabaseConnectionManager:
 
             if not handled:
                 logger.error("InfluxDB connection failed", error=str(e))
-                raise DataSourceError(f"InfluxDB connection failed: {str(e)}")
+                raise DataSourceError(f"InfluxDB connection failed: {e!s}")
             else:
-                logger.info(
-                    "InfluxDB connection recovered after error handling")
+                logger.info("InfluxDB connection recovered after error handling")
 
     # Removed duplicate async _start_health_monitoring and _health_monitor.
     # Single health monitor loop is implemented in _health_check_loop.
@@ -307,9 +290,7 @@ class DatabaseConnectionManager:
             raise DataSourceError("Database not initialized")
 
         async_session = async_sessionmaker(
-            self.async_engine,
-            class_=AsyncSession,
-            expire_on_commit=False
+            self.async_engine, class_=AsyncSession, expire_on_commit=False
         )
         return async_session()
 
@@ -318,10 +299,7 @@ class DatabaseConnectionManager:
         if not self.sync_engine:
             raise DataSourceError("Database not initialized")
 
-        SessionLocal = sessionmaker(
-            bind=self.sync_engine,
-            expire_on_commit=False
-        )
+        SessionLocal = sessionmaker(bind=self.sync_engine, expire_on_commit=False)
         return SessionLocal()
 
     async def get_redis_client(self) -> redis.Redis:
@@ -375,7 +353,7 @@ class DatabaseConnectionManager:
 
 
 # Global connection manager instance
-_connection_manager: Optional[DatabaseConnectionManager] = None
+_connection_manager: DatabaseConnectionManager | None = None
 
 
 async def initialize_database(config: Config) -> None:
@@ -441,21 +419,16 @@ def is_database_healthy() -> bool:
 
 
 # Database utility functions
-async def execute_query(
-        query: str, params: Optional[Dict[str, Any]] = None) -> Any:
+async def execute_query(query: str, params: dict[str, Any] | None = None) -> Any:
     """Execute a database query with parameters."""
     async with get_async_session() as session:
         result = await session.execute(text(query), params or {})
         return result
 
 
-async def health_check() -> Dict[str, bool]:
+async def health_check() -> dict[str, bool]:
     """Perform comprehensive health check on all databases."""
-    health_status = {
-        "postgresql": False,
-        "redis": False,
-        "influxdb": False
-    }
+    health_status = {"postgresql": False, "redis": False, "influxdb": False}
 
     try:
         # Check PostgreSQL
@@ -485,26 +458,20 @@ async def health_check() -> Dict[str, bool]:
 
 
 # TODO: Remove in production - Debug functions
-async def debug_connection_info() -> Dict[str, Any]:
+async def debug_connection_info() -> dict[str, Any]:
     """Debug function to get connection information."""
     if not _connection_manager:
-        return format_api_response(
-            {}, success=False, message="Database not initialized")
+        return format_api_response({}, success=False, message="Database not initialized")
 
     # Use utils formatter for consistent API response
     debug_data = {
         "postgresql_url": _connection_manager.config.get_database_url().replace(
-            _connection_manager.config.database.postgresql_password,
-            "***"
+            _connection_manager.config.database.postgresql_password, "***"
         ),
         "redis_url": _connection_manager.config.get_redis_url().replace(
-            _connection_manager.config.database.redis_password or "",
-            "***"
+            _connection_manager.config.database.redis_password or "", "***"
         ),
         "influxdb_url": f"http://{_connection_manager.config.database.influxdb_host}:{_connection_manager.config.database.influxdb_port}",
         "health_status": is_database_healthy(),
     }
-    return format_api_response(
-        debug_data,
-        success=True,
-        message="Connection info retrieved")
+    return format_api_response(debug_data, success=True, message="Connection info retrieved")

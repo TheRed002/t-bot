@@ -21,48 +21,17 @@ Dependencies:
 - P-007A: Utility functions and decorators
 """
 
-# Data Quality Management (P-000)
-from .quality.validation import DataValidator
+# Keep __init__ lightweight to avoid importing heavy dependencies at import time.
+# Import only quality submodules here; other submodules should be imported directly
+# by consumers as needed to avoid circular or heavy dependency trees (e.g., exchanges).
 from .quality.cleaning import DataCleaner
 from .quality.monitoring import QualityMonitor
-
-# Data Sources (P-000A)
-from .sources.market_data import MarketDataSource
-from .sources.news_data import NewsDataSource
-from .sources.social_media import SocialMediaDataSource
-from .sources.alternative_data import AlternativeDataSource
-
-# Data Pipeline (P-000A)
-from .pipeline.ingestion import DataIngestionPipeline
-from .pipeline.processing import DataProcessor
-from .pipeline.validation import PipelineValidator
-from .pipeline.storage import DataStorageManager
-
-# Feature Engineering (P-015)
-from .features.technical_indicators import TechnicalIndicatorCalculator
-from .features.statistical_features import StatisticalFeatureCalculator
-from .features.alternative_features import AlternativeFeatureCalculator
+from .quality.validation import DataValidator
 
 __all__ = [
     # Data Quality Management
-    'DataValidator',
-    'DataCleaner',
-    'QualityMonitor',
-
-    # Data Sources
-    'MarketDataSource',
-    'NewsDataSource',
-    'SocialMediaDataSource',
-    'AlternativeDataSource',
-
-    # Data Pipeline
-    'DataIngestionPipeline',
-    'DataProcessor',
-    'PipelineValidator',
-    'DataStorageManager',
-
-    # Feature Engineering
-    'TechnicalIndicatorCalculator',
-    'StatisticalFeatureCalculator',
-    'AlternativeFeatureCalculator'
+    "DataValidator",
+    "DataCleaner",
+    "QualityMonitor",
+    # Quality submodule exports only (other submodules must be imported directly)
 ]

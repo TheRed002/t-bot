@@ -5,33 +5,40 @@ These tests verify exchange interface, factory, rate limiting, and connection
 management with actual component interactions.
 """
 
-import pytest
 import asyncio
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
-from src.core.logging import get_logger
-from unittest.mock import Mock, AsyncMock, patch
-from typing import Dict, List, Callable
+from unittest.mock import patch
+
+import pytest
 
 from src.core.config import Config
-from src.core.logging import setup_logging
 from src.core.exceptions import (
-    TradingBotError, ExchangeError, ValidationError,
-    ExchangeRateLimitError, ConnectionError
+    ExchangeRateLimitError,
+    ValidationError,
 )
+from src.core.logging import get_logger, setup_logging
 from src.core.types import (
-    ExchangeInfo, Ticker, OrderBook, OrderSide, OrderType,
-    OrderStatus, Trade, ExchangeStatus, MarketData, OrderResponse
+    ExchangeInfo,
+    MarketData,
+    OrderBook,
+    OrderResponse,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Ticker,
+    Trade,
 )
-
 from src.exchanges.base import BaseExchange
+from src.exchanges.connection_manager import ConnectionManager
 from src.exchanges.factory import ExchangeFactory
-from src.exchanges.rate_limiter import RateLimiter, TokenBucket, RateLimitDecorator
-from src.exchanges.connection_manager import ConnectionManager, WebSocketConnection
+from src.exchanges.rate_limiter import RateLimitDecorator, RateLimiter
 from src.exchanges.types import (
-    ExchangeTypes, ExchangeCapability, ExchangeTradingPair,
-    ExchangeFee, ExchangeRateLimit, ExchangeConnectionConfig
+    ExchangeCapability,
+    ExchangeRateLimit,
+    ExchangeTypes,
 )
 
 
@@ -72,18 +79,11 @@ class MockExchange(BaseExchange):
         await asyncio.sleep(0.1)  # Simulate disconnection time
         self.connected = False
 
-    async def get_account_balance(self) -> Dict[str, Decimal]:
+    async def get_account_balance(self) -> dict[str, Decimal]:
         """Mock account balance."""
-        return {
-            "BTC": Decimal("1.0"),
-            "ETH": Decimal("10.0"),
-            "USDT": Decimal("10000.0")
-        }
+        return {"BTC": Decimal("1.0"), "ETH": Decimal("10.0"), "USDT": Decimal("10000.0")}
 
-    async def get_market_data(
-            self,
-            symbol: str,
-            timeframe: str = "1m") -> MarketData:
+    async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """Mock market data."""
         return MarketData(
             symbol=symbol,
@@ -93,13 +93,10 @@ class MockExchange(BaseExchange):
             low_price=Decimal("49000.00"),
             close_price=Decimal("50500.00"),
             volume=Decimal("1000.0"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
-    async def get_trade_history(
-            self,
-            symbol: str,
-            limit: int = 100) -> List[Trade]:
+    async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]:
         """Mock trade history."""
         self.trade_count += 1
         return [
@@ -109,14 +106,11 @@ class MockExchange(BaseExchange):
                 price=Decimal("50000.00"),
                 quantity=Decimal("1.0"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
         ]
 
-    async def subscribe_to_stream(
-            self,
-            symbol: str,
-            callback: Callable) -> None:
+    async def subscribe_to_stream(self, symbol: str, callback: Callable) -> None:
         """Mock stream subscription."""
         # Simulate subscription
         await asyncio.sleep(0.1)
@@ -129,7 +123,7 @@ class MockExchange(BaseExchange):
             supported_symbols=["BTCUSDT", "ETHUSDT"],
             rate_limits={"requests_per_minute": 1200, "orders_per_second": 10},
             features=["spot_trading", "futures_trading"],
-            api_version="v1"
+            api_version="v1",
         )
 
     async def get_ticker(self, symbol: str) -> Ticker:
@@ -141,7 +135,7 @@ class MockExchange(BaseExchange):
             last_price=Decimal("50000.00"),
             volume_24h=Decimal("1000.0"),
             price_change_24h=Decimal("100.00"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
     async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook:
@@ -150,12 +144,17 @@ class MockExchange(BaseExchange):
             symbol=symbol,
             bids=[(Decimal("50000.00"), Decimal("1.0"))],
             asks=[(Decimal("50001.00"), Decimal("1.0"))],
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
-    async def place_order(self, symbol: str, side: OrderSide,
-                          order_type: OrderType, quantity: Decimal,
-                          price: Decimal = None) -> OrderResponse:
+    async def place_order(
+        self,
+        symbol: str,
+        side: OrderSide,
+        order_type: OrderType,
+        quantity: Decimal,
+        price: Decimal = None,
+    ) -> OrderResponse:
         """Mock order placement."""
         self.order_count += 1
         return OrderResponse(
@@ -167,7 +166,7 @@ class MockExchange(BaseExchange):
             quantity=quantity,
             price=price,
             status=OrderStatus.PENDING.value,  # Use the enum value (string)
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
     async def get_order_status(self, order_id: str) -> OrderStatus:
@@ -183,16 +182,14 @@ class MockExchange(BaseExchange):
 class TestExchangeFactoryIntegration:
     """Test exchange factory integration."""
 
-    async def test_factory_initialization(
-            self, config, setup_logging_for_tests):
+    async def test_factory_initialization(self, config, setup_logging_for_tests):
         """Test factory initialization."""
         factory = ExchangeFactory(config)
         assert factory is not None
         assert factory.config == config
         assert len(factory._active_exchanges) == 0
 
-    async def test_exchange_registration_and_creation(
-            self, config, setup_logging_for_tests):
+    async def test_exchange_registration_and_creation(self, config, setup_logging_for_tests):
         """Test exchange registration and creation."""
         factory = ExchangeFactory(config)
 
@@ -207,8 +204,7 @@ class TestExchangeFactoryIntegration:
         # Note: Factory doesn't track active exchanges in _active_exchanges dict
         # The exchange is created and connected but not stored
 
-    async def test_exchange_lifecycle_management(
-            self, config, setup_logging_for_tests):
+    async def test_exchange_lifecycle_management(self, config, setup_logging_for_tests):
         """Test complete exchange lifecycle."""
         factory = ExchangeFactory(config)
         factory.register_exchange("mock", MockExchange)
@@ -226,8 +222,7 @@ class TestExchangeFactoryIntegration:
         removed = await factory.remove_exchange("mock")
         assert removed is True
 
-    async def test_multiple_exchanges_management(
-            self, config, setup_logging_for_tests):
+    async def test_multiple_exchanges_management(self, config, setup_logging_for_tests):
         """Test managing multiple exchanges."""
         factory = ExchangeFactory(config)
         factory.register_exchange("mock_0", MockExchange)
@@ -255,16 +250,14 @@ class TestExchangeFactoryIntegration:
 class TestRateLimiterIntegration:
     """Test rate limiter integration."""
 
-    async def test_rate_limiter_initialization(
-            self, config, setup_logging_for_tests):
+    async def test_rate_limiter_initialization(self, config, setup_logging_for_tests):
         """Test rate limiter initialization."""
         rate_limiter = RateLimiter(config, "test_exchange")
         assert rate_limiter is not None
         assert "requests_per_minute" in rate_limiter.buckets
         assert "orders_per_second" in rate_limiter.buckets
 
-    async def test_token_bucket_integration(
-            self, config, setup_logging_for_tests):
+    async def test_token_bucket_integration(self, config, setup_logging_for_tests):
         """Test token bucket integration with rate limiter."""
         rate_limiter = RateLimiter(config, "test_exchange")
         bucket = rate_limiter.buckets["requests_per_minute"]
@@ -285,8 +278,7 @@ class TestRateLimiterIntegration:
         # But the refill rate is slow, so we just check it's not zero
         assert bucket.tokens > 0
 
-    async def test_rate_limiter_acquire_integration(
-            self, config, setup_logging_for_tests):
+    async def test_rate_limiter_acquire_integration(self, config, setup_logging_for_tests):
         """Test rate limiter acquire functionality."""
         rate_limiter = RateLimiter(config, "test_exchange")
 
@@ -301,8 +293,7 @@ class TestRateLimiterIntegration:
         with pytest.raises(ExchangeRateLimitError):
             await rate_limiter.acquire("requests_per_minute", tokens=100, timeout=0.1)
 
-    async def test_rate_limit_decorator_integration(
-            self, config, setup_logging_for_tests):
+    async def test_rate_limit_decorator_integration(self, config, setup_logging_for_tests):
         """Test rate limit decorator integration."""
         rate_limiter = RateLimiter(config, "test_exchange")
 
@@ -310,8 +301,7 @@ class TestRateLimiterIntegration:
             def __init__(self):
                 self.rate_limiter = rate_limiter
 
-            @RateLimitDecorator(bucket_name="requests_per_minute",
-                                tokens=1, timeout=1.0)
+            @RateLimitDecorator(bucket_name="requests_per_minute", tokens=1, timeout=1.0)
             async def test_method(self):
                 return "success"
 
@@ -324,16 +314,14 @@ class TestRateLimiterIntegration:
 class TestConnectionManagerIntegration:
     """Test connection manager integration."""
 
-    async def test_connection_manager_initialization(
-            self, config, setup_logging_for_tests):
+    async def test_connection_manager_initialization(self, config, setup_logging_for_tests):
         """Test connection manager initialization."""
         manager = ConnectionManager(config, "test_exchange")
         assert manager is not None
         assert len(manager.rest_connections) == 0
         assert len(manager.websocket_connections) == 0
 
-    async def test_rest_connection_management(
-            self, config, setup_logging_for_tests):
+    async def test_rest_connection_management(self, config, setup_logging_for_tests):
         """Test REST connection management."""
         manager = ConnectionManager(config, "test_exchange")
 
@@ -346,8 +334,7 @@ class TestConnectionManagerIntegration:
         conn2 = await manager.get_rest_connection("test_rest")
         assert conn2 == conn
 
-    async def test_websocket_connection_management(
-            self, config, setup_logging_for_tests):
+    async def test_websocket_connection_management(self, config, setup_logging_for_tests):
         """Test WebSocket connection management."""
         manager = ConnectionManager(config, "test_exchange")
 
@@ -369,8 +356,7 @@ class TestConnectionManagerIntegration:
         await ws.disconnect()
         assert ws.connected is False
 
-    async def test_connection_health_monitoring(
-            self, config, setup_logging_for_tests):
+    async def test_connection_health_monitoring(self, config, setup_logging_for_tests):
         """Test connection health monitoring."""
         manager = ConnectionManager(config, "test_exchange")
 
@@ -396,8 +382,7 @@ class TestConnectionManagerIntegration:
 class TestExchangeIntegration:
     """Test complete exchange integration."""
 
-    async def test_exchange_with_rate_limiting(
-            self, config, setup_logging_for_tests):
+    async def test_exchange_with_rate_limiting(self, config, setup_logging_for_tests):
         """Test exchange operations with rate limiting."""
         factory = ExchangeFactory(config)
         factory.register_exchange("mock", MockExchange)
@@ -416,13 +401,12 @@ class TestExchangeIntegration:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("0.001")
+            quantity=Decimal("0.001"),
         )
         assert order.symbol == "BTCUSDT"
         assert order.side == OrderSide.BUY
 
-    async def test_exchange_with_connection_management(
-            self, config, setup_logging_for_tests):
+    async def test_exchange_with_connection_management(self, config, setup_logging_for_tests):
         """Test exchange with connection management."""
         factory = ExchangeFactory(config)
         factory.register_exchange("mock", MockExchange)
@@ -444,8 +428,7 @@ class TestExchangeIntegration:
         # Note: remove_exchange doesn't disconnect, it just removes from
         # tracking
 
-    async def test_exchange_error_handling_integration(
-            self, config, setup_logging_for_tests):
+    async def test_exchange_error_handling_integration(self, config, setup_logging_for_tests):
         """Test exchange error handling integration."""
         factory = ExchangeFactory(config)
         factory.register_exchange("mock", MockExchange)
@@ -455,7 +438,7 @@ class TestExchangeIntegration:
         # Exchange is already connected by factory
 
         # Test with invalid parameters
-        with patch.object(exchange, 'get_ticker', side_effect=ValidationError("Invalid symbol")):
+        with patch.object(exchange, "get_ticker", side_effect=ValidationError("Invalid symbol")):
             with pytest.raises(ValidationError):
                 # Empty symbol should raise ValidationError
                 await exchange.get_ticker("")
@@ -464,8 +447,7 @@ class TestExchangeIntegration:
         ticker = await exchange.get_ticker("BTCUSDT")
         assert ticker is not None
 
-    async def test_multiple_exchanges_with_shared_resources(
-            self, config, setup_logging_for_tests):
+    async def test_multiple_exchanges_with_shared_resources(self, config, setup_logging_for_tests):
         """Test multiple exchanges sharing rate limiters and connection managers."""
         factory = ExchangeFactory(config)
         factory.register_exchange("mock_0", MockExchange)
@@ -499,7 +481,7 @@ class TestExchangeIntegration:
                     symbol="BTCUSDT",
                     side=OrderSide.BUY,
                     order_type=OrderType.MARKET,
-                    quantity=Decimal("0.001")
+                    quantity=Decimal("0.001"),
                 )
             )
             order_tasks.append(task)
@@ -514,8 +496,7 @@ class TestExchangeIntegration:
 class TestExchangeTypesIntegration:
     """Test exchange types integration."""
 
-    async def test_exchange_types_validation(
-            self, config, setup_logging_for_tests):
+    async def test_exchange_types_validation(self, config, setup_logging_for_tests):
         """Test exchange types validation."""
         # Test valid exchange types
         assert ExchangeTypes.validate_symbol("BTCUSDT") is True
@@ -523,24 +504,21 @@ class TestExchangeTypesIntegration:
 
         # Test invalid exchange types
         assert ExchangeTypes.validate_symbol("") is False
-        assert ExchangeTypes.validate_symbol(
-            "BTC-USD") is False  # Contains hyphen
+        assert ExchangeTypes.validate_symbol("BTC-USD") is False  # Contains hyphen
 
-    async def test_exchange_capabilities_validation(
-            self, config, setup_logging_for_tests):
+    async def test_exchange_capabilities_validation(self, config, setup_logging_for_tests):
         """Test exchange capabilities validation."""
         capabilities = [
             ExchangeCapability.SPOT_TRADING,
             ExchangeCapability.FUTURES_TRADING,
-            ExchangeCapability.MARGIN_TRADING
+            ExchangeCapability.MARGIN_TRADING,
         ]
 
         # Test that capabilities are valid enum values
         for capability in capabilities:
             assert capability in ExchangeCapability
 
-    async def test_trading_pair_validation(
-            self, config, setup_logging_for_tests):
+    async def test_trading_pair_validation(self, config, setup_logging_for_tests):
         """Test trading pair validation."""
         valid_pairs = ["BTCUSDT", "ETHUSDT"]
 
@@ -552,13 +530,10 @@ class TestExchangeTypesIntegration:
         for pair in invalid_pairs:
             assert ExchangeTypes.validate_symbol(pair) is False
 
-    async def test_rate_limit_validation(
-            self, config, setup_logging_for_tests):
+    async def test_rate_limit_validation(self, config, setup_logging_for_tests):
         """Test rate limit validation."""
         rate_limit = ExchangeRateLimit(
-            requests_per_minute=1200,
-            orders_per_second=10,
-            websocket_connections=4
+            requests_per_minute=1200, orders_per_second=10, websocket_connections=4
         )
 
         # Test that the rate limit object is created successfully
@@ -571,8 +546,7 @@ class TestExchangeTypesIntegration:
 class TestComprehensiveExchangeIntegration:
     """Test comprehensive exchange integration scenarios."""
 
-    async def test_full_trading_workflow(
-            self, config, setup_logging_for_tests):
+    async def test_full_trading_workflow(self, config, setup_logging_for_tests):
         """Test complete trading workflow with all components."""
         factory = ExchangeFactory(config)
         factory.register_exchange("mock", MockExchange)
@@ -601,7 +575,7 @@ class TestComprehensiveExchangeIntegration:
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
             quantity=Decimal("0.001"),
-            price=Decimal("50000.00")
+            price=Decimal("50000.00"),
         )
         assert order.status == OrderStatus.PENDING.value
 
@@ -622,8 +596,7 @@ class TestComprehensiveExchangeIntegration:
         # Note: remove_exchange doesn't disconnect, it just removes from
         # tracking
 
-    async def test_error_recovery_scenarios(
-            self, config, setup_logging_for_tests):
+    async def test_error_recovery_scenarios(self, config, setup_logging_for_tests):
         """Test error recovery scenarios."""
         factory = ExchangeFactory(config)
         factory.register_exchange("mock", MockExchange)
@@ -663,8 +636,7 @@ class TestComprehensiveExchangeIntegration:
         results = await connection_manager.reconnect_all()
         assert isinstance(results, dict)
 
-    async def test_performance_under_load(
-            self, config, setup_logging_for_tests):
+    async def test_performance_under_load(self, config, setup_logging_for_tests):
         """Test performance under load."""
         factory = ExchangeFactory(config)
         factory.register_exchange("mock_0", MockExchange)
@@ -705,8 +677,7 @@ class TestComprehensiveExchangeIntegration:
             if isinstance(result, Exception):
                 # Some operations might fail due to validation errors or rate
                 # limiting
-                assert isinstance(
-                    result, (ExchangeRateLimitError, ValidationError))
+                assert isinstance(result, (ExchangeRateLimitError, ValidationError))
             else:
                 assert result.symbol == "BTCUSDT"
 

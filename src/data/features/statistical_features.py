@@ -15,37 +15,36 @@ Dependencies:
 - P-000A: Data pipeline integration
 """
 
-import asyncio
-from typing import Dict, List, Any, Optional, Tuple, Union
-from decimal import Decimal
-from datetime import datetime, timezone, timedelta
+import warnings
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
+
 import numpy as np
 import pandas as pd
 from scipy import stats
 from scipy.signal import periodogram
-import warnings
+
+from src.core.config import Config
+from src.core.exceptions import DataError
+from src.core.logging import get_logger
 
 # Import from P-001 core components
-from src.core.types import MarketData, Signal
-from src.core.exceptions import DataError, ValidationError
-from src.core.config import Config
-from src.core.logging import get_logger
+from src.core.types import MarketData
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
-from src.utils.decorators import time_execution, retry, cache_result
-from src.utils.validators import validate_price, validate_quantity
-from src.utils.helpers import calculate_percentage_change
+from src.utils.decorators import cache_result, time_execution
 
 logger = get_logger(__name__)
 
 
 class StatFeatureType(Enum):
     """Statistical feature type enumeration"""
+
     ROLLING_STATS = "rolling_stats"
     AUTOCORRELATION = "autocorrelation"
     CROSS_CORRELATION = "cross_correlation"
@@ -55,6 +54,7 @@ class StatFeatureType(Enum):
 
 class RegimeType(Enum):
     """Market regime type enumeration"""
+
     TRENDING_UP = "trending_up"
     TRENDING_DOWN = "trending_down"
     RANGING = "ranging"
@@ -66,21 +66,23 @@ class RegimeType(Enum):
 @dataclass
 class StatisticalConfig:
     """Statistical feature calculation configuration"""
+
     feature_name: str
     feature_type: StatFeatureType
     window_size: int
     enabled: bool = True
-    parameters: Dict[str, Any] = None
+    parameters: dict[str, Any] = None
 
 
 @dataclass
 class StatisticalResult:
     """Statistical feature calculation result"""
+
     feature_name: str
     symbol: str
     timestamp: datetime
-    value: Optional[Union[float, Dict[str, float]]]
-    metadata: Dict[str, Any]
+    value: float | dict[str, float] | None
+    metadata: dict[str, Any]
     calculation_time: float
 
 
@@ -98,37 +100,40 @@ class StatisticalFeatureCalculator:
         self.error_handler = ErrorHandler(config)
 
         # Statistical configuration
-        stats_config = getattr(config, 'statistical_features', {})
-        if hasattr(stats_config, 'get'):
-            self.default_windows = stats_config.get('default_windows', {
-                'rolling_stats': 20,
-                'autocorr': 50,
-                'regime': 100,
-                'seasonality': 252  # Trading days in a year
-            })
-            self.regime_threshold = stats_config.get('regime_threshold', 0.02)
+        stats_config = getattr(config, "statistical_features", {})
+        if hasattr(stats_config, "get"):
+            self.default_windows = stats_config.get(
+                "default_windows",
+                {
+                    "rolling_stats": 20,
+                    "autocorr": 50,
+                    "regime": 100,
+                    "seasonality": 252,  # Trading days in a year
+                },
+            )
+            self.regime_threshold = stats_config.get("regime_threshold", 0.02)
             self.correlation_threshold = stats_config.get(
-                'correlation_threshold', 0.7)
+                "correlation_threshold", 0.7)
         else:
             self.default_windows = {
-                'rolling_stats': 20,
-                'autocorr': 50,
-                'regime': 100,
-                'seasonality': 252
+                "rolling_stats": 20,
+                "autocorr": 50,
+                "regime": 100,
+                "seasonality": 252,
             }
             self.regime_threshold = 0.02
             self.correlation_threshold = 0.7
 
         # Data storage
-        self.price_data: Dict[str, pd.DataFrame] = {}
-        self.feature_cache: Dict[str, Dict[str, Any]] = {}
+        self.price_data: dict[str, pd.DataFrame] = {}
+        self.feature_cache: dict[str, dict[str, Any]] = {}
 
         # Statistics
         self.calculation_stats = {
-            'total_calculations': 0,
-            'successful_calculations': 0,
-            'failed_calculations': 0,
-            'avg_calculation_time': 0.0
+            "total_calculations": 0,
+            "successful_calculations": 0,
+            "failed_calculations": 0,
+            "avg_calculation_time": 0.0,
         }
 
         logger.info("StatisticalFeatureCalculator initialized")
@@ -145,10 +150,18 @@ class StatisticalFeatureCalculator:
 
             # Initialize DataFrame if not exists
             if symbol not in self.price_data:
-                self.price_data[symbol] = pd.DataFrame(columns=[
-                    'timestamp', 'open', 'high', 'low', 'close', 'volume',
-                    'returns', 'log_returns'
-                ])
+                self.price_data[symbol] = pd.DataFrame(
+                    columns=[
+                        "timestamp",
+                        "open",
+                        "high",
+                        "low",
+                        "close",
+                        "volume",
+                        "returns",
+                        "log_returns",
+                    ]
+                )
 
             # Calculate returns
             close_price = float(data.price)
@@ -156,30 +169,29 @@ class StatisticalFeatureCalculator:
             log_returns = 0.0
 
             if len(self.price_data[symbol]) > 0:
-                prev_close = self.price_data[symbol]['close'].iloc[-1]
+                prev_close = self.price_data[symbol]["close"].iloc[-1]
                 if prev_close > 0:
                     returns = (close_price - prev_close) / prev_close
                     log_returns = np.log(close_price / prev_close)
 
             # Add new data point
             new_row = {
-                'timestamp': data.timestamp,
-                'open': float(data.open_price or data.price),
-                'high': float(data.high_price or data.price),
-                'low': float(data.low_price or data.price),
-                'close': close_price,
-                'volume': float(data.volume),
-                'returns': returns,
-                'log_returns': log_returns
+                "timestamp": data.timestamp,
+                "open": float(data.open_price or data.price),
+                "high": float(data.high_price or data.price),
+                "low": float(data.low_price or data.price),
+                "close": close_price,
+                "volume": float(data.volume),
+                "returns": returns,
+                "log_returns": log_returns,
             }
 
-            self.price_data[symbol] = pd.concat([
-                self.price_data[symbol],
-                pd.DataFrame([new_row])
-            ], ignore_index=True)
+            self.price_data[symbol] = pd.concat(
+                [self.price_data[symbol], pd.DataFrame([new_row])], ignore_index=True
+            )
 
             # Keep only recent data
-            max_rows = getattr(self.config, 'max_price_history', 2000)
+            max_rows = getattr(self.config, "max_price_history", 2000)
             if len(self.price_data[symbol]) > max_rows:
                 self.price_data[symbol] = self.price_data[symbol].tail(
                     max_rows)
@@ -189,16 +201,13 @@ class StatisticalFeatureCalculator:
                 self.feature_cache[symbol] = {}
 
         except Exception as e:
-            logger.error(f"Failed to add market data for {symbol}: {str(e)}")
-            raise DataError(f"Market data addition failed: {str(e)}")
+            logger.error(f"Failed to add market data for {symbol}: {e!s}")
+            raise DataError(f"Market data addition failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=300)
+    @cache_result(ttl_seconds=300)
     async def calculate_rolling_stats(
-        self,
-        symbol: str,
-        window: int = None,
-        field: str = 'returns'
+        self, symbol: str, window: int = None, field: str = "returns"
     ) -> StatisticalResult:
         """
         Calculate rolling statistical features.
@@ -217,23 +226,20 @@ class StatisticalFeatureCalculator:
             if symbol not in self.price_data:
                 raise DataError(f"No price data available for {symbol}")
 
-            window = window or self.default_windows['rolling_stats']
+            window = window or self.default_windows["rolling_stats"]
             df = self.price_data[symbol]
 
             if len(df) < window:
                 return StatisticalResult(
-                    feature_name='ROLLING_STATS',
+                    feature_name="ROLLING_STATS",
                     symbol=symbol,
-                    timestamp=datetime.now(
-                        timezone.utc),
+                    timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={
-                        'window': window,
-                        'field': field,
-                        'reason': 'insufficient_data'},
+                    metadata={"window": window, "field": field,
+                              "reason": "insufficient_data"},
                     calculation_time=(
-                        datetime.now() -
-                        start_time).total_seconds())
+                        datetime.now() - start_time).total_seconds(),
+                )
 
             # Calculate rolling statistics
             data_series = df[field]
@@ -258,44 +264,40 @@ class StatisticalFeatureCalculator:
                        rolling_std) if rolling_std > 0 else 0
 
             statistical_values = {
-                'mean': rolling_mean,
-                'std': rolling_std,
-                'skewness': rolling_skew,
-                'kurtosis': rolling_kurt,
-                'min': rolling_min,
-                'max': rolling_max,
-                'median': rolling_median,
-                'q25': rolling_quantile_25,
-                'q75': rolling_quantile_75,
-                'z_score': z_score,
-                'latest_value': latest_value
+                "mean": rolling_mean,
+                "std": rolling_std,
+                "skewness": rolling_skew,
+                "kurtosis": rolling_kurt,
+                "min": rolling_min,
+                "max": rolling_max,
+                "median": rolling_median,
+                "q25": rolling_quantile_25,
+                "q75": rolling_quantile_75,
+                "z_score": z_score,
+                "latest_value": latest_value,
             }
 
-            self.calculation_stats['successful_calculations'] += 1
+            self.calculation_stats["successful_calculations"] += 1
 
             return StatisticalResult(
-                feature_name='ROLLING_STATS',
+                feature_name="ROLLING_STATS",
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc),
                 value=statistical_values,
-                metadata={'window': window, 'field': field},
-                calculation_time=(datetime.now() - start_time).total_seconds()
+                metadata={"window": window, "field": field},
+                calculation_time=(datetime.now() - start_time).total_seconds(),
             )
 
         except Exception as e:
-            self.calculation_stats['failed_calculations'] += 1
+            self.calculation_stats["failed_calculations"] += 1
             logger.error(
-                f"Rolling stats calculation failed for {symbol}: {
-                    str(e)}")
-            raise DataError(f"Rolling stats calculation failed: {str(e)}")
+                f"Rolling stats calculation failed for {symbol}: {e!s}")
+            raise DataError(f"Rolling stats calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=600)
+    @cache_result(ttl_seconds=600)
     async def calculate_autocorrelation(
-        self,
-        symbol: str,
-        max_lags: int = None,
-        field: str = 'returns'
+        self, symbol: str, max_lags: int = None, field: str = "returns"
     ) -> StatisticalResult:
         """
         Calculate autocorrelation features.
@@ -319,18 +321,15 @@ class StatisticalFeatureCalculator:
 
             if len(df) < max_lags * 2:
                 return StatisticalResult(
-                    feature_name='AUTOCORRELATION',
+                    feature_name="AUTOCORRELATION",
                     symbol=symbol,
-                    timestamp=datetime.now(
-                        timezone.utc),
+                    timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={
-                        'max_lags': max_lags,
-                        'field': field,
-                        'reason': 'insufficient_data'},
+                    metadata={"max_lags": max_lags, "field": field,
+                              "reason": "insufficient_data"},
                     calculation_time=(
-                        datetime.now() -
-                        start_time).total_seconds())
+                        datetime.now() - start_time).total_seconds(),
+                )
 
             # Calculate autocorrelations
             data_series = df[field].dropna()
@@ -344,60 +343,52 @@ class StatisticalFeatureCalculator:
             n = len(data_series)
             confidence_interval = 1.96 / np.sqrt(n)
             significant_lags = [
-                i + 1 for i,
-                ac in enumerate(autocorrs) if abs(ac) > confidence_interval]
+                i + 1 for i, ac in enumerate(autocorrs) if abs(ac) > confidence_interval
+            ]
 
             # Calculate Ljung-Box test statistic for serial correlation
             try:
                 from statsmodels.stats.diagnostic import acorr_ljungbox
+
                 ljung_box_stat = acorr_ljungbox(
-                    data_series, lags=min(
-                        10, max_lags), return_df=True)
-                ljung_box_pvalue = ljung_box_stat['lb_pvalue'].min()
+                    data_series, lags=min(10, max_lags), return_df=True)
+                ljung_box_pvalue = ljung_box_stat["lb_pvalue"].min()
             except ImportError:
                 ljung_box_pvalue = None
                 logger.warning("statsmodels not available for Ljung-Box test")
 
             autocorr_values = {
-                'autocorrelations': autocorrs[:10],  # Return first 10 lags
-                'max_autocorr': max(autocorrs),
-                'min_autocorr': min(autocorrs),
-                'mean_autocorr': np.mean(autocorrs),
+                "autocorrelations": autocorrs[:10],  # Return first 10 lags
+                "max_autocorr": max(autocorrs),
+                "min_autocorr": min(autocorrs),
+                "mean_autocorr": np.mean(autocorrs),
                 # Top 5 significant lags
-                'significant_lags': significant_lags[:5],
-                'ljung_box_pvalue': ljung_box_pvalue
+                "significant_lags": significant_lags[:5],
+                "ljung_box_pvalue": ljung_box_pvalue,
             }
 
-            self.calculation_stats['successful_calculations'] += 1
+            self.calculation_stats["successful_calculations"] += 1
 
             return StatisticalResult(
-                feature_name='AUTOCORRELATION',
+                feature_name="AUTOCORRELATION",
                 symbol=symbol,
-                timestamp=datetime.now(
-                    timezone.utc),
+                timestamp=datetime.now(timezone.utc),
                 value=autocorr_values,
-                metadata={
-                    'max_lags': max_lags,
-                    'field': field,
-                    'n_observations': len(data_series)},
-                calculation_time=(
-                    datetime.now() -
-                    start_time).total_seconds())
+                metadata={"max_lags": max_lags, "field": field,
+                          "n_observations": len(data_series)},
+                calculation_time=(datetime.now() - start_time).total_seconds(),
+            )
 
         except Exception as e:
-            self.calculation_stats['failed_calculations'] += 1
+            self.calculation_stats["failed_calculations"] += 1
             logger.error(
-                f"Autocorrelation calculation failed for {symbol}: {
-                    str(e)}")
-            raise DataError(f"Autocorrelation calculation failed: {str(e)}")
+                f"Autocorrelation calculation failed for {symbol}: {e!s}")
+            raise DataError(f"Autocorrelation calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=600)
+    @cache_result(ttl_seconds=600)
     async def detect_regime(
-        self,
-        symbol: str,
-        window: int = None,
-        field: str = 'returns'
+        self, symbol: str, window: int = None, field: str = "returns"
     ) -> StatisticalResult:
         """
         Detect market regime (trending vs ranging).
@@ -416,28 +407,25 @@ class StatisticalFeatureCalculator:
             if symbol not in self.price_data:
                 raise DataError(f"No price data available for {symbol}")
 
-            window = window or self.default_windows['regime']
+            window = window or self.default_windows["regime"]
             df = self.price_data[symbol]
 
             if len(df) < window:
                 return StatisticalResult(
-                    feature_name='REGIME_DETECTION',
+                    feature_name="REGIME_DETECTION",
                     symbol=symbol,
-                    timestamp=datetime.now(
-                        timezone.utc),
+                    timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={
-                        'window': window,
-                        'field': field,
-                        'reason': 'insufficient_data'},
+                    metadata={"window": window, "field": field,
+                              "reason": "insufficient_data"},
                     calculation_time=(
-                        datetime.now() -
-                        start_time).total_seconds())
+                        datetime.now() - start_time).total_seconds(),
+                )
 
             # Get recent data
             recent_data = df.tail(window)
-            prices = recent_data['close']
-            returns = recent_data['returns']
+            prices = recent_data["close"]
+            returns = recent_data["returns"]
 
             # Calculate trend indicators
             price_trend = (prices.iloc[-1] - prices.iloc[0]) / prices.iloc[0]
@@ -446,7 +434,8 @@ class StatisticalFeatureCalculator:
 
             # Calculate volatility regime
             volatility_percentile = stats.percentileofscore(
-                df['returns'].rolling(window).std().dropna(), returns_std)
+                df["returns"].rolling(window).std().dropna(), returns_std
+            )
 
             # Determine regime
             regime = RegimeType.UNKNOWN
@@ -472,52 +461,44 @@ class StatisticalFeatureCalculator:
                 confidence = 1.0 - abs(price_trend) / self.regime_threshold
 
             # Calculate additional regime metrics
-            directional_movement = np.sum(
-                np.sign(returns) == np.sign(
-                    returns.shift(1))) / len(returns)
+            directional_movement = np.sum(np.sign(returns) == np.sign(returns.shift(1))) / len(
+                returns
+            )
             trending_strength = abs(returns_mean) / \
                 returns_std if returns_std > 0 else 0
 
             regime_values = {
-                'regime': regime.value,
-                'confidence': confidence,
-                'price_trend': price_trend,
-                'returns_mean': returns_mean,
-                'returns_std': returns_std,
-                'volatility_percentile': volatility_percentile,
-                'directional_movement': directional_movement,
-                'trending_strength': trending_strength
+                "regime": regime.value,
+                "confidence": confidence,
+                "price_trend": price_trend,
+                "returns_mean": returns_mean,
+                "returns_std": returns_std,
+                "volatility_percentile": volatility_percentile,
+                "directional_movement": directional_movement,
+                "trending_strength": trending_strength,
             }
 
-            self.calculation_stats['successful_calculations'] += 1
+            self.calculation_stats["successful_calculations"] += 1
 
             return StatisticalResult(
-                feature_name='REGIME_DETECTION',
+                feature_name="REGIME_DETECTION",
                 symbol=symbol,
-                timestamp=datetime.now(
-                    timezone.utc),
+                timestamp=datetime.now(timezone.utc),
                 value=regime_values,
-                metadata={
-                    'window': window,
-                    'field': field,
-                    'threshold': self.regime_threshold},
-                calculation_time=(
-                    datetime.now() -
-                    start_time).total_seconds())
+                metadata={"window": window, "field": field,
+                          "threshold": self.regime_threshold},
+                calculation_time=(datetime.now() - start_time).total_seconds(),
+            )
 
         except Exception as e:
-            self.calculation_stats['failed_calculations'] += 1
-            logger.error(f"Regime detection failed for {symbol}: {str(e)}")
-            raise DataError(f"Regime detection failed: {str(e)}")
+            self.calculation_stats["failed_calculations"] += 1
+            logger.error(f"Regime detection failed for {symbol}: {e!s}")
+            raise DataError(f"Regime detection failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=900)
+    @cache_result(ttl_seconds=900)
     async def calculate_cross_correlation(
-        self,
-        symbol1: str,
-        symbol2: str,
-        max_lags: int = 20,
-        field: str = 'returns'
+        self, symbol1: str, symbol2: str, max_lags: int = 20, field: str = "returns"
     ) -> StatisticalResult:
         """
         Calculate cross-correlation between two assets.
@@ -535,10 +516,8 @@ class StatisticalFeatureCalculator:
 
         try:
             if symbol1 not in self.price_data or symbol2 not in self.price_data:
-                missing = [
-                    s for s in [
-                        symbol1,
-                        symbol2] if s not in self.price_data]
+                missing = [s for s in [symbol1, symbol2]
+                           if s not in self.price_data]
                 raise DataError(
                     f"No price data available for symbols: {missing}")
 
@@ -546,31 +525,31 @@ class StatisticalFeatureCalculator:
             df2 = self.price_data[symbol2]
 
             # Align timestamps and get common data
-            df1['timestamp'] = pd.to_datetime(df1['timestamp'])
-            df2['timestamp'] = pd.to_datetime(df2['timestamp'])
+            df1["timestamp"] = pd.to_datetime(df1["timestamp"])
+            df2["timestamp"] = pd.to_datetime(df2["timestamp"])
 
-            merged = pd.merge(df1, df2, on='timestamp', suffixes=('_1', '_2'))
+            merged = pd.merge(df1, df2, on="timestamp", suffixes=("_1", "_2"))
 
             if len(merged) < max_lags * 2:
                 return StatisticalResult(
-                    feature_name='CROSS_CORRELATION',
+                    feature_name="CROSS_CORRELATION",
                     symbol=f"{symbol1}_{symbol2}",
-                    timestamp=datetime.now(
-                        timezone.utc),
+                    timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={
-                        'symbol1': symbol1,
-                        'symbol2': symbol2,
-                        'max_lags': max_lags,
-                        'field': field,
-                        'reason': 'insufficient_common_data'},
+                        "symbol1": symbol1,
+                        "symbol2": symbol2,
+                        "max_lags": max_lags,
+                        "field": field,
+                        "reason": "insufficient_common_data",
+                    },
                     calculation_time=(
-                        datetime.now() -
-                        start_time).total_seconds())
+                        datetime.now() - start_time).total_seconds(),
+                )
 
             # Get data series
-            series1 = merged[f'{field}_1'].dropna()
-            series2 = merged[f'{field}_2'].dropna()
+            series1 = merged[f"{field}_1"].dropna()
+            series2 = merged[f"{field}_2"].dropna()
 
             # Calculate cross-correlations
             cross_correlations = []
@@ -600,42 +579,41 @@ class StatisticalFeatureCalculator:
             max_negative_lag_corr = max(negative_lags) if negative_lags else 0
 
             cross_corr_values = {
-                'contemporaneous_correlation': cross_correlations[max_lags],
-                'max_correlation': max_corr,
-                'max_correlation_lag': max_corr_lag,
-                'max_positive_lag_correlation': max_positive_lag_corr,
-                'max_negative_lag_correlation': max_negative_lag_corr,
-                'lead_lag_asymmetry': max_positive_lag_corr - max_negative_lag_corr,
-                'correlation_strength': abs(max_corr)}
+                "contemporaneous_correlation": cross_correlations[max_lags],
+                "max_correlation": max_corr,
+                "max_correlation_lag": max_corr_lag,
+                "max_positive_lag_correlation": max_positive_lag_corr,
+                "max_negative_lag_correlation": max_negative_lag_corr,
+                "lead_lag_asymmetry": max_positive_lag_corr - max_negative_lag_corr,
+                "correlation_strength": abs(max_corr),
+            }
 
-            self.calculation_stats['successful_calculations'] += 1
+            self.calculation_stats["successful_calculations"] += 1
 
             return StatisticalResult(
-                feature_name='CROSS_CORRELATION',
+                feature_name="CROSS_CORRELATION",
                 symbol=f"{symbol1}_{symbol2}",
                 timestamp=datetime.now(timezone.utc),
                 value=cross_corr_values,
                 metadata={
-                    'symbol1': symbol1, 'symbol2': symbol2,
-                    'max_lags': max_lags, 'field': field,
-                    'n_observations': len(merged)
+                    "symbol1": symbol1,
+                    "symbol2": symbol2,
+                    "max_lags": max_lags,
+                    "field": field,
+                    "n_observations": len(merged),
                 },
-                calculation_time=(datetime.now() - start_time).total_seconds()
+                calculation_time=(datetime.now() - start_time).total_seconds(),
             )
 
         except Exception as e:
-            self.calculation_stats['failed_calculations'] += 1
+            self.calculation_stats["failed_calculations"] += 1
             logger.error(
-                f"Cross-correlation calculation failed for {symbol1}-{symbol2}: {str(e)}")
-            raise DataError(f"Cross-correlation calculation failed: {str(e)}")
+                f"Cross-correlation calculation failed for {symbol1}-{symbol2}: {e!s}")
+            raise DataError(f"Cross-correlation calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl=1800)
-    async def detect_seasonality(
-        self,
-        symbol: str,
-        field: str = 'returns'
-    ) -> StatisticalResult:
+    @cache_result(ttl_seconds=1800)
+    async def detect_seasonality(self, symbol: str, field: str = "returns") -> StatisticalResult:
         """
         Detect seasonal patterns in price data.
 
@@ -653,42 +631,39 @@ class StatisticalFeatureCalculator:
                 raise DataError(f"No price data available for {symbol}")
 
             df = self.price_data[symbol]
-            min_observations = self.default_windows['seasonality']
+            min_observations = self.default_windows["seasonality"]
 
             if len(df) < min_observations:
                 return StatisticalResult(
-                    feature_name='SEASONALITY',
+                    feature_name="SEASONALITY",
                     symbol=symbol,
-                    timestamp=datetime.now(
-                        timezone.utc),
+                    timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={
-                        'field': field,
-                        'reason': 'insufficient_data'},
+                    metadata={"field": field, "reason": "insufficient_data"},
                     calculation_time=(
-                        datetime.now() -
-                        start_time).total_seconds())
+                        datetime.now() - start_time).total_seconds(),
+                )
 
             # Prepare time series with datetime index
             df_copy = df.copy()
-            df_copy['timestamp'] = pd.to_datetime(df_copy['timestamp'])
-            df_copy.set_index('timestamp', inplace=True)
+            df_copy["timestamp"] = pd.to_datetime(df_copy["timestamp"])
+            df_copy.set_index("timestamp", inplace=True)
 
             data_series = df_copy[field].dropna()
 
             # Extract time components
-            df_copy['hour'] = df_copy.index.hour
-            df_copy['day_of_week'] = df_copy.index.dayofweek
-            df_copy['day_of_month'] = df_copy.index.day
-            df_copy['month'] = df_copy.index.month
+            df_copy["hour"] = df_copy.index.hour
+            df_copy["day_of_week"] = df_copy.index.dayofweek
+            df_copy["day_of_month"] = df_copy.index.day
+            df_copy["month"] = df_copy.index.month
 
             # Calculate seasonal patterns
             hourly_pattern = data_series.groupby(
-                df_copy['hour']).mean().to_dict()
+                df_copy["hour"]).mean().to_dict()
             daily_pattern = data_series.groupby(
-                df_copy['day_of_week']).mean().to_dict()
+                df_copy["day_of_week"]).mean().to_dict()
             monthly_pattern = data_series.groupby(
-                df_copy['month']).mean().to_dict()
+                df_copy["month"]).mean().to_dict()
 
             # Spectral analysis for dominant frequencies
             try:
@@ -709,42 +684,39 @@ class StatisticalFeatureCalculator:
             monthly_variance = np.var(list(monthly_pattern.values()))
 
             seasonality_values = {
-                'hourly_pattern': hourly_pattern,
-                'daily_pattern': daily_pattern,
-                'monthly_pattern': monthly_pattern,
-                'hourly_variance': hourly_variance,
-                'daily_variance': daily_variance,
-                'monthly_variance': monthly_variance,
-                'dominant_frequency': dominant_frequency,
-                'dominant_period_days': dominant_period,
-                'strongest_pattern': max(['hourly', 'daily', 'monthly'],
-                                         key=lambda x: eval(f"{x}_variance"))
+                "hourly_pattern": hourly_pattern,
+                "daily_pattern": daily_pattern,
+                "monthly_pattern": monthly_pattern,
+                "hourly_variance": hourly_variance,
+                "daily_variance": daily_variance,
+                "monthly_variance": monthly_variance,
+                "dominant_frequency": dominant_frequency,
+                "dominant_period_days": dominant_period,
+                "strongest_pattern": max(
+                    ["hourly", "daily", "monthly"], key=lambda x: eval(f"{x}_variance")
+                ),
             }
 
-            self.calculation_stats['successful_calculations'] += 1
+            self.calculation_stats["successful_calculations"] += 1
 
             return StatisticalResult(
-                feature_name='SEASONALITY',
+                feature_name="SEASONALITY",
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc),
                 value=seasonality_values,
-                metadata={'field': field, 'n_observations': len(data_series)},
-                calculation_time=(datetime.now() - start_time).total_seconds()
+                metadata={"field": field, "n_observations": len(data_series)},
+                calculation_time=(datetime.now() - start_time).total_seconds(),
             )
 
         except Exception as e:
-            self.calculation_stats['failed_calculations'] += 1
-            logger.error(
-                f"Seasonality detection failed for {symbol}: {
-                    str(e)}")
-            raise DataError(f"Seasonality detection failed: {str(e)}")
+            self.calculation_stats["failed_calculations"] += 1
+            logger.error(f"Seasonality detection failed for {symbol}: {e!s}")
+            raise DataError(f"Seasonality detection failed: {e!s}")
 
     @time_execution
     async def calculate_batch_features(
-        self,
-        symbol: str,
-        features: List[str]
-    ) -> Dict[str, StatisticalResult]:
+        self, symbol: str, features: list[str]
+    ) -> dict[str, StatisticalResult]:
         """
         Calculate multiple statistical features in batch.
 
@@ -760,56 +732,53 @@ class StatisticalFeatureCalculator:
 
             for feature in features:
                 try:
-                    if feature.upper() == 'ROLLING_STATS':
-                        results['ROLLING_STATS'] = await self.calculate_rolling_stats(symbol)
-                    elif feature.upper() == 'AUTOCORRELATION':
-                        results['AUTOCORRELATION'] = await self.calculate_autocorrelation(symbol)
-                    elif feature.upper() == 'REGIME':
-                        results['REGIME'] = await self.detect_regime(symbol)
-                    elif feature.upper() == 'SEASONALITY':
-                        results['SEASONALITY'] = await self.detect_seasonality(symbol)
+                    if feature.upper() == "ROLLING_STATS":
+                        results["ROLLING_STATS"] = await self.calculate_rolling_stats(symbol)
+                    elif feature.upper() == "AUTOCORRELATION":
+                        results["AUTOCORRELATION"] = await self.calculate_autocorrelation(symbol)
+                    elif feature.upper() == "REGIME":
+                        results["REGIME"] = await self.detect_regime(symbol)
+                    elif feature.upper() == "SEASONALITY":
+                        results["SEASONALITY"] = await self.detect_seasonality(symbol)
                     else:
                         logger.warning(
                             f"Unknown statistical feature: {feature}")
 
                 except Exception as e:
                     logger.error(
-                        f"Failed to calculate {feature} for {symbol}: {
-                            str(e)}")
+                        f"Failed to calculate {feature} for {symbol}: {e!s}")
                     results[feature] = None
 
             logger.info(
-                f"Calculated {len([r for r in results.values() if r is not None])} statistical features for {symbol}")
+                f"Calculated {len([r for r in results.values() if r is not None])} statistical features for {symbol}"
+            )
             return results
 
         except Exception as e:
             logger.error(
-                f"Batch statistical feature calculation failed for {symbol}: {
-                    str(e)}")
-            raise DataError(f"Batch calculation failed: {str(e)}")
+                f"Batch statistical feature calculation failed for {symbol}: {e!s}")
+            raise DataError(f"Batch calculation failed: {e!s}")
 
     @time_execution
-    async def get_calculation_summary(self) -> Dict[str, Any]:
+    async def get_calculation_summary(self) -> dict[str, Any]:
         """Get calculation statistics and summary."""
         try:
-            total = self.calculation_stats['total_calculations']
+            total = self.calculation_stats["total_calculations"]
             success_rate = (
-                (self.calculation_stats['successful_calculations'] / total * 100)
-                if total > 0 else 0
+                (self.calculation_stats["successful_calculations"] / total * 100)
+                if total > 0
+                else 0
             )
 
             return {
-                'statistics': self.calculation_stats.copy(),
-                'success_rate': f"{success_rate:.2f}%",
-                'symbols_tracked': len(self.price_data),
-                'regime_threshold': self.regime_threshold,
-                'correlation_threshold': self.correlation_threshold,
-                'timestamp': datetime.now(timezone.utc).isoformat()
+                "statistics": self.calculation_stats.copy(),
+                "success_rate": f"{success_rate:.2f}%",
+                "symbols_tracked": len(self.price_data),
+                "regime_threshold": self.regime_threshold,
+                "correlation_threshold": self.correlation_threshold,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         except Exception as e:
-            logger.error(f"Failed to generate calculation summary: {str(e)}")
-            return {
-                'error': str(e),
-                'timestamp': datetime.now(
-                    timezone.utc).isoformat()}
+            logger.error(f"Failed to generate calculation summary: {e!s}")
+            return {"error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}

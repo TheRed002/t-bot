@@ -16,26 +16,20 @@ Author: Trading Bot Framework
 Version: 2.0.0
 """
 
-from src.utils.formatters import format_currency
-from src.utils.validators import validate_quantity, validate_percentage
-from src.utils.decorators import time_execution, retry
-from src.error_handling.error_handler import ErrorHandler
-import asyncio
-from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
-import statistics
-import math
+from decimal import Decimal
+from typing import Any
+
+from src.core.config import Config
+from src.core.exceptions import ValidationError
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import (
-    FundFlow, CapitalAllocation, WithdrawalRule, CapitalProtection
-)
-from src.core.exceptions import (
-    RiskManagementError, ValidationError
-)
-from src.core.config import Config
-from src.core.logging import get_logger
+from src.core.types import CapitalProtection, FundFlow, WithdrawalRule
+from src.error_handling.error_handler import ErrorHandler
+from src.utils.decorators import time_execution
+from src.utils.formatters import format_currency
+from src.utils.validators import validate_quantity
 
 # MANDATORY: Use structured logging from src.core.logging for all capital
 # management operations
@@ -65,8 +59,8 @@ class FundFlowManager:
         self.capital_config = config.capital_management
 
         # Flow tracking
-        self.fund_flows: List[FundFlow] = []
-        self.withdrawal_rules: Dict[str, WithdrawalRule] = {}
+        self.fund_flows: list[FundFlow] = []
+        self.withdrawal_rules: dict[str, WithdrawalRule] = {}
         self.capital_protection = CapitalProtection(
             emergency_reserve_pct=self.capital_config.emergency_reserve_pct,
             max_daily_loss_pct=self.capital_config.max_daily_loss_pct,
@@ -75,11 +69,11 @@ class FundFlowManager:
             profit_lock_pct=self.capital_config.profit_lock_pct,
             auto_compound_enabled=self.capital_config.auto_compound_enabled,
             auto_compound_frequency=self.capital_config.auto_compound_frequency,
-            profit_threshold=Decimal(str(self.capital_config.profit_threshold))
+            profit_threshold=Decimal(str(self.capital_config.profit_threshold)),
         )
 
         # Performance tracking
-        self.strategy_performance: Dict[str, Dict[str, float]] = {}
+        self.strategy_performance: dict[str, dict[str, float]] = {}
         self.total_profit = Decimal("0")
         self.locked_profit = Decimal("0")
 
@@ -101,13 +95,13 @@ class FundFlowManager:
         logger.info(
             "Fund flow manager initialized",
             auto_compound_enabled=self.capital_config.auto_compound_enabled,
-            profit_threshold=format_currency(
-                float(
-                    self.capital_config.profit_threshold)))
+            profit_threshold=format_currency(float(self.capital_config.profit_threshold)),
+        )
 
     @time_execution
-    async def process_deposit(self, amount: Decimal, currency: str = "USDT",
-                              exchange: str = "binance") -> FundFlow:
+    async def process_deposit(
+        self, amount: Decimal, currency: str = "USDT", exchange: str = "binance"
+    ) -> FundFlow:
         """
         Process a deposit request.
 
@@ -126,7 +120,9 @@ class FundFlowManager:
             if amount < Decimal(str(self.capital_config.min_deposit_amount)):
                 raise ValidationError(
                     f"Deposit amount {amount} below minimum {
-                        self.capital_config.min_deposit_amount}")
+                        self.capital_config.min_deposit_amount
+                    }"
+                )
 
             # Create fund flow record
             flow = FundFlow(
@@ -137,7 +133,7 @@ class FundFlowManager:
                 amount=amount,
                 currency=currency,
                 reason="deposit",
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
 
             # Add to flow history
@@ -146,7 +142,7 @@ class FundFlowManager:
             logger.info(
                 "Deposit processed successfully",
                 amount=format_currency(float(amount), currency),
-                exchange=exchange
+                exchange=exchange,
             )
 
             return flow
@@ -156,17 +152,18 @@ class FundFlowManager:
                 "Deposit processing failed",
                 amount=format_currency(float(amount), currency),
                 exchange=exchange,
-                error=str(e)
+                error=str(e),
             )
             raise
 
     @time_execution
     async def process_withdrawal(
-            self,
-            amount: Decimal,
-            currency: str = "USDT",
-            exchange: str = "binance",
-            reason: str = "withdrawal") -> FundFlow:
+        self,
+        amount: Decimal,
+        currency: str = "USDT",
+        exchange: str = "binance",
+        reason: str = "withdrawal",
+    ) -> FundFlow:
         """
         Process a withdrawal request with rule validation.
 
@@ -187,25 +184,27 @@ class FundFlowManager:
             validate_quantity(float(amount), "withdrawal_amount")
 
             # Check minimum withdrawal amount
-            if amount < Decimal(
-                    str(self.capital_config.min_withdrawal_amount)):
+            if amount < Decimal(str(self.capital_config.min_withdrawal_amount)):
                 raise ValidationError(
                     f"Withdrawal amount {amount} below minimum {
-                        self.capital_config.min_withdrawal_amount}")
+                        self.capital_config.min_withdrawal_amount
+                    }"
+                )
 
             # Validate withdrawal rules
             await self._validate_withdrawal_rules(amount, currency)
 
             # Check maximum withdrawal percentage
             if self.total_capital > Decimal("0"):
-                max_withdrawal = self.total_capital * \
-                    Decimal(str(self.capital_config.max_withdrawal_pct))
+                max_withdrawal = self.total_capital * Decimal(
+                    str(self.capital_config.max_withdrawal_pct)
+                )
                 if amount > max_withdrawal:
                     raise ValidationError(
-                        f"Withdrawal amount {amount} exceeds maximum {max_withdrawal}")
+                        f"Withdrawal amount {amount} exceeds maximum {max_withdrawal}"
+                    )
             else:
-                logger.warning(
-                    "Total capital not set, skipping withdrawal percentage validation")
+                logger.warning("Total capital not set, skipping withdrawal percentage validation")
 
             # Check cooldown period
             await self._check_withdrawal_cooldown()
@@ -219,7 +218,7 @@ class FundFlowManager:
                 amount=amount,
                 currency=currency,
                 reason=reason,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
 
             # Add to flow history
@@ -229,7 +228,7 @@ class FundFlowManager:
                 "Withdrawal processed successfully",
                 amount=format_currency(float(amount), currency),
                 exchange=exchange,
-                reason=reason
+                reason=reason,
             )
 
             return flow
@@ -239,17 +238,14 @@ class FundFlowManager:
                 "Withdrawal processing failed",
                 amount=format_currency(float(amount), currency),
                 exchange=exchange,
-                error=str(e)
+                error=str(e),
             )
             raise
 
     @time_execution
     async def process_strategy_reallocation(
-            self,
-            from_strategy: str,
-            to_strategy: str,
-            amount: Decimal,
-            reason: str = "reallocation") -> FundFlow:
+        self, from_strategy: str, to_strategy: str, amount: Decimal, reason: str = "reallocation"
+    ) -> FundFlow:
         """
         Process capital reallocation between strategies.
 
@@ -268,8 +264,9 @@ class FundFlowManager:
 
             # Check maximum daily reallocation
             if self.total_capital > Decimal("0"):
-                max_daily_reallocation = self.total_capital * \
-                    Decimal(str(self.capital_config.max_daily_reallocation_pct))
+                max_daily_reallocation = self.total_capital * Decimal(
+                    str(self.capital_config.max_daily_reallocation_pct)
+                )
                 daily_reallocation = await self._get_daily_reallocation_amount()
 
                 if daily_reallocation + amount > max_daily_reallocation:
@@ -278,8 +275,7 @@ class FundFlowManager:
                         f"Requested: {amount}, Limit: {max_daily_reallocation}"
                     )
             else:
-                logger.warning(
-                    "Total capital not set, skipping reallocation limit validation")
+                logger.warning("Total capital not set, skipping reallocation limit validation")
 
             # Create fund flow record
             flow = FundFlow(
@@ -289,7 +285,7 @@ class FundFlowManager:
                 to_exchange=None,
                 amount=amount,
                 reason=reason,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
 
             # Add to flow history
@@ -300,7 +296,7 @@ class FundFlowManager:
                 from_strategy=from_strategy,
                 to_strategy=to_strategy,
                 amount=format_currency(float(amount)),
-                reason=reason
+                reason=reason,
             )
 
             return flow
@@ -311,12 +307,12 @@ class FundFlowManager:
                 from_strategy=from_strategy,
                 to_strategy=to_strategy,
                 amount=format_currency(float(amount)),
-                error=str(e)
+                error=str(e),
             )
             raise
 
     @time_execution
-    async def process_auto_compound(self) -> Optional[FundFlow]:
+    async def process_auto_compound(self) -> FundFlow | None:
         """
         Process auto-compounding of profits.
 
@@ -345,7 +341,7 @@ class FundFlowManager:
                 to_exchange=None,
                 amount=compound_amount,
                 reason="auto_compound",
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
 
             # Add to flow history
@@ -358,7 +354,7 @@ class FundFlowManager:
             logger.info(
                 "Auto-compound processed",
                 compound_amount=format_currency(float(compound_amount)),
-                total_locked_profit=format_currency(float(self.locked_profit))
+                total_locked_profit=format_currency(float(self.locked_profit)),
             )
 
             return flow
@@ -369,7 +365,8 @@ class FundFlowManager:
 
     @time_execution
     async def update_performance(
-            self, strategy_id: str, performance_metrics: Dict[str, float]) -> None:
+        self, strategy_id: str, performance_metrics: dict[str, float]
+    ) -> None:
         """
         Update performance metrics for a strategy.
 
@@ -381,25 +378,20 @@ class FundFlowManager:
             self.strategy_performance[strategy_id] = performance_metrics
 
             # Update total profit
-            if 'total_pnl' in performance_metrics:
-                self.total_profit = Decimal(
-                    str(performance_metrics['total_pnl']))
+            if "total_pnl" in performance_metrics:
+                self.total_profit = Decimal(str(performance_metrics["total_pnl"]))
 
             logger.debug(
                 "Performance updated",
                 strategy_id=strategy_id,
-                total_profit=format_currency(float(self.total_profit))
+                total_profit=format_currency(float(self.total_profit)),
             )
 
         except Exception as e:
-            logger.error(
-                "Performance update failed",
-                strategy_id=strategy_id,
-                error=str(e)
-            )
+            logger.error("Performance update failed", strategy_id=strategy_id, error=str(e))
 
     @time_execution
-    async def get_flow_history(self, days: int = 30) -> List[FundFlow]:
+    async def get_flow_history(self, days: int = 30) -> list[FundFlow]:
         """
         Get fund flow history for the specified period.
 
@@ -412,10 +404,7 @@ class FundFlowManager:
         try:
             cutoff_date = datetime.now() - timedelta(days=days)
 
-            recent_flows = [
-                flow for flow in self.fund_flows
-                if flow.timestamp >= cutoff_date
-            ]
+            recent_flows = [flow for flow in self.fund_flows if flow.timestamp >= cutoff_date]
 
             return recent_flows
 
@@ -424,7 +413,7 @@ class FundFlowManager:
             raise
 
     @time_execution
-    async def get_flow_summary(self, days: int = 30) -> Dict[str, Any]:
+    async def get_flow_summary(self, days: int = 30) -> dict[str, Any]:
         """
         Get summary of fund flows for the specified period.
 
@@ -438,48 +427,46 @@ class FundFlowManager:
             flows = await self.get_flow_history(days)
 
             # Calculate summaries
-            total_deposits = sum(
-                flow.amount for flow in flows if flow.reason == "deposit")
-            total_withdrawals = sum(
-                flow.amount for flow in flows if flow.reason == "withdrawal")
+            total_deposits = sum(flow.amount for flow in flows if flow.reason == "deposit")
+            total_withdrawals = sum(flow.amount for flow in flows if flow.reason == "withdrawal")
             total_reallocations = sum(
-                flow.amount for flow in flows if flow.reason == "reallocation")
-            total_compounds = sum(
-                flow.amount for flow in flows if flow.reason == "auto_compound")
+                flow.amount for flow in flows if flow.reason == "reallocation"
+            )
+            total_compounds = sum(flow.amount for flow in flows if flow.reason == "auto_compound")
 
             # Group by currency
             currency_flows = {}
             for flow in flows:
-                currency = getattr(flow, 'currency', 'USDT')
+                currency = getattr(flow, "currency", "USDT")
                 if currency not in currency_flows:
                     currency_flows[currency] = {
-                        'deposits': Decimal("0"),
-                        'withdrawals': Decimal("0"),
-                        'reallocations': Decimal("0"),
-                        'compounds': Decimal("0")
+                        "deposits": Decimal("0"),
+                        "withdrawals": Decimal("0"),
+                        "reallocations": Decimal("0"),
+                        "compounds": Decimal("0"),
                     }
 
                 if flow.reason == "deposit":
-                    currency_flows[currency]['deposits'] += flow.amount
+                    currency_flows[currency]["deposits"] += flow.amount
                 elif flow.reason == "withdrawal":
-                    currency_flows[currency]['withdrawals'] += flow.amount
+                    currency_flows[currency]["withdrawals"] += flow.amount
                 elif flow.reason == "reallocation":
-                    currency_flows[currency]['reallocations'] += flow.amount
+                    currency_flows[currency]["reallocations"] += flow.amount
                 elif flow.reason == "auto_compound":
-                    currency_flows[currency]['compounds'] += flow.amount
+                    currency_flows[currency]["compounds"] += flow.amount
 
             summary = {
-                'period_days': days,
-                'total_flows': len(flows),
-                'total_deposits': float(total_deposits),
-                'total_withdrawals': float(total_withdrawals),
-                'total_reallocations': float(total_reallocations),
-                'total_compounds': float(total_compounds),
-                'net_flow': float(total_deposits - total_withdrawals),
-                'currency_flows': {
+                "period_days": days,
+                "total_flows": len(flows),
+                "total_deposits": float(total_deposits),
+                "total_withdrawals": float(total_withdrawals),
+                "total_reallocations": float(total_reallocations),
+                "total_compounds": float(total_compounds),
+                "net_flow": float(total_deposits - total_withdrawals),
+                "currency_flows": {
                     curr: {k: float(v) for k, v in flows.items()}
                     for curr, flows in currency_flows.items()
-                }
+                },
             }
 
             return summary
@@ -493,17 +480,18 @@ class FundFlowManager:
         for rule_name, rule_config in self.capital_config.withdrawal_rules.items():
             rule = WithdrawalRule(
                 name=rule_name,
-                description=rule_config.get('description', ''),
-                enabled=rule_config.get('enabled', True),
-                threshold=rule_config.get('threshold'),
-                min_amount=Decimal(str(rule_config.get('min_amount', 0))) if rule_config.get('min_amount') else None,
-                max_percentage=rule_config.get('max_percentage'),
-                cooldown_hours=rule_config.get('cooldown_hours')
+                description=rule_config.get("description", ""),
+                enabled=rule_config.get("enabled", True),
+                threshold=rule_config.get("threshold"),
+                min_amount=Decimal(str(rule_config.get("min_amount", 0)))
+                if rule_config.get("min_amount")
+                else None,
+                max_percentage=rule_config.get("max_percentage"),
+                cooldown_hours=rule_config.get("cooldown_hours"),
             )
             self.withdrawal_rules[rule_name] = rule
 
-    async def _validate_withdrawal_rules(
-            self, amount: Decimal, currency: str) -> None:
+    async def _validate_withdrawal_rules(self, amount: Decimal, currency: str) -> None:
         """
         Validate withdrawal against all enabled rules.
 
@@ -521,8 +509,7 @@ class FundFlowManager:
 
                 if rule_name == "profit_only":
                     if self.total_profit <= Decimal("0"):
-                        raise ValidationError(
-                            "Withdrawal not allowed: No profits available")
+                        raise ValidationError("Withdrawal not allowed: No profits available")
 
                 elif rule_name == "maintain_minimum":
                     # Check if withdrawal would violate minimum capital
@@ -542,18 +529,19 @@ class FundFlowManager:
                         if not performance_ok:
                             raise ValidationError(
                                 f"Withdrawal not allowed: Performance below threshold {
-                                    rule.threshold}")
+                                    rule.threshold
+                                }"
+                            )
 
                 # Check minimum amount rule
                 if rule.min_amount and amount < rule.min_amount:
                     raise ValidationError(
-                        f"Withdrawal amount {amount} below minimum {
-                            rule.min_amount}")
+                        f"Withdrawal amount {amount} below minimum {rule.min_amount}"
+                    )
 
                 # Check maximum percentage rule
                 if rule.max_percentage and self.total_capital > Decimal("0"):
-                    max_amount = self.total_capital * \
-                        Decimal(str(rule.max_percentage))
+                    max_amount = self.total_capital * Decimal(str(rule.max_percentage))
                     if amount > max_amount:
                         raise ValidationError(
                             f"Withdrawal amount {amount} exceeds maximum {max_amount} "
@@ -573,14 +561,10 @@ class FundFlowManager:
         """
         try:
             # Find the most recent withdrawal
-            recent_withdrawals = [
-                flow for flow in self.fund_flows
-                if flow.reason == "withdrawal"
-            ]
+            recent_withdrawals = [flow for flow in self.fund_flows if flow.reason == "withdrawal"]
 
             if recent_withdrawals:
-                last_withdrawal = max(
-                    recent_withdrawals, key=lambda f: f.timestamp)
+                last_withdrawal = max(recent_withdrawals, key=lambda f: f.timestamp)
                 cooldown_hours = self.capital_config.fund_flow_cooldown_minutes / 60
 
                 if datetime.now() - last_withdrawal.timestamp < timedelta(hours=cooldown_hours):
@@ -601,7 +585,8 @@ class FundFlowManager:
             for strategy_type, min_amount in self.capital_config.per_strategy_minimum.items():
                 # Check if this strategy type is active
                 active_strategies = [
-                    strategy_id for strategy_id in self.strategy_performance.keys()
+                    strategy_id
+                    for strategy_id in self.strategy_performance.keys()
                     if strategy_type in strategy_id.lower()
                 ]
 
@@ -611,9 +596,7 @@ class FundFlowManager:
             return total_minimum
 
         except Exception as e:
-            logger.error(
-                "Failed to calculate minimum capital required",
-                error=str(e))
+            logger.error("Failed to calculate minimum capital required", error=str(e))
             return Decimal("1000")  # Default minimum
 
     async def _check_performance_threshold(self, threshold: float) -> bool:
@@ -635,11 +618,10 @@ class FundFlowManager:
             strategy_count = 0
 
             for strategy_id, metrics in self.strategy_performance.items():
-                if 'total_pnl' in metrics and 'initial_capital' in metrics:
-                    initial_capital = Decimal(str(metrics['initial_capital']))
+                if "total_pnl" in metrics and "initial_capital" in metrics:
+                    initial_capital = Decimal(str(metrics["initial_capital"]))
                     if initial_capital > 0:
-                        return_rate = Decimal(
-                            str(metrics['total_pnl'])) / initial_capital
+                        return_rate = Decimal(str(metrics["total_pnl"])) / initial_capital
                         total_return += return_rate
                         strategy_count += 1
 
@@ -658,16 +640,15 @@ class FundFlowManager:
         try:
             today = datetime.now().date()
             today_flows = [
-                flow for flow in self.fund_flows
+                flow
+                for flow in self.fund_flows
                 if flow.reason == "reallocation" and flow.timestamp.date() == today
             ]
 
             return sum(flow.amount for flow in today_flows)
 
         except Exception as e:
-            logger.error(
-                "Failed to get daily reallocation amount",
-                error=str(e))
+            logger.error("Failed to get daily reallocation amount", error=str(e))
             return Decimal("0")
 
     def _should_compound(self) -> bool:
@@ -678,14 +659,10 @@ class FundFlowManager:
 
             # Check frequency
             if self.capital_config.auto_compound_frequency == "weekly":
-                days_since_last = (
-                    datetime.now() -
-                    self.last_compound_date).days
+                days_since_last = (datetime.now() - self.last_compound_date).days
                 return days_since_last >= 7
             elif self.capital_config.auto_compound_frequency == "monthly":
-                days_since_last = (
-                    datetime.now() -
-                    self.last_compound_date).days
+                days_since_last = (datetime.now() - self.last_compound_date).days
                 return days_since_last >= 30
             else:
                 return False
@@ -704,8 +681,7 @@ class FundFlowManager:
             compound_amount = self.total_profit - self.capital_config.profit_threshold
 
             # Apply profit lock percentage
-            locked_amount = compound_amount * \
-                Decimal(str(self.capital_config.profit_lock_pct))
+            locked_amount = compound_amount * Decimal(str(self.capital_config.profit_lock_pct))
 
             return locked_amount
 
@@ -713,14 +689,17 @@ class FundFlowManager:
             logger.error("Failed to calculate compound amount", error=str(e))
             return Decimal("0")
 
-    def _calculate_compound_schedule(self) -> Dict[str, Any]:
+    def _calculate_compound_schedule(self) -> dict[str, Any]:
         """Calculate compound schedule based on frequency."""
         try:
             schedule = {
-                'frequency': self.capital_config.auto_compound_frequency,
-                'next_compound': self.last_compound_date + timedelta(
-                    days=7 if self.capital_config.auto_compound_frequency == "weekly" else 30),
-                'enabled': self.capital_config.auto_compound_enabled}
+                "frequency": self.capital_config.auto_compound_frequency,
+                "next_compound": self.last_compound_date
+                + timedelta(
+                    days=7 if self.capital_config.auto_compound_frequency == "weekly" else 30
+                ),
+                "enabled": self.capital_config.auto_compound_enabled,
+            }
 
             return schedule
 
@@ -738,8 +717,7 @@ class FundFlowManager:
         try:
             self.total_capital = total_capital
             logger.info(
-                "Total capital updated",
-                total_capital=format_currency(float(total_capital))
+                "Total capital updated", total_capital=format_currency(float(total_capital))
             )
         except Exception as e:
             logger.error("Failed to update total capital", error=str(e))
@@ -749,32 +727,30 @@ class FundFlowManager:
         """Get current total capital."""
         return self.total_capital
 
-    async def get_capital_protection_status(self) -> Dict[str, Any]:
+    async def get_capital_protection_status(self) -> dict[str, Any]:
         """Get current capital protection status."""
         try:
             status = {
-                'emergency_reserve_pct': self.capital_protection.emergency_reserve_pct,
-                'max_daily_loss_pct': self.capital_protection.max_daily_loss_pct,
-                'max_weekly_loss_pct': self.capital_protection.max_weekly_loss_pct,
-                'max_monthly_loss_pct': self.capital_protection.max_monthly_loss_pct,
-                'profit_lock_pct': self.capital_protection.profit_lock_pct,
-                'total_profit': float(self.total_profit),
-                'locked_profit': float(self.locked_profit),
-                'auto_compound_enabled': self.capital_protection.auto_compound_enabled,
-                'next_compound_date': self.compound_schedule.get('next_compound', datetime.now()),
+                "emergency_reserve_pct": self.capital_protection.emergency_reserve_pct,
+                "max_daily_loss_pct": self.capital_protection.max_daily_loss_pct,
+                "max_weekly_loss_pct": self.capital_protection.max_weekly_loss_pct,
+                "max_monthly_loss_pct": self.capital_protection.max_monthly_loss_pct,
+                "profit_lock_pct": self.capital_protection.profit_lock_pct,
+                "total_profit": float(self.total_profit),
+                "locked_profit": float(self.locked_profit),
+                "auto_compound_enabled": self.capital_protection.auto_compound_enabled,
+                "next_compound_date": self.compound_schedule.get("next_compound", datetime.now()),
                 # Protection is active if there's profit
-                'protection_active': self.total_profit > 0 or self.locked_profit > 0
+                "protection_active": self.total_profit > 0 or self.locked_profit > 0,
             }
 
             return status
 
         except Exception as e:
-            logger.error(
-                "Failed to get capital protection status",
-                error=str(e))
+            logger.error("Failed to get capital protection status", error=str(e))
             raise
 
-    async def get_performance_summary(self) -> Dict[str, Any]:
+    async def get_performance_summary(self) -> dict[str, Any]:
         """Get performance summary for all strategies."""
         try:
             total_pnl = 0.0
@@ -782,33 +758,36 @@ class FundFlowManager:
             # Calculate total PnL from strategy performance
             for strategy_id, metrics in self.strategy_performance.items():
                 if isinstance(metrics, dict):
-                    total_pnl += metrics.get('pnl', 0.0)
+                    total_pnl += metrics.get("pnl", 0.0)
                 else:
                     # Handle case where metrics might be a single value
-                    total_pnl += float(metrics) if isinstance(metrics,
-                                                              (int, float, Decimal)) else 0.0
+                    total_pnl += (
+                        float(metrics) if isinstance(metrics, (int, float, Decimal)) else 0.0
+                    )
 
             summary = {
-                'total_pnl': total_pnl,
-                'total_profit': float(self.total_profit),
-                'locked_profit': float(self.locked_profit),
-                'strategy_count': len(self.strategy_performance),
-                'strategies': {}
+                "total_pnl": total_pnl,
+                "total_profit": float(self.total_profit),
+                "locked_profit": float(self.locked_profit),
+                "strategy_count": len(self.strategy_performance),
+                "strategies": {},
             }
 
             for strategy_id, metrics in self.strategy_performance.items():
                 if isinstance(metrics, dict):
-                    summary['strategies'][strategy_id] = {
-                        'pnl': metrics.get(
-                            'pnl', 0.0), 'performance_score': metrics.get(
-                            'performance_score', 0.0), 'last_updated': metrics.get(
-                            'last_updated', datetime.now())}
+                    summary["strategies"][strategy_id] = {
+                        "pnl": metrics.get("pnl", 0.0),
+                        "performance_score": metrics.get("performance_score", 0.0),
+                        "last_updated": metrics.get("last_updated", datetime.now()),
+                    }
                 else:
                     # Handle case where metrics might be a single value
-                    summary['strategies'][strategy_id] = {
-                        'pnl': float(metrics) if isinstance(metrics, (int, float, Decimal)) else 0.0,
-                        'performance_score': 0.0,
-                        'last_updated': datetime.now()
+                    summary["strategies"][strategy_id] = {
+                        "pnl": float(metrics)
+                        if isinstance(metrics, (int, float, Decimal))
+                        else 0.0,
+                        "performance_score": 0.0,
+                        "last_updated": datetime.now(),
                     }
 
             return summary

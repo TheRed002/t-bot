@@ -18,17 +18,18 @@ Dependencies:
 - P-002A: Error handling framework
 """
 
-import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
-from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, timezone
-import pytz
 import asyncio
-import json
-import yaml
-from pathlib import Path
-import re
 import hashlib
+import json
+import re
+from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pytz
+import yaml
 
 # Import from P-001 core components
 from src.core.exceptions import ValidationError
@@ -40,6 +41,7 @@ logger = get_logger(__name__)
 # =============================================================================
 # Mathematical Utilities
 # =============================================================================
+
 
 def calculate_percentage_change(old_value: float, new_value: float) -> float:
     """
@@ -56,16 +58,14 @@ def calculate_percentage_change(old_value: float, new_value: float) -> float:
         ValidationError: If old_value is zero (division by zero)
     """
     if old_value == 0:
-        raise ValidationError(
-            "Cannot calculate percentage change with zero old value")
+        raise ValidationError("Cannot calculate percentage change with zero old value")
 
     percentage_change = (new_value - old_value) / old_value
     return float(percentage_change)
 
 
 def calculate_sharpe_ratio(
-    returns: List[float], risk_free_rate: float = 0.02,
-    frequency: str = "daily"
+    returns: list[float], risk_free_rate: float = 0.02, frequency: str = "daily"
 ) -> float:
     """
     Calculate the Sharpe ratio for a series of returns.
@@ -85,15 +85,10 @@ def calculate_sharpe_ratio(
         raise ValidationError("Returns list cannot be empty")
 
     if len(returns) < 2:
-        raise ValidationError(
-            "Need at least 2 returns to calculate Sharpe ratio")
+        raise ValidationError("Need at least 2 returns to calculate Sharpe ratio")
 
     # Validate frequency
-    valid_frequencies = {
-        "daily": 252,
-        "weekly": 52,
-        "monthly": 12,
-        "yearly": 1}
+    valid_frequencies = {"daily": 252, "weekly": 52, "monthly": 12, "yearly": 1}
     if frequency not in valid_frequencies:
         raise ValidationError(
             f"Invalid frequency: {frequency}. Must be one of {list(valid_frequencies.keys())}"
@@ -121,8 +116,7 @@ def calculate_sharpe_ratio(
     return float(sharpe_ratio)
 
 
-def calculate_max_drawdown(
-        equity_curve: List[float]) -> Tuple[float, int, int]:
+def calculate_max_drawdown(equity_curve: list[float]) -> tuple[float, int, int]:
     """
     Calculate the maximum drawdown from an equity curve.
 
@@ -155,14 +149,12 @@ def calculate_max_drawdown(
     max_drawdown = drawdown[max_drawdown_idx]
 
     # Find the peak before the maximum drawdown
-    peak_idx = np.argmax(equity[:max_drawdown_idx + 1])
+    peak_idx = np.argmax(equity[: max_drawdown_idx + 1])
 
     return float(max_drawdown), int(peak_idx), int(max_drawdown_idx)
 
 
-def calculate_var(
-        returns: List[float],
-        confidence_level: float = 0.95) -> float:
+def calculate_var(returns: list[float], confidence_level: float = 0.95) -> float:
     """
     Calculate Value at Risk (VaR) for a series of returns.
 
@@ -193,9 +185,7 @@ def calculate_var(
     return float(var)
 
 
-def calculate_volatility(
-        returns: List[float],
-        window: Optional[int] = None) -> float:
+def calculate_volatility(returns: list[float], window: int | None = None) -> float:
     """
     Calculate volatility (standard deviation) of returns.
 
@@ -233,7 +223,7 @@ def calculate_volatility(
     return float(volatility)
 
 
-def calculate_correlation(series1: List[float], series2: List[float]) -> float:
+def calculate_correlation(series1: list[float], series2: list[float]) -> float:
     """
     Calculate correlation coefficient between two series.
 
@@ -254,8 +244,7 @@ def calculate_correlation(series1: List[float], series2: List[float]) -> float:
         raise ValidationError("Series must have the same length")
 
     if len(series1) < 2:
-        raise ValidationError(
-            "Need at least 2 points to calculate correlation")
+        raise ValidationError("Need at least 2 points to calculate correlation")
 
     # Convert to numpy arrays
     arr1 = np.array(series1)
@@ -264,8 +253,7 @@ def calculate_correlation(series1: List[float], series2: List[float]) -> float:
     # Remove any NaN values from both arrays
     mask = ~(np.isnan(arr1) | np.isnan(arr2))
     if np.sum(mask) < 2:
-        raise ValidationError(
-            "Not enough valid data points after removing NaN values")
+        raise ValidationError("Not enough valid data points after removing NaN values")
 
     arr1_clean = arr1[mask]
     arr2_clean = arr2[mask]
@@ -283,6 +271,7 @@ def calculate_correlation(series1: List[float], series2: List[float]) -> float:
 # =============================================================================
 # Date/Time Utilities
 # =============================================================================
+
 
 def get_trading_session(dt: datetime, exchange: str = "binance") -> str:
     """
@@ -380,10 +369,10 @@ def convert_timezone(dt: datetime, target_tz: str) -> datetime:
     except pytz.exceptions.UnknownTimeZoneError:
         raise ValidationError(f"Invalid timezone: {target_tz}")
     except Exception as e:
-        raise ValidationError(f"Error converting timezone: {str(e)}")
+        raise ValidationError(f"Error converting timezone: {e!s}")
 
 
-def parse_datetime(dt_str: str, format_str: Optional[str] = None) -> datetime:
+def parse_datetime(dt_str: str, format_str: str | None = None) -> datetime:
     """
     Parse datetime string to datetime object.
 
@@ -402,7 +391,7 @@ def parse_datetime(dt_str: str, format_str: Optional[str] = None) -> datetime:
             return datetime.strptime(dt_str, format_str)
         except ValueError as e:
             raise ValidationError(
-                f"Cannot parse datetime '{dt_str}' with format '{format_str}': {str(e)}"
+                f"Cannot parse datetime '{dt_str}' with format '{format_str}': {e!s}"
             )
 
     # Try common formats
@@ -411,7 +400,7 @@ def parse_datetime(dt_str: str, format_str: Optional[str] = None) -> datetime:
         "%Y-%m-%dT%H:%M:%S",
         "%Y-%m-%dT%H:%M:%SZ",
         "%Y-%m-%d",
-        "%H:%M:%S"
+        "%H:%M:%S",
     ]
 
     for fmt in common_formats:
@@ -420,17 +409,16 @@ def parse_datetime(dt_str: str, format_str: Optional[str] = None) -> datetime:
         except ValueError:
             continue
 
-    raise ValidationError(
-        f"Cannot parse datetime string '{dt_str}' with any known format")
+    raise ValidationError(f"Cannot parse datetime string '{dt_str}' with any known format")
 
 
 # =============================================================================
 # Data Conversion Utilities
 # =============================================================================
 
+
 def convert_currency(
-    amount: float, from_currency: str, to_currency: str,
-    exchange_rate: float
+    amount: float, from_currency: str, to_currency: str, exchange_rate: float
 ) -> float:
     """
     Convert amount from one currency to another.
@@ -481,8 +469,7 @@ def normalize_price(price: float, symbol: str) -> Decimal:
         ValidationError: If price is invalid
     """
     if price <= 0:
-        raise ValidationError(
-            f"Price must be positive for {symbol}, got {price}")
+        raise ValidationError(f"Price must be positive for {symbol}, got {price}")
 
     # Determine precision based on symbol
     if "BTC" in symbol.upper():
@@ -497,8 +484,7 @@ def normalize_price(price: float, symbol: str) -> Decimal:
     # Convert to Decimal and round
     decimal_price = Decimal(str(price))
     normalized_price = decimal_price.quantize(
-        Decimal(f"0.{'0' * (precision - 1)}1"),
-        rounding=ROUND_HALF_UP
+        Decimal(f"0.{'0' * (precision - 1)}1"), rounding=ROUND_HALF_UP
     )
 
     return normalized_price
@@ -518,7 +504,7 @@ def round_to_precision(value: float, precision: int) -> float:
     if precision < 0:
         raise ValidationError("Precision must be non-negative")
 
-    factor = 10 ** precision
+    factor = 10**precision
     return round(value * factor) / factor
 
 
@@ -537,14 +523,14 @@ def round_to_precision_decimal(value: Decimal, precision: int) -> Decimal:
         raise ValidationError("Precision must be non-negative")
 
     # Use Decimal's quantize method for precise rounding
-    factor = Decimal(
-        f"0.{'0' * (precision - 1)}1") if precision > 0 else Decimal("1")
+    factor = Decimal(f"0.{'0' * (precision - 1)}1") if precision > 0 else Decimal("1")
     return value.quantize(factor, rounding=ROUND_HALF_UP)
 
 
 # =============================================================================
 # File Operations
 # =============================================================================
+
 
 def safe_read_file(file_path: str, encoding: str = "utf-8") -> str:
     """
@@ -568,21 +554,18 @@ def safe_read_file(file_path: str, encoding: str = "utf-8") -> str:
         if not path.is_file():
             raise ValidationError(f"Path is not a file: {file_path}")
 
-        with open(path, 'r', encoding=encoding) as f:
+        with open(path, encoding=encoding) as f:
             content = f.read()
 
         logger.debug(f"Successfully read file: {file_path}")
         return content
 
     except Exception as e:
-        logger.error(f"Failed to read file {file_path}: {str(e)}")
-        raise ValidationError(f"Cannot read file '{file_path}': {str(e)}")
+        logger.error(f"Failed to read file {file_path}: {e!s}")
+        raise ValidationError(f"Cannot read file '{file_path}': {e!s}")
 
 
-def safe_write_file(
-        file_path: str,
-        content: str,
-        encoding: str = "utf-8") -> None:
+def safe_write_file(file_path: str, content: str, encoding: str = "utf-8") -> None:
     """
     Safely write content to a file with error handling.
 
@@ -601,9 +584,9 @@ def safe_write_file(
         path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write content atomically using temporary file
-        temp_path = path.with_suffix(path.suffix + '.tmp')
+        temp_path = path.with_suffix(path.suffix + ".tmp")
 
-        with open(temp_path, 'w', encoding=encoding) as f:
+        with open(temp_path, "w", encoding=encoding) as f:
             f.write(content)
 
         # Atomic move
@@ -612,11 +595,11 @@ def safe_write_file(
         logger.debug(f"Successfully wrote file: {file_path}")
 
     except Exception as e:
-        logger.error(f"Failed to write file {file_path}: {str(e)}")
-        raise ValidationError(f"Cannot write file '{file_path}': {str(e)}")
+        logger.error(f"Failed to write file {file_path}: {e!s}")
+        raise ValidationError(f"Cannot write file '{file_path}': {e!s}")
 
 
-def load_config_file(file_path: str) -> Dict[str, Any]:
+def load_config_file(file_path: str) -> dict[str, Any]:
     """
     Load configuration from YAML or JSON file.
 
@@ -633,9 +616,9 @@ def load_config_file(file_path: str) -> Dict[str, Any]:
         content = safe_read_file(file_path)
         path = Path(file_path)
 
-        if path.suffix.lower() in ['.yaml', '.yml']:
+        if path.suffix.lower() in [".yaml", ".yml"]:
             config = yaml.safe_load(content)
-        elif path.suffix.lower() == '.json':
+        elif path.suffix.lower() == ".json":
             config = json.loads(content)
         else:
             raise ValidationError(f"Unsupported file format: {path.suffix}")
@@ -647,15 +630,14 @@ def load_config_file(file_path: str) -> Dict[str, Any]:
         return config
 
     except Exception as e:
-        logger.error(f"Failed to load config file {file_path}: {str(e)}")
-        raise ValidationError(
-            f"Cannot load config file '{file_path}': {str(e)}"
-        )
+        logger.error(f"Failed to load config file {file_path}: {e!s}")
+        raise ValidationError(f"Cannot load config file '{file_path}': {e!s}")
 
 
 # =============================================================================
 # Network Utilities
 # =============================================================================
+
 
 async def test_connection(host: str, port: int, timeout: float = 5.0) -> bool:
     """
@@ -671,14 +653,13 @@ async def test_connection(host: str, port: int, timeout: float = 5.0) -> bool:
     """
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=timeout
+            asyncio.open_connection(host, port), timeout=timeout
         )
         writer.close()
         await writer.wait_closed()
         return True
     except Exception as e:
-        logger.debug(f"Connection test failed for {host}:{port}: {str(e)}")
+        logger.debug(f"Connection test failed for {host}:{port}: {e!s}")
         return False
 
 
@@ -701,8 +682,7 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
         start_time = asyncio.get_event_loop().time()
 
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port),
-            timeout=timeout
+            asyncio.open_connection(host, port), timeout=timeout
         )
 
         end_time = asyncio.get_event_loop().time()
@@ -714,13 +694,11 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
         return latency_ms
 
     except Exception as e:
-        logger.error(f"Failed to measure latency for {host}:{port}: {str(e)}")
-        raise ValidationError(
-            f"Cannot measure latency to {host}:{port}: {str(e)}"
-        )
+        logger.error(f"Failed to measure latency for {host}:{port}: {e!s}")
+        raise ValidationError(f"Cannot measure latency to {host}:{port}: {e!s}")
 
 
-async def ping_host(host: str, count: int = 3) -> Dict[str, Any]:
+async def ping_host(host: str, count: int = 3) -> dict[str, Any]:
     """
     Ping a host and return statistics.
 
@@ -740,16 +718,10 @@ async def ping_host(host: str, count: int = 3) -> Dict[str, Any]:
                 latencies.append(latency)
                 await asyncio.sleep(0.1)  # Small delay between pings
             except Exception as e:
-                logger.warning(
-                    f"Ping attempt {i + 1} failed for {host}: {str(e)}"
-                )
+                logger.warning(f"Ping attempt {i + 1} failed for {host}: {e!s}")
 
         if not latencies:
-            return {
-                "host": host,
-                "success": False,
-                "error": "All ping attempts failed"
-            }
+            return {"host": host, "success": False, "error": "All ping attempts failed"}
 
         return {
             "host": host,
@@ -758,21 +730,18 @@ async def ping_host(host: str, count: int = 3) -> Dict[str, Any]:
             "min_latency_ms": min(latencies),
             "max_latency_ms": max(latencies),
             "avg_latency_ms": sum(latencies) / len(latencies),
-            "packet_loss_pct": ((count - len(latencies)) / count) * 100
+            "packet_loss_pct": ((count - len(latencies)) / count) * 100,
         }
 
     except Exception as e:
-        logger.error(f"Ping failed for {host}: {str(e)}")
-        return {
-            "host": host,
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"Ping failed for {host}: {e!s}")
+        return {"host": host, "success": False, "error": str(e)}
 
 
 # =============================================================================
 # String Utilities
 # =============================================================================
+
 
 def sanitize_symbol(symbol: str) -> str:
     """
@@ -794,7 +763,7 @@ def sanitize_symbol(symbol: str) -> str:
     sanitized = symbol.strip().upper()
 
     # Remove invalid characters (keep only alphanumeric and common separators)
-    sanitized = re.sub(r'[^A-Z0-9/_-]', '', sanitized)
+    sanitized = re.sub(r"[^A-Z0-9/_-]", "", sanitized)
 
     if not sanitized:
         raise ValidationError("Symbol contains no valid characters")
@@ -802,7 +771,7 @@ def sanitize_symbol(symbol: str) -> str:
     return sanitized
 
 
-def parse_trading_pair(pair: str) -> Tuple[str, str]:
+def parse_trading_pair(pair: str) -> tuple[str, str]:
     """
     Parse trading pair string into base and quote currencies.
 
@@ -819,22 +788,14 @@ def parse_trading_pair(pair: str) -> Tuple[str, str]:
         raise ValidationError("Trading pair cannot be empty")
 
     # Remove common separators and convert to uppercase
-    pair = pair.upper().replace('/', '').replace('-', '').replace('_', '')
+    pair = pair.upper().replace("/", "").replace("-", "").replace("_", "")
 
     # Common quote currencies
-    quote_currencies = [
-        'USDT',
-        'USDC',
-        'USD',
-        'BTC',
-        'ETH',
-        'BNB',
-        'ADA',
-        'DOT']
+    quote_currencies = ["USDT", "USDC", "USD", "BTC", "ETH", "BNB", "ADA", "DOT"]
 
     for quote in quote_currencies:
         if pair.endswith(quote):
-            base = pair[:-len(quote)]
+            base = pair[: -len(quote)]
             if base:
                 return base, quote
 
@@ -849,9 +810,7 @@ def parse_trading_pair(pair: str) -> Tuple[str, str]:
     raise ValidationError(f"Cannot parse trading pair: {pair}")
 
 
-def format_timestamp(
-        dt: datetime,
-        format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
+def format_timestamp(dt: datetime, format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
     """
     Format datetime as timestamp string.
 
@@ -878,7 +837,7 @@ def generate_hash(data: str) -> str:
     Returns:
         Hexadecimal hash string
     """
-    return hashlib.sha256(data.encode('utf-8')).hexdigest()
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
 def validate_email(email: str) -> bool:
@@ -891,11 +850,11 @@ def validate_email(email: str) -> bool:
     Returns:
         True if valid, False otherwise
     """
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email))
 
 
-def extract_numbers(text: str) -> List[float]:
+def extract_numbers(text: str) -> list[float]:
     """
     Extract all numbers from a text string.
 
@@ -905,7 +864,7 @@ def extract_numbers(text: str) -> List[float]:
     Returns:
         List of extracted numbers
     """
-    pattern = r'-?\d*\.?\d+'
+    pattern = r"-?\d*\.?\d+"
     matches = re.findall(pattern, text)
     return [float(match) for match in matches]
 
@@ -914,9 +873,9 @@ def extract_numbers(text: str) -> List[float]:
 # Technical Analysis Utilities
 # =============================================================================
 
+
 def calculate_atr(
-    highs: List[float], lows: List[float], closes: List[float],
-    period: int = 14
+    highs: list[float], lows: list[float], closes: list[float], period: int = 14
 ) -> float:
     """
     Calculate Average True Range (ATR) using ta-lib.
@@ -951,18 +910,13 @@ def calculate_atr(
         return None
 
     except ImportError:
-        logger.warning(
-            "ta-lib not available, falling back to manual ATR calculation")
+        logger.warning("ta-lib not available, falling back to manual ATR calculation")
         # Fallback to manual calculation
-        if len(highs) < period + 1 or len(lows) < period + \
-                1 or len(closes) < period + 1:
-            raise ValidationError(
-                f"Need at least {period + 1} data points for ATR calculation"
-            )
+        if len(highs) < period + 1 or len(lows) < period + 1 or len(closes) < period + 1:
+            raise ValidationError(f"Need at least {period + 1} data points for ATR calculation")
 
         if len(highs) != len(lows) or len(highs) != len(closes):
-            raise ValidationError(
-                "High, low, and close arrays must have the same length")
+            raise ValidationError("High, low, and close arrays must have the same length")
 
         # Calculate True Range
         true_ranges = []
@@ -976,8 +930,7 @@ def calculate_atr(
 
         # Calculate ATR using simple moving average
         if len(true_ranges) < period:
-            raise ValidationError(
-                f"Not enough true range data for {period}-period ATR")
+            raise ValidationError(f"Not enough true range data for {period}-period ATR")
 
         # Use the last 'period' true ranges
         recent_true_ranges = true_ranges[-period:]
@@ -989,7 +942,7 @@ def calculate_atr(
         return None
 
 
-def calculate_zscore(values: List[float], lookback_period: int = 20) -> float:
+def calculate_zscore(values: list[float], lookback_period: int = 20) -> float:
     """
     Calculate Z-score for mean reversion analysis using ta-lib.
 
@@ -1029,12 +982,10 @@ def calculate_zscore(values: List[float], lookback_period: int = 20) -> float:
         return None
 
     except ImportError:
-        logger.warning(
-            "ta-lib not available, falling back to manual Z-score calculation")
+        logger.warning("ta-lib not available, falling back to manual Z-score calculation")
         # Fallback to manual calculation
         if len(values) < lookback_period:
-            raise ValidationError(
-                f"Need at least {lookback_period} values for Z-score calculation")
+            raise ValidationError(f"Need at least {lookback_period} values for Z-score calculation")
 
         if lookback_period <= 0:
             raise ValidationError("Lookback period must be positive")
@@ -1046,9 +997,8 @@ def calculate_zscore(values: List[float], lookback_period: int = 20) -> float:
         mean = sum(recent_values) / len(recent_values)
 
         # Calculate variance
-        variance = sum((x - mean) ** 2 for x in recent_values) / \
-            len(recent_values)
-        std_dev = variance ** 0.5
+        variance = sum((x - mean) ** 2 for x in recent_values) / len(recent_values)
+        std_dev = variance**0.5
 
         # Avoid division by zero
         if std_dev == 0:
@@ -1065,7 +1015,7 @@ def calculate_zscore(values: List[float], lookback_period: int = 20) -> float:
         return None
 
 
-def calculate_rsi(prices: List[float], period: int = 14) -> float:
+def calculate_rsi(prices: list[float], period: int = 14) -> float:
     """
     Calculate Relative Strength Index (RSI) using ta-lib.
 
@@ -1094,13 +1044,10 @@ def calculate_rsi(prices: List[float], period: int = 14) -> float:
         return None
 
     except ImportError:
-        logger.warning(
-            "ta-lib not available, falling back to manual RSI calculation")
+        logger.warning("ta-lib not available, falling back to manual RSI calculation")
         # Fallback to manual calculation
         if len(prices) < period + 1:
-            raise ValidationError(
-                f"Need at least {period + 1} prices for RSI calculation"
-            )
+            raise ValidationError(f"Need at least {period + 1} prices for RSI calculation")
 
         if period <= 0:
             raise ValidationError("RSI period must be positive")
@@ -1112,8 +1059,7 @@ def calculate_rsi(prices: List[float], period: int = 14) -> float:
             changes.append(change)
 
         if len(changes) < period:
-            raise ValidationError(
-                f"Not enough price changes for {period}-period RSI")
+            raise ValidationError(f"Not enough price changes for {period}-period RSI")
 
         # Get recent changes
         recent_changes = changes[-period:]
@@ -1140,10 +1086,7 @@ def calculate_rsi(prices: List[float], period: int = 14) -> float:
         return None
 
 
-def calculate_moving_average(
-        prices: List[float],
-        period: int,
-        ma_type: str = "sma") -> float:
+def calculate_moving_average(prices: list[float], period: int, ma_type: str = "sma") -> float:
     """
     Calculate moving average using ta-lib.
 
@@ -1180,12 +1123,12 @@ def calculate_moving_average(
         return None
 
     except ImportError:
-        logger.warning(
-            "ta-lib not available, falling back to manual MA calculation")
+        logger.warning("ta-lib not available, falling back to manual MA calculation")
         # Fallback to manual calculation
         if len(prices) < period:
             raise ValidationError(
-                f"Need at least {period} prices for {period}-period moving average")
+                f"Need at least {period} prices for {period}-period moving average"
+            )
 
         if period <= 0:
             raise ValidationError("Moving average period must be positive")
@@ -1199,8 +1142,7 @@ def calculate_moving_average(
         elif ma_type.lower() == "ema":
             # Exponential Moving Average
             if len(prices) < period:
-                raise ValidationError(
-                    f"Need at least {period} prices for EMA calculation")
+                raise ValidationError(f"Need at least {period} prices for EMA calculation")
 
             # Use SMA as initial EMA value
             initial_ema = sum(prices[:period]) / period
@@ -1216,15 +1158,15 @@ def calculate_moving_average(
             return float(ema)
 
         else:
-            raise ValidationError(
-                f"Unsupported moving average type: {ma_type}")
+            raise ValidationError(f"Unsupported moving average type: {ma_type}")
     except Exception as e:
         logger.error(f"Error calculating moving average: {e}")
         return None
 
 
 def calculate_support_resistance(
-        prices: List[float], lookback_period: int = 20) -> Tuple[float, float]:
+    prices: list[float], lookback_period: int = 20
+) -> tuple[float, float]:
     """
     Calculate support and resistance levels using ta-lib.
 
@@ -1239,8 +1181,8 @@ def calculate_support_resistance(
         ValidationError: If insufficient data
     """
     try:
-        import talib
         import numpy as np
+        import talib
 
         # Convert to numpy array
         price_array = np.array(prices, dtype=np.float64)
@@ -1263,11 +1205,13 @@ def calculate_support_resistance(
 
     except ImportError:
         logger.warning(
-            "ta-lib not available, falling back to manual support/resistance calculation")
+            "ta-lib not available, falling back to manual support/resistance calculation"
+        )
         # Fallback to manual calculation
         if len(prices) < lookback_period:
             raise ValidationError(
-                f"Need at least {lookback_period} prices for support/resistance calculation")
+                f"Need at least {lookback_period} prices for support/resistance calculation"
+            )
 
         # Get recent prices
         recent_prices = prices[-lookback_period:]

@@ -11,40 +11,39 @@ This module tests the comprehensive quality monitoring system including:
 Test Coverage: 90%+
 """
 
-import pytest
-import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import Any
+
+import pytest
+
+from src.core.types import MarketData, Signal, SignalDirection
 
 # Import the components to test
 from src.data.quality.monitoring import (
-    QualityMonitor, QualityLevel, DriftType, QualityMetric, DriftAlert
+    DriftAlert,
+    DriftType,
+    QualityLevel,
+    QualityMetric,
+    QualityMonitor,
 )
-from src.core.types import MarketData, Signal, SignalDirection
-from src.core.exceptions import DataError, DataValidationError, ValidationError
 
 
 class TestQualityMonitor:
     """Test cases for QualityMonitor class"""
 
     @pytest.fixture
-    def monitor_config(self) -> Dict[str, Any]:
+    def monitor_config(self) -> dict[str, Any]:
         """Test configuration for monitor"""
         return {
-            'quality_thresholds': {
-                'excellent': 0.95,
-                'good': 0.85,
-                'fair': 0.70,
-                'poor': 0.50
-            },
-            'drift_threshold': 0.05,  # More sensitive for testing
-            'distribution_window': 100,
-            'alert_cooldown': 3600
+            "quality_thresholds": {"excellent": 0.95, "good": 0.85, "fair": 0.70, "poor": 0.50},
+            "drift_threshold": 0.05,  # More sensitive for testing
+            "distribution_window": 100,
+            "alert_cooldown": 3600,
         }
 
     @pytest.fixture
-    def monitor(self, monitor_config: Dict[str, Any]) -> QualityMonitor:
+    def monitor(self, monitor_config: dict[str, Any]) -> QualityMonitor:
         """Create monitor instance for testing"""
         return QualityMonitor(monitor_config)
 
@@ -60,11 +59,11 @@ class TestQualityMonitor:
             ask=Decimal("50001.00"),
             open_price=Decimal("49900.00"),
             high_price=Decimal("50100.00"),
-            low_price=Decimal("49800.00")
+            low_price=Decimal("49800.00"),
         )
 
     @pytest.fixture
-    def valid_signals(self) -> List[Signal]:
+    def valid_signals(self) -> list[Signal]:
         """Create valid signals for testing"""
         return [
             Signal(
@@ -72,32 +71,31 @@ class TestQualityMonitor:
                 confidence=0.75,
                 timestamp=datetime.now(timezone.utc),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy"
+                strategy_name="test_strategy",
             ),
             Signal(
                 direction=SignalDirection.SELL,
                 confidence=0.85,
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=1),
                 symbol="ETHUSDT",
-                strategy_name="test_strategy"
-            )
+                strategy_name="test_strategy",
+            ),
         ]
 
     @pytest.mark.asyncio
     async def test_monitor_initialization(self, monitor: QualityMonitor):
         """Test monitor initialization with configuration"""
         assert monitor.config is not None
-        assert monitor.quality_thresholds['excellent'] == 0.95
-        assert monitor.quality_thresholds['good'] == 0.85
+        assert monitor.quality_thresholds["excellent"] == 0.95
+        assert monitor.quality_thresholds["good"] == 0.85
         assert monitor.drift_threshold == 0.05  # Updated to match test config
         assert monitor.distribution_window == 100
         assert monitor.alert_cooldown == 3600
 
     @pytest.mark.asyncio
     async def test_monitor_data_quality_valid(
-            self,
-            monitor: QualityMonitor,
-            valid_market_data: MarketData):
+        self, monitor: QualityMonitor, valid_market_data: MarketData
+    ):
         """Test monitoring of valid market data"""
         quality_score, drift_alerts = await monitor.monitor_data_quality(valid_market_data)
 
@@ -114,7 +112,7 @@ class TestQualityMonitor:
             symbol="BTCUSDT",
             price=Decimal("-100.00"),  # Negative price
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         quality_score, drift_alerts = await monitor.monitor_data_quality(invalid_data)
@@ -124,14 +122,13 @@ class TestQualityMonitor:
         assert quality_score < 0.8
 
     @pytest.mark.asyncio
-    async def test_monitor_data_quality_missing_fields(
-            self, monitor: QualityMonitor):
+    async def test_monitor_data_quality_missing_fields(self, monitor: QualityMonitor):
         """Test monitoring of data with missing fields"""
         incomplete_data = MarketData(
             symbol="BTCUSDT",
             price=Decimal("50000.00"),
             volume=Decimal("0"),  # Zero volume (treated as missing)
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         quality_score, drift_alerts = await monitor.monitor_data_quality(incomplete_data)
@@ -141,7 +138,8 @@ class TestQualityMonitor:
 
     @pytest.mark.asyncio
     async def test_monitor_signal_quality_valid(
-            self, monitor: QualityMonitor, valid_signals: List[Signal]):
+        self, monitor: QualityMonitor, valid_signals: list[Signal]
+    ):
         """Test monitoring of valid signal data"""
         quality_score, drift_alerts = await monitor.monitor_signal_quality(valid_signals)
 
@@ -160,8 +158,7 @@ class TestQualityMonitor:
         assert len(drift_alerts) == 0
 
     @pytest.mark.asyncio
-    async def test_monitor_signal_quality_low_confidence(
-            self, monitor: QualityMonitor):
+    async def test_monitor_signal_quality_low_confidence(self, monitor: QualityMonitor):
         """Test monitoring of signals with low confidence"""
         low_confidence_signals = []
         for i in range(10):  # Need at least 10 signals for drift detection
@@ -171,7 +168,7 @@ class TestQualityMonitor:
                 # Low confidence with slight variation
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy"
+                strategy_name="test_strategy",
             )
             low_confidence_signals.append(signal)
 
@@ -183,45 +180,45 @@ class TestQualityMonitor:
 
     @pytest.mark.asyncio
     async def test_generate_quality_report(
-            self,
-            monitor: QualityMonitor,
-            valid_market_data: MarketData):
+        self, monitor: QualityMonitor, valid_market_data: MarketData
+    ):
         """Test quality report generation"""
         # Add some data to the monitor
         await monitor.monitor_data_quality(valid_market_data)
 
         report = await monitor.generate_quality_report()
 
-        assert 'timestamp' in report
-        assert 'overall_quality_score' in report
-        assert 'symbol_quality_scores' in report
-        assert 'drift_summary' in report
-        assert 'distribution_summary' in report
-        assert 'alert_summary' in report
-        assert 'recommendations' in report
+        assert "timestamp" in report
+        assert "overall_quality_score" in report
+        assert "symbol_quality_scores" in report
+        assert "drift_summary" in report
+        assert "distribution_summary" in report
+        assert "alert_summary" in report
+        assert "recommendations" in report
 
         # Check report structure
-        assert isinstance(report['overall_quality_score'], float)
-        assert isinstance(report['symbol_quality_scores'], dict)
-        assert isinstance(report['drift_summary'], dict)
-        assert isinstance(report['recommendations'], list)
+        assert isinstance(report["overall_quality_score"], float)
+        assert isinstance(report["symbol_quality_scores"], dict)
+        assert isinstance(report["drift_summary"], dict)
+        assert isinstance(report["recommendations"], list)
 
     @pytest.mark.asyncio
     async def test_generate_quality_report_specific_symbol(
-            self, monitor: QualityMonitor, valid_market_data: MarketData):
+        self, monitor: QualityMonitor, valid_market_data: MarketData
+    ):
         """Test quality report generation for specific symbol"""
         # Add data for specific symbol
         await monitor.monitor_data_quality(valid_market_data)
 
         report = await monitor.generate_quality_report(symbol="BTCUSDT")
 
-        assert 'symbol_quality_scores' in report
-        assert 'BTCUSDT' in report['symbol_quality_scores']
+        assert "symbol_quality_scores" in report
+        assert "BTCUSDT" in report["symbol_quality_scores"]
 
-        symbol_data = report['symbol_quality_scores']['BTCUSDT']
-        assert 'current_score' in symbol_data
-        assert 'avg_score' in symbol_data
-        assert 'trend' in symbol_data
+        symbol_data = report["symbol_quality_scores"]["BTCUSDT"]
+        assert "current_score" in symbol_data
+        assert "avg_score" in symbol_data
+        assert "trend" in symbol_data
 
     @pytest.mark.asyncio
     async def test_drift_detection(self, monitor: QualityMonitor):
@@ -235,7 +232,7 @@ class TestQualityMonitor:
                 symbol=symbol,
                 price=Decimal(str(price)),
                 volume=Decimal("100.5"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             await monitor.monitor_data_quality(data)
 
@@ -244,7 +241,7 @@ class TestQualityMonitor:
             symbol=symbol,
             price=Decimal("60000.00"),  # Significant price increase
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         quality_score, drift_alerts = await monitor.monitor_data_quality(drifted_data)
@@ -254,13 +251,11 @@ class TestQualityMonitor:
 
         # Check drift alert properties
         for alert in drift_alerts:
-            assert alert.drift_type in [
-                DriftType.COVARIATE_DRIFT,
-                DriftType.DISTRIBUTION_DRIFT]
-            assert alert.feature in ['price', 'volume']
+            assert alert.drift_type in [DriftType.COVARIATE_DRIFT, DriftType.DISTRIBUTION_DRIFT]
+            assert alert.feature in ["price", "volume"]
             assert alert.severity in [QualityLevel.FAIR, QualityLevel.POOR]
             assert alert.timestamp is not None
-            assert 'drift_score' in alert.metadata
+            assert "drift_score" in alert.metadata
 
     @pytest.mark.asyncio
     async def test_signal_drift_detection(self, monitor: QualityMonitor):
@@ -273,7 +268,7 @@ class TestQualityMonitor:
                 confidence=0.8,  # Stable high confidence
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy"
+                strategy_name="test_strategy",
             )
             stable_signals.append(signal)
 
@@ -293,7 +288,7 @@ class TestQualityMonitor:
                 # Low confidence with slight variation
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy"
+                strategy_name="test_strategy",
             )
             low_confidence_signals.append(signal)
 
@@ -301,8 +296,7 @@ class TestQualityMonitor:
 
         # Should detect concept drift
         assert len(drift_alerts) > 0
-        assert any(alert.drift_type ==
-                   DriftType.CONCEPT_DRIFT for alert in drift_alerts)
+        assert any(alert.drift_type == DriftType.CONCEPT_DRIFT for alert in drift_alerts)
 
     @pytest.mark.asyncio
     async def test_calculate_quality_score(self, monitor: QualityMonitor):
@@ -314,7 +308,7 @@ class TestQualityMonitor:
             volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
             bid=Decimal("49999.00"),
-            ask=Decimal("50001.00")
+            ask=Decimal("50001.00"),
         )
 
         score = await monitor._calculate_quality_score(complete_data)
@@ -326,7 +320,7 @@ class TestQualityMonitor:
             symbol="BTCUSDT",
             price=Decimal("50000.00"),
             volume=Decimal("0"),  # Zero volume (treated as missing)
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         score = await monitor._calculate_quality_score(incomplete_data)
@@ -338,7 +332,7 @@ class TestQualityMonitor:
             symbol="BTCUSDT",
             price=Decimal("-100.00"),  # Negative price
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         score = await monitor._calculate_quality_score(invalid_data)
@@ -359,7 +353,9 @@ class TestQualityMonitor:
         recent_different = [200, 201, 202, 203, 204]
         historical_different = [100, 101, 102, 103, 104]
 
-        drift_score = await monitor._calculate_distribution_drift(recent_different, historical_different)
+        drift_score = await monitor._calculate_distribution_drift(
+            recent_different, historical_different
+        )
         # Should be high for different distributions (adjusted threshold)
         assert drift_score > 0.4
 
@@ -368,9 +364,9 @@ class TestQualityMonitor:
         """Test recommendation generation"""
         # Test with good quality
         good_report = {
-            'overall_quality_score': 0.9,
-            'drift_summary': {},
-            'alert_summary': {'critical_alerts': 0}
+            "overall_quality_score": 0.9,
+            "drift_summary": {},
+            "alert_summary": {"critical_alerts": 0},
         }
 
         recommendations = await monitor._generate_recommendations(good_report)
@@ -379,9 +375,9 @@ class TestQualityMonitor:
 
         # Test with poor quality
         poor_report = {
-            'overall_quality_score': 0.3,
-            'drift_summary': {'covariate_drift': 10},
-            'alert_summary': {'critical_alerts': 5}
+            "overall_quality_score": 0.3,
+            "drift_summary": {"covariate_drift": 10},
+            "alert_summary": {"critical_alerts": 5},
         }
 
         recommendations = await monitor._generate_recommendations(poor_report)
@@ -394,18 +390,18 @@ class TestQualityMonitor:
         """Test monitoring summary generation"""
         summary = await monitor.get_monitoring_summary()
 
-        assert 'monitoring_stats' in summary
-        assert 'quality_scores' in summary
-        assert 'distribution_sizes' in summary
-        assert 'recent_alerts' in summary
-        assert 'monitoring_config' in summary
+        assert "monitoring_stats" in summary
+        assert "quality_scores" in summary
+        assert "distribution_sizes" in summary
+        assert "recent_alerts" in summary
+        assert "monitoring_config" in summary
 
         # Check config values
-        config = summary['monitoring_config']
-        assert config['quality_thresholds']['excellent'] == 0.95
+        config = summary["monitoring_config"]
+        assert config["quality_thresholds"]["excellent"] == 0.95
         # Updated to match test config
-        assert config['drift_threshold'] == 0.05
-        assert config['distribution_window'] == 100
+        assert config["drift_threshold"] == 0.05
+        assert config["distribution_window"] == 100
 
     @pytest.mark.asyncio
     async def test_monitor_error_handling(self, monitor: QualityMonitor):
@@ -421,7 +417,7 @@ class TestQualityMonitor:
             symbol="",  # Empty symbol (invalid but Pydantic-valid)
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         quality_score, drift_alerts = await monitor.monitor_data_quality(malformed_data)
@@ -429,9 +425,8 @@ class TestQualityMonitor:
 
     @pytest.mark.asyncio
     async def test_monitor_performance(
-            self,
-            monitor: QualityMonitor,
-            valid_market_data: MarketData):
+        self, monitor: QualityMonitor, valid_market_data: MarketData
+    ):
         """Test monitor performance"""
         import time
 
@@ -453,16 +448,15 @@ class TestQualityMonitor:
 
     @pytest.mark.asyncio
     async def test_distribution_updates(
-            self,
-            monitor: QualityMonitor,
-            valid_market_data: MarketData):
+        self, monitor: QualityMonitor, valid_market_data: MarketData
+    ):
         """Test distribution update functionality"""
-        initial_stats = monitor.monitoring_stats['distribution_updates']
+        initial_stats = monitor.monitoring_stats["distribution_updates"]
 
         await monitor.monitor_data_quality(valid_market_data)
 
         # Should update distributions
-        assert monitor.monitoring_stats['distribution_updates'] > initial_stats
+        assert monitor.monitoring_stats["distribution_updates"] > initial_stats
 
         # Check that distributions are updated
         assert valid_market_data.symbol in monitor.price_distributions
@@ -479,7 +473,7 @@ class TestQualityMonitor:
                 symbol=symbol,
                 price=Decimal(str(50000 + i * 10)),  # Stable progression
                 volume=Decimal("100.5"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             await monitor.monitor_data_quality(data)
 
@@ -489,7 +483,7 @@ class TestQualityMonitor:
                 symbol=symbol,
                 price=Decimal(str(60000 + i * 1000)),  # Significant drift
                 volume=Decimal("100.5"),
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
             await monitor.monitor_data_quality(data)
 
@@ -538,7 +532,7 @@ class TestQualityMetric:
             threshold=0.9,
             level=QualityLevel.EXCELLENT,
             timestamp=datetime.now(timezone.utc),
-            metadata={"test": "value"}
+            metadata={"test": "value"},
         )
 
         assert metric.metric_name == "completeness"
@@ -559,7 +553,7 @@ class TestDriftAlert:
             severity=QualityLevel.POOR,
             description="Price distribution drift detected",
             timestamp=datetime.now(timezone.utc),
-            metadata={"drift_score": 0.15}
+            metadata={"drift_score": 0.15},
         )
 
         assert alert.drift_type == DriftType.COVARIATE_DRIFT

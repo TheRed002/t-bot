@@ -10,45 +10,36 @@ This module contains comprehensive tests for all constant definitions and enumer
 - Market constants (symbol mappings, exchange specifications, trading pairs, intervals)
 """
 
-import pytest
 from decimal import Decimal
-from datetime import time
-from enum import Enum
-from typing import Dict, Any, List
 
 from src.utils.constants import (
-    # Trading constants
-    MARKET_HOURS,
-    SETTLEMENT_TIMES,
-    PRECISION_LEVELS,
-
     # API constants
     API_ENDPOINTS,
-    RATE_LIMITS,
-    TIMEOUTS,
-    HTTP_STATUS_CODES,
-
-    # Financial constants
-    FEE_STRUCTURES,
-    MINIMUM_AMOUNTS,
-    MAXIMUM_AMOUNTS,
-    SLIPPAGE_TOLERANCE,
-
     # Configuration constants
     DEFAULT_VALUES,
-    LIMITS,
-    THRESHOLDS,
-
     # Error constants
     ERROR_CODES,
     ERROR_MESSAGES,
-    ERROR_SEVERITY,
     ERROR_RECOVERY_STRATEGIES,
-
+    ERROR_SEVERITY,
+    EXCHANGE_SPECIFICATIONS,
+    # Financial constants
+    FEE_STRUCTURES,
+    HTTP_STATUS_CODES,
+    LIMITS,
+    # Trading constants
+    MARKET_HOURS,
+    MAXIMUM_AMOUNTS,
+    MINIMUM_AMOUNTS,
+    PRECISION_LEVELS,
+    RATE_LIMITS,
+    SETTLEMENT_TIMES,
+    SLIPPAGE_TOLERANCE,
     # Market constants
     SYMBOL_MAPPINGS,
-    EXCHANGE_SPECIFICATIONS,
-    TRADING_PAIRS
+    THRESHOLDS,
+    TIMEOUTS,
+    TRADING_PAIRS,
 )
 
 
@@ -633,8 +624,9 @@ class TestConstantsIntegration:
             ERROR_RECOVERY_STRATEGIES,
             SYMBOL_MAPPINGS,
             EXCHANGE_SPECIFICATIONS,
-            TRADING_PAIRS]
+            TRADING_PAIRS,
+        ]
 
         for constant in required_constants:
             assert constant is not None
-            assert len(constant) > 0 if hasattr(constant, '__len__') else True
+            assert len(constant) > 0 if hasattr(constant, "__len__") else True

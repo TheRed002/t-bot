@@ -9,39 +9,34 @@ CRITICAL: This scanner requires real-time data feeds and ultra-low latency
 processing to detect opportunities before they disappear.
 """
 
-import asyncio
-from typing import List, Dict, Optional, Tuple, Any, Set
-from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, timedelta
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+
+from src.core.exceptions import ArbitrageError, ValidationError
+from src.core.logging import get_logger
+
+# From P-001 - Use existing types
+from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
 
 # MANDATORY: Import from P-011 - NEVER recreate the base strategy
 from src.strategies.base import BaseStrategy
-
-# From P-001 - Use existing types
-from src.core.types import (
-    Signal, MarketData, Position, SignalDirection,
-    StrategyConfig, StrategyType, OrderRequest, OrderResponse
-)
-from src.core.logging import get_logger
-from src.core.exceptions import (
-    ValidationError, ExecutionError, ArbitrageError,
-    ArbitrageOpportunityError, ArbitrageExecutionError, ArbitrageTimingError
-)
+from src.utils.constants import GLOBAL_FEE_STRUCTURE, GLOBAL_MINIMUM_AMOUNTS, PRECISION_LEVELS
 
 # From P-007A - Use decorators and validators
-from src.utils.decorators import time_execution, retry, circuit_breaker, log_errors
-from src.utils.validators import validate_price, validate_quantity, validate_decimal, validate_percentage
-from src.utils.helpers import round_to_precision, round_to_precision_decimal, calculate_volatility, calculate_correlation
-from src.utils.formatters import format_currency, format_percentage, format_pnl
-from src.utils.constants import FEE_STRUCTURES, GLOBAL_FEE_STRUCTURE, GLOBAL_MINIMUM_AMOUNTS, PRECISION_LEVELS
+from src.utils.decorators import log_errors, time_execution
+from src.utils.formatters import format_currency, format_percentage
+from src.utils.helpers import round_to_precision_decimal
+from src.utils.validators import (
+    validate_decimal,
+    validate_percentage,
+    validate_price,
+    validate_quantity,
+)
 
 # From P-008+ - Use risk management
-from src.risk_management.base import BaseRiskManager
-from src.risk_management.position_sizing import PositionSizer
-from src.risk_management.risk_metrics import RiskCalculator
 
 # From P-003+ - Use exchange interfaces
-from src.exchanges.base import BaseExchange
 
 logger = get_logger(__name__)
 
@@ -67,26 +62,21 @@ class ArbitrageOpportunity(BaseStrategy):
 
         # Scanner-specific configuration
         self.scan_interval = config.get("scan_interval", 100)  # milliseconds
-        self.max_execution_time = config.get(
-            "max_execution_time", 500)  # milliseconds
+        self.max_execution_time = config.get("max_execution_time", 500)  # milliseconds
         self.min_profit_threshold = Decimal(
-            str(config.get("min_profit_threshold", "0.001")))  # 0.1%
+            str(config.get("min_profit_threshold", "0.001"))
+        )  # 0.1%
         self.max_opportunities = config.get("max_opportunities", 10)
-        self.exchanges = config.get(
-            "exchanges", [
-                "binance", "okx", "coinbase"])
-        self.symbols = config.get(
-            "symbols", [
-                "BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT"])
-        self.triangular_paths = config.get("triangular_paths", [
-            ["BTCUSDT", "ETHBTC", "ETHUSDT"],
-            ["BTCUSDT", "BNBBTC", "BNBUSDT"]
-        ])
+        self.exchanges = config.get("exchanges", ["binance", "okx", "coinbase"])
+        self.symbols = config.get("symbols", ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT"])
+        self.triangular_paths = config.get(
+            "triangular_paths", [["BTCUSDT", "ETHBTC", "ETHUSDT"], ["BTCUSDT", "BNBBTC", "BNBUSDT"]]
+        )
 
         # State tracking
-        self.active_opportunities: Dict[str, Dict] = {}
-        self.exchange_prices: Dict[str, Dict[str, MarketData]] = {}
-        self.opportunity_history: List[Dict] = []
+        self.active_opportunities: dict[str, dict] = {}
+        self.exchange_prices: dict[str, dict[str, MarketData]] = {}
+        self.opportunity_history: list[dict] = []
         self.last_scan_time = datetime.now()
 
         # Performance tracking
@@ -99,11 +89,11 @@ class ArbitrageOpportunity(BaseStrategy):
             strategy=self.name,
             exchanges=self.exchanges,
             symbols=self.symbols,
-            scan_interval=self.scan_interval
+            scan_interval=self.scan_interval,
         )
 
     @time_execution
-    async def _generate_signals_impl(self, data: MarketData) -> List[Signal]:
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """
         Generate arbitrage opportunity signals based on comprehensive market scanning.
 
@@ -130,7 +120,7 @@ class ArbitrageOpportunity(BaseStrategy):
                     "Arbitrage opportunities found",
                     strategy=self.name,
                     opportunity_count=len(signals),
-                    symbols=[s.symbol for s in signals]
+                    symbols=[s.symbol for s in signals],
                 )
 
             return signals
@@ -140,11 +130,11 @@ class ArbitrageOpportunity(BaseStrategy):
                 "Arbitrage opportunity scanning failed",
                 strategy=self.name,
                 symbol=data.symbol,
-                error=str(e)
+                error=str(e),
             )
             return []  # Graceful degradation
 
-    async def _scan_arbitrage_opportunities(self) -> List[Signal]:
+    async def _scan_arbitrage_opportunities(self) -> list[Signal]:
         """
         Perform comprehensive arbitrage opportunity scanning.
 
@@ -173,14 +163,10 @@ class ArbitrageOpportunity(BaseStrategy):
             return prioritized_signals
 
         except Exception as e:
-            logger.error(
-                "Arbitrage opportunity scanning failed",
-                strategy=self.name,
-                error=str(e)
-            )
+            logger.error("Arbitrage opportunity scanning failed", strategy=self.name, error=str(e))
             return []
 
-    async def _scan_cross_exchange_opportunities(self) -> List[Signal]:
+    async def _scan_cross_exchange_opportunities(self) -> list[Signal]:
         """
         Scan for cross-exchange arbitrage opportunities.
 
@@ -194,8 +180,10 @@ class ArbitrageOpportunity(BaseStrategy):
                 # Get all available prices for this symbol
                 symbol_prices = {}
                 for exchange in self.exchanges:
-                    if exchange in self.exchange_prices and symbol in self.exchange_prices[
-                            exchange]:
+                    if (
+                        exchange in self.exchange_prices
+                        and symbol in self.exchange_prices[exchange]
+                    ):
                         symbol_prices[exchange] = self.exchange_prices[exchange][symbol]
 
                 if len(symbol_prices) < 2:
@@ -217,30 +205,29 @@ class ArbitrageOpportunity(BaseStrategy):
                         best_ask_exchange = exchange
 
                 # Check if arbitrage opportunity exists
-                if (best_bid_exchange and best_ask_exchange and
-                    best_bid_exchange != best_ask_exchange and
-                        best_bid_price > best_ask_price):
-
+                if (
+                    best_bid_exchange
+                    and best_ask_exchange
+                    and best_bid_exchange != best_ask_exchange
+                    and best_bid_price > best_ask_price
+                ):
                     # Calculate potential profit
                     spread = best_bid_price - best_ask_price
                     spread_percentage = (spread / best_ask_price) * 100
 
                     # Account for fees and slippage
                     estimated_fees = self._calculate_cross_exchange_fees(
-                        best_ask_price, best_bid_price)
+                        best_ask_price, best_bid_price
+                    )
                     net_profit = spread - estimated_fees
                     net_profit_percentage = (net_profit / best_ask_price) * 100
 
                     # Check if profit meets threshold
-                    if net_profit_percentage >= float(
-                            self.min_profit_threshold * 100):
-
+                    if net_profit_percentage >= float(self.min_profit_threshold * 100):
                         # Create cross-exchange arbitrage signal
                         signal = Signal(
                             direction=SignalDirection.BUY,
-                            confidence=min(
-                                0.9,
-                                net_profit_percentage / 2),
+                            confidence=min(0.9, net_profit_percentage / 2),
                             timestamp=datetime.now(),
                             symbol=symbol,
                             strategy_name=self.name,
@@ -254,21 +241,21 @@ class ArbitrageOpportunity(BaseStrategy):
                                 "net_profit_percentage": float(net_profit_percentage),
                                 "estimated_fees": float(estimated_fees),
                                 "opportunity_priority": self._calculate_priority(
-                                    net_profit_percentage,
-                                    "cross_exchange")})
+                                    net_profit_percentage, "cross_exchange"
+                                ),
+                            },
+                        )
 
                         signals.append(signal)
 
         except Exception as e:
             logger.error(
-                "Cross-exchange opportunity scanning failed",
-                strategy=self.name,
-                error=str(e)
+                "Cross-exchange opportunity scanning failed", strategy=self.name, error=str(e)
             )
 
         return signals
 
-    async def _scan_triangular_opportunities(self) -> List[Signal]:
+    async def _scan_triangular_opportunities(self) -> list[Signal]:
         """
         Scan for triangular arbitrage opportunities.
 
@@ -305,20 +292,17 @@ class ArbitrageOpportunity(BaseStrategy):
 
                 # Account for fees and slippage
                 total_fees = self._calculate_triangular_fees(
-                    btc_usdt_rate, eth_btc_rate, eth_usdt_rate)
+                    btc_usdt_rate, eth_btc_rate, eth_usdt_rate
+                )
                 net_profit = profit - total_fees
                 net_profit_percentage = (net_profit / start_usdt) * 100
 
                 # Check if profit meets threshold
-                if net_profit_percentage >= float(
-                        self.min_profit_threshold * 100):
-
+                if net_profit_percentage >= float(self.min_profit_threshold * 100):
                     # Create triangular arbitrage signal
                     signal = Signal(
                         direction=SignalDirection.BUY,
-                        confidence=min(
-                            0.9,
-                            net_profit_percentage / 2),
+                        confidence=min(0.9, net_profit_percentage / 2),
                         timestamp=datetime.now(),
                         symbol=pair1,
                         strategy_name=self.name,
@@ -332,25 +316,20 @@ class ArbitrageOpportunity(BaseStrategy):
                             "net_profit_percentage": float(net_profit_percentage),
                             "estimated_fees": float(total_fees),
                             "opportunity_priority": self._calculate_priority(
-                                net_profit_percentage,
-                                "triangular")})
+                                net_profit_percentage, "triangular"
+                            ),
+                        },
+                    )
 
                     signals.append(signal)
 
         except Exception as e:
-            logger.error(
-                "Triangular opportunity scanning failed",
-                strategy=self.name,
-                error=str(e)
-            )
+            logger.error("Triangular opportunity scanning failed", strategy=self.name, error=str(e))
 
         return signals
 
     @log_errors
-    def _calculate_cross_exchange_fees(
-            self,
-            buy_price: Decimal,
-            sell_price: Decimal) -> Decimal:
+    def _calculate_cross_exchange_fees(self, buy_price: Decimal, sell_price: Decimal) -> Decimal:
         """
         Calculate fees for cross-exchange arbitrage using proper validation and formatting.
 
@@ -373,19 +352,19 @@ class ArbitrageOpportunity(BaseStrategy):
             validate_price(sell_price, "sell_price")
 
             # Get fee structure from constants and convert to Decimal
-            taker_fee_rate = Decimal(
-                str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
+            taker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
 
             # Calculate fees using proper rounding
             buy_fees = round_to_precision_decimal(
-                buy_price * taker_fee_rate, PRECISION_LEVELS["fee"])
+                buy_price * taker_fee_rate, PRECISION_LEVELS["fee"]
+            )
             sell_fees = round_to_precision_decimal(
-                sell_price * taker_fee_rate, PRECISION_LEVELS["fee"])
+                sell_price * taker_fee_rate, PRECISION_LEVELS["fee"]
+            )
 
             # Calculate slippage cost
             slippage_cost = round_to_precision_decimal(
-                (sell_price - buy_price) * Decimal("0.0005"),
-                PRECISION_LEVELS["price"]
+                (sell_price - buy_price) * Decimal("0.0005"), PRECISION_LEVELS["price"]
             )
 
             # Calculate total fees
@@ -402,7 +381,7 @@ class ArbitrageOpportunity(BaseStrategy):
                 buy_fees=format_currency(buy_fees),
                 sell_fees=format_currency(sell_fees),
                 slippage_cost=format_currency(slippage_cost),
-                total_fees=format_currency(total_fees)
+                total_fees=format_currency(total_fees),
             )
 
             return total_fees
@@ -413,17 +392,12 @@ class ArbitrageOpportunity(BaseStrategy):
                 strategy=self.name,
                 buy_price=float(buy_price),
                 sell_price=float(sell_price),
-                error=str(e)
+                error=str(e),
             )
-            raise ArbitrageError(
-                f"Cross-exchange fee calculation failed: {str(e)}")
+            raise ArbitrageError(f"Cross-exchange fee calculation failed: {e!s}")
 
     @log_errors
-    def _calculate_triangular_fees(
-            self,
-            rate1: Decimal,
-            rate2: Decimal,
-            rate3: Decimal) -> Decimal:
+    def _calculate_triangular_fees(self, rate1: Decimal, rate2: Decimal, rate3: Decimal) -> Decimal:
         """
         Calculate fees for triangular arbitrage using proper validation and formatting.
 
@@ -441,34 +415,38 @@ class ArbitrageOpportunity(BaseStrategy):
         """
         try:
             # Validate input rates using utils
-            for rate, name in [
-                    (rate1, "rate1"), (rate2, "rate2"), (rate3, "rate3")]:
+            for rate, name in [(rate1, "rate1"), (rate2, "rate2"), (rate3, "rate3")]:
                 validate_decimal(rate)
                 validate_price(rate, name)
 
             # Get fee structure from constants and convert to Decimal
-            taker_fee_rate = Decimal(
-                str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
+            taker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
 
             # Calculate fees for each step using proper rounding
-            step1_fees = round_to_precision_decimal(
-                rate1 * taker_fee_rate, PRECISION_LEVELS["fee"])
-            step2_fees = round_to_precision_decimal(
-                rate2 * taker_fee_rate, PRECISION_LEVELS["fee"])
-            step3_fees = round_to_precision_decimal(
-                rate3 * taker_fee_rate, PRECISION_LEVELS["fee"])
+            step1_fees = round_to_precision_decimal(rate1 * taker_fee_rate, PRECISION_LEVELS["fee"])
+            step2_fees = round_to_precision_decimal(rate2 * taker_fee_rate, PRECISION_LEVELS["fee"])
+            step3_fees = round_to_precision_decimal(rate3 * taker_fee_rate, PRECISION_LEVELS["fee"])
 
             # Calculate slippage costs for each step
             slippage_cost1 = round_to_precision_decimal(
-                rate1 * Decimal("0.0005"), PRECISION_LEVELS["price"])
+                rate1 * Decimal("0.0005"), PRECISION_LEVELS["price"]
+            )
             slippage_cost2 = round_to_precision_decimal(
-                rate2 * Decimal("0.0005"), PRECISION_LEVELS["price"])
+                rate2 * Decimal("0.0005"), PRECISION_LEVELS["price"]
+            )
             slippage_cost3 = round_to_precision_decimal(
-                rate3 * Decimal("0.0005"), PRECISION_LEVELS["price"])
+                rate3 * Decimal("0.0005"), PRECISION_LEVELS["price"]
+            )
 
             # Calculate total fees
-            total_fees = step1_fees + step2_fees + step3_fees + \
-                slippage_cost1 + slippage_cost2 + slippage_cost3
+            total_fees = (
+                step1_fees
+                + step2_fees
+                + step3_fees
+                + slippage_cost1
+                + slippage_cost2
+                + slippage_cost3
+            )
 
             # Validate final result
             validate_decimal(total_fees)
@@ -483,11 +461,11 @@ class ArbitrageOpportunity(BaseStrategy):
                 step2_fees=format_currency(step2_fees),
                 step3_fees=format_currency(step3_fees),
                 slippage_costs=[
-                    format_currency(cost) for cost in [
-                        slippage_cost1,
-                        slippage_cost2,
-                        slippage_cost3]],
-                total_fees=format_currency(total_fees))
+                    format_currency(cost)
+                    for cost in [slippage_cost1, slippage_cost2, slippage_cost3]
+                ],
+                total_fees=format_currency(total_fees),
+            )
 
             return total_fees
 
@@ -498,17 +476,12 @@ class ArbitrageOpportunity(BaseStrategy):
                 rate1=float(rate1),
                 rate2=float(rate2),
                 rate3=float(rate3),
-                error=str(e)
+                error=str(e),
             )
-            raise ArbitrageError(
-                f"Triangular fee calculation failed: {
-                    str(e)}")
+            raise ArbitrageError(f"Triangular fee calculation failed: {e!s}")
 
     @log_errors
-    def _calculate_priority(
-            self,
-            profit_percentage: float,
-            arbitrage_type: str) -> float:
+    def _calculate_priority(self, profit_percentage: float, arbitrage_type: str) -> float:
         """
         Calculate opportunity priority based on profit and type using proper validation.
 
@@ -525,15 +498,14 @@ class ArbitrageOpportunity(BaseStrategy):
         """
         try:
             # Convert profit_percentage to float if it's a Decimal
-            if hasattr(profit_percentage, '__float__'):
+            if hasattr(profit_percentage, "__float__"):
                 profit_percentage = float(profit_percentage)
 
             # Validate inputs using utils
             validate_percentage(profit_percentage, "profit_percentage")
 
             if arbitrage_type not in ["cross_exchange", "triangular"]:
-                raise ValidationError(
-                    f"Invalid arbitrage type: {arbitrage_type}")
+                raise ValidationError(f"Invalid arbitrage type: {arbitrage_type}")
 
             # Base priority on profit percentage
             base_priority = profit_percentage
@@ -566,7 +538,7 @@ class ArbitrageOpportunity(BaseStrategy):
                 arbitrage_type=arbitrage_type,
                 type_multiplier=type_multiplier,
                 market_multiplier=market_multiplier,
-                final_priority=priority
+                final_priority=priority,
             )
 
             return priority
@@ -577,11 +549,11 @@ class ArbitrageOpportunity(BaseStrategy):
                 strategy=self.name,
                 profit_percentage=profit_percentage,
                 arbitrage_type=arbitrage_type,
-                error=str(e)
+                error=str(e),
             )
-            raise ArbitrageError(f"Priority calculation failed: {str(e)}")
+            raise ArbitrageError(f"Priority calculation failed: {e!s}")
 
-    def _prioritize_opportunities(self, signals: List[Signal]) -> List[Signal]:
+    def _prioritize_opportunities(self, signals: list[Signal]) -> list[Signal]:
         """
         Prioritize arbitrage opportunities by profit potential and feasibility.
 
@@ -594,13 +566,11 @@ class ArbitrageOpportunity(BaseStrategy):
         try:
             # Sort by priority (highest first)
             sorted_signals = sorted(
-                signals,
-                key=lambda s: s.metadata.get("opportunity_priority", 0),
-                reverse=True
+                signals, key=lambda s: s.metadata.get("opportunity_priority", 0), reverse=True
             )
 
             # Limit to maximum opportunities
-            limited_signals = sorted_signals[:self.max_opportunities]
+            limited_signals = sorted_signals[: self.max_opportunities]
 
             # Log top opportunities
             if limited_signals:
@@ -611,17 +581,14 @@ class ArbitrageOpportunity(BaseStrategy):
                     symbol=top_opportunity.symbol,
                     arbitrage_type=top_opportunity.metadata.get("arbitrage_type"),
                     profit_percentage=top_opportunity.metadata.get("net_profit_percentage"),
-                    priority=top_opportunity.metadata.get("opportunity_priority"))
+                    priority=top_opportunity.metadata.get("opportunity_priority"),
+                )
 
             return limited_signals
 
         except Exception as e:
-            logger.error(
-                "Opportunity prioritization failed",
-                strategy=self.name,
-                error=str(e)
-            )
-            return signals[:self.max_opportunities]  # Return first N on error
+            logger.error("Opportunity prioritization failed", strategy=self.name, error=str(e))
+            return signals[: self.max_opportunities]  # Return first N on error
 
     async def validate_signal(self, signal: Signal) -> bool:
         """
@@ -658,23 +625,22 @@ class ArbitrageOpportunity(BaseStrategy):
 
             # Additional validation based on type
             if arbitrage_type == "cross_exchange":
-                required_cross_fields = [
-                    "buy_exchange",
-                    "sell_exchange",
-                    "buy_price",
-                    "sell_price"]
+                required_cross_fields = ["buy_exchange", "sell_exchange", "buy_price", "sell_price"]
                 for field in required_cross_fields:
                     if field not in metadata:
                         return False
 
                 # Validate exchanges are different
-                if metadata.get("buy_exchange") == metadata.get(
-                        "sell_exchange"):
+                if metadata.get("buy_exchange") == metadata.get("sell_exchange"):
                     return False
 
             elif arbitrage_type == "triangular":
                 required_triangular_fields = [
-                    "path", "start_rate", "intermediate_rate", "final_rate"]
+                    "path",
+                    "start_rate",
+                    "intermediate_rate",
+                    "final_rate",
+                ]
                 for field in required_triangular_fields:
                     if field not in metadata:
                         return False
@@ -687,11 +653,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error(
-                "Arbitrage signal validation failed",
-                strategy=self.name,
-                error=str(e)
-            )
+            logger.error("Arbitrage signal validation failed", strategy=self.name, error=str(e))
             return False
 
     @log_errors
@@ -711,17 +673,14 @@ class ArbitrageOpportunity(BaseStrategy):
         try:
             # Validate signal using utils
             if not signal:
-                raise ArbitrageError(
-                    "Invalid signal for arbitrage position sizing")
+                raise ArbitrageError("Invalid signal for arbitrage position sizing")
 
             validate_percentage(signal.confidence, "signal_confidence")
 
             # Get configuration parameters
-            total_capital = Decimal(
-                str(self.config.parameters.get("total_capital", 10000)))
+            total_capital = Decimal(str(self.config.parameters.get("total_capital", 10000)))
             risk_per_trade = self.config.parameters.get("risk_per_trade", 0.02)
-            max_position_size = self.config.parameters.get(
-                "max_position_size", 0.1)
+            max_position_size = self.config.parameters.get("max_position_size", 0.1)
 
             # Calculate base position size using simple percentage method
             base_size = total_capital * Decimal(str(risk_per_trade))
@@ -733,8 +692,9 @@ class ArbitrageOpportunity(BaseStrategy):
 
             # Scale by arbitrage-specific factors
             metadata = signal.metadata
-            profit_potential = Decimal(
-                str(metadata.get("net_profit_percentage", 0))) / Decimal("100")
+            profit_potential = Decimal(str(metadata.get("net_profit_percentage", 0))) / Decimal(
+                "100"
+            )
             validate_percentage(profit_potential * 100, "profit_potential")
 
             # Adjust for arbitrage type
@@ -747,22 +707,18 @@ class ArbitrageOpportunity(BaseStrategy):
 
             # Apply arbitrage-specific adjustments
             arbitrage_multiplier = min(
-                Decimal("2.0"),
-                profit_potential *
-                Decimal("10"))  # Scale with profit
+                Decimal("2.0"), profit_potential * Decimal("10")
+            )  # Scale with profit
             confidence_multiplier = Decimal(str(signal.confidence))
 
             # Calculate final position size with proper validation
             position_size = round_to_precision_decimal(
-                base_size *
-                confidence_multiplier *
-                arbitrage_multiplier *
-                type_multiplier,
-                PRECISION_LEVELS["position"])
+                base_size * confidence_multiplier * arbitrage_multiplier * type_multiplier,
+                PRECISION_LEVELS["position"],
+            )
 
             # Apply minimum position size from constants
-            min_size = Decimal(
-                str(GLOBAL_MINIMUM_AMOUNTS.get("position", 0.001)))
+            min_size = Decimal(str(GLOBAL_MINIMUM_AMOUNTS.get("position", 0.001)))
             if position_size < min_size:
                 position_size = min_size
 
@@ -778,7 +734,7 @@ class ArbitrageOpportunity(BaseStrategy):
                 confidence=format_percentage(signal.confidence * 100),
                 arbitrage_type=arbitrage_type,
                 type_multiplier=type_multiplier,
-                final_size=format_currency(position_size)
+                final_size=format_currency(position_size),
             )
 
             return position_size
@@ -788,11 +744,9 @@ class ArbitrageOpportunity(BaseStrategy):
                 "Arbitrage scanner position size calculation failed",
                 strategy=self.name,
                 signal_confidence=signal.confidence if signal else None,
-                error=str(e)
+                error=str(e),
             )
-            raise ArbitrageError(
-                f"Arbitrage scanner position size calculation failed: {
-                    str(e)}")
+            raise ArbitrageError(f"Arbitrage scanner position size calculation failed: {e!s}")
 
     async def should_exit(self, position: Position, data: MarketData) -> bool:
         """
@@ -812,10 +766,8 @@ class ArbitrageOpportunity(BaseStrategy):
 
             # Check execution timeout
             metadata = position.metadata
-            execution_timeout = metadata.get(
-                "execution_timeout", self.max_execution_time)
-            position_age = (
-                datetime.now() - position.timestamp).total_seconds() * 1000
+            execution_timeout = metadata.get("execution_timeout", self.max_execution_time)
+            position_age = (datetime.now() - position.timestamp).total_seconds() * 1000
 
             if position_age > execution_timeout:
                 logger.info(
@@ -823,7 +775,7 @@ class ArbitrageOpportunity(BaseStrategy):
                     strategy=self.name,
                     symbol=position.symbol,
                     age_ms=position_age,
-                    timeout_ms=execution_timeout
+                    timeout_ms=execution_timeout,
                 )
                 return True
 
@@ -861,15 +813,13 @@ class ArbitrageOpportunity(BaseStrategy):
                 "Exit condition check failed",
                 strategy=self.name,
                 symbol=position.symbol,
-                error=str(e)
+                error=str(e),
             )
             return False
 
     async def _get_current_cross_exchange_spread(
-            self,
-            symbol: str,
-            buy_exchange: str,
-            sell_exchange: str) -> Decimal:
+        self, symbol: str, buy_exchange: str, sell_exchange: str
+    ) -> Decimal:
         """
         Get current cross-exchange spread.
 
@@ -886,12 +836,16 @@ class ArbitrageOpportunity(BaseStrategy):
             sell_price = None
 
             # Get current prices
-            if (buy_exchange in self.exchange_prices and
-                    symbol in self.exchange_prices[buy_exchange]):
+            if (
+                buy_exchange in self.exchange_prices
+                and symbol in self.exchange_prices[buy_exchange]
+            ):
                 buy_price = self.exchange_prices[buy_exchange][symbol].ask
 
-            if (sell_exchange in self.exchange_prices and
-                    symbol in self.exchange_prices[sell_exchange]):
+            if (
+                sell_exchange in self.exchange_prices
+                and symbol in self.exchange_prices[sell_exchange]
+            ):
                 sell_price = self.exchange_prices[sell_exchange][symbol].bid
 
             if buy_price and sell_price:
@@ -904,12 +858,11 @@ class ArbitrageOpportunity(BaseStrategy):
                 "Cross-exchange spread calculation failed",
                 strategy=self.name,
                 symbol=symbol,
-                error=str(e)
+                error=str(e),
             )
             return Decimal("0")
 
-    async def _check_triangular_path(
-            self, path: List[str]) -> Optional[Signal]:
+    async def _check_triangular_path(self, path: list[str]) -> Signal | None:
         """
         Check if triangular arbitrage opportunity still exists.
 
@@ -945,8 +898,7 @@ class ArbitrageOpportunity(BaseStrategy):
             profit_percentage = (profit / start_usdt) * 100
 
             # Account for fees and slippage
-            total_fees = self._calculate_triangular_fees(
-                btc_usdt_rate, eth_btc_rate, eth_usdt_rate)
+            total_fees = self._calculate_triangular_fees(btc_usdt_rate, eth_btc_rate, eth_usdt_rate)
             net_profit = profit - total_fees
             net_profit_percentage = (net_profit / start_usdt) * 100
 
@@ -961,23 +913,19 @@ class ArbitrageOpportunity(BaseStrategy):
                     metadata={
                         "arbitrage_type": "triangular",
                         "path": path,
-                        "net_profit_percentage": float(net_profit_percentage)
-                    }
+                        "net_profit_percentage": float(net_profit_percentage),
+                    },
                 )
 
             return None
 
         except Exception as e:
             logger.error(
-                "Triangular path check failed",
-                strategy=self.name,
-                path=path,
-                error=str(e)
+                "Triangular path check failed", strategy=self.name, path=path, error=str(e)
             )
             return None
 
-    async def post_trade_processing(
-            self, trade_result: Dict[str, Any]) -> None:
+    async def post_trade_processing(self, trade_result: dict[str, Any]) -> None:
         """
         Process completed arbitrage opportunity trade.
 
@@ -1013,12 +961,8 @@ class ArbitrageOpportunity(BaseStrategy):
                 symbol=trade_result.get("symbol"),
                 arbitrage_type=trade_result.get("arbitrage_type"),
                 pnl=float(trade_result.get("pnl", 0)),
-                execution_time_ms=trade_result.get("execution_time_ms", 0)
+                execution_time_ms=trade_result.get("execution_time_ms", 0),
             )
 
         except Exception as e:
-            logger.error(
-                "Post-trade processing failed",
-                strategy=self.name,
-                error=str(e)
-            )
+            logger.error("Post-trade processing failed", strategy=self.name, error=str(e))

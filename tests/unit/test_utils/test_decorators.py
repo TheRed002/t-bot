@@ -6,19 +6,30 @@ they work correctly with both sync and async functions, handle errors properly,
 and provide the expected functionality.
 """
 
-import pytest
 import asyncio
 import time
-from unittest.mock import patch, MagicMock
-from decimal import Decimal
 
+import pytest
+
+from src.core.exceptions import TimeoutError, ValidationError
 from src.utils.decorators import (
-    time_execution, memory_usage, cpu_usage, retry, circuit_breaker,
-    timeout, cache_result, redis_cache, ttl_cache, log_calls,
-    log_performance, log_errors, validate_input, validate_output,
-    type_check, rate_limit, api_throttle
+    api_throttle,
+    cache_result,
+    circuit_breaker,
+    cpu_usage,
+    log_calls,
+    log_errors,
+    log_performance,
+    memory_usage,
+    rate_limit,
+    redis_cache,
+    retry,
+    time_execution,
+    timeout,
+    type_check,
+    validate_input,
+    validate_output,
 )
-from src.core.exceptions import ValidationError, TimeoutError
 
 
 class TestTimeExecution:
@@ -27,6 +38,7 @@ class TestTimeExecution:
     @pytest.mark.asyncio
     async def test_time_execution_async_success(self):
         """Test time_execution with successful async function."""
+
         @time_execution
         async def test_func():
             await asyncio.sleep(0.01)
@@ -38,6 +50,7 @@ class TestTimeExecution:
     @pytest.mark.asyncio
     async def test_time_execution_async_error(self):
         """Test time_execution with async function that raises error."""
+
         @time_execution
         async def test_func():
             await asyncio.sleep(0.01)
@@ -48,6 +61,7 @@ class TestTimeExecution:
 
     def test_time_execution_sync_success(self):
         """Test time_execution with successful sync function."""
+
         @time_execution
         def test_func():
             time.sleep(0.01)
@@ -58,6 +72,7 @@ class TestTimeExecution:
 
     def test_time_execution_sync_error(self):
         """Test time_execution with sync function that raises error."""
+
         @time_execution
         def test_func():
             time.sleep(0.01)
@@ -73,6 +88,7 @@ class TestMemoryUsage:
     @pytest.mark.asyncio
     async def test_memory_usage_async(self):
         """Test memory_usage with async function."""
+
         @memory_usage
         async def test_func():
             await asyncio.sleep(0.01)
@@ -83,6 +99,7 @@ class TestMemoryUsage:
 
     def test_memory_usage_sync(self):
         """Test memory_usage with sync function."""
+
         @memory_usage
         def test_func():
             time.sleep(0.01)
@@ -98,6 +115,7 @@ class TestCpuUsage:
     @pytest.mark.asyncio
     async def test_cpu_usage_async(self):
         """Test cpu_usage with async function."""
+
         @cpu_usage
         async def test_func():
             await asyncio.sleep(0.01)
@@ -108,6 +126,7 @@ class TestCpuUsage:
 
     def test_cpu_usage_sync(self):
         """Test cpu_usage with sync function."""
+
         @cpu_usage
         def test_func():
             time.sleep(0.01)
@@ -123,6 +142,7 @@ class TestRetry:
     @pytest.mark.asyncio
     async def test_retry_async_success_first_try(self):
         """Test retry with async function that succeeds on first try."""
+
         @retry(max_attempts=3)
         async def test_func():
             return "success"
@@ -150,6 +170,7 @@ class TestRetry:
     @pytest.mark.asyncio
     async def test_retry_async_max_attempts_exceeded(self):
         """Test retry with async function that always fails."""
+
         @retry(max_attempts=2, base_delay=0.01)
         async def test_func():
             raise ValueError("permanent error")
@@ -159,6 +180,7 @@ class TestRetry:
 
     def test_retry_sync_success_first_try(self):
         """Test retry with sync function that succeeds on first try."""
+
         @retry(max_attempts=3)
         def test_func():
             return "success"
@@ -189,6 +211,7 @@ class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_breaker_async_success(self):
         """Test circuit_breaker with async function that succeeds."""
+
         @circuit_breaker(failure_threshold=2, recovery_timeout=0.1)
         async def test_func():
             return "success"
@@ -199,6 +222,7 @@ class TestCircuitBreaker:
     @pytest.mark.asyncio
     async def test_circuit_breaker_async_opens_circuit(self):
         """Test circuit_breaker with async function that opens circuit."""
+
         @circuit_breaker(failure_threshold=2, recovery_timeout=0.1)
         async def test_func():
             raise ValueError("test error")
@@ -217,6 +241,7 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_sync_success(self):
         """Test circuit_breaker with sync function that succeeds."""
+
         @circuit_breaker(failure_threshold=2, recovery_timeout=0.1)
         def test_func():
             return "success"
@@ -226,6 +251,7 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_sync_opens_circuit(self):
         """Test circuit_breaker with sync function that opens circuit."""
+
         @circuit_breaker(failure_threshold=2, recovery_timeout=0.1)
         def test_func():
             raise ValueError("test error")
@@ -249,6 +275,7 @@ class TestTimeout:
     @pytest.mark.asyncio
     async def test_timeout_async_success(self):
         """Test timeout with async function that completes in time."""
+
         @timeout(1.0)
         async def test_func():
             await asyncio.sleep(0.01)
@@ -260,6 +287,7 @@ class TestTimeout:
     @pytest.mark.asyncio
     async def test_timeout_async_timeout(self):
         """Test timeout with async function that times out."""
+
         @timeout(0.01)
         async def test_func():
             await asyncio.sleep(0.1)
@@ -270,6 +298,7 @@ class TestTimeout:
 
     def test_timeout_sync_warning(self):
         """Test timeout with sync function (should log warning)."""
+
         @timeout(1.0)
         def test_func():
             return "success"
@@ -314,6 +343,7 @@ class TestCacheResult:
 
         # Clear any existing cache
         from src.utils.decorators import _cache, _cache_timestamps
+
         _cache.clear()
         _cache_timestamps.clear()
 
@@ -334,6 +364,7 @@ class TestRedisCache:
     @pytest.mark.asyncio
     async def test_redis_cache_async(self):
         """Test redis_cache with async function."""
+
         @redis_cache(ttl_seconds=1.0)
         async def test_func():
             return "success"
@@ -343,6 +374,7 @@ class TestRedisCache:
 
     def test_redis_cache_sync(self):
         """Test redis_cache with sync function."""
+
         @redis_cache(ttl_seconds=1.0)
         def test_func():
             return "success"
@@ -357,6 +389,7 @@ class TestLogCalls:
     @pytest.mark.asyncio
     async def test_log_calls_async_success(self):
         """Test log_calls with async function that succeeds."""
+
         @log_calls
         async def test_func():
             return "success"
@@ -367,6 +400,7 @@ class TestLogCalls:
     @pytest.mark.asyncio
     async def test_log_calls_async_error(self):
         """Test log_calls with async function that raises error."""
+
         @log_calls
         async def test_func():
             raise ValueError("test error")
@@ -376,6 +410,7 @@ class TestLogCalls:
 
     def test_log_calls_sync_success(self):
         """Test log_calls with sync function that succeeds."""
+
         @log_calls
         def test_func():
             return "success"
@@ -385,6 +420,7 @@ class TestLogCalls:
 
     def test_log_calls_sync_error(self):
         """Test log_calls with sync function that raises error."""
+
         @log_calls
         def test_func():
             raise ValueError("test error")
@@ -399,6 +435,7 @@ class TestLogPerformance:
     @pytest.mark.asyncio
     async def test_log_performance_async_success(self):
         """Test log_performance with async function that succeeds."""
+
         @log_performance
         async def test_func():
             await asyncio.sleep(0.01)
@@ -410,6 +447,7 @@ class TestLogPerformance:
     @pytest.mark.asyncio
     async def test_log_performance_async_error(self):
         """Test log_performance with async function that raises error."""
+
         @log_performance
         async def test_func():
             await asyncio.sleep(0.01)
@@ -420,6 +458,7 @@ class TestLogPerformance:
 
     def test_log_performance_sync_success(self):
         """Test log_performance with sync function that succeeds."""
+
         @log_performance
         def test_func():
             time.sleep(0.01)
@@ -430,6 +469,7 @@ class TestLogPerformance:
 
     def test_log_performance_sync_error(self):
         """Test log_performance with sync function that raises error."""
+
         @log_performance
         def test_func():
             time.sleep(0.01)
@@ -445,6 +485,7 @@ class TestLogErrors:
     @pytest.mark.asyncio
     async def test_log_errors_async_success(self):
         """Test log_errors with async function that succeeds."""
+
         @log_errors
         async def test_func():
             return "success"
@@ -455,6 +496,7 @@ class TestLogErrors:
     @pytest.mark.asyncio
     async def test_log_errors_async_error(self):
         """Test log_errors with async function that raises error."""
+
         @log_errors
         async def test_func():
             raise ValueError("test error")
@@ -464,6 +506,7 @@ class TestLogErrors:
 
     def test_log_errors_sync_success(self):
         """Test log_errors with sync function that succeeds."""
+
         @log_errors
         def test_func():
             return "success"
@@ -473,6 +516,7 @@ class TestLogErrors:
 
     def test_log_errors_sync_error(self):
         """Test log_errors with sync function that raises error."""
+
         @log_errors
         def test_func():
             raise ValueError("test error")
@@ -487,6 +531,7 @@ class TestValidateInput:
     @pytest.mark.asyncio
     async def test_validate_input_async_success(self):
         """Test validate_input with async function that passes validation."""
+
         def validation_func(*args, **kwargs):
             if len(args) > 0 and args[0] == "valid":
                 return True
@@ -502,6 +547,7 @@ class TestValidateInput:
     @pytest.mark.asyncio
     async def test_validate_input_async_validation_fails(self):
         """Test validate_input with async function that fails validation."""
+
         def validation_func(*args, **kwargs):
             raise ValidationError("Invalid input")
 
@@ -514,6 +560,7 @@ class TestValidateInput:
 
     def test_validate_input_sync_success(self):
         """Test validate_input with sync function that passes validation."""
+
         def validation_func(*args, **kwargs):
             if len(args) > 0 and args[0] == "valid":
                 return True
@@ -528,6 +575,7 @@ class TestValidateInput:
 
     def test_validate_input_sync_validation_fails(self):
         """Test validate_input with sync function that fails validation."""
+
         def validation_func(*args, **kwargs):
             raise ValidationError("Invalid input")
 
@@ -545,6 +593,7 @@ class TestValidateOutput:
     @pytest.mark.asyncio
     async def test_validate_output_async_success(self):
         """Test validate_output with async function that passes validation."""
+
         def validation_func(result):
             if result == "valid_result":
                 return True
@@ -560,6 +609,7 @@ class TestValidateOutput:
     @pytest.mark.asyncio
     async def test_validate_output_async_validation_fails(self):
         """Test validate_output with async function that fails validation."""
+
         def validation_func(result):
             raise ValidationError("Invalid output")
 
@@ -572,6 +622,7 @@ class TestValidateOutput:
 
     def test_validate_output_sync_success(self):
         """Test validate_output with sync function that passes validation."""
+
         def validation_func(result):
             if result == "valid_result":
                 return True
@@ -586,6 +637,7 @@ class TestValidateOutput:
 
     def test_validate_output_sync_validation_fails(self):
         """Test validate_output with sync function that fails validation."""
+
         def validation_func(result):
             raise ValidationError("Invalid output")
 
@@ -603,6 +655,7 @@ class TestTypeCheck:
     @pytest.mark.asyncio
     async def test_type_check_async_success(self):
         """Test type_check with async function that has correct types."""
+
         @type_check
         async def test_func(value: str) -> str:
             return f"processed_{value}"
@@ -613,6 +666,7 @@ class TestTypeCheck:
     @pytest.mark.asyncio
     async def test_type_check_async_type_mismatch(self):
         """Test type_check with async function that has type mismatch."""
+
         @type_check
         async def test_func(value: str) -> str:
             return f"processed_{value}"
@@ -622,6 +676,7 @@ class TestTypeCheck:
 
     def test_type_check_sync_success(self):
         """Test type_check with sync function that has correct types."""
+
         @type_check
         def test_func(value: str) -> str:
             return f"processed_{value}"
@@ -631,6 +686,7 @@ class TestTypeCheck:
 
     def test_type_check_sync_type_mismatch(self):
         """Test type_check with sync function that has type mismatch."""
+
         @type_check
         def test_func(value: str) -> str:
             return f"processed_{value}"
@@ -645,6 +701,7 @@ class TestRateLimit:
     @pytest.mark.asyncio
     async def test_rate_limit_async_success(self):
         """Test rate_limit with async function that doesn't exceed limits."""
+
         @rate_limit(max_calls=5, time_window=1.0)
         async def test_func():
             return "success"
@@ -660,6 +717,7 @@ class TestRateLimit:
     @pytest.mark.asyncio
     async def test_rate_limit_async_exceeds_limit(self):
         """Test rate_limit with async function that exceeds limits."""
+
         @rate_limit(max_calls=2, time_window=1.0)
         async def test_func():
             return "success"
@@ -676,6 +734,7 @@ class TestRateLimit:
 
     def test_rate_limit_sync_success(self):
         """Test rate_limit with sync function that doesn't exceed limits."""
+
         @rate_limit(max_calls=5, time_window=1.0)
         def test_func():
             return "success"
@@ -690,6 +749,7 @@ class TestRateLimit:
 
     def test_rate_limit_sync_exceeds_limit(self):
         """Test rate_limit with sync function that exceeds limits."""
+
         @rate_limit(max_calls=2, time_window=1.0)
         def test_func():
             return "success"
@@ -711,6 +771,7 @@ class TestApiThrottle:
     @pytest.mark.asyncio
     async def test_api_throttle_async(self):
         """Test api_throttle with async function."""
+
         @api_throttle(max_calls=5, time_window=1.0)
         async def test_func():
             return "success"
@@ -720,6 +781,7 @@ class TestApiThrottle:
 
     def test_api_throttle_sync(self):
         """Test api_throttle with sync function."""
+
         @api_throttle(max_calls=5, time_window=1.0)
         def test_func():
             return "success"

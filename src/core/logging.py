@@ -12,19 +12,19 @@ Features:
 - Log rotation and retention policies
 """
 
-import structlog
+import contextvars
+import functools
 import logging
 import logging.handlers
-import uuid
-import time
-import functools
-from typing import Optional, Dict, Any, Callable, cast
-from contextlib import contextmanager
-from datetime import datetime, timezone
-import os
 import sys
-import contextvars
+import time
+import uuid
+from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, cast
+
+import structlog
 
 
 class CorrelationContext:
@@ -38,7 +38,7 @@ class CorrelationContext:
     """
 
     def __init__(self):
-        self.correlation_id: Optional[str] = None
+        self.correlation_id: str | None = None
         self._context = contextvars.ContextVar("correlation_id", default=None)
 
     def set_correlation_id(self, correlation_id: str) -> None:
@@ -46,7 +46,7 @@ class CorrelationContext:
         self.correlation_id = correlation_id
         self._context.set(correlation_id)
 
-    def get_correlation_id(self) -> Optional[str]:
+    def get_correlation_id(self) -> str | None:
         """Get current correlation ID."""
         return self._context.get()
 
@@ -55,7 +55,7 @@ class CorrelationContext:
         return str(uuid.uuid4())
 
     @contextmanager
-    def correlation_context(self, correlation_id: Optional[str] = None):
+    def correlation_context(self, correlation_id: str | None = None):
         """Context manager for correlation ID tracking."""
         if correlation_id is None:
             correlation_id = self.generate_correlation_id()
@@ -67,22 +67,24 @@ class CorrelationContext:
             self._context.reset(token)
 
 
-def _add_correlation_id(logger: Any, method_name: str,
-                        event_dict: Dict[str, Any]) -> Dict[str, Any]:
+def _add_correlation_id(
+    logger: Any, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     """Add correlation ID to event dict."""
     if event_dict is not None:
-        event_dict.update(
-            correlation_id=correlation_context.get_correlation_id())
+        event_dict.update(correlation_id=correlation_context.get_correlation_id())
         return event_dict
     return {"correlation_id": correlation_context.get_correlation_id()}
 
 
-def _safe_unicode_decoder(logger: Any, method_name: str,
-                          event_dict: Dict[str, Any]) -> Dict[str, Any]:
+def _safe_unicode_decoder(
+    logger: Any, method_name: str, event_dict: dict[str, Any]
+) -> dict[str, Any]:
     """Safe unicode decoder for event dict."""
     if event_dict is not None:
-        return cast(Dict[str, Any], structlog.processors.UnicodeDecoder()(
-            logger, method_name, event_dict))
+        return cast(
+            dict[str, Any], structlog.processors.UnicodeDecoder()(logger, method_name, event_dict)
+        )
     return {}
 
 
@@ -93,10 +95,10 @@ correlation_context = CorrelationContext()
 def setup_logging(
     environment: str = "development",
     log_level: str = "INFO",
-    log_file: Optional[str] = None,
+    log_file: str | None = None,
     max_bytes: int = 10 * 1024 * 1024,  # 10MB
     backup_count: int = 5,
-    retention_days: int = 30
+    retention_days: int = 30,
 ) -> None:
     """Setup structured logging configuration with rotation and retention.
 
@@ -146,10 +148,7 @@ def setup_logging(
 
         # Setup rotating file handler
         file_handler = logging.handlers.RotatingFileHandler(
-            filename=log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding='utf-8'
+            filename=log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
         )
 
         # Setup console handler
@@ -159,7 +158,7 @@ def setup_logging(
         logging.basicConfig(
             format="%(message)s",
             level=getattr(logging, log_level.upper()),
-            handlers=[file_handler, console_handler]
+            handlers=[file_handler, console_handler],
         )
 
         # Clean up old log files based on retention policy
@@ -195,6 +194,7 @@ def log_performance(func: Callable) -> Callable:
     Returns:
         Decorated function with performance logging
     """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         logger = get_logger(func.__module__)
@@ -246,6 +246,7 @@ def log_async_performance(func: Callable) -> Callable:
     Returns:
         Decorated async function with performance logging
     """
+
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
         logger = get_logger(func.__module__)
@@ -301,17 +302,27 @@ class SecureLogger:
     def __init__(self, logger: structlog.BoundLogger):
         self.logger = logger
         self.sensitive_fields = {
-            'password', 'secret', 'key', 'token', 'api_key', 'private_key',
-            'access_token', 'refresh_token', 'authorization', 'auth'
+            "password",
+            "secret",
+            "key",
+            "token",
+            "api_key",
+            "private_key",
+            "access_token",
+            "refresh_token",
+            "authorization",
+            "auth",
         }
 
-    def _sanitize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Remove sensitive data from logging."""
         sanitized = {}
         for key, value in data.items():
             if isinstance(value, dict):
                 sanitized[key] = self._sanitize_data(value)
-            elif isinstance(value, str) and any(field in key.lower() for field in self.sensitive_fields):
+            elif isinstance(value, str) and any(
+                field in key.lower() for field in self.sensitive_fields
+            ):
                 sanitized[key] = "***REDACTED***"
             else:
                 sanitized[key] = value
@@ -407,10 +418,7 @@ class PerformanceMonitor:
                 )
 
 
-def _cleanup_old_logs(
-        log_dir: Path,
-        log_name: str,
-        retention_days: int) -> None:
+def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None:
     """Clean up old log files based on retention policy.
 
     Args:
@@ -419,7 +427,6 @@ def _cleanup_old_logs(
         retention_days: Number of days to retain log files
     """
     import time
-    from datetime import datetime, timedelta
 
     if not log_dir.exists():
         return
@@ -432,14 +439,11 @@ def _cleanup_old_logs(
             if log_file.stat().st_mtime < cutoff_time:
                 log_file.unlink()
                 print(f"Removed old log file: {log_file}")
-        except (OSError, IOError) as e:
+        except OSError as e:
             print(f"Failed to remove old log file {log_file}: {e}")
 
 
-def setup_production_logging(
-    log_dir: str = "logs",
-    app_name: str = "trading-bot"
-) -> None:
+def setup_production_logging(log_dir: str = "logs", app_name: str = "trading-bot") -> None:
     """Setup production logging with file rotation and retention.
 
     Args:
@@ -453,7 +457,7 @@ def setup_production_logging(
         log_file=log_file,
         max_bytes=50 * 1024 * 1024,  # 50MB per file
         backup_count=10,  # Keep 10 backup files
-        retention_days=90  # Retain for 90 days
+        retention_days=90,  # Retain for 90 days
     )
 
 
@@ -462,7 +466,7 @@ def setup_development_logging() -> None:
     setup_logging(
         environment="development",
         log_level="DEBUG",
-        log_file=None  # Console only for development
+        log_file=None,  # Console only for development
     )
 
 

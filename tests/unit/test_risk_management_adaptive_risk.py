@@ -5,17 +5,17 @@ This module tests the AdaptiveRiskManager class and related functionality
 for dynamic risk parameter adjustment.
 """
 
-import pytest
-import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
-from typing import List, Dict, Any
+
+import pytest
+
+from src.core.exceptions import RiskManagementError, ValidationError
+from src.core.types import MarketRegime, OrderSide, Position, Signal, SignalDirection
 
 # Import the modules to test
 from src.risk_management.adaptive_risk import AdaptiveRiskManager
 from src.risk_management.regime_detection import MarketRegimeDetector
-from src.core.types import MarketData, MarketRegime, Position, Signal, SignalDirection, OrderSide
-from src.core.exceptions import RiskManagementError, ValidationError
 
 
 class TestAdaptiveRiskManager:
@@ -25,21 +25,21 @@ class TestAdaptiveRiskManager:
     def config(self):
         """Test configuration for adaptive risk manager."""
         return {
-            'base_position_size_pct': 0.02,  # 2%
-            'base_stop_loss_pct': 0.02,      # 2%
-            'base_take_profit_pct': 0.04,    # 4%
-            'momentum_window': 20,
-            'momentum_threshold': 0.1
+            "base_position_size_pct": 0.02,  # 2%
+            "base_stop_loss_pct": 0.02,  # 2%
+            "base_take_profit_pct": 0.04,  # 4%
+            "momentum_window": 20,
+            "momentum_threshold": 0.1,
         }
 
     @pytest.fixture
     def regime_detector(self):
         """Create a regime detector instance for testing."""
         detector_config = {
-            'volatility_window': 20,
-            'trend_window': 50,
-            'correlation_window': 30,
-            'regime_change_threshold': 0.7
+            "volatility_window": 20,
+            "trend_window": 50,
+            "correlation_window": 30,
+            "regime_change_threshold": 0.7,
         }
         return MarketRegimeDetector(detector_config)
 
@@ -57,7 +57,7 @@ class TestAdaptiveRiskManager:
             timestamp=datetime.now(),
             symbol="BTCUSDT",
             strategy_name="test_strategy",
-            metadata={}
+            metadata={},
         )
 
     @pytest.fixture
@@ -70,7 +70,7 @@ class TestAdaptiveRiskManager:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
     @pytest.fixture
@@ -84,7 +84,7 @@ class TestAdaptiveRiskManager:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             Position(
                 symbol="ETHUSDT",
@@ -93,7 +93,7 @@ class TestAdaptiveRiskManager:
                 current_price=Decimal("3100"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             Position(
                 symbol="ADAUSDT",
@@ -102,8 +102,8 @@ class TestAdaptiveRiskManager:
                 current_price=Decimal("1.6"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         ]
 
     def test_initialization(self, config, regime_detector):
@@ -124,7 +124,8 @@ class TestAdaptiveRiskManager:
 
     @pytest.mark.asyncio
     async def test_calculate_adaptive_position_size_low_volatility(
-            self, adaptive_risk_manager, sample_signal):
+        self, adaptive_risk_manager, sample_signal
+    ):
         """Test adaptive position size calculation for low volatility regime."""
         portfolio_value = Decimal("10000")
 
@@ -143,7 +144,8 @@ class TestAdaptiveRiskManager:
 
     @pytest.mark.asyncio
     async def test_calculate_adaptive_position_size_high_volatility(
-            self, adaptive_risk_manager, sample_signal):
+        self, adaptive_risk_manager, sample_signal
+    ):
         """Test adaptive position size calculation for high volatility regime."""
         portfolio_value = Decimal("10000")
 
@@ -161,7 +163,8 @@ class TestAdaptiveRiskManager:
 
     @pytest.mark.asyncio
     async def test_calculate_adaptive_position_size_crisis(
-            self, adaptive_risk_manager, sample_signal):
+        self, adaptive_risk_manager, sample_signal
+    ):
         """Test adaptive position size calculation for crisis regime."""
         portfolio_value = Decimal("10000")
 
@@ -179,7 +182,8 @@ class TestAdaptiveRiskManager:
 
     @pytest.mark.asyncio
     async def test_calculate_adaptive_stop_loss_low_volatility(
-            self, adaptive_risk_manager, sample_signal):
+        self, adaptive_risk_manager, sample_signal
+    ):
         """Test adaptive stop loss calculation for low volatility regime."""
         entry_price = Decimal("50000")
 
@@ -195,7 +199,8 @@ class TestAdaptiveRiskManager:
 
     @pytest.mark.asyncio
     async def test_calculate_adaptive_stop_loss_high_volatility(
-            self, adaptive_risk_manager, sample_signal):
+        self, adaptive_risk_manager, sample_signal
+    ):
         """Test adaptive stop loss calculation for high volatility regime."""
         entry_price = Decimal("50000")
 
@@ -209,8 +214,7 @@ class TestAdaptiveRiskManager:
         assert stop_loss < base_stop_loss  # Wider stop (lower price for buy)
 
     @pytest.mark.asyncio
-    async def test_calculate_adaptive_stop_loss_sell_signal(
-            self, adaptive_risk_manager):
+    async def test_calculate_adaptive_stop_loss_sell_signal(self, adaptive_risk_manager):
         """Test adaptive stop loss calculation for sell signal."""
         sell_signal = Signal(
             direction=SignalDirection.SELL,
@@ -218,7 +222,7 @@ class TestAdaptiveRiskManager:
             timestamp=datetime.now(),
             symbol="BTCUSDT",
             strategy_name="test_strategy",
-            metadata={}
+            metadata={},
         )
         entry_price = Decimal("50000")
 
@@ -231,7 +235,8 @@ class TestAdaptiveRiskManager:
 
     @pytest.mark.asyncio
     async def test_calculate_adaptive_take_profit_low_volatility(
-            self, adaptive_risk_manager, sample_signal):
+        self, adaptive_risk_manager, sample_signal
+    ):
         """Test adaptive take profit calculation for low volatility regime."""
         entry_price = Decimal("50000")
 
@@ -241,16 +246,15 @@ class TestAdaptiveRiskManager:
 
         # Should be slightly higher due to low volatility multiplier (1.1)
         base_take_profit = entry_price * Decimal("0.04")
-        expected_take_profit = entry_price * \
-            (1 + Decimal("0.04") * Decimal("1.1"))
+        expected_take_profit = entry_price * (1 + Decimal("0.04") * Decimal("1.1"))
 
         assert take_profit > entry_price
-        assert take_profit > expected_take_profit * \
-            Decimal("0.9")  # Approximate
+        assert take_profit > expected_take_profit * Decimal("0.9")  # Approximate
 
     @pytest.mark.asyncio
     async def test_calculate_adaptive_take_profit_high_volatility(
-            self, adaptive_risk_manager, sample_signal):
+        self, adaptive_risk_manager, sample_signal
+    ):
         """Test adaptive take profit calculation for high volatility regime."""
         entry_price = Decimal("50000")
 
@@ -260,21 +264,18 @@ class TestAdaptiveRiskManager:
 
         # Should be higher due to high volatility multiplier (1.2)
         base_take_profit = entry_price * Decimal("0.04")
-        expected_take_profit = entry_price * \
-            (1 + Decimal("0.04") * Decimal("1.2"))
+        expected_take_profit = entry_price * (1 + Decimal("0.04") * Decimal("1.2"))
 
         assert take_profit > entry_price
-        assert take_profit > expected_take_profit * \
-            Decimal("0.9")  # Approximate
+        assert take_profit > expected_take_profit * Decimal("0.9")  # Approximate
 
     @pytest.mark.asyncio
-    async def test_calculate_adaptive_portfolio_limits_low_volatility(
-            self, adaptive_risk_manager):
+    async def test_calculate_adaptive_portfolio_limits_low_volatility(self, adaptive_risk_manager):
         """Test adaptive portfolio limits for low volatility regime."""
         base_limits = {
-            'max_positions': 10,
-            'max_portfolio_exposure': 0.95,
-            'max_correlation_exposure': 0.5
+            "max_positions": 10,
+            "max_portfolio_exposure": 0.95,
+            "max_correlation_exposure": 0.5,
         }
 
         adaptive_limits = await adaptive_risk_manager.calculate_adaptive_portfolio_limits(
@@ -282,17 +283,16 @@ class TestAdaptiveRiskManager:
         )
 
         # Should allow more positions due to low volatility multiplier (1.1)
-        assert adaptive_limits['max_positions'] > base_limits['max_positions']
-        assert adaptive_limits['max_portfolio_exposure'] > base_limits['max_portfolio_exposure']
+        assert adaptive_limits["max_positions"] > base_limits["max_positions"]
+        assert adaptive_limits["max_portfolio_exposure"] > base_limits["max_portfolio_exposure"]
 
     @pytest.mark.asyncio
-    async def test_calculate_adaptive_portfolio_limits_high_volatility(
-            self, adaptive_risk_manager):
+    async def test_calculate_adaptive_portfolio_limits_high_volatility(self, adaptive_risk_manager):
         """Test adaptive portfolio limits for high volatility regime."""
         base_limits = {
-            'max_positions': 10,
-            'max_portfolio_exposure': 0.95,
-            'max_correlation_exposure': 0.5
+            "max_positions": 10,
+            "max_portfolio_exposure": 0.95,
+            "max_correlation_exposure": 0.5,
         }
 
         adaptive_limits = await adaptive_risk_manager.calculate_adaptive_portfolio_limits(
@@ -300,17 +300,16 @@ class TestAdaptiveRiskManager:
         )
 
         # Should allow fewer positions due to high volatility multiplier (0.8)
-        assert adaptive_limits['max_positions'] < base_limits['max_positions']
-        assert adaptive_limits['max_portfolio_exposure'] < base_limits['max_portfolio_exposure']
+        assert adaptive_limits["max_positions"] < base_limits["max_positions"]
+        assert adaptive_limits["max_portfolio_exposure"] < base_limits["max_portfolio_exposure"]
 
     @pytest.mark.asyncio
-    async def test_calculate_adaptive_portfolio_limits_crisis(
-            self, adaptive_risk_manager):
+    async def test_calculate_adaptive_portfolio_limits_crisis(self, adaptive_risk_manager):
         """Test adaptive portfolio limits for crisis regime."""
         base_limits = {
-            'max_positions': 10,
-            'max_portfolio_exposure': 0.95,
-            'max_correlation_exposure': 0.5
+            "max_positions": 10,
+            "max_portfolio_exposure": 0.95,
+            "max_correlation_exposure": 0.5,
         }
 
         adaptive_limits = await adaptive_risk_manager.calculate_adaptive_portfolio_limits(
@@ -318,135 +317,131 @@ class TestAdaptiveRiskManager:
         )
 
         # Should allow very few positions due to crisis multiplier (0.5)
-        assert adaptive_limits['max_positions'] < base_limits['max_positions']
-        assert adaptive_limits['max_portfolio_exposure'] < base_limits['max_portfolio_exposure']
+        assert adaptive_limits["max_positions"] < base_limits["max_positions"]
+        assert adaptive_limits["max_portfolio_exposure"] < base_limits["max_portfolio_exposure"]
 
     @pytest.mark.asyncio
     async def test_run_stress_test_market_crash(
-            self, adaptive_risk_manager, sample_portfolio_positions):
+        self, adaptive_risk_manager, sample_portfolio_positions
+    ):
         """Test stress test for market crash scenario."""
         results = await adaptive_risk_manager.run_stress_test(
-            sample_portfolio_positions, 'market_crash'
+            sample_portfolio_positions, "market_crash"
         )
 
-        assert results['scenario'] == 'market_crash'
-        assert results['initial_value'] > 0
+        assert results["scenario"] == "market_crash"
+        assert results["initial_value"] > 0
         # Market crash
-        assert results['stressed_value'] < results['initial_value']
-        assert results['value_change'] < 0  # Negative change
-        assert results['value_change_pct'] < 0  # Negative percentage
-        assert results['max_drawdown'] < 0  # Negative drawdown
-        assert results['positions_affected'] == 3
-        assert isinstance(results['timestamp'], datetime)
+        assert results["stressed_value"] < results["initial_value"]
+        assert results["value_change"] < 0  # Negative change
+        assert results["value_change_pct"] < 0  # Negative percentage
+        assert results["max_drawdown"] < 0  # Negative drawdown
+        assert results["positions_affected"] == 3
+        assert isinstance(results["timestamp"], datetime)
 
     @pytest.mark.asyncio
     async def test_run_stress_test_flash_crash(
-            self, adaptive_risk_manager, sample_portfolio_positions):
+        self, adaptive_risk_manager, sample_portfolio_positions
+    ):
         """Test stress test for flash crash scenario."""
         results = await adaptive_risk_manager.run_stress_test(
-            sample_portfolio_positions, 'flash_crash'
+            sample_portfolio_positions, "flash_crash"
         )
 
-        assert results['scenario'] == 'flash_crash'
-        assert results['initial_value'] > 0
+        assert results["scenario"] == "flash_crash"
+        assert results["initial_value"] > 0
         # Flash crash
-        assert results['stressed_value'] < results['initial_value']
-        assert results['value_change'] < 0  # Negative change
-        assert results['value_change_pct'] < 0  # Negative percentage
-        assert results['max_drawdown'] < 0  # Negative drawdown
+        assert results["stressed_value"] < results["initial_value"]
+        assert results["value_change"] < 0  # Negative change
+        assert results["value_change_pct"] < 0  # Negative percentage
+        assert results["max_drawdown"] < 0  # Negative drawdown
 
     @pytest.mark.asyncio
     async def test_run_stress_test_volatility_spike(
-            self, adaptive_risk_manager, sample_portfolio_positions):
+        self, adaptive_risk_manager, sample_portfolio_positions
+    ):
         """Test stress test for volatility spike scenario."""
         results = await adaptive_risk_manager.run_stress_test(
-            sample_portfolio_positions, 'volatility_spike'
+            sample_portfolio_positions, "volatility_spike"
         )
 
-        assert results['scenario'] == 'volatility_spike'
-        assert results['initial_value'] > 0
+        assert results["scenario"] == "volatility_spike"
+        assert results["initial_value"] > 0
         # Volatility spike
-        assert results['stressed_value'] < results['initial_value']
-        assert results['value_change'] < 0  # Negative change
-        assert results['value_change_pct'] < 0  # Negative percentage
-        assert results['max_drawdown'] < 0  # Negative drawdown
+        assert results["stressed_value"] < results["initial_value"]
+        assert results["value_change"] < 0  # Negative change
+        assert results["value_change_pct"] < 0  # Negative percentage
+        assert results["max_drawdown"] < 0  # Negative drawdown
 
     @pytest.mark.asyncio
     async def test_run_stress_test_unknown_scenario(
-            self, adaptive_risk_manager, sample_portfolio_positions):
+        self, adaptive_risk_manager, sample_portfolio_positions
+    ):
         """Test stress test with unknown scenario."""
         with pytest.raises(ValidationError):
             await adaptive_risk_manager.run_stress_test(
-                sample_portfolio_positions, 'unknown_scenario'
+                sample_portfolio_positions, "unknown_scenario"
             )
 
     @pytest.mark.asyncio
-    async def test_run_stress_test_empty_portfolio(
-            self, adaptive_risk_manager):
+    async def test_run_stress_test_empty_portfolio(self, adaptive_risk_manager):
         """Test stress test with empty portfolio."""
-        results = await adaptive_risk_manager.run_stress_test([], 'market_crash')
+        results = await adaptive_risk_manager.run_stress_test([], "market_crash")
 
-        assert results['scenario'] == 'market_crash'
-        assert results['initial_value'] == 0
-        assert results['stressed_value'] == 0
-        assert results['value_change'] == 0
-        assert results['value_change_pct'] == 0
-        assert results['max_drawdown'] == 0
-        assert results['positions_affected'] == 0
+        assert results["scenario"] == "market_crash"
+        assert results["initial_value"] == 0
+        assert results["stressed_value"] == 0
+        assert results["value_change"] == 0
+        assert results["value_change_pct"] == 0
+        assert results["max_drawdown"] == 0
+        assert results["positions_affected"] == 0
 
-    def test_get_adaptive_parameters_low_volatility(
-            self, adaptive_risk_manager):
+    def test_get_adaptive_parameters_low_volatility(self, adaptive_risk_manager):
         """Test getting adaptive parameters for low volatility regime."""
-        params = adaptive_risk_manager.get_adaptive_parameters(
-            MarketRegime.LOW_VOLATILITY)
+        params = adaptive_risk_manager.get_adaptive_parameters(MarketRegime.LOW_VOLATILITY)
 
-        assert params['position_size_multiplier'] == 1.2
-        assert params['stop_loss_multiplier'] == 0.8
-        assert params['take_profit_multiplier'] == 1.1
-        assert params['max_positions_multiplier'] == 1.1
-        assert params['regime'] == MarketRegime.LOW_VOLATILITY.value
+        assert params["position_size_multiplier"] == 1.2
+        assert params["stop_loss_multiplier"] == 0.8
+        assert params["take_profit_multiplier"] == 1.1
+        assert params["max_positions_multiplier"] == 1.1
+        assert params["regime"] == MarketRegime.LOW_VOLATILITY.value
 
-    def test_get_adaptive_parameters_high_volatility(
-            self, adaptive_risk_manager):
+    def test_get_adaptive_parameters_high_volatility(self, adaptive_risk_manager):
         """Test getting adaptive parameters for high volatility regime."""
-        params = adaptive_risk_manager.get_adaptive_parameters(
-            MarketRegime.HIGH_VOLATILITY)
+        params = adaptive_risk_manager.get_adaptive_parameters(MarketRegime.HIGH_VOLATILITY)
 
-        assert params['position_size_multiplier'] == 0.7
-        assert params['stop_loss_multiplier'] == 1.3
-        assert params['take_profit_multiplier'] == 1.2
-        assert params['max_positions_multiplier'] == 0.8
-        assert params['regime'] == MarketRegime.HIGH_VOLATILITY.value
+        assert params["position_size_multiplier"] == 0.7
+        assert params["stop_loss_multiplier"] == 1.3
+        assert params["take_profit_multiplier"] == 1.2
+        assert params["max_positions_multiplier"] == 0.8
+        assert params["regime"] == MarketRegime.HIGH_VOLATILITY.value
 
     def test_get_adaptive_parameters_crisis(self, adaptive_risk_manager):
         """Test getting adaptive parameters for crisis regime."""
-        params = adaptive_risk_manager.get_adaptive_parameters(
-            MarketRegime.CRISIS)
+        params = adaptive_risk_manager.get_adaptive_parameters(MarketRegime.CRISIS)
 
-        assert params['position_size_multiplier'] == 0.5
-        assert params['stop_loss_multiplier'] == 1.5
-        assert params['take_profit_multiplier'] == 1.5
-        assert params['max_positions_multiplier'] == 0.5
-        assert params['regime'] == MarketRegime.CRISIS.value
+        assert params["position_size_multiplier"] == 0.5
+        assert params["stop_loss_multiplier"] == 1.5
+        assert params["take_profit_multiplier"] == 1.5
+        assert params["max_positions_multiplier"] == 0.5
+        assert params["regime"] == MarketRegime.CRISIS.value
 
     def test_get_stress_test_scenarios(self, adaptive_risk_manager):
         """Test getting available stress test scenarios."""
         scenarios = adaptive_risk_manager.get_stress_test_scenarios()
 
         expected_scenarios = [
-            'market_crash',
-            'flash_crash',
-            'volatility_spike',
-            'correlation_breakdown']
+            "market_crash",
+            "flash_crash",
+            "volatility_spike",
+            "correlation_breakdown",
+        ]
         assert all(scenario in scenarios for scenario in expected_scenarios)
         assert len(scenarios) == len(expected_scenarios)
 
-    def test_update_regime_detector(
-            self,
-            adaptive_risk_manager,
-            regime_detector):
+    def test_update_regime_detector(self, adaptive_risk_manager, regime_detector):
         """Test updating regime detector reference."""
-        new_detector = MarketRegimeDetector({'volatility_window': 30})
+        new_detector = MarketRegimeDetector({"volatility_window": 30})
 
         adaptive_risk_manager.update_regime_detector(new_detector)
 
@@ -454,8 +449,7 @@ class TestAdaptiveRiskManager:
         assert adaptive_risk_manager.regime_detector != regime_detector
 
     @pytest.mark.asyncio
-    async def test_error_handling_position_size_calculation(
-            self, adaptive_risk_manager):
+    async def test_error_handling_position_size_calculation(self, adaptive_risk_manager):
         """Test error handling in position size calculation."""
         # Test with invalid signal
         invalid_signal = Signal(
@@ -464,7 +458,7 @@ class TestAdaptiveRiskManager:
             timestamp=datetime.now(),
             symbol="",  # Invalid symbol
             strategy_name="test_strategy",
-            metadata={}
+            metadata={},
         )
 
         with pytest.raises(RiskManagementError):
@@ -473,8 +467,7 @@ class TestAdaptiveRiskManager:
             )
 
     @pytest.mark.asyncio
-    async def test_error_handling_stop_loss_calculation(
-            self, adaptive_risk_manager):
+    async def test_error_handling_stop_loss_calculation(self, adaptive_risk_manager):
         """Test error handling in stop loss calculation."""
         # Test with invalid signal
         invalid_signal = Signal(
@@ -483,7 +476,7 @@ class TestAdaptiveRiskManager:
             timestamp=datetime.now(),
             symbol="",  # Invalid symbol
             strategy_name="test_strategy",
-            metadata={}
+            metadata={},
         )
 
         with pytest.raises(RiskManagementError):
@@ -492,8 +485,7 @@ class TestAdaptiveRiskManager:
             )
 
     @pytest.mark.asyncio
-    async def test_error_handling_take_profit_calculation(
-            self, adaptive_risk_manager):
+    async def test_error_handling_take_profit_calculation(self, adaptive_risk_manager):
         """Test error handling in take profit calculation."""
         # Test with invalid signal
         invalid_signal = Signal(
@@ -502,7 +494,7 @@ class TestAdaptiveRiskManager:
             timestamp=datetime.now(),
             symbol="",  # Invalid symbol
             strategy_name="test_strategy",
-            metadata={}
+            metadata={},
         )
 
         with pytest.raises(RiskManagementError):
@@ -511,12 +503,12 @@ class TestAdaptiveRiskManager:
             )
 
     @pytest.mark.asyncio
-    async def test_error_handling_portfolio_limits_calculation(
-            self, adaptive_risk_manager):
+    async def test_error_handling_portfolio_limits_calculation(self, adaptive_risk_manager):
         """Test error handling in portfolio limits calculation."""
         with pytest.raises(RiskManagementError):
             await adaptive_risk_manager.calculate_adaptive_portfolio_limits(
-                MarketRegime.MEDIUM_VOLATILITY, None  # Invalid base limits
+                MarketRegime.MEDIUM_VOLATILITY,
+                None,  # Invalid base limits
             )
 
     @pytest.mark.asyncio
@@ -524,7 +516,8 @@ class TestAdaptiveRiskManager:
         """Test error handling in stress test."""
         with pytest.raises(RiskManagementError):
             await adaptive_risk_manager.run_stress_test(
-                None, 'market_crash'  # Invalid positions
+                None,
+                "market_crash",  # Invalid positions
             )
 
     def test_configuration_validation(self):
@@ -551,41 +544,39 @@ class TestAdaptiveRiskManager:
             MarketRegime.CRISIS,
             MarketRegime.TRENDING_UP,
             MarketRegime.TRENDING_DOWN,
-            MarketRegime.RANGING
+            MarketRegime.RANGING,
         ]
 
         for regime in expected_regimes:
             assert regime in adaptive_risk_manager.regime_adjustments
             adj = adaptive_risk_manager.regime_adjustments[regime]
-            assert 'position_size_multiplier' in adj
-            assert 'stop_loss_multiplier' in adj
-            assert 'take_profit_multiplier' in adj
-            assert 'max_positions_multiplier' in adj
+            assert "position_size_multiplier" in adj
+            assert "stop_loss_multiplier" in adj
+            assert "take_profit_multiplier" in adj
+            assert "max_positions_multiplier" in adj
 
     def test_correlation_adjustments_completeness(self, adaptive_risk_manager):
         """Test that correlation adjustments are properly configured."""
         # Check that correlation regimes have adjustments
-        expected_correlation_regimes = [
-            MarketRegime.HIGH_CORRELATION,
-            MarketRegime.LOW_CORRELATION
-        ]
+        expected_correlation_regimes = [MarketRegime.HIGH_CORRELATION, MarketRegime.LOW_CORRELATION]
 
         for regime in expected_correlation_regimes:
             assert regime in adaptive_risk_manager.correlation_adjustments
             adj = adaptive_risk_manager.correlation_adjustments[regime]
-            assert 'position_size_multiplier' in adj
-            assert 'max_positions_multiplier' in adj
+            assert "position_size_multiplier" in adj
+            assert "max_positions_multiplier" in adj
 
     def test_stress_test_scenarios_completeness(self, adaptive_risk_manager):
         """Test that stress test scenarios are properly configured."""
         expected_scenarios = [
-            'market_crash',
-            'flash_crash',
-            'volatility_spike',
-            'correlation_breakdown']
+            "market_crash",
+            "flash_crash",
+            "volatility_spike",
+            "correlation_breakdown",
+        ]
 
         for scenario in expected_scenarios:
             assert scenario in adaptive_risk_manager.stress_test_scenarios
             scenario_config = adaptive_risk_manager.stress_test_scenarios[scenario]
-            assert 'price_shock' in scenario_config
-            assert 'volatility_multiplier' in scenario_config
+            assert "price_shock" in scenario_config
+            assert "volatility_multiplier" in scenario_config

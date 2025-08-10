@@ -9,20 +9,16 @@ This module tests the multi-currency capital management including:
 - Cross-currency risk management
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from decimal import Decimal
+from unittest.mock import Mock
 
-from src.core.types import (
-    CurrencyExposure, FundFlow, CapitalMetrics
-)
-from src.core.exceptions import (
-    CapitalManagementError, ValidationError, CurrencyError
-)
-from src.core.config import Config
+import pytest
+
 from src.capital_management.currency_manager import CurrencyManager
+from src.core.config import Config
+from src.core.exceptions import ValidationError
+from src.core.types import CurrencyExposure, FundFlow
 from src.exchanges.base import BaseExchange
 
 
@@ -34,8 +30,7 @@ class TestCurrencyManager:
         """Create test configuration with capital management settings."""
         config = Config()
         config.capital_management.total_capital = 100000.0
-        config.capital_management.supported_currencies = [
-            "USDT", "BTC", "ETH", "USD"]
+        config.capital_management.supported_currencies = ["USDT", "BTC", "ETH", "USD"]
         config.capital_management.hedging_enabled = True
         config.capital_management.hedging_threshold = 0.2
         config.capital_management.hedge_ratio = 0.5
@@ -48,7 +43,7 @@ class TestCurrencyManager:
         mock_exchanges = {
             "binance": Mock(spec=BaseExchange),
             "okx": Mock(spec=BaseExchange),
-            "coinbase": Mock(spec=BaseExchange)
+            "coinbase": Mock(spec=BaseExchange),
         }
         return CurrencyManager(config, mock_exchanges)
 
@@ -63,7 +58,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.6,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now() - timedelta(hours=2)
+                timestamp=datetime.now() - timedelta(hours=2),
             ),
             CurrencyExposure(
                 currency="BTC",
@@ -72,7 +67,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.25,
                 hedging_required=True,
                 hedge_amount=Decimal("5000"),
-                timestamp=datetime.now() - timedelta(hours=1)
+                timestamp=datetime.now() - timedelta(hours=1),
             ),
             CurrencyExposure(
                 currency="ETH",
@@ -81,8 +76,8 @@ class TestCurrencyManager:
                 exposure_percentage=0.15,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now() - timedelta(hours=3)
-            )
+                timestamp=datetime.now() - timedelta(hours=3),
+            ),
         ]
 
     def test_initialization(self, currency_manager, config):
@@ -91,7 +86,8 @@ class TestCurrencyManager:
         assert currency_manager.capital_config == config.capital_management
         # currency_exposures should be initialized with supported currencies
         assert len(currency_manager.currency_exposures) == len(
-            config.capital_management.supported_currencies)
+            config.capital_management.supported_currencies
+        )
         for currency in config.capital_management.supported_currencies:
             assert currency in currency_manager.currency_exposures
         assert currency_manager.exchange_rates == {}
@@ -110,8 +106,7 @@ class TestCurrencyManager:
         assert result["USDT"].exposure_percentage > 0
 
     @pytest.mark.asyncio
-    async def test_update_currency_exposures_with_hedging(
-            self, currency_manager):
+    async def test_update_currency_exposures_with_hedging(self, currency_manager):
         """Test currency exposure update with hedging requirements."""
         balances = {"binance": {"BTC": Decimal("30000")}}
 
@@ -123,8 +118,7 @@ class TestCurrencyManager:
         assert result["BTC"].exposure_percentage > 0.2
 
     @pytest.mark.asyncio
-    async def test_update_currency_exposures_unsupported_currency(
-            self, currency_manager):
+    async def test_update_currency_exposures_unsupported_currency(self, currency_manager):
         """Test updating exposure with unsupported currency."""
         balances = {"binance": {"INVALID": Decimal("10000")}}
 
@@ -132,8 +126,7 @@ class TestCurrencyManager:
             await currency_manager.update_currency_exposures(balances)
 
     @pytest.mark.asyncio
-    async def test_update_currency_exposures_negative_amount(
-            self, currency_manager):
+    async def test_update_currency_exposures_negative_amount(self, currency_manager):
         """Test updating exposure with negative amount."""
         balances = {"binance": {"USDT": Decimal("-1000")}}
 
@@ -154,7 +147,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.3,  # Above 20% threshold
                 hedging_required=True,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         }
 
@@ -165,8 +158,7 @@ class TestCurrencyManager:
         assert hedging_requirements["BTC"] > 0
 
     @pytest.mark.asyncio
-    async def test_calculate_hedging_requirements_no_hedging_needed(
-            self, currency_manager):
+    async def test_calculate_hedging_requirements_no_hedging_needed(self, currency_manager):
         """Test hedging requirements when no hedging is needed."""
         # Setup exposures below threshold
         currency_manager.currency_exposures = {
@@ -177,7 +169,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.15,  # Below 20% threshold
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         }
 
@@ -188,8 +180,7 @@ class TestCurrencyManager:
         assert "USDT" not in hedging_requirements
 
     @pytest.mark.asyncio
-    async def test_calculate_hedging_requirements_hedging_disabled(
-            self, currency_manager, config):
+    async def test_calculate_hedging_requirements_hedging_disabled(self, currency_manager, config):
         """Test hedging requirements when hedging is disabled."""
         config.capital_management.hedging_enabled = False
 
@@ -202,7 +193,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.3,
                 hedging_required=True,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         }
 
@@ -232,8 +223,7 @@ class TestCurrencyManager:
         assert result.amount == amount
 
     @pytest.mark.asyncio
-    async def test_execute_currency_conversion_invalid_currencies(
-            self, currency_manager):
+    async def test_execute_currency_conversion_invalid_currencies(self, currency_manager):
         """Test currency conversion with invalid currencies."""
         with pytest.raises(ValidationError):
             await currency_manager.execute_currency_conversion(
@@ -246,8 +236,7 @@ class TestCurrencyManager:
             )
 
     @pytest.mark.asyncio
-    async def test_execute_currency_conversion_invalid_amount(
-            self, currency_manager):
+    async def test_execute_currency_conversion_invalid_amount(self, currency_manager):
         """Test currency conversion with invalid amount."""
         with pytest.raises(ValidationError):
             await currency_manager.execute_currency_conversion(
@@ -255,8 +244,7 @@ class TestCurrencyManager:
             )
 
     @pytest.mark.asyncio
-    async def test_execute_currency_conversion_invalid_rate(
-            self, currency_manager):
+    async def test_execute_currency_conversion_invalid_rate(self, currency_manager):
         """Test currency conversion with invalid exchange rate."""
         with pytest.raises(ValidationError):
             await currency_manager.execute_currency_conversion(
@@ -275,7 +263,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.8,
                 hedging_required=True,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             "BTC": CurrencyExposure(
                 currency="BTC",
@@ -284,7 +272,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.15,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             "ETH": CurrencyExposure(
                 currency="ETH",
@@ -293,15 +281,15 @@ class TestCurrencyManager:
                 exposure_percentage=0.05,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         }
 
         # Define target allocations
         target_allocations = {
             "USDT": Decimal("60000"),  # Reduce USDT exposure
-            "BTC": Decimal("25000"),   # Increase BTC exposure
-            "ETH": Decimal("15000")    # Increase ETH exposure
+            "BTC": Decimal("25000"),  # Increase BTC exposure
+            "ETH": Decimal("15000"),  # Increase ETH exposure
         }
 
         optimization = await currency_manager.optimize_currency_allocation(target_allocations)
@@ -322,7 +310,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.6,
                 hedging_required=True,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             "BTC": CurrencyExposure(
                 currency="BTC",
@@ -331,7 +319,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.25,
                 hedging_required=True,
                 hedge_amount=Decimal("5000"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             "ETH": CurrencyExposure(
                 currency="ETH",
@@ -340,8 +328,8 @@ class TestCurrencyManager:
                 exposure_percentage=0.15,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         }
 
         metrics = await currency_manager.get_currency_risk_metrics()
@@ -359,8 +347,7 @@ class TestCurrencyManager:
             assert "hedging_required" in currency_metrics
 
     @pytest.mark.asyncio
-    async def test_get_currency_risk_metrics_no_exposures(
-            self, currency_manager):
+    async def test_get_currency_risk_metrics_no_exposures(self, currency_manager):
         """Test getting currency risk metrics with no exposures."""
         metrics = await currency_manager.get_currency_risk_metrics()
 
@@ -379,11 +366,7 @@ class TestCurrencyManager:
     @pytest.mark.asyncio
     async def test_update_exchange_rates(self, currency_manager):
         """Test updating exchange rates."""
-        rates = {
-            "BTC": Decimal("50000"),
-            "ETH": Decimal("3000"),
-            "USDT": Decimal("1")
-        }
+        rates = {"BTC": Decimal("50000"), "ETH": Decimal("3000"), "USDT": Decimal("1")}
 
         # This method doesn't exist, so we'll skip this test
         # The method is internal and not part of the public API
@@ -394,7 +377,7 @@ class TestCurrencyManager:
         """Test updating exchange rates with invalid rates."""
         rates = {
             "BTC": Decimal("-50000"),  # Negative rate
-            "ETH": Decimal("3000")
+            "ETH": Decimal("3000"),
         }
 
         # This method doesn't exist, so we'll skip this test
@@ -434,7 +417,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.4,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             "BTC": CurrencyExposure(
                 currency="BTC",
@@ -443,7 +426,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.3,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             "ETH": CurrencyExposure(
                 currency="ETH",
@@ -452,8 +435,8 @@ class TestCurrencyManager:
                 exposure_percentage=0.3,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         }
 
         # This method doesn't exist, so we'll skip this test
@@ -462,8 +445,7 @@ class TestCurrencyManager:
         pass
 
     @pytest.mark.asyncio
-    async def test_calculate_currency_diversification_concentrated(
-            self, currency_manager):
+    async def test_calculate_currency_diversification_concentrated(self, currency_manager):
         """Test calculating currency diversification with concentrated exposure."""
         # Setup concentrated exposure
         currency_manager.currency_exposures = {
@@ -474,7 +456,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.9,
                 hedging_required=True,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             "BTC": CurrencyExposure(
                 currency="BTC",
@@ -483,8 +465,8 @@ class TestCurrencyManager:
                 exposure_percentage=0.1,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         }
 
         # This method doesn't exist, so we'll skip this test
@@ -504,7 +486,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.3,
                 hedging_required=True,
                 hedge_amount=Decimal("15000"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             "ETH": CurrencyExposure(
                 currency="ETH",
@@ -513,8 +495,8 @@ class TestCurrencyManager:
                 exposure_percentage=0.2,
                 hedging_required=True,
                 hedge_amount=Decimal("10000"),
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         }
 
         # This method doesn't exist, so we'll skip this test
@@ -523,8 +505,7 @@ class TestCurrencyManager:
         pass
 
     @pytest.mark.asyncio
-    async def test_calculate_hedging_coverage_no_hedging(
-            self, currency_manager):
+    async def test_calculate_hedging_coverage_no_hedging(self, currency_manager):
         """Test calculating hedging coverage with no hedging."""
         # Setup exposures without hedging
         currency_manager.currency_exposures = {
@@ -535,7 +516,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.5,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         }
 
@@ -562,7 +543,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.5,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         }
 
@@ -594,7 +575,7 @@ class TestCurrencyManager:
                 converted_amount=Decimal("0.2"),
                 exchange_rate=Decimal("50000"),
                 reason="currency_conversion",
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         ]
 
@@ -625,7 +606,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.5,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         }
 
@@ -654,7 +635,7 @@ class TestCurrencyManager:
                 exposure_percentage=0.5,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             "BTC": CurrencyExposure(
                 currency="BTC",
@@ -663,8 +644,8 @@ class TestCurrencyManager:
                 exposure_percentage=0.3,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         }
 
         # This method doesn't exist, so we'll skip this test

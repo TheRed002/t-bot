@@ -9,34 +9,38 @@ P-002A (error handling) components.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Callable, Any
-from decimal import Decimal
+from collections.abc import Callable
 from datetime import datetime
-import asyncio
+from decimal import Decimal
+
+from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeRateLimitError,
+    ValidationError,
+)
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import (
-    OrderRequest, OrderResponse, MarketData, Position,
-    Signal, TradingMode, OrderSide, OrderType,
-    ExchangeInfo, Ticker, OrderBook, Trade, OrderStatus
+    ExchangeInfo,
+    MarketData,
+    OrderBook,
+    OrderRequest,
+    OrderResponse,
+    OrderStatus,
+    Ticker,
+    Trade,
 )
-from src.core.exceptions import (
-    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError,
-    ValidationError, ExecutionError
-)
-from src.core.config import Config
-from src.core.logging import get_logger
+from src.error_handling.connection_manager import ConnectionManager as ErrorConnectionManager
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.connection_manager import ConnectionManager as ErrorConnectionManager
 
 # MANDATORY: Import from P-007 (advanced rate limiting)
 from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
 from src.exchanges.connection_manager import ConnectionManager
 
 # MANDATORY: Import from P-007A (utils)
-from src.utils.decorators import time_execution, retry, circuit_breaker
 
 logger = get_logger(__name__)
 
@@ -76,11 +80,10 @@ class BaseExchange(ABC):
 
         # Initialize rate limiter and connection manager
         self.rate_limiter = None  # Will be set by subclasses
-        self.ws_manager = None    # Will be set by subclasses
+        self.ws_manager = None  # Will be set by subclasses
 
         # TODO: Remove in production
-        logger.debug(
-            f"BaseExchange initialized with P-007 components for {exchange_name}")
+        logger.debug(f"BaseExchange initialized with P-007 components for {exchange_name}")
         logger.info(f"Initialized {exchange_name} exchange interface")
 
     @abstractmethod
@@ -99,7 +102,7 @@ class BaseExchange(ABC):
         pass
 
     @abstractmethod
-    async def get_account_balance(self) -> Dict[str, Decimal]:
+    async def get_account_balance(self) -> dict[str, Decimal]:
         """
         Get all asset balances from the exchange.
 
@@ -152,10 +155,7 @@ class BaseExchange(ABC):
         pass
 
     @abstractmethod
-    async def get_market_data(
-            self,
-            symbol: str,
-            timeframe: str = "1m") -> MarketData:
+    async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """
         Get OHLCV market data for a symbol.
 
@@ -169,10 +169,7 @@ class BaseExchange(ABC):
         pass
 
     @abstractmethod
-    async def subscribe_to_stream(
-            self,
-            symbol: str,
-            callback: Callable) -> None:
+    async def subscribe_to_stream(self, symbol: str, callback: Callable) -> None:
         """
         Subscribe to real-time data stream for a symbol.
 
@@ -197,10 +194,7 @@ class BaseExchange(ABC):
         pass
 
     @abstractmethod
-    async def get_trade_history(
-            self,
-            symbol: str,
-            limit: int = 100) -> List[Trade]:
+    async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]:
         """
         Get historical trades for a symbol.
 
@@ -250,11 +244,11 @@ class BaseExchange(ABC):
         try:
             # Basic validation
             if not order.symbol or not order.quantity:
-                logger.warning(f"Invalid order: missing symbol or quantity")
+                logger.warning("Invalid order: missing symbol or quantity")
                 return False
 
             if order.quantity <= 0:
-                logger.warning(f"Invalid order: quantity must be positive")
+                logger.warning("Invalid order: quantity must be positive")
                 return False
 
             # TODO: Remove in production - Additional validation can be added
@@ -263,11 +257,10 @@ class BaseExchange(ABC):
             return True
 
         except Exception as e:
-            logger.error(f"Order validation failed: {str(e)}")
+            logger.error(f"Order validation failed: {e!s}")
             return False
 
-    async def post_trade_processing(
-            self, order_response: OrderResponse) -> None:
+    async def post_trade_processing(self, order_response: OrderResponse) -> None:
         """
         Post-trade processing hook.
 
@@ -277,11 +270,12 @@ class BaseExchange(ABC):
         try:
             # Log the trade
             logger.info(
-                f"Order executed: {
-                    order_response.id} - {
-                    order_response.symbol} " f"{
-                    order_response.side.value} {
-                    order_response.filled_quantity}")
+                "Order executed",
+                order_id=order_response.id,
+                symbol=order_response.symbol,
+                side=order_response.side.value,
+                filled_quantity=str(order_response.filled_quantity),
+            )
 
             # TODO: Remove in production - Additional processing can be added here
             # - Update position tracking
@@ -289,7 +283,7 @@ class BaseExchange(ABC):
             # - Update performance metrics
 
         except Exception as e:
-            logger.error(f"Post-trade processing failed: {str(e)}")
+            logger.error(f"Post-trade processing failed: {e!s}")
 
     def is_connected(self) -> bool:
         """
@@ -331,10 +325,7 @@ class BaseExchange(ABC):
             self.last_heartbeat = datetime.now()
             return True
         except Exception as e:
-            logger.warning(
-                f"Health check failed for {
-                    self.exchange_name}: {
-                    str(e)}")
+            logger.warning("Health check failed", exchange=self.exchange_name, error=str(e))
             return False
 
     async def _check_rate_limit(self, endpoint: str, weight: int = 1) -> bool:
@@ -372,10 +363,11 @@ class BaseExchange(ABC):
                 "Rate limit check failed",
                 exchange=self.exchange_name,
                 endpoint=endpoint,
-                error=str(e))
-            raise ExchangeRateLimitError(f"Rate limit check failed: {str(e)}")
+                error=str(e),
+            )
+            raise ExchangeRateLimitError(f"Rate limit check failed: {e!s}")
 
-    def get_rate_limits(self) -> Dict[str, int]:
+    def get_rate_limits(self) -> dict[str, int]:
         """
         Get the rate limits for this exchange.
 

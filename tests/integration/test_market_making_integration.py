@@ -8,30 +8,33 @@ order placement, and inventory management.
 CRITICAL: These tests verify the integration between all market making components.
 """
 
-import pytest
-import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-import numpy as np
+from unittest.mock import AsyncMock, Mock
 
-# Import the strategy classes
-from src.strategies.static.market_making import MarketMakingStrategy
-from src.strategies.static.inventory_manager import InventoryManager
-from src.strategies.static.spread_optimizer import SpreadOptimizer
+import pytest
 
 # Import core types
 from src.core.types import (
-    Signal, MarketData, Position, SignalDirection, OrderSide,
-    StrategyConfig, StrategyType, OrderRequest, OrderResponse
+    MarketData,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
 )
-from src.core.exceptions import ValidationError, RiskManagementError
-
-# Import risk management
-from src.risk_management.base import BaseRiskManager
 
 # Import exchange interface
 from src.exchanges.base import BaseExchange
+
+# Import risk management
+from src.risk_management.base import BaseRiskManager
+from src.strategies.static.inventory_manager import InventoryManager
+
+# Import the strategy classes
+from src.strategies.static.market_making import MarketMakingStrategy
+from src.strategies.static.spread_optimizer import SpreadOptimizer
 
 
 class TestMarketMakingIntegration:
@@ -70,8 +73,8 @@ class TestMarketMakingIntegration:
                 "min_profit_per_trade": 0.00001,
                 "order_refresh_time": 30,
                 "adaptive_spreads": True,
-                "competition_monitoring": True
-            }
+                "competition_monitoring": True,
+            },
         }
 
     @pytest.fixture
@@ -88,7 +91,7 @@ class TestMarketMakingIntegration:
                 ask=Decimal(str(base_price + i * 10 + 1)),
                 open_price=Decimal(str(base_price + i * 10 - 50)),
                 high_price=Decimal(str(base_price + i * 10 + 50)),
-                low_price=Decimal(str(base_price + i * 10 - 50))
+                low_price=Decimal(str(base_price + i * 10 - 50)),
             )
             for i in range(10)
         ]
@@ -97,18 +100,20 @@ class TestMarketMakingIntegration:
     def mock_exchange(self):
         """Create a mock exchange for testing."""
         exchange = Mock(spec=BaseExchange)
-        exchange.place_order = AsyncMock(return_value=OrderResponse(
-            id="test_order_123",
-            client_order_id="test_client_123",
-            symbol="BTCUSDT",
-            side=OrderSide.BUY,
-            order_type="limit",
-            quantity=Decimal("0.01"),
-            price=Decimal("50000"),
-            filled_quantity=Decimal("0.01"),
-            status="filled",
-            timestamp=datetime.now(timezone.utc)
-        ))
+        exchange.place_order = AsyncMock(
+            return_value=OrderResponse(
+                id="test_order_123",
+                client_order_id="test_client_123",
+                symbol="BTCUSDT",
+                side=OrderSide.BUY,
+                order_type="limit",
+                quantity=Decimal("0.01"),
+                price=Decimal("50000"),
+                filled_quantity=Decimal("0.01"),
+                status="filled",
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
         exchange.get_market_data = AsyncMock()
         exchange.get_order_book = AsyncMock()
         exchange.cancel_order = AsyncMock(return_value=True)
@@ -118,8 +123,7 @@ class TestMarketMakingIntegration:
     def mock_risk_manager(self):
         """Create a mock risk manager for testing."""
         risk_manager = Mock(spec=BaseRiskManager)
-        risk_manager.calculate_position_size = AsyncMock(
-            return_value=Decimal("0.01"))
+        risk_manager.calculate_position_size = AsyncMock(return_value=Decimal("0.01"))
         risk_manager.validate_signal = AsyncMock(return_value=True)
         risk_manager.validate_order = AsyncMock(return_value=True)
         return risk_manager
@@ -133,8 +137,7 @@ class TestMarketMakingIntegration:
         return strategy
 
     @pytest.mark.asyncio
-    async def test_complete_market_making_workflow(
-            self, strategy, market_data_sequence):
+    async def test_complete_market_making_workflow(self, strategy, market_data_sequence):
         """Test the complete market making workflow."""
         # Step 1: Generate signals from market data
         signals = await strategy._generate_signals_impl(market_data_sequence[0])
@@ -163,7 +166,7 @@ class TestMarketMakingIntegration:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         await strategy.update_inventory_state(position)
@@ -190,7 +193,7 @@ class TestMarketMakingIntegration:
                 volume=Decimal("100"),
                 timestamp=datetime.now(timezone.utc) + timedelta(minutes=i),
                 bid=Decimal(str(base_price + price_change - 1)),
-                ask=Decimal(str(base_price + price_change + 1))
+                ask=Decimal(str(base_price + price_change + 1)),
             )
             market_data_list.append(market_data)
 
@@ -220,7 +223,7 @@ class TestMarketMakingIntegration:
             "rebalance_frequency_hours": 4,
             "max_rebalance_size": 0.5,
             "emergency_threshold": 0.8,
-            "emergency_liquidation_enabled": True
+            "emergency_liquidation_enabled": True,
         }
 
         inventory_manager = InventoryManager(inventory_config)
@@ -233,7 +236,7 @@ class TestMarketMakingIntegration:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         await inventory_manager.update_inventory(position)
@@ -267,7 +270,7 @@ class TestMarketMakingIntegration:
             "competitor_weight": 0.3,
             "max_competitor_spread": 0.005,
             "impact_threshold": 0.001,
-            "impact_multiplier": 1.5
+            "impact_multiplier": 1.5,
         }
 
         spread_optimizer = SpreadOptimizer(optimizer_config)
@@ -279,14 +282,14 @@ class TestMarketMakingIntegration:
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
             bid=Decimal("49999"),
-            ask=Decimal("50001")
+            ask=Decimal("50001"),
         )
 
         order_book = {
             "symbol": "BTCUSDT",
             "bids": [[Decimal("49999"), Decimal("2.0")], [Decimal("49998"), Decimal("1.0")]],
             "asks": [[Decimal("50001"), Decimal("1.0")], [Decimal("50002"), Decimal("2.0")]],
-            "timestamp": datetime.now(timezone.utc)
+            "timestamp": datetime.now(timezone.utc),
         }
 
         # Test spread optimization
@@ -310,8 +313,7 @@ class TestMarketMakingIntegration:
         assert ask_spread > 0
 
     @pytest.mark.asyncio
-    async def test_risk_management_integration(
-            self, strategy, mock_risk_manager):
+    async def test_risk_management_integration(self, strategy, mock_risk_manager):
         """Test risk management integration."""
         # Test signal validation with risk manager
         signal = Signal(
@@ -320,13 +322,7 @@ class TestMarketMakingIntegration:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={
-                "price": 50000.0,
-                "size": 0.01,
-                "level": 1,
-                "spread": 0.001,
-                "side": "bid"
-            }
+            metadata={"price": 50000.0, "size": 0.01, "level": 1, "spread": 0.001, "side": "bid"},
         )
 
         # Mock risk manager to reject signal
@@ -351,7 +347,7 @@ class TestMarketMakingIntegration:
             order_type="limit",
             quantity=Decimal("0.01"),
             price=Decimal("50000"),
-            client_order_id="test_order"
+            client_order_id="test_order",
         )
 
         # Mock successful order placement
@@ -365,7 +361,7 @@ class TestMarketMakingIntegration:
             price=Decimal("50000"),
             filled_quantity=Decimal("0.01"),
             status="filled",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         response = await mock_exchange.place_order(order_request)
@@ -384,7 +380,7 @@ class TestMarketMakingIntegration:
             {"pnl": 10.5, "quantity": 0.01, "price": 50000.0},
             {"pnl": -5.2, "quantity": 0.01, "price": 50000.0},
             {"pnl": 15.8, "quantity": 0.01, "price": 50000.0},
-            {"pnl": 8.3, "quantity": 0.01, "price": 50000.0}
+            {"pnl": 8.3, "quantity": 0.01, "price": 50000.0},
         ]
 
         for trade_result in trade_results:
@@ -415,7 +411,7 @@ class TestMarketMakingIntegration:
             "rebalance_frequency_hours": 4,
             "max_rebalance_size": 0.5,
             "emergency_threshold": 0.8,
-            "emergency_liquidation_enabled": True
+            "emergency_liquidation_enabled": True,
         }
 
         inventory_manager = InventoryManager(inventory_config)
@@ -428,7 +424,7 @@ class TestMarketMakingIntegration:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         await inventory_manager.update_inventory(position)
@@ -455,7 +451,7 @@ class TestMarketMakingIntegration:
             # Wide spread
             {"price": 50200, "bid": 50150, "ask": 50250, "volatility": 0.02},
             # Narrow spread
-            {"price": 50300, "bid": 50299, "ask": 50301, "volatility": 0.01}
+            {"price": 50300, "bid": 50299, "ask": 50301, "volatility": 0.01},
         ]
 
         for i, condition in enumerate(market_conditions):
@@ -465,7 +461,7 @@ class TestMarketMakingIntegration:
                 volume=Decimal("100"),
                 timestamp=datetime.now(timezone.utc) + timedelta(minutes=i),
                 bid=Decimal(str(condition["bid"])),
-                ask=Decimal(str(condition["ask"]))
+                ask=Decimal(str(condition["ask"])),
             )
 
             # Update strategy with new market data
@@ -498,7 +494,7 @@ class TestMarketMakingIntegration:
             side=OrderSide.BUY,
             order_type="limit",
             quantity=Decimal("0.01"),
-            price=Decimal("50000")
+            price=Decimal("50000"),
         )
 
         # Should handle exchange errors gracefully
@@ -512,7 +508,7 @@ class TestMarketMakingIntegration:
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
             bid=None,  # Invalid data
-            ask=None
+            ask=None,
         )
 
         signals = await strategy._generate_signals_impl(invalid_data)
@@ -525,7 +521,7 @@ class TestMarketMakingIntegration:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={}  # Missing required metadata
+            metadata={},  # Missing required metadata
         )
 
         is_valid = await strategy.validate_signal(invalid_signal)

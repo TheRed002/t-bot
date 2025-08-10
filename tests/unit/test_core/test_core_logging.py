@@ -4,16 +4,21 @@ Unit tests for core logging system.
 These tests verify the structured logging, correlation tracking, and performance monitoring.
 """
 
-import os
-import pytest
 import asyncio
+import os
 import time
-from unittest.mock import patch, MagicMock
-from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.core.logging import (
-    get_logger, setup_logging, log_performance, log_async_performance,
-    get_secure_logger, PerformanceMonitor, correlation_context
+    PerformanceMonitor,
+    correlation_context,
+    get_logger,
+    get_secure_logger,
+    log_async_performance,
+    log_performance,
+    setup_logging,
 )
 
 
@@ -78,6 +83,7 @@ class TestPerformanceDecorators:
 
     def test_performance_decorator(self):
         """Test performance logging decorator."""
+
         @log_performance
         def test_function():
             return "test_result"
@@ -88,6 +94,7 @@ class TestPerformanceDecorators:
     @pytest.mark.asyncio
     async def test_async_performance_decorator(self):
         """Test async performance logging decorator."""
+
         @log_async_performance
         async def test_async_function():
             await asyncio.sleep(0.01)
@@ -98,6 +105,7 @@ class TestPerformanceDecorators:
 
     def test_performance_decorator_with_args(self):
         """Test performance decorator with function arguments."""
+
         @log_performance
         def test_function_with_args(arg1, arg2, kwarg1="default"):
             return f"{arg1}_{arg2}_{kwarg1}"
@@ -108,6 +116,7 @@ class TestPerformanceDecorators:
     @pytest.mark.asyncio
     async def test_async_performance_decorator_with_args(self):
         """Test async performance decorator with function arguments."""
+
         @log_async_performance
         async def test_async_function_with_args(arg1, arg2, kwarg1="default"):
             await asyncio.sleep(0.01)
@@ -152,22 +161,19 @@ class TestSecureLogger:
         """Test secure logger creation."""
         secure_logger = get_secure_logger(__name__)
         assert secure_logger is not None
-        assert hasattr(secure_logger, 'info')
-        assert hasattr(secure_logger, 'warning')
-        assert hasattr(secure_logger, 'error')
-        assert hasattr(secure_logger, 'critical')
-        assert hasattr(secure_logger, 'debug')
+        assert hasattr(secure_logger, "info")
+        assert hasattr(secure_logger, "warning")
+        assert hasattr(secure_logger, "error")
+        assert hasattr(secure_logger, "critical")
+        assert hasattr(secure_logger, "debug")
 
     def test_secure_logger_sanitization(self):
         """Test secure logger data sanitization."""
         secure_logger = get_secure_logger(__name__)
 
         # Test that sensitive data is sanitized
-        with patch.object(secure_logger.logger, 'info') as mock_info:
-            secure_logger.info(
-                "Test message",
-                password="secret123",
-                api_key="key456")
+        with patch.object(secure_logger.logger, "info") as mock_info:
+            secure_logger.info("Test message", password="secret123", api_key="key456")
             mock_info.assert_called_once()
 
             # Get the call arguments
@@ -175,15 +181,15 @@ class TestSecureLogger:
             sanitized_kwargs = call_args[1]  # kwargs
 
             # Check that sensitive data is redacted
-            assert sanitized_kwargs['password'] == "***REDACTED***"
-            assert sanitized_kwargs['api_key'] == "***REDACTED***"
+            assert sanitized_kwargs["password"] == "***REDACTED***"
+            assert sanitized_kwargs["api_key"] == "***REDACTED***"
 
     def test_secure_logger_non_sensitive_data(self):
         """Test secure logger with non-sensitive data."""
         secure_logger = get_secure_logger(__name__)
 
         # Test that non-sensitive data is preserved
-        with patch.object(secure_logger.logger, 'info') as mock_info:
+        with patch.object(secure_logger.logger, "info") as mock_info:
             secure_logger.info("Test message", user_id="123", symbol="BTCUSDT")
             mock_info.assert_called_once()
 
@@ -192,8 +198,8 @@ class TestSecureLogger:
             sanitized_kwargs = call_args[1]  # kwargs
 
             # Check that non-sensitive data is preserved
-            assert sanitized_kwargs['user_id'] == "123"
-            assert sanitized_kwargs['symbol'] == "BTCUSDT"
+            assert sanitized_kwargs["user_id"] == "123"
+            assert sanitized_kwargs["symbol"] == "BTCUSDT"
 
 
 class TestLoggingSetup:
@@ -261,16 +267,10 @@ class TestLoggingEdgeCases:
         secure_logger = get_secure_logger(__name__)
 
         test_data = {
-            "user": {
-                "name": "test",
-                "password": "secret123",
-                "settings": {
-                    "api_key": "key456"
-                }
-            }
+            "user": {"name": "test", "password": "secret123", "settings": {"api_key": "key456"}}
         }
 
-        with patch.object(secure_logger.logger, 'info') as mock_info:
+        with patch.object(secure_logger.logger, "info") as mock_info:
             secure_logger.info("Test message", data=test_data)
             mock_info.assert_called_once()
 
@@ -279,11 +279,11 @@ class TestLoggingEdgeCases:
             sanitized_kwargs = call_args[1]  # kwargs
 
             # Check that nested sensitive data is redacted
-            sanitized_data = sanitized_kwargs['data']
-            assert sanitized_data['user']['password'] == "***REDACTED***"
-            assert sanitized_data['user']['settings']['api_key'] == "***REDACTED***"
+            sanitized_data = sanitized_kwargs["data"]
+            assert sanitized_data["user"]["password"] == "***REDACTED***"
+            assert sanitized_data["user"]["settings"]["api_key"] == "***REDACTED***"
             # Non-sensitive data preserved
-            assert sanitized_data['user']['name'] == "test"
+            assert sanitized_data["user"]["name"] == "test"
 
 
 class TestLoggingFileOperations:
@@ -298,7 +298,7 @@ class TestLoggingFileOperations:
             log_file=str(log_file),
             max_bytes=1024,
             backup_count=2,
-            retention_days=7
+            retention_days=7,
         )
 
         # Verify log file was created
@@ -310,11 +310,12 @@ class TestLoggingFileOperations:
 
         # Give some time for the log to be written
         import time
+
         time.sleep(0.1)
 
         # Check log file content - the message might be in the log but not immediately visible
         # due to buffering or async writing
-        with open(log_file, 'r') as f:
+        with open(log_file) as f:
             content = f.read()
             # The log file might be empty due to buffering, so we'll just check that it exists
             # and the logging setup worked
@@ -323,11 +324,7 @@ class TestLoggingFileOperations:
     def test_setup_logging_production_environment(self, tmp_path):
         """Test production logging setup."""
         log_file = tmp_path / "prod.log"
-        setup_logging(
-            environment="production",
-            log_level="WARNING",
-            log_file=str(log_file)
-        )
+        setup_logging(environment="production", log_level="WARNING", log_file=str(log_file))
 
         assert log_file.exists()
         logger = get_logger(__name__)
@@ -335,11 +332,7 @@ class TestLoggingFileOperations:
 
     def test_setup_logging_console_only(self):
         """Test console-only logging setup."""
-        setup_logging(
-            environment="development",
-            log_level="DEBUG",
-            log_file=None
-        )
+        setup_logging(environment="development", log_level="DEBUG", log_file=None)
 
         logger = get_logger(__name__)
         assert logger is not None
@@ -350,6 +343,7 @@ class TestPerformanceDecoratorErrorHandling:
 
     def test_performance_decorator_exception_handling(self):
         """Test performance decorator handles exceptions correctly."""
+
         @log_performance
         def function_that_raises():
             raise ValueError("Test error")
@@ -360,6 +354,7 @@ class TestPerformanceDecoratorErrorHandling:
     @pytest.mark.asyncio
     async def test_async_performance_decorator_exception_handling(self):
         """Test async performance decorator handles exceptions correctly."""
+
         @log_async_performance
         async def async_function_that_raises():
             raise RuntimeError("Async test error")
@@ -375,49 +370,49 @@ class TestSecureLoggerMethods:
         """Test secure logger warning method."""
         secure_logger = get_secure_logger(__name__)
 
-        with patch.object(secure_logger.logger, 'warning') as mock_warning:
+        with patch.object(secure_logger.logger, "warning") as mock_warning:
             secure_logger.warning("Warning message", password="secret123")
             mock_warning.assert_called_once()
 
             call_args = mock_warning.call_args
             sanitized_kwargs = call_args[1]
-            assert sanitized_kwargs['password'] == "***REDACTED***"
+            assert sanitized_kwargs["password"] == "***REDACTED***"
 
     def test_secure_logger_error(self):
         """Test secure logger error method."""
         secure_logger = get_secure_logger(__name__)
 
-        with patch.object(secure_logger.logger, 'error') as mock_error:
+        with patch.object(secure_logger.logger, "error") as mock_error:
             secure_logger.error("Error message", api_key="secret456")
             mock_error.assert_called_once()
 
             call_args = mock_error.call_args
             sanitized_kwargs = call_args[1]
-            assert sanitized_kwargs['api_key'] == "***REDACTED***"
+            assert sanitized_kwargs["api_key"] == "***REDACTED***"
 
     def test_secure_logger_critical(self):
         """Test secure logger critical method."""
         secure_logger = get_secure_logger(__name__)
 
-        with patch.object(secure_logger.logger, 'critical') as mock_critical:
+        with patch.object(secure_logger.logger, "critical") as mock_critical:
             secure_logger.critical("Critical message", secret="top_secret")
             mock_critical.assert_called_once()
 
             call_args = mock_critical.call_args
             sanitized_kwargs = call_args[1]
-            assert sanitized_kwargs['secret'] == "***REDACTED***"
+            assert sanitized_kwargs["secret"] == "***REDACTED***"
 
     def test_secure_logger_debug(self):
         """Test secure logger debug method."""
         secure_logger = get_secure_logger(__name__)
 
-        with patch.object(secure_logger.logger, 'debug') as mock_debug:
+        with patch.object(secure_logger.logger, "debug") as mock_debug:
             secure_logger.debug("Debug message", token="access_token")
             mock_debug.assert_called_once()
 
             call_args = mock_debug.call_args
             sanitized_kwargs = call_args[1]
-            assert sanitized_kwargs['token'] == "***REDACTED***"
+            assert sanitized_kwargs["token"] == "***REDACTED***"
 
 
 class TestPerformanceMonitorErrorHandling:
@@ -446,8 +441,9 @@ class TestProductionLoggingSetup:
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
 
-        with patch('src.core.logging.setup_logging') as mock_setup:
+        with patch("src.core.logging.setup_logging") as mock_setup:
             from src.core.logging import setup_production_logging
+
             setup_production_logging(str(log_dir), "test-app")
 
             mock_setup.assert_called_once_with(
@@ -456,35 +452,34 @@ class TestProductionLoggingSetup:
                 log_file=str(log_dir / "test-app.log"),
                 max_bytes=50 * 1024 * 1024,
                 backup_count=10,
-                retention_days=90
+                retention_days=90,
             )
 
     def test_setup_development_logging(self):
         """Test setup_development_logging function."""
-        with patch('src.core.logging.setup_logging') as mock_setup:
+        with patch("src.core.logging.setup_logging") as mock_setup:
             from src.core.logging import setup_development_logging
+
             setup_development_logging()
 
             mock_setup.assert_called_once_with(
-                environment="development",
-                log_level="DEBUG",
-                log_file=None
+                environment="development", log_level="DEBUG", log_file=None
             )
 
     def test_setup_debug_logging(self):
         """Test setup_debug_logging function."""
-        with patch('src.core.logging.setup_development_logging') as mock_setup_dev:
-            with patch('src.core.logging.get_logger') as mock_get_logger:
+        with patch("src.core.logging.setup_development_logging") as mock_setup_dev:
+            with patch("src.core.logging.get_logger") as mock_get_logger:
                 mock_logger = MagicMock()
                 mock_get_logger.return_value = mock_logger
 
                 from src.core.logging import setup_debug_logging
+
                 setup_debug_logging()
 
                 mock_setup_dev.assert_called_once()
                 mock_get_logger.assert_called_once_with("src.core.logging")
-                mock_logger.info.assert_called_once_with(
-                    "Debug logging enabled")
+                mock_logger.info.assert_called_once_with("Debug logging enabled")
 
 
 class TestLogCleanup:
@@ -500,9 +495,9 @@ class TestLogCleanup:
 
     def test_cleanup_old_logs_with_files(self, tmp_path):
         """Test cleanup with actual log files."""
-        from src.core.logging import _cleanup_old_logs
         import time
-        from datetime import datetime, timedelta
+
+        from src.core.logging import _cleanup_old_logs
 
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
@@ -537,7 +532,7 @@ class TestCorrelationIdEdgeCases:
         # This should handle None gracefully
         result = _add_correlation_id(None, "info", None)
         # The function returns {'correlation_id': None} when event_dict is None
-        assert result == {'correlation_id': None}
+        assert result == {"correlation_id": None}
 
     def test_safe_unicode_decoder_with_none_event_dict(self):
         """Test _safe_unicode_decoder with None event_dict."""

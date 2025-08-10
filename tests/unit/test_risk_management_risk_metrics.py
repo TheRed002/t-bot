@@ -4,19 +4,15 @@ Unit tests for RiskCalculator class.
 This module tests the risk metrics calculation and assessment.
 """
 
-import pytest
-import numpy as np
-from decimal import Decimal
 from datetime import datetime
-from unittest.mock import Mock, AsyncMock, patch
+from decimal import Decimal
 
-from src.core.types import (
-    Position, OrderSide, MarketData, RiskMetrics, RiskLevel
-)
-from src.core.exceptions import (
-    RiskManagementError, ValidationError
-)
+import numpy as np
+import pytest
+
 from src.core.config import Config
+from src.core.exceptions import RiskManagementError
+from src.core.types import MarketData, OrderSide, Position, RiskLevel, RiskMetrics
 from src.risk_management.risk_metrics import RiskCalculator
 
 
@@ -43,7 +39,7 @@ class TestRiskCalculator:
             current_price=Decimal("51000"),
             unrealized_pnl=Decimal("100"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
     @pytest.fixture
@@ -58,7 +54,7 @@ class TestRiskCalculator:
             ask=Decimal("51010"),
             open_price=Decimal("50000"),
             high_price=Decimal("52000"),
-            low_price=Decimal("49000")
+            low_price=Decimal("49000"),
         )
 
     def test_initialization(self, risk_calculator, config):
@@ -71,7 +67,8 @@ class TestRiskCalculator:
 
     @pytest.mark.asyncio
     async def test_calculate_risk_metrics_with_positions(
-            self, risk_calculator, sample_position, sample_market_data):
+        self, risk_calculator, sample_position, sample_market_data
+    ):
         """Test risk metrics calculation with positions."""
         positions = [sample_position]
         market_data = [sample_market_data]
@@ -87,8 +84,7 @@ class TestRiskCalculator:
         assert risk_metrics.risk_level in RiskLevel
 
     @pytest.mark.asyncio
-    async def test_calculate_risk_metrics_empty_positions(
-            self, risk_calculator):
+    async def test_calculate_risk_metrics_empty_positions(self, risk_calculator):
         """Test risk metrics calculation with empty positions."""
         positions = []
         market_data = []
@@ -105,22 +101,19 @@ class TestRiskCalculator:
 
     @pytest.mark.asyncio
     async def test_calculate_risk_metrics_mismatch_data(
-            self, risk_calculator, sample_position, sample_market_data):
+        self, risk_calculator, sample_position, sample_market_data
+    ):
         """Test risk metrics calculation with mismatched data."""
         positions = [sample_position]
-        market_data = [
-            sample_market_data,
-            sample_market_data]  # Extra market data
+        market_data = [sample_market_data, sample_market_data]  # Extra market data
 
         with pytest.raises(RiskManagementError):
             await risk_calculator.calculate_risk_metrics(positions, market_data)
 
     @pytest.mark.asyncio
     async def test_calculate_portfolio_value(
-            self,
-            risk_calculator,
-            sample_position,
-            sample_market_data):
+        self, risk_calculator, sample_position, sample_market_data
+    ):
         """Test portfolio value calculation."""
         positions = [sample_position]
         market_data = [sample_market_data]
@@ -141,8 +134,7 @@ class TestRiskCalculator:
         assert risk_calculator.portfolio_values[0] == 10000.0
 
     @pytest.mark.asyncio
-    async def test_update_portfolio_history_with_returns(
-            self, risk_calculator):
+    async def test_update_portfolio_history_with_returns(self, risk_calculator):
         """Test portfolio history update with return calculation."""
         # Add first portfolio value
         await risk_calculator._update_portfolio_history(Decimal("10000"))
@@ -159,8 +151,7 @@ class TestRiskCalculator:
     async def test_calculate_var(self, risk_calculator):
         """Test Value at Risk calculation."""
         # Add some return history
-        risk_calculator.portfolio_returns = [
-            0.01, -0.005, 0.02, -0.01, 0.015] * 10
+        risk_calculator.portfolio_returns = [0.01, -0.005, 0.02, -0.01, 0.015] * 10
         portfolio_value = Decimal("10000")
 
         var_1d = await risk_calculator._calculate_var(1, portfolio_value)
@@ -185,8 +176,7 @@ class TestRiskCalculator:
     async def test_calculate_expected_shortfall(self, risk_calculator):
         """Test Expected Shortfall calculation."""
         # Add some return history
-        risk_calculator.portfolio_returns = [
-            0.01, -0.005, 0.02, -0.01, 0.015] * 10
+        risk_calculator.portfolio_returns = [0.01, -0.005, 0.02, -0.01, 0.015] * 10
         portfolio_value = Decimal("10000")
 
         expected_shortfall = await risk_calculator._calculate_expected_shortfall(portfolio_value)
@@ -194,8 +184,7 @@ class TestRiskCalculator:
         assert expected_shortfall > 0
 
     @pytest.mark.asyncio
-    async def test_calculate_expected_shortfall_insufficient_data(
-            self, risk_calculator):
+    async def test_calculate_expected_shortfall_insufficient_data(self, risk_calculator):
         """Test Expected Shortfall calculation with insufficient data."""
         portfolio_value = Decimal("10000")
 
@@ -209,8 +198,7 @@ class TestRiskCalculator:
     async def test_calculate_max_drawdown(self, risk_calculator):
         """Test maximum drawdown calculation."""
         # Add portfolio values with drawdown
-        risk_calculator.portfolio_values = [
-            10000, 11000, 9000, 12000, 8000, 13000]
+        risk_calculator.portfolio_values = [10000, 11000, 9000, 12000, 8000, 13000]
 
         max_drawdown = await risk_calculator._calculate_max_drawdown()
 
@@ -219,8 +207,7 @@ class TestRiskCalculator:
         assert max_drawdown <= Decimal("1")
 
     @pytest.mark.asyncio
-    async def test_calculate_max_drawdown_insufficient_data(
-            self, risk_calculator):
+    async def test_calculate_max_drawdown_insufficient_data(self, risk_calculator):
         """Test maximum drawdown calculation with insufficient data."""
         max_drawdown = await risk_calculator._calculate_max_drawdown()
 
@@ -230,8 +217,7 @@ class TestRiskCalculator:
     async def test_calculate_current_drawdown(self, risk_calculator):
         """Test current drawdown calculation."""
         # Add portfolio values
-        risk_calculator.portfolio_values = [
-            10000, 11000, 9000, 12000, 8000, 13000]
+        risk_calculator.portfolio_values = [10000, 11000, 9000, 12000, 8000, 13000]
         portfolio_value = Decimal("9000")  # Current value below peak
 
         current_drawdown = await risk_calculator._calculate_current_drawdown(portfolio_value)
@@ -244,8 +230,7 @@ class TestRiskCalculator:
     async def test_calculate_current_drawdown_at_peak(self, risk_calculator):
         """Test current drawdown calculation at peak."""
         # Add portfolio values
-        risk_calculator.portfolio_values = [
-            10000, 11000, 9000, 12000, 8000, 13000]
+        risk_calculator.portfolio_values = [10000, 11000, 9000, 12000, 8000, 13000]
         portfolio_value = Decimal("13000")  # At peak
 
         current_drawdown = await risk_calculator._calculate_current_drawdown(portfolio_value)
@@ -256,8 +241,7 @@ class TestRiskCalculator:
     async def test_calculate_sharpe_ratio(self, risk_calculator):
         """Test Sharpe ratio calculation."""
         # Add return history
-        risk_calculator.portfolio_returns = [
-            0.01, -0.005, 0.02, -0.01, 0.015] * 10
+        risk_calculator.portfolio_returns = [0.01, -0.005, 0.02, -0.01, 0.015] * 10
 
         sharpe_ratio = await risk_calculator._calculate_sharpe_ratio()
 
@@ -265,16 +249,14 @@ class TestRiskCalculator:
         assert isinstance(sharpe_ratio, Decimal)
 
     @pytest.mark.asyncio
-    async def test_calculate_sharpe_ratio_insufficient_data(
-            self, risk_calculator):
+    async def test_calculate_sharpe_ratio_insufficient_data(self, risk_calculator):
         """Test Sharpe ratio calculation with insufficient data."""
         sharpe_ratio = await risk_calculator._calculate_sharpe_ratio()
 
         assert sharpe_ratio is None
 
     @pytest.mark.asyncio
-    async def test_calculate_sharpe_ratio_zero_volatility(
-            self, risk_calculator):
+    async def test_calculate_sharpe_ratio_zero_volatility(self, risk_calculator):
         """Test Sharpe ratio calculation with zero volatility."""
         # Add return history with zero volatility
         risk_calculator.portfolio_returns = [0.01] * 30
@@ -292,7 +274,9 @@ class TestRiskCalculator:
         current_drawdown = Decimal("0.02")  # 2% drawdown
         sharpe_ratio = Decimal("1.5")
 
-        risk_level = await risk_calculator._determine_risk_level(var_1d, current_drawdown, sharpe_ratio)
+        risk_level = await risk_calculator._determine_risk_level(
+            var_1d, current_drawdown, sharpe_ratio
+        )
 
         assert risk_level == RiskLevel.LOW
 
@@ -303,7 +287,9 @@ class TestRiskCalculator:
         current_drawdown = Decimal("0.06")  # 6% drawdown
         sharpe_ratio = Decimal("0.3")
 
-        risk_level = await risk_calculator._determine_risk_level(var_1d, current_drawdown, sharpe_ratio)
+        risk_level = await risk_calculator._determine_risk_level(
+            var_1d, current_drawdown, sharpe_ratio
+        )
 
         assert risk_level == RiskLevel.MEDIUM
 
@@ -314,7 +300,9 @@ class TestRiskCalculator:
         current_drawdown = Decimal("0.12")  # 12% drawdown
         sharpe_ratio = Decimal("-1.5")
 
-        risk_level = await risk_calculator._determine_risk_level(var_1d, current_drawdown, sharpe_ratio)
+        risk_level = await risk_calculator._determine_risk_level(
+            var_1d, current_drawdown, sharpe_ratio
+        )
 
         assert risk_level == RiskLevel.HIGH
 
@@ -325,7 +313,9 @@ class TestRiskCalculator:
         current_drawdown = Decimal("0.25")  # 25% drawdown
         sharpe_ratio = Decimal("-2.0")
 
-        risk_level = await risk_calculator._determine_risk_level(var_1d, current_drawdown, sharpe_ratio)
+        risk_level = await risk_calculator._determine_risk_level(
+            var_1d, current_drawdown, sharpe_ratio
+        )
 
         assert risk_level == RiskLevel.CRITICAL
 
@@ -362,8 +352,7 @@ class TestRiskCalculator:
     async def test_get_risk_summary(self, risk_calculator):
         """Test risk summary generation."""
         # Add some portfolio data
-        risk_calculator.portfolio_values = [
-            10000, 11000, 9000, 12000, 8000, 13000]
+        risk_calculator.portfolio_values = [10000, 11000, 9000, 12000, 8000, 13000]
         risk_calculator.position_returns["BTCUSDT"] = [0.01, 0.02, 0.01]
 
         summary = await risk_calculator.get_risk_summary()
@@ -396,8 +385,7 @@ class TestRiskCalculator:
         returns_array = np.array(returns)
         volatility = np.std(returns_array)
         z_score = 1.645  # 95% confidence
-        expected_var = portfolio_value * \
-            Decimal(str(volatility)) * Decimal(str(z_score))
+        expected_var = portfolio_value * Decimal(str(volatility)) * Decimal(str(z_score))
 
         # This test verifies the mathematical accuracy of VaR calculation
         assert expected_var > 0

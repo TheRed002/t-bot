@@ -5,26 +5,31 @@ These tests verify error categorization, severity classification, retry policies
 circuit breaker integration, and error context preservation.
 """
 
-import pytest
-import asyncio
 import time
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch, AsyncMock
-from decimal import Decimal
+from unittest.mock import patch
+
+import pytest
 
 from src.core.config import Config
 from src.core.exceptions import (
-    TradingBotError, ExchangeError, RiskManagementError,
-    ValidationError, ExecutionError, ModelError, DataError,
-    StateConsistencyError, SecurityError
+    DataError,
+    ExchangeError,
+    ExecutionError,
+    ModelError,
+    RiskManagementError,
+    SecurityError,
+    StateConsistencyError,
+    TradingBotError,
+    ValidationError,
 )
-
 from src.error_handling.error_handler import (
+    CircuitBreaker,
+    ErrorContext,
     ErrorHandler,
     ErrorSeverity,
-    ErrorContext,
-    CircuitBreaker,
-    error_handler_decorator)
+    error_handler_decorator,
+)
 from src.error_handling.pattern_analytics import ErrorPattern
 
 
@@ -63,7 +68,7 @@ class TestErrorContext:
             symbol="BTCUSDT",
             order_id="order_123",
             details={"key": "value"},
-            stack_trace="traceback info"
+            stack_trace="traceback info",
         )
 
         assert context.error_id == "test_error_123"
@@ -88,7 +93,7 @@ class TestErrorContext:
             severity=ErrorSeverity.MEDIUM,
             component="database",
             operation="query",
-            error=error
+            error=error,
         )
 
         assert context.error_id == "test_error_123"
@@ -230,32 +235,40 @@ class TestErrorHandler:
     def test_error_classification(self, error_handler):
         """Test error classification functionality."""
         # Test critical errors
-        assert error_handler.classify_error(
-            StateConsistencyError("State corruption")) == ErrorSeverity.CRITICAL
-        assert error_handler.classify_error(
-            SecurityError("Security breach")) == ErrorSeverity.CRITICAL
+        assert (
+            error_handler.classify_error(StateConsistencyError("State corruption"))
+            == ErrorSeverity.CRITICAL
+        )
+        assert (
+            error_handler.classify_error(SecurityError("Security breach")) == ErrorSeverity.CRITICAL
+        )
 
         # Test high severity errors
-        assert error_handler.classify_error(
-            RiskManagementError("Risk limit exceeded")) == ErrorSeverity.HIGH
-        assert error_handler.classify_error(
-            ExchangeError("API timeout")) == ErrorSeverity.HIGH
-        assert error_handler.classify_error(ExecutionError(
-            "Order execution failed")) == ErrorSeverity.HIGH
+        assert (
+            error_handler.classify_error(RiskManagementError("Risk limit exceeded"))
+            == ErrorSeverity.HIGH
+        )
+        assert error_handler.classify_error(ExchangeError("API timeout")) == ErrorSeverity.HIGH
+        assert (
+            error_handler.classify_error(ExecutionError("Order execution failed"))
+            == ErrorSeverity.HIGH
+        )
 
         # Test medium severity errors
-        assert error_handler.classify_error(
-            DataError("Data validation failed")) == ErrorSeverity.MEDIUM
-        assert error_handler.classify_error(
-            ModelError("Model inference failed")) == ErrorSeverity.MEDIUM
+        assert (
+            error_handler.classify_error(DataError("Data validation failed"))
+            == ErrorSeverity.MEDIUM
+        )
+        assert (
+            error_handler.classify_error(ModelError("Model inference failed"))
+            == ErrorSeverity.MEDIUM
+        )
 
         # Test low severity errors
-        assert error_handler.classify_error(
-            ValidationError("Invalid input")) == ErrorSeverity.LOW
+        assert error_handler.classify_error(ValidationError("Invalid input")) == ErrorSeverity.LOW
 
         # Test unknown errors
-        assert error_handler.classify_error(
-            ValueError("Unknown error")) == ErrorSeverity.MEDIUM
+        assert error_handler.classify_error(ValueError("Unknown error")) == ErrorSeverity.MEDIUM
 
     def test_error_context_creation(self, error_handler):
         """Test error context creation."""
@@ -266,7 +279,7 @@ class TestErrorHandler:
             operation="place_order",
             user_id="test_user",
             bot_id="test_bot",
-            symbol="BTCUSDT"
+            symbol="BTCUSDT",
         )
 
         assert context.error_id is not None
@@ -287,7 +300,7 @@ class TestErrorHandler:
             error=error,
             component="risk_management",
             operation="validate_position",
-            details={"position_size": 1000, "limit": 500}
+            details={"position_size": 1000, "limit": 500},
         )
 
         assert context.error_id is not None
@@ -304,9 +317,7 @@ class TestErrorHandler:
         """Test successful error handling."""
         error = ValidationError("Invalid input")
         context = error_handler.create_error_context(
-            error=error,
-            component="validation",
-            operation="validate_input"
+            error=error, component="validation", operation="validate_input"
         )
 
         # Mock recovery strategy
@@ -327,9 +338,7 @@ class TestErrorHandler:
         """Test error handling without recovery strategy."""
         error = DataError("Data validation failed")
         context = error_handler.create_error_context(
-            error=error,
-            component="data",
-            operation="validate_data"
+            error=error, component="data", operation="validate_data"
         )
 
         result = await error_handler.handle_error(error, context)
@@ -342,12 +351,10 @@ class TestErrorHandler:
         """Test critical error escalation."""
         error = StateConsistencyError("State corruption")
         context = error_handler.create_error_context(
-            error=error,
-            component="state",
-            operation="validate_state"
+            error=error, component="state", operation="validate_state"
         )
 
-        with patch.object(error_handler, '_escalate_error') as mock_escalate:
+        with patch.object(error_handler, "_escalate_error") as mock_escalate:
             result = await error_handler.handle_error(error, context)
 
             assert result is False
@@ -358,15 +365,13 @@ class TestErrorHandler:
         """Test error handling when max attempts exceeded."""
         error = ExchangeError("API timeout")
         context = error_handler.create_error_context(
-            error=error,
-            component="exchange",
-            operation="place_order"
+            error=error, component="exchange", operation="place_order"
         )
 
         # Set recovery attempts to max
         context.recovery_attempts = context.max_recovery_attempts
 
-        with patch.object(error_handler, '_escalate_error') as mock_escalate:
+        with patch.object(error_handler, "_escalate_error") as mock_escalate:
             result = await error_handler.handle_error(error, context)
 
             assert result is False
@@ -408,6 +413,7 @@ class TestErrorHandlerDecorator:
     @pytest.mark.asyncio
     async def test_error_handler_decorator_success(self, config):
         """Test error handler decorator with successful function."""
+
         @error_handler_decorator("test", "successful_function")
         async def successful_function():
             return "success"
@@ -418,6 +424,7 @@ class TestErrorHandlerDecorator:
     @pytest.mark.asyncio
     async def test_error_handler_decorator_exception(self, config):
         """Test error handler decorator with exception."""
+
         @error_handler_decorator("test", "failing_function")
         async def failing_function():
             raise ValidationError("Test validation error")
@@ -435,9 +442,7 @@ class TestErrorHandlerDecorator:
             recovery_called = True
             return True
 
-        @error_handler_decorator("test",
-                                 "function_with_recovery",
-                                 recovery_strategy=mock_recovery)
+        @error_handler_decorator("test", "function_with_recovery", recovery_strategy=mock_recovery)
         async def function_with_recovery():
             raise ExchangeError("Test exchange error")
 
@@ -449,6 +454,7 @@ class TestErrorHandlerDecorator:
 
     def test_error_handler_decorator_sync_function(self, config):
         """Test error handler decorator with synchronous function."""
+
         @error_handler_decorator("test", "sync_function")
         def sync_function():
             return "sync success"
@@ -458,6 +464,7 @@ class TestErrorHandlerDecorator:
 
     def test_error_handler_decorator_sync_exception(self, config):
         """Test error handler decorator with synchronous exception."""
+
         @error_handler_decorator("test", "sync_failing_function")
         def sync_failing_function():
             raise ValidationError("Test validation error")
@@ -484,7 +491,7 @@ class TestErrorPattern:
             occurrence_count=5,
             confidence=0.8,
             description="Test pattern",
-            suggested_action="Monitor"
+            suggested_action="Monitor",
         )
 
         assert pattern.pattern_id == "test_pattern"
@@ -508,7 +515,7 @@ class TestErrorPattern:
             occurrence_count=3,
             confidence=0.7,
             description="Test pattern",
-            suggested_action="Investigate"
+            suggested_action="Investigate",
         )
 
         pattern_dict = pattern.to_dict()
@@ -533,7 +540,7 @@ class TestErrorPattern:
             occurrence_count=1,
             confidence=0.6,
             description="Test pattern",
-            suggested_action="Monitor"
+            suggested_action="Monitor",
         )
 
         initial_count = pattern.occurrence_count
@@ -558,6 +565,7 @@ class TestErrorHandlerIntegration:
     @pytest.mark.asyncio
     async def test_error_handler_with_circuit_breaker(self, error_handler):
         """Test error handler with circuit breaker integration."""
+
         # Create a function that fails
         def failing_function():
             raise ExchangeError("API timeout")
@@ -589,9 +597,7 @@ class TestErrorHandlerIntegration:
         for i in range(3):
             error = ExchangeError(f"API timeout {i}")
             context = error_handler.create_error_context(
-                error=error,
-                component="exchange",
-                operation="place_order"
+                error=error, component="exchange", operation="place_order"
             )
 
             await error_handler.handle_error(error, context)
@@ -601,8 +607,7 @@ class TestErrorHandlerIntegration:
         assert len(patterns) > 0
 
         # Should have a pattern for exchange errors
-        exchange_patterns = [
-            p for p in patterns.values() if p.component == "exchange"]
+        exchange_patterns = [p for p in patterns.values() if p.component == "exchange"]
         assert len(exchange_patterns) > 0
 
     @pytest.mark.asyncio
@@ -628,12 +633,10 @@ class TestErrorHandlerIntegration:
         """Test error handler escalation for critical errors."""
         error = StateConsistencyError("Critical state corruption")
         context = error_handler.create_error_context(
-            error=error,
-            component="state",
-            operation="validate_state"
+            error=error, component="state", operation="validate_state"
         )
 
-        with patch.object(error_handler, '_escalate_error') as mock_escalate:
+        with patch.object(error_handler, "_escalate_error") as mock_escalate:
             await error_handler.handle_error(error, context)
 
             # Should escalate critical errors
@@ -649,7 +652,7 @@ class TestErrorHandlerIntegration:
             operation="place_order",
             user_id="test_user",
             bot_id="test_bot",
-            symbol="BTCUSDT"
+            symbol="BTCUSDT",
         )
 
         # Verify context is preserved

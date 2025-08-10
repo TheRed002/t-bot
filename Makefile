@@ -4,7 +4,10 @@
 # Use bash for Makefile recipes
 SHELL := /bin/bash
 
-.PHONY: migrate test test-unit test-integration coverage docker-up host-ip format wsl-test wsl-test-unit wsl-test-integration wsl-coverage
+# WSL project directory for Windows-host -> WSL commands
+PROJECT_DIR_WSL := /mnt/e/Work/P-41 Trading/code/t-bot
+
+.PHONY: migrate test test-unit test-integration coverage docker-up host-ip format formate lint install-dev-tools wsl-test wsl-test-unit wsl-test-integration wsl-coverage
 
 # Run database migrations
 migrate:
@@ -50,11 +53,40 @@ wsl-coverage:
 	@echo "🧪 (WSL) Running coverage..."
 	wsl -- bash -lc "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && python -m pytest tests/ --cov=src --cov-report=term-missing | cat"
 
-# Format all Python files using autopep8
+# Developer tooling helpers
+install-dev-tools:
+	@echo "📦 Installing developer tooling (ruff, black, isort) into venv..."
+	@if command -v wsl >/dev/null 2>&1; then \
+		wsl -- bash -lc "source ~/.venv/bin/activate && pip install -U ruff black isort | cat"; \
+	else \
+		source ~/.venv/bin/activate && pip install -U ruff black isort | cat; \
+	fi
+	@echo "✅ Dev tools installed!"
+
+# Lint (no fixes)
+lint:
+	@echo "🔍 Running Ruff checks (no fixes)..."
+	@if command -v wsl >/dev/null 2>&1; then \
+		wsl -- bash -lc "cd '$(PROJECT_DIR_WSL)' && source ~/.venv/bin/activate && ruff check src tests | cat"; \
+	else \
+		source ~/.venv/bin/activate && ruff check src tests | cat; \
+	fi
+	@echo "✅ Lint completed!"
+
+# Format all Python files using Ruff formatter and autofix
 format:
-	@echo "🎨 Formatting all Python files with autopep8..."
-	python -m autopep8 --in-place --recursive --aggressive --aggressive src/ tests/ --max-line-length=100
+	@echo "🎨 Formatting code with Ruff (and sorting imports)..."
+	@if command -v wsl >/dev/null 2>&1; then \
+		wsl -- bash -lc "cd '$(PROJECT_DIR_WSL)' && source ~/.venv/bin/activate && ruff check src tests --fix | cat"; \
+		wsl -- bash -lc "cd '$(PROJECT_DIR_WSL)' && source ~/.venv/bin/activate && ruff format src tests | cat"; \
+	else \
+		source ~/.venv/bin/activate && ruff check src tests --fix | cat; \
+		source ~/.venv/bin/activate && ruff format src tests | cat; \
+	fi
 	@echo "✅ Formatting completed!"
+
+# Common typo alias
+formate: format
 
 # Start database services with Docker
 docker-up:

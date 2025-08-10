@@ -4,54 +4,56 @@ Extended unit tests for core type definitions.
 These tests cover additional types and enums not covered in the basic types test.
 """
 
-import pytest
-from decimal import Decimal
 from datetime import datetime, timezone
+from decimal import Decimal
+
+import pytest
 from pydantic import ValidationError
 
 from src.core.types import (
-    ExchangeType,
-    RequestType,
-    ConnectionType,
-    ValidationLevel,
-    ValidationResult,
-    QualityLevel,
-    DriftType,
-    IngestionMode,
-    PipelineStatus,
-    ProcessingStep,
-    StorageMode,
-    NewsSentiment,
-    SocialSentiment,
-    ExchangeInfo,
-    Ticker,
-    OrderBook,
-    ExchangeStatus,
-    OrderStatus,
-    Trade,
-    RiskLevel,
-    PositionSizeMethod,
-    RiskMetrics,
-    PositionLimits,
-    CircuitBreakerStatus,
-    CircuitBreakerType,
-    CircuitBreakerEvent,
-    MarketRegime,
-    RegimeChangeEvent,
     AllocationStrategy,
     CapitalAllocation,
-    FundFlow,
     CapitalMetrics,
-    CurrencyExposure,
-    ExchangeAllocation,
-    WithdrawalRule,
     CapitalProtection,
-    StrategyType,
-    StrategyStatus,
+    CircuitBreakerEvent,
+    CircuitBreakerStatus,
+    CircuitBreakerType,
+    ConnectionType,
+    CurrencyExposure,
+    DriftType,
+    ErrorPattern,
+    ExchangeAllocation,
+    ExchangeInfo,
+    ExchangeStatus,
+    ExchangeType,
+    FundFlow,
+    IngestionMode,
+    MarketRegime,
+    NewsSentiment,
+    OrderBook,
+    OrderSide,
+    OrderStatus,
+    PipelineStatus,
+    PositionLimits,
+    PositionSizeMethod,
+    ProcessingStep,
+    QualityLevel,
+    RegimeChangeEvent,
+    RequestType,
+    RiskLevel,
+    RiskMetrics,
+    SocialSentiment,
+    StorageMode,
     StrategyConfig,
     StrategyMetrics,
-    ErrorPattern,
-    OrderSide)
+    StrategyStatus,
+    StrategyType,
+    Ticker,
+    Trade,
+    ValidationLevel,
+    ValidationResult,
+    WithdrawalRule,
+)
 
 
 class TestExchangeType:
@@ -208,7 +210,7 @@ class TestExchangeInfo:
             supported_symbols=["BTC/USDT", "ETH/USDT"],
             rate_limits={"requests_per_minute": 1000},
             features=["spot_trading", "futures_trading"],
-            api_version="v1"
+            api_version="v1",
         )
 
         assert exchange_info.name == "test_exchange"
@@ -230,7 +232,7 @@ class TestTicker:
             last_price=Decimal("50000.50"),
             volume_24h=Decimal("1000.5"),
             price_change_24h=Decimal("500.00"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         assert ticker.symbol == "BTC/USDT"
@@ -250,7 +252,7 @@ class TestOrderBook:
             symbol="BTC/USDT",
             bids=[[Decimal("49999.00"), Decimal("1.0")], [Decimal("49998.00"), Decimal("2.0")]],
             asks=[[Decimal("50001.00"), Decimal("1.0")], [Decimal("50002.00"), Decimal("2.0")]],
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         assert order_book.symbol == "BTC/USDT"
@@ -297,7 +299,7 @@ class TestTrade:
             price=Decimal("50000.00"),
             timestamp=datetime.now(timezone.utc),
             fee=Decimal("25.00"),
-            fee_currency="USDT"
+            fee_currency="USDT",
         )
 
         assert trade.id == "trade_123"
@@ -344,7 +346,7 @@ class TestRiskMetrics:
             sharpe_ratio=Decimal("1.5"),
             current_drawdown=Decimal("1000.00"),
             risk_level=RiskLevel.MEDIUM,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         assert risk_metrics.var_1d == Decimal("1000.00")
@@ -368,7 +370,7 @@ class TestPositionLimits:
             max_portfolio_exposure=Decimal("0.95"),
             max_sector_exposure=Decimal("0.25"),
             max_correlation_exposure=Decimal("0.5"),
-            max_leverage=Decimal("2.0")
+            max_leverage=Decimal("2.0"),
         )
 
         assert position_limits.max_position_size == Decimal("10000.00")
@@ -414,7 +416,7 @@ class TestCircuitBreakerEvent:
             actual_value=Decimal("0.06"),
             timestamp=datetime.now(timezone.utc),
             description="Daily loss limit exceeded",
-            metadata={"strategy": "test_strategy"}
+            metadata={"strategy": "test_strategy"},
         )
 
         assert event.trigger_type == CircuitBreakerType.DAILY_LOSS_LIMIT
@@ -451,7 +453,7 @@ class TestRegimeChangeEvent:
             confidence=0.8,
             timestamp=datetime.now(timezone.utc),
             trigger_metrics={"volatility": 0.05},
-            description="Volatility spike detected"
+            description="Volatility spike detected",
         )
 
         assert event.from_regime == MarketRegime.LOW_VOLATILITY
@@ -485,7 +487,7 @@ class TestCapitalAllocation:
             utilized_amount=Decimal("5000.00"),
             available_amount=Decimal("5000.00"),
             allocation_percentage=0.1,
-            last_rebalance=datetime.now(timezone.utc)
+            last_rebalance=datetime.now(timezone.utc),
         )
 
         assert allocation.strategy_id == "test_strategy"
@@ -511,7 +513,7 @@ class TestFundFlow:
             reason="rebalancing",
             timestamp=datetime.now(timezone.utc),
             converted_amount=Decimal("1000.00"),
-            exchange_rate=Decimal("1.0")
+            exchange_rate=Decimal("1.0"),
         )
 
         assert fund_flow.from_strategy == "strategy_a"
@@ -539,7 +541,7 @@ class TestCapitalMetrics:
             rebalance_frequency_hours=24,
             emergency_reserve=Decimal("10000.00"),
             last_updated=datetime.now(timezone.utc),
-            allocation_count=5
+            allocation_count=5,
         )
 
         assert metrics.total_capital == Decimal("100000.00")
@@ -564,7 +566,7 @@ class TestCurrencyExposure:
             exposure_percentage=0.25,
             hedging_required=True,
             hedge_amount=Decimal("0.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         assert exposure.currency == "BTC"
@@ -588,7 +590,7 @@ class TestExchangeAllocation:
             liquidity_score=0.9,
             fee_efficiency=0.8,
             reliability_score=0.95,
-            last_rebalance=datetime.now(timezone.utc)
+            last_rebalance=datetime.now(timezone.utc),
         )
 
         assert allocation.exchange == "binance"
@@ -612,7 +614,7 @@ class TestWithdrawalRule:
             threshold=0.05,
             min_amount=Decimal("1000.00"),
             max_percentage=0.2,
-            cooldown_hours=24
+            cooldown_hours=24,
         )
 
         assert rule.name == "profit_only"
@@ -637,7 +639,7 @@ class TestCapitalProtection:
             profit_lock_pct=0.5,
             auto_compound_enabled=True,
             auto_compound_frequency="weekly",
-            profit_threshold=Decimal("100.00")
+            profit_threshold=Decimal("100.00"),
         )
 
         assert protection.emergency_reserve_pct == 0.1
@@ -692,7 +694,7 @@ class TestStrategyConfig:
             position_size_pct=0.02,
             stop_loss_pct=0.02,
             take_profit_pct=0.04,
-            parameters={"param1": "value1"}
+            parameters={"param1": "value1"},
         )
 
         assert config.name == "test_strategy"
@@ -721,7 +723,7 @@ class TestStrategyMetrics:
             win_rate=0.6,
             sharpe_ratio=1.2,
             max_drawdown=Decimal("2000.00"),
-            last_updated=datetime.now(timezone.utc)
+            last_updated=datetime.now(timezone.utc),
         )
 
         assert metrics.total_trades == 100
@@ -751,7 +753,7 @@ class TestErrorPattern:
             confidence=0.8,
             description="Test error pattern",
             suggested_action="Restart component",
-            is_active=True
+            is_active=True,
         )
 
         assert pattern.pattern_id == "test_pattern"
@@ -782,7 +784,7 @@ class TestErrorPattern:
             confidence=0.8,
             description="Test error pattern",
             suggested_action="Restart component",
-            is_active=True
+            is_active=True,
         )
 
         pattern_dict = pattern.to_dict()
@@ -814,7 +816,7 @@ class TestValidationErrorScenarios:
                 allocated_amount=Decimal("1000"),
                 available_amount=Decimal("1000"),
                 allocation_percentage=1.5,  # Invalid: > 1.0
-                last_rebalance=datetime.now(timezone.utc)
+                last_rebalance=datetime.now(timezone.utc),
             )
 
     def test_capital_allocation_negative_percentage(self):
@@ -826,7 +828,7 @@ class TestValidationErrorScenarios:
                 allocated_amount=Decimal("1000"),
                 available_amount=Decimal("1000"),
                 allocation_percentage=-0.1,  # Invalid: < 0.0
-                last_rebalance=datetime.now(timezone.utc)
+                last_rebalance=datetime.now(timezone.utc),
             )
 
     def test_fund_flow_invalid_amount(self):
@@ -836,7 +838,7 @@ class TestValidationErrorScenarios:
                 amount=Decimal("-100"),  # Invalid: negative amount
                 currency="USDT",
                 reason="Test flow",
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
 
     def test_fund_flow_zero_amount(self):
@@ -846,7 +848,7 @@ class TestValidationErrorScenarios:
                 amount=Decimal("0"),  # Invalid: zero amount
                 currency="USDT",
                 reason="Test flow",
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
 
     def test_capital_metrics_invalid_utilization_rate(self):
@@ -861,7 +863,7 @@ class TestValidationErrorScenarios:
                 rebalance_frequency_hours=24,
                 emergency_reserve=Decimal("1000"),
                 last_updated=datetime.now(timezone.utc),
-                allocation_count=5
+                allocation_count=5,
             )
 
     def test_capital_metrics_invalid_allocation_efficiency(self):
@@ -876,7 +878,7 @@ class TestValidationErrorScenarios:
                 rebalance_frequency_hours=24,
                 emergency_reserve=Decimal("1000"),
                 last_updated=datetime.now(timezone.utc),
-                allocation_count=5
+                allocation_count=5,
             )
 
     def test_currency_exposure_invalid_percentage(self):
@@ -888,7 +890,7 @@ class TestValidationErrorScenarios:
                 base_currency_equivalent=Decimal("1000"),
                 exposure_percentage=1.1,  # Invalid: > 1.0
                 hedging_required=False,
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(timezone.utc),
             )
 
     def test_exchange_allocation_invalid_score_fields(self):
@@ -902,7 +904,7 @@ class TestValidationErrorScenarios:
                 liquidity_score=1.2,  # Invalid: > 1.0
                 fee_efficiency=0.7,
                 reliability_score=0.9,
-                last_rebalance=datetime.now(timezone.utc)
+                last_rebalance=datetime.now(timezone.utc),
             )
 
     def test_withdrawal_rule_invalid_percentage_fields(self):
@@ -914,7 +916,7 @@ class TestValidationErrorScenarios:
                 threshold=1.5,  # Invalid: > 1.0
                 min_amount=Decimal("100"),
                 max_percentage=0.8,
-                cooldown_hours=24
+                cooldown_hours=24,
             )
 
     def test_capital_protection_invalid_percentage_fields(self):
@@ -925,7 +927,7 @@ class TestValidationErrorScenarios:
                 max_daily_loss_pct=0.05,
                 max_weekly_loss_pct=0.10,
                 max_monthly_loss_pct=0.15,
-                profit_lock_pct=0.5
+                profit_lock_pct=0.5,
             )
 
     def test_strategy_config_invalid_percentage_fields(self):
@@ -938,7 +940,7 @@ class TestValidationErrorScenarios:
                 min_confidence=1.2,  # Invalid: > 1.0
                 position_size_pct=0.02,
                 stop_loss_pct=0.02,
-                take_profit_pct=0.04
+                take_profit_pct=0.04,
             )
 
     def test_strategy_config_invalid_positive_integer(self):
@@ -951,7 +953,7 @@ class TestValidationErrorScenarios:
                 max_positions=0,  # Invalid: not positive
                 position_size_pct=0.02,
                 stop_loss_pct=0.02,
-                take_profit_pct=0.04
+                take_profit_pct=0.04,
             )
 
     def test_strategy_metrics_invalid_win_rate(self):
@@ -963,7 +965,7 @@ class TestValidationErrorScenarios:
                 losing_trades=40,
                 total_pnl=Decimal("1000"),
                 win_rate=1.1,  # Invalid: > 1.0
-                last_updated=datetime.now(timezone.utc)
+                last_updated=datetime.now(timezone.utc),
             )
 
     def test_strategy_config_invalid_symbols_empty_list(self):
@@ -975,7 +977,7 @@ class TestValidationErrorScenarios:
                 symbols=[],  # Invalid: empty list
                 position_size_pct=0.02,
                 stop_loss_pct=0.02,
-                take_profit_pct=0.04
+                take_profit_pct=0.04,
             )
 
     def test_strategy_config_invalid_symbols_none_list(self):
@@ -987,7 +989,7 @@ class TestValidationErrorScenarios:
                 symbols=None,  # Invalid: None
                 position_size_pct=0.02,
                 stop_loss_pct=0.02,
-                take_profit_pct=0.04
+                take_profit_pct=0.04,
             )
 
     def test_strategy_config_invalid_symbol_format(self):
@@ -999,7 +1001,7 @@ class TestValidationErrorScenarios:
                 symbols=["AB"],  # Invalid: too short (< 3 chars)
                 position_size_pct=0.02,
                 stop_loss_pct=0.02,
-                take_profit_pct=0.04
+                take_profit_pct=0.04,
             )
 
     def test_strategy_config_invalid_symbol_type(self):
@@ -1011,7 +1013,7 @@ class TestValidationErrorScenarios:
                 symbols=[123],  # Invalid: not a string
                 position_size_pct=0.02,
                 stop_loss_pct=0.02,
-                take_profit_pct=0.04
+                take_profit_pct=0.04,
             )
 
     def test_strategy_config_invalid_percentage_fields_negative(self):
@@ -1024,7 +1026,7 @@ class TestValidationErrorScenarios:
                 min_confidence=-0.1,  # Invalid: negative
                 position_size_pct=0.02,
                 stop_loss_pct=0.02,
-                take_profit_pct=0.04
+                take_profit_pct=0.04,
             )
 
     def test_strategy_config_invalid_percentage_fields_above_one(self):
@@ -1037,7 +1039,7 @@ class TestValidationErrorScenarios:
                 min_confidence=0.6,
                 position_size_pct=1.1,  # Invalid: > 1.0
                 stop_loss_pct=0.02,
-                take_profit_pct=0.04
+                take_profit_pct=0.04,
             )
 
     def test_strategy_config_invalid_positive_integer_negative(self):
@@ -1050,5 +1052,5 @@ class TestValidationErrorScenarios:
                 max_positions=-1,  # Invalid: negative
                 position_size_pct=0.02,
                 stop_loss_pct=0.02,
-                take_profit_pct=0.04
+                take_profit_pct=0.04,
             )

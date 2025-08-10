@@ -8,33 +8,32 @@ while managing inventory risk and optimizing spreads based on market conditions.
 CRITICAL: This strategy MUST inherit from BaseStrategy and follow the exact interface.
 """
 
-import numpy as np
-from typing import List, Optional, Dict, Any, Tuple
-from decimal import Decimal
-from datetime import datetime, timedelta
-import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from decimal import Decimal
+from typing import Any
 
-# MANDATORY: Import from P-011 - NEVER recreate the base strategy
-from src.strategies.base import BaseStrategy
-
-# From P-001 - Use existing types
-from src.core.types import (
-    Signal, MarketData, Position, SignalDirection,
-    StrategyConfig, StrategyType, OrderRequest, OrderSide, OrderType
-)
-from src.core.exceptions import ValidationError, RiskManagementError
-
-# From P-007A - Use decorators and validators
-from src.utils.decorators import time_execution, retry, circuit_breaker
-from src.utils.validators import validate_price, validate_quantity
-from src.utils.helpers import calculate_atr, calculate_volatility
-
-# From P-008+ - Use risk management
-from src.risk_management.base import BaseRiskManager
+import numpy as np
 
 # From P-001 - Use structured logging
 from src.core.logging import get_logger
+
+# From P-001 - Use existing types
+from src.core.types import (
+    MarketData,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyType,
+)
+
+# From P-008+ - Use risk management
+# MANDATORY: Import from P-011 - NEVER recreate the base strategy
+from src.strategies.base import BaseStrategy
+
+# From P-007A - Use decorators and validators
+from src.utils.decorators import time_execution
+from src.utils.validators import validate_price, validate_quantity
 
 logger = get_logger(__name__)
 
@@ -42,6 +41,7 @@ logger = get_logger(__name__)
 @dataclass
 class OrderLevel:
     """Represents a single order level in the market making strategy."""
+
     level: int
     bid_price: Decimal
     ask_price: Decimal
@@ -54,6 +54,7 @@ class OrderLevel:
 @dataclass
 class InventoryState:
     """Current inventory state for the market making strategy."""
+
     current_inventory: Decimal
     target_inventory: Decimal
     max_inventory: Decimal
@@ -79,7 +80,7 @@ class MarketMakingStrategy(BaseStrategy):
     - Cross-exchange rate limit synchronization
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize Market Making Strategy.
 
         Args:
@@ -89,66 +90,56 @@ class MarketMakingStrategy(BaseStrategy):
         self.strategy_type = StrategyType.MARKET_MAKING
 
         # Strategy-specific parameters with defaults
-        self.base_spread = Decimal(
-            str(self.config.parameters.get("base_spread", 0.001)))  # 0.1%
+        self.base_spread = Decimal(str(self.config.parameters.get("base_spread", 0.001)))  # 0.1%
         self.order_levels = self.config.parameters.get("order_levels", 5)
-        self.base_order_size = Decimal(
-            str(self.config.parameters.get("base_order_size", 0.01)))
-        self.size_multiplier = self.config.parameters.get(
-            "size_multiplier", 1.5)
+        self.base_order_size = Decimal(str(self.config.parameters.get("base_order_size", 0.01)))
+        self.size_multiplier = self.config.parameters.get("size_multiplier", 1.5)
         self.order_size_distribution = self.config.parameters.get(
-            "order_size_distribution", "exponential")
+            "order_size_distribution", "exponential"
+        )
 
         # Spread adjustment parameters
-        self.volatility_multiplier = self.config.parameters.get(
-            "volatility_multiplier", 2.0)
-        self.inventory_skew_enabled = self.config.parameters.get(
-            "inventory_skew", True)
-        self.competitive_quotes_enabled = self.config.parameters.get(
-            "competitive_quotes", True)
+        self.volatility_multiplier = self.config.parameters.get("volatility_multiplier", 2.0)
+        self.inventory_skew_enabled = self.config.parameters.get("inventory_skew", True)
+        self.competitive_quotes_enabled = self.config.parameters.get("competitive_quotes", True)
 
         # Inventory management
-        self.target_inventory = Decimal(
-            str(self.config.parameters.get("target_inventory", 0.5)))
-        self.max_inventory = Decimal(
-            str(self.config.parameters.get("max_inventory", 1.0)))
-        self.inventory_risk_aversion = self.config.parameters.get(
-            "inventory_risk_aversion", 0.1)
-        self.rebalance_threshold = self.config.parameters.get(
-            "rebalance_threshold", 0.2)
+        self.target_inventory = Decimal(str(self.config.parameters.get("target_inventory", 0.5)))
+        self.max_inventory = Decimal(str(self.config.parameters.get("max_inventory", 1.0)))
+        self.inventory_risk_aversion = self.config.parameters.get("inventory_risk_aversion", 0.1)
+        self.rebalance_threshold = self.config.parameters.get("rebalance_threshold", 0.2)
 
         # Risk parameters
         self.max_position_value = Decimal(
-            str(self.config.parameters.get("max_position_value", 10000)))
+            str(self.config.parameters.get("max_position_value", 10000))
+        )
         self.stop_loss_inventory = Decimal(
-            str(self.config.parameters.get("stop_loss_inventory", 2.0)))
-        self.daily_loss_limit = Decimal(
-            str(self.config.parameters.get("daily_loss_limit", 100)))
+            str(self.config.parameters.get("stop_loss_inventory", 2.0))
+        )
+        self.daily_loss_limit = Decimal(str(self.config.parameters.get("daily_loss_limit", 100)))
         self.min_profit_per_trade = Decimal(
-            str(self.config.parameters.get("min_profit_per_trade", 0.00001)))
+            str(self.config.parameters.get("min_profit_per_trade", 0.00001))
+        )
 
         # Order management
-        self.order_refresh_time = self.config.parameters.get(
-            "order_refresh_time", 30)  # seconds
-        self.adaptive_spreads = self.config.parameters.get(
-            "adaptive_spreads", True)
-        self.competition_monitoring = self.config.parameters.get(
-            "competition_monitoring", True)
+        self.order_refresh_time = self.config.parameters.get("order_refresh_time", 30)  # seconds
+        self.adaptive_spreads = self.config.parameters.get("adaptive_spreads", True)
+        self.competition_monitoring = self.config.parameters.get("competition_monitoring", True)
 
         # State tracking
-        self.active_orders: Dict[str, OrderLevel] = {}
+        self.active_orders: dict[str, OrderLevel] = {}
         self.inventory_state = InventoryState(
             current_inventory=Decimal("0"),
             target_inventory=self.target_inventory,
             max_inventory=self.max_inventory,
             inventory_skew=0.0,
-            last_rebalance=datetime.now()
+            last_rebalance=datetime.now(),
         )
 
         # Market data tracking
-        self.price_history: List[float] = []
-        self.volatility_history: List[float] = []
-        self.spread_history: List[float] = []
+        self.price_history: list[float] = []
+        self.volatility_history: list[float] = []
+        self.spread_history: list[float] = []
 
         # Performance tracking
         self.total_trades = 0
@@ -162,11 +153,11 @@ class MarketMakingStrategy(BaseStrategy):
             strategy=self.name,
             base_spread=float(self.base_spread),
             order_levels=self.order_levels,
-            target_inventory=float(self.target_inventory)
+            target_inventory=float(self.target_inventory),
         )
 
     @time_execution
-    async def _generate_signals_impl(self, data: MarketData) -> List[Signal]:
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """Generate market making signals from market data.
 
         MANDATORY: Use graceful error handling and input validation.
@@ -180,8 +171,10 @@ class MarketMakingStrategy(BaseStrategy):
         try:
             # Validate input data
             if not data or not data.price or not data.bid or not data.ask:
-                logger.warning("Invalid market data for signal generation",
-                               symbol=data.symbol if data else None)
+                logger.warning(
+                    "Invalid market data for signal generation",
+                    symbol=data.symbol if data else None,
+                )
                 return []
 
             # Update price history
@@ -197,12 +190,12 @@ class MarketMakingStrategy(BaseStrategy):
             for level in range(1, self.order_levels + 1):
                 # Calculate level-specific parameters
                 level_spread = self._calculate_level_spread(
-                    level, current_spread, current_volatility)
+                    level, current_spread, current_volatility
+                )
                 level_size = self._calculate_level_size(level)
 
                 # Generate bid signal
-                bid_price = data.bid * \
-                    (Decimal("1") - level_spread / Decimal("2"))
+                bid_price = data.bid * (Decimal("1") - level_spread / Decimal("2"))
                 bid_signal = Signal(
                     direction=SignalDirection.BUY,
                     confidence=0.8,  # High confidence for market making
@@ -215,14 +208,13 @@ class MarketMakingStrategy(BaseStrategy):
                         "price": float(bid_price),
                         "size": float(level_size),
                         "spread": float(level_spread),
-                        "side": "bid"
-                    }
+                        "side": "bid",
+                    },
                 )
                 signals.append(bid_signal)
 
                 # Generate ask signal
-                ask_price = data.ask * \
-                    (Decimal("1") + level_spread / Decimal("2"))
+                ask_price = data.ask * (Decimal("1") + level_spread / Decimal("2"))
                 ask_signal = Signal(
                     direction=SignalDirection.SELL,
                     confidence=0.8,  # High confidence for market making
@@ -235,8 +227,8 @@ class MarketMakingStrategy(BaseStrategy):
                         "price": float(ask_price),
                         "size": float(level_size),
                         "spread": float(level_spread),
-                        "side": "ask"
-                    }
+                        "side": "ask",
+                    },
                 )
                 signals.append(ask_signal)
 
@@ -246,21 +238,18 @@ class MarketMakingStrategy(BaseStrategy):
                 symbol=data.symbol,
                 signal_count=len(signals),
                 current_spread=float(current_spread),
-                volatility=current_volatility
+                volatility=current_volatility,
             )
 
             return signals
 
         except Exception as e:
-            logger.error("Market making signal generation failed",
-                         strategy=self.name, error=str(e))
+            logger.error("Market making signal generation failed", strategy=self.name, error=str(e))
             return []  # Graceful degradation
 
     def _calculate_level_spread(
-            self,
-            level: int,
-            base_spread: Decimal,
-            volatility: float) -> Decimal:
+        self, level: int, base_spread: Decimal, volatility: float
+    ) -> Decimal:
         """Calculate spread for a specific order level.
 
         Args:
@@ -276,8 +265,7 @@ class MarketMakingStrategy(BaseStrategy):
 
         # Adjust for volatility
         if self.adaptive_spreads and volatility > 0:
-            volatility_adjustment = min(
-                volatility * self.volatility_multiplier, 0.01)
+            volatility_adjustment = min(volatility * self.volatility_multiplier, 0.01)
             level_spread += Decimal(str(volatility_adjustment))
 
         # Adjust for inventory skew
@@ -299,8 +287,7 @@ class MarketMakingStrategy(BaseStrategy):
             Calculated order size
         """
         if self.order_size_distribution == "exponential":
-            size = self.base_order_size * \
-                Decimal(str(self.size_multiplier ** (level - 1)))
+            size = self.base_order_size * Decimal(str(self.size_multiplier ** (level - 1)))
         elif self.order_size_distribution == "linear":
             size = self.base_order_size * Decimal(str(level))
         else:  # constant
@@ -308,8 +295,7 @@ class MarketMakingStrategy(BaseStrategy):
 
         # Apply inventory-based size adjustment
         if self.inventory_skew_enabled:
-            inventory_factor = 1 + \
-                abs(self.inventory_state.inventory_skew) * 0.5
+            inventory_factor = 1 + abs(self.inventory_state.inventory_skew) * 0.5
             size *= Decimal(str(inventory_factor))
 
         return size
@@ -365,15 +351,15 @@ class MarketMakingStrategy(BaseStrategy):
             # Basic validation
             if not signal or signal.confidence < self.config.min_confidence:
                 logger.warning(
-                    "Signal confidence too low",
-                    strategy=self.name,
-                    confidence=signal.confidence)
+                    "Signal confidence too low", strategy=self.name, confidence=signal.confidence
+                )
                 return False
 
             # Check if we have required metadata
             if "price" not in signal.metadata or "size" not in signal.metadata:
-                logger.warning("Signal missing required metadata",
-                               strategy=self.name, metadata=signal.metadata)
+                logger.warning(
+                    "Signal missing required metadata", strategy=self.name, metadata=signal.metadata
+                )
                 return False
 
             # Validate price and size
@@ -381,42 +367,41 @@ class MarketMakingStrategy(BaseStrategy):
             size = Decimal(str(signal.metadata["size"]))
 
             if not validate_price(float(price), signal.symbol):
-                logger.warning("Invalid price in signal",
-                               strategy=self.name, price=float(price))
+                logger.warning("Invalid price in signal", strategy=self.name, price=float(price))
                 return False
 
             if not validate_quantity(float(size), signal.symbol):
-                logger.warning("Invalid size in signal",
-                               strategy=self.name, size=float(size))
+                logger.warning("Invalid size in signal", strategy=self.name, size=float(size))
                 return False
 
             # Check inventory limits
             if not self._check_inventory_limits(signal):
-                logger.warning("Signal violates inventory limits",
-                               strategy=self.name, signal=signal.direction)
+                logger.warning(
+                    "Signal violates inventory limits", strategy=self.name, signal=signal.direction
+                )
                 return False
 
             # Check daily loss limit
             if self.daily_pnl < -self.daily_loss_limit:
                 logger.warning(
-                    "Daily loss limit reached",
-                    strategy=self.name,
-                    daily_pnl=float(
-                        self.daily_pnl))
+                    "Daily loss limit reached", strategy=self.name, daily_pnl=float(self.daily_pnl)
+                )
                 return False
 
             # Check with risk manager if available
             if self._risk_manager:
                 if not await self._risk_manager.validate_signal(signal):
-                    logger.warning("Signal rejected by risk manager",
-                                   strategy=self.name, signal=signal.direction)
+                    logger.warning(
+                        "Signal rejected by risk manager",
+                        strategy=self.name,
+                        signal=signal.direction,
+                    )
                     return False
 
             return True
 
         except Exception as e:
-            logger.error("Signal validation failed",
-                         strategy=self.name, error=str(e))
+            logger.error("Signal validation failed", strategy=self.name, error=str(e))
             return False
 
     def _check_inventory_limits(self, signal: Signal) -> bool:
@@ -453,8 +438,7 @@ class MarketMakingStrategy(BaseStrategy):
         """
         try:
             # Get size from signal metadata
-            size = Decimal(
-                str(signal.metadata.get("size", self.base_order_size)))
+            size = Decimal(str(signal.metadata.get("size", self.base_order_size)))
 
             # Apply risk management if available
             if self._risk_manager:
@@ -462,15 +446,13 @@ class MarketMakingStrategy(BaseStrategy):
                 pass
 
             # Ensure size is within limits
-            max_size = self.max_position_value / \
-                Decimal(str(signal.metadata.get("price", 1)))
+            max_size = self.max_position_value / Decimal(str(signal.metadata.get("price", 1)))
             size = min(size, max_size)
 
             return size
 
         except Exception as e:
-            logger.error("Position size calculation failed",
-                         strategy=self.name, error=str(e))
+            logger.error("Position size calculation failed", strategy=self.name, error=str(e))
             return self.base_order_size
 
     async def should_exit(self, position: Position, data: MarketData) -> bool:
@@ -489,33 +471,31 @@ class MarketMakingStrategy(BaseStrategy):
                 logger.info(
                     "Position exceeds stop loss inventory",
                     strategy=self.name,
-                    quantity=float(
-                        position.quantity))
+                    quantity=float(position.quantity),
+                )
                 return True
 
             # Check for profit taking (if position is profitable)
             if position.unrealized_pnl > self.min_profit_per_trade:
                 # Consider closing if spread has narrowed significantly
-                current_spread = (data.ask - data.bid) / \
-                    data.bid if data.bid and data.ask else 0
+                current_spread = (data.ask - data.bid) / data.bid if data.bid and data.ask else 0
                 if current_spread < self.base_spread * Decimal("0.5"):
                     logger.info(
                         "Closing position due to narrow spread",
                         strategy=self.name,
-                        spread=float(current_spread))
+                        spread=float(current_spread),
+                    )
                     return True
 
             # Check for inventory rebalancing
             if await self._should_rebalance_inventory(position):
-                logger.info("Closing position for inventory rebalancing",
-                            strategy=self.name)
+                logger.info("Closing position for inventory rebalancing", strategy=self.name)
                 return True
 
             return False
 
         except Exception as e:
-            logger.error("Position exit check failed",
-                         strategy=self.name, error=str(e))
+            logger.error("Position exit check failed", strategy=self.name, error=str(e))
             return False
 
     async def _should_rebalance_inventory(self, position: Position) -> bool:
@@ -528,35 +508,38 @@ class MarketMakingStrategy(BaseStrategy):
             True if rebalancing needed, False otherwise
         """
         # Calculate current inventory skew
-        current_skew = self.inventory_state.current_inventory / \
-            self.inventory_state.max_inventory
+        current_skew = self.inventory_state.current_inventory / self.inventory_state.max_inventory
 
         # Check if skew is too high
         if abs(current_skew) > 0.8:  # 80% of max inventory
-            logger.debug("Rebalancing needed due to high skew",
-                         strategy=self.name, current_skew=float(current_skew))
+            logger.debug(
+                "Rebalancing needed due to high skew",
+                strategy=self.name,
+                current_skew=float(current_skew),
+            )
             return True
 
         # Check if we need to move toward target inventory
         target_diff = abs(
-            self.inventory_state.current_inventory -
-            self.inventory_state.target_inventory)
-        threshold = self.inventory_state.max_inventory * \
-            Decimal(str(self.rebalance_threshold))
+            self.inventory_state.current_inventory - self.inventory_state.target_inventory
+        )
+        threshold = self.inventory_state.max_inventory * Decimal(str(self.rebalance_threshold))
 
         logger.debug(
             "Checking rebalancing conditions",
             strategy=self.name,
-            current_inventory=float(
-                self.inventory_state.current_inventory),
-            target_inventory=float(
-                self.inventory_state.target_inventory),
+            current_inventory=float(self.inventory_state.current_inventory),
+            target_inventory=float(self.inventory_state.target_inventory),
             target_diff=float(target_diff),
-            threshold=float(threshold))
+            threshold=float(threshold),
+        )
 
         if target_diff >= threshold:
-            logger.debug("Rebalancing needed due to target deviation",
-                         strategy=self.name, target_diff=float(target_diff))
+            logger.debug(
+                "Rebalancing needed due to target deviation",
+                strategy=self.name,
+                target_diff=float(target_diff),
+            )
             return True
 
         return False
@@ -582,16 +565,14 @@ class MarketMakingStrategy(BaseStrategy):
             logger.debug(
                 "Inventory state updated",
                 strategy=self.name,
-                current_inventory=float(
-                    self.inventory_state.current_inventory),
-                inventory_skew=self.inventory_state.inventory_skew)
+                current_inventory=float(self.inventory_state.current_inventory),
+                inventory_skew=self.inventory_state.inventory_skew,
+            )
 
         except Exception as e:
-            logger.error("Inventory state update failed",
-                         strategy=self.name, error=str(e))
+            logger.error("Inventory state update failed", strategy=self.name, error=str(e))
 
-    async def update_performance_metrics(
-            self, trade_result: Dict[str, Any]) -> None:
+    async def update_performance_metrics(self, trade_result: dict[str, Any]) -> None:
         """Update performance metrics after trade execution.
 
         Args:
@@ -627,14 +608,13 @@ class MarketMakingStrategy(BaseStrategy):
                 strategy=self.name,
                 total_trades=self.total_trades,
                 total_pnl=float(self.total_pnl),
-                daily_pnl=float(self.daily_pnl)
+                daily_pnl=float(self.daily_pnl),
             )
 
         except Exception as e:
-            logger.error("Performance metrics update failed",
-                         strategy=self.name, error=str(e))
+            logger.error("Performance metrics update failed", strategy=self.name, error=str(e))
 
-    def get_strategy_info(self) -> Dict[str, Any]:
+    def get_strategy_info(self) -> dict[str, Any]:
         """Get comprehensive strategy information.
 
         Returns:
@@ -657,7 +637,7 @@ class MarketMakingStrategy(BaseStrategy):
             "daily_pnl": float(self.daily_pnl),
             "order_size_distribution": self.order_size_distribution,
             "adaptive_spreads": self.adaptive_spreads,
-            "competition_monitoring": self.competition_monitoring
+            "competition_monitoring": self.competition_monitoring,
         }
 
         base_info.update(market_making_info)

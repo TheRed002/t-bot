@@ -19,21 +19,26 @@ Dependencies:
 """
 
 import re
-from typing import Any, Dict, List, Optional, Union
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timezone, timedelta
+from typing import Any
+
+from src.core.config import Config
 
 # Import from P-001 core components
 from src.core.exceptions import ValidationError
+from src.core.logging import get_logger
 from src.core.types import (
-    OrderRequest, OrderResponse, MarketData, Position,
-    Signal, OrderSide, OrderType
+    MarketData,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderType,
     # TODO: Add RiskConfig, StrategyConfig when implemented in P-008+ (Risk
     # Management)
+    Position,
+    Signal,
 )
-from src.core.config import Config
-from src.core.logging import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -42,10 +47,8 @@ logger = get_logger(__name__)
 # Financial Data Validation
 # =============================================================================
 
-def validate_price(
-        price: float,
-        symbol: str,
-        exchange: str = "binance") -> Decimal:
+
+def validate_price(price: float, symbol: str, exchange: str = "binance") -> Decimal:
     """
     Validate and normalize price values.
 
@@ -61,16 +64,13 @@ def validate_price(
         ValidationError: If price is invalid
     """
     if not isinstance(price, (int, float, Decimal)):
-        raise ValidationError(
-            f"Price must be a number for {symbol}, got {type(price).__name__}")
+        raise ValidationError(f"Price must be a number for {symbol}, got {type(price).__name__}")
 
     if price <= 0:
-        raise ValidationError(
-            f"Price must be positive for {symbol}, got {price}")
+        raise ValidationError(f"Price must be positive for {symbol}, got {price}")
 
     if price > 1_000_000:  # Sanity check for extremely high prices
-        raise ValidationError(
-            f"Price {price} for {symbol} exceeds maximum allowed")
+        raise ValidationError(f"Price {price} for {symbol} exceeds maximum allowed")
 
     try:
         # Convert to Decimal for financial precision
@@ -80,14 +80,12 @@ def validate_price(
         precision = get_price_precision(symbol, exchange)
 
         # Round to appropriate precision
-        normalized_price = decimal_price.quantize(
-            Decimal(f"0.{'0' * (precision - 1)}1")
-        )
+        normalized_price = decimal_price.quantize(Decimal(f"0.{'0' * (precision - 1)}1"))
 
         return normalized_price
 
     except (InvalidOperation, ValueError) as e:
-        raise ValidationError(f"Invalid price format for {symbol}: {str(e)}")
+        raise ValidationError(f"Invalid price format for {symbol}: {e!s}")
 
 
 def get_price_precision(symbol: str, exchange: str) -> int:
@@ -103,23 +101,13 @@ def get_price_precision(symbol: str, exchange: str) -> int:
     """
     # Exchange-specific precision rules
     exchange_precisions = {
-        "binance": {
-            "BTC": 8, "ETH": 6, "USDT": 2, "USD": 2,
-            "default": 4
-        },
-        "okx": {
-            "BTC": 8, "ETH": 6, "USDT": 2, "USD": 2,
-            "default": 4
-        },
-        "coinbase": {
-            "BTC": 8, "ETH": 6, "USDT": 2, "USD": 2,
-            "default": 4
-        }
+        "binance": {"BTC": 8, "ETH": 6, "USDT": 2, "USD": 2, "default": 4},
+        "okx": {"BTC": 8, "ETH": 6, "USDT": 2, "USD": 2, "default": 4},
+        "coinbase": {"BTC": 8, "ETH": 6, "USDT": 2, "USD": 2, "default": 4},
     }
 
     # Get exchange rules
-    exchange_rules = exchange_precisions.get(
-        exchange.lower(), exchange_precisions["binance"])
+    exchange_rules = exchange_precisions.get(exchange.lower(), exchange_precisions["binance"])
 
     # Determine precision based on symbol
     for asset in ["BTC", "ETH", "USDT", "USD"]:
@@ -129,10 +117,7 @@ def get_price_precision(symbol: str, exchange: str) -> int:
     return exchange_rules["default"]
 
 
-def validate_quantity(
-        quantity: float,
-        symbol: str,
-        min_qty: Optional[float] = None) -> Decimal:
+def validate_quantity(quantity: float, symbol: str, min_qty: float | None = None) -> Decimal:
     """
     Validate trading quantity.
 
@@ -153,12 +138,10 @@ def validate_quantity(
         )
 
     if quantity <= 0:
-        raise ValidationError(
-            f"Quantity must be positive for {symbol}, got {quantity}")
+        raise ValidationError(f"Quantity must be positive for {symbol}, got {quantity}")
 
     if min_qty and quantity < min_qty:
-        raise ValidationError(
-            f"Quantity {quantity} below minimum {min_qty} for {symbol}")
+        raise ValidationError(f"Quantity {quantity} below minimum {min_qty} for {symbol}")
 
     try:
         # Convert to Decimal for financial precision
@@ -173,15 +156,12 @@ def validate_quantity(
             precision = 4
 
         # Round to appropriate precision
-        normalized_qty = decimal_qty.quantize(
-            Decimal(f"0.{'0' * (precision - 1)}1")
-        )
+        normalized_qty = decimal_qty.quantize(Decimal(f"0.{'0' * (precision - 1)}1"))
 
         return normalized_qty
 
     except (InvalidOperation, ValueError) as e:
-        raise ValidationError(
-            f"Invalid quantity format for {symbol}: {str(e)}")
+        raise ValidationError(f"Invalid quantity format for {symbol}: {e!s}")
 
 
 def validate_symbol(symbol: str) -> str:
@@ -210,12 +190,12 @@ def validate_symbol(symbol: str) -> str:
     normalized = symbol.strip().upper()
 
     # Check for valid characters (alphanumeric and common separators)
-    if not re.match(r'^[A-Z0-9/_-]+$', normalized):
+    if not re.match(r"^[A-Z0-9/_-]+$", normalized):
         raise ValidationError(f"Symbol contains invalid characters: {symbol}")
 
     # Check for common patterns
-    if '/' in normalized:
-        parts = normalized.split('/')
+    if "/" in normalized:
+        parts = normalized.split("/")
         if len(parts) != 2:
             raise ValidationError(f"Invalid symbol format: {symbol}")
         if not parts[0] or not parts[1]:
@@ -259,13 +239,12 @@ def validate_order_request(order: OrderRequest) -> bool:
         # Validate time in force
         valid_tif = ["GTC", "IOC", "FOK"]
         if order.time_in_force not in valid_tif:
-            raise ValidationError(
-                f"Invalid time in force: {order.time_in_force}")
+            raise ValidationError(f"Invalid time in force: {order.time_in_force}")
 
         return True
 
     except Exception as e:
-        raise ValidationError(f"Order request validation failed: {str(e)}")
+        raise ValidationError(f"Order request validation failed: {e!s}")
 
 
 def validate_market_data(data: MarketData) -> bool:
@@ -313,15 +292,15 @@ def validate_market_data(data: MarketData) -> bool:
         return True
 
     except Exception as e:
-        raise ValidationError(f"Market data validation failed: {str(e)}")
+        raise ValidationError(f"Market data validation failed: {e!s}")
 
 
 # =============================================================================
 # Configuration Validation
 # =============================================================================
 
-def validate_config(config: Union[Dict[str, Any], Config],
-                    required_fields: List[str] = None) -> bool:
+
+def validate_config(config: dict[str, Any] | Config, required_fields: list[str] = None) -> bool:
     """
     Validate configuration using core Config type or dictionary.
 
@@ -336,28 +315,26 @@ def validate_config(config: Union[Dict[str, Any], Config],
         ValidationError: If configuration is invalid
     """
     # Handle both Config objects and dictionaries
-    if hasattr(config, 'model_dump'):
+    if hasattr(config, "model_dump"):
         # It's a Pydantic model (Config object)
         config_dict = config.model_dump()
     elif isinstance(config, dict):
         config_dict = config
     else:
-        raise ValidationError(
-            "Configuration must be a Config object or dictionary")
+        raise ValidationError("Configuration must be a Config object or dictionary")
 
     if required_fields:
         for field in required_fields:
             if field not in config_dict:
                 raise ValidationError(f"Required field missing: {field}")
             if config_dict[field] is None:
-                raise ValidationError(
-                    f"Required field cannot be None: {field}")
+                raise ValidationError(f"Required field cannot be None: {field}")
 
     return True
 
 
 # TODO: Use RiskConfig when available
-def validate_risk_parameters(params: Union[Dict[str, Any], Any]) -> bool:
+def validate_risk_parameters(params: dict[str, Any] | Any) -> bool:
     """
     Validate risk management parameters using core RiskConfig type.
 
@@ -370,9 +347,7 @@ def validate_risk_parameters(params: Union[Dict[str, Any], Any]) -> bool:
     Raises:
         ValidationError: If risk parameters are invalid
     """
-    required_fields = [
-        "max_position_size", "max_daily_loss", "max_drawdown"
-    ]
+    required_fields = ["max_position_size", "max_daily_loss", "max_drawdown"]
 
     validate_config(params, required_fields)
 
@@ -429,7 +404,7 @@ def validate_signal(signal: Signal) -> bool:
 
 
 # TODO: Use StrategyConfig when available
-def validate_strategy_config(config: Union[Dict[str, Any], Any]) -> bool:
+def validate_strategy_config(config: dict[str, Any] | Any) -> bool:
     """
     Validate strategy configuration using core StrategyConfig type.
 
@@ -442,17 +417,14 @@ def validate_strategy_config(config: Union[Dict[str, Any], Any]) -> bool:
     Raises:
         ValidationError: If strategy configuration is invalid
     """
-    required_fields = [
-        "name", "strategy_type", "symbols", "timeframe"
-    ]
+    required_fields = ["name", "strategy_type", "symbols", "timeframe"]
 
     validate_config(config, required_fields)
 
     # Validate strategy type
     valid_types = ["static", "dynamic", "arbitrage", "market_making", "ai_ml"]
     if config["strategy_type"] not in valid_types:
-        raise ValidationError(
-            f"Invalid strategy type: {config['strategy_type']}")
+        raise ValidationError(f"Invalid strategy type: {config['strategy_type']}")
 
     # Validate symbols
     if not isinstance(config["symbols"], list) or not config["symbols"]:
@@ -482,8 +454,8 @@ def validate_strategy_config(config: Union[Dict[str, Any], Any]) -> bool:
 # API Input Validation
 # =============================================================================
 
-def validate_api_request(
-        request_data: Dict[str, Any], required_fields: List[str] = None) -> bool:
+
+def validate_api_request(request_data: dict[str, Any], required_fields: list[str] = None) -> bool:
     """
     Validate API request payload.
 
@@ -508,8 +480,7 @@ def validate_api_request(
     return True
 
 
-def validate_webhook_payload(
-        payload: Dict[str, Any], signature: str = None) -> bool:
+def validate_webhook_payload(payload: dict[str, Any], signature: str = None) -> bool:
     """
     Validate webhook payload with optional signature verification.
 
@@ -535,12 +506,11 @@ def validate_webhook_payload(
         try:
             timestamp = payload["timestamp"]
             if isinstance(timestamp, str):
-                datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             elif isinstance(timestamp, (int, float)):
                 datetime.fromtimestamp(timestamp)
         except (ValueError, TypeError):
-            raise ValidationError(
-                "Invalid timestamp format in webhook payload")
+            raise ValidationError("Invalid timestamp format in webhook payload")
 
     # TODO: Implement signature verification if needed
     if signature:
@@ -573,26 +543,19 @@ def sanitize_user_input(input_data: str) -> str:
         r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER)\b)",
         r"(\b(UNION|OR|AND)\b)",
         r"(--|/\*|\*/)",
-        r"(\b(EXEC|EXECUTE)\b)"
+        r"(\b(EXEC|EXECUTE)\b)",
     ]
 
     for pattern in sql_patterns:
         if re.search(pattern, sanitized, re.IGNORECASE):
-            raise ValidationError(
-                "Input contains potentially dangerous SQL patterns")
+            raise ValidationError("Input contains potentially dangerous SQL patterns")
 
     # Check for script injection patterns
-    script_patterns = [
-        r"<script[^>]*>.*?</script>",
-        r"javascript:",
-        r"on\w+\s*=",
-        r"<iframe[^>]*>"
-    ]
+    script_patterns = [r"<script[^>]*>.*?</script>", r"javascript:", r"on\w+\s*=", r"<iframe[^>]*>"]
 
     for pattern in script_patterns:
         if re.search(pattern, sanitized, re.IGNORECASE):
-            raise ValidationError(
-                "Input contains potentially dangerous script patterns")
+            raise ValidationError("Input contains potentially dangerous script patterns")
 
     return sanitized
 
@@ -601,9 +564,9 @@ def sanitize_user_input(input_data: str) -> str:
 # Data Type Validation
 # =============================================================================
 
+
 def validate_decimal(
-    value: Any, min_value: Optional[Decimal] = None,
-    max_value: Optional[Decimal] = None
+    value: Any, min_value: Decimal | None = None, max_value: Decimal | None = None
 ) -> Decimal:
     """
     Validate and convert value to Decimal.
@@ -626,17 +589,15 @@ def validate_decimal(
             decimal_value = Decimal(str(value))
 
         if min_value is not None and decimal_value < min_value:
-            raise ValidationError(
-                f"Value {decimal_value} below minimum {min_value}")
+            raise ValidationError(f"Value {decimal_value} below minimum {min_value}")
 
         if max_value is not None and decimal_value > max_value:
-            raise ValidationError(
-                f"Value {decimal_value} above maximum {max_value}")
+            raise ValidationError(f"Value {decimal_value} above maximum {max_value}")
 
         return decimal_value
 
     except (InvalidOperation, ValueError, TypeError) as e:
-        raise ValidationError(f"Cannot convert to Decimal: {str(e)}")
+        raise ValidationError(f"Cannot convert to Decimal: {e!s}")
 
 
 def validate_positive_number(value: Any, field_name: str = "value") -> float:
@@ -660,13 +621,12 @@ def validate_positive_number(value: Any, field_name: str = "value") -> float:
             num_value = float(value)
 
         if num_value <= 0:
-            raise ValidationError(
-                f"{field_name} must be positive, got {num_value}")
+            raise ValidationError(f"{field_name} must be positive, got {num_value}")
 
         return num_value
 
     except (ValueError, TypeError) as e:
-        raise ValidationError(f"Invalid {field_name}: {str(e)}")
+        raise ValidationError(f"Invalid {field_name}: {e!s}")
 
 
 def validate_percentage(value: Any, field_name: str = "percentage") -> float:
@@ -690,13 +650,12 @@ def validate_percentage(value: Any, field_name: str = "percentage") -> float:
             pct_value = float(value)
 
         if pct_value < 0 or pct_value > 100:
-            raise ValidationError(
-                f"{field_name} must be between 0 and 100, got {pct_value}")
+            raise ValidationError(f"{field_name} must be between 0 and 100, got {pct_value}")
 
         return pct_value
 
     except (ValueError, TypeError) as e:
-        raise ValidationError(f"Invalid {field_name}: {str(e)}")
+        raise ValidationError(f"Invalid {field_name}: {e!s}")
 
 
 def validate_timestamp(timestamp: Any) -> datetime:
@@ -720,12 +679,7 @@ def validate_timestamp(timestamp: Any) -> datetime:
             return datetime.fromtimestamp(timestamp, tz=timezone.utc)
         elif isinstance(timestamp, str):
             # Try common formats
-            formats = [
-                "%Y-%m-%d %H:%M:%S",
-                "%Y-%m-%dT%H:%M:%S",
-                "%Y-%m-%dT%H:%M:%SZ",
-                "%Y-%m-%d"
-            ]
+            formats = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"]
 
             for fmt in formats:
                 try:
@@ -738,16 +692,15 @@ def validate_timestamp(timestamp: Any) -> datetime:
             raise ValidationError(f"Invalid timestamp type: {type(timestamp)}")
 
     except Exception as e:
-        raise ValidationError(f"Invalid timestamp: {str(e)}")
+        raise ValidationError(f"Invalid timestamp: {e!s}")
 
 
 # =============================================================================
 # Business Rule Validation
 # =============================================================================
 
-def validate_trading_rules(
-        signal: Signal,
-        current_positions: List[Position]) -> bool:
+
+def validate_trading_rules(signal: Signal, current_positions: list[Position]) -> bool:
     """
     Validate trading rules for a signal.
 
@@ -763,8 +716,7 @@ def validate_trading_rules(
     """
     # Validate signal confidence
     if signal.confidence < 0 or signal.confidence > 1:
-        raise ValidationError(
-            f"Invalid signal confidence: {signal.confidence}")
+        raise ValidationError(f"Invalid signal confidence: {signal.confidence}")
 
     # Check for conflicting positions
     for position in current_positions:
@@ -772,8 +724,7 @@ def validate_trading_rules(
             if position.side != signal.direction:
                 # Check if we're trying to reverse position
                 if abs(float(position.quantity)) > 0:
-                    logger.warning(
-                        f"Signal would reverse position for {signal.symbol}")
+                    logger.warning(f"Signal would reverse position for {signal.symbol}")
                     # This might be allowed depending on strategy rules
 
     # Validate signal timestamp
@@ -786,8 +737,7 @@ def validate_trading_rules(
     return True
 
 
-def validate_risk_limits(
-        positions: List[Position], risk_config: Dict[str, Any]) -> bool:
+def validate_risk_limits(positions: list[Position], risk_config: dict[str, Any]) -> bool:
     """
     Validate risk limits for current positions.
 
@@ -802,16 +752,12 @@ def validate_risk_limits(
         ValidationError: If risk limits are exceeded
     """
     # Calculate total exposure
-    total_exposure = sum(
-        abs(float(pos.quantity) * float(pos.current_price))
-        for pos in positions
-    )
+    total_exposure = sum(abs(float(pos.quantity) * float(pos.current_price)) for pos in positions)
 
     # Check maximum portfolio exposure
     max_exposure = risk_config.get("max_portfolio_exposure", 0.95)
     if total_exposure > max_exposure:
-        raise ValidationError(
-            f"Total exposure {total_exposure} exceeds limit {max_exposure}")
+        raise ValidationError(f"Total exposure {total_exposure} exceeds limit {max_exposure}")
 
     # Check maximum positions per symbol
     symbol_counts = {}
@@ -831,8 +777,7 @@ def validate_risk_limits(
     return True
 
 
-def validate_position_limits(
-        position: Position, risk_config: Dict[str, Any]) -> bool:
+def validate_position_limits(position: Position, risk_config: dict[str, Any]) -> bool:
     """
     Validate position size limits.
 
@@ -846,20 +791,17 @@ def validate_position_limits(
     Raises:
         ValidationError: If position exceeds limits
     """
-    position_value = abs(float(position.quantity) *
-                         float(position.current_price))
+    position_value = abs(float(position.quantity) * float(position.current_price))
 
     # Check maximum position size
     max_position_size = risk_config.get("max_position_size", 0.1)
     if position_value > max_position_size:
-        raise ValidationError(
-            f"Position value {position_value} exceeds limit {max_position_size}")
+        raise ValidationError(f"Position value {position_value} exceeds limit {max_position_size}")
 
     # Check minimum position size
     min_position_size = risk_config.get("min_position_size", 0.001)
     if position_value < min_position_size:
-        raise ValidationError(
-            f"Position value {position_value} below minimum {min_position_size}")
+        raise ValidationError(f"Position value {position_value} below minimum {min_position_size}")
 
     return True
 
@@ -867,6 +809,7 @@ def validate_position_limits(
 # =============================================================================
 # Exchange Data Validation
 # =============================================================================
+
 
 def validate_order_response(response: OrderResponse) -> bool:
     """
@@ -898,26 +841,24 @@ def validate_order_response(response: OrderResponse) -> bool:
             raise ValidationError("Filled quantity cannot be negative")
 
         if response.filled_quantity > response.quantity:
-            raise ValidationError(
-                "Filled quantity cannot exceed total quantity")
+            raise ValidationError("Filled quantity cannot exceed total quantity")
 
         # Validate price for limit orders
         if response.order_type == OrderType.LIMIT and response.price:
             validate_price(float(response.price), response.symbol)
 
         # Validate status
-        valid_statuses = ["pending", "filled",
-                          "cancelled", "rejected", "partial"]
+        valid_statuses = ["pending", "filled", "cancelled", "rejected", "partial"]
         if response.status not in valid_statuses:
             raise ValidationError(f"Invalid order status: {response.status}")
 
         return True
 
     except Exception as e:
-        raise ValidationError(f"Order response validation failed: {str(e)}")
+        raise ValidationError(f"Order response validation failed: {e!s}")
 
 
-def validate_balance_data(balances: Dict[str, float]) -> bool:
+def validate_balance_data(balances: dict[str, float]) -> bool:
     """
     Validate balance data from exchange.
 
@@ -946,7 +887,7 @@ def validate_balance_data(balances: Dict[str, float]) -> bool:
     return True
 
 
-def validate_trade_data(trade: Dict[str, Any]) -> bool:
+def validate_trade_data(trade: dict[str, Any]) -> bool:
     """
     Validate trade data from exchange.
 
@@ -959,8 +900,7 @@ def validate_trade_data(trade: Dict[str, Any]) -> bool:
     Raises:
         ValidationError: If trade data is invalid
     """
-    required_fields = ["id", "symbol", "side",
-                       "quantity", "price", "timestamp"]
+    required_fields = ["id", "symbol", "side", "quantity", "price", "timestamp"]
 
     for field in required_fields:
         if field not in trade:
@@ -989,7 +929,7 @@ def validate_trade_data(trade: Dict[str, Any]) -> bool:
     return True
 
 
-def validate_exchange_info(exchange_info: Dict[str, Any]) -> bool:
+def validate_exchange_info(exchange_info: dict[str, Any]) -> bool:
     """
     Validate exchange information.
 

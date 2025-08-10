@@ -9,34 +9,34 @@ P-002A (error handling), and P-007A (utils) components.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional, Dict, Any, Tuple
+from datetime import datetime
 from decimal import Decimal
-from datetime import datetime, timedelta
-import asyncio
+from typing import Any
+
+from src.core.config import Config
+from src.core.exceptions import (
+    RiskManagementError,
+    ValidationError,
+)
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import (
-    Position, MarketData, Signal, OrderRequest,
-    RiskMetrics, PositionLimits, RiskLevel, PositionSizeMethod
+    MarketData,
+    OrderRequest,
+    Position,
+    PositionLimits,
+    RiskLevel,
+    RiskMetrics,
+    Signal,
 )
-from src.core.exceptions import (
-    RiskManagementError, PositionLimitError, DrawdownLimitError,
-    ValidationError
-)
-from src.core.config import Config
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import RecoveryScenario
-
-# MANDATORY: Import from P-007A
-from src.utils.decorators import time_execution, retry, circuit_breaker
-from src.utils.validators import validate_price, validate_quantity, validate_position_limits
-from src.utils.formatters import format_percentage, format_currency
 
 # MANDATORY: Import from P-003+
-from src.exchanges.base import BaseExchange
+# MANDATORY: Import from P-007A
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -66,22 +66,20 @@ class BaseRiskManager(ABC):
         # Risk state tracking
         self.current_risk_level = RiskLevel.LOW
         self.last_risk_calculation = datetime.now()
-        self.risk_metrics: Optional[RiskMetrics] = None
-        self.position_limits: Optional[PositionLimits] = None
+        self.risk_metrics: RiskMetrics | None = None
+        self.position_limits: PositionLimits | None = None
 
         # Portfolio state
-        self.positions: List[Position] = []
+        self.positions: list[Position] = []
         self.total_portfolio_value = Decimal("0")
         self.current_drawdown = Decimal("0")
         self.max_drawdown = Decimal("0")
 
-        self.logger.info("Risk manager initialized",
-                         risk_config=dict(self.risk_config))
+        self.logger.info("Risk manager initialized", risk_config=dict(self.risk_config))
 
     @abstractmethod
     @time_execution
-    async def calculate_position_size(self, signal: Signal,
-                                      portfolio_value: Decimal) -> Decimal:
+    async def calculate_position_size(self, signal: Signal, portfolio_value: Decimal) -> Decimal:
         """
         Calculate optimal position size for a trading signal.
 
@@ -117,8 +115,7 @@ class BaseRiskManager(ABC):
 
     @abstractmethod
     @time_execution
-    async def validate_order(self, order: OrderRequest,
-                             portfolio_value: Decimal) -> bool:
+    async def validate_order(self, order: OrderRequest, portfolio_value: Decimal) -> bool:
         """
         Validate an order request against risk limits.
 
@@ -138,9 +135,8 @@ class BaseRiskManager(ABC):
     @abstractmethod
     @time_execution
     async def calculate_risk_metrics(
-            self,
-            positions: List[Position],
-            market_data: List[MarketData]) -> RiskMetrics:
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> RiskMetrics:
         """
         Calculate comprehensive risk metrics for the portfolio.
 
@@ -175,8 +171,7 @@ class BaseRiskManager(ABC):
 
     @abstractmethod
     @time_execution
-    async def should_exit_position(self, position: Position,
-                                   market_data: MarketData) -> bool:
+    async def should_exit_position(self, position: Position, market_data: MarketData) -> bool:
         """
         Determine if a position should be closed based on risk criteria.
 
@@ -191,8 +186,9 @@ class BaseRiskManager(ABC):
 
     # Standard methods that can be overridden
     @time_execution
-    async def update_portfolio_state(self, positions: List[Position],
-                                     portfolio_value: Decimal) -> None:
+    async def update_portfolio_state(
+        self, positions: list[Position], portfolio_value: Decimal
+    ) -> None:
         """
         Update internal portfolio state for risk calculations.
 
@@ -209,12 +205,14 @@ class BaseRiskManager(ABC):
             if self.current_drawdown > self.max_drawdown:
                 self.max_drawdown = self.current_drawdown
 
-        self.logger.debug("Portfolio state updated",
-                          position_count=len(positions),
-                          portfolio_value=float(portfolio_value))
+        self.logger.debug(
+            "Portfolio state updated",
+            position_count=len(positions),
+            portfolio_value=float(portfolio_value),
+        )
 
     @time_execution
-    async def get_risk_summary(self) -> Dict[str, Any]:
+    async def get_risk_summary(self) -> dict[str, Any]:
         """
         Get comprehensive risk summary for monitoring and reporting.
 
@@ -229,7 +227,7 @@ class BaseRiskManager(ABC):
             "max_drawdown": float(self.max_drawdown),
             "last_calculation": self.last_risk_calculation.isoformat(),
             "position_limits": self.position_limits.model_dump() if self.position_limits else None,
-            "risk_metrics": self.risk_metrics.model_dump() if self.risk_metrics else None
+            "risk_metrics": self.risk_metrics.model_dump() if self.risk_metrics else None,
         }
 
         return summary
@@ -250,11 +248,10 @@ class BaseRiskManager(ABC):
             RiskManagementError(f"Emergency stop: {reason}"),
             component="risk_manager",
             operation="emergency_stop",
-            severity="critical"
+            severity="critical",
         )
         await self.error_handler.handle_error(
-            RiskManagementError(f"Emergency stop: {reason}"),
-            error_context
+            RiskManagementError(f"Emergency stop: {reason}"), error_context
         )
 
     @time_execution
@@ -268,8 +265,7 @@ class BaseRiskManager(ABC):
         try:
             # Validate position size parameters
             if not (0 < self.risk_config.default_position_size_pct <= 1):
-                raise ValidationError(
-                    "Invalid default position size percentage")
+                raise ValidationError("Invalid default position size percentage")
 
             if not (0 < self.risk_config.max_position_size_pct <= 1):
                 raise ValidationError("Invalid max position size percentage")
@@ -292,8 +288,7 @@ class BaseRiskManager(ABC):
             self.logger.error("Risk parameter validation failed", error=str(e))
             raise ValidationError(f"Risk parameter validation failed: {e}")
 
-    def _calculate_portfolio_exposure(
-            self, positions: List[Position]) -> Decimal:
+    def _calculate_portfolio_exposure(self, positions: list[Position]) -> Decimal:
         """
         Calculate total portfolio exposure as percentage of portfolio value.
 
@@ -306,10 +301,7 @@ class BaseRiskManager(ABC):
         if not self.total_portfolio_value or self.total_portfolio_value == 0:
             return Decimal("0")
 
-        total_exposure = sum(
-            abs(pos.quantity * pos.current_price)
-            for pos in positions
-        )
+        total_exposure = sum(abs(pos.quantity * pos.current_price) for pos in positions)
 
         return total_exposure / self.total_portfolio_value
 
@@ -339,12 +331,12 @@ class BaseRiskManager(ABC):
         if daily_pnl >= 0:
             return True  # No loss to check
 
-        max_daily_loss = self.total_portfolio_value * \
-            Decimal(str(self.risk_config.max_daily_loss_pct))
+        max_daily_loss = self.total_portfolio_value * Decimal(
+            str(self.risk_config.max_daily_loss_pct)
+        )
         return abs(daily_pnl) <= max_daily_loss
 
-    async def _log_risk_violation(
-            self, violation_type: str, details: Dict[str, Any]) -> None:
+    async def _log_risk_violation(self, violation_type: str, details: dict[str, Any]) -> None:
         """
         Log risk violation for monitoring and alerting.
 
@@ -352,12 +344,12 @@ class BaseRiskManager(ABC):
             violation_type: Type of risk violation
             details: Additional violation details
         """
-        self.logger.warning("Risk violation detected",
-                            violation_type=violation_type,
-                            details=details,
-                            risk_level=self.current_risk_level.value)
+        self.logger.warning(
+            "Risk violation detected",
+            violation_type=violation_type,
+            details=details,
+            risk_level=self.current_risk_level.value,
+        )
 
         # TODO: Remove in production - Debug logging
-        self.logger.debug("Risk violation details",
-                          violation_type=violation_type,
-                          details=details)
+        self.logger.debug("Risk violation details", violation_type=violation_type, details=details)

@@ -12,32 +12,35 @@ This module tests the emergency controls functionality including:
 CRITICAL: Tests must achieve 90% coverage for P-009 implementation.
 """
 
-import pytest
-import asyncio
+from datetime import datetime
 from decimal import Decimal
-from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch
-from typing import Dict, Any
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import EmergencyStopError, ValidationError
 
 # Import from P-001
 from src.core.types import (
-    Position, OrderRequest, OrderResponse, MarketData,
-    CircuitBreakerType, OrderSide, OrderType, RiskLevel
+    CircuitBreakerType,
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    RiskLevel,
 )
-from src.core.exceptions import (
-    RiskManagementError, EmergencyStopError, ValidationError
-)
-from src.core.config import Config
+
+# Import from P-003+
+from src.exchanges.base import BaseExchange
 
 # Import from P-008
 from src.risk_management.base import BaseRiskManager
 from src.risk_management.circuit_breakers import CircuitBreakerManager
 from src.risk_management.emergency_controls import (
-    EmergencyControls, EmergencyState, EmergencyAction
+    EmergencyAction,
+    EmergencyControls,
+    EmergencyState,
 )
-
-# Import from P-003+
-from src.exchanges.base import BaseExchange
 
 
 class TestEmergencyControls:
@@ -76,22 +79,14 @@ class TestEmergencyControls:
         exchange.get_positions = AsyncMock(return_value=[])
         exchange.cancel_order = AsyncMock(return_value=True)
         exchange.place_order = AsyncMock(return_value=Mock(status="filled"))
-        exchange.get_account_balance = AsyncMock(
-            return_value={"USDT": Decimal("10000")})
+        exchange.get_account_balance = AsyncMock(return_value={"USDT": Decimal("10000")})
         return exchange
 
     @pytest.fixture
-    def emergency_controls(
-            self,
-            mock_config,
-            mock_risk_manager,
-            mock_circuit_breaker_manager):
+    def emergency_controls(self, mock_config, mock_risk_manager, mock_circuit_breaker_manager):
         """Create emergency controls instance."""
-        with patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
-            return EmergencyControls(
-                mock_config,
-                mock_risk_manager,
-                mock_circuit_breaker_manager)
+        with patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()):
+            return EmergencyControls(mock_config, mock_risk_manager, mock_circuit_breaker_manager)
 
     def test_initialization(self, emergency_controls):
         """Test emergency controls initialization."""
@@ -132,23 +127,22 @@ class TestEmergencyControls:
         """Test emergency stop activation failure."""
         # Mock the _execute_emergency_procedures to raise an exception
         emergency_controls._execute_emergency_procedures = AsyncMock(
-            side_effect=Exception("Test error"))
+            side_effect=Exception("Test error")
+        )
 
         with pytest.raises(EmergencyStopError):
-            await emergency_controls.activate_emergency_stop("Test reason", CircuitBreakerType.DAILY_LOSS_LIMIT)
+            await emergency_controls.activate_emergency_stop(
+                "Test reason", CircuitBreakerType.DAILY_LOSS_LIMIT
+            )
 
     @pytest.mark.asyncio
-    async def test_cancel_all_pending_orders(
-            self, emergency_controls, mock_exchange):
+    async def test_cancel_all_pending_orders(self, emergency_controls, mock_exchange):
         """Test cancellation of all pending orders."""
         # Register exchange
         emergency_controls.register_exchange("binance", mock_exchange)
 
         # Mock pending orders
-        mock_orders = [
-            Mock(id="order1", symbol="BTCUSDT"),
-            Mock(id="order2", symbol="ETHUSDT")
-        ]
+        mock_orders = [Mock(id="order1", symbol="BTCUSDT"), Mock(id="order2", symbol="ETHUSDT")]
         mock_exchange.get_pending_orders.return_value = mock_orders
 
         await emergency_controls._cancel_all_pending_orders()
@@ -163,22 +157,16 @@ class TestEmergencyControls:
         assert emergency_controls.emergency_events[-1].orders_cancelled == 2
 
     @pytest.mark.asyncio
-    async def test_close_all_positions(
-            self, emergency_controls, mock_exchange):
+    async def test_close_all_positions(self, emergency_controls, mock_exchange):
         """Test closure of all positions."""
         # Register exchange
         emergency_controls.register_exchange("binance", mock_exchange)
 
         # Mock positions
         mock_positions = [
-            Mock(
-                symbol="BTCUSDT",
-                quantity=Decimal("1.0"),
-                side=OrderSide.BUY),
-            Mock(
-                symbol="ETHUSDT",
-                quantity=Decimal("10.0"),
-                side=OrderSide.SELL)]
+            Mock(symbol="BTCUSDT", quantity=Decimal("1.0"), side=OrderSide.BUY),
+            Mock(symbol="ETHUSDT", quantity=Decimal("10.0"), side=OrderSide.SELL),
+        ]
         mock_exchange.get_positions.return_value = mock_positions
 
         await emergency_controls._close_all_positions()
@@ -202,22 +190,20 @@ class TestEmergencyControls:
         # (This is a negative test - we verify no exceptions are raised)
 
     @pytest.mark.asyncio
-    async def test_validate_order_during_emergency_normal_state(
-            self, emergency_controls):
+    async def test_validate_order_during_emergency_normal_state(self, emergency_controls):
         """Test order validation during normal state."""
         order = OrderRequest(
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         allowed = await emergency_controls.validate_order_during_emergency(order)
         assert allowed is True
 
     @pytest.mark.asyncio
-    async def test_validate_order_during_emergency_emergency_state(
-            self, emergency_controls):
+    async def test_validate_order_during_emergency_emergency_state(self, emergency_controls):
         """Test order validation during emergency state."""
         emergency_controls.state = EmergencyState.EMERGENCY
 
@@ -225,15 +211,14 @@ class TestEmergencyControls:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         allowed = await emergency_controls.validate_order_during_emergency(order)
         assert allowed is False
 
     @pytest.mark.asyncio
-    async def test_validate_order_during_emergency_manual_override(
-            self, emergency_controls):
+    async def test_validate_order_during_emergency_manual_override(self, emergency_controls):
         """Test order validation during manual override."""
         emergency_controls.state = EmergencyState.MANUAL_OVERRIDE
 
@@ -241,7 +226,7 @@ class TestEmergencyControls:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         allowed = await emergency_controls.validate_order_during_emergency(order)
@@ -249,7 +234,8 @@ class TestEmergencyControls:
 
     @pytest.mark.asyncio
     async def test_validate_order_during_emergency_recovery_mode(
-            self, emergency_controls, mock_exchange):
+        self, emergency_controls, mock_exchange
+    ):
         """Test order validation during recovery mode."""
         emergency_controls.state = EmergencyState.RECOVERY
         emergency_controls.register_exchange("binance", mock_exchange)
@@ -261,7 +247,7 @@ class TestEmergencyControls:
             order_type=OrderType.MARKET,
             quantity=Decimal("0.01"),
             # Small order (0.01 BTC = $500 out of $10k = 5%)
-            price=Decimal("50000")
+            price=Decimal("50000"),
         )
 
         allowed = await emergency_controls.validate_order_during_emergency(order)
@@ -273,7 +259,7 @@ class TestEmergencyControls:
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
             quantity=Decimal("10.0"),  # Large order
-            price=Decimal("50000")
+            price=Decimal("50000"),
         )
 
         allowed = await emergency_controls.validate_order_during_emergency(order)
@@ -285,7 +271,7 @@ class TestEmergencyControls:
             side=OrderSide.BUY,
             order_type=OrderType.STOP_LOSS,  # Not allowed during recovery
             quantity=Decimal("0.1"),
-            price=Decimal("50000")
+            price=Decimal("50000"),
         )
 
         allowed = await emergency_controls.validate_order_during_emergency(order)
@@ -306,8 +292,7 @@ class TestEmergencyControls:
         assert emergency_controls.emergency_reason == "Test reason"
 
     @pytest.mark.asyncio
-    async def test_deactivate_emergency_stop_recovery_to_normal(
-            self, emergency_controls):
+    async def test_deactivate_emergency_stop_recovery_to_normal(self, emergency_controls):
         """Test deactivation from recovery to normal state."""
         # Set recovery state
         emergency_controls.state = EmergencyState.RECOVERY
@@ -331,8 +316,7 @@ class TestEmergencyControls:
         assert emergency_controls.manual_override_time is not None
 
     @pytest.mark.asyncio
-    async def test_deactivate_manual_override_success(
-            self, emergency_controls):
+    async def test_deactivate_manual_override_success(self, emergency_controls):
         """Test successful manual override deactivation."""
         user_id = "test_user"
         emergency_controls.manual_override_user = user_id
@@ -345,8 +329,7 @@ class TestEmergencyControls:
         assert emergency_controls.manual_override_time is None
 
     @pytest.mark.asyncio
-    async def test_deactivate_manual_override_unauthorized(
-            self, emergency_controls):
+    async def test_deactivate_manual_override_unauthorized(self, emergency_controls):
         """Test unauthorized manual override deactivation."""
         emergency_controls.manual_override_user = "user1"
         emergency_controls.state = EmergencyState.MANUAL_OVERRIDE
@@ -356,7 +339,8 @@ class TestEmergencyControls:
 
     @pytest.mark.asyncio
     async def test_validate_recovery_completion_success(
-            self, emergency_controls, mock_risk_manager):
+        self, emergency_controls, mock_risk_manager
+    ):
         """Test successful recovery completion validation."""
         # Mock risk metrics
         mock_risk_metrics = Mock()
@@ -368,7 +352,8 @@ class TestEmergencyControls:
 
     @pytest.mark.asyncio
     async def test_validate_recovery_completion_high_risk(
-            self, emergency_controls, mock_risk_manager):
+        self, emergency_controls, mock_risk_manager
+    ):
         """Test recovery completion validation with high risk."""
         # Mock risk metrics
         mock_risk_metrics = Mock()
@@ -380,11 +365,13 @@ class TestEmergencyControls:
 
     @pytest.mark.asyncio
     async def test_validate_recovery_completion_circuit_breakers_triggered(
-            self, emergency_controls):
+        self, emergency_controls
+    ):
         """Test recovery completion validation with triggered circuit breakers."""
         # Mock triggered circuit breakers
         emergency_controls.circuit_breaker_manager.get_triggered_breakers.return_value = [
-            "daily_loss_limit"]
+            "daily_loss_limit"
+        ]
 
         result = await emergency_controls._validate_recovery_completion()
         assert result is False
@@ -464,21 +451,22 @@ class TestEmergencyControlsIntegration:
 
     @pytest.mark.asyncio
     async def test_complete_emergency_cycle(
-            self,
-            mock_config,
-            mock_risk_manager,
-            mock_circuit_breaker_manager):
+        self, mock_config, mock_risk_manager, mock_circuit_breaker_manager
+    ):
         """Test complete emergency cycle from activation to recovery."""
-        with patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()):
             emergency_controls = EmergencyControls(
-                mock_config, mock_risk_manager, mock_circuit_breaker_manager)
+                mock_config, mock_risk_manager, mock_circuit_breaker_manager
+            )
 
             # Initial state
             assert emergency_controls.state == EmergencyState.NORMAL
             assert emergency_controls.is_trading_allowed() is True
 
             # Activate emergency stop
-            await emergency_controls.activate_emergency_stop("Test emergency", CircuitBreakerType.DAILY_LOSS_LIMIT)
+            await emergency_controls.activate_emergency_stop(
+                "Test emergency", CircuitBreakerType.DAILY_LOSS_LIMIT
+            )
 
             assert emergency_controls.state == EmergencyState.EMERGENCY
             assert emergency_controls.is_trading_allowed() is False
@@ -497,32 +485,25 @@ class TestEmergencyControlsIntegration:
 
     @pytest.mark.asyncio
     async def test_emergency_with_exchanges(
-            self,
-            mock_config,
-            mock_risk_manager,
-            mock_circuit_breaker_manager):
+        self, mock_config, mock_risk_manager, mock_circuit_breaker_manager
+    ):
         """Test emergency procedures with registered exchanges."""
-        with patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()):
             emergency_controls = EmergencyControls(
-                mock_config, mock_risk_manager, mock_circuit_breaker_manager)
+                mock_config, mock_risk_manager, mock_circuit_breaker_manager
+            )
 
             # Create mock exchanges
             exchange1 = Mock(spec=BaseExchange)
-            exchange1.get_pending_orders = AsyncMock(
-                return_value=[Mock(id="order1")])
+            exchange1.get_pending_orders = AsyncMock(return_value=[Mock(id="order1")])
             exchange1.get_positions = AsyncMock(
-                return_value=[
-                    Mock(
-                        symbol="BTCUSDT",
-                        quantity=Decimal("1.0"),
-                        side=OrderSide.BUY)])
+                return_value=[Mock(symbol="BTCUSDT", quantity=Decimal("1.0"), side=OrderSide.BUY)]
+            )
             exchange1.cancel_order = AsyncMock(return_value=True)
-            exchange1.place_order = AsyncMock(
-                return_value=Mock(status="filled"))
+            exchange1.place_order = AsyncMock(return_value=Mock(status="filled"))
 
             exchange2 = Mock(spec=BaseExchange)
-            exchange2.get_pending_orders = AsyncMock(
-                return_value=[Mock(id="order2")])
+            exchange2.get_pending_orders = AsyncMock(return_value=[Mock(id="order2")])
             exchange2.get_positions = AsyncMock(return_value=[])
             exchange2.cancel_order = AsyncMock(return_value=True)
 
@@ -531,7 +512,9 @@ class TestEmergencyControlsIntegration:
             emergency_controls.register_exchange("okx", exchange2)
 
             # Activate emergency stop
-            await emergency_controls.activate_emergency_stop("Test emergency", CircuitBreakerType.DAILY_LOSS_LIMIT)
+            await emergency_controls.activate_emergency_stop(
+                "Test emergency", CircuitBreakerType.DAILY_LOSS_LIMIT
+            )
 
             # Verify orders were cancelled
             assert exchange1.cancel_order.call_count == 1
@@ -543,14 +526,13 @@ class TestEmergencyControlsIntegration:
 
     @pytest.mark.asyncio
     async def test_manual_override_cycle(
-            self,
-            mock_config,
-            mock_risk_manager,
-            mock_circuit_breaker_manager):
+        self, mock_config, mock_risk_manager, mock_circuit_breaker_manager
+    ):
         """Test manual override cycle."""
-        with patch('src.risk_management.emergency_controls.ErrorHandler', return_value=Mock()):
+        with patch("src.risk_management.emergency_controls.ErrorHandler", return_value=Mock()):
             emergency_controls = EmergencyControls(
-                mock_config, mock_risk_manager, mock_circuit_breaker_manager)
+                mock_config, mock_risk_manager, mock_circuit_breaker_manager
+            )
 
             # Start in emergency state
             emergency_controls.state = EmergencyState.EMERGENCY

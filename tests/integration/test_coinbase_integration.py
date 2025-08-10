@@ -8,33 +8,34 @@ CRITICAL: These tests ensure the Coinbase implementation works correctly
 in a real environment with proper error handling and recovery.
 """
 
-import pytest
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 from decimal import Decimal
-from datetime import datetime, timezone
-from typing import Dict, List, Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
-# Import the classes to test
-from src.exchanges.coinbase import CoinbaseExchange
-from src.exchanges.coinbase_websocket import CoinbaseWebSocketHandler
-from src.exchanges.coinbase_orders import CoinbaseOrderManager
-from src.exchanges.factory import ExchangeFactory
+import pytest
+
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+)
 
 # Import core types and exceptions
 from src.core.types import (
-    OrderRequest, OrderResponse, MarketData, Position,
-    Signal, TradingMode, OrderSide, OrderType,
-    ExchangeInfo, Ticker, OrderBook, Trade, OrderStatus
+    MarketData,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Ticker,
 )
-from src.core.exceptions import (
-    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError,
-    ExchangeInsufficientFundsError, ValidationError, ExecutionError
-)
-from src.core.config import Config
+
+# Import the classes to test
+from src.exchanges.coinbase import CoinbaseExchange
+from src.exchanges.coinbase_orders import CoinbaseOrderManager
+from src.exchanges.coinbase_websocket import CoinbaseWebSocketHandler
+from src.exchanges.factory import ExchangeFactory
 
 # Import test utilities
-from tests.conftest import config
 
 
 class TestCoinbaseIntegration:
@@ -63,8 +64,9 @@ class TestCoinbaseIntegration:
     @pytest.mark.asyncio
     async def test_exchange_factory_registration(self, exchange_factory):
         """Test that Coinbase exchange is properly registered with factory."""
+        from unittest.mock import AsyncMock, patch
+
         from src.exchanges import register_exchanges
-        from unittest.mock import patch, AsyncMock
 
         # Register exchanges
         register_exchanges(exchange_factory)
@@ -78,27 +80,22 @@ class TestCoinbaseIntegration:
         mock_ws_client = AsyncMock()
 
         # Mock the get_products method for connection test
-        mock_rest_client.get_products.return_value = [
-            {'product_id': 'BTC-USD', 'status': 'online'}
-        ]
+        mock_rest_client.get_products.return_value = [{"product_id": "BTC-USD", "status": "online"}]
 
         # Mock WebSocket methods
         mock_ws_client.open = AsyncMock()
 
-        with patch('src.exchanges.coinbase.RESTClient', return_value=mock_rest_client), \
-                patch('src.exchanges.coinbase.WSClient', return_value=mock_ws_client):
-
+        with (
+            patch("src.exchanges.coinbase.RESTClient", return_value=mock_rest_client),
+            patch("src.exchanges.coinbase.WSClient", return_value=mock_ws_client),
+        ):
             # Check that we can create a Coinbase exchange instance
             exchange = await exchange_factory.create_exchange("coinbase")
             assert exchange is not None
             assert exchange.exchange_name == "coinbase"
 
     @pytest.mark.asyncio
-    async def test_complete_workflow(
-            self,
-            coinbase_exchange,
-            ws_handler,
-            order_manager):
+    async def test_complete_workflow(self, coinbase_exchange, ws_handler, order_manager):
         """Test complete workflow from connection to order execution."""
         # Mock the Coinbase clients
         mock_rest_client = AsyncMock()
@@ -107,73 +104,61 @@ class TestCoinbaseIntegration:
         # Mock account data
         mock_rest_client.get_accounts.return_value = [
             {
-                'currency': 'USD',
-                'available_balance': {'value': '10000.00'},
-                'hold': {'value': '0.00'}
+                "currency": "USD",
+                "available_balance": {"value": "10000.00"},
+                "hold": {"value": "0.00"},
             }
         ]
 
         # Mock product data
-        mock_rest_client.get_product.return_value = {
-            'product_id': 'BTC-USD',
-            'status': 'online'
-        }
+        mock_rest_client.get_product.return_value = {"product_id": "BTC-USD", "status": "online"}
 
         # Mock ticker data
         mock_rest_client.get_product_ticker.return_value = {
-            'product_id': 'BTC-USD',
-            'price': '50000.00',
-            'volume_24h': '1000.0',
-            'time': '2024-01-01T00:00:00.000Z',
-            'bid': '49999.00',
-            'ask': '50001.00'
+            "product_id": "BTC-USD",
+            "price": "50000.00",
+            "volume_24h": "1000.0",
+            "time": "2024-01-01T00:00:00.000Z",
+            "bid": "49999.00",
+            "ask": "50001.00",
         }
 
         # Mock candles data
         mock_rest_client.get_product_candles.return_value = [
             {
-                'open': '50000.00',
-                'high': '50100.00',
-                'low': '49900.00',
-                'close': '50050.00',
-                'volume': '100.0',
-                'time': '2024-01-01T00:00:00.000Z'
+                "open": "50000.00",
+                "high": "50100.00",
+                "low": "49900.00",
+                "close": "50050.00",
+                "volume": "100.0",
+                "time": "2024-01-01T00:00:00.000Z",
             }
         ]
 
         # Mock order creation
         mock_rest_client.create_order.return_value = {
-            'order_id': 'test_order_123',
-            'product_id': 'BTC-USD',
-            'side': 'BUY',
-            'order_configuration': {
-                'market_market_ioc': {
-                    'quote_size': '100.00'
-                }
-            },
-            'status': 'OPEN',
-            'created_time': '2024-01-01T00:00:00.000Z',
-            'filled_size': '0.0'
+            "order_id": "test_order_123",
+            "product_id": "BTC-USD",
+            "side": "BUY",
+            "order_configuration": {"market_market_ioc": {"quote_size": "100.00"}},
+            "status": "OPEN",
+            "created_time": "2024-01-01T00:00:00.000Z",
+            "filled_size": "0.0",
         }
 
         # Mock order status
         mock_rest_client.get_order.return_value = {
-            'order_id': 'test_order_123',
-            'product_id': 'BTC-USD',
-            'side': 'BUY',
-            'order_configuration': {
-                'market_market_ioc': {
-                    'quote_size': '100.00'
-                }
-            },
-            'status': 'FILLED',
-            'created_time': '2024-01-01T00:00:00.000Z',
-            'filled_size': '100.0'
+            "order_id": "test_order_123",
+            "product_id": "BTC-USD",
+            "side": "BUY",
+            "order_configuration": {"market_market_ioc": {"quote_size": "100.00"}},
+            "status": "FILLED",
+            "created_time": "2024-01-01T00:00:00.000Z",
+            "filled_size": "100.0",
         }
 
         # Mock time
-        mock_rest_client.get_time.return_value = {
-            'iso': '2024-01-01T00:00:00.000Z'}
+        mock_rest_client.get_time.return_value = {"iso": "2024-01-01T00:00:00.000Z"}
 
         # Mock WebSocket methods
         mock_ws_client.open = AsyncMock()
@@ -183,11 +168,12 @@ class TestCoinbaseIntegration:
         mock_ws_client.matches = AsyncMock()
         mock_ws_client.user = AsyncMock()
 
-        with patch('src.exchanges.coinbase.RESTClient', return_value=mock_rest_client), \
-                patch('src.exchanges.coinbase.WSClient', return_value=mock_ws_client), \
-                patch('src.exchanges.coinbase_websocket.WSClient', return_value=mock_ws_client), \
-                patch('src.exchanges.coinbase_orders.RESTClient', return_value=mock_rest_client):
-
+        with (
+            patch("src.exchanges.coinbase.RESTClient", return_value=mock_rest_client),
+            patch("src.exchanges.coinbase.WSClient", return_value=mock_ws_client),
+            patch("src.exchanges.coinbase_websocket.WSClient", return_value=mock_ws_client),
+            patch("src.exchanges.coinbase_orders.RESTClient", return_value=mock_rest_client),
+        ):
             # 1. Test exchange connection
             result = await coinbase_exchange.connect()
             assert result is True
@@ -205,40 +191,40 @@ class TestCoinbaseIntegration:
             # 4. Test getting account balance
             balances = await coinbase_exchange.get_account_balance()
             assert isinstance(balances, dict)
-            assert 'USD' in balances
-            assert balances['USD'] == Decimal('10000.00')
+            assert "USD" in balances
+            assert balances["USD"] == Decimal("10000.00")
 
             # 5. Test getting market data
-            market_data = await coinbase_exchange.get_market_data('BTC-USD')
+            market_data = await coinbase_exchange.get_market_data("BTC-USD")
             assert isinstance(market_data, MarketData)
-            assert market_data.symbol == 'BTC-USD'
-            assert market_data.price == Decimal('50000.00')
+            assert market_data.symbol == "BTC-USD"
+            assert market_data.price == Decimal("50000.00")
 
             # 6. Test placing an order
             order_request = OrderRequest(
                 symbol="BTC-USD",
                 side=OrderSide.BUY,
                 order_type=OrderType.MARKET,
-                quantity=Decimal("100.00")
+                quantity=Decimal("100.00"),
             )
 
             order_response = await coinbase_exchange.place_order(order_request)
             assert isinstance(order_response, OrderResponse)
-            assert order_response.id == 'test_order_123'
-            assert order_response.symbol == 'BTC-USD'
+            assert order_response.id == "test_order_123"
+            assert order_response.symbol == "BTC-USD"
             assert order_response.side == OrderSide.BUY
 
             # 7. Test getting order status
-            status = await coinbase_exchange.get_order_status('test_order_123')
+            status = await coinbase_exchange.get_order_status("test_order_123")
             assert status == OrderStatus.FILLED
 
             # 8. Test WebSocket subscription
             callback = AsyncMock()
-            await ws_handler.subscribe_to_ticker('BTC-USD', callback)
-            assert 'ticker_BTC-USD' in ws_handler.active_streams
+            await ws_handler.subscribe_to_ticker("BTC-USD", callback)
+            assert "ticker_BTC-USD" in ws_handler.active_streams
 
             # 9. Test order cancellation
-            cancel_result = await coinbase_exchange.cancel_order('test_order_123')
+            cancel_result = await coinbase_exchange.cancel_order("test_order_123")
             assert cancel_result is True
 
             # 10. Test disconnection
@@ -252,7 +238,7 @@ class TestCoinbaseIntegration:
     async def test_error_handling_and_recovery(self, coinbase_exchange):
         """Test error handling and recovery scenarios."""
         # Test connection failure
-        with patch('src.exchanges.coinbase.RESTClient', side_effect=Exception("Connection failed")):
+        with patch("src.exchanges.coinbase.RESTClient", side_effect=Exception("Connection failed")):
             result = await coinbase_exchange.connect()
             assert result is False
             assert coinbase_exchange.connected is False
@@ -263,7 +249,7 @@ class TestCoinbaseIntegration:
             symbol="BTC-USD",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("100.00")
+            quantity=Decimal("100.00"),
         )
 
         with pytest.raises(ExchangeConnectionError):
@@ -286,8 +272,7 @@ class TestCoinbaseIntegration:
         # Mock REST client
         mock_rest_client = AsyncMock()
         mock_rest_client.get_accounts.return_value = []
-        mock_rest_client.get_time.return_value = {
-            'iso': '2024-01-01T00:00:00.000Z'}
+        mock_rest_client.get_time.return_value = {"iso": "2024-01-01T00:00:00.000Z"}
 
         coinbase_exchange.client = mock_rest_client
 
@@ -312,16 +297,16 @@ class TestCoinbaseIntegration:
 
         # Test ticker message handling
         callback = AsyncMock()
-        ws_handler.callbacks['BTC-USD'] = [callback]
+        ws_handler.callbacks["BTC-USD"] = [callback]
 
         ticker_message = {
-            'product_id': 'BTC-USD',
-            'price': '50000.00',
-            'volume_24h': '1000.0',
-            'time': '2024-01-01T00:00:00.000Z',
-            'bid': '49999.00',
-            'ask': '50001.00',
-            'price_change_24h': '100.00'
+            "product_id": "BTC-USD",
+            "price": "50000.00",
+            "volume_24h": "1000.0",
+            "time": "2024-01-01T00:00:00.000Z",
+            "bid": "49999.00",
+            "ask": "50001.00",
+            "price_change_24h": "100.00",
         }
 
         await ws_handler.handle_ticker_message(ticker_message)
@@ -330,35 +315,27 @@ class TestCoinbaseIntegration:
         callback.assert_called_once()
         ticker = callback.call_args[0][0]
         assert isinstance(ticker, Ticker)
-        assert ticker.symbol == 'BTC-USD'
-        assert ticker.last_price == Decimal('50000.00')
+        assert ticker.symbol == "BTC-USD"
+        assert ticker.last_price == Decimal("50000.00")
 
     @pytest.mark.asyncio
     async def test_order_manager_integration(self, order_manager):
         """Test order manager integration."""
         # Mock REST client
         mock_rest_client = AsyncMock()
-        mock_rest_client.get_time.return_value = {
-            'iso': '2024-01-01T00:00:00.000Z'}
-        mock_rest_client.get_product.return_value = {
-            'product_id': 'BTC-USD',
-            'status': 'online'
-        }
+        mock_rest_client.get_time.return_value = {"iso": "2024-01-01T00:00:00.000Z"}
+        mock_rest_client.get_product.return_value = {"product_id": "BTC-USD", "status": "online"}
         mock_rest_client.create_order.return_value = {
-            'order_id': 'test_order_123',
-            'product_id': 'BTC-USD',
-            'side': 'BUY',
-            'order_configuration': {
-                'market_market_ioc': {
-                    'quote_size': '100.00'
-                }
-            },
-            'status': 'OPEN',
-            'created_time': '2024-01-01T00:00:00.000Z',
-            'filled_size': '0.0'
+            "order_id": "test_order_123",
+            "product_id": "BTC-USD",
+            "side": "BUY",
+            "order_configuration": {"market_market_ioc": {"quote_size": "100.00"}},
+            "status": "OPEN",
+            "created_time": "2024-01-01T00:00:00.000Z",
+            "filled_size": "0.0",
         }
 
-        with patch('src.exchanges.coinbase_orders.RESTClient', return_value=mock_rest_client):
+        with patch("src.exchanges.coinbase_orders.RESTClient", return_value=mock_rest_client):
             # Initialize order manager
             result = await order_manager.initialize()
             assert result is True
@@ -368,34 +345,34 @@ class TestCoinbaseIntegration:
                 symbol="BTC-USD",
                 side=OrderSide.BUY,
                 order_type=OrderType.MARKET,
-                quantity=Decimal("100.00")
+                quantity=Decimal("100.00"),
             )
 
             order_response = await order_manager.place_order(order_request)
             assert isinstance(order_response, OrderResponse)
-            assert order_response.id == 'test_order_123'
+            assert order_response.id == "test_order_123"
 
             # Test fee calculation
             fees = await order_manager.calculate_fees(order_request)
             assert isinstance(fees, dict)
-            assert 'fee_rate' in fees
-            assert 'fee_amount' in fees
-            assert fees['fee_currency'] == 'USD'
+            assert "fee_rate" in fees
+            assert "fee_amount" in fees
+            assert fees["fee_currency"] == "USD"
 
             # Test order statistics
             stats = order_manager.get_order_statistics()
             assert isinstance(stats, dict)
-            assert 'total_orders' in stats
-            assert 'filled_orders' in stats
-            assert 'cancelled_orders' in stats
-            assert 'fill_rate' in stats
+            assert "total_orders" in stats
+            assert "filled_orders" in stats
+            assert "cancelled_orders" in stats
+            assert "fill_rate" in stats
 
     @pytest.mark.asyncio
-    async def test_multi_exchange_compatibility(
-            self, exchange_factory, config):
+    async def test_multi_exchange_compatibility(self, exchange_factory, config):
         """Test that Coinbase works alongside other exchanges."""
+        from unittest.mock import AsyncMock, patch
+
         from src.exchanges import register_exchanges
-        from unittest.mock import patch, AsyncMock
 
         # Register all exchanges
         register_exchanges(exchange_factory)
@@ -408,32 +385,31 @@ class TestCoinbaseIntegration:
 
         # Mock OKX balance response
         mock_account_client.get_balance.return_value = {
-            'code': '0',
-            'data': [
-                {'ccy': 'USDT', 'availBal': '1000.00', 'frozenBal': '0.00'},
-                {'ccy': 'BTC', 'availBal': '0.1', 'frozenBal': '0.00'}
-            ]
+            "code": "0",
+            "data": [
+                {"ccy": "USDT", "availBal": "1000.00", "frozenBal": "0.00"},
+                {"ccy": "BTC", "availBal": "0.1", "frozenBal": "0.00"},
+            ],
         }
 
         # Mock Binance clients
         mock_binance_client = AsyncMock()
         mock_binance_client.get_account.return_value = {
-            'makerCommission': 15,
-            'takerCommission': 15,
-            'buyerCommission': 0,
-            'sellerCommission': 0,
-            'canTrade': True,
-            'canWithdraw': True,
-            'canDeposit': True,
-            'updateTime': 0,
-            'accountType': 'SPOT',
-            'balances': [
-                {'asset': 'USDT', 'free': '1000.00000000', 'locked': '0.00000000'},
-                {'asset': 'BTC', 'free': '0.10000000', 'locked': '0.00000000'}
-            ]
+            "makerCommission": 15,
+            "takerCommission": 15,
+            "buyerCommission": 0,
+            "sellerCommission": 0,
+            "canTrade": True,
+            "canWithdraw": True,
+            "canDeposit": True,
+            "updateTime": 0,
+            "accountType": "SPOT",
+            "balances": [
+                {"asset": "USDT", "free": "1000.00000000", "locked": "0.00000000"},
+                {"asset": "BTC", "free": "0.10000000", "locked": "0.00000000"},
+            ],
         }
-        mock_binance_client.get_server_time.return_value = {
-            'serverTime': 1754384454796}
+        mock_binance_client.get_server_time.return_value = {"serverTime": 1754384454796}
         mock_binance_client.close_connection = AsyncMock()
 
         # Mock BinanceSocketManager
@@ -444,20 +420,21 @@ class TestCoinbaseIntegration:
         # Mock Coinbase clients
         mock_coinbase_rest_client = AsyncMock()
         mock_coinbase_rest_client.get_products.return_value = [
-            {'product_id': 'BTC-USD', 'status': 'online'}
+            {"product_id": "BTC-USD", "status": "online"}
         ]
         mock_coinbase_ws_client = AsyncMock()
         mock_coinbase_ws_client.open = AsyncMock()
 
-        with patch('src.exchanges.okx.Account', return_value=mock_account_client), \
-                patch('src.exchanges.okx.Market', return_value=mock_market_client), \
-                patch('src.exchanges.okx.Trade', return_value=mock_trade_client), \
-                patch('src.exchanges.okx.Public', return_value=mock_public_client), \
-                patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client), \
-                patch('src.exchanges.binance.BinanceSocketManager', return_value=mock_ws_manager), \
-                patch('src.exchanges.coinbase.RESTClient', return_value=mock_coinbase_rest_client), \
-                patch('src.exchanges.coinbase.WSClient', return_value=mock_coinbase_ws_client):
-
+        with (
+            patch("src.exchanges.okx.Account", return_value=mock_account_client),
+            patch("src.exchanges.okx.Market", return_value=mock_market_client),
+            patch("src.exchanges.okx.Trade", return_value=mock_trade_client),
+            patch("src.exchanges.okx.Public", return_value=mock_public_client),
+            patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client),
+            patch("src.exchanges.binance.BinanceSocketManager", return_value=mock_ws_manager),
+            patch("src.exchanges.coinbase.RESTClient", return_value=mock_coinbase_rest_client),
+            patch("src.exchanges.coinbase.WSClient", return_value=mock_coinbase_ws_client),
+        ):
             # Create multiple exchanges
             binance_exchange = await exchange_factory.get_exchange("binance")
             okx_exchange = await exchange_factory.get_exchange("okx")
@@ -483,9 +460,9 @@ class TestCoinbaseIntegration:
     async def test_configuration_integration(self, config):
         """Test that Coinbase configuration is properly integrated."""
         # Test that Coinbase config is present
-        assert hasattr(config.exchanges, 'coinbase_api_key')
-        assert hasattr(config.exchanges, 'coinbase_api_secret')
-        assert hasattr(config.exchanges, 'coinbase_sandbox')
+        assert hasattr(config.exchanges, "coinbase_api_key")
+        assert hasattr(config.exchanges, "coinbase_api_secret")
+        assert hasattr(config.exchanges, "coinbase_sandbox")
 
         # Test that Coinbase is in supported exchanges
         assert "coinbase" in config.exchanges.supported_exchanges
@@ -504,8 +481,13 @@ class TestCoinbaseIntegration:
         mock_rest_client = AsyncMock()
         mock_rest_client.get_accounts.side_effect = [
             Exception("Network error"),  # First call fails
-            [{'currency': 'USD', 'available_balance': {'value': '1000.00'},
-                'hold': {'value': '0.00'}}]  # Second call succeeds
+            [
+                {
+                    "currency": "USD",
+                    "available_balance": {"value": "1000.00"},
+                    "hold": {"value": "0.00"},
+                }
+            ],  # Second call succeeds
         ]
 
         coinbase_exchange.client = mock_rest_client
@@ -517,7 +499,7 @@ class TestCoinbaseIntegration:
         # Second call should succeed
         balances = await coinbase_exchange.get_account_balance()
         assert isinstance(balances, dict)
-        assert 'USD' in balances
+        assert "USD" in balances
 
     @pytest.mark.asyncio
     async def test_data_consistency(self, coinbase_exchange):
@@ -525,23 +507,23 @@ class TestCoinbaseIntegration:
         # Mock consistent data
         mock_rest_client = AsyncMock()
         mock_rest_client.get_product_ticker.return_value = {
-            'product_id': 'BTC-USD',
-            'price': '50000.00',
-            'volume_24h': '1000.0',
-            'time': '2024-01-01T00:00:00.000Z',
-            'bid': '50000.00',  # Match the best bid in order book
-            'ask': '50001.00'
+            "product_id": "BTC-USD",
+            "price": "50000.00",
+            "volume_24h": "1000.0",
+            "time": "2024-01-01T00:00:00.000Z",
+            "bid": "50000.00",  # Match the best bid in order book
+            "ask": "50001.00",
         }
         mock_rest_client.get_product_book.return_value = {
-            'bids': [['50000.00', '1.0'], ['49999.00', '2.0']],
-            'asks': [['50001.00', '1.0'], ['50002.00', '2.0']]
+            "bids": [["50000.00", "1.0"], ["49999.00", "2.0"]],
+            "asks": [["50001.00", "1.0"], ["50002.00", "2.0"]],
         }
 
         coinbase_exchange.client = mock_rest_client
 
         # Test that ticker and order book data are consistent
-        ticker = await coinbase_exchange.get_ticker('BTC-USD')
-        order_book = await coinbase_exchange.get_order_book('BTC-USD')
+        ticker = await coinbase_exchange.get_ticker("BTC-USD")
+        order_book = await coinbase_exchange.get_order_book("BTC-USD")
 
         # Verify data consistency
         assert ticker.symbol == order_book.symbol
@@ -552,24 +534,27 @@ class TestCoinbaseIntegration:
     async def test_performance_metrics(self, coinbase_exchange):
         """Test performance metrics and monitoring."""
         import time
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
 
         # Mock REST client
         mock_rest_client = AsyncMock()
         mock_rest_client.get_accounts.return_value = [
-            {'currency': 'USD', 'available_balance': {'value': '1000.00'}, 'hold': {'value': '0.00'}}
+            {
+                "currency": "USD",
+                "available_balance": {"value": "1000.00"},
+                "hold": {"value": "0.00"},
+            }
         ]
-        mock_rest_client.get_products.return_value = [
-            {'product_id': 'BTC-USD', 'status': 'online'}
-        ]
+        mock_rest_client.get_products.return_value = [{"product_id": "BTC-USD", "status": "online"}]
 
         # Mock WebSocket client
         mock_ws_client = AsyncMock()
         mock_ws_client.open = AsyncMock()
 
-        with patch('src.exchanges.coinbase.RESTClient', return_value=mock_rest_client), \
-                patch('src.exchanges.coinbase.WSClient', return_value=mock_ws_client):
-
+        with (
+            patch("src.exchanges.coinbase.RESTClient", return_value=mock_rest_client),
+            patch("src.exchanges.coinbase.WSClient", return_value=mock_ws_client),
+        ):
             # Test connection performance
             start_time = time.time()
             result = await coinbase_exchange.connect()

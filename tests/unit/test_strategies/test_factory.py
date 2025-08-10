@@ -4,21 +4,19 @@ Unit tests for StrategyFactory.
 Tests the strategy factory pattern for dynamic strategy instantiation and management.
 """
 
-import pytest
-import asyncio
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from decimal import Decimal
-from datetime import datetime, timezone
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
+from src.core.exceptions import ValidationError
 
 # Import from P-001
-from src.core.types import (
-    StrategyConfig, StrategyStatus, StrategyType, Signal, MarketData
-)
-from src.core.exceptions import ValidationError
+from src.core.types import MarketData, Signal, StrategyStatus
+from src.strategies.base import BaseStrategy
 
 # Import from P-011
 from src.strategies.factory import StrategyFactory
-from src.strategies.base import BaseStrategy
 
 
 class MockStrategy(BaseStrategy):
@@ -59,7 +57,7 @@ class TestStrategyFactory:
             "position_size_pct": 0.02,
             "stop_loss_pct": 0.02,
             "take_profit_pct": 0.04,
-            "parameters": {"test_param": "test_value"}
+            "parameters": {"test_param": "test_value"},
         }
 
     @pytest.fixture
@@ -90,6 +88,7 @@ class TestStrategyFactory:
 
     def test_register_invalid_strategy_class(self, factory):
         """Test registering invalid strategy class."""
+
         class InvalidStrategy:
             pass
 
@@ -108,7 +107,7 @@ class TestStrategyFactory:
         strategy_class = factory._get_strategy_class("non_existent")
         assert strategy_class is None
 
-    @patch('importlib.import_module')
+    @patch("importlib.import_module")
     def test_get_strategy_class_dynamic_import(self, mock_import, factory):
         """Test dynamic import of strategy class."""
         # Mock the import
@@ -148,11 +147,8 @@ class TestStrategyFactory:
             factory.create_strategy("test_strategy", invalid_config)
 
     def test_create_strategy_with_dependencies(
-            self,
-            factory,
-            mock_config,
-            mock_risk_manager,
-            mock_exchange):
+        self, factory, mock_config, mock_risk_manager, mock_exchange
+    ):
         """Test creating strategy with dependencies."""
         # Register strategy class
         factory._register_strategy_class("test_strategy", MockStrategy)
@@ -189,6 +185,7 @@ class TestStrategyFactory:
     @pytest.mark.asyncio
     async def test_start_strategy_error(self, factory, mock_config):
         """Test strategy start with error."""
+
         # Create strategy that raises error on start
         class ErrorStrategy(MockStrategy):
             async def start(self):
@@ -378,6 +375,6 @@ class TestStrategyFactory:
 
     def test_get_strategy_class_dynamic_import_error(self, factory):
         """Test dynamic import with import error."""
-        with patch('importlib.import_module', side_effect=ImportError("Module not found")):
+        with patch("importlib.import_module", side_effect=ImportError("Module not found")):
             strategy_class = factory._get_strategy_class("non_existent")
             assert strategy_class is None

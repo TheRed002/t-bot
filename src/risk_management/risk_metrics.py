@@ -13,28 +13,24 @@ CRITICAL: This integrates with P-001 (types, exceptions, config),
 P-002A (error handling), and P-007A (utils) components.
 """
 
-from typing import List, Optional, Dict, Any, Tuple
+from datetime import datetime
 from decimal import Decimal
-from datetime import datetime, timedelta
+from typing import Any
+
 import numpy as np
 
-# MANDATORY: Import from P-001
-from src.core.types import (
-    Position, MarketData, RiskMetrics, RiskLevel
-)
-from src.core.exceptions import (
-    RiskManagementError, ValidationError
-)
 from src.core.config import Config
+from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.logging import get_logger
+
+# MANDATORY: Import from P-001
+from src.core.types import MarketData, Position, RiskLevel, RiskMetrics
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
 # MANDATORY: Import from P-007A
-from src.utils.decorators import time_execution, retry
-from src.utils.validators import validate_price, validate_quantity, validate_position_limits
-from src.utils.formatters import format_percentage, format_currency
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -60,18 +56,17 @@ class RiskCalculator:
         self.logger = logger.bind(component="risk_calculator")
 
         # Historical data for calculations
-        self.portfolio_values: List[float] = []
-        self.portfolio_returns: List[float] = []
-        self.position_returns: Dict[str, List[float]] = {}
-        self.position_prices: Dict[str, List[float]] = {}
+        self.portfolio_values: list[float] = []
+        self.portfolio_returns: list[float] = []
+        self.position_returns: dict[str, list[float]] = {}
+        self.position_prices: dict[str, list[float]] = {}
 
         self.logger.info("Risk calculator initialized")
 
     @time_execution
     async def calculate_risk_metrics(
-            self,
-            positions: List[Position],
-            market_data: List[MarketData]) -> RiskMetrics:
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> RiskMetrics:
         """
         Calculate comprehensive risk metrics for the portfolio.
 
@@ -91,8 +86,7 @@ class RiskCalculator:
                 return await self._create_empty_risk_metrics()
 
             if len(positions) != len(market_data):
-                raise ValidationError(
-                    "Position and market data count mismatch")
+                raise ValidationError("Position and market data count mismatch")
 
             # Calculate portfolio value and returns
             portfolio_value = await self._calculate_portfolio_value(positions, market_data)
@@ -107,9 +101,7 @@ class RiskCalculator:
             sharpe_ratio = await self._calculate_sharpe_ratio()
 
             # Determine risk level
-            risk_level = await self._determine_risk_level(
-                var_1d, current_drawdown, sharpe_ratio
-            )
+            risk_level = await self._determine_risk_level(var_1d, current_drawdown, sharpe_ratio)
 
             # Create risk metrics object
             risk_metrics = RiskMetrics(
@@ -120,14 +112,16 @@ class RiskCalculator:
                 sharpe_ratio=sharpe_ratio,
                 current_drawdown=current_drawdown,
                 risk_level=risk_level,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
 
-            self.logger.info("Risk metrics calculated",
-                             var_1d=float(var_1d),
-                             var_5d=float(var_5d),
-                             current_drawdown=float(current_drawdown),
-                             risk_level=risk_level.value)
+            self.logger.info(
+                "Risk metrics calculated",
+                var_1d=float(var_1d),
+                var_5d=float(var_5d),
+                current_drawdown=float(current_drawdown),
+                risk_level=risk_level.value,
+            )
 
             return risk_metrics
 
@@ -151,14 +145,13 @@ class RiskCalculator:
             sharpe_ratio=None,
             current_drawdown=Decimal("0"),
             risk_level=RiskLevel.LOW,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
     @time_execution
     async def _calculate_portfolio_value(
-            self,
-            positions: List[Position],
-            market_data: List[MarketData]) -> Decimal:
+        self, positions: list[Position], market_data: list[MarketData]
+    ) -> Decimal:
         """
         Calculate current portfolio value.
 
@@ -171,13 +164,11 @@ class RiskCalculator:
         """
         portfolio_value = Decimal("0")
 
-        for position, market in zip(positions, market_data):
+        for position, market in zip(positions, market_data, strict=False):
             if position.symbol == market.symbol:
                 # Update position with current price
                 position.current_price = market.price
-                position.unrealized_pnl = (
-                    position.quantity * (market.price - position.entry_price)
-                )
+                position.unrealized_pnl = position.quantity * (market.price - position.entry_price)
 
                 # Add position value to portfolio
                 position_value = position.quantity * market.price
@@ -186,8 +177,7 @@ class RiskCalculator:
         return portfolio_value
 
     @time_execution
-    async def _update_portfolio_history(
-            self, portfolio_value: Decimal) -> None:
+    async def _update_portfolio_history(self, portfolio_value: Decimal) -> None:
         """
         Update portfolio value history for risk calculations.
 
@@ -200,8 +190,7 @@ class RiskCalculator:
         if len(self.portfolio_values) > 1:
             prev_value = self.portfolio_values[-2]
             if prev_value > 0:
-                return_rate = (
-                    float(portfolio_value) - prev_value) / prev_value
+                return_rate = (float(portfolio_value) - prev_value) / prev_value
                 self.portfolio_returns.append(return_rate)
 
         # Keep only recent history
@@ -213,10 +202,7 @@ class RiskCalculator:
             self.portfolio_returns = self.portfolio_returns[-max_history:]
 
     @time_execution
-    async def _calculate_var(
-            self,
-            days: int,
-            portfolio_value: Decimal) -> Decimal:
+    async def _calculate_var(self, days: int, portfolio_value: Decimal) -> Decimal:
         """
         Calculate Value at Risk for specified time horizon.
 
@@ -249,8 +235,7 @@ class RiskCalculator:
             z_score = 2.326
         else:
             # Interpolate for other confidence levels
-            z_score = 1.645 + (confidence_level - 0.95) * \
-                (2.326 - 1.645) / 0.04
+            z_score = 1.645 + (confidence_level - 0.95) * (2.326 - 1.645) / 0.04
 
         # Formula: VaR = portfolio_value * (volatility * sqrt(days) * z_score)
         var_percentage = daily_volatility * np.sqrt(days) * z_score
@@ -259,8 +244,7 @@ class RiskCalculator:
         return var_value
 
     @time_execution
-    async def _calculate_expected_shortfall(
-            self, portfolio_value: Decimal) -> Decimal:
+    async def _calculate_expected_shortfall(self, portfolio_value: Decimal) -> Decimal:
         """
         Calculate Expected Shortfall (Conditional VaR).
 
@@ -287,8 +271,7 @@ class RiskCalculator:
         if len(worst_returns) == 0:
             return portfolio_value * Decimal("0.02")  # Conservative fallback
 
-        expected_shortfall = portfolio_value * \
-            Decimal(str(abs(np.mean(worst_returns))))
+        expected_shortfall = portfolio_value * Decimal(str(abs(np.mean(worst_returns))))
 
         return expected_shortfall
 
@@ -312,8 +295,7 @@ class RiskCalculator:
         return Decimal(str(max_drawdown))
 
     @time_execution
-    async def _calculate_current_drawdown(
-            self, portfolio_value: Decimal) -> Decimal:
+    async def _calculate_current_drawdown(self, portfolio_value: Decimal) -> Decimal:
         """
         Calculate current drawdown from peak.
 
@@ -338,7 +320,7 @@ class RiskCalculator:
         return Decimal(str(max(0, current_drawdown)))
 
     @time_execution
-    async def _calculate_sharpe_ratio(self) -> Optional[Decimal]:
+    async def _calculate_sharpe_ratio(self) -> Decimal | None:
         """
         Calculate Sharpe ratio for the portfolio.
 
@@ -368,10 +350,8 @@ class RiskCalculator:
 
     @time_execution
     async def _determine_risk_level(
-            self,
-            var_1d: Decimal,
-            current_drawdown: Decimal,
-            sharpe_ratio: Optional[Decimal]) -> RiskLevel:
+        self, var_1d: Decimal, current_drawdown: Decimal, sharpe_ratio: Decimal | None
+    ) -> RiskLevel:
         """
         Determine risk level based on current metrics.
 
@@ -387,8 +367,11 @@ class RiskCalculator:
         current_portfolio_value = self.portfolio_values[-1] if self.portfolio_values else 1
 
         # Calculate VaR as percentage of portfolio value
-        var_1d_pct = var_1d / \
-            Decimal(str(current_portfolio_value)) if current_portfolio_value > 0 else Decimal("0")
+        var_1d_pct = (
+            var_1d / Decimal(str(current_portfolio_value))
+            if current_portfolio_value > 0
+            else Decimal("0")
+        )
 
         # Risk level thresholds (as percentages)
         var_threshold_high = Decimal("0.05")  # 5% VaR
@@ -398,20 +381,23 @@ class RiskCalculator:
         sharpe_threshold_low = Decimal("-1.0")  # Negative Sharpe ratio
 
         # Check for critical risk
-        if (var_1d_pct > var_threshold_critical or
-                current_drawdown > drawdown_threshold_critical):
+        if var_1d_pct > var_threshold_critical or current_drawdown > drawdown_threshold_critical:
             return RiskLevel.CRITICAL
 
         # Check for high risk
-        if (var_1d_pct > var_threshold_high or
-            current_drawdown > drawdown_threshold_high or
-                (sharpe_ratio and sharpe_ratio < sharpe_threshold_low)):
+        if (
+            var_1d_pct > var_threshold_high
+            or current_drawdown > drawdown_threshold_high
+            or (sharpe_ratio and sharpe_ratio < sharpe_threshold_low)
+        ):
             return RiskLevel.HIGH
 
         # Check for medium risk
-        if (var_1d_pct > Decimal("0.02") or  # 2% VaR
-            current_drawdown > Decimal("0.05") or  # 5% drawdown
-                (sharpe_ratio and sharpe_ratio < Decimal("0.5"))):
+        if (
+            var_1d_pct > Decimal("0.02")  # 2% VaR
+            or current_drawdown > Decimal("0.05")  # 5% drawdown
+            or (sharpe_ratio and sharpe_ratio < Decimal("0.5"))
+        ):
             return RiskLevel.MEDIUM
 
         # Default to low risk
@@ -448,7 +434,7 @@ class RiskCalculator:
             self.position_prices[symbol] = self.position_prices[symbol][-max_history:]
 
     @time_execution
-    async def get_risk_summary(self) -> Dict[str, Any]:
+    async def get_risk_summary(self) -> dict[str, Any]:
         """
         Get comprehensive risk summary.
 
@@ -464,16 +450,12 @@ class RiskCalculator:
         summary = {
             "current_portfolio_value": current_value,
             "peak_portfolio_value": peak_value,
-            "total_return": (
-                current_value -
-                self.portfolio_values[0]) /
-            self.portfolio_values[0] if len(
-                self.portfolio_values) > 1 else 0,
-            "data_points": len(
-                self.portfolio_values),
-            "return_data_points": len(
-                self.portfolio_returns),
-            "position_symbols": list(
-                self.position_returns.keys())}
+            "total_return": (current_value - self.portfolio_values[0]) / self.portfolio_values[0]
+            if len(self.portfolio_values) > 1
+            else 0,
+            "data_points": len(self.portfolio_values),
+            "return_data_points": len(self.portfolio_returns),
+            "position_symbols": list(self.position_returns.keys()),
+        }
 
         return summary

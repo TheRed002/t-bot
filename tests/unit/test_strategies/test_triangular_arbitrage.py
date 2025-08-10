@@ -6,17 +6,21 @@ arbitrage opportunities within a single exchange and generates signals for
 a sequence of trades to capture the profit.
 """
 
-import pytest
-from decimal import Decimal
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, AsyncMock
+from decimal import Decimal
 
-from src.strategies.static.triangular_arbitrage import TriangularArbitrageStrategy
+import pytest
+
+from src.core.exceptions import ArbitrageError
 from src.core.types import (
-    Signal, MarketData, Position, SignalDirection,
-    StrategyConfig, StrategyType, OrderSide
+    MarketData,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyType,
 )
-from src.core.exceptions import ArbitrageError, ValidationError
+from src.strategies.static.triangular_arbitrage import TriangularArbitrageStrategy
 
 
 class TestTriangularArbitrageStrategy:
@@ -33,7 +37,7 @@ class TestTriangularArbitrageStrategy:
             "symbols": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],
             "triangular_paths": [
                 ["BTCUSDT", "ETHBTC", "ETHUSDT"],
-                ["BTCUSDT", "BNBBTC", "BNBUSDT"]
+                ["BTCUSDT", "BNBBTC", "BNBUSDT"],
             ],
             "exchange": "binance",
             "slippage_limit": "0.0005",
@@ -41,10 +45,7 @@ class TestTriangularArbitrageStrategy:
             "risk_per_trade": 0.02,
             "position_size_pct": 0.1,
             "min_confidence": 0.5,
-            "parameters": {
-                "max_position_size": 0.05,
-                "max_open_arbitrages": 3
-            }
+            "parameters": {"max_position_size": 0.05, "max_open_arbitrages": 3},
         }
 
     @pytest.fixture
@@ -62,7 +63,7 @@ class TestTriangularArbitrageStrategy:
             ask=Decimal("50001"),
             volume=Decimal("1000"),
             timestamp=datetime.now(),
-            metadata={"exchange": "binance"}
+            metadata={"exchange": "binance"},
         )
 
     def test_initialization(self, strategy):
@@ -78,8 +79,7 @@ class TestTriangularArbitrageStrategy:
         assert strategy.pair_prices == {}
 
     @pytest.mark.asyncio
-    async def test_generate_signals_no_opportunities(
-            self, strategy, market_data):
+    async def test_generate_signals_no_opportunities(self, strategy, market_data):
         """Test signal generation when no opportunities exist."""
         signals = await strategy._generate_signals_impl(market_data)
 
@@ -87,8 +87,7 @@ class TestTriangularArbitrageStrategy:
         assert len(signals) == 0
 
     @pytest.mark.asyncio
-    async def test_generate_signals_with_opportunities(
-            self, strategy, market_data):
+    async def test_generate_signals_with_opportunities(self, strategy, market_data):
         """Test signal generation when opportunities exist."""
         # Setup price data for triangular arbitrage
         strategy.pair_prices = {
@@ -99,7 +98,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("50001"),
                 volume=Decimal("1000"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHBTC": MarketData(
                 symbol="ETHBTC",
@@ -108,7 +107,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("0.0501"),
                 volume=Decimal("100"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHUSDT": MarketData(
                 symbol="ETHUSDT",
@@ -117,8 +116,8 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("2501"),
                 volume=Decimal("500"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
-            )
+                metadata={"exchange": "binance"},
+            ),
         }
 
         signals = await strategy._generate_signals_impl(market_data)
@@ -140,7 +139,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("50001"),
                 volume=Decimal("1000"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHBTC": MarketData(
                 symbol="ETHBTC",
@@ -149,7 +148,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("0.0501"),
                 volume=Decimal("100"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHUSDT": MarketData(
                 symbol="ETHUSDT",
@@ -158,8 +157,8 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("2501"),
                 volume=Decimal("500"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
-            )
+                metadata={"exchange": "binance"},
+            ),
         }
 
         signals = await strategy._detect_triangular_opportunities("BTCUSDT")
@@ -183,7 +182,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("50001"),
                 volume=Decimal("1000"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHBTC": MarketData(
                 symbol="ETHBTC",
@@ -192,7 +191,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("0.0501"),
                 volume=Decimal("100"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHUSDT": MarketData(
                 symbol="ETHUSDT",
@@ -201,8 +200,8 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("2501"),
                 volume=Decimal("500"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
-            )
+                metadata={"exchange": "binance"},
+            ),
         }
 
         path = ["BTCUSDT", "ETHBTC", "ETHUSDT"]
@@ -217,8 +216,8 @@ class TestTriangularArbitrageStrategy:
     def test_calculate_triangular_fees(self, strategy):
         """Test triangular fee calculation."""
         rate1 = Decimal("50000")  # BTC/USDT
-        rate2 = Decimal("0.05")   # ETH/BTC
-        rate3 = Decimal("2500")   # ETH/USDT
+        rate2 = Decimal("0.05")  # ETH/BTC
+        rate3 = Decimal("2500")  # ETH/USDT
 
         fees = strategy._calculate_triangular_fees(rate1, rate2, rate3)
 
@@ -228,8 +227,7 @@ class TestTriangularArbitrageStrategy:
     def test_calculate_triangular_fees_invalid_input(self, strategy):
         """Test triangular fee calculation with invalid input."""
         with pytest.raises(ArbitrageError):
-            strategy._calculate_triangular_fees(
-                Decimal("-1"), Decimal("0.05"), Decimal("2500"))
+            strategy._calculate_triangular_fees(Decimal("-1"), Decimal("0.05"), Decimal("2500"))
 
     @pytest.mark.asyncio
     async def test_validate_triangular_timing_valid(self, strategy):
@@ -243,7 +241,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("50001"),
                 volume=Decimal("1000"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHBTC": MarketData(
                 symbol="ETHBTC",
@@ -252,7 +250,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("0.0501"),
                 volume=Decimal("100"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHUSDT": MarketData(
                 symbol="ETHUSDT",
@@ -261,8 +259,8 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("2501"),
                 volume=Decimal("500"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
-            )
+                metadata={"exchange": "binance"},
+            ),
         }
 
         path = ["BTCUSDT", "ETHBTC", "ETHUSDT"]
@@ -282,7 +280,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("50001"),
                 volume=Decimal("1000"),
                 timestamp=datetime.now() - timedelta(seconds=1),  # Old data
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHBTC": MarketData(
                 symbol="ETHBTC",
@@ -291,7 +289,7 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("0.0501"),
                 volume=Decimal("100"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
+                metadata={"exchange": "binance"},
             ),
             "ETHUSDT": MarketData(
                 symbol="ETHUSDT",
@@ -300,8 +298,8 @@ class TestTriangularArbitrageStrategy:
                 ask=Decimal("2501"),
                 volume=Decimal("500"),
                 timestamp=datetime.now(),
-                metadata={"exchange": "binance"}
-            )
+                metadata={"exchange": "binance"},
+            ),
         }
 
         path = ["BTCUSDT", "ETHBTC", "ETHUSDT"]
@@ -326,9 +324,9 @@ class TestTriangularArbitrageStrategy:
                 "execution_sequence": [
                     {"pair": "BTCUSDT", "action": "buy", "rate": 50000.0},
                     {"pair": "ETHBTC", "action": "sell", "rate": 0.05},
-                    {"pair": "ETHUSDT", "action": "sell", "rate": 2500.0}
-                ]
-            }
+                    {"pair": "ETHUSDT", "action": "sell", "rate": 2500.0},
+                ],
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -346,8 +344,8 @@ class TestTriangularArbitrageStrategy:
             strategy_name="test",
             metadata={
                 "arbitrage_type": "triangular",
-                "net_profit_percentage": 0.05  # Below threshold
-            }
+                "net_profit_percentage": 0.05,  # Below threshold
+            },
         )
 
         result = await strategy.validate_signal(signal)
@@ -362,10 +360,7 @@ class TestTriangularArbitrageStrategy:
             timestamp=datetime.now(),
             symbol="BTCUSDT",
             strategy_name="test",
-            metadata={
-                "arbitrage_type": "triangular",
-                "net_profit_percentage": 0.5
-            }
+            metadata={"arbitrage_type": "triangular", "net_profit_percentage": 0.5},
         )
 
         position_size = strategy.get_position_size(signal)
@@ -379,8 +374,7 @@ class TestTriangularArbitrageStrategy:
             strategy.get_position_size(None)
 
     @pytest.mark.asyncio
-    async def test_should_exit_not_triangular_position(
-            self, strategy, market_data):
+    async def test_should_exit_not_triangular_position(self, strategy, market_data):
         """Test exit condition for non-triangular position."""
         position = Position(
             symbol="BTCUSDT",
@@ -390,7 +384,7 @@ class TestTriangularArbitrageStrategy:
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
             timestamp=datetime.now(),
-            metadata={}  # No arbitrage_type
+            metadata={},  # No arbitrage_type
         )
 
         result = await strategy.should_exit(position, market_data)
@@ -410,8 +404,8 @@ class TestTriangularArbitrageStrategy:
             timestamp=datetime.now() - timedelta(seconds=1),  # Old position
             metadata={
                 "arbitrage_type": "triangular",
-                "execution_timeout": 500  # 500ms timeout
-            }
+                "execution_timeout": 500,  # 500ms timeout
+            },
         )
 
         result = await strategy.should_exit(position, market_data)
@@ -425,7 +419,7 @@ class TestTriangularArbitrageStrategy:
             "symbol": "BTCUSDT",
             "path": ["BTCUSDT", "ETHBTC", "ETHUSDT"],
             "pnl": 50.0,
-            "execution_time_ms": 100
+            "execution_time_ms": 100,
         }
 
         initial_trades = strategy.metrics.total_trades
@@ -443,7 +437,7 @@ class TestTriangularArbitrageStrategy:
             "symbol": "BTCUSDT",
             "path": ["BTCUSDT", "ETHBTC", "ETHUSDT"],
             "pnl": "invalid_pnl",  # Invalid P&L
-            "execution_time_ms": 100
+            "execution_time_ms": 100,
         }
 
         # Should not raise exception, should handle gracefully

@@ -8,25 +8,27 @@ and inventory management.
 CRITICAL: These tests must achieve 90% coverage as required by P-013B.
 """
 
-import pytest
-import asyncio
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, AsyncMock, patch
-import numpy as np
+from unittest.mock import AsyncMock, Mock, patch
 
-# Import the strategy classes
-from src.strategies.static.market_making import MarketMakingStrategy, OrderLevel, InventoryState
-from src.strategies.static.inventory_manager import InventoryManager
-from src.strategies.static.spread_optimizer import SpreadOptimizer
+import pytest
 
 # Import core types
 from src.core.types import (
-    Signal, MarketData, Position, SignalDirection, OrderSide,
-    StrategyConfig, StrategyType
+    MarketData,
+    OrderSide,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyType,
 )
-from src.core.exceptions import ValidationError, RiskManagementError
 from src.risk_management.base import BaseRiskManager
+from src.strategies.static.inventory_manager import InventoryManager
+
+# Import the strategy classes
+from src.strategies.static.market_making import MarketMakingStrategy
+from src.strategies.static.spread_optimizer import SpreadOptimizer
 
 
 class TestMarketMakingStrategy:
@@ -64,8 +66,8 @@ class TestMarketMakingStrategy:
                 "min_profit_per_trade": 0.00001,
                 "order_refresh_time": 30,
                 "adaptive_spreads": True,
-                "competition_monitoring": True
-            }
+                "competition_monitoring": True,
+            },
         }
 
     @pytest.fixture
@@ -80,7 +82,7 @@ class TestMarketMakingStrategy:
             ask=Decimal("50001"),
             open_price=Decimal("49900"),
             high_price=Decimal("50100"),
-            low_price=Decimal("49800")
+            low_price=Decimal("49800"),
         )
 
     @pytest.fixture
@@ -106,7 +108,7 @@ class TestMarketMakingStrategy:
             "name": "test_default",
             "strategy_type": "market_making",
             "symbols": ["BTCUSDT"],
-            "parameters": {}
+            "parameters": {},
         }
         strategy = MarketMakingStrategy(config)
 
@@ -150,16 +152,15 @@ class TestMarketMakingStrategy:
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
             bid=None,
-            ask=None
+            ask=None,
         )
         signals = await strategy._generate_signals_impl(invalid_data)
         assert len(signals) == 0
 
     @pytest.mark.asyncio
-    async def test_generate_signals_exception_handling(
-            self, strategy, market_data):
+    async def test_generate_signals_exception_handling(self, strategy, market_data):
         """Test signal generation with exception handling."""
-        with patch.object(strategy, '_update_price_history', side_effect=Exception("Test error")):
+        with patch.object(strategy, "_update_price_history", side_effect=Exception("Test error")):
             signals = await strategy._generate_signals_impl(market_data)
             assert len(signals) == 0  # Graceful degradation
 
@@ -173,14 +174,12 @@ class TestMarketMakingStrategy:
         assert spread > base_spread
 
         # Test level 3 (should be wider)
-        spread_level_3 = strategy._calculate_level_spread(
-            3, base_spread, volatility)
+        spread_level_3 = strategy._calculate_level_spread(3, base_spread, volatility)
         assert spread_level_3 > spread
 
         # Test with inventory skew
         strategy.inventory_state.inventory_skew = 0.5
-        spread_with_skew = strategy._calculate_level_spread(
-            1, base_spread, volatility)
+        spread_with_skew = strategy._calculate_level_spread(1, base_spread, volatility)
         assert spread_with_skew != spread
 
     def test_calculate_level_size(self, strategy):
@@ -231,13 +230,7 @@ class TestMarketMakingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={
-                "price": 50000.0,
-                "size": 0.01,
-                "level": 1,
-                "spread": 0.001,
-                "side": "bid"
-            }
+            metadata={"price": 50000.0, "size": 0.01, "level": 1, "spread": 0.001, "side": "bid"},
         )
 
         is_valid = await strategy.validate_signal(signal)
@@ -252,7 +245,7 @@ class TestMarketMakingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={"price": 50000.0, "size": 0.01}
+            metadata={"price": 50000.0, "size": 0.01},
         )
 
         is_valid = await strategy.validate_signal(signal)
@@ -267,7 +260,7 @@ class TestMarketMakingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={}  # Missing required metadata
+            metadata={},  # Missing required metadata
         )
 
         is_valid = await strategy.validate_signal(signal)
@@ -284,7 +277,7 @@ class TestMarketMakingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={"price": 50000.0, "size": 0.01}
+            metadata={"price": 50000.0, "size": 0.01},
         )
 
         is_valid = await strategy.validate_signal(signal)
@@ -304,21 +297,14 @@ class TestMarketMakingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={
-                "price": 50000.0,
-                "size": 0.01,
-                "level": 1,
-                "spread": 0.001,
-                "side": "bid"
-            }
+            metadata={"price": 50000.0, "size": 0.01, "level": 1, "spread": 0.001, "side": "bid"},
         )
 
         is_valid = await strategy.validate_signal(signal)
         assert is_valid is False
 
     @pytest.mark.asyncio
-    async def test_validate_signal_with_risk_manager_acceptance(
-            self, strategy):
+    async def test_validate_signal_with_risk_manager_acceptance(self, strategy):
         """Test signal validation when risk manager accepts signal."""
         # Mock risk manager to accept signal
         mock_risk_manager = Mock(spec=BaseRiskManager)
@@ -331,13 +317,7 @@ class TestMarketMakingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={
-                "price": 50000.0,
-                "size": 0.01,
-                "level": 1,
-                "spread": 0.001,
-                "side": "bid"
-            }
+            metadata={"price": 50000.0, "size": 0.01, "level": 1, "spread": 0.001, "side": "bid"},
         )
 
         is_valid = await strategy.validate_signal(signal)
@@ -352,7 +332,7 @@ class TestMarketMakingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={"size": 0.5}
+            metadata={"size": 0.5},
         )
 
         is_valid = strategy._check_inventory_limits(signal)
@@ -371,7 +351,7 @@ class TestMarketMakingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={"size": 0.01, "price": 50000.0}
+            metadata={"size": 0.01, "price": 50000.0},
         )
 
         size = strategy.get_position_size(signal)
@@ -388,7 +368,7 @@ class TestMarketMakingStrategy:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         market_data = MarketData(
@@ -397,7 +377,7 @@ class TestMarketMakingStrategy:
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
             bid=Decimal("49999"),
-            ask=Decimal("50001")
+            ask=Decimal("50001"),
         )
 
         should_exit = await strategy.should_exit(position, market_data)
@@ -413,7 +393,7 @@ class TestMarketMakingStrategy:
             current_price=Decimal("50100"),
             unrealized_pnl=Decimal("50"),  # Profitable
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         market_data = MarketData(
@@ -422,7 +402,7 @@ class TestMarketMakingStrategy:
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
             bid=Decimal("49950"),  # Narrow spread
-            ask=Decimal("50050")
+            ask=Decimal("50050"),
         )
 
         should_exit = await strategy.should_exit(position, market_data)
@@ -439,7 +419,7 @@ class TestMarketMakingStrategy:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         should_rebalance = await strategy._should_rebalance_inventory(position)
@@ -455,7 +435,7 @@ class TestMarketMakingStrategy:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         await strategy.update_inventory_state(position)
@@ -466,11 +446,7 @@ class TestMarketMakingStrategy:
     @pytest.mark.asyncio
     async def test_update_performance_metrics(self, strategy):
         """Test performance metrics update."""
-        trade_result = {
-            "pnl": 10.5,
-            "quantity": 0.01,
-            "price": 50000.0
-        }
+        trade_result = {"pnl": 10.5, "quantity": 0.01, "price": 50000.0}
 
         initial_trades = strategy.total_trades
         initial_pnl = strategy.total_pnl
@@ -488,7 +464,7 @@ class TestMarketMakingStrategy:
         trade_result = {
             "pnl": "invalid_pnl",  # This will cause an exception
             "quantity": 0.01,
-            "price": 50000.0
+            "price": 50000.0,
         }
 
         await strategy.update_performance_metrics(trade_result)
@@ -544,13 +520,7 @@ class TestMarketMakingStrategy:
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
             strategy_name=strategy.name,
-            metadata={
-                "price": 50000.0,
-                "size": 0.01,
-                "level": 1,
-                "spread": 0.001,
-                "side": "bid"
-            }
+            metadata={"price": 50000.0, "size": 0.01, "level": 1, "spread": 0.001, "side": "bid"},
         )
 
         size = strategy.get_position_size(signal)
@@ -570,8 +540,8 @@ class TestMarketMakingStrategy:
                 "size": 0.01,
                 "level": 1,
                 "spread": 0.001,
-                "side": "bid"
-            }
+                "side": "bid",
+            },
         )
 
         size = strategy.get_position_size(signal)
@@ -588,7 +558,7 @@ class TestMarketMakingStrategy:
             current_price=Decimal("50100"),
             unrealized_pnl=Decimal("50"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Market data with invalid bid/ask that will cause division by zero
@@ -598,7 +568,7 @@ class TestMarketMakingStrategy:
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
             bid=Decimal("0"),  # This will cause division by zero
-            ask=Decimal("0")
+            ask=Decimal("0"),
         )
 
         should_exit = await strategy.should_exit(position, market_data)
@@ -615,7 +585,7 @@ class TestMarketMakingStrategy:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Set max_inventory to 0 to cause division by zero
@@ -642,7 +612,7 @@ class TestInventoryManager:
             "rebalance_frequency_hours": 4,
             "max_rebalance_size": 0.5,
             "emergency_threshold": 0.8,
-            "emergency_liquidation_enabled": True
+            "emergency_liquidation_enabled": True,
         }
 
     @pytest.fixture
@@ -660,7 +630,7 @@ class TestInventoryManager:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
     @pytest.mark.asyncio
@@ -672,8 +642,7 @@ class TestInventoryManager:
         assert inventory_manager.inventory_skew == 0.3
 
     @pytest.mark.asyncio
-    async def test_should_rebalance_threshold_exceeded(
-            self, inventory_manager):
+    async def test_should_rebalance_threshold_exceeded(self, inventory_manager):
         """Test rebalancing check when threshold is exceeded."""
         inventory_manager.current_inventory = Decimal("0.8")  # 80% of max
         inventory_manager.target_inventory = Decimal("0.5")
@@ -682,8 +651,7 @@ class TestInventoryManager:
         assert should_rebalance is True
 
     @pytest.mark.asyncio
-    async def test_should_rebalance_max_inventory_exceeded(
-            self, inventory_manager):
+    async def test_should_rebalance_max_inventory_exceeded(self, inventory_manager):
         """Test rebalancing check when max inventory is exceeded."""
         inventory_manager.current_inventory = Decimal("1.5")  # Exceeds max
 
@@ -780,8 +748,7 @@ class TestInventoryManager:
 
         await inventory_manager.record_rebalance(Decimal("10.5"))
 
-        assert inventory_manager.total_rebalance_cost == initial_cost + \
-            Decimal("10.5")
+        assert inventory_manager.total_rebalance_cost == initial_cost + Decimal("10.5")
         assert inventory_manager.rebalance_count == initial_count + 1
 
     @pytest.mark.asyncio
@@ -792,8 +759,7 @@ class TestInventoryManager:
 
         await inventory_manager.record_emergency(Decimal("-5.5"))
 
-        assert inventory_manager.total_emergency_cost == initial_cost + \
-            Decimal("-5.5")
+        assert inventory_manager.total_emergency_cost == initial_cost + Decimal("-5.5")
         assert inventory_manager.emergency_count == initial_count + 1
 
     def test_get_inventory_summary(self, inventory_manager):
@@ -818,7 +784,7 @@ class TestInventoryManager:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         is_valid = await inventory_manager.validate_inventory_limits(position)
@@ -830,8 +796,7 @@ class TestInventoryManager:
         assert is_valid is False
 
     @pytest.mark.asyncio
-    async def test_validate_inventory_limits_with_exception(
-            self, inventory_manager):
+    async def test_validate_inventory_limits_with_exception(self, inventory_manager):
         """Test inventory limits validation with exception handling."""
         # Create a position that will cause an exception
         position = Position(
@@ -841,7 +806,7 @@ class TestInventoryManager:
             current_price=Decimal("50000"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         # Set invalid max_inventory to cause an exception
@@ -852,8 +817,7 @@ class TestInventoryManager:
         assert isinstance(result, bool)
 
     @pytest.mark.asyncio
-    async def test_calculate_spread_adjustment_with_exception(
-            self, inventory_manager):
+    async def test_calculate_spread_adjustment_with_exception(self, inventory_manager):
         """Test spread adjustment calculation with exception handling."""
         # Test with invalid base_spread that will cause an exception
         base_spread = Decimal("0.001")
@@ -865,8 +829,7 @@ class TestInventoryManager:
         assert isinstance(result, Decimal)
 
     @pytest.mark.asyncio
-    async def test_calculate_size_adjustment_with_exception(
-            self, inventory_manager):
+    async def test_calculate_size_adjustment_with_exception(self, inventory_manager):
         """Test size adjustment calculation with exception handling."""
         # Test with invalid base_size that will cause an exception
         base_size = Decimal("0.01")
@@ -915,7 +878,7 @@ class TestSpreadOptimizer:
             "competitor_weight": 0.3,
             "max_competitor_spread": 0.005,
             "impact_threshold": 0.001,
-            "impact_multiplier": 1.5
+            "impact_multiplier": 1.5,
         }
 
     @pytest.fixture
@@ -935,7 +898,7 @@ class TestSpreadOptimizer:
             ask=Decimal("50001"),
             open_price=Decimal("49900"),
             high_price=Decimal("50100"),
-            low_price=Decimal("49800")
+            low_price=Decimal("49800"),
         )
 
     @pytest.fixture
@@ -945,7 +908,7 @@ class TestSpreadOptimizer:
             "symbol": "BTCUSDT",
             "bids": [[Decimal("49999"), Decimal("1.0")], [Decimal("49998"), Decimal("2.0")]],
             "asks": [[Decimal("50001"), Decimal("1.0")], [Decimal("50002"), Decimal("2.0")]],
-            "timestamp": datetime.now(timezone.utc)
+            "timestamp": datetime.now(timezone.utc),
         }
 
     @pytest.mark.asyncio
@@ -953,9 +916,7 @@ class TestSpreadOptimizer:
         """Test basic spread optimization."""
         base_spread = Decimal("0.001")
 
-        optimized_spread = await spread_optimizer.optimize_spread(
-            base_spread, market_data
-        )
+        optimized_spread = await spread_optimizer.optimize_spread(base_spread, market_data)
 
         assert isinstance(optimized_spread, Decimal)
         assert optimized_spread >= spread_optimizer.min_spread
@@ -988,9 +949,11 @@ class TestSpreadOptimizer:
         # Test with balanced order book
         balanced_order_book = {
             "bids": [[Decimal("49999"), Decimal("1.0")]],
-            "asks": [[Decimal("50001"), Decimal("1.0")]]
+            "asks": [[Decimal("50001"), Decimal("1.0")]],
         }
-        adjustment = await spread_optimizer._calculate_imbalance_adjustment(base_spread, balanced_order_book)
+        adjustment = await spread_optimizer._calculate_imbalance_adjustment(
+            base_spread, balanced_order_book
+        )
         assert adjustment == Decimal("0")
 
     @pytest.mark.asyncio
@@ -1004,7 +967,9 @@ class TestSpreadOptimizer:
 
         # Test with competitor data
         competitor_spreads = [0.002, 0.003, 0.001]
-        adjustment = await spread_optimizer._calculate_competitor_adjustment(base_spread, competitor_spreads)
+        adjustment = await spread_optimizer._calculate_competitor_adjustment(
+            base_spread, competitor_spreads
+        )
         assert isinstance(adjustment, Decimal)
 
     @pytest.mark.asyncio
@@ -1017,14 +982,12 @@ class TestSpreadOptimizer:
         assert adjustment == Decimal("0")
 
         # Test with spread history
-        spread_optimizer.spread_history = [
-            0.001 + i * 0.0001 for i in range(15)]
+        spread_optimizer.spread_history = [0.001 + i * 0.0001 for i in range(15)]
         adjustment = await spread_optimizer._calculate_impact_adjustment(base_spread)
         assert isinstance(adjustment, Decimal)
 
     @pytest.mark.asyncio
-    async def test_calculate_optimal_spread(
-            self, spread_optimizer, market_data):
+    async def test_calculate_optimal_spread(self, spread_optimizer, market_data):
         """Test optimal spread calculation."""
         bid_spread, ask_spread = await spread_optimizer.calculate_optimal_spread(market_data)
 
@@ -1067,7 +1030,7 @@ class TestSpreadOptimizer:
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
             bid=Decimal("49999"),
-            ask=Decimal("50001")
+            ask=Decimal("50001"),
         )
 
         # Invalid order book that will cause an exception
@@ -1088,7 +1051,7 @@ class TestSpreadOptimizer:
             volume=Decimal("100"),
             timestamp=datetime.now(timezone.utc),
             bid=Decimal("49999"),
-            ask=Decimal("50001")
+            ask=Decimal("50001"),
         )
 
         # Invalid order book that will cause an exception
@@ -1100,8 +1063,7 @@ class TestSpreadOptimizer:
         assert isinstance(result, Decimal)
 
     @pytest.mark.asyncio
-    async def test_calculate_optimal_spread_with_exception(
-            self, spread_optimizer, market_data):
+    async def test_calculate_optimal_spread_with_exception(self, spread_optimizer, market_data):
         """Test optimal spread calculation with exception handling."""
         # Create invalid order book that will cause an exception
         order_book = "invalid_order_book"
@@ -1113,8 +1075,7 @@ class TestSpreadOptimizer:
         assert isinstance(result[1], Decimal)
 
     @pytest.mark.asyncio
-    async def test_should_widen_spread_with_exception(
-            self, spread_optimizer, market_data):
+    async def test_should_widen_spread_with_exception(self, spread_optimizer, market_data):
         """Test spread widening check with exception handling."""
         # Set invalid volatility history that will cause an exception
         spread_optimizer.volatility_history = ["invalid_volatility"]

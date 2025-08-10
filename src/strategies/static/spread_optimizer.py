@@ -9,21 +9,18 @@ CRITICAL: This integrates with the market making strategy and provides
 sophisticated spread optimization capabilities.
 """
 
-import numpy as np
-from typing import Dict, Any, Optional, List, Tuple
 from decimal import Decimal
-from datetime import datetime, timedelta
-import asyncio
+from typing import Any
 
-# MANDATORY: Import from P-001
-from src.core.types import MarketData, OrderBook, Ticker
-from src.core.exceptions import ValidationError
+import numpy as np
+
 from src.core.logging import get_logger
 
+# MANDATORY: Import from P-001
+from src.core.types import MarketData, OrderBook
+
 # MANDATORY: Import from P-007A
-from src.utils.decorators import time_execution, retry
-from src.utils.validators import validate_price
-from src.utils.formatters import format_percentage
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -41,7 +38,7 @@ class SpreadOptimizer:
     - Adaptive spread widening during high volatility
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """
         Initialize Spread Optimizer.
 
@@ -54,31 +51,30 @@ class SpreadOptimizer:
         self.volatility_multiplier = config.get("volatility_multiplier", 2.0)
         self.volatility_window = config.get("volatility_window", 20)
         self.min_volatility = config.get("min_volatility", 0.001)  # 0.1%
-        self.max_volatility = config.get("max_volatility", 0.05)   # 5%
+        self.max_volatility = config.get("max_volatility", 0.05)  # 5%
 
         # Order book parameters
-        self.imbalance_threshold = config.get(
-            "imbalance_threshold", 0.1)  # 10%
+        self.imbalance_threshold = config.get("imbalance_threshold", 0.1)  # 10%
         self.depth_levels = config.get("depth_levels", 5)
-        self.min_spread = Decimal(
-            str(config.get("min_spread", 0.0001)))  # 0.01%
-        self.max_spread = Decimal(str(config.get("max_spread", 0.01)))    # 1%
+        self.min_spread = Decimal(str(config.get("min_spread", 0.0001)))  # 0.01%
+        self.max_spread = Decimal(str(config.get("max_spread", 0.01)))  # 1%
 
         # Competition parameters
         self.competitor_monitoring = config.get("competitor_monitoring", True)
         self.competitor_weight = config.get("competitor_weight", 0.3)
         self.max_competitor_spread = Decimal(
-            str(config.get("max_competitor_spread", 0.005)))  # 0.5%
+            str(config.get("max_competitor_spread", 0.005))
+        )  # 0.5%
 
         # Market impact parameters
         self.impact_threshold = config.get("impact_threshold", 0.001)  # 0.1%
         self.impact_multiplier = config.get("impact_multiplier", 1.5)
 
         # State tracking
-        self.price_history: List[float] = []
-        self.spread_history: List[float] = []
-        self.volatility_history: List[float] = []
-        self.competitor_spreads: List[float] = []
+        self.price_history: list[float] = []
+        self.spread_history: list[float] = []
+        self.volatility_history: list[float] = []
+        self.competitor_spreads: list[float] = []
 
         # Performance tracking
         self.optimization_count = 0
@@ -90,15 +86,17 @@ class SpreadOptimizer:
             "Spread Optimizer initialized",
             volatility_multiplier=self.volatility_multiplier,
             imbalance_threshold=self.imbalance_threshold,
-            competitor_monitoring=self.competitor_monitoring
+            competitor_monitoring=self.competitor_monitoring,
         )
 
     @time_execution
-    async def optimize_spread(self,
-                              base_spread: Decimal,
-                              market_data: MarketData,
-                              order_book: Optional[OrderBook] = None,
-                              competitor_spreads: Optional[List[float]] = None) -> Decimal:
+    async def optimize_spread(
+        self,
+        base_spread: Decimal,
+        market_data: MarketData,
+        order_book: OrderBook | None = None,
+        competitor_spreads: list[float] | None = None,
+    ) -> Decimal:
         """
         Optimize spread based on market conditions.
 
@@ -133,10 +131,10 @@ class SpreadOptimizer:
 
             # Combine all adjustments
             total_adjustment = (
-                volatility_adjustment +
-                imbalance_adjustment +
-                competitor_adjustment +
-                impact_adjustment
+                volatility_adjustment
+                + imbalance_adjustment
+                + competitor_adjustment
+                + impact_adjustment
             )
 
             # Apply adjustment to base spread
@@ -156,7 +154,7 @@ class SpreadOptimizer:
                 competitor_adjustment=float(competitor_adjustment),
                 impact_adjustment=float(impact_adjustment),
                 total_adjustment=float(total_adjustment),
-                optimized_spread=float(optimized_spread)
+                optimized_spread=float(optimized_spread),
             )
 
             return optimized_spread
@@ -166,8 +164,7 @@ class SpreadOptimizer:
             return base_spread
 
     @time_execution
-    async def _calculate_volatility_adjustment(
-            self, base_spread: Decimal) -> Decimal:
+    async def _calculate_volatility_adjustment(self, base_spread: Decimal) -> Decimal:
         """
         Calculate spread adjustment based on volatility.
 
@@ -182,7 +179,7 @@ class SpreadOptimizer:
                 return Decimal("0")
 
             # Calculate current volatility
-            prices = np.array(self.price_history[-self.volatility_window:])
+            prices = np.array(self.price_history[-self.volatility_window :])
             returns = np.diff(prices) / prices[:-1]
             volatility = np.std(returns) * np.sqrt(252)  # Annualized
 
@@ -202,22 +199,19 @@ class SpreadOptimizer:
                 "Volatility adjustment calculated",
                 volatility=volatility,
                 adjustment=float(adjustment),
-                multiplier=self.volatility_multiplier
+                multiplier=self.volatility_multiplier,
             )
 
             return Decimal(str(adjustment))
 
         except Exception as e:
-            logger.error(
-                "Volatility adjustment calculation failed",
-                error=str(e))
+            logger.error("Volatility adjustment calculation failed", error=str(e))
             return Decimal("0")
 
     @time_execution
     async def _calculate_imbalance_adjustment(
-            self,
-            base_spread: Decimal,
-            order_book: Optional[OrderBook]) -> Decimal:
+        self, base_spread: Decimal, order_book: OrderBook | None
+    ) -> Decimal:
         """
         Calculate spread adjustment based on order book imbalance.
 
@@ -233,10 +227,8 @@ class SpreadOptimizer:
                 return Decimal("0")
 
             # Calculate bid and ask volumes at specified depth
-            bid_volume = sum(float(bid[1])
-                             for bid in order_book.bids[:self.depth_levels])
-            ask_volume = sum(float(ask[1])
-                             for ask in order_book.asks[:self.depth_levels])
+            bid_volume = sum(float(bid[1]) for bid in order_book.bids[: self.depth_levels])
+            ask_volume = sum(float(ask[1]) for ask in order_book.asks[: self.depth_levels])
 
             if bid_volume == 0 or ask_volume == 0:
                 return Decimal("0")
@@ -258,7 +250,7 @@ class SpreadOptimizer:
                     imbalance_ratio=imbalance_ratio,
                     adjustment=float(adjustment),
                     bid_volume=bid_volume,
-                    ask_volume=ask_volume
+                    ask_volume=ask_volume,
                 )
 
                 return Decimal(str(adjustment))
@@ -266,14 +258,13 @@ class SpreadOptimizer:
             return Decimal("0")
 
         except Exception as e:
-            logger.error(
-                "Imbalance adjustment calculation failed",
-                error=str(e))
+            logger.error("Imbalance adjustment calculation failed", error=str(e))
             return Decimal("0")
 
     @time_execution
     async def _calculate_competitor_adjustment(
-            self, base_spread: Decimal, competitor_spreads: Optional[List[float]]) -> Decimal:
+        self, base_spread: Decimal, competitor_spreads: list[float] | None
+    ) -> Decimal:
         """
         Calculate spread adjustment based on competitor spreads.
 
@@ -290,8 +281,8 @@ class SpreadOptimizer:
 
             # Calculate average competitor spread
             valid_spreads = [
-                s for s in competitor_spreads if 0 < s < float(
-                    self.max_competitor_spread)]
+                s for s in competitor_spreads if 0 < s < float(self.max_competitor_spread)
+            ]
 
             if not valid_spreads:
                 return Decimal("0")
@@ -307,7 +298,7 @@ class SpreadOptimizer:
 
             # Clamp adjustment
             adjustment = max(adjustment, -0.002)  # Max 0.2% reduction
-            adjustment = min(adjustment, 0.002)   # Max 0.2% increase
+            adjustment = min(adjustment, 0.002)  # Max 0.2% increase
 
             self.competitor_adjustments += 1
 
@@ -316,20 +307,17 @@ class SpreadOptimizer:
                 avg_competitor_spread=avg_competitor_spread,
                 current_spread=current_spread,
                 adjustment=adjustment,
-                competitor_count=len(valid_spreads)
+                competitor_count=len(valid_spreads),
             )
 
             return Decimal(str(adjustment))
 
         except Exception as e:
-            logger.error(
-                "Competitor adjustment calculation failed",
-                error=str(e))
+            logger.error("Competitor adjustment calculation failed", error=str(e))
             return Decimal("0")
 
     @time_execution
-    async def _calculate_impact_adjustment(
-            self, base_spread: Decimal) -> Decimal:
+    async def _calculate_impact_adjustment(self, base_spread: Decimal) -> Decimal:
         """
         Calculate spread adjustment based on market impact.
 
@@ -356,7 +344,7 @@ class SpreadOptimizer:
                     "Impact adjustment calculated",
                     spread_volatility=spread_volatility,
                     adjustment=float(adjustment),
-                    threshold=self.impact_threshold
+                    threshold=self.impact_threshold,
                 )
 
                 return Decimal(str(adjustment))
@@ -392,7 +380,7 @@ class SpreadOptimizer:
 
             # Update volatility history
             if len(self.price_history) >= self.volatility_window:
-                prices = np.array(self.price_history[-self.volatility_window:])
+                prices = np.array(self.price_history[-self.volatility_window :])
                 returns = np.diff(prices) / prices[:-1]
                 volatility = np.std(returns) * np.sqrt(252)
                 self.volatility_history.append(volatility)
@@ -404,11 +392,12 @@ class SpreadOptimizer:
             logger.error("History update failed", error=str(e))
 
     @time_execution
-    async def calculate_optimal_spread(self,
-                                       market_data: MarketData,
-                                       order_book: Optional[OrderBook] = None,
-                                       competitor_spreads: Optional[List[float]] = None) -> Tuple[Decimal,
-                                                                                                  Decimal]:
+    async def calculate_optimal_spread(
+        self,
+        market_data: MarketData,
+        order_book: OrderBook | None = None,
+        competitor_spreads: list[float] | None = None,
+    ) -> tuple[Decimal, Decimal]:
         """
         Calculate optimal bid and ask spreads.
 
@@ -423,8 +412,7 @@ class SpreadOptimizer:
         try:
             # Calculate base spread from market data
             if market_data.bid and market_data.ask:
-                base_spread = (
-                    market_data.ask - market_data.bid) / market_data.bid
+                base_spread = (market_data.ask - market_data.bid) / market_data.bid
             else:
                 base_spread = Decimal("0.001")  # Default 0.1%
 
@@ -442,7 +430,7 @@ class SpreadOptimizer:
                 base_spread=float(base_spread),
                 optimized_spread=float(optimized_spread),
                 bid_spread=float(bid_spread),
-                ask_spread=float(ask_spread)
+                ask_spread=float(ask_spread),
             )
 
             return bid_spread, ask_spread
@@ -469,8 +457,9 @@ class SpreadOptimizer:
             if len(self.volatility_history) > 0:
                 recent_volatility = np.mean(self.volatility_history[-5:])
                 if recent_volatility > self.max_volatility * 0.8:
-                    logger.info("Spread widening due to high volatility",
-                                volatility=recent_volatility)
+                    logger.info(
+                        "Spread widening due to high volatility", volatility=recent_volatility
+                    )
                     return True
 
             # Check for wide recent spreads
@@ -478,8 +467,9 @@ class SpreadOptimizer:
                 recent_spreads = self.spread_history[-5:]
                 avg_recent_spread = np.mean(recent_spreads)
                 if avg_recent_spread > float(self.max_spread) * 0.8:
-                    logger.info("Spread widening due to wide recent spreads",
-                                avg_spread=avg_recent_spread)
+                    logger.info(
+                        "Spread widening due to wide recent spreads", avg_spread=avg_recent_spread
+                    )
                     return True
 
             # Check for rapid price movements
@@ -489,8 +479,9 @@ class SpreadOptimizer:
                 max_change = np.max(np.abs(price_changes))
 
                 if max_change > 0.01:  # 1% price change
-                    logger.info("Spread widening due to rapid price movements",
-                                max_change=max_change)
+                    logger.info(
+                        "Spread widening due to rapid price movements", max_change=max_change
+                    )
                     return True
 
             return False
@@ -499,7 +490,7 @@ class SpreadOptimizer:
             logger.error("Spread widening check failed", error=str(e))
             return False
 
-    def get_optimization_summary(self) -> Dict[str, Any]:
+    def get_optimization_summary(self) -> dict[str, Any]:
         """
         Get comprehensive optimization summary.
 
@@ -519,11 +510,9 @@ class SpreadOptimizer:
                 "max_spread": float(self.max_spread),
                 "price_history_length": len(self.price_history),
                 "spread_history_length": len(self.spread_history),
-                "volatility_history_length": len(self.volatility_history)
+                "volatility_history_length": len(self.volatility_history),
             }
 
         except Exception as e:
-            logger.error(
-                "Optimization summary generation failed",
-                error=str(e))
+            logger.error("Optimization summary generation failed", error=str(e))
             return {}

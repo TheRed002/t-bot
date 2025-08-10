@@ -5,11 +5,10 @@ This module configures Alembic for database migrations with proper
 environment handling and model discovery.
 """
 
-import asyncio
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
-from sqlalchemy.engine import Connection
+
 from alembic import context
+from sqlalchemy import engine_from_config, pool
 
 # Import core components from P-001
 from src.core.config import Config
@@ -60,8 +59,8 @@ def get_url() -> str:
         logger.error("Failed to get database URL", error=str(e))
         # Fallback to environment variable
         return os.getenv(
-            "DATABASE_URL",
-            "postgresql://postgres:password@localhost:5432/trading_bot")
+            "DATABASE_URL", "postgresql://postgres:password@localhost:5432/trading_bot"
+        )
 
 
 def run_migrations_offline() -> None:
@@ -103,10 +102,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

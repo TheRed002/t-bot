@@ -9,44 +9,48 @@ and P-003 (base exchange interface) components.
 """
 
 import asyncio
-import json
-import time
-import hmac
-import hashlib
-from typing import Dict, List, Optional, Callable, Any
-from decimal import Decimal
+from collections.abc import Callable
 from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+# Binance-specific imports
+from binance import AsyncClient, BinanceSocketManager
+from binance.exceptions import BinanceAPIException, BinanceOrderException
+
+from src.core.config import Config
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+    ExchangeInsufficientFundsError,
+    ExecutionError,
+    ValidationError,
+)
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import (
-    OrderRequest, OrderResponse, MarketData, Position,
-    Signal, TradingMode, OrderSide, OrderType,
-    ExchangeInfo, Ticker, OrderBook, Trade, OrderStatus
+    ExchangeInfo,
+    MarketData,
+    OrderBook,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Ticker,
+    Trade,
 )
-from src.core.exceptions import (
-    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError,
-    ExchangeInsufficientFundsError, ValidationError, ExecutionError
-)
-from src.core.config import Config
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
-
 # MANDATORY: Import from P-003
 from src.exchanges.base import BaseExchange
-from src.exchanges.rate_limiter import RateLimiter
 from src.exchanges.connection_manager import ConnectionManager
+from src.exchanges.rate_limiter import RateLimiter
 
 # MANDATORY: Import from P-007A (utils)
-from src.utils.constants import API_ENDPOINTS, RATE_LIMITS, TIMEOUTS
+from src.utils.constants import API_ENDPOINTS
 from src.utils.decorators import time_execution
-
-# Binance-specific imports
-import aiohttp
-import websockets
-from binance import AsyncClient, BinanceSocketManager
-from binance.exceptions import BinanceAPIException, BinanceOrderException
 
 logger = get_logger(__name__)
 
@@ -89,8 +93,8 @@ class BinanceExchange(BaseExchange):
             self.ws_url = binance_config["ws_url"]
 
         # Initialize Binance client
-        self.client: Optional[AsyncClient] = None
-        self.ws_manager: Optional[BinanceSocketManager] = None
+        self.client: AsyncClient | None = None
+        self.ws_manager: BinanceSocketManager | None = None
 
         # Initialize rate limiter for Binance-specific limits
         self.rate_limiter = RateLimiter(config, "binance")
@@ -99,11 +103,11 @@ class BinanceExchange(BaseExchange):
         self.connection_manager = ConnectionManager(config, exchange_name)
 
         # WebSocket streams
-        self.active_streams: Dict[str, Any] = {}
-        self.callbacks: Dict[str, List[Callable]] = {}
+        self.active_streams: dict[str, Any] = {}
+        self.callbacks: dict[str, list[Callable]] = {}
 
         # Order tracking
-        self.pending_orders: Dict[str, Dict] = {}
+        self.pending_orders: dict[str, dict] = {}
 
         logger.info(f"Initialized Binance exchange (testnet: {self.testnet})")
 
@@ -119,9 +123,7 @@ class BinanceExchange(BaseExchange):
 
             # Initialize Binance client
             self.client = await AsyncClient.create(
-                api_key=self.api_key,
-                api_secret=self.api_secret,
-                testnet=self.testnet
+                api_key=self.api_key, api_secret=self.api_secret, testnet=self.testnet
             )
 
             # Initialize WebSocket manager
@@ -142,7 +144,7 @@ class BinanceExchange(BaseExchange):
             return True
 
         except Exception as e:
-            logger.error(f"Failed to connect to Binance: {str(e)}")
+            logger.error(f"Failed to connect to Binance: {e!s}")
             self.status = "error"
             self.connected = False
             return False
@@ -166,9 +168,9 @@ class BinanceExchange(BaseExchange):
             logger.info("Successfully disconnected from Binance exchange")
 
         except Exception as e:
-            logger.error(f"Error disconnecting from Binance: {str(e)}")
+            logger.error(f"Error disconnecting from Binance: {e!s}")
 
-    async def get_account_balance(self) -> Dict[str, Decimal]:
+    async def get_account_balance(self) -> dict[str, Decimal]:
         """
         Get all asset balances from Binance.
 
@@ -183,27 +185,25 @@ class BinanceExchange(BaseExchange):
             account_info = await self.client.get_account()
 
             balances = {}
-            for balance in account_info['balances']:
-                asset = balance['asset']
-                free = Decimal(balance['free'])
-                locked = Decimal(balance['locked'])
+            for balance in account_info["balances"]:
+                asset = balance["asset"]
+                free = Decimal(balance["free"])
+                locked = Decimal(balance["locked"])
                 total = free + locked
 
                 # Only include assets with non-zero balance
                 if total > 0:
                     balances[asset] = total
 
-            logger.debug(
-                f"Retrieved {
-                    len(balances)} asset balances from Binance")
+            logger.debug(f"Retrieved {len(balances)} asset balances from Binance")
             return balances
 
         except BinanceAPIException as e:
             logger.error(f"Binance API error getting balance: {e}")
             raise ExchangeError(f"Failed to get balance: {e}")
         except Exception as e:
-            logger.error(f"Error getting balance from Binance: {str(e)}")
-            raise ExchangeError(f"Failed to get balance: {str(e)}")
+            logger.error(f"Error getting balance from Binance: {e!s}")
+            raise ExchangeError(f"Failed to get balance: {e!s}")
 
     @time_execution
     async def place_order(self, order: OrderRequest) -> OrderResponse:
@@ -236,7 +236,7 @@ class BinanceExchange(BaseExchange):
                     symbol=order.symbol,
                     side=order.side.value.upper(),
                     quantity=str(order.quantity),
-                    newClientOrderId=order.client_order_id
+                    newClientOrderId=order.client_order_id,
                 )
             elif order.order_type == OrderType.LIMIT:
                 result = await self.client.order_limit(
@@ -245,12 +245,10 @@ class BinanceExchange(BaseExchange):
                     quantity=str(order.quantity),
                     price=str(order.price),
                     timeInForce=order.time_in_force,
-                    newClientOrderId=order.client_order_id
+                    newClientOrderId=order.client_order_id,
                 )
             else:
-                raise ValidationError(
-                    f"Unsupported order type: {
-                        order.order_type}")
+                raise ValidationError(f"Unsupported order type: {order.order_type}")
 
             # Convert response to OrderResponse
             response = self._convert_binance_order_to_response(result)
@@ -264,15 +262,14 @@ class BinanceExchange(BaseExchange):
         except BinanceOrderException as e:
             logger.error(f"Binance order error: {e}")
             if "insufficient balance" in str(e).lower():
-                raise ExchangeInsufficientFundsError(
-                    f"Insufficient balance: {e}")
+                raise ExchangeInsufficientFundsError(f"Insufficient balance: {e}")
             raise OrderRejectionError(f"Order rejected: {e}")
         except BinanceAPIException as e:
             logger.error(f"Binance API error placing order: {e}")
             raise ExchangeError(f"Failed to place order: {e}")
         except Exception as e:
-            logger.error(f"Error placing order on Binance: {str(e)}")
-            raise ExecutionError(f"Failed to place order: {str(e)}")
+            logger.error(f"Error placing order on Binance: {e!s}")
+            raise ExecutionError(f"Failed to place order: {e!s}")
 
     @time_execution
     async def cancel_order(self, order_id: str) -> bool:
@@ -302,7 +299,7 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Binance API error cancelling order: {e}")
             return False
         except Exception as e:
-            logger.error(f"Error cancelling order on Binance: {str(e)}")
+            logger.error(f"Error cancelling order on Binance: {e!s}")
             return False
 
     @time_execution
@@ -327,8 +324,7 @@ class BinanceExchange(BaseExchange):
             result = await self.client.get_order(symbol="", orderId=order_id)
 
             # Convert to OrderStatus
-            status = self._convert_binance_status_to_order_status(
-                result['status'])
+            status = self._convert_binance_status_to_order_status(result["status"])
 
             return status
 
@@ -336,14 +332,11 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Binance API error getting order status: {e}")
             raise ExchangeError(f"Failed to get order status: {e}")
         except Exception as e:
-            logger.error(f"Error getting order status from Binance: {str(e)}")
-            raise ExchangeError(f"Failed to get order status: {str(e)}")
+            logger.error(f"Error getting order status from Binance: {e!s}")
+            raise ExchangeError(f"Failed to get order status: {e!s}")
 
     @time_execution
-    async def get_market_data(
-            self,
-            symbol: str,
-            timeframe: str = "1m") -> MarketData:
+    async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """
         Get market data from Binance.
 
@@ -362,11 +355,7 @@ class BinanceExchange(BaseExchange):
             await self.rate_limiter.acquire("requests_per_minute", 1)
 
             # Get klines (OHLCV data)
-            klines = await self.client.get_klines(
-                symbol=symbol,
-                interval=timeframe,
-                limit=1
-            )
+            klines = await self.client.get_klines(symbol=symbol, interval=timeframe, limit=1)
 
             if not klines:
                 raise ExchangeError(f"No market data available for {symbol}")
@@ -377,11 +366,10 @@ class BinanceExchange(BaseExchange):
                 symbol=symbol,
                 price=Decimal(str(kline[4])),  # Close price
                 volume=Decimal(str(kline[5])),  # Volume
-                timestamp=datetime.fromtimestamp(
-                    kline[6] / 1000, tz=timezone.utc),
+                timestamp=datetime.fromtimestamp(kline[6] / 1000, tz=timezone.utc),
                 open_price=Decimal(str(kline[1])),
                 high_price=Decimal(str(kline[2])),
-                low_price=Decimal(str(kline[3]))
+                low_price=Decimal(str(kline[3])),
             )
 
             return market_data
@@ -390,13 +378,10 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Binance API error getting market data: {e}")
             raise ExchangeError(f"Failed to get market data: {e}")
         except Exception as e:
-            logger.error(f"Error getting market data from Binance: {str(e)}")
-            raise ExchangeError(f"Failed to get market data: {str(e)}")
+            logger.error(f"Error getting market data from Binance: {e!s}")
+            raise ExchangeError(f"Failed to get market data: {e!s}")
 
-    async def subscribe_to_stream(
-            self,
-            symbol: str,
-            callback: Callable) -> None:
+    async def subscribe_to_stream(self, symbol: str, callback: Callable) -> None:
         """
         Subscribe to real-time data stream for a symbol.
 
@@ -426,8 +411,8 @@ class BinanceExchange(BaseExchange):
                 logger.info(f"Subscribed to stream: {stream_name}")
 
         except Exception as e:
-            logger.error(f"Error subscribing to stream: {str(e)}")
-            raise ExchangeError(f"Failed to subscribe to stream: {str(e)}")
+            logger.error(f"Error subscribing to stream: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to stream: {e!s}")
 
     @time_execution
     async def get_order_book(self, symbol: str, depth: int = 10) -> OrderBook:
@@ -452,18 +437,15 @@ class BinanceExchange(BaseExchange):
             result = await self.client.get_order_book(symbol=symbol, limit=depth)
 
             # Convert to OrderBook
-            bids = [[Decimal(str(price)), Decimal(str(qty))]
-                    for price, qty in result['bids']]
-            asks = [[Decimal(str(price)), Decimal(str(qty))]
-                    for price, qty in result['asks']]
+            bids = [[Decimal(str(price)), Decimal(str(qty))] for price, qty in result["bids"]]
+            asks = [[Decimal(str(price)), Decimal(str(qty))] for price, qty in result["asks"]]
 
             order_book = OrderBook(
                 symbol=symbol,
                 bids=bids,
                 asks=asks,
-                timestamp=datetime.fromtimestamp(
-                    result['lastUpdateId'],
-                    tz=timezone.utc))
+                timestamp=datetime.fromtimestamp(result["lastUpdateId"], tz=timezone.utc),
+            )
 
             return order_book
 
@@ -471,14 +453,11 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Binance API error getting order book: {e}")
             raise ExchangeError(f"Failed to get order book: {e}")
         except Exception as e:
-            logger.error(f"Error getting order book from Binance: {str(e)}")
-            raise ExchangeError(f"Failed to get order book: {str(e)}")
+            logger.error(f"Error getting order book from Binance: {e!s}")
+            raise ExchangeError(f"Failed to get order book: {e!s}")
 
     @time_execution
-    async def get_trade_history(
-            self,
-            symbol: str,
-            limit: int = 100) -> List[Trade]:
+    async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]:
         """
         Get trade history from Binance.
 
@@ -503,14 +482,13 @@ class BinanceExchange(BaseExchange):
             trades = []
             for trade_data in result:
                 trade = Trade(
-                    id=str(trade_data['id']),
+                    id=str(trade_data["id"]),
                     symbol=symbol,
-                    side=OrderSide.BUY if trade_data['isBuyerMaker'] else OrderSide.SELL,
-                    quantity=Decimal(str(trade_data['qty'])),
-                    price=Decimal(str(trade_data['price'])),
-                    timestamp=datetime.fromtimestamp(
-                        trade_data['time'] / 1000, tz=timezone.utc),
-                    fee=Decimal("0")  # Fee not available in recent trades
+                    side=OrderSide.BUY if trade_data["isBuyerMaker"] else OrderSide.SELL,
+                    quantity=Decimal(str(trade_data["qty"])),
+                    price=Decimal(str(trade_data["price"])),
+                    timestamp=datetime.fromtimestamp(trade_data["time"] / 1000, tz=timezone.utc),
+                    fee=Decimal("0"),  # Fee not available in recent trades
                 )
                 trades.append(trade)
 
@@ -520,8 +498,8 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Binance API error getting trade history: {e}")
             raise ExchangeError(f"Failed to get trade history: {e}")
         except Exception as e:
-            logger.error(f"Error getting trade history from Binance: {str(e)}")
-            raise ExchangeError(f"Failed to get trade history: {str(e)}")
+            logger.error(f"Error getting trade history from Binance: {e!s}")
+            raise ExchangeError(f"Failed to get trade history: {e!s}")
 
     @time_execution
     async def get_exchange_info(self) -> ExchangeInfo:
@@ -544,17 +522,15 @@ class BinanceExchange(BaseExchange):
             # Convert to ExchangeInfo
             exchange_info = ExchangeInfo(
                 name="binance",
-                supported_symbols=[
-                    symbol['symbol'] for symbol in result['symbols']],
+                supported_symbols=[symbol["symbol"] for symbol in result["symbols"]],
                 rate_limits={
                     "requests_per_minute": 1200,
                     "orders_per_second": 10,
-                    "orders_per_24_hours": 160000},
-                features=[
-                    "spot_trading",
-                    "margin_trading",
-                    "futures_trading"],
-                api_version="v3")
+                    "orders_per_24_hours": 160000,
+                },
+                features=["spot_trading", "margin_trading", "futures_trading"],
+                api_version="v3",
+            )
 
             return exchange_info
 
@@ -562,8 +538,8 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Binance API error getting exchange info: {e}")
             raise ExchangeError(f"Failed to get exchange info: {e}")
         except Exception as e:
-            logger.error(f"Error getting exchange info from Binance: {str(e)}")
-            raise ExchangeError(f"Failed to get exchange info: {str(e)}")
+            logger.error(f"Error getting exchange info from Binance: {e!s}")
+            raise ExchangeError(f"Failed to get exchange info: {e!s}")
 
     @time_execution
     async def get_ticker(self, symbol: str) -> Ticker:
@@ -589,12 +565,12 @@ class BinanceExchange(BaseExchange):
             # Convert to Ticker
             ticker = Ticker(
                 symbol=symbol,
-                bid=Decimal(str(result['bidPrice'])),
-                ask=Decimal(str(result['askPrice'])),
-                last_price=Decimal(str(result['lastPrice'])),
-                volume_24h=Decimal(str(result['volume'])),
-                price_change_24h=Decimal(str(result['priceChange'])),
-                timestamp=datetime.fromtimestamp(result['closeTime'] / 1000, tz=timezone.utc)
+                bid=Decimal(str(result["bidPrice"])),
+                ask=Decimal(str(result["askPrice"])),
+                last_price=Decimal(str(result["lastPrice"])),
+                volume_24h=Decimal(str(result["volume"])),
+                price_change_24h=Decimal(str(result["priceChange"])),
+                timestamp=datetime.fromtimestamp(result["closeTime"] / 1000, tz=timezone.utc),
             )
 
             return ticker
@@ -603,55 +579,53 @@ class BinanceExchange(BaseExchange):
             logger.error(f"Binance API error getting ticker: {e}")
             raise ExchangeError(f"Failed to get ticker: {e}")
         except Exception as e:
-            logger.error(f"Error getting ticker from Binance: {str(e)}")
-            raise ExchangeError(f"Failed to get ticker: {str(e)}")
+            logger.error(f"Error getting ticker from Binance: {e!s}")
+            raise ExchangeError(f"Failed to get ticker: {e!s}")
 
     # Helper methods for internal use
 
-    def _convert_order_to_binance(self, order: OrderRequest) -> Dict[str, Any]:
+    def _convert_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert OrderRequest to Binance order format."""
         binance_order = {
-            'symbol': order.symbol,
-            'side': order.side.value.upper(),
-            'type': order.order_type.value.upper(),
-            'quantity': str(order.quantity),
-            'newClientOrderId': order.client_order_id
+            "symbol": order.symbol,
+            "side": order.side.value.upper(),
+            "type": order.order_type.value.upper(),
+            "quantity": str(order.quantity),
+            "newClientOrderId": order.client_order_id,
         }
 
         if order.price:
-            binance_order['price'] = str(order.price)
+            binance_order["price"] = str(order.price)
 
         if order.time_in_force:
-            binance_order['timeInForce'] = order.time_in_force
+            binance_order["timeInForce"] = order.time_in_force
 
         return binance_order
 
-    def _convert_binance_order_to_response(
-            self, result: Dict) -> OrderResponse:
+    def _convert_binance_order_to_response(self, result: dict) -> OrderResponse:
         """Convert Binance order result to OrderResponse."""
         return OrderResponse(
-            id=str(result['orderId']),
-            client_order_id=result.get('clientOrderId'),
-            symbol=result['symbol'],
-            side=OrderSide.BUY if result['side'] == 'BUY' else OrderSide.SELL,
-            order_type=OrderType.MARKET if result['type'] == 'MARKET' else OrderType.LIMIT,
-            quantity=Decimal(str(result['origQty'])),
-            price=Decimal(str(result['price'])) if result.get('price') else None,
-            filled_quantity=Decimal(str(result['executedQty'])),
-            status=result['status'],
-            timestamp=datetime.fromtimestamp(result['time'] / 1000, tz=timezone.utc)
+            id=str(result["orderId"]),
+            client_order_id=result.get("clientOrderId"),
+            symbol=result["symbol"],
+            side=OrderSide.BUY if result["side"] == "BUY" else OrderSide.SELL,
+            order_type=OrderType.MARKET if result["type"] == "MARKET" else OrderType.LIMIT,
+            quantity=Decimal(str(result["origQty"])),
+            price=Decimal(str(result["price"])) if result.get("price") else None,
+            filled_quantity=Decimal(str(result["executedQty"])),
+            status=result["status"],
+            timestamp=datetime.fromtimestamp(result["time"] / 1000, tz=timezone.utc),
         )
 
-    def _convert_binance_status_to_order_status(
-            self, status: str) -> OrderStatus:
+    def _convert_binance_status_to_order_status(self, status: str) -> OrderStatus:
         """Convert Binance order status to OrderStatus enum."""
         status_mapping = {
-            'NEW': OrderStatus.PENDING,
-            'PARTIALLY_FILLED': OrderStatus.PARTIALLY_FILLED,
-            'FILLED': OrderStatus.FILLED,
-            'CANCELED': OrderStatus.CANCELLED,
-            'REJECTED': OrderStatus.REJECTED,
-            'EXPIRED': OrderStatus.EXPIRED
+            "NEW": OrderStatus.PENDING,
+            "PARTIALLY_FILLED": OrderStatus.PARTIALLY_FILLED,
+            "FILLED": OrderStatus.FILLED,
+            "CANCELED": OrderStatus.CANCELLED,
+            "REJECTED": OrderStatus.REJECTED,
+            "EXPIRED": OrderStatus.EXPIRED,
         }
         return status_mapping.get(status, OrderStatus.UNKNOWN)
 
@@ -660,16 +634,15 @@ class BinanceExchange(BaseExchange):
         try:
             # Start user data stream for account updates
             user_data_stream = self.ws_manager.user_socket()
-            self.active_streams['user_data'] = user_data_stream
+            self.active_streams["user_data"] = user_data_stream
 
             # Start async handler for user data stream
-            asyncio.create_task(
-                self._handle_user_data_stream(user_data_stream))
+            asyncio.create_task(self._handle_user_data_stream(user_data_stream))
 
             logger.info("WebSocket streams initialized")
 
         except Exception as e:
-            logger.error(f"Error initializing WebSocket: {str(e)}")
+            logger.error(f"Error initializing WebSocket: {e!s}")
 
     async def _handle_stream(self, stream_name: str, stream) -> None:
         """Handle WebSocket stream data."""
@@ -681,11 +654,9 @@ class BinanceExchange(BaseExchange):
                             try:
                                 await callback(msg)
                             except Exception as e:
-                                logger.error(
-                                    f"Error in stream callback: {
-                                        str(e)}")
+                                logger.error(f"Error in stream callback: {e!s}")
         except Exception as e:
-            logger.error(f"Error handling stream {stream_name}: {str(e)}")
+            logger.error(f"Error handling stream {stream_name}: {e!s}")
 
     async def _handle_user_data_stream(self, stream) -> None:
         """Handle user data stream for account updates."""
@@ -693,14 +664,14 @@ class BinanceExchange(BaseExchange):
             async with stream as stream_handler:
                 async for msg in stream_handler:
                     # Handle different types of user data updates
-                    if msg['e'] == 'outboundAccountPosition':
+                    if msg["e"] == "outboundAccountPosition":
                         # Account balance update
                         logger.debug("Account balance updated")
-                    elif msg['e'] == 'executionReport':
+                    elif msg["e"] == "executionReport":
                         # Order execution update
                         logger.debug(f"Order execution: {msg}")
         except Exception as e:
-            logger.error(f"Error handling user data stream: {str(e)}")
+            logger.error(f"Error handling user data stream: {e!s}")
 
     async def _close_stream(self, stream_name: str) -> None:
         """Close a WebSocket stream."""
@@ -715,7 +686,7 @@ class BinanceExchange(BaseExchange):
 
                 logger.info(f"Closed stream: {stream_name}")
         except Exception as e:
-            logger.error(f"Error closing stream {stream_name}: {str(e)}")
+            logger.error(f"Error closing stream {stream_name}: {e!s}")
 
     async def health_check(self) -> bool:
         """
@@ -737,14 +708,14 @@ class BinanceExchange(BaseExchange):
             return True
 
         except Exception as e:
-            logger.error(f"Health check failed: {str(e)}")
+            logger.error(f"Health check failed: {e!s}")
             return False
 
-    def get_rate_limits(self) -> Dict[str, int]:
+    def get_rate_limits(self) -> dict[str, int]:
         """Get current rate limits for Binance."""
         return {
             "requests_per_minute": 1200,
             "orders_per_second": 10,
             "orders_per_24_hours": 160000,
-            "weight_per_minute": 1200
+            "weight_per_minute": 1200,
         }

@@ -4,14 +4,21 @@ Unit tests for core type definitions.
 These tests verify the core data structures used throughout the system.
 """
 
-import pytest
-from decimal import Decimal
 from datetime import datetime, timezone
-from typing import Dict, Any
+from decimal import Decimal
+
+import pytest
 
 from src.core.types import (
-    TradingMode, SignalDirection, OrderSide, OrderType,
-    Signal, MarketData, OrderRequest, OrderResponse, Position
+    MarketData,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderType,
+    Position,
+    Signal,
+    SignalDirection,
+    TradingMode,
 )
 
 
@@ -86,7 +93,7 @@ class TestSignal:
             timestamp=datetime.now(timezone.utc),
             symbol="BTC/USDT",
             strategy_name="test_strategy",
-            metadata={"test": "data"}
+            metadata={"test": "data"},
         )
 
         assert signal.direction == SignalDirection.BUY
@@ -103,7 +110,7 @@ class TestSignal:
             confidence=0.5,
             timestamp=datetime.now(timezone.utc),
             symbol="BTC/USDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
         assert signal.confidence == 0.5
 
@@ -114,7 +121,7 @@ class TestSignal:
                 confidence=1.5,  # Invalid: > 1.0
                 timestamp=datetime.now(timezone.utc),
                 symbol="BTC/USDT",
-                strategy_name="test_strategy"
+                strategy_name="test_strategy",
             )
 
     def test_signal_confidence_boundaries(self):
@@ -125,7 +132,7 @@ class TestSignal:
             confidence=0.0,
             timestamp=datetime.now(timezone.utc),
             symbol="BTC/USDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
         assert signal_min.confidence == 0.0
 
@@ -135,7 +142,7 @@ class TestSignal:
             confidence=1.0,
             timestamp=datetime.now(timezone.utc),
             symbol="BTC/USDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
         assert signal_max.confidence == 1.0
 
@@ -154,7 +161,7 @@ class TestMarketData:
             ask=Decimal("50001.00"),
             open_price=Decimal("49900.00"),
             high_price=Decimal("50100.00"),
-            low_price=Decimal("49800.00")
+            low_price=Decimal("49800.00"),
         )
 
         assert market_data.symbol == "BTC/USDT"
@@ -169,7 +176,7 @@ class TestMarketData:
             symbol="BTC/USDT",
             price=Decimal("50000.00"),
             volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         assert market_data.symbol == "BTC/USDT"
@@ -190,7 +197,7 @@ class TestOrderRequest:
             quantity=Decimal("1.0"),
             price=Decimal("50000.00"),
             time_in_force="GTC",
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
         assert order_request.symbol == "BTC/USDT"
@@ -206,7 +213,7 @@ class TestOrderRequest:
             symbol="BTC/USDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         assert order_request.symbol == "BTC/USDT"
@@ -230,7 +237,7 @@ class TestOrderResponse:
             price=Decimal("50000.00"),
             filled_quantity=Decimal("0.5"),
             status="partially_filled",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         assert order_response.id == "test_order_id"
@@ -253,7 +260,7 @@ class TestPosition:
             current_price=Decimal("51000.00"),
             unrealized_pnl=Decimal("2000.00"),
             side=OrderSide.BUY,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         assert position.symbol == "BTC/USDT"
@@ -272,7 +279,7 @@ class TestPosition:
             current_price=Decimal("49000.00"),
             unrealized_pnl=Decimal("1000.00"),
             side=OrderSide.SELL,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(timezone.utc),
         )
 
         assert position.side == OrderSide.SELL

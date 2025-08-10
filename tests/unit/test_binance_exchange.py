@@ -11,28 +11,29 @@ This module tests the Binance exchange implementation including:
 CRITICAL: These tests ensure the Binance implementation meets P-004 requirements.
 """
 
-import pytest
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 from decimal import Decimal
-from datetime import datetime, timezone
-from typing import Dict, Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from src.core.exceptions import (
+    ExchangeError,
+    ExecutionError,
+)
 
 # Import core types and exceptions
 from src.core.types import (
-    OrderRequest, OrderResponse, MarketData, Position,
-    OrderSide, OrderType, OrderStatus, Ticker, OrderBook, Trade
+    OrderRequest,
+    OrderSide,
+    OrderStatus,
+    OrderType,
 )
-from src.core.exceptions import (
-    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError,
-    ExchangeInsufficientFundsError, ValidationError, ExecutionError
-)
-# Don't import Config to avoid Pydantic field inspection issues
 
+# Don't import Config to avoid Pydantic field inspection issues
 # Import Binance implementation
 from src.exchanges.binance import BinanceExchange
-from src.exchanges.binance_websocket import BinanceWebSocketHandler
 from src.exchanges.binance_orders import BinanceOrderManager
+from src.exchanges.binance_websocket import BinanceWebSocketHandler
 
 
 @pytest.fixture
@@ -52,7 +53,7 @@ def mock_config():
         "binance": {
             "requests_per_minute": 1200,
             "orders_per_second": 10,
-            "websocket_connections": 5
+            "websocket_connections": 5,
         }
     }
 
@@ -86,31 +87,33 @@ def mock_binance_client():
         "balances": [
             {"asset": "BTC", "free": "1.0", "locked": "0.0"},
             {"asset": "USDT", "free": "10000.0", "locked": "0.0"},
-            {"asset": "ETH", "free": "0.0", "locked": "0.0"}
+            {"asset": "ETH", "free": "0.0", "locked": "0.0"},
         ]
     }
 
     # Mock market data
-    client.get_klines.return_value = [[
-        1640995200000,  # Open time
-        "50000.0",      # Open
-        "51000.0",      # High
-        "49000.0",      # Low
-        "50500.0",      # Close
-        "100.0",        # Volume
-        1640995260000,  # Close time
-        "5000000.0",    # Quote asset volume
-        100,            # Number of trades
-        "50.0",         # Taker buy base asset volume
-        "50.0",         # Taker buy quote asset volume
-        "0"             # Ignore
-    ]]
+    client.get_klines.return_value = [
+        [
+            1640995200000,  # Open time
+            "50000.0",  # Open
+            "51000.0",  # High
+            "49000.0",  # Low
+            "50500.0",  # Close
+            "100.0",  # Volume
+            1640995260000,  # Close time
+            "5000000.0",  # Quote asset volume
+            100,  # Number of trades
+            "50.0",  # Taker buy base asset volume
+            "50.0",  # Taker buy quote asset volume
+            "0",  # Ignore
+        ]
+    ]
 
     # Mock order book
     client.get_order_book.return_value = {
         "lastUpdateId": 123456789,
         "bids": [["50000.0", "1.0"], ["49999.0", "2.0"]],
-        "asks": [["50001.0", "1.0"], ["50002.0", "2.0"]]
+        "asks": [["50001.0", "1.0"], ["50002.0", "2.0"]],
     }
 
     # Mock ticker
@@ -121,18 +124,20 @@ def mock_binance_client():
         "lastPrice": "50000.5",
         "volume": "1000.0",
         "priceChange": "100.0",
-        "closeTime": 1640995200000
+        "closeTime": 1640995200000,
     }
 
     # Mock trade history
-    client.get_recent_trades.return_value = [{
-        "id": 12345,
-        "symbol": "BTCUSDT",
-        "price": "50000.0",
-        "qty": "1.0",
-        "time": 1640995200000,
-        "isBuyerMaker": False
-    }]
+    client.get_recent_trades.return_value = [
+        {
+            "id": 12345,
+            "symbol": "BTCUSDT",
+            "price": "50000.0",
+            "qty": "1.0",
+            "time": 1640995200000,
+            "isBuyerMaker": False,
+        }
+    ]
 
     # Mock exchange info
     client.get_exchange_info.return_value = {
@@ -145,16 +150,16 @@ def mock_binance_client():
                 "status": "TRADING",
                 "baseAsset": "BTC",
                 "quoteAsset": "USDT",
-                "permissions": ["SPOT"]
+                "permissions": ["SPOT"],
             },
             {
                 "symbol": "ETHUSDT",
                 "status": "TRADING",
                 "baseAsset": "ETH",
                 "quoteAsset": "USDT",
-                "permissions": ["SPOT"]
-            }
-        ]
+                "permissions": ["SPOT"],
+            },
+        ],
     }
 
     return client
@@ -188,7 +193,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_connection_success(self, mock_config, mock_binance_client):
         """Test successful connection."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
 
             # Test connection
@@ -201,7 +206,9 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_connection_failure(self, mock_config):
         """Test connection failure."""
-        with patch('src.exchanges.binance.AsyncClient.create', side_effect=Exception("Connection failed")):
+        with patch(
+            "src.exchanges.binance.AsyncClient.create", side_effect=Exception("Connection failed")
+        ):
             exchange = BinanceExchange(mock_config, "binance")
 
             # Test connection
@@ -213,7 +220,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_disconnection(self, mock_config, mock_binance_client):
         """Test disconnection."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -229,7 +236,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_get_account_balance(self, mock_config, mock_binance_client):
         """Test getting account balance."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -245,7 +252,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_get_market_data(self, mock_config, mock_binance_client):
         """Test getting market data."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -266,7 +273,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_get_order_book(self, mock_config, mock_binance_client):
         """Test getting order book."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -286,7 +293,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_get_ticker(self, mock_config, mock_binance_client):
         """Test getting ticker information."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -306,7 +313,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_get_trade_history(self, mock_config, mock_binance_client):
         """Test getting trade history."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -324,7 +331,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_get_exchange_info(self, mock_config, mock_binance_client):
         """Test getting exchange information."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -341,10 +348,9 @@ class TestBinanceExchange:
             assert "spot_trading" in exchange_info.features
 
     @pytest.mark.asyncio
-    async def test_health_check_success(
-            self, mock_config, mock_binance_client):
+    async def test_health_check_success(self, mock_config, mock_binance_client):
         """Test successful health check."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -355,13 +361,11 @@ class TestBinanceExchange:
             assert result is True
 
     @pytest.mark.asyncio
-    async def test_health_check_failure(
-            self, mock_config, mock_binance_client):
+    async def test_health_check_failure(self, mock_config, mock_binance_client):
         """Test health check failure."""
-        mock_binance_client.get_server_time.side_effect = Exception(
-            "Connection failed")
+        mock_binance_client.get_server_time.side_effect = Exception("Connection failed")
 
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -388,7 +392,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_connection_error_handling(self, mock_config):
         """Test connection error handling."""
-        with patch('src.exchanges.binance.AsyncClient.create', side_effect=Exception("API Error")):
+        with patch("src.exchanges.binance.AsyncClient.create", side_effect=Exception("API Error")):
             exchange = BinanceExchange(mock_config, "binance")
 
             # The connect method catches exceptions and returns False
@@ -424,17 +428,16 @@ class TestBinanceExchange:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         with pytest.raises(ExecutionError):  # Changed from ExchangeConnectionError
             await exchange.place_order(order)
 
     @pytest.mark.asyncio
-    async def test_place_order_validation_failure(
-            self, mock_config, mock_binance_client):
+    async def test_place_order_validation_failure(self, mock_config, mock_binance_client):
         """Test order placement with validation failure."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -446,17 +449,16 @@ class TestBinanceExchange:
                 symbol="BTCUSDT",
                 side=OrderSide.BUY,
                 order_type=OrderType.MARKET,
-                quantity=Decimal("1.0")
+                quantity=Decimal("1.0"),
             )
 
             with pytest.raises(ExecutionError):
                 await exchange.place_order(order)
 
     @pytest.mark.asyncio
-    async def test_place_order_unsupported_type(
-            self, mock_config, mock_binance_client):
+    async def test_place_order_unsupported_type(self, mock_config, mock_binance_client):
         """Test placing unsupported order type."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -468,17 +470,16 @@ class TestBinanceExchange:
                 symbol="BTCUSDT",
                 side=OrderSide.BUY,
                 order_type=OrderType.TAKE_PROFIT,  # Unsupported
-                quantity=Decimal("1.0")
+                quantity=Decimal("1.0"),
             )
 
             with pytest.raises(ExecutionError):
                 await exchange.place_order(order)
 
     @pytest.mark.asyncio
-    async def test_cancel_order_success(
-            self, mock_config, mock_binance_client):
+    async def test_cancel_order_success(self, mock_config, mock_binance_client):
         """Test successful order cancellation."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -491,13 +492,11 @@ class TestBinanceExchange:
             assert result is True
 
     @pytest.mark.asyncio
-    async def test_cancel_order_failure(
-            self, mock_config, mock_binance_client):
+    async def test_cancel_order_failure(self, mock_config, mock_binance_client):
         """Test order cancellation failure."""
-        mock_binance_client.cancel_order.side_effect = Exception(
-            "Cancel failed")
+        mock_binance_client.cancel_order.side_effect = Exception("Cancel failed")
 
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -515,10 +514,10 @@ class TestBinanceExchange:
         mock_binance_client.get_order.return_value = {
             "orderId": "12345",
             "symbol": "BTCUSDT",
-            "status": "FILLED"
+            "status": "FILLED",
         }
 
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -533,7 +532,7 @@ class TestBinanceExchange:
     @pytest.mark.asyncio
     async def test_subscribe_to_stream(self, mock_config, mock_binance_client):
         """Test subscribing to stream."""
-        with patch('src.exchanges.binance.AsyncClient.create', return_value=mock_binance_client):
+        with patch("src.exchanges.binance.AsyncClient.create", return_value=mock_binance_client):
             exchange = BinanceExchange(mock_config, "binance")
             exchange.client = mock_binance_client
             exchange.connected = True
@@ -546,8 +545,7 @@ class TestBinanceExchange:
             await exchange.subscribe_to_stream("BTCUSDT", callback)
 
             # Verify WebSocket manager was used
-            mock_ws_manager.symbol_ticker_socket.assert_called_once_with(
-                "BTCUSDT")
+            mock_ws_manager.symbol_ticker_socket.assert_called_once_with("BTCUSDT")
 
 
 class TestBinanceWebSocketHandler:
@@ -571,8 +569,7 @@ class TestBinanceWebSocketHandler:
         """Test successful WebSocket connection."""
         mock_client = MagicMock()
         # Mock get_server_time to return an awaitable
-        mock_client.get_server_time = AsyncMock(
-            return_value={"serverTime": 1640995200000})
+        mock_client.get_server_time = AsyncMock(return_value={"serverTime": 1640995200000})
 
         handler = BinanceWebSocketHandler(mock_config, mock_client, "binance")
 
@@ -587,8 +584,7 @@ class TestBinanceWebSocketHandler:
     async def test_connection_failure(self, mock_config):
         """Test WebSocket connection failure."""
         mock_client = MagicMock()
-        mock_client.get_server_time.side_effect = Exception(
-            "Connection failed")
+        mock_client.get_server_time.side_effect = Exception("Connection failed")
 
         handler = BinanceWebSocketHandler(mock_config, mock_client, "binance")
 
@@ -606,9 +602,10 @@ class TestBinanceWebSocketHandler:
         mock_stream = AsyncMock()
         mock_ws_manager.symbol_ticker_socket.return_value = mock_stream
 
-        with patch('src.exchanges.binance_websocket.BinanceSocketManager', return_value=mock_ws_manager):
-            handler = BinanceWebSocketHandler(
-                mock_config, mock_client, "binance")
+        with patch(
+            "src.exchanges.binance_websocket.BinanceSocketManager", return_value=mock_ws_manager
+        ):
+            handler = BinanceWebSocketHandler(mock_config, mock_client, "binance")
             handler.ws_manager = mock_ws_manager
             handler.connected = True
 
@@ -672,9 +669,10 @@ class TestBinanceWebSocketHandler:
         mock_stream = AsyncMock()
         mock_ws_manager.depth_socket.return_value = mock_stream
 
-        with patch('src.exchanges.binance_websocket.BinanceSocketManager', return_value=mock_ws_manager):
-            handler = BinanceWebSocketHandler(
-                mock_config, mock_client, "binance")
+        with patch(
+            "src.exchanges.binance_websocket.BinanceSocketManager", return_value=mock_ws_manager
+        ):
+            handler = BinanceWebSocketHandler(mock_config, mock_client, "binance")
             handler.ws_manager = mock_ws_manager
             handler.connected = True
 
@@ -683,8 +681,7 @@ class TestBinanceWebSocketHandler:
 
             # The key format includes the depth and interval
             # Check that any key containing "btcusdt@depth" exists
-            depth_keys = [
-                k for k in handler.active_streams.keys() if "btcusdt@depth" in k]
+            depth_keys = [k for k in handler.active_streams.keys() if "btcusdt@depth" in k]
             assert len(depth_keys) > 0
 
     @pytest.mark.asyncio
@@ -695,9 +692,10 @@ class TestBinanceWebSocketHandler:
         mock_stream = AsyncMock()
         mock_ws_manager.symbol_trade_socket.return_value = mock_stream
 
-        with patch('src.exchanges.binance_websocket.BinanceSocketManager', return_value=mock_ws_manager):
-            handler = BinanceWebSocketHandler(
-                mock_config, mock_client, "binance")
+        with patch(
+            "src.exchanges.binance_websocket.BinanceSocketManager", return_value=mock_ws_manager
+        ):
+            handler = BinanceWebSocketHandler(mock_config, mock_client, "binance")
             handler.ws_manager = mock_ws_manager
             handler.connected = True
 
@@ -756,7 +754,7 @@ class TestBinanceOrderManager:
             "origQty": "1.0",
             "executedQty": "1.0",
             "status": "FILLED",
-            "time": 1640995200000
+            "time": 1640995200000,
         }
 
         manager = BinanceOrderManager(mock_config, mock_client, "binance")
@@ -765,7 +763,7 @@ class TestBinanceOrderManager:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         result = await manager.place_market_order(order)
@@ -787,7 +785,7 @@ class TestBinanceOrderManager:
             "origQty": "1.0",
             "executedQty": "0.0",
             "status": "NEW",
-            "time": 1640995200000
+            "time": 1640995200000,
         }
 
         manager = BinanceOrderManager(mock_config, mock_client, "binance")
@@ -797,7 +795,7 @@ class TestBinanceOrderManager:
             side=OrderSide.BUY,
             order_type=OrderType.LIMIT,
             quantity=Decimal("1.0"),
-            price=Decimal("50000.0")
+            price=Decimal("50000.0"),
         )
 
         result = await manager.place_limit_order(order)
@@ -809,19 +807,12 @@ class TestBinanceOrderManager:
     async def test_cancel_order_success(self, mock_config):
         """Test successful order cancellation."""
         mock_client = AsyncMock()
-        mock_client.cancel_order.return_value = {
-            "orderId": 12345,
-            "status": "CANCELED"
-        }
+        mock_client.cancel_order.return_value = {"orderId": 12345, "status": "CANCELED"}
 
         manager = BinanceOrderManager(mock_config, mock_client, "binance")
 
         # Add order to pending_orders first
-        manager.pending_orders["12345"] = {
-            "id": "12345",
-            "symbol": "BTCUSDT",
-            "status": "NEW"
-        }
+        manager.pending_orders["12345"] = {"id": "12345", "symbol": "BTCUSDT", "status": "NEW"}
 
         result = await manager.cancel_order("12345", "BTCUSDT")
 
@@ -836,7 +827,7 @@ class TestBinanceOrderManager:
         mock_client.get_order.return_value = {
             "orderId": 12345,
             "symbol": "BTCUSDT",
-            "status": "FILLED"
+            "status": "FILLED",
         }
 
         manager = BinanceOrderManager(mock_config, mock_client, "binance")
@@ -855,7 +846,7 @@ class TestBinanceOrderManager:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         fees = manager.calculate_fees(order, Decimal("50000.0"))
@@ -871,7 +862,7 @@ class TestBinanceOrderManager:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         # This should not raise an exception
@@ -909,7 +900,7 @@ class TestBinanceOrderManager:
             "origQty": "1.0",
             "executedQty": "0.0",
             "status": "NEW",
-            "time": 1640995200000
+            "time": 1640995200000,
         }
 
         manager = BinanceOrderManager(mock_config, mock_client, "binance")
@@ -919,7 +910,7 @@ class TestBinanceOrderManager:
             side=OrderSide.SELL,
             order_type=OrderType.STOP_LOSS,
             quantity=Decimal("1.0"),
-            stop_price=Decimal("45000.0")
+            stop_price=Decimal("45000.0"),
         )
 
         result = await manager.place_stop_loss_order(order)
@@ -940,7 +931,7 @@ class TestBinanceOrderManager:
             "executedQty": "0.0",
             "price": "50000.0",
             "status": "NEW",
-            "time": 1640995200000
+            "time": 1640995200000,
         }
 
         manager = BinanceOrderManager(mock_config, mock_client, "binance")
@@ -952,7 +943,7 @@ class TestBinanceOrderManager:
             order_type=OrderType.LIMIT,  # OCO orders must be LIMIT type
             quantity=Decimal("1.0"),
             price=Decimal("50000.0"),
-            stop_price=Decimal("45000.0")
+            stop_price=Decimal("45000.0"),
         )
 
         result = await manager.place_oco_order(order)
@@ -973,7 +964,7 @@ class TestBinanceOrderManager:
                 "origQty": "1.0",
                 "executedQty": "0.0",
                 "status": "NEW",
-                "time": 1640995200000
+                "time": 1640995200000,
             }
         ]
 
@@ -997,7 +988,7 @@ class TestBinanceOrderManager:
                 "origQty": "1.0",
                 "executedQty": "1.0",
                 "status": "FILLED",
-                "time": 1640995200000
+                "time": 1640995200000,
             }
         ]
 
@@ -1015,13 +1006,13 @@ class TestBinanceExchangeIntegration:
     @pytest.mark.asyncio
     async def test_exchange_with_websocket_integration(self, mock_config):
         """Test exchange with WebSocket integration."""
-        with patch('src.exchanges.binance.AsyncClient.create') as mock_create:
+        with patch("src.exchanges.binance.AsyncClient.create") as mock_create:
             mock_client = AsyncMock()
             mock_create.return_value = mock_client
 
             # Mock WebSocket manager
             mock_ws_manager = MagicMock()
-            with patch('src.exchanges.binance.BinanceSocketManager', return_value=mock_ws_manager):
+            with patch("src.exchanges.binance.BinanceSocketManager", return_value=mock_ws_manager):
                 exchange = BinanceExchange(mock_config, "binance")
 
                 # Test connection
@@ -1033,13 +1024,12 @@ class TestBinanceExchangeIntegration:
                 await exchange.subscribe_to_stream("BTCUSDT", callback)
 
                 # Verify WebSocket manager was used
-                mock_ws_manager.symbol_ticker_socket.assert_called_once_with(
-                    "BTCUSDT")
+                mock_ws_manager.symbol_ticker_socket.assert_called_once_with("BTCUSDT")
 
     @pytest.mark.asyncio
     async def test_exchange_with_order_manager_integration(self, mock_config):
         """Test exchange with order manager integration."""
-        with patch('src.exchanges.binance.AsyncClient.create') as mock_create:
+        with patch("src.exchanges.binance.AsyncClient.create") as mock_create:
             mock_client = AsyncMock()
             mock_create.return_value = mock_client
 
@@ -1052,7 +1042,7 @@ class TestBinanceExchangeIntegration:
                 "origQty": "1.0",
                 "executedQty": "1.0",
                 "status": "FILLED",
-                "time": 1640995200000
+                "time": 1640995200000,
             }
 
             exchange = BinanceExchange(mock_config, "binance")
@@ -1067,7 +1057,7 @@ class TestBinanceExchangeIntegration:
                 symbol="BTCUSDT",
                 side=OrderSide.BUY,
                 order_type=OrderType.MARKET,
-                quantity=Decimal("1.0")
+                quantity=Decimal("1.0"),
             )
 
             response = await exchange.place_order(order)
@@ -1078,7 +1068,7 @@ class TestBinanceExchangeIntegration:
     @pytest.mark.asyncio
     async def test_error_handling_integration(self, mock_config):
         """Test error handling integration."""
-        with patch('src.exchanges.binance.AsyncClient.create') as mock_create:
+        with patch("src.exchanges.binance.AsyncClient.create") as mock_create:
             mock_client = AsyncMock()
             mock_create.return_value = mock_client
 
@@ -1096,7 +1086,7 @@ class TestBinanceExchangeIntegration:
     @pytest.mark.asyncio
     async def test_rate_limiting_integration(self, mock_config):
         """Test rate limiting integration."""
-        with patch('src.exchanges.binance.AsyncClient.create') as mock_create:
+        with patch("src.exchanges.binance.AsyncClient.create") as mock_create:
             mock_client = AsyncMock()
             mock_create.return_value = mock_client
 
@@ -1109,7 +1099,7 @@ class TestBinanceExchangeIntegration:
                 "origQty": "1.0",
                 "executedQty": "1.0",
                 "status": "FILLED",
-                "time": 1640995200000
+                "time": 1640995200000,
             }
 
             exchange = BinanceExchange(mock_config, "binance")
@@ -1127,7 +1117,7 @@ class TestBinanceExchangeIntegration:
                 symbol="BTCUSDT",
                 side=OrderSide.BUY,
                 order_type=OrderType.MARKET,
-                quantity=Decimal("1.0")
+                quantity=Decimal("1.0"),
             )
 
             await exchange.place_order(order)
@@ -1170,17 +1160,16 @@ class TestBinanceExchangeIntegration:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         with pytest.raises(Exception):
             await manager.place_market_order(order)
 
     @pytest.mark.asyncio
-    async def test_exchange_websocket_disconnect_integration(
-            self, mock_config):
+    async def test_exchange_websocket_disconnect_integration(self, mock_config):
         """Test exchange WebSocket disconnect integration."""
-        with patch('src.exchanges.binance.AsyncClient.create') as mock_create:
+        with patch("src.exchanges.binance.AsyncClient.create") as mock_create:
             mock_client = AsyncMock()
             mock_create.return_value = mock_client
 
@@ -1234,7 +1223,7 @@ class TestBinanceExchangeIntegration:
             symbol="BTCUSDT",
             side=OrderSide.BUY,
             order_type=OrderType.MARKET,
-            quantity=Decimal("1.0")
+            quantity=Decimal("1.0"),
         )
 
         # This should not raise an exception

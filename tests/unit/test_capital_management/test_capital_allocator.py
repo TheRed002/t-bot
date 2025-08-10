@@ -8,20 +8,15 @@ This module tests the dynamic capital allocation framework including:
 - Risk-based allocation
 """
 
-import pytest
-import asyncio
-from decimal import Decimal
 from datetime import datetime, timedelta
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from decimal import Decimal
 
-from src.core.types import (
-    CapitalAllocation, AllocationStrategy, FundFlow, CapitalMetrics
-)
-from src.core.exceptions import (
-    CapitalManagementError, ValidationError, InsufficientCapitalError
-)
-from src.core.config import Config
+import pytest
+
 from src.capital_management.capital_allocator import CapitalAllocator
+from src.core.config import Config
+from src.core.exceptions import ValidationError
+from src.core.types import AllocationStrategy, CapitalAllocation, CapitalMetrics
 
 
 class TestCapitalAllocator:
@@ -55,7 +50,7 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("16000"),
                 available_amount=Decimal("4000"),
                 allocation_percentage=0.2,
-                last_rebalance=datetime.now() - timedelta(hours=12)
+                last_rebalance=datetime.now() - timedelta(hours=12),
             ),
             CapitalAllocation(
                 strategy_id="strategy_2",
@@ -64,7 +59,7 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("10500"),
                 available_amount=Decimal("4500"),
                 allocation_percentage=0.15,
-                last_rebalance=datetime.now() - timedelta(hours=6)
+                last_rebalance=datetime.now() - timedelta(hours=6),
             ),
             CapitalAllocation(
                 strategy_id="strategy_3",
@@ -73,8 +68,8 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("6000"),
                 available_amount=Decimal("4000"),
                 allocation_percentage=0.1,
-                last_rebalance=datetime.now() - timedelta(hours=18)
-            )
+                last_rebalance=datetime.now() - timedelta(hours=18),
+            ),
         ]
 
     def test_initialization(self, capital_allocator, config):
@@ -82,19 +77,26 @@ class TestCapitalAllocator:
         assert capital_allocator.config == config
         assert capital_allocator.capital_config == config.capital_management
         assert capital_allocator.total_capital == Decimal(
-            str(config.capital_management.total_capital))
-        assert capital_allocator.emergency_reserve == Decimal(str(
-            config.capital_management.total_capital * config.capital_management.emergency_reserve_pct))
-        assert capital_allocator.available_capital == Decimal(str(
-            config.capital_management.total_capital * (1 - config.capital_management.emergency_reserve_pct)))
+            str(config.capital_management.total_capital)
+        )
+        assert capital_allocator.emergency_reserve == Decimal(
+            str(
+                config.capital_management.total_capital
+                * config.capital_management.emergency_reserve_pct
+            )
+        )
+        assert capital_allocator.available_capital == Decimal(
+            str(
+                config.capital_management.total_capital
+                * (1 - config.capital_management.emergency_reserve_pct)
+            )
+        )
         assert capital_allocator.strategy_allocations == {}
         assert capital_allocator.exchange_allocations == {}
         assert capital_allocator.strategy_performance == {}
         # Check that last_rebalance is set to a recent time (within last
         # minute)
-        assert (
-            datetime.now() -
-            capital_allocator.last_rebalance).total_seconds() < 60
+        assert (datetime.now() - capital_allocator.last_rebalance).total_seconds() < 60
 
     @pytest.mark.asyncio
     async def test_allocate_capital_basic(self, capital_allocator):
@@ -119,12 +121,12 @@ class TestCapitalAllocator:
         assert allocation.exchange == exchange_name
         assert allocation.allocated_amount == allocation_amount
         assert allocation.allocation_percentage == float(
-            allocation_amount / capital_allocator.total_capital)
+            allocation_amount / capital_allocator.total_capital
+        )
         assert allocation.utilized_amount == Decimal("0")
 
     @pytest.mark.asyncio
-    async def test_allocate_capital_insufficient_funds(
-            self, capital_allocator):
+    async def test_allocate_capital_insufficient_funds(self, capital_allocator):
         """Test allocation with insufficient available capital."""
         strategy_name = "test_strategy"
         exchange_name = "binance"
@@ -136,16 +138,13 @@ class TestCapitalAllocator:
             )
 
     @pytest.mark.asyncio
-    async def test_allocate_capital_existing_allocation(
-            self, capital_allocator):
+    async def test_allocate_capital_existing_allocation(self, capital_allocator):
         """Test allocation to existing strategy/exchange combination."""
         strategy_name = "test_strategy"
         exchange_name = "binance"
 
         # First allocation
-        await capital_allocator.allocate_capital(
-            strategy_name, exchange_name, Decimal("5000")
-        )
+        await capital_allocator.allocate_capital(strategy_name, exchange_name, Decimal("5000"))
 
         # Second allocation to same strategy/exchange
         result = await capital_allocator.allocate_capital(
@@ -155,14 +154,11 @@ class TestCapitalAllocator:
         assert isinstance(result, CapitalAllocation)
         allocation_key = f"{strategy_name}_{exchange_name}"
         allocation = capital_allocator.strategy_allocations[allocation_key]
-        assert allocation.allocated_amount == Decimal(
-            "3000")  # Second allocation overwrites first
-        assert allocation.allocation_percentage == 3000 / \
-            float(capital_allocator.total_capital)
+        assert allocation.allocated_amount == Decimal("3000")  # Second allocation overwrites first
+        assert allocation.allocation_percentage == 3000 / float(capital_allocator.total_capital)
 
     @pytest.mark.asyncio
-    async def test_rebalance_allocations_equal_weight(
-            self, capital_allocator, config):
+    async def test_rebalance_allocations_equal_weight(self, capital_allocator, config):
         """Test rebalancing with equal weight strategy."""
         config.capital_management.allocation_strategy = AllocationStrategy.EQUAL_WEIGHT
 
@@ -175,7 +171,7 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("16000"),
                 available_amount=Decimal("4000"),
                 allocation_percentage=0.2,
-                last_rebalance=datetime.now() - timedelta(hours=25)
+                last_rebalance=datetime.now() - timedelta(hours=25),
             ),
             "strategy_2_okx": CapitalAllocation(
                 strategy_id="strategy_2",
@@ -184,8 +180,8 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("10500"),
                 available_amount=Decimal("4500"),
                 allocation_percentage=0.15,
-                last_rebalance=datetime.now() - timedelta(hours=25)
-            )
+                last_rebalance=datetime.now() - timedelta(hours=25),
+            ),
         }
 
         result = await capital_allocator.rebalance_allocations()
@@ -197,8 +193,7 @@ class TestCapitalAllocator:
             assert allocation.allocation_percentage > 0
 
     @pytest.mark.asyncio
-    async def test_rebalance_allocations_performance_weighted(
-            self, capital_allocator, config):
+    async def test_rebalance_allocations_performance_weighted(self, capital_allocator, config):
         """Test rebalancing with performance weighted strategy."""
         config.capital_management.allocation_strategy = AllocationStrategy.PERFORMANCE_WEIGHTED
 
@@ -211,7 +206,7 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("16000"),
                 available_amount=Decimal("4000"),
                 allocation_percentage=0.2,
-                last_rebalance=datetime.now() - timedelta(hours=25)
+                last_rebalance=datetime.now() - timedelta(hours=25),
             ),
             "strategy2_okx": CapitalAllocation(
                 strategy_id="strategy2",
@@ -220,14 +215,14 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("10500"),
                 available_amount=Decimal("4500"),
                 allocation_percentage=0.15,
-                last_rebalance=datetime.now() - timedelta(hours=25)
-            )
+                last_rebalance=datetime.now() - timedelta(hours=25),
+            ),
         }
 
         # Add performance data
         capital_allocator.strategy_performance = {
             "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2},
-            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8}
+            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8},
         }
 
         result = await capital_allocator.rebalance_allocations()
@@ -240,8 +235,7 @@ class TestCapitalAllocator:
             assert allocation.allocation_percentage > 0
 
     @pytest.mark.asyncio
-    async def test_rebalance_allocations_no_rebalance_needed(
-            self, capital_allocator):
+    async def test_rebalance_allocations_no_rebalance_needed(self, capital_allocator):
         """Test rebalancing when not needed (within frequency window)."""
         # Setup allocation with recent rebalance
         capital_allocator.strategy_allocations = {
@@ -252,7 +246,7 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("16000"),
                 available_amount=Decimal("4000"),
                 allocation_percentage=0.2,
-                last_rebalance=datetime.now() - timedelta(hours=2)  # Recent rebalance
+                last_rebalance=datetime.now() - timedelta(hours=2),  # Recent rebalance
             )
         }
 
@@ -278,24 +272,19 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("5000"),
                 available_amount=Decimal("5000"),
                 allocation_percentage=0.1,
-                last_rebalance=datetime.now()
+                last_rebalance=datetime.now(),
             )
         }
 
-        await capital_allocator.update_utilization(
-            strategy_name, exchange_name, utilization_rate
-        )
+        await capital_allocator.update_utilization(strategy_name, exchange_name, utilization_rate)
 
         allocation = capital_allocator.strategy_allocations[allocation_key]
         assert allocation.utilized_amount == utilization_rate
 
     @pytest.mark.asyncio
-    async def test_update_utilization_allocation_not_found(
-            self, capital_allocator):
+    async def test_update_utilization_allocation_not_found(self, capital_allocator):
         """Test updating utilization for non-existent allocation."""
-        await capital_allocator.update_utilization(
-            "nonexistent", "nonexistent", Decimal("0.5")
-        )
+        await capital_allocator.update_utilization("nonexistent", "nonexistent", Decimal("0.5"))
         # Should not raise an exception, just do nothing
 
     @pytest.mark.asyncio
@@ -310,7 +299,7 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("16000"),
                 available_amount=Decimal("4000"),
                 allocation_percentage=0.2,
-                last_rebalance=datetime.now()
+                last_rebalance=datetime.now(),
             ),
             "strategy_2_okx": CapitalAllocation(
                 strategy_id="strategy_2",
@@ -319,8 +308,8 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("10500"),
                 available_amount=Decimal("4500"),
                 allocation_percentage=0.15,
-                last_rebalance=datetime.now()
-            )
+                last_rebalance=datetime.now(),
+            ),
         }
 
         metrics = await capital_allocator.get_capital_metrics()
@@ -347,7 +336,8 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("8000"),
                 available_amount=Decimal("2000"),
                 allocation_percentage=0.1,
-                last_rebalance=datetime.now()),
+                last_rebalance=datetime.now(),
+            ),
             "strategy1_okx": CapitalAllocation(
                 strategy_id="strategy1",
                 exchange="okx",
@@ -355,7 +345,8 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("4000"),
                 available_amount=Decimal("1000"),
                 allocation_percentage=0.05,
-                last_rebalance=datetime.now()),
+                last_rebalance=datetime.now(),
+            ),
             "strategy2_binance": CapitalAllocation(
                 strategy_id="strategy2",
                 exchange="binance",
@@ -363,7 +354,9 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("12000"),
                 available_amount=Decimal("3000"),
                 allocation_percentage=0.15,
-                last_rebalance=datetime.now())}
+                last_rebalance=datetime.now(),
+            ),
+        }
 
         result = await capital_allocator._equal_weight_allocation()
 
@@ -385,7 +378,8 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("8000"),
                 available_amount=Decimal("2000"),
                 allocation_percentage=0.1,
-                last_rebalance=datetime.now()),
+                last_rebalance=datetime.now(),
+            ),
             "strategy2_binance": CapitalAllocation(
                 strategy_id="strategy2",
                 exchange="binance",
@@ -393,15 +387,19 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("12000"),
                 available_amount=Decimal("3000"),
                 allocation_percentage=0.15,
-                last_rebalance=datetime.now())}
+                last_rebalance=datetime.now(),
+            ),
+        }
 
         # Setup performance data
         capital_allocator.strategy_performance = {
             "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2},
-            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8}
+            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8},
         }
 
-        result = await capital_allocator._performance_weighted_allocation(capital_allocator.strategy_performance)
+        result = await capital_allocator._performance_weighted_allocation(
+            capital_allocator.strategy_performance
+        )
 
         assert isinstance(result, dict)
         assert len(result) > 0
@@ -421,7 +419,8 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("8000"),
                 available_amount=Decimal("2000"),
                 allocation_percentage=0.1,
-                last_rebalance=datetime.now()),
+                last_rebalance=datetime.now(),
+            ),
             "strategy2_binance": CapitalAllocation(
                 strategy_id="strategy2",
                 exchange="binance",
@@ -429,20 +428,19 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("12000"),
                 available_amount=Decimal("3000"),
                 allocation_percentage=0.15,
-                last_rebalance=datetime.now())}
+                last_rebalance=datetime.now(),
+            ),
+        }
 
         # Setup performance data
         capital_allocator.strategy_performance = {
-            "strategy1": {
-                "return_rate": 0.9,
-                "sharpe_ratio": 1.2,
-                "volatility": 0.15},
-            "strategy2": {
-                "return_rate": 0.6,
-                "sharpe_ratio": 0.8,
-                "volatility": 0.08}}
+            "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2, "volatility": 0.15},
+            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8, "volatility": 0.08},
+        }
 
-        result = await capital_allocator._volatility_weighted_allocation(capital_allocator.strategy_performance)
+        result = await capital_allocator._volatility_weighted_allocation(
+            capital_allocator.strategy_performance
+        )
 
         assert isinstance(result, dict)
         assert len(result) > 0
@@ -462,7 +460,8 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("8000"),
                 available_amount=Decimal("2000"),
                 allocation_percentage=0.1,
-                last_rebalance=datetime.now()),
+                last_rebalance=datetime.now(),
+            ),
             "strategy2_binance": CapitalAllocation(
                 strategy_id="strategy2",
                 exchange="binance",
@@ -470,20 +469,19 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("12000"),
                 available_amount=Decimal("3000"),
                 allocation_percentage=0.15,
-                last_rebalance=datetime.now())}
+                last_rebalance=datetime.now(),
+            ),
+        }
 
         # Setup performance data
         capital_allocator.strategy_performance = {
-            "strategy1": {
-                "return_rate": 0.9,
-                "sharpe_ratio": 1.2,
-                "volatility": 0.15},
-            "strategy2": {
-                "return_rate": 0.6,
-                "sharpe_ratio": 0.8,
-                "volatility": 0.08}}
+            "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2, "volatility": 0.15},
+            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8, "volatility": 0.08},
+        }
 
-        result = await capital_allocator._risk_parity_allocation(capital_allocator.strategy_performance)
+        result = await capital_allocator._risk_parity_allocation(
+            capital_allocator.strategy_performance
+        )
 
         assert isinstance(result, dict)
         assert len(result) > 0
@@ -503,7 +501,8 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("8000"),
                 available_amount=Decimal("2000"),
                 allocation_percentage=0.1,
-                last_rebalance=datetime.now()),
+                last_rebalance=datetime.now(),
+            ),
             "strategy2_binance": CapitalAllocation(
                 strategy_id="strategy2",
                 exchange="binance",
@@ -511,18 +510,15 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("12000"),
                 available_amount=Decimal("3000"),
                 allocation_percentage=0.15,
-                last_rebalance=datetime.now())}
+                last_rebalance=datetime.now(),
+            ),
+        }
 
         # Setup performance data
         capital_allocator.strategy_performance = {
-            "strategy1": {
-                "return_rate": 0.9,
-                "sharpe_ratio": 1.2,
-                "volatility": 0.15},
-            "strategy2": {
-                "return_rate": 0.6,
-                "sharpe_ratio": 0.8,
-                "volatility": 0.08}}
+            "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2, "volatility": 0.15},
+            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8, "volatility": 0.08},
+        }
 
         result = await capital_allocator._dynamic_allocation(capital_allocator.strategy_performance)
 
@@ -546,7 +542,9 @@ class TestCapitalAllocator:
                 utilized_amount=Decimal("8000"),
                 available_amount=Decimal("2000"),
                 allocation_percentage=0.1,
-                last_rebalance=datetime.now())}
+                last_rebalance=datetime.now(),
+            )
+        }
 
         # Setup performance data
         capital_allocator.strategy_performance = {
@@ -561,8 +559,7 @@ class TestCapitalAllocator:
         assert "sharpe_ratio" in metrics[strategy_name]
 
     @pytest.mark.asyncio
-    async def test_calculate_performance_metrics_no_data(
-            self, capital_allocator):
+    async def test_calculate_performance_metrics_no_data(self, capital_allocator):
         """Test calculating performance metrics with no data."""
         metrics = await capital_allocator._calculate_performance_metrics()
 
@@ -577,10 +574,12 @@ class TestCapitalAllocator:
         await capital_allocator.update_total_capital(new_total)
 
         assert capital_allocator.total_capital == new_total
-        assert capital_allocator.emergency_reserve == new_total * \
-            Decimal(str(capital_allocator.capital_config.emergency_reserve_pct))
-        assert capital_allocator.available_capital == new_total * \
-            (1 - Decimal(str(capital_allocator.capital_config.emergency_reserve_pct)))
+        assert capital_allocator.emergency_reserve == new_total * Decimal(
+            str(capital_allocator.capital_config.emergency_reserve_pct)
+        )
+        assert capital_allocator.available_capital == new_total * (
+            1 - Decimal(str(capital_allocator.capital_config.emergency_reserve_pct))
+        )
 
     @pytest.mark.asyncio
     async def test_get_emergency_reserve(self, capital_allocator):
@@ -588,21 +587,24 @@ class TestCapitalAllocator:
         reserve = await capital_allocator.get_emergency_reserve()
 
         assert reserve == capital_allocator.emergency_reserve
-        assert reserve == capital_allocator.total_capital * \
-            Decimal(str(capital_allocator.capital_config.emergency_reserve_pct))
+        assert reserve == capital_allocator.total_capital * Decimal(
+            str(capital_allocator.capital_config.emergency_reserve_pct)
+        )
 
     @pytest.mark.asyncio
     async def test_get_available_capital(self, capital_allocator):
         """Test getting available capital amount."""
         available = capital_allocator.available_capital
 
-        assert available == capital_allocator.total_capital * \
-            (1 - Decimal(str(capital_allocator.capital_config.emergency_reserve_pct)))
+        assert available == capital_allocator.total_capital * (
+            1 - Decimal(str(capital_allocator.capital_config.emergency_reserve_pct))
+        )
 
     @pytest.mark.asyncio
     async def test_get_available_capital_attribute(self, capital_allocator):
         """Test getting available capital attribute."""
         available = capital_allocator.available_capital
 
-        assert available == capital_allocator.total_capital * \
-            (1 - Decimal(str(capital_allocator.capital_config.emergency_reserve_pct)))
+        assert available == capital_allocator.total_capital * (
+            1 - Decimal(str(capital_allocator.capital_config.emergency_reserve_pct))
+        )

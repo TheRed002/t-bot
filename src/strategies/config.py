@@ -6,15 +6,17 @@ and environment-specific configurations for all strategies.
 """
 
 import json
-import yaml
-from pathlib import Path
-from typing import Dict, Any, Optional, List
 from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from src.core.exceptions import ConfigurationError
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import StrategyConfig, StrategyType
-from src.core.exceptions import ValidationError, ConfigurationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -38,12 +40,9 @@ class StrategyConfigurationManager:
         # Default configurations for different strategy types
         self._default_configs = self._initialize_default_configs()
 
-        logger.info(
-            "Strategy configuration manager initialized",
-            config_dir=str(
-                self.config_dir))
+        logger.info("Strategy configuration manager initialized", config_dir=str(self.config_dir))
 
-    def _initialize_default_configs(self) -> Dict[str, Dict[str, Any]]:
+    def _initialize_default_configs(self) -> dict[str, dict[str, Any]]:
         """Initialize default configurations for different strategy types.
 
         Returns:
@@ -65,8 +64,8 @@ class StrategyConfigurationManager:
                     "lookback_period": 20,
                     "entry_threshold": 2.0,
                     "exit_threshold": 0.5,
-                    "volatility_window": 20
-                }
+                    "volatility_window": 20,
+                },
             },
             "trend_following": {
                 "name": "trend_following",
@@ -84,8 +83,8 @@ class StrategyConfigurationManager:
                     "slow_ma": 50,
                     "rsi_period": 14,
                     "rsi_overbought": 70,
-                    "rsi_oversold": 30
-                }
+                    "rsi_oversold": 30,
+                },
             },
             "breakout": {
                 "name": "breakout",
@@ -102,9 +101,9 @@ class StrategyConfigurationManager:
                     "support_resistance_period": 20,
                     "breakout_confirmation_periods": 3,
                     "volume_threshold": 1.5,
-                    "consolidation_period": 10
-                }
-            }
+                    "consolidation_period": 10,
+                },
+            },
         }
 
     @time_execution
@@ -125,15 +124,15 @@ class StrategyConfigurationManager:
             config_file = self.config_dir / f"{strategy_name}.yaml"
             if config_file.exists():
                 config_data = self._load_config_file(config_file)
-                logger.info("Loaded strategy config from file",
-                            strategy_name=strategy_name,
-                            config_file=str(config_file))
+                logger.info(
+                    "Loaded strategy config from file",
+                    strategy_name=strategy_name,
+                    config_file=str(config_file),
+                )
             else:
                 # Use default configuration
                 config_data = self._get_default_config(strategy_name)
-                logger.info(
-                    "Using default strategy config",
-                    strategy_name=strategy_name)
+                logger.info("Using default strategy config", strategy_name=strategy_name)
 
             # Validate configuration
             validate_strategy_config(config_data)
@@ -144,14 +143,12 @@ class StrategyConfigurationManager:
             return config
 
         except Exception as e:
-            logger.error("Failed to load strategy config",
-                         strategy_name=strategy_name,
-                         error=str(e))
-            raise ConfigurationError(
-                f"Failed to load configuration for {strategy_name}: {
-                    str(e)}")
+            logger.error(
+                "Failed to load strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"Failed to load configuration for {strategy_name}: {e!s}")
 
-    def _load_config_file(self, config_file: Path) -> Dict[str, Any]:
+    def _load_config_file(self, config_file: Path) -> dict[str, Any]:
         """Load configuration from file.
 
         Args:
@@ -160,17 +157,15 @@ class StrategyConfigurationManager:
         Returns:
             Configuration dictionary
         """
-        with open(config_file, 'r') as f:
-            if config_file.suffix == '.yaml' or config_file.suffix == '.yml':
+        with open(config_file) as f:
+            if config_file.suffix == ".yaml" or config_file.suffix == ".yml":
                 return yaml.safe_load(f)
-            elif config_file.suffix == '.json':
+            elif config_file.suffix == ".json":
                 return json.load(f)
             else:
-                raise ConfigurationError(
-                    f"Unsupported config file format: {
-                        config_file.suffix}")
+                raise ConfigurationError(f"Unsupported config file format: {config_file.suffix}")
 
-    def _get_default_config(self, strategy_name: str) -> Dict[str, Any]:
+    def _get_default_config(self, strategy_name: str) -> dict[str, Any]:
         """Get default configuration for strategy.
 
         Args:
@@ -180,16 +175,12 @@ class StrategyConfigurationManager:
             Default configuration dictionary
         """
         if strategy_name not in self._default_configs:
-            raise ConfigurationError(
-                f"No default configuration for strategy: {strategy_name}")
+            raise ConfigurationError(f"No default configuration for strategy: {strategy_name}")
 
         return self._default_configs[strategy_name].copy()
 
     @time_execution
-    def save_strategy_config(
-            self,
-            strategy_name: str,
-            config: StrategyConfig) -> None:
+    def save_strategy_config(self, strategy_name: str, config: StrategyConfig) -> None:
         """Save strategy configuration to file.
 
         Args:
@@ -203,34 +194,31 @@ class StrategyConfigurationManager:
             config_dict = config.model_dump()
 
             # Ensure strategy_type is a string for YAML serialization
-            if "strategy_type" in config_dict and hasattr(
-                    config_dict["strategy_type"], 'value'):
+            if "strategy_type" in config_dict and hasattr(config_dict["strategy_type"], "value"):
                 config_dict["strategy_type"] = config_dict["strategy_type"].value
 
             # Add metadata
             config_dict["_metadata"] = {
                 "last_updated": datetime.now().isoformat(),
-                "version": "1.0.0"
+                "version": "1.0.0",
             }
 
             # Save to file
-            with open(config_file, 'w') as f:
+            with open(config_file, "w") as f:
                 yaml.dump(config_dict, f, default_flow_style=False, indent=2)
 
-            logger.info("Strategy config saved",
-                        strategy_name=strategy_name,
-                        config_file=str(config_file))
+            logger.info(
+                "Strategy config saved", strategy_name=strategy_name, config_file=str(config_file)
+            )
 
         except Exception as e:
-            logger.error("Failed to save strategy config",
-                         strategy_name=strategy_name,
-                         error=str(e))
-            raise ConfigurationError(
-                f"Failed to save configuration for {strategy_name}: {
-                    str(e)}")
+            logger.error(
+                "Failed to save strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"Failed to save configuration for {strategy_name}: {e!s}")
 
     @time_execution
-    def validate_config(self, config: Dict[str, Any]) -> bool:
+    def validate_config(self, config: dict[str, Any]) -> bool:
         """Validate strategy configuration.
 
         Args:
@@ -246,7 +234,7 @@ class StrategyConfigurationManager:
             logger.warning("Configuration validation failed", error=str(e))
             return False
 
-    def get_available_strategies(self) -> List[str]:
+    def get_available_strategies(self) -> list[str]:
         """Get list of available strategies.
 
         Returns:
@@ -266,7 +254,7 @@ class StrategyConfigurationManager:
 
         return sorted(strategies)
 
-    def get_config_schema(self) -> Dict[str, Any]:
+    def get_config_schema(self) -> dict[str, Any]:
         """Get configuration schema for validation.
 
         Returns:
@@ -275,11 +263,7 @@ class StrategyConfigurationManager:
         return StrategyConfig.model_json_schema()
 
     @time_execution
-    def update_config_parameter(
-            self,
-            strategy_name: str,
-            parameter: str,
-            value: Any) -> bool:
+    def update_config_parameter(self, strategy_name: str, parameter: str, value: Any) -> bool:
         """Update a single configuration parameter.
 
         Args:
@@ -298,8 +282,7 @@ class StrategyConfigurationManager:
             config_dict = config.model_dump()
 
             # Ensure strategy_type is a string for validation
-            if "strategy_type" in config_dict and hasattr(
-                    config_dict["strategy_type"], 'value'):
+            if "strategy_type" in config_dict and hasattr(config_dict["strategy_type"], "value"):
                 config_dict["strategy_type"] = config_dict["strategy_type"].value
 
             if parameter in config_dict:
@@ -310,36 +293,40 @@ class StrategyConfigurationManager:
                     # Save updated config
                     updated_config = StrategyConfig(**config_dict)
                     self.save_strategy_config(strategy_name, updated_config)
-                    logger.info("Config parameter updated",
-                                strategy_name=strategy_name,
-                                parameter=parameter,
-                                value=value)
+                    logger.info(
+                        "Config parameter updated",
+                        strategy_name=strategy_name,
+                        parameter=parameter,
+                        value=value,
+                    )
                     return True
                 else:
                     logger.error(
                         "Invalid configuration after parameter update",
                         strategy_name=strategy_name,
-                        parameter=parameter)
+                        parameter=parameter,
+                    )
                     return False
             else:
-                logger.error("Parameter not found in config",
-                             strategy_name=strategy_name,
-                             parameter=parameter)
+                logger.error(
+                    "Parameter not found in config",
+                    strategy_name=strategy_name,
+                    parameter=parameter,
+                )
                 return False
 
         except Exception as e:
-            logger.error("Failed to update config parameter",
-                         strategy_name=strategy_name,
-                         parameter=parameter,
-                         error=str(e))
+            logger.error(
+                "Failed to update config parameter",
+                strategy_name=strategy_name,
+                parameter=parameter,
+                error=str(e),
+            )
             return False
 
     def create_strategy_config(
-            self,
-            strategy_name: str,
-            strategy_type: StrategyType,
-            symbols: List[str],
-            **kwargs) -> StrategyConfig:
+        self, strategy_name: str, strategy_type: StrategyType, symbols: list[str], **kwargs
+    ) -> StrategyConfig:
         """Create a new strategy configuration.
 
         Args:
@@ -356,8 +343,16 @@ class StrategyConfigurationManager:
             config_data = self._get_default_config(strategy_name)
 
             # Update with provided parameters
-            config_data.update({"name": strategy_name, "strategy_type": strategy_type.value if hasattr(
-                strategy_type, 'value') else strategy_type, "symbols": symbols, **kwargs})
+            config_data.update(
+                {
+                    "name": strategy_name,
+                    "strategy_type": strategy_type.value
+                    if hasattr(strategy_type, "value")
+                    else strategy_type,
+                    "symbols": symbols,
+                    **kwargs,
+                }
+            )
 
             # Validate configuration
             validate_strategy_config(config_data)
@@ -369,19 +364,18 @@ class StrategyConfigurationManager:
             logger.info(
                 "Strategy config created",
                 strategy_name=strategy_name,
-                strategy_type=strategy_type.value if hasattr(
-                    strategy_type,
-                    'value') else strategy_type)
+                strategy_type=strategy_type.value
+                if hasattr(strategy_type, "value")
+                else strategy_type,
+            )
 
             return config
 
         except Exception as e:
-            logger.error("Failed to create strategy config",
-                         strategy_name=strategy_name,
-                         error=str(e))
-            raise ConfigurationError(
-                f"Failed to create configuration for {strategy_name}: {
-                    str(e)}")
+            logger.error(
+                "Failed to create strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"Failed to create configuration for {strategy_name}: {e!s}")
 
     def delete_strategy_config(self, strategy_name: str) -> bool:
         """Delete strategy configuration file.
@@ -396,22 +390,25 @@ class StrategyConfigurationManager:
             config_file = self.config_dir / f"{strategy_name}.yaml"
             if config_file.exists():
                 config_file.unlink()
-                logger.info("Strategy config deleted",
-                            strategy_name=strategy_name,
-                            config_file=str(config_file))
+                logger.info(
+                    "Strategy config deleted",
+                    strategy_name=strategy_name,
+                    config_file=str(config_file),
+                )
                 return True
             else:
-                logger.warning("Strategy config file not found for deletion",
-                               strategy_name=strategy_name)
+                logger.warning(
+                    "Strategy config file not found for deletion", strategy_name=strategy_name
+                )
                 return False
 
         except Exception as e:
-            logger.error("Failed to delete strategy config",
-                         strategy_name=strategy_name,
-                         error=str(e))
+            logger.error(
+                "Failed to delete strategy config", strategy_name=strategy_name, error=str(e)
+            )
             return False
 
-    def get_config_summary(self) -> Dict[str, Any]:
+    def get_config_summary(self) -> dict[str, Any]:
         """Get summary of all configurations.
 
         Returns:
@@ -421,15 +418,17 @@ class StrategyConfigurationManager:
             "config_directory": str(self.config_dir),
             "total_strategies": len(self.get_available_strategies()),
             "config_files": [],
-            "default_configs": list(self._default_configs.keys())
+            "default_configs": list(self._default_configs.keys()),
         }
 
         # List config files
         for config_file in self.config_dir.glob("*.yaml"):
-            summary["config_files"].append({
-                "name": config_file.stem,
-                "size": config_file.stat().st_size,
-                "modified": datetime.fromtimestamp(config_file.stat().st_mtime).isoformat()
-            })
+            summary["config_files"].append(
+                {
+                    "name": config_file.stem,
+                    "size": config_file.stat().st_size,
+                    "modified": datetime.fromtimestamp(config_file.stat().st_mtime).isoformat(),
+                }
+            )
 
         return summary

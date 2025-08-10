@@ -4,41 +4,49 @@ Unit tests for helper functions.
 This module tests the utility functions in src.utils.helpers module.
 """
 
-import pytest
-import math
-import statistics
-from decimal import Decimal
-from datetime import datetime, timedelta, timezone
-from unittest.mock import patch, mock_open, MagicMock, AsyncMock
-import json
-import yaml
 import asyncio
-import aiohttp
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
+
+import pytest
+
+from src.core.exceptions import ValidationError
 
 # Import the functions to test
 from src.utils.helpers import (
+    calculate_correlation,
+    calculate_max_drawdown,
     # Mathematical utilities
-    calculate_sharpe_ratio, calculate_max_drawdown, calculate_var,
-    calculate_volatility, calculate_correlation,
-
-    # Date/time utilities
-    get_trading_session, is_market_open, convert_timezone, parse_datetime,
-
+    calculate_sharpe_ratio,
+    calculate_var,
+    calculate_volatility,
     # Data conversion utilities
-    convert_currency, normalize_price, round_to_precision,
-
+    convert_currency,
+    convert_timezone,
+    extract_numbers,
+    format_timestamp,
+    generate_hash,
+    # Date/time utilities
+    get_trading_session,
+    is_market_open,
+    load_config_file,
+    measure_latency,
+    normalize_price,
+    parse_datetime,
+    parse_trading_pair,
+    ping_host,
+    round_to_precision,
     # File operations
-    safe_read_file, safe_write_file, load_config_file,
-
-    # Network utilities
-    test_connection, measure_latency, ping_host,
-
+    safe_read_file,
+    safe_write_file,
     # String utilities
-    sanitize_symbol, parse_trading_pair, format_timestamp,
-    generate_hash, validate_email, extract_numbers
+    sanitize_symbol,
+    # Network utilities
+    test_connection,
+    validate_email,
 )
-
-from src.core.exceptions import ValidationError, ConfigurationError
 
 
 class TestMathematicalUtilities:
@@ -81,8 +89,8 @@ class TestMathematicalUtilities:
         assert isinstance(result, tuple)
         assert len(result) == 3
         assert isinstance(result[0], float)  # max_drawdown
-        assert isinstance(result[1], int)    # start_index
-        assert isinstance(result[2], int)    # end_index
+        assert isinstance(result[1], int)  # start_index
+        assert isinstance(result[2], int)  # end_index
         assert result[0] <= 0  # Drawdown should be negative or zero
 
     def test_calculate_max_drawdown_increasing_prices(self):
@@ -205,11 +213,7 @@ class TestDateTimeUtilities:
         result = get_trading_session(dt, "binance")
 
         assert isinstance(result, str)
-        assert result in [
-            'low_activity',
-            'asian_session',
-            'european_session',
-            'american_session']
+        assert result in ["low_activity", "asian_session", "european_session", "american_session"]
 
     def test_get_trading_session_weekend(self):
         """Test trading session detection on weekend."""
@@ -218,11 +222,7 @@ class TestDateTimeUtilities:
         result = get_trading_session(dt, "binance")
 
         assert isinstance(result, str)
-        assert result in [
-            'low_activity',
-            'asian_session',
-            'european_session',
-            'american_session']
+        assert result in ["low_activity", "asian_session", "european_session", "american_session"]
 
     def test_get_trading_session_holiday(self):
         """Test trading session detection on holiday."""
@@ -231,11 +231,7 @@ class TestDateTimeUtilities:
         result = get_trading_session(dt, "binance")
 
         assert isinstance(result, str)
-        assert result in [
-            'low_activity',
-            'asian_session',
-            'european_session',
-            'american_session']
+        assert result in ["low_activity", "asian_session", "european_session", "american_session"]
 
     def test_is_market_open_crypto(self):
         """Test market open check for crypto exchange."""
@@ -372,61 +368,61 @@ class TestFileOperations:
         content = "test content"
         mock_file = mock_open(read_data=content)
 
-        with patch('builtins.open', mock_file):
-            with patch('pathlib.Path.exists', return_value=True):
-                with patch('pathlib.Path.is_file', return_value=True):
-                    result = safe_read_file('test.txt')
+        with patch("builtins.open", mock_file):
+            with patch("pathlib.Path.exists", return_value=True):
+                with patch("pathlib.Path.is_file", return_value=True):
+                    result = safe_read_file("test.txt")
 
         assert result == content
 
     def test_safe_read_file_file_not_found(self):
         """Test safe file reading with non-existent file."""
-        with patch('pathlib.Path.exists', return_value=False):
+        with patch("pathlib.Path.exists", return_value=False):
             with pytest.raises(ValidationError, match="File does not exist"):
-                safe_read_file('nonexistent.txt')
+                safe_read_file("nonexistent.txt")
 
     def test_safe_read_file_permission_error(self):
         """Test safe file reading with permission error."""
-        with patch('pathlib.Path.exists', return_value=True):
-            with patch('pathlib.Path.is_file', return_value=True):
-                with patch('builtins.open', side_effect=PermissionError):
+        with patch("pathlib.Path.exists", return_value=True):
+            with patch("pathlib.Path.is_file", return_value=True):
+                with patch("builtins.open", side_effect=PermissionError):
                     with pytest.raises(ValidationError, match="Cannot read file"):
-                        safe_read_file('protected.txt')
+                        safe_read_file("protected.txt")
 
     def test_safe_write_file_success(self):
         """Test safe file writing."""
         content = "test content"
 
         # Mock the entire Path class and its methods
-        with patch('src.utils.helpers.Path') as mock_path_class:
+        with patch("src.utils.helpers.Path") as mock_path_class:
             mock_path_instance = MagicMock()
             mock_path_class.return_value = mock_path_instance
             mock_path_instance.parent.mkdir.return_value = None
             mock_path_instance.with_suffix.return_value = mock_path_instance
 
-            with patch('builtins.open', mock_open()):
-                safe_write_file('test.txt', content)
+            with patch("builtins.open", mock_open()):
+                safe_write_file("test.txt", content)
 
     def test_safe_write_file_permission_error(self):
         """Test safe file writing with permission error."""
         content = "test content"
 
-        with patch('pathlib.Path') as mock_path:
+        with patch("pathlib.Path") as mock_path:
             mock_path_instance = MagicMock()
             mock_path.return_value = mock_path_instance
             mock_path_instance.parent.mkdir.return_value = None
             mock_path_instance.with_suffix.return_value = mock_path_instance
 
-            with patch('builtins.open', side_effect=PermissionError):
+            with patch("builtins.open", side_effect=PermissionError):
                 with pytest.raises(ValidationError, match="Cannot write file"):
-                    safe_write_file('protected.txt', content)
+                    safe_write_file("protected.txt", content)
 
     def test_load_config_file_json_success(self):
         """Test loading JSON config file."""
         config_data = {"key": "value", "number": 123}
 
-        with patch('src.utils.helpers.safe_read_file', return_value=json.dumps(config_data)):
-            result = load_config_file('config.json')
+        with patch("src.utils.helpers.safe_read_file", return_value=json.dumps(config_data)):
+            result = load_config_file("config.json")
 
         assert result == config_data
 
@@ -435,18 +431,18 @@ class TestFileOperations:
         config_data = {"key": "value", "number": 123}
         yaml_content = "key: value\nnumber: 123"
 
-        with patch('src.utils.helpers.safe_read_file', return_value=yaml_content):
-            with patch('yaml.safe_load', return_value=config_data):
-                result = load_config_file('config.yaml')
+        with patch("src.utils.helpers.safe_read_file", return_value=yaml_content):
+            with patch("yaml.safe_load", return_value=config_data):
+                result = load_config_file("config.yaml")
 
         assert result == config_data
 
     def test_load_config_file_unsupported_format(self):
         """Test loading config file with unsupported format."""
         # Mock the safe_read_file to return some content
-        with patch('src.utils.helpers.safe_read_file', return_value="some content"):
+        with patch("src.utils.helpers.safe_read_file", return_value="some content"):
             with pytest.raises(ValidationError, match="Unsupported file format"):
-                load_config_file('config.txt')
+                load_config_file("config.txt")
 
 
 class TestNetworkUtilities:
@@ -457,7 +453,7 @@ class TestNetworkUtilities:
         """Test connection testing with successful connection."""
         # This function doesn't exist in helpers, so let's test measure_latency
         # instead
-        with patch('asyncio.open_connection') as mock_conn:
+        with patch("asyncio.open_connection") as mock_conn:
             mock_reader = MagicMock()
             mock_writer = MagicMock()  # Use regular MagicMock for writer
             # Configure the writer methods
@@ -465,7 +461,7 @@ class TestNetworkUtilities:
             mock_writer.wait_closed = AsyncMock(return_value=None)
             mock_conn.return_value = (mock_reader, mock_writer)
 
-            result = await measure_latency('api.example.com', 443)
+            result = await measure_latency("api.example.com", 443)
 
             assert isinstance(result, float)
             assert result >= 0
@@ -475,8 +471,8 @@ class TestNetworkUtilities:
         """Test connection testing with failed connection."""
         # This function doesn't exist in helpers, so let's test ping_host
         # instead
-        with patch('asyncio.open_connection', side_effect=Exception("Connection failed")):
-            result = await ping_host('api.example.com')
+        with patch("asyncio.open_connection", side_effect=Exception("Connection failed")):
+            result = await ping_host("api.example.com")
 
             assert isinstance(result, dict)
             assert result["success"] is False
@@ -486,7 +482,7 @@ class TestNetworkUtilities:
     @pytest.mark.asyncio
     async def test_measure_latency_success(self):
         """Test latency measurement with successful ping."""
-        with patch('asyncio.open_connection') as mock_conn:
+        with patch("asyncio.open_connection") as mock_conn:
             mock_reader = MagicMock()
             mock_writer = MagicMock()  # Use regular MagicMock for writer
             # Configure the writer methods
@@ -494,10 +490,9 @@ class TestNetworkUtilities:
             mock_writer.wait_closed = AsyncMock(return_value=None)
             mock_conn.return_value = (mock_reader, mock_writer)
 
-            with patch('asyncio.get_event_loop') as mock_loop:
-                mock_loop.return_value.time.side_effect = [
-                    100.0, 100.1]  # 100ms latency
-                result = await measure_latency('api.example.com', 443)
+            with patch("asyncio.get_event_loop") as mock_loop:
+                mock_loop.return_value.time.side_effect = [100.0, 100.1]  # 100ms latency
+                result = await measure_latency("api.example.com", 443)
 
         assert isinstance(result, float)
         assert result > 0
@@ -505,30 +500,30 @@ class TestNetworkUtilities:
     @pytest.mark.asyncio
     async def test_measure_latency_timeout(self):
         """Test latency measurement with timeout."""
-        with patch('asyncio.open_connection', side_effect=asyncio.TimeoutError()):
+        with patch("asyncio.open_connection", side_effect=asyncio.TimeoutError()):
             with pytest.raises(ValidationError, match="Cannot measure latency"):
-                await measure_latency('api.example.com', 443)
+                await measure_latency("api.example.com", 443)
 
     @pytest.mark.asyncio
     async def test_ping_host_success(self):
         """Test host ping with successful response."""
-        with patch('src.utils.helpers.measure_latency', return_value=50.0):
-            result = await ping_host('google.com')
+        with patch("src.utils.helpers.measure_latency", return_value=50.0):
+            result = await ping_host("google.com")
 
         assert isinstance(result, dict)
-        assert result['success'] is True
-        assert 'host' in result
-        assert 'avg_latency_ms' in result
+        assert result["success"] is True
+        assert "host" in result
+        assert "avg_latency_ms" in result
 
     @pytest.mark.asyncio
     async def test_ping_host_failure(self):
         """Test host ping with failed response."""
-        with patch('src.utils.helpers.measure_latency', side_effect=Exception("Connection failed")):
-            result = await ping_host('invalid-host.com')
+        with patch("src.utils.helpers.measure_latency", side_effect=Exception("Connection failed")):
+            result = await ping_host("invalid-host.com")
 
         assert isinstance(result, dict)
-        assert result['success'] is False
-        assert 'error' in result
+        assert result["success"] is False
+        assert "error" in result
 
 
 class TestStringUtilities:
@@ -712,11 +707,7 @@ class TestHelperFunctionsIntegration:
 
         # Session should be a valid string
         assert isinstance(session, str)
-        assert session in [
-            'low_activity',
-            'asian_session',
-            'european_session',
-            'american_session']
+        assert session in ["low_activity", "asian_session", "european_session", "american_session"]
 
         # Market should be open for crypto
         assert is_open is True
@@ -758,4 +749,4 @@ class TestHelperFunctionsIntegration:
 
 
 # Remove any accidental test_connection symbol from pytest collection
-del test_connection  # noqa
+del test_connection

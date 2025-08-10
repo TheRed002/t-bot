@@ -25,16 +25,11 @@ Version: 1.0.0
 """
 
 from .capital_allocator import CapitalAllocator
-from .exchange_distributor import ExchangeDistributor
 from .currency_manager import CurrencyManager
+from .exchange_distributor import ExchangeDistributor
 from .fund_flow_manager import FundFlowManager
 
-__all__ = [
-    'CapitalAllocator',
-    'ExchangeDistributor',
-    'CurrencyManager',
-    'FundFlowManager'
-]
+__all__ = ["CapitalAllocator", "CurrencyManager", "ExchangeDistributor", "FundFlowManager"]
 
 __version__ = "1.0.0"
 __author__ = "Trading Bot Framework"

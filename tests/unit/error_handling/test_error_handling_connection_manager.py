@@ -4,16 +4,18 @@ Unit tests for connection manager functionality.
 Tests connection state management, health monitoring, and resilience features.
 """
 
-import pytest
-import asyncio
-import time
 from datetime import datetime, timezone
-from unittest.mock import patch, AsyncMock, MagicMock
-from src.error_handling.connection_manager import (
-    ConnectionState, ConnectionHealth, ConnectionManager
-)
-from src.core.exceptions import TradingBotError, ExchangeError, ExchangeConnectionError
+from unittest.mock import patch
+
+import pytest
+
 from src.core.config import Config
+from src.core.exceptions import ExchangeConnectionError
+from src.error_handling.connection_manager import (
+    ConnectionHealth,
+    ConnectionManager,
+    ConnectionState,
+)
 
 
 class TestConnectionState:
@@ -46,7 +48,7 @@ class TestConnectionHealth:
             connection_quality=0.95,
             uptime_seconds=3600,
             reconnect_count=2,
-            last_error="Connection timeout"
+            last_error="Connection timeout",
         )
 
         assert health.last_heartbeat == timestamp
@@ -66,7 +68,7 @@ class TestConnectionHealth:
             packet_loss=0.05,
             connection_quality=0.8,
             uptime_seconds=1800,
-            reconnect_count=1
+            reconnect_count=1,
         )
 
         health_dict = health.to_dict()
@@ -105,17 +107,18 @@ class TestConnectionManager:
     @pytest.mark.asyncio
     async def test_establish_connection_success(self, connection_manager):
         """Test successful connection establishment."""
+
         async def mock_connect(**kwargs):
             return {"status": "connected", "connection_id": "test_conn"}
 
         # Mock the health monitoring to avoid hanging
-        with patch.object(connection_manager, '_monitor_connection_health') as mock_monitor:
+        with patch.object(connection_manager, "_monitor_connection_health") as mock_monitor:
             result = await connection_manager.establish_connection(
                 connection_id="test_conn",
                 connection_type="exchange",
                 connect_func=mock_connect,
                 host="localhost",
-                port=8080
+                port=8080,
             )
 
             assert result is True
@@ -127,17 +130,18 @@ class TestConnectionManager:
     @pytest.mark.asyncio
     async def test_establish_connection_failure(self, connection_manager):
         """Test connection establishment failure."""
+
         async def mock_connect(**kwargs):
             raise ExchangeConnectionError("Connection failed")
 
         # Mock the health monitoring to avoid hanging
-        with patch.object(connection_manager, '_monitor_connection_health'):
+        with patch.object(connection_manager, "_monitor_connection_health"):
             result = await connection_manager.establish_connection(
                 connection_id="test_conn",
                 connection_type="exchange",
                 connect_func=mock_connect,
                 host="localhost",
-                port=8080
+                port=8080,
             )
 
             assert result is False
@@ -146,18 +150,19 @@ class TestConnectionManager:
     @pytest.mark.asyncio
     async def test_close_connection(self, connection_manager):
         """Test connection closure."""
+
         # First establish a connection
         async def mock_connect(**kwargs):
             return {"status": "connected", "connection_id": "test_conn"}
 
         # Mock the health monitoring to avoid hanging
-        with patch.object(connection_manager, '_monitor_connection_health'):
+        with patch.object(connection_manager, "_monitor_connection_health"):
             await connection_manager.establish_connection(
                 connection_id="test_conn",
                 connection_type="exchange",
                 connect_func=mock_connect,
                 host="localhost",
-                port=8080
+                port=8080,
             )
 
             # Then close it
@@ -165,23 +170,26 @@ class TestConnectionManager:
             assert result is True
             # The connection should still exist but with DISCONNECTED state
             assert "test_conn" in connection_manager.connections
-            assert connection_manager.connections["test_conn"]["state"] == ConnectionState.DISCONNECTED
+            assert (
+                connection_manager.connections["test_conn"]["state"] == ConnectionState.DISCONNECTED
+            )
 
     @pytest.mark.asyncio
     async def test_reconnect_connection(self, connection_manager):
         """Test connection reconnection."""
+
         # First establish a connection
         async def mock_connect(**kwargs):
             return {"status": "connected", "connection_id": "test_conn"}
 
         # Mock the health monitoring to avoid hanging
-        with patch.object(connection_manager, '_monitor_connection_health'):
+        with patch.object(connection_manager, "_monitor_connection_health"):
             await connection_manager.establish_connection(
                 connection_id="test_conn",
                 connection_type="exchange",
                 connect_func=mock_connect,
                 host="localhost",
-                port=8080
+                port=8080,
             )
 
             # Then reconnect it
@@ -198,7 +206,7 @@ class TestConnectionManager:
             "state": ConnectionState.CONNECTED,
             "established_at": datetime.now(timezone.utc),
             "last_activity": datetime.now(timezone.utc),
-            "reconnect_count": 0
+            "reconnect_count": 0,
         }
 
         # Add health monitor
@@ -208,7 +216,7 @@ class TestConnectionManager:
             packet_loss=0.01,
             connection_quality=0.95,
             uptime_seconds=3600,
-            reconnect_count=0
+            reconnect_count=0,
         )
 
         status = connection_manager.get_connection_status("test_conn")
@@ -226,7 +234,7 @@ class TestConnectionManager:
             "state": ConnectionState.CONNECTED,
             "established_at": now,
             "last_activity": now,
-            "reconnect_count": 0
+            "reconnect_count": 0,
         }
         connection_manager.connections["conn2"] = {
             "connection": {"status": "disconnected"},
@@ -234,7 +242,7 @@ class TestConnectionManager:
             "state": ConnectionState.DISCONNECTED,
             "established_at": now,
             "last_activity": now,
-            "reconnect_count": 1
+            "reconnect_count": 1,
         }
 
         # Add health monitors
@@ -244,7 +252,7 @@ class TestConnectionManager:
             packet_loss=0.01,
             connection_quality=0.95,
             uptime_seconds=3600,
-            reconnect_count=0
+            reconnect_count=0,
         )
         connection_manager.health_monitors["conn2"] = ConnectionHealth(
             last_heartbeat=now,
@@ -252,7 +260,7 @@ class TestConnectionManager:
             packet_loss=0.05,
             connection_quality=0.8,
             uptime_seconds=1800,
-            reconnect_count=1
+            reconnect_count=1,
         )
 
         all_status = connection_manager.get_all_connection_status()
@@ -270,7 +278,7 @@ class TestConnectionManager:
             "state": ConnectionState.CONNECTED,
             "established_at": now,
             "last_activity": now,
-            "reconnect_count": 0
+            "reconnect_count": 0,
         }
 
         # Add a healthy connection
@@ -280,7 +288,7 @@ class TestConnectionManager:
             packet_loss=0.01,
             connection_quality=0.95,
             uptime_seconds=3600,
-            reconnect_count=0
+            reconnect_count=0,
         )
 
         assert connection_manager.is_connection_healthy("test_conn") is True
@@ -288,11 +296,7 @@ class TestConnectionManager:
     @pytest.mark.asyncio
     async def test_queue_message(self, connection_manager):
         """Test message queuing."""
-        message = {
-            "type": "order",
-            "data": {
-                "symbol": "BTCUSDT",
-                "side": "buy"}}
+        message = {"type": "order", "data": {"symbol": "BTCUSDT", "side": "buy"}}
 
         result = await connection_manager.queue_message("test_conn", message)
         assert result is True
@@ -305,7 +309,7 @@ class TestConnectionManager:
         # Add messages to queue
         messages = [
             {"type": "order", "data": {"symbol": "BTCUSDT", "side": "buy"}},
-            {"type": "cancel", "data": {"order_id": "123"}}
+            {"type": "cancel", "data": {"order_id": "123"}},
         ]
 
         for message in messages:

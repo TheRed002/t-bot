@@ -7,27 +7,21 @@ It detects volatility regimes, trend regimes, and correlation regimes with chang
 CRITICAL: This module integrates with existing risk management framework from P-008/P-009.
 """
 
+from datetime import datetime
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime, timedelta
-from decimal import Decimal
-from enum import Enum
-import asyncio
 
-# MANDATORY: Import from P-001
-from src.core.types import RiskLevel, MarketData, RiskMetrics, MarketRegime, RegimeChangeEvent
-from src.core.exceptions import RiskManagementError, ValidationError
-from pydantic import BaseModel, Field
+from src.core.exceptions import RiskManagementError
 from src.core.logging import get_logger
 
-# MANDATORY: Import from P-007A
-from src.utils.decorators import time_execution, retry
-from src.utils.validators import validate_price
+# MANDATORY: Import from P-001
+from src.core.types import MarketData, MarketRegime, RegimeChangeEvent
 
 # MANDATORY: Import from P-008/P-009
-from src.risk_management.base import BaseRiskManager
-from src.risk_management.risk_metrics import RiskCalculator
+# MANDATORY: Import from P-007A
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -40,49 +34,44 @@ class MarketRegimeDetector:
     for dynamic risk management adaptation.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         """Initialize market regime detector with configuration."""
         self.config = config
-        self.volatility_window = config.get('volatility_window', 20)
-        self.trend_window = config.get('trend_window', 50)
-        self.correlation_window = config.get('correlation_window', 30)
-        self.regime_change_threshold = config.get(
-            'regime_change_threshold', 0.7)
+        self.volatility_window = config.get("volatility_window", 20)
+        self.trend_window = config.get("trend_window", 50)
+        self.correlation_window = config.get("correlation_window", 30)
+        self.regime_change_threshold = config.get("regime_change_threshold", 0.7)
 
         # Volatility thresholds (annualized)
         self.volatility_thresholds = {
-            MarketRegime.LOW_VOLATILITY: 0.15,    # < 15% annualized
+            MarketRegime.LOW_VOLATILITY: 0.15,  # < 15% annualized
             MarketRegime.MEDIUM_VOLATILITY: 0.30,  # 15-30% annualized
-            MarketRegime.HIGH_VOLATILITY: 0.50     # > 30% annualized
+            MarketRegime.HIGH_VOLATILITY: 0.50,  # > 30% annualized
         }
 
         # Trend strength thresholds
-        self.trend_thresholds = {
-            'weak_trend': 0.3,
-            'strong_trend': 0.7
-        }
+        self.trend_thresholds = {"weak_trend": 0.3, "strong_trend": 0.7}
 
         # Correlation thresholds
         self.correlation_thresholds = {
             MarketRegime.LOW_CORRELATION: 0.3,
-            MarketRegime.HIGH_CORRELATION: 0.7
+            MarketRegime.HIGH_CORRELATION: 0.7,
         }
 
         # State tracking
         self.current_regime = MarketRegime.MEDIUM_VOLATILITY
-        self.regime_history: List[RegimeChangeEvent] = []
-        self.price_data: Dict[str, List[float]] = {}
+        self.regime_history: list[RegimeChangeEvent] = []
+        self.price_data: dict[str, list[float]] = {}
         self.last_update = datetime.now()
 
-        logger.info("Market regime detector initialized",
-                    volatility_window=self.volatility_window,
-                    trend_window=self.trend_window)
+        logger.info(
+            "Market regime detector initialized",
+            volatility_window=self.volatility_window,
+            trend_window=self.trend_window,
+        )
 
     @time_execution
-    async def detect_volatility_regime(
-            self,
-            symbol: str,
-            price_data: List[float]) -> MarketRegime:
+    async def detect_volatility_regime(self, symbol: str, price_data: list[float]) -> MarketRegime:
         """
         Detect volatility regime based on price data.
 
@@ -98,7 +87,8 @@ class MarketRegimeDetector:
                 logger.warning(
                     "Insufficient data for volatility regime detection",
                     symbol=symbol,
-                    data_points=len(price_data))
+                    data_points=len(price_data),
+                )
                 return MarketRegime.MEDIUM_VOLATILITY
 
             # Calculate returns
@@ -119,22 +109,17 @@ class MarketRegimeDetector:
                 "Volatility regime detected",
                 symbol=symbol,
                 volatility=volatility,
-                regime=regime.value)
+                regime=regime.value,
+            )
 
             return regime
 
         except Exception as e:
-            logger.error("Error detecting volatility regime",
-                         symbol=symbol, error=str(e))
-            raise RiskManagementError(
-                f"Volatility regime detection failed: {
-                    str(e)}")
+            logger.error("Error detecting volatility regime", symbol=symbol, error=str(e))
+            raise RiskManagementError(f"Volatility regime detection failed: {e!s}")
 
     @time_execution
-    async def detect_trend_regime(
-            self,
-            symbol: str,
-            price_data: List[float]) -> MarketRegime:
+    async def detect_trend_regime(self, symbol: str, price_data: list[float]) -> MarketRegime:
         """
         Detect trend regime based on price data.
 
@@ -147,8 +132,11 @@ class MarketRegimeDetector:
         """
         try:
             if len(price_data) < self.trend_window:
-                logger.warning("Insufficient data for trend regime detection",
-                               symbol=symbol, data_points=len(price_data))
+                logger.warning(
+                    "Insufficient data for trend regime detection",
+                    symbol=symbol,
+                    data_points=len(price_data),
+                )
                 return MarketRegime.RANGING
 
             # Calculate linear regression slope
@@ -157,11 +145,12 @@ class MarketRegimeDetector:
 
             # Calculate R-squared (trend strength)
             y_pred = slope * x + intercept
-            r_squared = 1 - np.sum((price_data - y_pred) ** 2) / \
-                np.sum((price_data - np.mean(price_data)) ** 2)
+            r_squared = 1 - np.sum((price_data - y_pred) ** 2) / np.sum(
+                (price_data - np.mean(price_data)) ** 2
+            )
 
             # Classify trend regime
-            if r_squared < self.trend_thresholds['weak_trend']:
+            if r_squared < self.trend_thresholds["weak_trend"]:
                 regime = MarketRegime.RANGING
             elif slope > 0:
                 regime = MarketRegime.TRENDING_UP
@@ -173,22 +162,19 @@ class MarketRegimeDetector:
                 symbol=symbol,
                 slope=slope,
                 r_squared=r_squared,
-                regime=regime.value)
+                regime=regime.value,
+            )
 
             return regime
 
         except Exception as e:
-            logger.error("Error detecting trend regime",
-                         symbol=symbol, error=str(e))
-            raise RiskManagementError(
-                f"Trend regime detection failed: {
-                    str(e)}")
+            logger.error("Error detecting trend regime", symbol=symbol, error=str(e))
+            raise RiskManagementError(f"Trend regime detection failed: {e!s}")
 
     @time_execution
-    async def detect_correlation_regime(self,
-                                        symbols: List[str],
-                                        price_data_dict: Dict[str,
-                                                              List[float]]) -> MarketRegime:
+    async def detect_correlation_regime(
+        self, symbols: list[str], price_data_dict: dict[str, list[float]]
+    ) -> MarketRegime:
         """
         Detect correlation regime across multiple symbols.
 
@@ -201,17 +187,18 @@ class MarketRegimeDetector:
         """
         try:
             if len(symbols) < 2:
-                logger.warning(
-                    "Insufficient symbols for correlation regime detection")
+                logger.warning("Insufficient symbols for correlation regime detection")
                 return MarketRegime.LOW_CORRELATION
 
             # Calculate returns for all symbols
             returns_dict = {}
-            min_length = float('inf')
+            min_length = float("inf")
 
             for symbol in symbols:
-                if symbol in price_data_dict and len(
-                        price_data_dict[symbol]) >= self.correlation_window:
+                if (
+                    symbol in price_data_dict
+                    and len(price_data_dict[symbol]) >= self.correlation_window
+                ):
                     returns = np.diff(np.log(price_data_dict[symbol]))
                     returns_dict[symbol] = returns
                     min_length = min(min_length, len(returns))
@@ -242,20 +229,18 @@ class MarketRegimeDetector:
             else:
                 regime = MarketRegime.LOW_CORRELATION
 
-            logger.debug("Correlation regime detected",
-                         avg_correlation=avg_correlation, regime=regime.value)
+            logger.debug(
+                "Correlation regime detected", avg_correlation=avg_correlation, regime=regime.value
+            )
 
             return regime
 
         except Exception as e:
             logger.error("Error detecting correlation regime", error=str(e))
-            raise RiskManagementError(
-                f"Correlation regime detection failed: {
-                    str(e)}")
+            raise RiskManagementError(f"Correlation regime detection failed: {e!s}")
 
     @time_execution
-    async def detect_comprehensive_regime(
-            self, market_data: List[MarketData]) -> MarketRegime:
+    async def detect_comprehensive_regime(self, market_data: list[MarketData]) -> MarketRegime:
         """
         Detect comprehensive market regime combining all factors.
 
@@ -271,7 +256,7 @@ class MarketRegimeDetector:
                 return MarketRegime.MEDIUM_VOLATILITY
 
             # Group data by symbol
-            symbol_data: Dict[str, List[float]] = {}
+            symbol_data: dict[str, list[float]] = {}
             for data in market_data:
                 if data.symbol not in symbol_data:
                     symbol_data[data.symbol] = []
@@ -282,9 +267,7 @@ class MarketRegimeDetector:
             trend_regimes = []
 
             for symbol, prices in symbol_data.items():
-                if len(prices) >= max(
-                        self.volatility_window,
-                        self.trend_window):
+                if len(prices) >= max(self.volatility_window, self.trend_window):
                     vol_regime = await self.detect_volatility_regime(symbol, prices)
                     trend_regime = await self.detect_trend_regime(symbol, prices)
                     volatility_regimes.append(vol_regime)
@@ -306,16 +289,15 @@ class MarketRegimeDetector:
             return comprehensive_regime
 
         except Exception as e:
-            logger.error(
-                "Error in comprehensive regime detection",
-                error=str(e))
-            raise RiskManagementError(
-                f"Comprehensive regime detection failed: {
-                    str(e)}")
+            logger.error("Error in comprehensive regime detection", error=str(e))
+            raise RiskManagementError(f"Comprehensive regime detection failed: {e!s}")
 
-    def _combine_regimes(self, volatility_regimes: List[MarketRegime],
-                         trend_regimes: List[MarketRegime],
-                         correlation_regime: MarketRegime) -> MarketRegime:
+    def _combine_regimes(
+        self,
+        volatility_regimes: list[MarketRegime],
+        trend_regimes: list[MarketRegime],
+        correlation_regime: MarketRegime,
+    ) -> MarketRegime:
         """
         Combine individual regimes into comprehensive classification.
 
@@ -338,12 +320,18 @@ class MarketRegimeDetector:
             trend_counts[regime] = trend_counts.get(regime, 0) + 1
 
         # Determine dominant volatility regime
-        dominant_vol = max(vol_counts.items(), key=lambda x: x[1])[
-            0] if vol_counts else MarketRegime.MEDIUM_VOLATILITY
+        dominant_vol = (
+            max(vol_counts.items(), key=lambda x: x[1])[0]
+            if vol_counts
+            else MarketRegime.MEDIUM_VOLATILITY
+        )
 
         # Determine dominant trend regime
-        dominant_trend = max(trend_counts.items(), key=lambda x: x[1])[
-            0] if trend_counts else MarketRegime.RANGING
+        dominant_trend = (
+            max(trend_counts.items(), key=lambda x: x[1])[0]
+            if trend_counts
+            else MarketRegime.RANGING
+        )
 
         # Combine for comprehensive classification
         if dominant_vol == MarketRegime.HIGH_VOLATILITY:
@@ -374,25 +362,27 @@ class MarketRegimeDetector:
                     confidence=confidence,
                     timestamp=datetime.now(),
                     trigger_metrics={
-                        'volatility_window': self.volatility_window,
-                        'trend_window': self.trend_window,
-                        'correlation_window': self.correlation_window},
-                    description=f"Regime change from {
-                        self.current_regime.value} to {
-                        new_regime.value}")
+                        "volatility_window": self.volatility_window,
+                        "trend_window": self.trend_window,
+                        "correlation_window": self.correlation_window,
+                    },
+                    description=f"Regime change from {self.current_regime.value} to {
+                        new_regime.value
+                    }",
+                )
 
                 self.regime_history.append(event)
                 self.current_regime = new_regime
 
-                logger.warning("Market regime change detected",
-                               from_regime=self.current_regime.value,
-                               to_regime=new_regime.value,
-                               confidence=confidence)
+                logger.warning(
+                    "Market regime change detected",
+                    from_regime=self.current_regime.value,
+                    to_regime=new_regime.value,
+                    confidence=confidence,
+                )
 
                 # TODO: Remove in production - Debug logging
-                logger.debug(
-                    "Regime change event created",
-                    event_data=event.model_dump())
+                logger.debug("Regime change event created", event_data=event.model_dump())
 
     def _calculate_change_confidence(self, new_regime: MarketRegime) -> float:
         """
@@ -409,8 +399,9 @@ class MarketRegimeDetector:
             return 0.8  # High confidence for first change
 
         # Check if this is a reversal or continuation
-        recent_changes = self.regime_history[-3:] if len(
-            self.regime_history) >= 3 else self.regime_history
+        recent_changes = (
+            self.regime_history[-3:] if len(self.regime_history) >= 3 else self.regime_history
+        )
 
         # Higher confidence if this is a new regime type
         if new_regime not in [event.to_regime for event in recent_changes]:
@@ -422,7 +413,7 @@ class MarketRegimeDetector:
 
         return 0.8
 
-    def get_regime_history(self, limit: int = 10) -> List[RegimeChangeEvent]:
+    def get_regime_history(self, limit: int = 10) -> list[RegimeChangeEvent]:
         """
         Get recent regime change history.
 
@@ -443,7 +434,7 @@ class MarketRegimeDetector:
         """
         return self.current_regime
 
-    def get_regime_statistics(self) -> Dict[str, Any]:
+    def get_regime_statistics(self) -> dict[str, Any]:
         """
         Get regime detection statistics.
 
@@ -452,21 +443,22 @@ class MarketRegimeDetector:
         """
         if not self.regime_history:
             return {
-                'total_changes': 0,
-                'current_regime': self.current_regime.value,
-                'regime_duration_hours': 0,
-                'last_change': None
+                "total_changes": 0,
+                "current_regime": self.current_regime.value,
+                "regime_duration_hours": 0,
+                "last_change": None,
             }
 
         total_changes = len(self.regime_history)
         regime_duration = (
-            datetime.now() - self.regime_history[-1].timestamp).total_seconds() / 3600
+            datetime.now() - self.regime_history[-1].timestamp
+        ).total_seconds() / 3600
 
         stats = {
-            'total_changes': total_changes,
-            'current_regime': self.current_regime.value,
-            'regime_duration_hours': regime_duration,
-            'last_change': self.regime_history[-1].timestamp.isoformat()
+            "total_changes": total_changes,
+            "current_regime": self.current_regime.value,
+            "regime_duration_hours": regime_duration,
+            "last_change": self.regime_history[-1].timestamp.isoformat(),
         }
 
         return stats

@@ -5,27 +5,24 @@ This module tests the complete risk management workflow including all components
 working together in realistic scenarios.
 """
 
-import pytest
-import asyncio
+from datetime import datetime
 from decimal import Decimal
-from datetime import datetime, timedelta
-from unittest.mock import patch
 
+import pytest
+
+from src.core.config import Config
+from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.types import (
-    Signal,
-    SignalDirection,
     MarketData,
-    Position,
     OrderRequest,
     OrderSide,
     OrderType,
-    RiskMetrics,
+    Position,
     RiskLevel,
-    PositionSizeMethod)
-from src.core.exceptions import (
-    RiskManagementError, PositionLimitError, ValidationError
+    RiskMetrics,
+    Signal,
+    SignalDirection,
 )
-from src.core.config import Config
 from src.risk_management import RiskManager
 
 
@@ -53,7 +50,7 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             ),
             Position(
                 symbol="ETHUSDT",
@@ -62,8 +59,8 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("3100"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
-            )
+                timestamp=datetime.now(),
+            ),
         ]
 
     @pytest.fixture
@@ -79,7 +76,7 @@ class TestRiskManagementIntegration:
                 ask=Decimal("51010"),
                 open_price=Decimal("50000"),
                 high_price=Decimal("52000"),
-                low_price=Decimal("49000")
+                low_price=Decimal("49000"),
             ),
             MarketData(
                 symbol="ETHUSDT",
@@ -90,8 +87,8 @@ class TestRiskManagementIntegration:
                 ask=Decimal("3105"),
                 open_price=Decimal("3000"),
                 high_price=Decimal("3200"),
-                low_price=Decimal("2900")
-            )
+                low_price=Decimal("2900"),
+            ),
         ]
 
     @pytest.fixture
@@ -103,24 +100,21 @@ class TestRiskManagementIntegration:
                 confidence=0.8,
                 timestamp=datetime.now(),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy"
+                strategy_name="test_strategy",
             ),
             Signal(
                 direction=SignalDirection.SELL,
                 confidence=0.7,
                 timestamp=datetime.now(),
                 symbol="ETHUSDT",
-                strategy_name="test_strategy"
-            )
+                strategy_name="test_strategy",
+            ),
         ]
 
     @pytest.mark.asyncio
     async def test_complete_risk_management_workflow(
-            self,
-            risk_manager,
-            sample_positions,
-            sample_market_data,
-            sample_signals):
+        self, risk_manager, sample_positions, sample_market_data, sample_signals
+    ):
         """Test complete risk management workflow."""
         portfolio_value = Decimal("100000")
 
@@ -128,14 +122,17 @@ class TestRiskManagementIntegration:
         await risk_manager.update_portfolio_state(sample_positions, portfolio_value)
 
         # Step 2: Calculate risk metrics
-        risk_metrics = await risk_manager.calculate_risk_metrics(sample_positions, sample_market_data)
+        risk_metrics = await risk_manager.calculate_risk_metrics(
+            sample_positions, sample_market_data
+        )
 
         assert isinstance(risk_metrics, RiskMetrics)
         assert risk_metrics.risk_level in [
             RiskLevel.LOW,
             RiskLevel.MEDIUM,
             RiskLevel.HIGH,
-            RiskLevel.CRITICAL]
+            RiskLevel.CRITICAL,
+        ]
         assert risk_metrics.var_1d >= 0
         assert risk_metrics.var_5d >= 0
         assert risk_metrics.expected_shortfall >= 0
@@ -151,8 +148,9 @@ class TestRiskManagementIntegration:
             if signal.direction != SignalDirection.HOLD:
                 position_size = await risk_manager.calculate_position_size(signal, portfolio_value)
                 assert position_size >= 0
-                assert position_size <= portfolio_value * \
-                    Decimal(str(risk_manager.risk_config.max_position_size_pct))
+                assert position_size <= portfolio_value * Decimal(
+                    str(risk_manager.risk_config.max_position_size_pct)
+                )
 
         # Step 5: Check portfolio limits for new positions
         new_position = Position(
@@ -162,7 +160,7 @@ class TestRiskManagementIntegration:
             current_price=Decimal("0.5"),
             unrealized_pnl=Decimal("0"),
             side=OrderSide.BUY,
-            timestamp=datetime.now()
+            timestamp=datetime.now(),
         )
 
         can_add = await risk_manager.check_portfolio_limits(new_position)
@@ -193,21 +191,23 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("1000"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
             positions.append(position)
 
-            market_data.append(MarketData(
-                symbol=symbol,
-                price=Decimal("51000"),
-                volume=Decimal("10000"),
-                timestamp=datetime.now(),
-                bid=Decimal("50990"),
-                ask=Decimal("51010"),
-                open_price=Decimal("50000"),
-                high_price=Decimal("52000"),
-                low_price=Decimal("49000")
-            ))
+            market_data.append(
+                MarketData(
+                    symbol=symbol,
+                    price=Decimal("51000"),
+                    volume=Decimal("10000"),
+                    timestamp=datetime.now(),
+                    bid=Decimal("50990"),
+                    ask=Decimal("51010"),
+                    open_price=Decimal("50000"),
+                    high_price=Decimal("52000"),
+                    low_price=Decimal("49000"),
+                )
+            )
 
         # Simulate historical portfolio data to enable proper VaR calculation
         # Update portfolio state multiple times with varying values to create
@@ -226,7 +226,8 @@ class TestRiskManagementIntegration:
             RiskLevel.LOW,
             RiskLevel.MEDIUM,
             RiskLevel.HIGH,
-            RiskLevel.CRITICAL]
+            RiskLevel.CRITICAL,
+        ]
         assert risk_metrics.var_1d > 0
         # 5-day VaR should be greater than 1-day VaR due to time scaling
         assert risk_metrics.var_5d > risk_metrics.var_1d
@@ -237,13 +238,14 @@ class TestRiskManagementIntegration:
             confidence=0.9,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         position_size = await risk_manager.calculate_position_size(signal, portfolio_value)
         assert position_size > 0
-        assert position_size <= portfolio_value * \
-            Decimal(str(risk_manager.risk_config.max_position_size_pct))
+        assert position_size <= portfolio_value * Decimal(
+            str(risk_manager.risk_config.max_position_size_pct)
+        )
 
     @pytest.mark.asyncio
     async def test_risk_management_with_high_volatility(self, risk_manager):
@@ -257,7 +259,7 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("45000"),  # 10% loss
                 unrealized_pnl=Decimal("-500"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         ]
 
@@ -284,13 +286,11 @@ class TestRiskManagementIntegration:
         for i in range(30):  # Create 30 days of history
             # Simulate declining portfolio value
             decline_factor = 1 - (i * 0.003)  # Gradual decline
-            portfolio_value = initial_portfolio_value * \
-                Decimal(str(decline_factor))
+            portfolio_value = initial_portfolio_value * Decimal(str(decline_factor))
             await risk_manager.update_portfolio_state(positions, portfolio_value)
 
         # Use the final (lower) portfolio value for risk calculation
-        final_portfolio_value = initial_portfolio_value * \
-            Decimal("0.85")  # 15% decline
+        final_portfolio_value = initial_portfolio_value * Decimal("0.85")  # 15% decline
         await risk_manager.update_portfolio_state(positions, final_portfolio_value)
 
         # Update the position to reflect the declining portfolio value
@@ -312,8 +312,7 @@ class TestRiskManagementIntegration:
         assert should_exit is True
 
     @pytest.mark.asyncio
-    async def test_risk_management_with_multiple_strategies(
-            self, risk_manager):
+    async def test_risk_management_with_multiple_strategies(self, risk_manager):
         """Test risk management with multiple trading strategies."""
         # Create signals from different strategies
         signals = [
@@ -322,22 +321,22 @@ class TestRiskManagementIntegration:
                 confidence=0.8,
                 timestamp=datetime.now(),
                 symbol="BTCUSDT",
-                strategy_name="momentum_strategy"
+                strategy_name="momentum_strategy",
             ),
             Signal(
                 direction=SignalDirection.SELL,
                 confidence=0.7,
                 timestamp=datetime.now(),
                 symbol="ETHUSDT",
-                strategy_name="mean_reversion_strategy"
+                strategy_name="mean_reversion_strategy",
             ),
             Signal(
                 direction=SignalDirection.BUY,
                 confidence=0.9,
                 timestamp=datetime.now(),
                 symbol="ADAUSDT",
-                strategy_name="ml_strategy"
-            )
+                strategy_name="ml_strategy",
+            ),
         ]
 
         portfolio_value = Decimal("100000")
@@ -374,7 +373,7 @@ class TestRiskManagementIntegration:
             confidence=0.0,  # Invalid confidence
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         portfolio_value = Decimal("10000")
@@ -391,7 +390,7 @@ class TestRiskManagementIntegration:
             price=None,
             stop_price=None,
             time_in_force="GTC",
-            client_order_id="test_order_123"
+            client_order_id="test_order_123",
         )
 
         with pytest.raises(ValidationError):
@@ -399,7 +398,8 @@ class TestRiskManagementIntegration:
 
     @pytest.mark.asyncio
     async def test_risk_management_performance(
-            self, risk_manager, sample_positions, sample_market_data):
+        self, risk_manager, sample_positions, sample_market_data
+    ):
         """Test risk management performance with multiple rapid operations."""
         portfolio_value = Decimal("100000")
 
@@ -411,7 +411,9 @@ class TestRiskManagementIntegration:
 
         for _ in range(10):
             # Calculate risk metrics
-            risk_metrics = await risk_manager.calculate_risk_metrics(sample_positions, sample_market_data)
+            risk_metrics = await risk_manager.calculate_risk_metrics(
+                sample_positions, sample_market_data
+            )
             assert isinstance(risk_metrics, RiskMetrics)
 
             # Validate signals
@@ -420,7 +422,7 @@ class TestRiskManagementIntegration:
                 confidence=0.8,
                 timestamp=datetime.now(),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy"
+                strategy_name="test_strategy",
             )
             is_valid = await risk_manager.validate_signal(signal)
             assert isinstance(is_valid, bool)
@@ -458,7 +460,7 @@ class TestRiskManagementIntegration:
             confidence=0.8,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         with pytest.raises(RiskManagementError):
@@ -483,7 +485,7 @@ class TestRiskManagementIntegration:
             confidence=0.8,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy"
+            strategy_name="test_strategy",
         )
 
         position_size = await risk_manager.calculate_position_size(signal, portfolio_value)
@@ -511,7 +513,7 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
         ]
 
@@ -525,15 +527,14 @@ class TestRiskManagementIntegration:
                 ask=Decimal("51010"),
                 open_price=Decimal("50000"),
                 high_price=Decimal("52000"),
-                low_price=Decimal("49000")
+                low_price=Decimal("49000"),
             )
         ]
 
         # Simulate some historical data to avoid CRITICAL risk level due to insufficient data
         # Update portfolio state multiple times with stable values
         for i in range(30):  # Create 30 days of history
-            stable_value = portfolio_value + \
-                Decimal(str(i * 100))  # Gradual increase
+            stable_value = portfolio_value + Decimal(str(i * 100))  # Gradual increase
             await risk_manager.update_portfolio_state(positions, stable_value)
 
         initial_metrics = await risk_manager.calculate_risk_metrics(positions, market_data)

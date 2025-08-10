@@ -8,29 +8,23 @@ CRITICAL: This integrates with P-001 (core types, exceptions, config), P-002A (e
 and P-003 (base exchange interface) components.
 """
 
-import asyncio
-import json
-import time
-from typing import Dict, List, Optional, Callable, Any
-from decimal import Decimal
+from collections.abc import Callable
 from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+# Coinbase-specific imports
+from coinbase.websocket import WSClient, WSClientConnectionClosedException, WSClientException
+
+from src.core.config import Config
+from src.core.exceptions import ExchangeConnectionError, ExchangeError
+from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import (
-    MarketData, Ticker, OrderBook, Trade, OrderStatus
-)
-from src.core.exceptions import (
-    ExchangeError, ExchangeConnectionError, ExchangeRateLimitError
-)
-from src.core.config import Config
-from src.core.logging import get_logger
+from src.core.types import OrderBook, Ticker, Trade
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-
-# Coinbase-specific imports
-from coinbase.websocket import WSClient
-from coinbase.websocket import WSClientException, WSClientConnectionClosedException
 
 logger = get_logger(__name__)
 
@@ -61,16 +55,16 @@ class CoinbaseWebSocketHandler:
         self.sandbox = config.exchanges.coinbase_sandbox
 
         # WebSocket client
-        self.ws_client: Optional[WSClient] = None
+        self.ws_client: WSClient | None = None
 
         # Stream management
-        self.active_streams: Dict[str, Any] = {}
-        self.callbacks: Dict[str, List[Callable]] = {}
+        self.active_streams: dict[str, Any] = {}
+        self.callbacks: dict[str, list[Callable]] = {}
         self.connected = False
         self.last_heartbeat = None
 
         # Message queue for reconnection
-        self.message_queue: List[Dict] = []
+        self.message_queue: list[dict] = []
         self.max_queue_size = 1000
 
         logger.info(f"Initialized {exchange_name} WebSocket handler")
@@ -85,9 +79,7 @@ class CoinbaseWebSocketHandler:
         try:
             # Initialize WebSocket client
             self.ws_client = WSClient(
-                api_key=self.api_key,
-                api_secret=self.api_secret,
-                sandbox=self.sandbox
+                api_key=self.api_key, api_secret=self.api_secret, sandbox=self.sandbox
             )
 
             # Open connection
@@ -96,23 +88,15 @@ class CoinbaseWebSocketHandler:
             self.connected = True
             self.last_heartbeat = datetime.now(timezone.utc)
 
-            logger.info(
-                f"Successfully connected to {
-                    self.exchange_name} WebSocket")
+            logger.info(f"Successfully connected to {self.exchange_name} WebSocket")
             return True
 
         except (WSClientException, WSClientConnectionClosedException) as e:
-            logger.error(
-                f"Failed to connect to {
-                    self.exchange_name} WebSocket: {
-                    str(e)}")
+            logger.error(f"Failed to connect to {self.exchange_name} WebSocket: {e!s}")
             self.connected = False
             return False
         except Exception as e:
-            logger.error(
-                f"Unexpected error connecting to {
-                    self.exchange_name} WebSocket: {
-                    str(e)}")
+            logger.error(f"Unexpected error connecting to {self.exchange_name} WebSocket: {e!s}")
             self.connected = False
             return False
 
@@ -128,20 +112,13 @@ class CoinbaseWebSocketHandler:
             logger.info(f"Disconnected from {self.exchange_name} WebSocket")
 
         except (WSClientException, WSClientConnectionClosedException) as e:
-            logger.error(
-                f"Error disconnecting from {
-                    self.exchange_name} WebSocket: {
-                    str(e)}")
+            logger.error(f"Error disconnecting from {self.exchange_name} WebSocket: {e!s}")
         except Exception as e:
             logger.error(
-                f"Unexpected error disconnecting from {
-                    self.exchange_name} WebSocket: {
-                    str(e)}")
+                f"Unexpected error disconnecting from {self.exchange_name} WebSocket: {e!s}"
+            )
 
-    async def subscribe_to_ticker(
-            self,
-            symbol: str,
-            callback: Callable) -> None:
+    async def subscribe_to_ticker(self, symbol: str, callback: Callable) -> None:
         """
         Subscribe to ticker updates for a symbol.
 
@@ -161,7 +138,7 @@ class CoinbaseWebSocketHandler:
             self.active_streams[stream_key] = {
                 "type": "ticker",
                 "symbol": symbol,
-                "callback": callback
+                "callback": callback,
             }
 
             if symbol not in self.callbacks:
@@ -171,18 +148,13 @@ class CoinbaseWebSocketHandler:
             logger.info(f"Subscribed to ticker stream for {symbol}")
 
         except (WSClientException, WSClientConnectionClosedException) as e:
-            logger.error(
-                f"Failed to subscribe to ticker for {symbol}: {
-                    str(e)}")
-            raise ExchangeError(f"Failed to subscribe to ticker: {str(e)}")
+            logger.error(f"Failed to subscribe to ticker for {symbol}: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to ticker: {e!s}")
         except Exception as e:
-            logger.error(
-                f"Unexpected error subscribing to ticker for {symbol}: {
-                    str(e)}")
-            raise ExchangeError(f"Failed to subscribe to ticker: {str(e)}")
+            logger.error(f"Unexpected error subscribing to ticker for {symbol}: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to ticker: {e!s}")
 
-    async def subscribe_to_orderbook(
-            self, symbol: str, callback: Callable) -> None:
+    async def subscribe_to_orderbook(self, symbol: str, callback: Callable) -> None:
         """
         Subscribe to order book updates for a symbol.
 
@@ -202,7 +174,7 @@ class CoinbaseWebSocketHandler:
             self.active_streams[stream_key] = {
                 "type": "orderbook",
                 "symbol": symbol,
-                "callback": callback
+                "callback": callback,
             }
 
             if symbol not in self.callbacks:
@@ -212,20 +184,13 @@ class CoinbaseWebSocketHandler:
             logger.info(f"Subscribed to order book stream for {symbol}")
 
         except (WSClientException, WSClientConnectionClosedException) as e:
-            logger.error(
-                f"Failed to subscribe to order book for {symbol}: {
-                    str(e)}")
-            raise ExchangeError(f"Failed to subscribe to order book: {str(e)}")
+            logger.error(f"Failed to subscribe to order book for {symbol}: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to order book: {e!s}")
         except Exception as e:
-            logger.error(
-                f"Unexpected error subscribing to order book for {symbol}: {
-                    str(e)}")
-            raise ExchangeError(f"Failed to subscribe to order book: {str(e)}")
+            logger.error(f"Unexpected error subscribing to order book for {symbol}: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to order book: {e!s}")
 
-    async def subscribe_to_trades(
-            self,
-            symbol: str,
-            callback: Callable) -> None:
+    async def subscribe_to_trades(self, symbol: str, callback: Callable) -> None:
         """
         Subscribe to trade updates for a symbol.
 
@@ -245,7 +210,7 @@ class CoinbaseWebSocketHandler:
             self.active_streams[stream_key] = {
                 "type": "trades",
                 "symbol": symbol,
-                "callback": callback
+                "callback": callback,
             }
 
             if symbol not in self.callbacks:
@@ -255,10 +220,8 @@ class CoinbaseWebSocketHandler:
             logger.info(f"Subscribed to trades stream for {symbol}")
 
         except Exception as e:
-            logger.error(
-                f"Failed to subscribe to trades for {symbol}: {
-                    str(e)}")
-            raise ExchangeError(f"Failed to subscribe to trades: {str(e)}")
+            logger.error(f"Failed to subscribe to trades for {symbol}: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to trades: {e!s}")
 
     async def subscribe_to_user_data(self, callback: Callable) -> None:
         """
@@ -276,16 +239,13 @@ class CoinbaseWebSocketHandler:
 
             # Track subscription
             stream_key = "user_data"
-            self.active_streams[stream_key] = {
-                "type": "user_data",
-                "callback": callback
-            }
+            self.active_streams[stream_key] = {"type": "user_data", "callback": callback}
 
             logger.info("Subscribed to user data stream")
 
         except Exception as e:
-            logger.error(f"Failed to subscribe to user data: {str(e)}")
-            raise ExchangeError(f"Failed to subscribe to user data: {str(e)}")
+            logger.error(f"Failed to subscribe to user data: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to user data: {e!s}")
 
     async def unsubscribe_from_stream(self, stream_key: str) -> bool:
         """
@@ -299,8 +259,7 @@ class CoinbaseWebSocketHandler:
         """
         try:
             if stream_key not in self.active_streams:
-                logger.warning(
-                    f"Stream {stream_key} not found in active streams")
+                logger.warning(f"Stream {stream_key} not found in active streams")
                 return False
 
             stream_info = self.active_streams[stream_key]
@@ -322,7 +281,7 @@ class CoinbaseWebSocketHandler:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to unsubscribe from {stream_key}: {str(e)}")
+            logger.error(f"Failed to unsubscribe from {stream_key}: {e!s}")
             return False
 
     async def unsubscribe_all(self) -> None:
@@ -337,9 +296,9 @@ class CoinbaseWebSocketHandler:
             logger.info("Unsubscribed from all streams")
 
         except Exception as e:
-            logger.error(f"Failed to unsubscribe from all streams: {str(e)}")
+            logger.error(f"Failed to unsubscribe from all streams: {e!s}")
 
-    async def handle_ticker_message(self, message: Dict) -> None:
+    async def handle_ticker_message(self, message: dict) -> None:
         """
         Handle ticker message from WebSocket.
 
@@ -349,28 +308,28 @@ class CoinbaseWebSocketHandler:
         try:
             # Convert to unified Ticker format
             ticker = Ticker(
-                symbol=message.get('product_id', ''),
-                bid=Decimal(str(message.get('bid', '0'))),
-                ask=Decimal(str(message.get('ask', '0'))),
-                last_price=Decimal(str(message.get('price', '0'))),
-                volume_24h=Decimal(str(message.get('volume_24h', '0'))),
-                price_change_24h=Decimal(str(message.get('price_change_24h', '0'))),
-                timestamp=datetime.fromisoformat(message.get('time', '').replace('Z', '+00:00'))
+                symbol=message.get("product_id", ""),
+                bid=Decimal(str(message.get("bid", "0"))),
+                ask=Decimal(str(message.get("ask", "0"))),
+                last_price=Decimal(str(message.get("price", "0"))),
+                volume_24h=Decimal(str(message.get("volume_24h", "0"))),
+                price_change_24h=Decimal(str(message.get("price_change_24h", "0"))),
+                timestamp=datetime.fromisoformat(message.get("time", "").replace("Z", "+00:00")),
             )
 
             # Call registered callbacks
-            symbol = message.get('product_id', '')
+            symbol = message.get("product_id", "")
             if symbol in self.callbacks:
                 for callback in self.callbacks[symbol]:
                     try:
                         await callback(ticker)
                     except Exception as e:
-                        logger.error(f"Error in ticker callback: {str(e)}")
+                        logger.error(f"Error in ticker callback: {e!s}")
 
         except Exception as e:
-            logger.error(f"Error handling ticker message: {str(e)}")
+            logger.error(f"Error handling ticker message: {e!s}")
 
-    async def handle_orderbook_message(self, message: Dict) -> None:
+    async def handle_orderbook_message(self, message: dict) -> None:
         """
         Handle order book message from WebSocket.
 
@@ -380,25 +339,31 @@ class CoinbaseWebSocketHandler:
         try:
             # Convert to unified OrderBook format
             order_book = OrderBook(
-                symbol=message.get('product_id', ''),
-                bids=[[Decimal(str(level[0])), Decimal(str(level[1]))] for level in message.get('bids', [])],
-                asks=[[Decimal(str(level[0])), Decimal(str(level[1]))] for level in message.get('asks', [])],
-                timestamp=datetime.now(timezone.utc)
+                symbol=message.get("product_id", ""),
+                bids=[
+                    [Decimal(str(level[0])), Decimal(str(level[1]))]
+                    for level in message.get("bids", [])
+                ],
+                asks=[
+                    [Decimal(str(level[0])), Decimal(str(level[1]))]
+                    for level in message.get("asks", [])
+                ],
+                timestamp=datetime.now(timezone.utc),
             )
 
             # Call registered callbacks
-            symbol = message.get('product_id', '')
+            symbol = message.get("product_id", "")
             if symbol in self.callbacks:
                 for callback in self.callbacks[symbol]:
                     try:
                         await callback(order_book)
                     except Exception as e:
-                        logger.error(f"Error in order book callback: {str(e)}")
+                        logger.error(f"Error in order book callback: {e!s}")
 
         except Exception as e:
-            logger.error(f"Error handling order book message: {str(e)}")
+            logger.error(f"Error handling order book message: {e!s}")
 
-    async def handle_trade_message(self, message: Dict) -> None:
+    async def handle_trade_message(self, message: dict) -> None:
         """
         Handle trade message from WebSocket.
 
@@ -408,33 +373,30 @@ class CoinbaseWebSocketHandler:
         try:
             # Convert to unified Trade format
             trade = Trade(
-                id=message.get('trade_id', ''),
-                symbol=message.get('product_id', ''),
+                id=message.get("trade_id", ""),
+                symbol=message.get("product_id", ""),
                 # Convert to lowercase for consistency
-                side=message.get('side', 'buy').lower(),
-                quantity=Decimal(str(message.get('size', '0'))),
-                price=Decimal(str(message.get('price', '0'))),
-                timestamp=datetime.fromisoformat(
-                    message.get(
-                        'time', '').replace(
-                        'Z', '+00:00')),
+                side=message.get("side", "buy").lower(),
+                quantity=Decimal(str(message.get("size", "0"))),
+                price=Decimal(str(message.get("price", "0"))),
+                timestamp=datetime.fromisoformat(message.get("time", "").replace("Z", "+00:00")),
                 fee=Decimal("0"),  # Coinbase doesn't provide fee in trade data
-                fee_currency="USD"
+                fee_currency="USD",
             )
 
             # Call registered callbacks
-            symbol = message.get('product_id', '')
+            symbol = message.get("product_id", "")
             if symbol in self.callbacks:
                 for callback in self.callbacks[symbol]:
                     try:
                         await callback(trade)
                     except Exception as e:
-                        logger.error(f"Error in trade callback: {str(e)}")
+                        logger.error(f"Error in trade callback: {e!s}")
 
         except Exception as e:
-            logger.error(f"Error handling trade message: {str(e)}")
+            logger.error(f"Error handling trade message: {e!s}")
 
-    async def handle_user_message(self, message: Dict) -> None:
+    async def handle_user_message(self, message: dict) -> None:
         """
         Handle user data message from WebSocket.
 
@@ -443,47 +405,47 @@ class CoinbaseWebSocketHandler:
         """
         try:
             # Handle different types of user messages
-            message_type = message.get('channel', {}).get('name', '')
+            message_type = message.get("channel", {}).get("name", "")
 
-            if message_type == 'orders':
+            if message_type == "orders":
                 # Handle order updates
                 await self._handle_order_update(message)
-            elif message_type == 'accounts':
+            elif message_type == "accounts":
                 # Handle account updates
                 await self._handle_account_update(message)
 
             # Call registered callbacks
-            if 'user_data' in self.callbacks:
-                for callback in self.callbacks['user_data']:
+            if "user_data" in self.callbacks:
+                for callback in self.callbacks["user_data"]:
                     try:
                         await callback(message)
                     except Exception as e:
-                        logger.error(f"Error in user data callback: {str(e)}")
+                        logger.error(f"Error in user data callback: {e!s}")
 
         except Exception as e:
-            logger.error(f"Error handling user message: {str(e)}")
+            logger.error(f"Error handling user message: {e!s}")
 
-    async def _handle_order_update(self, message: Dict) -> None:
+    async def _handle_order_update(self, message: dict) -> None:
         """Handle order update message."""
         try:
-            order_id = message.get('order_id', '')
-            status = message.get('status', '')
+            order_id = message.get("order_id", "")
+            status = message.get("status", "")
 
             logger.info(f"Order {order_id} status updated to {status}")
 
         except Exception as e:
-            logger.error(f"Error handling order update: {str(e)}")
+            logger.error(f"Error handling order update: {e!s}")
 
-    async def _handle_account_update(self, message: Dict) -> None:
+    async def _handle_account_update(self, message: dict) -> None:
         """Handle account update message."""
         try:
-            account_id = message.get('account_id', '')
-            balance = message.get('balance', {})
+            account_id = message.get("account_id", "")
+            balance = message.get("balance", {})
 
             logger.info(f"Account {account_id} balance updated")
 
         except Exception as e:
-            logger.error(f"Error handling account update: {str(e)}")
+            logger.error(f"Error handling account update: {e!s}")
 
     async def health_check(self) -> bool:
         """
@@ -502,9 +464,8 @@ class CoinbaseWebSocketHandler:
 
             if self.last_heartbeat:
                 time_since_heartbeat = (
-                    datetime.now(
-                        timezone.utc) -
-                    self.last_heartbeat).total_seconds()
+                    datetime.now(timezone.utc) - self.last_heartbeat
+                ).total_seconds()
                 if time_since_heartbeat > 60:  # 1 minute timeout
                     logger.warning("WebSocket heartbeat timeout")
                     return False
@@ -512,7 +473,7 @@ class CoinbaseWebSocketHandler:
             return True
 
         except Exception as e:
-            logger.warning(f"WebSocket health check failed: {str(e)}")
+            logger.warning(f"WebSocket health check failed: {e!s}")
             return False
 
     def is_connected(self) -> bool:
@@ -524,7 +485,7 @@ class CoinbaseWebSocketHandler:
         """
         return self.connected and self.ws_client is not None
 
-    def get_active_streams(self) -> Dict[str, Any]:
+    def get_active_streams(self) -> dict[str, Any]:
         """
         Get information about active streams.
 
