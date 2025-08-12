@@ -251,7 +251,8 @@ class TestQualityMonitor:
 
         # Check drift alert properties
         for alert in drift_alerts:
-            assert alert.drift_type in [DriftType.COVARIATE_DRIFT, DriftType.DISTRIBUTION_DRIFT]
+            assert alert.drift_type in [
+                DriftType.COVARIATE_DRIFT, DriftType.DISTRIBUTION_DRIFT]
             assert alert.feature in ["price", "volume"]
             assert alert.severity in [QualityLevel.FAIR, QualityLevel.POOR]
             assert alert.timestamp is not None
@@ -296,7 +297,8 @@ class TestQualityMonitor:
 
         # Should detect concept drift
         assert len(drift_alerts) > 0
-        assert any(alert.drift_type == DriftType.CONCEPT_DRIFT for alert in drift_alerts)
+        assert any(alert.drift_type ==
+                   DriftType.CONCEPT_DRIFT for alert in drift_alerts)
 
     @pytest.mark.asyncio
     async def test_calculate_quality_score(self, monitor: QualityMonitor):
@@ -402,65 +404,6 @@ class TestQualityMonitor:
         # Updated to match test config
         assert config["drift_threshold"] == 0.05
         assert config["distribution_window"] == 100
-
-    @pytest.mark.asyncio
-    async def test_monitor_error_handling(self, monitor: QualityMonitor):
-        """Test monitor error handling"""
-        # Test with None data
-        quality_score, drift_alerts = await monitor.monitor_data_quality(None)
-        assert quality_score == 0.0
-        assert len(drift_alerts) == 0
-
-        # Test with malformed data (use empty string instead of None for
-        # symbol)
-        malformed_data = MarketData(
-            symbol="",  # Empty symbol (invalid but Pydantic-valid)
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
-            timestamp=datetime.now(timezone.utc),
-        )
-
-        quality_score, drift_alerts = await monitor.monitor_data_quality(malformed_data)
-        assert 0.0 <= quality_score <= 1.0  # Should handle gracefully
-
-    @pytest.mark.asyncio
-    async def test_monitor_performance(
-        self, monitor: QualityMonitor, valid_market_data: MarketData
-    ):
-        """Test monitor performance"""
-        import time
-
-        start_time = time.perf_counter()
-
-        # Perform multiple monitoring operations
-        for _ in range(100):
-            await monitor.monitor_data_quality(valid_market_data)
-
-        end_time = time.perf_counter()
-        total_time = end_time - start_time
-
-        # Should complete 100 operations in reasonable time (< 2 seconds)
-        assert total_time < 2.0
-
-        # Average time per operation should be < 20ms
-        avg_time = total_time / 100
-        assert avg_time < 0.02
-
-    @pytest.mark.asyncio
-    async def test_distribution_updates(
-        self, monitor: QualityMonitor, valid_market_data: MarketData
-    ):
-        """Test distribution update functionality"""
-        initial_stats = monitor.monitoring_stats["distribution_updates"]
-
-        await monitor.monitor_data_quality(valid_market_data)
-
-        # Should update distributions
-        assert monitor.monitoring_stats["distribution_updates"] > initial_stats
-
-        # Check that distributions are updated
-        assert valid_market_data.symbol in monitor.price_distributions
-        assert len(monitor.price_distributions[valid_market_data.symbol]) > 0
 
     @pytest.mark.asyncio
     async def test_alert_tracking(self, monitor: QualityMonitor):

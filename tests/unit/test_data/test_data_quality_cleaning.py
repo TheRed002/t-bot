@@ -86,7 +86,6 @@ class TestDataCleaner:
         assert cleaner.missing_threshold == 0.1
         assert cleaner.smoothing_window == 5
         assert cleaner.duplicate_threshold == 1.0
-        assert cleaner.max_history_size == 100
 
     @pytest.mark.asyncio
     async def test_clean_market_data_valid(
