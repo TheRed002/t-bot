@@ -9,6 +9,7 @@ used by all subsequent prompts for data persistence.
 """
 
 import asyncio
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -80,13 +81,16 @@ class DatabaseConnectionManager:
 
                 # Use ErrorHandler for sophisticated error management
                 recovery_scenario = NetworkDisconnectionRecovery(self.config)
-                handled = await self.error_handler.handle_error(error_context, recovery_scenario)
+                handled = await self.error_handler.handle_error(e, error_context, recovery_scenario)
 
                 if not handled:
-                    logger.error("Failed to initialize database connections", error=str(e))
-                    raise DataSourceError(f"Database initialization failed: {e!s}")
+                    logger.error(
+                        "Failed to initialize database connections", error=str(e))
+                    raise DataSourceError(
+                        f"Database initialization failed: {e!s}")
                 else:
-                    logger.info("Database connections recovered after error handling")
+                    logger.info(
+                        "Database connections recovered after error handling")
 
     def _start_health_monitoring(self) -> None:
         """Start health monitoring task with network testing."""
@@ -95,14 +99,17 @@ class DatabaseConnectionManager:
             try:
                 db_host = self.config.database.postgresql_host
                 db_port = self.config.database.postgresql_port
-                logger.info(f"Starting health monitoring for {db_host}:{db_port}")
-                monitor_interval = getattr(TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
+                logger.info(
+                    f"Starting health monitoring for {db_host}:{db_port}")
+                monitor_interval = getattr(
+                    TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
                 logger.debug(f"Health check interval: {monitor_interval}s")
             except Exception as e:
                 logger.warning(f"Health monitoring setup warning: {e}")
 
             # Start the monitoring task
-            self._health_check_task = asyncio.create_task(self._health_check_loop())
+            self._health_check_task = asyncio.create_task(
+                self._health_check_loop())
             logger.info("Database health monitoring started")
 
     async def _health_check_loop(self) -> None:
@@ -110,7 +117,8 @@ class DatabaseConnectionManager:
         while True:
             try:
                 # Use timeout constants from utils
-                health_check_interval = getattr(TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
+                health_check_interval = getattr(
+                    TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
                 await asyncio.sleep(health_check_interval)
 
                 # Use utils constants and performance monitoring
@@ -154,28 +162,55 @@ class DatabaseConnectionManager:
             max_overflow = getattr(LIMITS, "DB_MAX_OVERFLOW", 20)
             pool_recycle = getattr(TIMEOUTS, "DB_POOL_RECYCLE", 3600)
 
+            # Use NullPool under pytest to avoid pooled connection GC warnings
+            try:
+                from sqlalchemy.pool import NullPool as _NullPool
+                use_null_pool = bool(os.getenv("PYTEST_CURRENT_TEST"))
+            except Exception:
+                use_null_pool = False
+
+            async_pool_class = _NullPool if use_null_pool else AsyncAdaptedQueuePool
+
+            async_engine_kwargs = {
+                "echo": self.config.debug,
+                "poolclass": async_pool_class,
+                "connect_args": {"server_settings": {"application_name": "trading_bot_suite"}},
+            }
+            if async_pool_class.__name__ != "NullPool":
+                async_engine_kwargs.update(
+                    {
+                        "pool_size": self.config.database.postgresql_pool_size,
+                        "max_overflow": max_overflow,
+                        "pool_pre_ping": True,
+                        "pool_recycle": pool_recycle,
+                    }
+                )
+
             self.async_engine = create_async_engine(
-                self.config.get_async_database_url(),
-                echo=self.config.debug,
-                poolclass=AsyncAdaptedQueuePool,
-                pool_size=self.config.database.postgresql_pool_size,
-                max_overflow=max_overflow,
-                pool_pre_ping=True,
-                pool_recycle=pool_recycle,  # Recycle connections every hour
-                connect_args={"server_settings": {"application_name": "trading_bot_suite"}},
+                self.config.get_async_database_url(), **async_engine_kwargs
             )
 
             # Create sync engine for migrations using limits
             sync_pool_size = getattr(LIMITS, "DB_SYNC_POOL_SIZE", 5)
             sync_max_overflow = getattr(LIMITS, "DB_SYNC_MAX_OVERFLOW", 10)
 
-            self.sync_engine = create_engine(
-                self.config.get_database_url(),
-                echo=self.config.debug,
-                poolclass=QueuePool,
-                pool_size=sync_pool_size,
-                max_overflow=sync_max_overflow,
-            )
+            from sqlalchemy.pool import NullPool as _NullPool
+            sync_pool_class = _NullPool if use_null_pool else QueuePool
+
+            if sync_pool_class.__name__ == "NullPool":
+                self.sync_engine = create_engine(
+                    self.config.get_database_url(),
+                    echo=self.config.debug,
+                    poolclass=sync_pool_class,
+                )
+            else:
+                self.sync_engine = create_engine(
+                    self.config.get_database_url(),
+                    echo=self.config.debug,
+                    poolclass=sync_pool_class,
+                    pool_size=sync_pool_size,
+                    max_overflow=sync_max_overflow,
+                )
 
             # Test connection
             async with self.async_engine.begin() as conn:
@@ -194,13 +229,14 @@ class DatabaseConnectionManager:
 
             # Use ErrorHandler for sophisticated error management
             recovery_scenario = NetworkDisconnectionRecovery(self.config)
-            handled = await self.error_handler.handle_error(error_context, recovery_scenario)
+            handled = await self.error_handler.handle_error(e, error_context, recovery_scenario)
 
             if not handled:
                 logger.error("PostgreSQL connection failed", error=str(e))
                 raise DataSourceError(f"PostgreSQL connection failed: {e!s}")
             else:
-                logger.info("PostgreSQL connection recovered after error handling")
+                logger.info(
+                    "PostgreSQL connection recovered after error handling")
 
     @time_execution
     @circuit_breaker(failure_threshold=2, recovery_timeout=15)
@@ -231,7 +267,7 @@ class DatabaseConnectionManager:
 
             # Use ErrorHandler for sophisticated error management
             recovery_scenario = NetworkDisconnectionRecovery(self.config)
-            handled = await self.error_handler.handle_error(error_context, recovery_scenario)
+            handled = await self.error_handler.handle_error(e, error_context, recovery_scenario)
 
             if not handled:
                 logger.error("Redis connection failed", error=str(e))
@@ -278,7 +314,8 @@ class DatabaseConnectionManager:
                 logger.error("InfluxDB connection failed", error=str(e))
                 raise DataSourceError(f"InfluxDB connection failed: {e!s}")
             else:
-                logger.info("InfluxDB connection recovered after error handling")
+                logger.info(
+                    "InfluxDB connection recovered after error handling")
 
     # Removed duplicate async _start_health_monitoring and _health_monitor.
     # Single health monitor loop is implemented in _health_check_loop.
@@ -292,6 +329,7 @@ class DatabaseConnectionManager:
         async_session = async_sessionmaker(
             self.async_engine, class_=AsyncSession, expire_on_commit=False
         )
+        # Return a new session; callers should use context manager and close it
         return async_session()
 
     def get_sync_session(self) -> Session:
@@ -299,7 +337,8 @@ class DatabaseConnectionManager:
         if not self.sync_engine:
             raise DataSourceError("Database not initialized")
 
-        SessionLocal = sessionmaker(bind=self.sync_engine, expire_on_commit=False)
+        SessionLocal = sessionmaker(
+            bind=self.sync_engine, expire_on_commit=False)
         return SessionLocal()
 
     async def get_redis_client(self) -> redis.Redis:
@@ -332,8 +371,15 @@ class DatabaseConnectionManager:
                 self.sync_engine.dispose()
 
             if self.redis_client:
-                # Use proper shutdown for redis.asyncio client
-                await self.redis_client.close()
+                # Use proper shutdown for redis.asyncio client (Redis>=5)
+                try:
+                    await self.redis_client.aclose()
+                except AttributeError:
+                    # Fallback for older versions
+                    try:
+                        await self.redis_client.close()
+                    except Exception:
+                        pass
 
             if self.influxdb_client:
                 self.influxdb_client.close()

@@ -156,7 +156,8 @@ class ErrorHandler:
         if isinstance(error, (StateConsistencyError, SecurityError)):
             return ErrorSeverity.CRITICAL
         elif isinstance(
-            error, (RiskManagementError, ExchangeError, ConnectionError, ExecutionError)
+            error, (RiskManagementError, ExchangeError,
+                    ConnectionError, ExecutionError)
         ):
             return ErrorSeverity.HIGH
         elif isinstance(error, (DataError, ModelError)):
@@ -227,7 +228,8 @@ class ErrorHandler:
         circuit_breaker_key = self._get_circuit_breaker_key(context)
         if circuit_breaker_key and circuit_breaker_key in self.circuit_breakers:
             try:
-                self.circuit_breakers[circuit_breaker_key].call(lambda: self._raise_error(error))
+                self.circuit_breakers[circuit_breaker_key].call(
+                    lambda: self._raise_error(error))
             except TradingBotError:
                 logger.warning(
                     "Circuit breaker triggered",
@@ -240,7 +242,11 @@ class ErrorHandler:
         if recovery_strategy and context.recovery_attempts < context.max_recovery_attempts:
             try:
                 context.recovery_attempts += 1
-                await recovery_strategy(context)
+                # Accept both class instances with execute_recovery and callables
+                if hasattr(recovery_strategy, "execute_recovery"):
+                    await recovery_strategy.execute_recovery(context.__dict__)
+                else:
+                    await recovery_strategy(context)
                 logger.info(
                     "Recovery successful",
                     error_id=context.error_id,
@@ -312,7 +318,8 @@ class ErrorHandler:
             "details": context.details,
         }
 
-        logger.critical("Error escalation required", escalation_data=escalation_message)
+        logger.critical("Error escalation required",
+                        escalation_data=escalation_message)
 
         # TODO: Implement notification channels (Discord, email, SMS)
         # This will be implemented in P-031 (Alerting and Notification System)

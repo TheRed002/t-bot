@@ -11,6 +11,7 @@ used by all subsequent prompts for data persistence.
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, TypeVar
+from contextlib import asynccontextmanager
 
 from sqlalchemy import and_, desc, func, select, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -58,56 +59,78 @@ class DatabaseQueries:
             # TODO: Initialize with default config in production
             self.error_handler = None
 
+    @asynccontextmanager
+    async def _acquire_session(self):
+        """Yield a fresh AsyncSession managed by the global connection manager.
+
+        Always use a short-lived session scoped to the operation to guarantee
+        proper cleanup and avoid leaking connections in tests.
+        """
+        from src.database.connection import get_async_session
+
+        async with get_async_session() as temp_session:
+            yield temp_session
+
     # Generic CRUD operations
     @time_execution
     @log_performance
     async def create(self, model_instance: T) -> T:
         """Create a new record."""
         with correlation_context.correlation_context():
-            try:
-                # Validate financial data if it's a Trade model
-                if hasattr(model_instance, "price") and hasattr(model_instance, "quantity"):
-                    # Use proper utils validator signatures
-                    model_instance.price = validate_decimal(model_instance.price)
-                    validate_positive_number(model_instance.price, "price")
-                    model_instance.quantity = validate_decimal(model_instance.quantity)
-                    validate_positive_number(model_instance.quantity, "quantity")
+            async with self._acquire_session() as session:
+                try:
+                    # Validate financial data if it's a Trade model
+                    if hasattr(model_instance, "price") and hasattr(model_instance, "quantity"):
+                        # Use proper utils validator signatures
+                        model_instance.price = validate_decimal(
+                            model_instance.price)
+                        validate_positive_number(model_instance.price, "price")
+                        model_instance.quantity = validate_decimal(
+                            model_instance.quantity)
+                        validate_positive_number(
+                            model_instance.quantity, "quantity")
 
-                    # Round to proper precision for financial calculations
-                    # using utils
-                    model_instance.price = round_to_precision(float(model_instance.price), 8)
-                    model_instance.quantity = round_to_precision(float(model_instance.quantity), 8)
+                        # Round to proper precision for financial calculations
+                        # using utils
+                        model_instance.price = round_to_precision(
+                            float(model_instance.price), 8)
+                        model_instance.quantity = round_to_precision(
+                            float(model_instance.quantity), 8)
 
-                self.session.add(model_instance)
-                await self.session.commit()
-                await self.session.refresh(model_instance)
-                return model_instance
-            except SQLAlchemyError as e:
-                await self.session.rollback()
+                    session.add(model_instance)
+                    await session.flush()
+                    await session.commit()
+                    return model_instance
+                except SQLAlchemyError as e:
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
 
-                # Use ErrorHandler for sophisticated error management if
-                # available
-                if self.error_handler:
-                    error_context = self.error_handler.create_error_context(
-                        error=e,
-                        component="database_queries",
-                        operation="create_record",
-                        details={"model_type": type(model_instance).__name__},
-                    )
+                    # Use ErrorHandler for sophisticated error management if
+                    # available
+                    if self.error_handler:
+                        error_context = self.error_handler.create_error_context(
+                            error=e,
+                            component="database_queries",
+                            operation="create_record",
+                            details={"model_type": type(
+                                model_instance).__name__},
+                        )
 
-                    handled = await self.error_handler.handle_error(error_context)
-                    if handled:
-                        # Retry the operation after error handling
-                        try:
-                            self.session.add(model_instance)
-                            await self.session.commit()
-                            await self.session.refresh(model_instance)
-                            return model_instance
-                        except SQLAlchemyError:
-                            pass  # Fall through to raise original error
+                        handled = await self.error_handler.handle_error(error_context)
+                        if handled:
+                            # Retry the operation after error handling
+                            try:
+                                session.add(model_instance)
+                                await session.commit()
+                                return model_instance
+                            except SQLAlchemyError:
+                                pass  # Fall through to raise original error
 
-                logger.error("Database create operation failed", error=str(e))
-                raise DataError(f"Failed to create record: {e!s}")
+                    logger.error(
+                        "Database create operation failed", error=str(e))
+                    raise DataError(f"Failed to create record: {e!s}")
 
     @time_execution
     @cache_result(ttl_seconds=300)  # Cache for 5 minutes
@@ -116,10 +139,11 @@ class DatabaseQueries:
         """Get a record by ID."""
         with PerformanceMonitor(f"get_by_id_{model_class.__name__}"):
             try:
-                result = await self.session.execute(
-                    select(model_class).where(model_class.id == record_id)
-                )
-                return result.scalar_one_or_none()
+                async with self._acquire_session() as session:
+                    result = await session.execute(
+                        select(model_class).where(model_class.id == record_id)
+                    )
+                    return result.scalar_one_or_none()
             except SQLAlchemyError as e:
                 # Use ErrorHandler for sophisticated error management if
                 # available
@@ -128,7 +152,8 @@ class DatabaseQueries:
                         error=e,
                         component="database_queries",
                         operation="get_by_id",
-                        details={"model_type": model_class.__name__, "record_id": record_id},
+                        details={"model_type": model_class.__name__,
+                                 "record_id": record_id},
                     )
 
                     handled = await self.error_handler.handle_error(error_context)
@@ -136,7 +161,8 @@ class DatabaseQueries:
                         # Retry the operation after error handling
                         try:
                             result = await self.session.execute(
-                                select(model_class).where(model_class.id == record_id)
+                                select(model_class).where(
+                                    model_class.id == record_id)
                             )
                             return result.scalar_one_or_none()
                         except SQLAlchemyError:
@@ -150,11 +176,12 @@ class DatabaseQueries:
     ) -> list[T]:
         """Get all records with optional pagination."""
         try:
-            query = select(model_class)
-            if limit:
-                query = query.limit(limit).offset(offset)
-            result = await self.session.execute(query)
-            return result.scalars().all()
+            async with self._acquire_session() as session:
+                query = select(model_class)
+                if limit:
+                    query = query.limit(limit).offset(offset)
+                result = await session.execute(query)
+                return result.scalars().all()
         except SQLAlchemyError as e:
             logger.error("Database get_all operation failed", error=str(e))
             raise DataError(f"Failed to get all records: {e!s}")
@@ -221,7 +248,8 @@ class DatabaseQueries:
     async def get_user_by_username(self, username: str) -> User | None:
         """Get user by username."""
         try:
-            result = await self.session.execute(select(User).where(User.username == username))
+            async with self._acquire_session() as session:
+                result = await session.execute(select(User).where(User.username == username))
             return result.scalar_one_or_none()
         except SQLAlchemyError as e:
             logger.error("Failed to get user by username", error=str(e))
@@ -230,7 +258,8 @@ class DatabaseQueries:
     async def get_user_by_email(self, email: str) -> User | None:
         """Get user by email."""
         try:
-            result = await self.session.execute(select(User).where(User.email == email))
+            async with self._acquire_session() as session:
+                result = await session.execute(select(User).where(User.email == email))
             return result.scalar_one_or_none()
         except SQLAlchemyError as e:
             logger.error("Failed to get user by email", error=str(e))
@@ -295,11 +324,13 @@ class DatabaseQueries:
     ) -> list[Trade]:
         """Get trades for a specific bot."""
         try:
-            query = select(Trade).where(Trade.bot_id == bot_id).order_by(desc(Trade.timestamp))
-            if limit:
-                query = query.limit(limit).offset(offset)
-            result = await self.session.execute(query)
-            return result.scalars().all()
+            async with self._acquire_session() as session:
+                query = select(Trade).where(
+                    Trade.bot_id == bot_id).order_by(desc(Trade.timestamp))
+                if limit:
+                    query = query.limit(limit).offset(offset)
+                result = await session.execute(query)
+                return result.scalars().all()
         except SQLAlchemyError as e:
             logger.error("Failed to get trades by bot", error=str(e))
             raise DataError(f"Failed to get trades by bot: {e!s}")
@@ -342,12 +373,13 @@ class DatabaseQueries:
     async def get_positions_by_bot(self, bot_id: str) -> list[Position]:
         """Get all positions for a specific bot."""
         try:
-            result = await self.session.execute(
-                select(Position)
-                .where(Position.bot_id == bot_id)
-                .order_by(desc(Position.updated_at))
-            )
-            return result.scalars().all()
+            async with self._acquire_session() as session:
+                result = await session.execute(
+                    select(Position)
+                    .where(Position.bot_id == bot_id)
+                    .order_by(desc(Position.updated_at))
+                )
+                return result.scalars().all()
         except SQLAlchemyError as e:
             logger.error("Failed to get positions by bot", error=str(e))
             raise DataError(f"Failed to get positions by bot: {e!s}")
@@ -399,10 +431,12 @@ class DatabaseQueries:
     ) -> list[PerformanceMetrics]:
         """Get performance metrics for a bot within a date range."""
         try:
-            query = select(PerformanceMetrics).where(PerformanceMetrics.bot_id == bot_id)
+            query = select(PerformanceMetrics).where(
+                PerformanceMetrics.bot_id == bot_id)
 
             if start_date:
-                query = query.where(PerformanceMetrics.metric_date >= start_date)
+                query = query.where(
+                    PerformanceMetrics.metric_date >= start_date)
             if end_date:
                 query = query.where(PerformanceMetrics.metric_date <= end_date)
 
@@ -410,7 +444,8 @@ class DatabaseQueries:
             result = await self.session.execute(query)
             return result.scalars().all()
         except SQLAlchemyError as e:
-            logger.error("Failed to get performance metrics by bot", error=str(e))
+            logger.error(
+                "Failed to get performance metrics by bot", error=str(e))
             raise DataError(f"Failed to get performance metrics by bot: {e!s}")
 
     # Alert queries
@@ -430,7 +465,8 @@ class DatabaseQueries:
     async def get_alerts_by_severity(self, severity: str, limit: int | None = None) -> list[Alert]:
         """Get alerts by severity level."""
         try:
-            query = select(Alert).where(Alert.severity == severity).order_by(desc(Alert.timestamp))
+            query = select(Alert).where(Alert.severity ==
+                                        severity).order_by(desc(Alert.timestamp))
             if limit:
                 query = query.limit(limit)
             result = await self.session.execute(query)
@@ -511,15 +547,18 @@ class DatabaseQueries:
             )
 
             if start_time:
-                winning_query = winning_query.where(Trade.timestamp >= start_time)
+                winning_query = winning_query.where(
+                    Trade.timestamp >= start_time)
             if end_time:
-                winning_query = winning_query.where(Trade.timestamp <= end_time)
+                winning_query = winning_query.where(
+                    Trade.timestamp <= end_time)
 
             winning_result = await self.session.execute(winning_query)
             winning_trades = winning_result.scalar() or 0
 
             # Get total trades count
-            total_query = select(func.count(Trade.id)).where(Trade.bot_id == bot_id)
+            total_query = select(func.count(Trade.id)).where(
+                Trade.bot_id == bot_id)
 
             if start_time:
                 total_query = total_query.where(Trade.timestamp >= start_time)

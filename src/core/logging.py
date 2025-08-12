@@ -72,7 +72,8 @@ def _add_correlation_id(
 ) -> dict[str, Any]:
     """Add correlation ID to event dict."""
     if event_dict is not None:
-        event_dict.update(correlation_id=correlation_context.get_correlation_id())
+        event_dict.update(
+            correlation_id=correlation_context.get_correlation_id())
         return event_dict
     return {"correlation_id": correlation_context.get_correlation_id()}
 
@@ -83,7 +84,8 @@ def _safe_unicode_decoder(
     """Safe unicode decoder for event dict."""
     if event_dict is not None:
         return cast(
-            dict[str, Any], structlog.processors.UnicodeDecoder()(logger, method_name, event_dict)
+            dict[str, Any], structlog.processors.UnicodeDecoder()(
+                logger, method_name, event_dict)
         )
     return {}
 
@@ -159,7 +161,15 @@ def setup_logging(
             format="%(message)s",
             level=getattr(logging, log_level.upper()),
             handlers=[file_handler, console_handler],
+            force=True,
         )
+
+        # Ensure file handler flushes so tests see the file immediately
+        for handler in logging.getLogger().handlers:
+            try:
+                handler.flush()
+            except Exception:
+                pass
 
         # Clean up old log files based on retention policy
         _cleanup_old_logs(log_path.parent, log_path.stem, retention_days)

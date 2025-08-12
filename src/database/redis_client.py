@@ -27,11 +27,12 @@ logger = get_logger(__name__)
 class RedisClient:
     """Async Redis client with utilities for trading bot data."""
 
-    def __init__(self, redis_url: str):
+    def __init__(self, redis_url: str, *, auto_close: bool = True):
         self.redis_url = redis_url
         self.client: redis.Redis | None = None
         # Use utils constants for default TTL
         self._default_ttl = getattr(TIMEOUTS, "REDIS_DEFAULT_TTL", 3600)
+        self.auto_close = auto_close
 
     async def connect(self) -> None:
         """Connect to Redis with proper configuration."""
@@ -52,10 +53,26 @@ class RedisClient:
             logger.error("Redis connection failed", error=str(e))
             raise DataSourceError(f"Redis connection failed: {e!s}")
 
+    async def _ensure_connected(self) -> None:
+        if self.client is None:
+            await self.connect()
+
+    async def _maybe_autoclose(self) -> None:
+        if self.auto_close and self.client is not None:
+            try:
+                await self.client.aclose()
+            except AttributeError:
+                await self.client.close()
+            finally:
+                self.client = None
+
     async def disconnect(self) -> None:
         """Disconnect from Redis."""
         if self.client:
-            await self.client.close()
+            try:
+                await self.client.aclose()
+            except AttributeError:
+                await self.client.close()
             logger.info("Redis connection closed")
 
     def _get_namespaced_key(self, key: str, namespace: str = "trading_bot") -> str:
@@ -67,6 +84,7 @@ class RedisClient:
     ) -> bool:
         """Set a key-value pair with optional TTL."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
 
             # Serialize value
@@ -88,10 +106,13 @@ class RedisClient:
         except Exception as e:
             logger.error("Redis set operation failed", key=key, error=str(e))
             raise DataError(f"Redis set operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def get(self, key: str, namespace: str = "trading_bot") -> Any | None:
         """Get a value by key."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             value = await self.client.get(namespaced_key)
 
@@ -107,43 +128,58 @@ class RedisClient:
         except Exception as e:
             logger.error("Redis get operation failed", key=key, error=str(e))
             raise DataError(f"Redis get operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def delete(self, key: str, namespace: str = "trading_bot") -> bool:
         """Delete a key."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             result = await self.client.delete(namespaced_key)
             return result > 0
 
         except Exception as e:
-            logger.error("Redis delete operation failed", key=key, error=str(e))
+            logger.error("Redis delete operation failed",
+                         key=key, error=str(e))
             raise DataError(f"Redis delete operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def exists(self, key: str, namespace: str = "trading_bot") -> bool:
         """Check if a key exists."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             result = await self.client.exists(namespaced_key)
             return result > 0
 
         except Exception as e:
-            logger.error("Redis exists operation failed", key=key, error=str(e))
+            logger.error("Redis exists operation failed",
+                         key=key, error=str(e))
             raise DataError(f"Redis exists operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def expire(self, key: str, ttl: int, namespace: str = "trading_bot") -> bool:
         """Set expiration for a key."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             result = await self.client.expire(namespaced_key, ttl)
             return result
 
         except Exception as e:
-            logger.error("Redis expire operation failed", key=key, error=str(e))
+            logger.error("Redis expire operation failed",
+                         key=key, error=str(e))
             raise DataError(f"Redis expire operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def ttl(self, key: str, namespace: str = "trading_bot") -> int:
         """Get TTL for a key."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             result = await self.client.ttl(namespaced_key)
             return result
@@ -151,11 +187,14 @@ class RedisClient:
         except Exception as e:
             logger.error("Redis TTL operation failed", key=key, error=str(e))
             raise DataError(f"Redis TTL operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     # Hash operations
     async def hset(self, key: str, field: str, value: Any, namespace: str = "trading_bot") -> bool:
         """Set a field in a hash."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
 
             # Serialize value
@@ -168,12 +207,16 @@ class RedisClient:
             return result >= 0
 
         except Exception as e:
-            logger.error("Redis hset operation failed", key=key, field=field, error=str(e))
+            logger.error("Redis hset operation failed",
+                         key=key, field=field, error=str(e))
             raise DataError(f"Redis hset operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def hget(self, key: str, field: str, namespace: str = "trading_bot") -> Any | None:
         """Get a field from a hash."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             value = await self.client.hget(namespaced_key, field)
 
@@ -187,12 +230,16 @@ class RedisClient:
                 return value
 
         except Exception as e:
-            logger.error("Redis hget operation failed", key=key, field=field, error=str(e))
+            logger.error("Redis hget operation failed",
+                         key=key, field=field, error=str(e))
             raise DataError(f"Redis hget operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def hgetall(self, key: str, namespace: str = "trading_bot") -> dict[str, Any]:
         """Get all fields from a hash."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             result = await self.client.hgetall(namespaced_key)
 
@@ -207,19 +254,26 @@ class RedisClient:
             return deserialized
 
         except Exception as e:
-            logger.error("Redis hgetall operation failed", key=key, error=str(e))
+            logger.error("Redis hgetall operation failed",
+                         key=key, error=str(e))
             raise DataError(f"Redis hgetall operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def hdel(self, key: str, field: str, namespace: str = "trading_bot") -> bool:
         """Delete a field from a hash."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             result = await self.client.hdel(namespaced_key, field)
             return result > 0
 
         except Exception as e:
-            logger.error("Redis hdel operation failed", key=key, field=field, error=str(e))
+            logger.error("Redis hdel operation failed",
+                         key=key, field=field, error=str(e))
             raise DataError(f"Redis hdel operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     # List operations
     async def lpush(self, key: str, value: Any, namespace: str = "trading_bot") -> int:
@@ -277,7 +331,8 @@ class RedisClient:
             return deserialized
 
         except Exception as e:
-            logger.error("Redis lrange operation failed", key=key, error=str(e))
+            logger.error("Redis lrange operation failed",
+                         key=key, error=str(e))
             raise DataError(f"Redis lrange operation failed: {e!s}")
 
     # Set operations
@@ -316,7 +371,8 @@ class RedisClient:
             return list(deserialized)
 
         except Exception as e:
-            logger.error("Redis smembers operation failed", key=key, error=str(e))
+            logger.error("Redis smembers operation failed",
+                         key=key, error=str(e))
             raise DataError(f"Redis smembers operation failed: {e!s}")
 
     # Trading-specific utilities
