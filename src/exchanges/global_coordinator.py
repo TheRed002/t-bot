@@ -25,7 +25,7 @@ from src.core.types import RequestType
 
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
-from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution, log_calls
 
 logger = get_logger(__name__)
 
@@ -70,6 +70,7 @@ class GlobalRateCoordinator:
         logger.debug("GlobalRateCoordinator initialized", global_limits=self.global_limits)
 
     @time_execution
+    @log_calls
     async def check_global_limits(self, request_type: str, count: int = 1) -> bool:
         """
         Check if request is within global rate limits.
@@ -128,6 +129,7 @@ class GlobalRateCoordinator:
             raise ExchangeRateLimitError(f"Global rate limit check failed: {e!s}")
 
     @time_execution
+    @log_calls
     async def coordinate_request(self, exchange: str, endpoint: str, request_type: str) -> bool:
         """
         Coordinate request across global and exchange-specific limits.

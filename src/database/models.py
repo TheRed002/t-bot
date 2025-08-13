@@ -25,6 +25,8 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Column,
+    Numeric,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column, relationship
@@ -560,4 +562,288 @@ class AuditLog(Base):
         Index("idx_audit_logs_resource_type", "resource_type"),
         Index("idx_audit_logs_resource_id", "resource_id"),
         Index("idx_audit_logs_timestamp", "timestamp"),
+    )
+
+
+class CapitalAllocationDB(Base):
+    """Database model for capital allocations."""
+    __tablename__ = "capital_allocations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    strategy_id = Column(String, nullable=False, index=True)
+    exchange = Column(String, nullable=False, index=True)
+    allocated_amount = Column(Numeric(precision=20, scale=8), nullable=False)
+    utilized_amount = Column(Numeric(precision=20, scale=8), nullable=False, default=0)
+    available_amount = Column(Numeric(precision=20, scale=8), nullable=False, default=0)
+    allocation_percentage = Column(Float, nullable=False)
+    last_rebalance = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_strategy_exchange', 'strategy_id', 'exchange'),
+        Index('idx_created_at', 'created_at'),
+    )
+
+
+class FundFlowDB(Base):
+    """Database model for fund flows."""
+    __tablename__ = "fund_flows"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    from_strategy = Column(String, nullable=True, index=True)
+    to_strategy = Column(String, nullable=True, index=True)
+    from_exchange = Column(String, nullable=True, index=True)
+    to_exchange = Column(String, nullable=True, index=True)
+    amount = Column(Numeric(precision=20, scale=8), nullable=False)
+    currency = Column(String, nullable=False, index=True)
+    reason = Column(String, nullable=False, index=True)
+    timestamp = Column(DateTime, nullable=False, index=True)
+    converted_amount = Column(Numeric(precision=20, scale=8), nullable=True)
+    exchange_rate = Column(Numeric(precision=20, scale=8), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_timestamp', 'timestamp'),
+        Index('idx_reason', 'reason'),
+        Index('idx_currency', 'currency'),
+    )
+
+
+class CurrencyExposureDB(Base):
+    """Database model for currency exposures."""
+    __tablename__ = "currency_exposures"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    currency = Column(String, nullable=False, index=True)
+    base_currency_equivalent = Column(Numeric(precision=20, scale=8), nullable=False)
+    hedging_required = Column(Boolean, nullable=False, default=False)
+    hedge_amount = Column(Numeric(precision=20, scale=8), nullable=True)
+    last_updated = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_currency', 'currency'),
+        Index('idx_last_updated', 'last_updated'),
+    )
+
+
+class ExchangeAllocationDB(Base):
+    """Database model for exchange allocations."""
+    __tablename__ = "exchange_allocations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    exchange = Column(String, nullable=False, index=True)
+    allocated_amount = Column(Numeric(precision=20, scale=8), nullable=False)
+    utilized_amount = Column(Numeric(precision=20, scale=8), nullable=False, default=0)
+    available_amount = Column(Numeric(precision=20, scale=8), nullable=False, default=0)
+    allocation_percentage = Column(Float, nullable=False)
+    last_rebalance = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_exchange', 'exchange'),
+        Index('idx_last_rebalance', 'last_rebalance'),
+    )
+
+
+class MarketDataRecord(Base):
+    """Database model for market data records."""
+    __tablename__ = "market_data_records"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+
+    # Market data fields
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    exchange: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+    # Price data
+    open_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    high_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    low_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    close_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Volume and trade data
+    volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    quote_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    trades_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Bid/Ask data
+    bid: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    ask: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bid_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    ask_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Metadata
+    data_source: Mapped[str] = mapped_column(String(100), nullable=False, default="exchange")
+    quality_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    validation_status: Mapped[str] = mapped_column(String(20), nullable=False, default="valid")
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    # Constraints
+    __table_args__ = (
+        Index("idx_market_data_symbol_timestamp", "symbol", "timestamp"),
+        Index("idx_market_data_exchange_timestamp", "exchange", "timestamp"),
+        Index("idx_market_data_quality", "quality_score"),
+        Index("idx_market_data_validation", "validation_status"),
+        UniqueConstraint("symbol", "exchange", "timestamp", name="uq_market_data_unique"),
+    )
+
+
+class FeatureRecord(Base):
+    """Database model for calculated features."""
+    __tablename__ = "feature_records"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+
+    # Feature identification
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    feature_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    feature_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    calculation_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+
+    # Feature values
+    feature_value: Mapped[float] = mapped_column(Float, nullable=False)
+    confidence_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Calculation metadata
+    lookback_period: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    parameters: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    calculation_method: Mapped[str] = mapped_column(String(100), nullable=False, default="standard")
+
+    # Data source
+    source_data_start: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    source_data_end: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # Constraints
+    __table_args__ = (
+        Index("idx_feature_symbol_type", "symbol", "feature_type"),
+        Index("idx_feature_timestamp", "calculation_timestamp"),
+        Index("idx_feature_name", "feature_name"),
+        UniqueConstraint("symbol", "feature_type", "feature_name",
+                         "calculation_timestamp", name="uq_feature_unique"),
+    )
+
+
+class DataQualityRecord(Base):
+    """Database model for data quality metrics."""
+    __tablename__ = "data_quality_records"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+
+    # Quality identification
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    data_source: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    quality_check_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+
+    # Quality metrics
+    completeness_score: Mapped[float] = mapped_column(Float, nullable=False)
+    accuracy_score: Mapped[float] = mapped_column(Float, nullable=False)
+    consistency_score: Mapped[float] = mapped_column(Float, nullable=False)
+    timeliness_score: Mapped[float] = mapped_column(Float, nullable=False)
+    overall_score: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Quality issues
+    missing_data_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    outlier_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    validation_errors: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+
+    # Metadata
+    check_type: Mapped[str] = mapped_column(String(50), nullable=False, default="comprehensive")
+    data_period_start: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    data_period_end: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    # Constraints
+    __table_args__ = (
+        Index("idx_quality_symbol_timestamp", "symbol", "quality_check_timestamp"),
+        Index("idx_quality_source_timestamp", "data_source", "quality_check_timestamp"),
+        Index("idx_quality_overall_score", "overall_score"),
+        Index("idx_quality_check_type", "check_type"),
+    )
+
+
+class DataPipelineRecord(Base):
+    """Database model for data pipeline execution tracking."""
+    __tablename__ = "data_pipeline_records"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+
+    # Pipeline identification
+    pipeline_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    execution_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    execution_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True)
+
+    # Execution status
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    stage: Mapped[str] = mapped_column(String(50), nullable=False, default="started")
+
+    # Performance metrics
+    records_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    records_successful: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    records_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Error tracking
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_messages: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Metadata
+    configuration: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    dependencies: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+
+    # Timestamps
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    # Constraints
+    __table_args__ = (
+        Index("idx_pipeline_name_timestamp", "pipeline_name", "execution_timestamp"),
+        Index("idx_pipeline_status", "status"),
+        Index("idx_pipeline_stage", "stage"),
+        Index("idx_pipeline_execution_id", "execution_id"),
     )

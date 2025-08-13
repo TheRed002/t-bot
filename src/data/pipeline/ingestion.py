@@ -37,6 +37,9 @@ from src.data.sources.social_media import SocialMediaDataSource
 # Import from P-002 database components
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import DataFeedInterruptionRecovery, NetworkDisconnectionRecovery
+from src.error_handling.connection_manager import ConnectionManager
+from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 
 # Import from P-007A utilities
 from src.utils.decorators import retry, time_execution
@@ -91,7 +94,13 @@ class DataIngestionPipeline:
             config: Application configuration
         """
         self.config = config
+
+        # Initialize error handling components
         self.error_handler = ErrorHandler(config)
+        self.recovery_scenario = DataFeedInterruptionRecovery(config)
+        self.network_recovery = NetworkDisconnectionRecovery(config)
+        self.connection_manager = ConnectionManager(config)
+        self.pattern_analytics = ErrorPatternAnalytics(config)
 
         # Pipeline configuration
         pipeline_config = getattr(config, "data_pipeline", {})
@@ -99,9 +108,9 @@ class DataIngestionPipeline:
             self.ingestion_config = IngestionConfig(
                 mode=IngestionMode(pipeline_config.get("mode", "real_time")),
                 sources=pipeline_config.get("sources", ["market_data"]),
-                symbols=pipeline_config.get("symbols", ["BTC", "ETH"]),
+                symbols=pipeline_config.get("symbols", ["BTCUSDT"]),
                 batch_size=pipeline_config.get("batch_size", 100),
-                update_interval=pipeline_config.get("update_interval", 5),
+                update_interval=pipeline_config.get("update_interval", 1),
                 buffer_size=pipeline_config.get("buffer_size", 1000),
                 error_threshold=pipeline_config.get("error_threshold", 10),
                 retry_attempts=pipeline_config.get("retry_attempts", 3),
@@ -110,26 +119,32 @@ class DataIngestionPipeline:
             self.ingestion_config = IngestionConfig(
                 mode=IngestionMode("real_time"),
                 sources=["market_data"],
-                symbols=["BTC", "ETH"],
+                symbols=["BTCUSDT"],
                 batch_size=100,
-                update_interval=5,
+                update_interval=1,
                 buffer_size=1000,
                 error_threshold=10,
                 retry_attempts=3,
             )
 
-        # Data sources
-        self.market_data_source: MarketDataSource | None = None
-        self.news_data_source: NewsDataSource | None = None
-        self.social_media_source: SocialMediaDataSource | None = None
-        self.alternative_data_source: AlternativeDataSource | None = None
+        # Initialize data sources
+        self.market_data_source = None
+        self.news_data_source = None
+        self.social_media_source = None
+        self.alternative_data_source = None
 
         # Pipeline state
         self.status = PipelineStatus.STOPPED
         self.active_tasks: dict[str, asyncio.Task] = {}
-        self.data_buffers: dict[str, list[Any]] = {}
+        self.data_buffers: dict[str, list[dict[str, Any]]] = {}
+        self.data_callbacks: dict[str, list[Callable]] = {
+            "market_data": [],
+            "news_data": [],
+            "social_media": [],
+            "alternative_data": [],
+        }
 
-        # Metrics and monitoring
+        # Metrics tracking
         self.metrics = IngestionMetrics(
             total_records_processed=0,
             successful_ingestions=0,
@@ -141,62 +156,118 @@ class DataIngestionPipeline:
             last_update_time=datetime.now(timezone.utc),
         )
 
-        # Data callbacks
-        self.data_callbacks: dict[str, list[Callable]] = {
-            "market_data": [],
-            "news_data": [],
-            "social_data": [],
-            "alternative_data": [],
-        }
+        # Error tracking
+        self.error_count = 0
+        self.last_error_time = None
 
-        logger.info("DataIngestionPipeline initialized",
-                    config=self.ingestion_config)
+        logger.info("DataIngestionPipeline initialized", config=config)
 
     async def initialize(self) -> None:
-        """Initialize data ingestion pipeline and sources."""
+        """Initialize data sources and connections."""
         try:
-            self.status = PipelineStatus.STARTING
-
-            # Initialize data sources based on configuration
+            # Initialize market data source
             if "market_data" in self.ingestion_config.sources:
                 self.market_data_source = MarketDataSource(self.config)
                 await self.market_data_source.initialize()
-                logger.info("Market data source initialized")
 
+                # Establish connection with connection manager
+                await self.connection_manager.establish_connection(
+                    connection_id="market_data_source",
+                    connection_type="data_source",
+                    endpoint="market_data",
+                    connection_options={
+                        "retry_attempts": self.ingestion_config.retry_attempts,
+                        "timeout": 30
+                    }
+                )
+
+            # Initialize news data source
             if "news_data" in self.ingestion_config.sources:
                 self.news_data_source = NewsDataSource(self.config)
                 await self.news_data_source.initialize()
-                logger.info("News data source initialized")
 
+                # Establish connection with connection manager
+                await self.connection_manager.establish_connection(
+                    connection_id="news_data_source",
+                    connection_type="data_source",
+                    endpoint="news_api",
+                    connection_options={
+                        "retry_attempts": self.ingestion_config.retry_attempts,
+                        "timeout": 30
+                    }
+                )
+
+            # Initialize social media source
             if "social_media" in self.ingestion_config.sources:
                 self.social_media_source = SocialMediaDataSource(self.config)
                 await self.social_media_source.initialize()
-                logger.info("Social media source initialized")
 
+                # Establish connection with connection manager
+                await self.connection_manager.establish_connection(
+                    connection_id="social_media_source",
+                    connection_type="data_source",
+                    endpoint="social_media",
+                    connection_options={
+                        "retry_attempts": self.ingestion_config.retry_attempts,
+                        "timeout": 30
+                    }
+                )
+
+            # Initialize alternative data source
             if "alternative_data" in self.ingestion_config.sources:
-                self.alternative_data_source = AlternativeDataSource(
-                    self.config)
+                self.alternative_data_source = AlternativeDataSource(self.config)
                 await self.alternative_data_source.initialize()
-                logger.info("Alternative data source initialized")
 
-            # Initialize data buffers
-            for source in self.ingestion_config.sources:
-                self.data_buffers[source] = []
+                # Establish connection with connection manager
+                await self.connection_manager.establish_connection(
+                    connection_id="alternative_data_source",
+                    connection_type="data_source",
+                    endpoint="alternative_data",
+                    connection_options={
+                        "retry_attempts": self.ingestion_config.retry_attempts,
+                        "timeout": 30
+                    }
+                )
 
-            logger.info("DataIngestionPipeline initialization completed")
+            logger.info("DataIngestionPipeline initialized successfully")
 
         except Exception as e:
-            self.status = PipelineStatus.ERROR
+            # Use ErrorHandler for initialization errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="initialize",
+                details={
+                    "stage": "initialization",
+                    "sources": self.ingestion_config.sources
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             logger.error(f"Failed to initialize DataIngestionPipeline: {e!s}")
             raise DataSourceError(f"Pipeline initialization failed: {e!s}")
 
-    @time_execution
     async def start(self) -> None:
         """Start the data ingestion pipeline."""
         try:
             if self.status == PipelineStatus.RUNNING:
                 logger.warning("Pipeline is already running")
                 return
+
+            # Check connection health before starting
+            connection_status = await self.connection_manager.get_all_connection_status()
+            unhealthy_connections = [
+                conn_id for conn_id, status in connection_status.items()
+                if not status.get("is_healthy", False)
+            ]
+
+            if unhealthy_connections:
+                logger.warning(f"Unhealthy connections detected: {unhealthy_connections}")
+                # Attempt to reconnect unhealthy connections
+                for conn_id in unhealthy_connections:
+                    await self.connection_manager.reconnect_connection(conn_id)
 
             self.status = PipelineStatus.RUNNING
 
@@ -218,6 +289,20 @@ class DataIngestionPipeline:
             logger.info("DataIngestionPipeline started successfully")
 
         except Exception as e:
+            # Use ErrorHandler for start errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="start",
+                details={
+                    "stage": "startup",
+                    "mode": self.ingestion_config.mode.value
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             self.status = PipelineStatus.ERROR
             logger.error(f"Failed to start DataIngestionPipeline: {e!s}")
             raise DataSourceError(f"Pipeline start failed: {e!s}")
@@ -249,6 +334,21 @@ class DataIngestionPipeline:
                 logger.info("Real-time social media ingestion started")
 
         except Exception as e:
+            # Use ErrorHandler for real-time ingestion start errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="start_real_time_ingestion",
+                details={
+                    "stage": "real_time_startup",
+                    "sources": [s for s in ["market_data", "news_data", "social_media"]
+                                if getattr(self, f"{s}_source")]
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             logger.error(f"Failed to start real-time ingestion: {e!s}")
             raise
 
@@ -270,6 +370,21 @@ class DataIngestionPipeline:
                 logger.info("Batch historical market data ingestion started")
 
         except Exception as e:
+            # Use ErrorHandler for batch ingestion start errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="start_batch_ingestion",
+                details={
+                    "stage": "batch_startup",
+                    "sources": [s for s in ["alternative_data", "market_data"]
+                                if getattr(self, f"{s}_source")]
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             logger.error(f"Failed to start batch ingestion: {e!s}")
             raise
 
@@ -278,7 +393,7 @@ class DataIngestionPipeline:
         """Ingest real-time market data for a symbol."""
         try:
             # Subscribe to ticker updates
-            subscription_id = await self.market_data_source.subscribe_to_ticker(
+            await self.market_data_source.subscribe_to_ticker(
                 exchange_name="binance",  # Primary exchange
                 symbol=symbol,
                 callback=lambda ticker: self._handle_market_data(
@@ -293,6 +408,22 @@ class DataIngestionPipeline:
                 await asyncio.sleep(1)
 
         except Exception as e:
+            # Use ErrorHandler for market data ingestion errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="ingest_market_data_real_time",
+                symbol=symbol,
+                details={
+                    "data_type": "market_data",
+                    "mode": "real_time",
+                    "exchange": "binance"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             logger.error(
                 f"Real-time market data ingestion failed for {symbol}: {e!s}")
             self.metrics.failed_ingestions += 1
@@ -302,61 +433,112 @@ class DataIngestionPipeline:
         """Ingest real-time news data."""
         try:
             while self.status == PipelineStatus.RUNNING:
-                for symbol in self.ingestion_config.symbols:
-                    try:
-                        # Get recent news for symbol
+                try:
+                    # Get recent news for tracked symbols
+                    for symbol in self.ingestion_config.symbols:
                         news_articles = await self.news_data_source.get_news_for_symbol(
-                            symbol, hours_back=1
+                            symbol=symbol, hours_back=1, max_articles=10
                         )
 
-                        # Add to buffer
                         for article in news_articles:
                             self._add_to_buffer("news_data", article)
 
-                        self.metrics.successful_ingestions += len(
-                            news_articles)
+                        self.metrics.successful_ingestions += len(news_articles)
 
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to ingest news for {symbol}: {e!s}")
-                        self.metrics.failed_ingestions += 1
-                        continue
+                    # Convert to minutes
+                    await asyncio.sleep(self.ingestion_config.update_interval * 60)
 
-                # Wait before next collection
-                # Convert to seconds
-                await asyncio.sleep(self.ingestion_config.update_interval * 60)
+                except Exception as e:
+                    # Use ErrorHandler for news ingestion errors
+                    error_context = self.error_handler.create_error_context(
+                        error=e,
+                        component="DataIngestionPipeline",
+                        operation="ingest_news_data_real_time",
+                        details={
+                            "data_type": "news_data",
+                            "mode": "real_time"
+                        }
+                    )
+
+                    self.error_handler.handle_error(error_context)
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
+
+                    logger.warning(f"News data ingestion failed: {e!s}")
+                    self.metrics.failed_ingestions += 1
+                    await asyncio.sleep(60)  # Wait before retry
 
         except Exception as e:
-            logger.error(f"Real-time news data ingestion failed: {e!s}")
-            raise
+            # Use ErrorHandler for fatal news ingestion errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="ingest_news_data_real_time",
+                details={
+                    "data_type": "news_data",
+                    "mode": "real_time",
+                    "severity": "fatal"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Fatal error in news data ingestion: {e!s}")
 
     async def _ingest_social_data_real_time(self) -> None:
         """Ingest real-time social media data."""
         try:
             while self.status == PipelineStatus.RUNNING:
-                for symbol in self.ingestion_config.symbols:
-                    try:
-                        # Get social sentiment for symbol
+                try:
+                    # Get social sentiment for tracked symbols
+                    for symbol in self.ingestion_config.symbols:
                         social_metrics = await self.social_media_source.get_social_sentiment(
-                            symbol, hours_back=1
+                            symbol=symbol, hours_back=1
                         )
 
-                        # Add to buffer
-                        self._add_to_buffer("social_data", social_metrics)
-                        self.metrics.successful_ingestions += 1
+                        if social_metrics:
+                            self._add_to_buffer("social_media", social_metrics)
+                            self.metrics.successful_ingestions += 1
 
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to ingest social data for {symbol}: {e!s}")
-                        self.metrics.failed_ingestions += 1
-                        continue
+                    # Convert to minutes
+                    await asyncio.sleep(self.ingestion_config.update_interval * 60)
 
-                # Wait before next collection
-                await asyncio.sleep(self.ingestion_config.update_interval * 60)
+                except Exception as e:
+                    # Use ErrorHandler for social data ingestion errors
+                    error_context = self.error_handler.create_error_context(
+                        error=e,
+                        component="DataIngestionPipeline",
+                        operation="ingest_social_data_real_time",
+                        details={
+                            "data_type": "social_media",
+                            "mode": "real_time"
+                        }
+                    )
+
+                    self.error_handler.handle_error(error_context)
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
+
+                    logger.warning(f"Social media data ingestion failed: {e!s}")
+                    self.metrics.failed_ingestions += 1
+                    await asyncio.sleep(60)  # Wait before retry
 
         except Exception as e:
-            logger.error(f"Real-time social data ingestion failed: {e!s}")
-            raise
+            # Use ErrorHandler for fatal social data ingestion errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="ingest_social_data_real_time",
+                details={
+                    "data_type": "social_media",
+                    "mode": "real_time",
+                    "severity": "fatal"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Fatal error in social media data ingestion: {e!s}")
 
     async def _ingest_alternative_data_batch(self) -> None:
         """Ingest alternative data in batch mode."""
@@ -364,39 +546,55 @@ class DataIngestionPipeline:
             while self.status == PipelineStatus.RUNNING:
                 try:
                     # Get economic indicators
-                    indicators = ["GDP", "UNRATE", "FEDFUNDS"]
                     economic_data = await self.alternative_data_source.get_economic_indicators(
-                        indicators, days_back=7
+                        indicators=["gdp", "inflation", "unemployment"], days_back=7
                     )
 
-                    # Add to buffer
-                    for indicator in economic_data:
-                        self._add_to_buffer("alternative_data", indicator)
+                    for data_point in economic_data:
+                        self._add_to_buffer("alternative_data", data_point)
 
-                    # Get weather data
-                    weather_data = await self.alternative_data_source.get_weather_data(
-                        ["New York", "London"], days_back=7
-                    )
+                    self.metrics.successful_ingestions += len(economic_data)
+                    logger.info(f"Ingested {len(economic_data)} alternative data points")
 
-                    # Add to buffer
-                    for weather_point in weather_data:
-                        self._add_to_buffer("alternative_data", weather_point)
-
-                    self.metrics.successful_ingestions += len(
-                        economic_data) + len(weather_data)
-
-                    # Wait before next batch (1 hour)
-                    await asyncio.sleep(3600)
+                    # Run once per day
+                    await asyncio.sleep(24 * 60 * 60)  # 24 hours
 
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to ingest alternative data batch: {e!s}")
+                    # Use ErrorHandler for alternative data ingestion errors
+                    error_context = self.error_handler.create_error_context(
+                        error=e,
+                        component="DataIngestionPipeline",
+                        operation="ingest_alternative_data_batch",
+                        details={
+                            "data_type": "alternative_data",
+                            "mode": "batch"
+                        }
+                    )
+
+                    self.error_handler.handle_error(error_context)
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
+
+                    logger.warning(f"Alternative data ingestion failed: {e!s}")
                     self.metrics.failed_ingestions += 1
-                    await asyncio.sleep(300)  # Wait 5 minutes on error
+                    await asyncio.sleep(60 * 60)  # Wait 1 hour before retry
 
         except Exception as e:
-            logger.error(f"Batch alternative data ingestion failed: {e!s}")
-            raise
+            # Use ErrorHandler for fatal alternative data ingestion errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="ingest_alternative_data_batch",
+                details={
+                    "data_type": "alternative_data",
+                    "mode": "batch",
+                    "severity": "fatal"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Fatal error in alternative data ingestion: {e!s}")
 
     async def _ingest_historical_market_data(self) -> None:
         """Ingest historical market data in batch mode."""
@@ -425,12 +623,44 @@ class DataIngestionPipeline:
                     )
 
                 except Exception as e:
+                    # Use ErrorHandler for historical data ingestion errors
+                    error_context = self.error_handler.create_error_context(
+                        error=e,
+                        component="DataIngestionPipeline",
+                        operation="ingest_historical_market_data",
+                        symbol=symbol,
+                        details={
+                            "data_type": "market_data",
+                            "mode": "batch",
+                            "start_time": start_time.isoformat(),
+                            "end_time": end_time.isoformat()
+                        }
+                    )
+
+                    self.error_handler.handle_error(error_context)
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
+
                     logger.warning(
                         f"Failed to ingest historical data for {symbol}: {e!s}")
                     self.metrics.failed_ingestions += 1
                     continue
 
         except Exception as e:
+            # Use ErrorHandler for fatal historical data ingestion errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="ingest_historical_market_data",
+                details={
+                    "data_type": "market_data",
+                    "mode": "batch",
+                    "severity": "fatal"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             logger.error(f"Historical market data ingestion failed: {e!s}")
             raise
 
@@ -459,9 +689,39 @@ class DataIngestionPipeline:
                 try:
                     callback(market_data)
                 except Exception as e:
+                    # Use ErrorHandler for callback errors
+                    error_context = self.error_handler.create_error_context(
+                        error=e,
+                        component="DataIngestionPipeline",
+                        operation="handle_market_data_callback",
+                        symbol=symbol,
+                        details={
+                            "data_type": "market_data",
+                            "callback_type": "market_data"
+                        }
+                    )
+
+                    self.error_handler.handle_error(error_context)
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
+
                     logger.warning(f"Market data callback failed: {e!s}")
 
         except Exception as e:
+            # Use ErrorHandler for market data handling errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="handle_market_data",
+                symbol=symbol,
+                details={
+                    "data_type": "market_data",
+                    "stage": "data_handling"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             logger.error(f"Failed to handle market data for {symbol}: {e!s}")
             self.metrics.failed_ingestions += 1
 
@@ -485,6 +745,21 @@ class DataIngestionPipeline:
                 self.data_buffers[source].pop(0)
 
         except Exception as e:
+            # Use ErrorHandler for buffer operation errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="add_to_buffer",
+                details={
+                    "source": source,
+                    "buffer_size": len(self.data_buffers.get(source, [])),
+                    "max_buffer_size": self.ingestion_config.buffer_size
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             logger.error(f"Failed to add data to buffer {source}: {e!s}")
 
     async def _process_buffers(self) -> None:
@@ -498,172 +773,333 @@ class DataIngestionPipeline:
                             batch = buffer[: self.ingestion_config.batch_size]
                             self.data_buffers[source] = buffer[self.ingestion_config.batch_size:]
 
-                            # Process batch
-                            await self._process_data_batch(source, batch)
+                            # Process batch (placeholder for storage integration)
+                            logger.debug(f"Processing batch of {len(batch)} items from {source}")
+
+                            # Update metrics
+                            self.metrics.total_records_processed += len(batch)
 
                         except Exception as e:
-                            logger.error(
-                                f"Failed to process buffer for {source}: {e!s}")
-                            continue
+                            # Use ErrorHandler for buffer processing errors
+                            error_context = self.error_handler.create_error_context(
+                                error=e,
+                                component="DataIngestionPipeline",
+                                operation="process_buffers",
+                                details={
+                                    "source": source,
+                                    "batch_size": len(batch),
+                                    "stage": "batch_processing"
+                                }
+                            )
 
-                # Wait before next processing cycle
-                await asyncio.sleep(10)
+                            self.error_handler.handle_error(error_context)
+                            self.pattern_analytics.add_error_event(error_context.__dict__)
 
-        except Exception as e:
-            logger.error(f"Buffer processing failed: {e!s}")
-            raise
+                            logger.error(f"Failed to process buffer batch from {source}: {e!s}")
 
-    @time_execution
-    async def _process_data_batch(self, source: str, batch: list[dict[str, Any]]) -> None:
-        """Process a batch of data and store it."""
-        try:
-            # Import storage manager for database operations
-            from .storage import DataStorageManager
-
-            # Initialize storage manager if not already done
-            if not hasattr(self, "storage_manager"):
-                self.storage_manager = DataStorageManager(self.config)
-
-            # Process and store each item in the batch
-            for item in batch:
-                data_item = item.get("data")
-                if source == "market_data" and data_item is not None:
-                    await self.storage_manager.store_market_data(data_item)
-                # TODO: Extend storage for non-market data types
-
-            processed_count = len(batch)
-            self.metrics.total_records_processed += processed_count
-
-            logger.debug(
-                f"Processed and stored {processed_count} records from {source}")
+                await asyncio.sleep(1)  # Check buffers every second
 
         except Exception as e:
-            logger.error(f"Failed to process data batch for {source}: {e!s}")
-            raise
+            # Use ErrorHandler for fatal buffer processing errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="process_buffers",
+                details={
+                    "stage": "buffer_processing",
+                    "severity": "fatal"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Fatal error in buffer processing: {e!s}")
 
     async def _collect_metrics(self) -> None:
         """Collect and update pipeline metrics."""
         try:
-            last_time = datetime.now(timezone.utc)
-            last_processed = self.metrics.total_records_processed
-
             while self.status == PipelineStatus.RUNNING:
-                await asyncio.sleep(60)  # Update metrics every minute
+                try:
+                    # Calculate buffer utilization
+                    total_buffer_items = sum(len(buffer) for buffer in self.data_buffers.values())
+                    self.metrics.buffer_utilization = total_buffer_items / \
+                        (len(self.data_buffers) * self.ingestion_config.buffer_size)
 
-                current_time = datetime.now(timezone.utc)
-                current_processed = self.metrics.total_records_processed
+                    # Calculate error rate
+                    total_operations = self.metrics.successful_ingestions + self.metrics.failed_ingestions
+                    if total_operations > 0:
+                        self.metrics.error_rate = self.metrics.failed_ingestions / total_operations
 
-                # Calculate rates
-                time_diff = (current_time - last_time).total_seconds()
-                records_diff = current_processed - last_processed
+                    # Calculate records per second (rolling average)
+                    current_time = datetime.now(timezone.utc)
+                    time_diff = (current_time - self.metrics.last_update_time).total_seconds()
+                    if time_diff > 0:
+                        new_records = self.metrics.total_records_processed - \
+                            getattr(self, '_last_total_records', 0)
+                        self.metrics.records_per_second = new_records / time_diff
+                        self._last_total_records = self.metrics.total_records_processed
 
-                if time_diff > 0:
-                    self.metrics.records_per_second = records_diff / time_diff
+                    self.metrics.last_update_time = current_time
 
-                # Calculate buffer utilization
-                total_buffer_items = sum(len(buffer)
-                                         for buffer in self.data_buffers.values())
-                max_buffer_size = len(self.data_buffers) * \
-                    self.ingestion_config.buffer_size
+                    await asyncio.sleep(60)  # Update metrics every minute
 
-                if max_buffer_size > 0:
-                    self.metrics.buffer_utilization = total_buffer_items / max_buffer_size
+                except Exception as e:
+                    # Use ErrorHandler for metrics collection errors
+                    error_context = self.error_handler.create_error_context(
+                        error=e,
+                        component="DataIngestionPipeline",
+                        operation="collect_metrics",
+                        details={
+                            "stage": "metrics_collection"
+                        }
+                    )
 
-                # Calculate error rate
-                total_operations = (
-                    self.metrics.successful_ingestions + self.metrics.failed_ingestions
-                )
-                if total_operations > 0:
-                    self.metrics.error_rate = self.metrics.failed_ingestions / total_operations
+                    self.error_handler.handle_error(error_context)
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                self.metrics.last_update_time = current_time
-
-                # Update for next iteration
-                last_time = current_time
-                last_processed = current_processed
+                    logger.warning(f"Metrics collection failed: {e!s}")
+                    await asyncio.sleep(60)  # Wait before retry
 
         except Exception as e:
-            logger.error(f"Metrics collection failed: {e!s}")
+            # Use ErrorHandler for fatal metrics collection errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="collect_metrics",
+                details={
+                    "stage": "metrics_collection",
+                    "severity": "fatal"
+                }
+            )
 
-    def register_callback(self, data_type: str, callback: Callable[[Any], None]) -> None:
-        """
-        Register a callback for specific data type.
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
 
-        Args:
-            data_type: Type of data ('market_data', 'news_data', etc.)
-            callback: Callback function to handle data
-        """
-        if data_type in self.data_callbacks:
-            self.data_callbacks[data_type].append(callback)
-            logger.info(f"Registered callback for {data_type}")
-        else:
-            logger.warning(f"Unknown data type for callback: {data_type}")
+            logger.error(f"Fatal error in metrics collection: {e!s}")
 
     async def pause(self) -> None:
         """Pause the data ingestion pipeline."""
-        if self.status == PipelineStatus.RUNNING:
-            self.status = PipelineStatus.PAUSED
-            logger.info("DataIngestionPipeline paused")
+        try:
+            if self.status == PipelineStatus.RUNNING:
+                self.status = PipelineStatus.PAUSED
+                logger.info("DataIngestionPipeline paused")
+            else:
+                logger.warning("Pipeline is not running, cannot pause")
+
+        except Exception as e:
+            # Use ErrorHandler for pause errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="pause",
+                details={
+                    "current_status": self.status.value
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Failed to pause pipeline: {e!s}")
 
     async def resume(self) -> None:
         """Resume the data ingestion pipeline."""
-        if self.status == PipelineStatus.PAUSED:
-            self.status = PipelineStatus.RUNNING
-            logger.info("DataIngestionPipeline resumed")
+        try:
+            if self.status == PipelineStatus.PAUSED:
+                self.status = PipelineStatus.RUNNING
+                logger.info("DataIngestionPipeline resumed")
+            else:
+                logger.warning("Pipeline is not paused, cannot resume")
+
+        except Exception as e:
+            # Use ErrorHandler for resume errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="resume",
+                details={
+                    "current_status": self.status.value
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Failed to resume pipeline: {e!s}")
 
     async def stop(self) -> None:
         """Stop the data ingestion pipeline."""
         try:
-            self.status = PipelineStatus.STOPPING
+            if self.status == PipelineStatus.RUNNING:
+                self.status = PipelineStatus.STOPPED
 
-            # Cancel all active tasks
-            for task_name, task in self.active_tasks.items():
-                if not task.done():
-                    task.cancel()
-                    logger.info(f"Cancelled task: {task_name}")
+                # Cancel all active tasks
+                for task_name, task in self.active_tasks.items():
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
 
-            # Wait for tasks to complete
-            if self.active_tasks:
-                await asyncio.gather(*self.active_tasks.values(), return_exceptions=True)
+                # Close connections
+                await self.connection_manager.close_connection("market_data_source")
+                await self.connection_manager.close_connection("news_data_source")
+                await self.connection_manager.close_connection("social_media_source")
+                await self.connection_manager.close_connection("alternative_data_source")
 
-            # Cleanup data sources
-            if self.market_data_source:
-                await self.market_data_source.cleanup()
-            if self.news_data_source:
-                await self.news_data_source.cleanup()
-            if self.social_media_source:
-                await self.social_media_source.cleanup()
-            if self.alternative_data_source:
-                await self.alternative_data_source.cleanup()
+                # Cleanup data sources
+                if self.market_data_source:
+                    await self.market_data_source.cleanup()
+                if self.news_data_source:
+                    await self.news_data_source.cleanup()
+                if self.social_media_source:
+                    await self.social_media_source.cleanup()
+                if self.alternative_data_source:
+                    await self.alternative_data_source.cleanup()
 
-            self.status = PipelineStatus.STOPPED
-            logger.info("DataIngestionPipeline stopped successfully")
+                logger.info("DataIngestionPipeline stopped successfully")
+
+            else:
+                logger.warning("Pipeline is not running, cannot stop")
 
         except Exception as e:
-            self.status = PipelineStatus.ERROR
-            logger.error(f"Failed to stop DataIngestionPipeline: {e!s}")
-            raise
+            # Use ErrorHandler for stop errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="stop",
+                details={
+                    "current_status": self.status.value,
+                    "active_tasks": list(self.active_tasks.keys())
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Failed to stop pipeline: {e!s}")
+
+    def register_callback(self, data_type: str, callback: Callable[[Any], None]) -> None:
+        """Register a callback for data updates."""
+        try:
+            if data_type in self.data_callbacks:
+                self.data_callbacks[data_type].append(callback)
+                logger.info(f"Registered callback for {data_type}")
+            else:
+                logger.warning(f"Unknown data type: {data_type}")
+
+        except Exception as e:
+            # Use ErrorHandler for callback registration errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="register_callback",
+                details={
+                    "data_type": data_type,
+                    "callback_type": type(callback).__name__
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Failed to register callback for {data_type}: {e!s}")
 
     def get_status(self) -> dict[str, Any]:
-        """Get current pipeline status and metrics."""
-        return {
-            "status": self.status.value,
-            "configuration": {
+        """Get pipeline status and metrics."""
+        try:
+            # Get connection status
+            connection_status = self.connection_manager.get_all_connection_status()
+
+            # Get error pattern summary
+            pattern_summary = self.pattern_analytics.get_pattern_summary()
+            correlation_summary = self.pattern_analytics.get_correlation_summary()
+            trend_summary = self.pattern_analytics.get_trend_summary()
+
+            # Get circuit breaker status
+            circuit_breaker_status = self.error_handler.get_circuit_breaker_status()
+
+            return {
+                "status": self.status.value,
                 "mode": self.ingestion_config.mode.value,
                 "sources": self.ingestion_config.sources,
                 "symbols": self.ingestion_config.symbols,
-                "batch_size": self.ingestion_config.batch_size,
-                "update_interval": self.ingestion_config.update_interval,
-            },
-            "metrics": {
-                "total_records_processed": self.metrics.total_records_processed,
-                "successful_ingestions": self.metrics.successful_ingestions,
-                "failed_ingestions": self.metrics.failed_ingestions,
-                "records_per_second": self.metrics.records_per_second,
-                "buffer_utilization": self.metrics.buffer_utilization,
-                "error_rate": self.metrics.error_rate,
-                "last_update_time": self.metrics.last_update_time.isoformat(),
-            },
-            "buffer_sizes": {source: len(buffer) for source, buffer in self.data_buffers.items()},
-            "active_tasks": list(self.active_tasks.keys()),
-        }
+                "active_tasks": list(self.active_tasks.keys()),
+                "buffer_sizes": {
+                    source: len(buffer) for source, buffer in self.data_buffers.items()
+                },
+                "metrics": {
+                    "total_records_processed": self.metrics.total_records_processed,
+                    "successful_ingestions": self.metrics.successful_ingestions,
+                    "failed_ingestions": self.metrics.failed_ingestions,
+                    "avg_processing_time": self.metrics.avg_processing_time,
+                    "records_per_second": self.metrics.records_per_second,
+                    "buffer_utilization": self.metrics.buffer_utilization,
+                    "error_rate": self.metrics.error_rate,
+                    "last_update_time": self.metrics.last_update_time.isoformat()
+                },
+                "connection_status": connection_status,
+                "error_patterns": pattern_summary,
+                "error_correlations": correlation_summary,
+                "error_trends": trend_summary,
+                "circuit_breaker_status": circuit_breaker_status,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            # Use ErrorHandler for status retrieval errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="get_status",
+                details={
+                    "operation": "status_retrieval"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Failed to get pipeline status: {e!s}")
+            return {
+                "error": str(e),
+                "error_id": error_context.error_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+    async def cleanup(self) -> None:
+        """Cleanup pipeline resources."""
+        try:
+            # Stop pipeline if running
+            if self.status == PipelineStatus.RUNNING:
+                await self.stop()
+
+            # Clear buffers
+            self.data_buffers.clear()
+
+            # Clear callbacks
+            for data_type in self.data_callbacks:
+                self.data_callbacks[data_type].clear()
+
+            # Clear active tasks
+            self.active_tasks.clear()
+
+            logger.info("DataIngestionPipeline cleanup completed")
+
+        except Exception as e:
+            # Use ErrorHandler for cleanup errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="cleanup",
+                details={
+                    "operation": "cleanup"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Error during pipeline cleanup: {e!s}")

@@ -33,6 +33,7 @@ from src.core.types import MarketData
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 
 # Import from P-007A utilities
 from src.utils.decorators import cache_result, time_execution
@@ -84,7 +85,10 @@ class TechnicalIndicatorCalculator:
     def __init__(self, config: Config):
         """Initialize technical indicator calculator."""
         self.config = config
+
+        # Initialize error handling components
         self.error_handler = ErrorHandler(config)
+        self.pattern_analytics = ErrorPatternAnalytics(config)
 
         # Indicator configuration
         indicators_config = getattr(config, "indicators", {})
@@ -98,12 +102,10 @@ class TechnicalIndicatorCalculator:
                     "macd": [12, 26, 9],
                     "bollinger": 20,
                     "atr": 14,
-                    "stoch": [14, 3, 3],
                 },
             )
             self.cache_enabled = indicators_config.get("cache_enabled", True)
-            self.cache_ttl = indicators_config.get(
-                "cache_ttl", 300)  # 5 minutes
+            self.max_calculation_time = indicators_config.get("max_calculation_time", 5.0)
         else:
             self.default_periods = {
                 "sma": 20,
@@ -112,16 +114,15 @@ class TechnicalIndicatorCalculator:
                 "macd": [12, 26, 9],
                 "bollinger": 20,
                 "atr": 14,
-                "stoch": [14, 3, 3],
             }
             self.cache_enabled = True
-            self.cache_ttl = 300
+            self.max_calculation_time = 5.0
 
-        # Data storage for calculations
+        # Data storage
         self.price_data: dict[str, pd.DataFrame] = {}
-        self.indicator_cache: dict[str, dict[str, Any]] = {}
+        self.feature_cache: dict[str, dict[str, Any]] = {}
 
-        # Statistics
+        # Calculation statistics
         self.calculation_stats = {
             "total_calculations": 0,
             "successful_calculations": 0,
@@ -171,8 +172,8 @@ class TechnicalIndicatorCalculator:
                     max_rows)
 
             # Clear cache for this symbol
-            if symbol in self.indicator_cache:
-                self.indicator_cache[symbol] = {}
+            if symbol in self.feature_cache:
+                self.feature_cache[symbol] = {}
 
         except Exception as e:
             logger.error(f"Failed to add market data for {symbol}: {e!s}")
@@ -233,6 +234,26 @@ class TechnicalIndicatorCalculator:
             )
 
         except Exception as e:
+            # Use ErrorHandler for comprehensive error management
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="calculate_sma",
+                symbol=symbol,
+                details={
+                    "indicator": "SMA",
+                    "period": period,
+                    "field": field,
+                    "data_length": len(df) if symbol in self.price_data else 0
+                }
+            )
+
+            # Handle the error through the error handling framework
+            self.error_handler.handle_error(error_context)
+
+            # Add error event to pattern analytics
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             self.calculation_stats["failed_calculations"] += 1
             logger.error(f"SMA calculation failed for {symbol}: {e!s}")
             raise DataError(f"SMA calculation failed: {e!s}")
@@ -290,6 +311,26 @@ class TechnicalIndicatorCalculator:
             )
 
         except Exception as e:
+            # Use ErrorHandler for comprehensive error management
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="calculate_ema",
+                symbol=symbol,
+                details={
+                    "indicator": "EMA",
+                    "period": period,
+                    "field": field,
+                    "data_length": len(df) if symbol in self.price_data else 0
+                }
+            )
+
+            # Handle the error through the error handling framework
+            self.error_handler.handle_error(error_context)
+
+            # Add error event to pattern analytics
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             self.calculation_stats["failed_calculations"] += 1
             logger.error(f"EMA calculation failed for {symbol}: {e!s}")
             raise DataError(f"EMA calculation failed: {e!s}")
@@ -354,6 +395,25 @@ class TechnicalIndicatorCalculator:
             )
 
         except Exception as e:
+            # Use ErrorHandler for comprehensive error management
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="calculate_rsi",
+                symbol=symbol,
+                details={
+                    "indicator": "RSI",
+                    "period": period,
+                    "data_length": len(df) if symbol in self.price_data else 0
+                }
+            )
+
+            # Handle the error through the error handling framework
+            self.error_handler.handle_error(error_context)
+
+            # Add error event to pattern analytics
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             self.calculation_stats["failed_calculations"] += 1
             logger.error(f"RSI calculation failed for {symbol}: {e!s}")
             raise DataError(f"RSI calculation failed: {e!s}")
@@ -455,6 +515,27 @@ class TechnicalIndicatorCalculator:
             )
 
         except Exception as e:
+            # Use ErrorHandler for comprehensive error management
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="calculate_macd",
+                symbol=symbol,
+                details={
+                    "indicator": "MACD",
+                    "fast_period": fast_period,
+                    "slow_period": slow_period,
+                    "signal_period": signal_period,
+                    "data_length": len(df) if symbol in self.price_data else 0
+                }
+            )
+
+            # Handle the error through the error handling framework
+            self.error_handler.handle_error(error_context)
+
+            # Add error event to pattern analytics
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             self.calculation_stats["failed_calculations"] += 1
             logger.error(f"MACD calculation failed for {symbol}: {e!s}")
             raise DataError(f"MACD calculation failed: {e!s}")
@@ -550,9 +631,29 @@ class TechnicalIndicatorCalculator:
             )
 
         except Exception as e:
+            # Use ErrorHandler for comprehensive error management
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="calculate_bollinger_bands",
+                symbol=symbol,
+                details={
+                    "indicator": "Bollinger_Bands",
+                    "period": period,
+                    "std_dev": std_dev,
+                    "field": field,
+                    "data_length": len(df) if symbol in self.price_data else 0
+                }
+            )
+
+            # Handle the error through the error handling framework
+            self.error_handler.handle_error(error_context)
+
+            # Add error event to pattern analytics
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(
-                f"Bollinger Bands calculation failed for {symbol}: {e!s}")
+            logger.error(f"Bollinger Bands calculation failed for {symbol}: {e!s}")
             raise DataError(f"Bollinger Bands calculation failed: {e!s}")
 
     @time_execution
@@ -618,6 +719,25 @@ class TechnicalIndicatorCalculator:
             )
 
         except Exception as e:
+            # Use ErrorHandler for comprehensive error management
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="calculate_atr",
+                symbol=symbol,
+                details={
+                    "indicator": "ATR",
+                    "period": period,
+                    "data_length": len(df) if symbol in self.price_data else 0
+                }
+            )
+
+            # Handle the error through the error handling framework
+            self.error_handler.handle_error(error_context)
+
+            # Add error event to pattern analytics
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             self.calculation_stats["failed_calculations"] += 1
             logger.error(f"ATR calculation failed for {symbol}: {e!s}")
             raise DataError(f"ATR calculation failed: {e!s}")
@@ -661,12 +781,31 @@ class TechnicalIndicatorCalculator:
                         f"Failed to calculate {indicator} for {symbol}: {e!s}")
                     results[indicator] = None
 
+            successful_count = len([r for r in results.values() if r is not None])
             logger.info(
-                f"Calculated {len([r for r in results.values() if r is not None])} indicators for {symbol}"
+                f"Calculated {successful_count} indicators for {symbol}"
             )
             return results
 
         except Exception as e:
+            # Use ErrorHandler for comprehensive error management
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="calculate_batch_indicators",
+                symbol=symbol,
+                details={
+                    "indicators": indicators,
+                    "indicators_count": len(indicators)
+                }
+            )
+
+            # Handle the error through the error handling framework
+            self.error_handler.handle_error(error_context)
+
+            # Add error event to pattern analytics
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             logger.error(
                 f"Batch indicator calculation failed for {symbol}: {e!s}")
             raise DataError(f"Batch calculation failed: {e!s}")
@@ -706,5 +845,99 @@ class TechnicalIndicatorCalculator:
             }
 
         except Exception as e:
+            # Use ErrorHandler for comprehensive error management
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="get_calculation_summary",
+                details={
+                    "operation": "summary_generation"
+                }
+            )
+
+            # Handle the error through the error handling framework
+            self.error_handler.handle_error(error_context)
+
+            # Add error event to pattern analytics
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
             logger.error(f"Failed to generate calculation summary: {e!s}")
             return {"error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}
+
+    async def get_error_analytics(self) -> dict[str, Any]:
+        """Get error pattern analytics and circuit breaker status."""
+        try:
+            # Get error pattern summary from analytics
+            pattern_summary = self.pattern_analytics.get_pattern_summary()
+            correlation_summary = self.pattern_analytics.get_correlation_summary()
+            trend_summary = self.pattern_analytics.get_trend_summary()
+
+            # Get circuit breaker status
+            circuit_breaker_status = self.error_handler.get_circuit_breaker_status()
+
+            return {
+                "error_patterns": pattern_summary,
+                "error_correlations": correlation_summary,
+                "error_trends": trend_summary,
+                "circuit_breaker_status": circuit_breaker_status,
+                "calculation_stats": self.calculation_stats.copy(),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        except Exception as e:
+            # Use ErrorHandler for analytics retrieval errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="get_error_analytics",
+                details={
+                    "operation": "analytics_retrieval"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Failed to get error analytics: {e!s}")
+            return {
+                "error": str(e),
+                "error_id": error_context.error_id,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+    async def cleanup(self) -> None:
+        """Cleanup technical indicator calculator resources."""
+        try:
+            # Clear price data
+            self.price_data.clear()
+
+            # Clear feature cache
+            self.feature_cache.clear()
+
+            # Reset calculation stats
+            self.calculation_stats = {
+                "total_calculations": 0,
+                "successful_calculations": 0,
+                "failed_calculations": 0,
+                "cache_hits": 0,
+                "cache_misses": 0,
+                "avg_calculation_time": 0.0,
+            }
+
+            logger.info("TechnicalIndicatorCalculator cleanup completed")
+
+        except Exception as e:
+            # Use ErrorHandler for cleanup errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="TechnicalIndicatorCalculator",
+                operation="cleanup",
+                details={
+                    "operation": "cleanup"
+                }
+            )
+
+            self.error_handler.handle_error(error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            logger.error(f"Error during TechnicalIndicatorCalculator cleanup: {e!s}")

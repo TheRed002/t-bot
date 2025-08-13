@@ -28,6 +28,7 @@ from src.core.logging import get_logger
 # MANDATORY: Import from P-001
 from src.core.types import CurrencyExposure, FundFlow
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.exchanges.base import BaseExchange
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
@@ -79,6 +80,9 @@ class CurrencyManager:
 
         # Error handler
         self.error_handler = ErrorHandler(config)
+
+        # Recovery scenarios
+        self.partial_fill_recovery = PartialFillRecovery(config)
 
         # Initialize supported currencies
         self._initialize_currencies()
@@ -262,11 +266,12 @@ class CurrencyManager:
 
             # Create fund flow record
             flow = FundFlow(
-                from_currency=from_currency,
-                to_currency=to_currency,
+                from_strategy=None,
+                to_strategy=None,
                 from_exchange=exchange,
                 to_exchange=exchange,
                 amount=amount,
+                currency=from_currency,
                 converted_amount=converted_amount,
                 exchange_rate=rate,
                 reason="currency_conversion",

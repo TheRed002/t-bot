@@ -25,8 +25,15 @@ from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import CapitalProtection, FundFlow, WithdrawalRule
+from src.core.types import (
+    CapitalProtection,
+    FundFlow,
+    WithdrawalRule,
+)
+from src.database.connection import get_redis_client
+from src.database.connection import get_influxdb_client
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
 from src.utils.validators import validate_quantity
@@ -89,6 +96,33 @@ class FundFlowManager:
         # Error handler
         self.error_handler = ErrorHandler(config)
 
+        # Recovery scenarios
+        self.partial_fill_recovery = PartialFillRecovery(config)
+
+        # Redis client for caching (optional)
+        try:
+            self.redis_client = get_redis_client()
+        except Exception:
+            self.redis_client = None
+            logger.warning("Redis client not available, caching disabled")
+
+        # InfluxDB client for time series data (optional)
+        try:
+            self.influx_client = get_influxdb_client()
+        except Exception:
+            self.influx_client = None
+            logger.warning("InfluxDB client not available, time series storage disabled")
+
+        # Cache keys
+        self.cache_keys = {
+            "fund_flows": "fund:flows",
+            "summary": "fund:summary",
+            "withdrawal_rules": "fund:withdrawal_rules",
+        }
+
+        # Cache TTL (seconds)
+        self.cache_ttl = 300  # 5 minutes
+
         # Initialize withdrawal rules
         self._initialize_withdrawal_rules()
 
@@ -97,6 +131,53 @@ class FundFlowManager:
             auto_compound_enabled=self.capital_config.auto_compound_enabled,
             profit_threshold=format_currency(float(self.capital_config.profit_threshold)),
         )
+
+    async def _cache_fund_flows(self, flows: list[FundFlow]) -> None:
+        """Cache fund flows in Redis."""
+        if not self.redis_client:
+            return
+        try:
+            # Convert FundFlow objects to dict for caching
+            cache_data = [flow.model_dump() for flow in flows]
+            await self.redis_client.set(
+                self.cache_keys["fund_flows"],
+                cache_data,
+                ttl=self.cache_ttl
+            )
+        except Exception as e:
+            logger.warning("Failed to cache fund flows", error=str(e))
+
+    async def _get_cached_fund_flows(self) -> list[FundFlow] | None:
+        """Get cached fund flows from Redis."""
+        if not self.redis_client:
+            return None
+        try:
+            cached_data = await self.redis_client.get(self.cache_keys["fund_flows"])
+            if cached_data:
+                # Convert cached data back to FundFlow objects
+                flows = [FundFlow(**data) for data in cached_data]
+                return flows
+        except Exception as e:
+            logger.warning("Failed to get cached fund flows", error=str(e))
+        return None
+
+    async def _store_fund_flow_influxdb(self, flow: FundFlow) -> None:
+        """Store fund flow in InfluxDB for time series analysis."""
+        if not self.influx_client:
+            return
+        try:
+            # Create a point for fund flows
+            from influxdb_client import Point
+            point = Point("fund_flows").tag("component", "fund_flow_manager").tag(
+                "currency", flow.currency
+            ).tag("reason", flow.reason).tag("from_exchange", flow.from_exchange or "none").tag(
+                "to_exchange", flow.to_exchange or "none"
+            ).field("amount", float(flow.amount))
+
+            # Write to InfluxDB
+            self.influx_client.write_api().write(bucket="trading_bot", record=point)
+        except Exception as e:
+            logger.warning("Failed to store fund flow in InfluxDB", error=str(e))
 
     @time_execution
     async def process_deposit(
@@ -119,9 +200,8 @@ class FundFlowManager:
 
             if amount < Decimal(str(self.capital_config.min_deposit_amount)):
                 raise ValidationError(
-                    f"Deposit amount {amount} below minimum {
-                        self.capital_config.min_deposit_amount
-                    }"
+                    f"Deposit amount {amount} below minimum "
+                    f"{self.capital_config.min_deposit_amount}"
                 )
 
             # Create fund flow record
@@ -139,6 +219,12 @@ class FundFlowManager:
             # Add to flow history
             self.fund_flows.append(flow)
 
+            # Cache fund flows
+            await self._cache_fund_flows(self.fund_flows)
+
+            # Store fund flow in InfluxDB
+            await self._store_fund_flow_influxdb(flow)
+
             logger.info(
                 "Deposit processed successfully",
                 amount=format_currency(float(amount), currency),
@@ -148,8 +234,27 @@ class FundFlowManager:
             return flow
 
         except Exception as e:
+            # Create comprehensive error context
+            context = self.error_handler.create_error_context(
+                error=e,
+                component="capital_management",
+                operation="process_deposit",
+                details={
+                    "amount": float(amount),
+                    "currency": currency,
+                    "exchange": exchange,
+                    "total_capital": float(self.total_capital),
+                }
+            )
+
+            # Handle error with recovery strategy
+            await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
+
+            # Log detailed error information
             logger.error(
                 "Deposit processing failed",
+                error_id=context.error_id,
+                severity=context.severity.value,
                 amount=format_currency(float(amount), currency),
                 exchange=exchange,
                 error=str(e),
@@ -186,9 +291,8 @@ class FundFlowManager:
             # Check minimum withdrawal amount
             if amount < Decimal(str(self.capital_config.min_withdrawal_amount)):
                 raise ValidationError(
-                    f"Withdrawal amount {amount} below minimum {
-                        self.capital_config.min_withdrawal_amount
-                    }"
+                    f"Withdrawal amount {amount} below minimum "
+                    f"{self.capital_config.min_withdrawal_amount}"
                 )
 
             # Validate withdrawal rules
@@ -234,8 +338,28 @@ class FundFlowManager:
             return flow
 
         except Exception as e:
+            # Create comprehensive error context
+            context = self.error_handler.create_error_context(
+                error=e,
+                component="capital_management",
+                operation="process_withdrawal",
+                details={
+                    "amount": float(amount),
+                    "currency": currency,
+                    "exchange": exchange,
+                    "reason": reason,
+                    "total_capital": float(self.total_capital),
+                }
+            )
+
+            # Handle error with recovery strategy
+            await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
+
+            # Log detailed error information
             logger.error(
                 "Withdrawal processing failed",
+                error_id=context.error_id,
+                severity=context.severity.value,
                 amount=format_currency(float(amount), currency),
                 exchange=exchange,
                 error=str(e),
@@ -464,8 +588,8 @@ class FundFlowManager:
                 "total_compounds": float(total_compounds),
                 "net_flow": float(total_deposits - total_withdrawals),
                 "currency_flows": {
-                    curr: {k: float(v) for k, v in flows.items()}
-                    for curr, flows in currency_flows.items()
+                    curr: {k: float(v) for k, v in stats.items()}
+                    for curr, stats in currency_flows.items()
                 },
             }
 
@@ -528,9 +652,8 @@ class FundFlowManager:
                         performance_ok = await self._check_performance_threshold(rule.threshold)
                         if not performance_ok:
                             raise ValidationError(
-                                f"Withdrawal not allowed: Performance below threshold {
-                                    rule.threshold
-                                }"
+                                f"Withdrawal not allowed: Performance below "
+                                f"threshold {rule.threshold}"
                             )
 
                 # Check minimum amount rule

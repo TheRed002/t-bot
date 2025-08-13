@@ -134,6 +134,45 @@ class InfluxDBClientWrapper:
         point = self._create_point("market_data", tags, fields, timestamp)
         self.write_point(point)
 
+    def write_market_data_batch(
+        self, data_list: list[dict[str, Any]], timestamp: datetime | None = None
+    ) -> None:
+        """Write multiple market data points in batch."""
+        points = []
+
+        for data in data_list:
+            if isinstance(data, dict):
+                # Handle dict format
+                symbol = data.get("symbol", "")
+                fields = {
+                    "price": float(data.get("price", 0)),
+                    "volume": float(data.get("volume", 0)),
+                    "bid": float(data.get("bid", 0)),
+                    "ask": float(data.get("ask", 0)),
+                    "open": float(data.get("open", 0)),
+                    "high": float(data.get("high", 0)),
+                    "low": float(data.get("low", 0)),
+                }
+            else:
+                # Handle MarketData object format
+                symbol = getattr(data, "symbol", "")
+                fields = {
+                    "price": float(getattr(data, "price", 0)),
+                    "volume": float(getattr(data, "volume", 0) or 0),
+                    "bid": float(getattr(data, "bid", 0) or 0),
+                    "ask": float(getattr(data, "ask", 0) or 0),
+                    "high": float(getattr(data, "high_price", 0) or 0),
+                    "low": float(getattr(data, "low_price", 0) or 0),
+                    "open": float(getattr(data, "open_price", 0) or 0),
+                }
+
+            tags = {"symbol": symbol, "data_type": "market_data"}
+            point = self._create_point("market_data", tags, fields, timestamp)
+            points.append(point)
+
+        if points:
+            self.write_points(points)
+
     def write_trade(self, trade_data: dict[str, Any], timestamp: datetime | None = None) -> None:
         """Write trade data point."""
         tags = {

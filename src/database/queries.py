@@ -10,7 +10,7 @@ used by all subsequent prompts for data persistence.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, TypeVar
+from typing import Any, TypeVar, Optional, List, Dict
 from contextlib import asynccontextmanager
 
 from sqlalchemy import and_, desc, func, select, update
@@ -41,6 +41,14 @@ from .models import (
     Position,
     Trade,
     User,
+    CapitalAllocationDB,
+    FundFlowDB,
+    CurrencyExposureDB,
+    ExchangeAllocationDB,
+    MarketDataRecord,
+    FeatureRecord,
+    DataQualityRecord,
+    DataPipelineRecord,
 )
 
 logger = get_logger(__name__)
@@ -629,3 +637,346 @@ class DatabaseQueries:
         except SQLAlchemyError as e:
             logger.error("Database health check failed", error=str(e))
             return False
+
+    # Capital Management Queries
+
+    async def get_capital_allocations_by_strategy(
+        self, strategy_id: str, limit: Optional[int] = None, offset: int = 0
+    ) -> List[CapitalAllocationDB]:
+        """Get capital allocations for a specific strategy."""
+        query = select(CapitalAllocationDB).where(
+            CapitalAllocationDB.strategy_id == strategy_id
+        ).order_by(CapitalAllocationDB.created_at.desc())
+
+        if limit:
+            query = query.limit(limit).offset(offset)
+
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def get_capital_allocations_by_exchange(
+        self, exchange: str, limit: Optional[int] = None, offset: int = 0
+    ) -> List[CapitalAllocationDB]:
+        """Get capital allocations for a specific exchange."""
+        query = select(CapitalAllocationDB).where(
+            CapitalAllocationDB.exchange == exchange
+        ).order_by(CapitalAllocationDB.created_at.desc())
+
+        if limit:
+            query = query.limit(limit).offset(offset)
+
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def get_fund_flows_by_reason(
+        self, reason: str, start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None, limit: Optional[int] = None
+    ) -> List[FundFlowDB]:
+        """Get fund flows by reason within time range."""
+        query = select(FundFlowDB).where(FundFlowDB.reason == reason)
+
+        if start_time:
+            query = query.where(FundFlowDB.timestamp >= start_time)
+        if end_time:
+            query = query.where(FundFlowDB.timestamp <= end_time)
+
+        query = query.order_by(FundFlowDB.timestamp.desc())
+
+        if limit:
+            query = query.limit(limit)
+
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def get_fund_flows_by_currency(
+        self, currency: str, start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None, limit: Optional[int] = None
+    ) -> List[FundFlowDB]:
+        """Get fund flows by currency within time range."""
+        query = select(FundFlowDB).where(FundFlowDB.currency == currency)
+
+        if start_time:
+            query = query.where(FundFlowDB.timestamp >= start_time)
+        if end_time:
+            query = query.where(FundFlowDB.timestamp <= end_time)
+
+        query = query.order_by(FundFlowDB.timestamp.desc())
+
+        if limit:
+            query = query.limit(limit)
+
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def get_currency_exposure_by_currency(
+        self, currency: str
+    ) -> Optional[CurrencyExposureDB]:
+        """Get currency exposure for a specific currency."""
+        query = select(CurrencyExposureDB).where(
+            CurrencyExposureDB.currency == currency
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_exchange_allocation_by_exchange(
+        self, exchange: str
+    ) -> Optional[ExchangeAllocationDB]:
+        """Get exchange allocation for a specific exchange."""
+        query = select(ExchangeAllocationDB).where(
+            ExchangeAllocationDB.exchange == exchange
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_total_capital_allocated(
+        self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+    ) -> Decimal:
+        """Get total capital allocated within time range."""
+        query = select(func.sum(CapitalAllocationDB.allocated_amount))
+
+        if start_time:
+            query = query.where(CapitalAllocationDB.created_at >= start_time)
+        if end_time:
+            query = query.where(CapitalAllocationDB.created_at <= end_time)
+
+        result = await self.session.execute(query)
+        total = result.scalar()
+        return total or Decimal("0")
+
+    async def get_total_fund_flows(
+        self, start_time: Optional[datetime] = None, end_time: Optional[datetime] = None
+    ) -> Decimal:
+        """Get total fund flows within time range."""
+        query = select(func.sum(FundFlowDB.amount))
+
+        if start_time:
+            query = query.where(FundFlowDB.timestamp >= start_time)
+        if end_time:
+            query = query.where(FundFlowDB.timestamp <= end_time)
+
+        result = await self.session.execute(query)
+        total = result.scalar()
+        return total or Decimal("0")
+
+    async def bulk_create_capital_allocations(
+        self, allocations: List[CapitalAllocationDB]
+    ) -> List[CapitalAllocationDB]:
+        """Create multiple capital allocations in bulk."""
+        return await self.bulk_create(allocations)
+
+    async def bulk_update_capital_allocations(
+        self, updates: List[Dict[str, Any]]
+    ) -> int:
+        """Update multiple capital allocations in bulk."""
+        return await self.bulk_update(CapitalAllocationDB, updates, "id")
+
+    async def bulk_create_fund_flows(
+        self, flows: List[FundFlowDB]
+    ) -> List[FundFlowDB]:
+        """Create multiple fund flows in bulk."""
+        return await self.bulk_create(flows)
+
+    # Data Management Queries
+    async def create_market_data_record(
+        self, market_data: MarketDataRecord
+    ) -> MarketDataRecord:
+        """Create a new market data record."""
+        return await self.create(market_data)
+
+    async def bulk_create_market_data_records(
+        self, records: List[MarketDataRecord]
+    ) -> List[MarketDataRecord]:
+        """Create multiple market data records in bulk."""
+        return await self.bulk_create(records)
+
+    async def get_market_data_records(
+        self,
+        symbol: str,
+        exchange: str,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: Optional[int] = None
+    ) -> List[MarketDataRecord]:
+        """Get market data records for a symbol and exchange within time range."""
+        query = select(MarketDataRecord).where(
+            and_(
+                MarketDataRecord.symbol == symbol,
+                MarketDataRecord.exchange == exchange
+            )
+        )
+
+        if start_time:
+            query = query.where(MarketDataRecord.timestamp >= start_time)
+        if end_time:
+            query = query.where(MarketDataRecord.timestamp <= end_time)
+
+        query = query.order_by(MarketDataRecord.timestamp.desc())
+
+        if limit:
+            query = query.limit(limit)
+
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def get_market_data_by_quality(
+        self,
+        min_quality_score: float,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> List[MarketDataRecord]:
+        """Get market data records above quality threshold."""
+        query = select(MarketDataRecord).where(
+            MarketDataRecord.quality_score >= min_quality_score
+        )
+
+        if start_time:
+            query = query.where(MarketDataRecord.timestamp >= start_time)
+        if end_time:
+            query = query.where(MarketDataRecord.timestamp <= end_time)
+
+        query = query.order_by(MarketDataRecord.timestamp.desc())
+
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def delete_old_market_data(
+        self, cutoff_date: datetime
+    ) -> int:
+        """Delete market data records older than cutoff date."""
+        query = select(MarketDataRecord).where(
+            MarketDataRecord.timestamp < cutoff_date
+        )
+
+        result = await self.session.execute(query)
+        old_records = result.scalars().all()
+
+        if old_records:
+            for record in old_records:
+                await self.session.delete(record)
+            await self.session.commit()
+            return len(old_records)
+
+        return 0
+
+    async def create_feature_record(
+        self, feature: FeatureRecord
+    ) -> FeatureRecord:
+        """Create a new feature record."""
+        return await self.create(feature)
+
+    async def bulk_create_feature_records(
+        self, features: List[FeatureRecord]
+    ) -> List[FeatureRecord]:
+        """Create multiple feature records in bulk."""
+        return await self.bulk_create(features)
+
+    async def get_feature_records(
+        self,
+        symbol: str,
+        feature_type: Optional[str] = None,
+        feature_name: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> List[FeatureRecord]:
+        """Get feature records for a symbol with optional filtering."""
+        query = select(FeatureRecord).where(FeatureRecord.symbol == symbol)
+
+        if feature_type:
+            query = query.where(FeatureRecord.feature_type == feature_type)
+        if feature_name:
+            query = query.where(FeatureRecord.feature_name == feature_name)
+        if start_time:
+            query = query.where(FeatureRecord.calculation_timestamp >= start_time)
+        if end_time:
+            query = query.where(FeatureRecord.calculation_timestamp <= end_time)
+
+        query = query.order_by(FeatureRecord.calculation_timestamp.desc())
+
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def create_data_quality_record(
+        self, quality_record: DataQualityRecord
+    ) -> DataQualityRecord:
+        """Create a new data quality record."""
+        return await self.create(quality_record)
+
+    async def get_data_quality_records(
+        self,
+        symbol: Optional[str] = None,
+        data_source: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> List[DataQualityRecord]:
+        """Get data quality records with optional filtering."""
+        query = select(DataQualityRecord)
+
+        if symbol:
+            query = query.where(DataQualityRecord.symbol == symbol)
+        if data_source:
+            query = query.where(DataQualityRecord.data_source == data_source)
+        if start_time:
+            query = query.where(DataQualityRecord.quality_check_timestamp >= start_time)
+        if end_time:
+            query = query.where(DataQualityRecord.quality_check_timestamp <= end_time)
+
+        query = query.order_by(DataQualityRecord.quality_check_timestamp.desc())
+
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+    async def create_data_pipeline_record(
+        self, pipeline_record: DataPipelineRecord
+    ) -> DataPipelineRecord:
+        """Create a new data pipeline record."""
+        return await self.create(pipeline_record)
+
+    async def update_data_pipeline_status(
+        self,
+        execution_id: str,
+        status: str,
+        stage: Optional[str] = None,
+        error_message: Optional[str] = None
+    ) -> bool:
+        """Update data pipeline execution status."""
+        update_data = {"status": status, "updated_at": datetime.utcnow()}
+
+        if stage:
+            update_data["stage"] = stage
+        if error_message:
+            update_data["last_error"] = error_message
+            update_data["error_count"] = DataPipelineRecord.error_count + 1
+
+        query = (
+            update(DataPipelineRecord)
+            .where(DataPipelineRecord.execution_id == execution_id)
+            .values(**update_data)
+        )
+
+        result = await self.session.execute(query)
+        await self.session.commit()
+        return result.rowcount > 0
+
+    async def get_data_pipeline_records(
+        self,
+        pipeline_name: Optional[str] = None,
+        status: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> List[DataPipelineRecord]:
+        """Get data pipeline records with optional filtering."""
+        query = select(DataPipelineRecord)
+
+        if pipeline_name:
+            query = query.where(DataPipelineRecord.pipeline_name == pipeline_name)
+        if status:
+            query = query.where(DataPipelineRecord.status == status)
+        if start_time:
+            query = query.where(DataPipelineRecord.execution_timestamp >= start_time)
+        if end_time:
+            query = query.where(DataPipelineRecord.execution_timestamp <= end_time)
+
+        query = query.order_by(DataPipelineRecord.execution_timestamp.desc())
+
+        result = await self.session.execute(query)
+        return result.scalars().all()

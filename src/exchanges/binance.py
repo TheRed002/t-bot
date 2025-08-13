@@ -52,7 +52,8 @@ from src.exchanges.rate_limiter import RateLimiter
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.constants import API_ENDPOINTS
-from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution, retry, cache_result, log_calls
+
 
 logger = get_logger(__name__)
 
@@ -113,6 +114,8 @@ class BinanceExchange(BaseExchange):
 
         logger.info(f"Initialized Binance exchange (testnet: {self.testnet})")
 
+    @retry(max_attempts=3, base_delay=1.0)
+    @log_calls
     async def connect(self) -> bool:
         """
         Establish connection to Binance.
@@ -138,6 +141,15 @@ class BinanceExchange(BaseExchange):
             # Initialize WebSocket connection
             await self._initialize_websocket()
 
+            # Initialize database connection
+            await self._initialize_database()
+
+            # Initialize Redis client
+            await self._initialize_redis()
+
+            # Initialize data module
+            await self._initialize_data_module()
+
             self.connected = True
             self.status = "connected"
             self.last_heartbeat = datetime.now(timezone.utc)
@@ -151,7 +163,7 @@ class BinanceExchange(BaseExchange):
             self.connected = False
             return False
 
-    async def disconnect(self) -> None:
+    async def _disconnect_from_exchange(self) -> None:
         """Disconnect from Binance exchange."""
         try:
             logger.info("Disconnecting from Binance exchange...")
@@ -172,6 +184,7 @@ class BinanceExchange(BaseExchange):
         except Exception as e:
             logger.error(f"Error disconnecting from Binance: {e!s}")
 
+    @cache_result(ttl_seconds=30)  # Cache balance for 30 seconds
     async def get_account_balance(self) -> dict[str, Decimal]:
         """
         Get all asset balances from Binance.
@@ -198,16 +211,21 @@ class BinanceExchange(BaseExchange):
                     balances[asset] = total
 
             logger.debug(f"Retrieved {len(balances)} asset balances from Binance")
+
+            # Store balance snapshot in database
+            await self._store_balance_snapshot(balances)
+
             return balances
 
         except BinanceAPIException as e:
-            logger.error(f"Binance API error getting balance: {e}")
+            await self._handle_exchange_error(e, "get_account_balance", {"symbol": "ALL"})
             raise ExchangeError(f"Failed to get balance: {e}")
         except Exception as e:
-            logger.error(f"Error getting balance from Binance: {e!s}")
+            await self._handle_exchange_error(e, "get_account_balance", {"symbol": "ALL"})
             raise ExchangeError(f"Failed to get balance: {e!s}")
 
     @time_execution
+    @log_calls
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """
         Place an order on Binance.
@@ -262,15 +280,24 @@ class BinanceExchange(BaseExchange):
             return response
 
         except BinanceOrderException as e:
-            logger.error(f"Binance order error: {e}")
+            await self._handle_exchange_error(
+                e, "place_order",
+                {"symbol": order.symbol, "order_id": order.client_order_id}
+            )
             if "insufficient balance" in str(e).lower():
                 raise ExchangeInsufficientFundsError(f"Insufficient balance: {e}")
             raise OrderRejectionError(f"Order rejected: {e}")
         except BinanceAPIException as e:
-            logger.error(f"Binance API error placing order: {e}")
+            await self._handle_exchange_error(
+                e, "place_order",
+                {"symbol": order.symbol, "order_id": order.client_order_id}
+            )
             raise ExchangeError(f"Failed to place order: {e}")
         except Exception as e:
-            logger.error(f"Error placing order on Binance: {e!s}")
+            await self._handle_exchange_error(
+                e, "place_order",
+                {"symbol": order.symbol, "order_id": order.client_order_id}
+            )
             raise ExecutionError(f"Failed to place order: {e!s}")
 
     @time_execution
@@ -338,9 +365,10 @@ class BinanceExchange(BaseExchange):
             raise ExchangeError(f"Failed to get order status: {e!s}")
 
     @time_execution
-    async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
+    @cache_result(ttl_seconds=5)  # Cache market data for 5 seconds
+    async def _get_market_data_from_exchange(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """
-        Get market data from Binance.
+        Get market data from Binance API.
 
         Args:
             symbol: Trading symbol (e.g., "BTCUSDT")
@@ -373,6 +401,17 @@ class BinanceExchange(BaseExchange):
                 high_price=Decimal(str(kline[2])),
                 low_price=Decimal(str(kline[3])),
             )
+
+            # Cache market data in Redis
+            await self._cache_market_data(symbol, {
+                "price": str(market_data.price),
+                "volume": str(market_data.volume),
+                "timestamp": market_data.timestamp.isoformat(),
+                "open_price": str(market_data.open_price),
+                "high_price": str(market_data.high_price),
+                "low_price": str(market_data.low_price),
+                "timeframe": timeframe
+            })
 
             return market_data
 
@@ -459,9 +498,9 @@ class BinanceExchange(BaseExchange):
             raise ExchangeError(f"Failed to get order book: {e!s}")
 
     @time_execution
-    async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]:
+    async def _get_trade_history_from_exchange(self, symbol: str, limit: int = 100) -> list[Trade]:
         """
-        Get trade history from Binance.
+        Get trade history from Binance API.
 
         Args:
             symbol: Trading symbol
@@ -526,7 +565,9 @@ class BinanceExchange(BaseExchange):
         """Spot implementation: no positions; return empty list."""
         return []
 
+    @cache_result(ttl_seconds=300)
     @time_execution
+    @log_calls
     async def get_exchange_info(self) -> ExchangeInfo:
         """
         Get exchange information from Binance.

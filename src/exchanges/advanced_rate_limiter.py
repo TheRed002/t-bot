@@ -27,8 +27,8 @@ from src.core.types import (
 )
 
 # MANDATORY: Import from P-002A
-# MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
-from src.utils.decorators import time_execution
+# MANDATORY: Import from P-007A (utils)
+from src.utils.decorators import time_execution, log_calls
 
 logger = get_logger(__name__)
 
@@ -80,6 +80,7 @@ class AdvancedRateLimiter:
             raise ExchangeError(f"Rate limiter initialization failed: {e!s}")
 
     @time_execution
+    @log_calls
     async def check_rate_limit(self, exchange: str, endpoint: str, weight: int = 1) -> bool:
         """
         Check if rate limit allows the request.
@@ -150,6 +151,7 @@ class AdvancedRateLimiter:
             raise ExchangeRateLimitError(f"Rate limit check failed: {e!s}")
 
     @time_execution
+    @log_calls
     async def wait_if_needed(self, exchange: str, endpoint: str) -> float:
         """
         Wait if rate limit is exceeded.
@@ -191,10 +193,64 @@ class AdvancedRateLimiter:
             raise ExchangeRateLimitError(f"Rate limit wait failed: {e!s}")
 
     async def _check_global_limits(self, exchange: str, endpoint: str, weight: int) -> bool:
-        """Check global rate limits."""
-        # TODO: Implement global limit checking
-        # For now, always return True
-        return True
+        """Check global rate limits across all exchanges."""
+        try:
+            now = datetime.now()
+
+            # Check global request rate limits
+            global_key = "global:requests_per_minute"
+            if global_key not in self.global_limits:
+                self.global_limits[global_key] = []
+
+            # Clean old entries (keep last minute)
+            minute_ago = now - timedelta(minutes=1)
+            self.global_limits[global_key] = [
+                t for t in self.global_limits[global_key] if t > minute_ago
+            ]
+
+            # Check global rate limit (e.g., 1000 requests per minute across all exchanges)
+            max_global_requests = 1000
+            if len(self.global_limits[global_key]) >= max_global_requests:
+                logger.warning(
+                    "Global rate limit exceeded",
+                    exchange=exchange,
+                    endpoint=endpoint,
+                    current_requests=len(self.global_limits[global_key]),
+                    limit=max_global_requests
+                )
+                return False
+
+            # Check exchange-specific global limits
+            exchange_key = f"global:{exchange}:requests_per_minute"
+            if exchange_key not in self.global_limits:
+                self.global_limits[exchange_key] = []
+
+            # Clean old entries
+            self.global_limits[exchange_key] = [
+                t for t in self.global_limits[exchange_key] if t > minute_ago
+            ]
+
+            # Check exchange global limit (e.g., 500 requests per minute per exchange)
+            max_exchange_requests = 500
+            if len(self.global_limits[exchange_key]) >= max_exchange_requests:
+                logger.warning(
+                    "Exchange global rate limit exceeded",
+                    exchange=exchange,
+                    endpoint=endpoint,
+                    current_requests=len(self.global_limits[exchange_key]),
+                    limit=max_exchange_requests
+                )
+                return False
+
+            # Record the request
+            self.global_limits[global_key].append(now)
+            self.global_limits[exchange_key].append(now)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Global rate limit check failed: {e!s}")
+            return False
 
     def _record_request(self, exchange: str, endpoint: str, weight: int) -> None:
         """Record request for tracking."""

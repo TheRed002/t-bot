@@ -23,6 +23,11 @@ from src.core.logging import get_logger
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils.decorators import retry, log_calls
+from src.utils.constants import RATE_LIMITS
+from src.error_handling.recovery_scenarios import APIRateLimitRecovery
+
 logger = get_logger(__name__)
 
 
@@ -116,26 +121,30 @@ class RateLimiter:
         self.exchange_name = exchange_name
         self.error_handler = ErrorHandler(config.error_handling)
 
-        # Get rate limits from config
+        # Get rate limits from config or use constants as defaults
         rate_limits = config.exchanges.rate_limits.get(exchange_name, {})
+        default_limits = RATE_LIMITS.get(exchange_name, RATE_LIMITS.get("default", {}))
 
         # Initialize token buckets for different rate limits
         self.buckets: dict[str, TokenBucket] = {}
 
         # Requests per minute bucket
-        requests_per_minute = rate_limits.get("requests_per_minute", 1200)
+        requests_per_minute = rate_limits.get("requests_per_minute",
+                                              default_limits.get("requests_per_minute", 1200))
         self.buckets["requests_per_minute"] = TokenBucket(
             capacity=requests_per_minute, refill_rate=requests_per_minute, refill_time=60.0
         )
 
         # Orders per second bucket
-        orders_per_second = rate_limits.get("orders_per_second", 10)
+        orders_per_second = rate_limits.get("orders_per_second",
+                                            default_limits.get("orders_per_second", 10))
         self.buckets["orders_per_second"] = TokenBucket(
             capacity=orders_per_second, refill_rate=orders_per_second, refill_time=1.0
         )
 
         # WebSocket connections bucket
-        websocket_connections = rate_limits.get("websocket_connections", 5)
+        websocket_connections = rate_limits.get("websocket_connections",
+                                                default_limits.get("websocket_connections", 5))
         self.buckets["websocket_connections"] = TokenBucket(
             capacity=websocket_connections,
             refill_rate=websocket_connections,
@@ -148,6 +157,40 @@ class RateLimiter:
 
         logger.info(f"Initialized rate limiter for {exchange_name}")
 
+    async def _handle_rate_limit_error(self, error: Exception, operation: str, bucket_name: str = None) -> None:
+        """
+        Handle rate limit errors using the error handler.
+
+        Args:
+            error: The exception that occurred
+            operation: The operation being performed
+            bucket_name: The rate limit bucket name
+        """
+        try:
+            # Create error context
+            error_context = self.error_handler.create_error_context(
+                error=error,
+                component="exchange_rate_limiter",
+                operation=operation,
+                details={
+                    "exchange_name": self.exchange_name,
+                    "operation": operation,
+                    "bucket_name": bucket_name
+                }
+            )
+
+            # Use API rate limit recovery for rate limit violations
+            recovery_scenario = APIRateLimitRecovery(self.config)
+
+            # Handle the error
+            self.error_handler.handle_error(error_context, recovery_scenario)
+
+        except Exception as e:
+            # Fallback to basic logging if error handling fails
+            logger.error(f"Error handling failed for {operation}: {e!s}")
+
+    @retry(max_attempts=3, base_delay=1.0)
+    @log_calls
     async def acquire(
         self, bucket_name: str = "requests_per_minute", tokens: int = 1, timeout: float = 30.0
     ) -> bool:
@@ -181,10 +224,12 @@ class RateLimiter:
             # Calculate wait time
             wait_time = bucket.get_wait_time(tokens)
             if wait_time > timeout:
-                raise ExchangeRateLimitError(
+                rate_limit_error = ExchangeRateLimitError(
                     f"Rate limit exceeded for {bucket_name}. "
                     f"Wait time {wait_time:.2f}s exceeds timeout {timeout}s"
                 )
+                await self._handle_rate_limit_error(rate_limit_error, "acquire", bucket_name)
+                raise rate_limit_error
 
             # Wait for tokens to become available
             # Sleep in small increments

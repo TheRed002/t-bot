@@ -23,6 +23,9 @@ from src.error_handling.error_handler import ErrorHandler
 # Import base exchange interface
 from .base import BaseExchange
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils.decorators import retry, log_calls
+
 logger = get_logger(__name__)
 
 
@@ -91,6 +94,8 @@ class ExchangeFactory:
         """
         return exchange_name in self._exchange_registry
 
+    @retry(max_attempts=3, base_delay=1.0)
+    @log_calls
     async def create_exchange(self, exchange_name: str) -> BaseExchange:
         """
         Create a new exchange instance.

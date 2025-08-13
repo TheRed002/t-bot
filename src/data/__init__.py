@@ -22,16 +22,19 @@ Dependencies:
 """
 
 # Keep __init__ lightweight to avoid importing heavy dependencies at import time.
-# Import only quality submodules here; other submodules should be imported directly
+# Import only quality submodules and core services here; other submodules should be imported directly
 # by consumers as needed to avoid circular or heavy dependency trees (e.g., exchanges).
 from .quality.cleaning import DataCleaner
 from .quality.monitoring import QualityMonitor
 from .quality.validation import DataValidator
+from .services import DataIntegrationService
 
 __all__ = [
     # Data Quality Management
     "DataValidator",
     "DataCleaner",
     "QualityMonitor",
+    # Data Integration Service
+    "DataIntegrationService",
     # Quality submodule exports only (other submodules must be imported directly)
 ]

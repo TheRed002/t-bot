@@ -53,7 +53,8 @@ from src.exchanges.rate_limiter import RateLimiter
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.constants import API_ENDPOINTS
-from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution, retry, cache_result, log_calls
+
 
 logger = get_logger(__name__)
 
@@ -119,6 +120,8 @@ class CoinbaseExchange(BaseExchange):
 
         logger.info(f"Initialized {exchange_name} exchange interface")
 
+    @retry(max_attempts=3, base_delay=1.0)
+    @log_calls
     async def connect(self) -> bool:
         """
         Establish connection to Coinbase exchange.
@@ -151,6 +154,15 @@ class CoinbaseExchange(BaseExchange):
             # Initialize WebSocket connection
             await self._initialize_websocket()
 
+            # Initialize database connection
+            await self._initialize_database()
+
+            # Initialize Redis client
+            await self._initialize_redis()
+
+            # Initialize data module
+            await self._initialize_data_module()
+
             self.connected = True
             self.status = "connected"
             self.last_heartbeat = datetime.now(timezone.utc)
@@ -159,12 +171,12 @@ class CoinbaseExchange(BaseExchange):
             return True
 
         except Exception as e:
-            logger.error(f"Failed to connect to {self.exchange_name}: {e!s}")
+            await self._handle_exchange_error(e, "connect", {"exchange_name": self.exchange_name})
             self.connected = False
             self.status = "connection_failed"
             return False
 
-    async def disconnect(self) -> None:
+    async def _disconnect_from_exchange(self) -> None:
         """Disconnect from Coinbase exchange."""
         try:
             # Close WebSocket connections
@@ -214,6 +226,9 @@ class CoinbaseExchange(BaseExchange):
             self.balance_cache = balances
             self.last_balance_update = datetime.now(timezone.utc)
 
+            # Store balance snapshot in database
+            await self._store_balance_snapshot(balances)
+
             logger.debug(f"Retrieved balances for {len(balances)} currencies")
             return balances
 
@@ -221,10 +236,11 @@ class CoinbaseExchange(BaseExchange):
             # Re-raise connection errors as-is
             raise
         except Exception as e:
-            logger.error(f"Failed to get account balance: {e!s}")
+            await self._handle_exchange_error(e, "get_account_balance", {"exchange_name": self.exchange_name})
             raise ExchangeError(f"Failed to get account balance: {e!s}")
 
     @time_execution
+    @log_calls
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """
         Place an order on Coinbase exchange.
@@ -506,7 +522,9 @@ class CoinbaseExchange(BaseExchange):
         """Spot implementation: positions not available; return empty list."""
         return []
 
+    @cache_result(ttl_seconds=300)
     @time_execution
+    @log_calls
     async def get_exchange_info(self) -> ExchangeInfo:
         """
         Get exchange information including supported symbols and features.

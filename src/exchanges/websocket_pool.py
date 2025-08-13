@@ -22,7 +22,7 @@ from src.core.types import ConnectionType
 
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
-from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution, log_calls
 
 logger = get_logger(__name__)
 
@@ -93,6 +93,7 @@ class WebSocketConnectionPool:
         )
 
     @time_execution
+    @log_calls
     async def get_connection(self, connection_type: ConnectionType) -> PooledConnection | None:
         """
         Get a connection from the pool.
@@ -164,6 +165,7 @@ class WebSocketConnectionPool:
             raise ExchangeConnectionError(f"Connection retrieval failed: {e!s}")
 
     @time_execution
+    @log_calls
     async def release_connection(self, connection: PooledConnection) -> None:
         """
         Release a connection back to the pool.

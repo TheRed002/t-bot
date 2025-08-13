@@ -55,7 +55,11 @@ from src.exchanges.rate_limiter import RateLimiter
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.constants import API_ENDPOINTS
-from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution, retry, cache_result, log_calls
+
+# MANDATORY: Import from P-005 (OKX WebSocket)
+from src.exchanges.okx_websocket import OKXWebSocketManager
+
 
 logger = get_logger(__name__)
 
@@ -131,6 +135,8 @@ class OKXExchange(BaseExchange):
 
         logger.info(f"Initialized OKX exchange: {exchange_name}")
 
+    @retry(max_attempts=3, base_delay=1.0)
+    @log_calls
     async def connect(self) -> bool:
         """
         Establish connection to OKX exchange.
@@ -149,6 +155,9 @@ class OKXExchange(BaseExchange):
                 flag="0",  # 0: live trading, 1: demo trading
             )
 
+            # Initialize WebSocket manager
+            self.ws_manager = OKXWebSocketManager(self.config, self.exchange_name)
+
             self.market_client = Market(
                 key=self.api_key, secret=self.api_secret, passphrase=self.passphrase, flag="0"
             )
@@ -164,6 +173,15 @@ class OKXExchange(BaseExchange):
             # Test connection by getting account balance
             await self.get_account_balance()
 
+            # Initialize database connection
+            await self._initialize_database()
+
+            # Initialize Redis client
+            await self._initialize_redis()
+
+            # Initialize data module
+            await self._initialize_data_module()
+
             self.connected = True
             self.status = "connected"
             self.last_heartbeat = datetime.now(timezone.utc)
@@ -177,7 +195,7 @@ class OKXExchange(BaseExchange):
             self.status = "error"
             raise ExchangeConnectionError(f"Failed to connect to OKX: {e!s}")
 
-    async def disconnect(self) -> None:
+    async def _disconnect_from_exchange(self) -> None:
         """Disconnect from OKX exchange."""
         try:
             logger.info("Disconnecting from OKX exchange...")
@@ -238,6 +256,9 @@ class OKXExchange(BaseExchange):
             self._balance_cache = balances
             self._last_balance_update = datetime.now(timezone.utc)
 
+            # Store balance snapshot in database
+            await self._store_balance_snapshot(balances)
+
             logger.info(f"Retrieved {len(balances)} asset balances from OKX")
             return balances
 
@@ -247,6 +268,7 @@ class OKXExchange(BaseExchange):
                 f"Failed to get account balance from OKX: {e!s}")
 
     @time_execution
+    @log_calls
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """
         Execute a trade order on OKX exchange.
@@ -606,15 +628,9 @@ class OKXExchange(BaseExchange):
         except Exception:
             return []
 
-    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
-        """Return open orders if available; default empty (placeholder)."""
-        return []
-
-    async def get_positions(self) -> list[Position]:
-        """Spot implementation default: no positions; return empty list."""
-        return []
-
+    @cache_result(ttl_seconds=300)
     @time_execution
+    @log_calls
     async def get_exchange_info(self) -> ExchangeInfo:
         """
         Get exchange information from OKX.

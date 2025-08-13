@@ -31,7 +31,10 @@ from src.core.types import (
     CapitalAllocation,
     CapitalMetrics,
 )
+from src.database.connection import get_redis_client
+from src.database.connection import get_influxdb_client
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.risk_management.base import BaseRiskManager
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
@@ -90,12 +93,165 @@ class CapitalAllocator:
         # Error handler
         self.error_handler = ErrorHandler(config)
 
+        # Recovery scenarios
+        self.partial_fill_recovery = PartialFillRecovery(config)
+
+        # Redis client for caching (optional)
+        try:
+            self.redis_client = get_redis_client()
+        except Exception:
+            self.redis_client = None
+            logger.warning("Redis client not available, caching disabled")
+
+        # Cache keys
+        self.cache_keys = {
+            "allocations": "capital:allocations",
+            "performance": "capital:performance",
+            "metrics": "capital:metrics",
+            "total_capital": "capital:total",
+        }
+
+        # Cache TTL (seconds)
+        self.cache_ttl = 300  # 5 minutes
+
+        # InfluxDB client for time series data (optional)
+        try:
+            self.influx_client = get_influxdb_client()
+        except Exception:
+            self.influx_client = None
+            logger.warning("InfluxDB client not available, time series storage disabled")
+
         logger.info(
             "Capital allocator initialized",
             total_capital=format_currency(float(self.total_capital)),
             emergency_reserve=format_currency(float(self.emergency_reserve)),
             available_capital=format_currency(float(self.available_capital)),
         )
+
+    async def _get_cached_allocations(self) -> dict[str, CapitalAllocation] | None:
+        """Get cached allocations from Redis."""
+        if not self.redis_client:
+            return None
+        try:
+            cached_data = await self.redis_client.get(self.cache_keys["allocations"])
+            if cached_data:
+                # Convert cached data back to CapitalAllocation objects
+                allocations = {}
+                for key, data in cached_data.items():
+                    allocations[key] = CapitalAllocation(**data)
+                return allocations
+        except Exception as e:
+            logger.warning("Failed to get cached allocations", error=str(e))
+        return None
+
+    async def _cache_allocations(self, allocations: dict[str, CapitalAllocation]) -> None:
+        """Cache allocations in Redis."""
+        if not self.redis_client:
+            return
+        try:
+            # Convert CapitalAllocation objects to dict for caching
+            cache_data = {}
+            for key, allocation in allocations.items():
+                cache_data[key] = allocation.model_dump()
+
+            await self.redis_client.set(
+                self.cache_keys["allocations"],
+                cache_data,
+                ttl=self.cache_ttl
+            )
+        except Exception as e:
+            logger.warning("Failed to cache allocations", error=str(e))
+
+    async def _get_cached_performance(self) -> dict[str, dict[str, float]] | None:
+        """Get cached performance data from Redis."""
+        if not self.redis_client:
+            return None
+        try:
+            cached_data = await self.redis_client.get(self.cache_keys["performance"])
+            if cached_data:
+                return cached_data
+        except Exception as e:
+            logger.warning("Failed to get cached performance", error=str(e))
+        return None
+
+    async def _cache_performance(self, performance: dict[str, dict[str, float]]) -> None:
+        """Cache performance data in Redis."""
+        if not self.redis_client:
+            return
+        try:
+            await self.redis_client.set(
+                self.cache_keys["performance"],
+                performance,
+                ttl=self.cache_ttl
+            )
+        except Exception as e:
+            logger.warning("Failed to cache performance", error=str(e))
+
+    async def _get_cached_metrics(self) -> CapitalMetrics | None:
+        """Get cached metrics from Redis."""
+        if not self.redis_client:
+            return None
+        try:
+            cached_data = await self.redis_client.get(self.cache_keys["metrics"])
+            if cached_data:
+                return CapitalMetrics(**cached_data)
+        except Exception as e:
+            logger.warning("Failed to get cached metrics", error=str(e))
+        return None
+
+    async def _cache_metrics(self, metrics: CapitalMetrics) -> None:
+        """Cache metrics in Redis."""
+        if not self.redis_client:
+            return
+        try:
+            await self.redis_client.set(
+                self.cache_keys["metrics"],
+                metrics.model_dump(),
+                ttl=self.cache_ttl
+            )
+        except Exception as e:
+            logger.warning("Failed to cache metrics", error=str(e))
+
+    async def _store_capital_metrics_influxdb(self, metrics: CapitalMetrics) -> None:
+        """Store capital metrics in InfluxDB for time series analysis."""
+        if not self.influx_client:
+            return
+        try:
+            # Create a point for capital metrics
+            from influxdb_client import Point
+            point = Point("capital_metrics").tag("component", "capital_allocator").field(
+                "total_capital", float(metrics.total_capital)
+            ).field("allocated_capital", float(metrics.allocated_capital)).field(
+                "available_capital", float(metrics.available_capital)
+            ).field("utilization_rate", metrics.utilization_rate).field(
+                "allocation_efficiency", metrics.allocation_efficiency
+            ).field("allocation_count", metrics.allocation_count)
+
+            # Write to InfluxDB
+            self.influx_client.write_api().write(bucket="trading_bot", record=point)
+        except Exception as e:
+            logger.warning("Failed to store metrics in InfluxDB", error=str(e))
+
+    async def _store_allocation_change_influxdb(
+        self, strategy_id: str, exchange: str, amount: Decimal,
+        allocation_type: str, timestamp: datetime
+    ) -> None:
+        """Store allocation changes in InfluxDB for tracking."""
+        if not self.influx_client:
+            return
+        try:
+            # Create a point for allocation changes
+            from influxdb_client import Point
+            point = Point("allocation_changes").tag("component", "capital_allocator").tag(
+                "strategy_id", strategy_id
+            ).tag("exchange", exchange).tag("allocation_type", allocation_type).field(
+                "amount", float(amount)
+            )
+
+            # Write to InfluxDB
+            self.influx_client.write_api().write(bucket="trading_bot", record=point)
+        except Exception as e:
+            logger.warning("Failed to store allocation change in InfluxDB", error=str(e))
 
     @time_execution
     async def allocate_capital(
@@ -128,7 +284,8 @@ class CapitalAllocator:
             min_allocation = self._get_minimum_allocation(strategy_id)
             if requested_amount < Decimal(str(min_allocation)):
                 raise ValidationError(
-                    f"Requested amount {requested_amount} below minimum {min_allocation} for strategy {strategy_id}"
+                    f"Requested amount {requested_amount} below minimum "
+                    f"{min_allocation} for strategy {strategy_id}"
                 )
 
             # Check maximum allocation limits
@@ -137,7 +294,8 @@ class CapitalAllocator:
             )
             if requested_amount > max_allocation:
                 raise ValidationError(
-                    f"Requested amount {requested_amount} exceeds maximum allocation {max_allocation}"
+                    f"Requested amount {requested_amount} exceeds "
+                    f"maximum allocation {max_allocation}"
                 )
 
             # Calculate allocation percentage
@@ -161,6 +319,14 @@ class CapitalAllocator:
             # Update available capital
             self.available_capital -= requested_amount
 
+            # Cache allocations
+            await self._cache_allocations(self.strategy_allocations)
+
+            # Store allocation change in InfluxDB
+            await self._store_allocation_change_influxdb(
+                strategy_id, exchange, requested_amount, "allocation", datetime.now()
+            )
+
             logger.info(
                 "Capital allocated successfully",
                 strategy_id=strategy_id,
@@ -172,8 +338,28 @@ class CapitalAllocator:
             return allocation
 
         except Exception as e:
+            # Create comprehensive error context
+            context = self.error_handler.create_error_context(
+                error=e,
+                component="capital_management",
+                operation="allocate_capital",
+                details={
+                    "strategy_id": strategy_id,
+                    "exchange": exchange,
+                    "requested_amount": float(requested_amount),
+                    "available_capital": float(self.available_capital),
+                    "total_capital": float(self.total_capital),
+                }
+            )
+
+            # Handle error with recovery strategy
+            await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
+
+            # Log detailed error information
             logger.error(
                 "Capital allocation failed",
+                error_id=context.error_id,
+                severity=context.severity.value,
                 strategy_id=strategy_id,
                 exchange=exchange,
                 requested_amount=format_currency(float(requested_amount)),
@@ -225,7 +411,28 @@ class CapitalAllocator:
             return updated_allocations
 
         except Exception as e:
-            logger.error("Capital rebalancing failed", error=str(e))
+            # Create comprehensive error context
+            context = self.error_handler.create_error_context(
+                error=e,
+                component="capital_management",
+                operation="rebalance_allocations",
+                details={
+                    "strategy_count": len(self.strategy_allocations),
+                    "total_capital": float(self.total_capital),
+                    "available_capital": float(self.available_capital),
+                }
+            )
+
+            # Handle error with recovery strategy
+            await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
+
+            # Log detailed error information
+            logger.error(
+                "Capital rebalancing failed",
+                error_id=context.error_id,
+                severity=context.severity.value,
+                error=str(e),
+            )
             raise
 
     @time_execution
@@ -256,12 +463,31 @@ class CapitalAllocator:
                 )
 
         except Exception as e:
+            # Create comprehensive error context
+            context = self.error_handler.create_error_context(
+                error=e,
+                component="capital_management",
+                operation="update_utilization",
+                details={
+                    "strategy_id": strategy_id,
+                    "exchange": exchange,
+                    "utilized_amount": float(utilized_amount),
+                }
+            )
+
+            # Handle error with recovery strategy
+            await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
+
+            # Log detailed error information
             logger.error(
                 "Utilization update failed",
+                error_id=context.error_id,
+                severity=context.severity.value,
                 strategy_id=strategy_id,
                 exchange=exchange,
                 error=str(e),
             )
+            raise
 
     @time_execution
     async def get_capital_metrics(self) -> CapitalMetrics:
@@ -272,6 +498,12 @@ class CapitalAllocator:
             CapitalMetrics: Current capital metrics
         """
         try:
+            # Try to get cached metrics first
+            cached_metrics = await self._get_cached_metrics()
+            if cached_metrics:
+                logger.debug("Returning cached capital metrics")
+                return cached_metrics
+
             # Calculate utilization rate
             total_allocated = sum(
                 alloc.allocated_amount for alloc in self.strategy_allocations.values()
@@ -300,10 +532,36 @@ class CapitalAllocator:
                 allocation_count=len(self.strategy_allocations),
             )
 
+            # Cache metrics for future use
+            await self._cache_metrics(metrics)
+
+            # Store metrics in InfluxDB for time series analysis
+            await self._store_capital_metrics_influxdb(metrics)
+
             return metrics
 
         except Exception as e:
-            logger.error("Failed to calculate capital metrics", error=str(e))
+            # Create comprehensive error context
+            context = self.error_handler.create_error_context(
+                error=e,
+                component="capital_management",
+                operation="get_capital_metrics",
+                details={
+                    "strategy_count": len(self.strategy_allocations),
+                    "total_capital": float(self.total_capital),
+                }
+            )
+
+            # Handle error with recovery strategy
+            await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
+
+            # Log detailed error information
+            logger.error(
+                "Failed to calculate capital metrics",
+                error_id=context.error_id,
+                severity=context.severity.value,
+                error=str(e),
+            )
             raise
 
     async def _calculate_performance_metrics(self) -> dict[str, dict[str, float]]:

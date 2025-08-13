@@ -267,6 +267,10 @@ class DataStorageManager:
             # Bulk write to InfluxDB
             await self.influx_client.write_market_data_batch(data_list)
 
+            # Also store to PostgreSQL for persistent storage
+            if self.storage_mode == StorageMode.HYBRID or self.storage_mode == StorageMode.PERSISTENT:
+                await self._store_batch_to_postgresql(data_list)
+
             # Update metrics
             stored_count = len(data_list)
             self.metrics.successful_stores += stored_count
@@ -295,14 +299,13 @@ class DataStorageManager:
             cutoff_date = datetime.now(
                 timezone.utc) - timedelta(days=days_to_keep)
 
-            async with get_async_session() as session:
-                # Delete old market data records
-                result = await session.execute(
-                    f"DELETE FROM market_data_records WHERE timestamp < '{cutoff_date}'"
-                )
+            # Use proper database queries instead of raw SQL
+            from src.database.queries import DatabaseQueries
+            from src.database.connection import get_async_session
 
-                await session.commit()
-                deleted_count = result.rowcount
+            async with get_async_session() as session:
+                db_queries = DatabaseQueries(session)
+                deleted_count = await db_queries.delete_old_market_data(cutoff_date)
 
                 logger.info(f"Cleaned up {deleted_count} old records")
                 return deleted_count
@@ -357,3 +360,53 @@ class DataStorageManager:
 
         except Exception as e:
             logger.error(f"Error during DataStorageManager cleanup: {e!s}")
+
+    async def _store_batch_to_postgresql(self, data_list: list[MarketData]) -> bool:
+        """
+        Store a batch of market data to PostgreSQL for persistent storage.
+
+        Args:
+            data_list: List of market data to store
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            from src.database.queries import DatabaseQueries
+            from src.database.connection import get_async_session
+            from src.database.models import MarketDataRecord
+
+            async with get_async_session() as session:
+                db_queries = DatabaseQueries(session)
+
+                # Convert MarketData to MarketDataRecord models
+                records = []
+                for data in data_list:
+                    record = MarketDataRecord(
+                        symbol=data.symbol,
+                        exchange=getattr(data, 'exchange', 'unknown'),
+                        timestamp=data.timestamp or datetime.now(timezone.utc),
+                        open_price=float(data.open_price) if data.open_price else None,
+                        high_price=float(data.high_price) if data.high_price else None,
+                        low_price=float(data.low_price) if data.low_price else None,
+                        close_price=float(data.price) if data.price else None,
+                        price=float(data.price) if data.price else None,
+                        volume=float(data.volume) if data.volume else None,
+                        bid=float(data.bid) if data.bid else None,
+                        ask=float(data.ask) if data.ask else None,
+                        data_source='exchange',
+                        quality_score=1.0,  # Default quality score
+                        validation_status='valid'
+                    )
+                    records.append(record)
+
+                # Bulk create records
+                if records:
+                    await db_queries.bulk_create_market_data_records(records)
+                    logger.info(f"Stored {len(records)} records to PostgreSQL")
+
+                return True
+
+        except Exception as e:
+            logger.error(f"PostgreSQL storage failed: {e!s}")
+            return False

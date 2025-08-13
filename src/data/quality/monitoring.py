@@ -488,10 +488,13 @@ class QualityMonitor:
                             DriftAlert(
                                 drift_type=DriftType.COVARIATE_DRIFT,
                                 feature="volume",
-                                severity=QualityLevel.POOR
-                                if drift_score > 0.2
-                                else QualityLevel.FAIR,
-                                description=f"Volume distribution drift detected: {drift_score:.3f}",
+                                severity=(
+                                    QualityLevel.POOR if drift_score > 0.2
+                                    else QualityLevel.FAIR
+                                ),
+                                description=(
+                                    f"Volume distribution drift detected: {drift_score:.3f}"
+                                ),
                                 timestamp=datetime.now(timezone.utc),
                                 metadata={
                                     "drift_score": drift_score,
@@ -549,7 +552,9 @@ class QualityMonitor:
                         drift_type=DriftType.CONCEPT_DRIFT,
                         feature="signal_stability",
                         severity=QualityLevel.FAIR,
-                        description=f"Unstable signal confidence detected: std={std_confidence:.3f}",
+                        description=(
+                            f"Unstable signal confidence detected: std={std_confidence:.3f}"
+                        ),
                         timestamp=datetime.now(timezone.utc),
                         metadata={
                             "mean_confidence": mean_confidence,
@@ -625,7 +630,8 @@ class QualityMonitor:
         for symbol, size in price_dists.items():
             if size < self.distribution_window // 2:
                 recommendations.append(
-                    f"Insufficient price data for {symbol}. Collect more data for reliable monitoring."
+                    f"Insufficient price data for {symbol}. "
+                    f"Collect more data for reliable monitoring."
                 )
 
         if not recommendations:

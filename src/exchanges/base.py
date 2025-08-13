@@ -17,6 +17,8 @@ from src.core.config import Config
 from src.core.exceptions import (
     ExchangeRateLimitError,
     ValidationError,
+    ExchangeConnectionError,
+    OrderRejectionError,
 )
 from src.core.logging import get_logger
 
@@ -42,6 +44,15 @@ from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
 from src.exchanges.connection_manager import ConnectionManager
 
 # MANDATORY: Import from P-007A (utils)
+from src.utils.decorators import retry, log_calls, time_execution, memory_usage, log_errors
+from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery, OrderRejectionRecovery
+
+# MANDATORY: Import from P-001 (database)
+from src.database.connection import get_async_session
+from src.database.queries import DatabaseQueries
+from src.database.models import BalanceSnapshot, PerformanceMetrics
+from src.database.redis_client import RedisClient
+
 
 logger = get_logger(__name__)
 
@@ -83,11 +94,104 @@ class BaseExchange(ABC):
         self.rate_limiter = None  # Will be set by subclasses
         self.ws_manager = None  # Will be set by subclasses
 
+        # Initialize database connection
+        self.db_session = None
+        self.db_queries = None
+
+        # Initialize Redis client for real-time data
+        self.redis_client = None
+
+        # Note: Data module components removed to avoid circular dependency
+
         # TODO: Remove in production
         logger.debug(f"BaseExchange initialized with P-007 components for {exchange_name}")
         logger.info(f"Initialized {exchange_name} exchange interface")
 
+    async def _initialize_database(self) -> None:
+        """
+        Initialize database connection and queries.
+        """
+        try:
+            # Get database session with connection pooling
+            self.db_session = get_async_session()
+            self.db_queries = DatabaseQueries(self.db_session)
+
+            # Test database connection
+            if not await self.db_queries.health_check():
+                raise Exception("Database health check failed")
+
+            logger.debug(f"Database initialized for {self.exchange_name}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize database for {self.exchange_name}: {e!s}")
+            self.db_session = None
+            self.db_queries = None
+
+    async def _initialize_redis(self) -> None:
+        """
+        Initialize Redis client for real-time data caching.
+        """
+        try:
+            # Get Redis URL from config (simplified for now)
+            redis_url = "redis://localhost:6379"  # TODO: Get from config
+            self.redis_client = RedisClient(redis_url)
+            await self.redis_client.connect()
+
+            # Test Redis connection
+            if not await self.redis_client.health_check():
+                raise Exception("Redis health check failed")
+
+            logger.debug(f"Redis initialized for {self.exchange_name}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Redis for {self.exchange_name}: {e!s}")
+            self.redis_client = None
+
+    # Note: _initialize_data_module method removed to avoid circular dependency
+
+    async def _handle_exchange_error(self, error: Exception, operation: str, context: dict = None) -> None:
+        """
+        Handle exchange errors using the error handler with proper context.
+
+        Args:
+            error: The exception that occurred
+            operation: The operation being performed
+            context: Additional context information
+        """
+        try:
+            # Create error context with exchange-specific information
+            error_context = self.error_handler.create_error_context(
+                error=error,
+                component="exchange",
+                operation=operation,
+                symbol=context.get("symbol") if context else None,
+                order_id=context.get("order_id") if context else None,
+                details={
+                    "exchange_name": self.exchange_name,
+                    "operation": operation,
+                    **(context if context else {})
+                }
+            )
+
+            # Handle the error with appropriate recovery scenario
+            if isinstance(error, ExchangeConnectionError):
+                recovery_scenario = NetworkDisconnectionRecovery(self.config)
+            elif isinstance(error, (OrderRejectionError, ValidationError)):
+                recovery_scenario = OrderRejectionRecovery(self.config)
+            else:
+                recovery_scenario = None
+
+            # Handle the error
+            self.error_handler.handle_error(error_context, recovery_scenario)
+
+        except Exception as e:
+            # Fallback to basic logging if error handling fails
+            logger.error(f"Error handling failed for {operation}: {e!s}")
+
     @abstractmethod
+    @time_execution
+    @memory_usage
+    @retry(max_attempts=3, base_delay=1.0)
+    @log_calls
+    @log_errors
     async def connect(self) -> bool:
         """
         Establish connection to the exchange.
@@ -97,12 +201,23 @@ class BaseExchange(ABC):
         """
         pass
 
-    @abstractmethod
     async def disconnect(self) -> None:
-        """Disconnect from the exchange."""
+        """Disconnect from the exchange and cleanup resources."""
+        try:
+            # Call exchange-specific disconnect
+            await self._disconnect_from_exchange()
+
+        except Exception as e:
+            logger.error(f"Error during disconnect: {e!s}")
+
+    @abstractmethod
+    async def _disconnect_from_exchange(self) -> None:
+        """Disconnect from the exchange (to be implemented by subclasses)."""
         pass
 
     @abstractmethod
+    @time_execution
+    @memory_usage
     async def get_account_balance(self) -> dict[str, Decimal]:
         """
         Get all asset balances from the exchange.
@@ -112,7 +227,92 @@ class BaseExchange(ABC):
         """
         pass
 
+    async def _store_balance_snapshot(self, balances: dict[str, Decimal]) -> None:
+        """
+        Store balance snapshot in the database.
+
+        Args:
+            balances: Dictionary mapping asset symbols to balances
+        """
+        try:
+            if not self.db_queries:
+                return
+
+            # Store balance snapshots for each currency
+            for currency, total_balance in balances.items():
+                if total_balance > 0:
+                    balance_snapshot = BalanceSnapshot(
+                        user_id=f"{self.exchange_name}_user",  # Placeholder user ID
+                        exchange=self.exchange_name,
+                        currency=currency,
+                        total_balance=total_balance,
+                        available_balance=total_balance,  # Simplified for now
+                        locked_balance=Decimal("0"),  # Simplified for now
+                        timestamp=datetime.now()
+                    )
+
+                    await self.db_queries.create(balance_snapshot)
+
+            logger.debug(f"Balance snapshot stored for {self.exchange_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to store balance snapshot: {e!s}")
+
+    async def _cache_market_data(self, symbol: str, data: dict, ttl: int = 300) -> None:
+        """
+        Cache market data in Redis for fast access.
+
+        Args:
+            symbol: Trading symbol
+            data: Market data to cache
+            ttl: Time to live in seconds
+        """
+        try:
+            if not self.redis_client:
+                return
+
+            key = f"market_data:{self.exchange_name}:{symbol}"
+            await self.redis_client.set(key, data, ttl=ttl)
+            logger.debug(f"Market data cached for {symbol}")
+
+        except Exception as e:
+            logger.error(f"Failed to cache market data: {e!s}")
+
+    async def _store_performance_metrics(self, metrics: dict) -> None:
+        """
+        Store performance metrics in the database.
+
+        Args:
+            metrics: Dictionary containing performance metrics
+        """
+        try:
+            if not self.db_queries:
+                return
+
+            # Create performance metrics record
+            performance_metrics = PerformanceMetrics(
+                bot_id=f"{self.exchange_name}_bot",  # Placeholder bot ID
+                metric_date=datetime.now().date(),
+                total_trades=metrics.get("total_trades", 0),
+                winning_trades=metrics.get("winning_trades", 0),
+                losing_trades=metrics.get("losing_trades", 0),
+                total_pnl=metrics.get("total_pnl", Decimal("0")),
+                win_rate=metrics.get("win_rate", 0.0),
+                sharpe_ratio=metrics.get("sharpe_ratio"),
+                max_drawdown=metrics.get("max_drawdown")
+            )
+
+            # Store in database
+            await self.db_queries.create(performance_metrics)
+            logger.debug(f"Performance metrics stored for {self.exchange_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to store performance metrics: {e!s}")
+
     @abstractmethod
+    @time_execution
+    @memory_usage
+    @log_errors
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """
         Execute a trade order on the exchange.
@@ -155,10 +355,9 @@ class BaseExchange(ABC):
         """
         pass
 
-    @abstractmethod
     async def get_market_data(self, symbol: str, timeframe: str = "1m") -> MarketData:
         """
-        Get OHLCV market data for a symbol.
+        Get OHLCV market data for a symbol using centralized data source.
 
         Args:
             symbol: Trading symbol (e.g., 'BTCUSDT')
@@ -166,6 +365,118 @@ class BaseExchange(ABC):
 
         Returns:
             MarketData: Market data with price and volume information
+        """
+        try:
+            # Use centralized market data source if available
+            if self.market_data_source:
+                # Subscribe to ticker updates for real-time data
+                market_data = await self.market_data_source.get_historical_data(
+                    self.exchange_name, symbol,
+                    start_time=None, end_time=None, interval=timeframe
+                )
+
+                if market_data:
+                    # Return the most recent data point
+                    return market_data[-1] if isinstance(market_data, list) else market_data
+
+            # Fallback to exchange-specific implementation
+            return await self._get_market_data_from_exchange(symbol, timeframe)
+
+        except Exception as e:
+            logger.error(f"Failed to get market data: {e!s}")
+            # Fallback to exchange-specific implementation
+            return await self._get_market_data_from_exchange(symbol, timeframe)
+
+    async def get_processed_market_data(
+        self, symbol: str, timeframe: str = "1m", processing_steps: list = None
+    ) -> dict:
+        """
+        Get processed market data with advanced features and validation.
+
+        Args:
+            symbol: Trading symbol
+            timeframe: Timeframe for the data
+            processing_steps: List of processing steps to apply
+
+        Returns:
+            dict: Processed market data with features and validation results
+        """
+        try:
+            # Get raw market data
+            raw_data = await self.get_market_data(symbol, timeframe)
+
+            if not raw_data:
+                return {}
+
+            result = {
+                "raw_data": raw_data,
+                "processed_data": None,
+                "technical_indicators": {},
+                "statistical_features": {},
+                "validation_results": {},
+                "quality_score": 0.0
+            }
+
+            # Process data if processor is available
+            if self.data_processor:
+                processed_result = await self.data_processor.process_market_data(
+                    raw_data, processing_steps
+                )
+                result["processed_data"] = processed_result
+
+            # Calculate technical indicators if available
+            if self.technical_indicators:
+                self.technical_indicators.add_market_data(raw_data)
+
+                # Calculate common indicators
+                result["technical_indicators"] = {
+                    "sma_20": await self.technical_indicators.calculate_sma(symbol, 20, "price"),
+                    "rsi_14": await self.technical_indicators.calculate_rsi(symbol, 14),
+                    "macd": await self.technical_indicators.calculate_macd(symbol),
+                    "bollinger": await self.technical_indicators.calculate_bollinger_bands(symbol, 20, 2.0)
+                }
+
+            # Calculate statistical features if available
+            if self.statistical_features:
+                self.statistical_features.add_market_data(raw_data)
+
+                # Calculate common statistical features
+                result["statistical_features"] = {
+                    "rolling_stats": await self.statistical_features.calculate_rolling_stats(symbol, 20, "price"),
+                    "autocorrelation": await self.statistical_features.calculate_autocorrelation(symbol, 10, "price"),
+                    "regime": await self.statistical_features.detect_regime(symbol, 50, "price")
+                }
+
+            # Validate data if validator is available
+            if self.data_validator:
+                is_valid, validation_issues = await self.data_validator.validate_market_data(raw_data)
+                result["validation_results"] = {
+                    "is_valid": is_valid,
+                    "issues": validation_issues
+                }
+
+            # Monitor data quality if monitor is available
+            if self.quality_monitor:
+                quality_score, drift_alerts = await self.quality_monitor.monitor_data_quality(raw_data)
+                result["quality_score"] = quality_score
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get processed market data: {e!s}")
+            return {}
+
+    @abstractmethod
+    async def _get_market_data_from_exchange(self, symbol: str, timeframe: str = "1m") -> MarketData:
+        """
+        Get market data from exchange API (to be implemented by subclasses).
+
+        Args:
+            symbol: Trading symbol
+            timeframe: Timeframe for the data
+
+        Returns:
+            MarketData: Market data from exchange
         """
         pass
 
@@ -194,7 +505,6 @@ class BaseExchange(ABC):
         """
         pass
 
-    @abstractmethod
     async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]:
         """
         Get historical trades for a symbol.
@@ -205,6 +515,33 @@ class BaseExchange(ABC):
 
         Returns:
             List[Trade]: List of historical trades
+        """
+        try:
+            # Try to get trades from database first
+            if self.db_queries:
+                trades = await self.db_queries.get_trades_by_symbol(symbol, limit=limit)
+                if trades:
+                    logger.debug(f"Retrieved {len(trades)} trades from database for {symbol}")
+                    return trades
+
+            # Fallback to exchange API if no database data
+            return await self._get_trade_history_from_exchange(symbol, limit)
+
+        except Exception as e:
+            logger.error(f"Failed to get trade history: {e!s}")
+            return []
+
+    @abstractmethod
+    async def _get_trade_history_from_exchange(self, symbol: str, limit: int = 100) -> list[Trade]:
+        """
+        Get trade history from exchange API (to be implemented by subclasses).
+
+        Args:
+            symbol: Trading symbol
+            limit: Maximum number of trades to retrieve
+
+        Returns:
+            List[Trade]: List of trades from exchange
         """
         pass
 
@@ -300,13 +637,166 @@ class BaseExchange(ABC):
                 filled_quantity=str(order_response.filled_quantity),
             )
 
+            # Store trade in database if available
+            if self.db_queries and order_response.filled_quantity > 0:
+                await self._store_trade_in_database(order_response)
+
+            # Update performance metrics
+            await self._update_performance_metrics(order_response)
+
             # TODO: Remove in production - Additional processing can be added here
             # - Update position tracking
             # - Calculate fees
-            # - Update performance metrics
 
         except Exception as e:
             logger.error(f"Post-trade processing failed: {e!s}")
+
+    async def _store_trade_in_database(self, order_response: OrderResponse) -> None:
+        """
+        Store executed trade in the database.
+
+        Args:
+            order_response: Order response with execution details
+        """
+        try:
+            if not self.db_queries:
+                return
+
+            # Validate trade data before storage
+            if not self._validate_trade_data(order_response):
+                logger.warning(f"Invalid trade data for {order_response.id}, skipping storage")
+                return
+
+            # Create trade record
+            trade = Trade(
+                id=order_response.id,
+                bot_id=f"{self.exchange_name}_bot",  # Placeholder bot ID
+                symbol=order_response.symbol,
+                side=order_response.side.value,
+                order_type=order_response.order_type.value,
+                quantity=order_response.filled_quantity,
+                price=order_response.price or Decimal("0"),
+                executed_price=order_response.price or Decimal("0"),
+                fee=Decimal("0"),  # Will be calculated separately
+                pnl=Decimal("0"),  # Will be calculated separately
+                status=order_response.status,
+                timestamp=order_response.timestamp
+            )
+
+            # Store in database
+            await self.db_queries.create(trade)
+            logger.debug(f"Trade {order_response.id} stored in database")
+
+        except Exception as e:
+            logger.error(f"Failed to store trade in database: {e!s}")
+
+    def _validate_trade_data(self, order_response: OrderResponse) -> bool:
+        """
+        Validate trade data before database storage.
+
+        Args:
+            order_response: Order response to validate
+
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        try:
+            # Basic validation
+            if not order_response.id or not order_response.symbol:
+                return False
+
+            if order_response.filled_quantity <= 0:
+                return False
+
+            if not order_response.timestamp:
+                return False
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Trade data validation failed: {e!s}")
+            return False
+
+    async def _update_performance_metrics(self, order_response: OrderResponse) -> None:
+        """
+        Update performance metrics after trade execution.
+
+        Args:
+            order_response: Order response with execution details
+        """
+        try:
+            if not self.db_queries:
+                return
+
+            # Get current performance metrics for today
+            today = datetime.now().date()
+            existing_metrics = await self.db_queries.get_performance_metrics_by_bot(
+                f"{self.exchange_name}_bot",
+                start_date=today,
+                end_date=today
+            )
+
+            if existing_metrics:
+                # Update existing metrics
+                metrics = existing_metrics[0]
+                metrics.total_trades += 1
+
+                # Calculate P&L (simplified - would need position tracking for accurate calculation)
+                if order_response.side.value == "buy":
+                    # This is a buy, P&L calculation would depend on position management
+                    pass
+                else:
+                    # This is a sell, P&L calculation would depend on position management
+                    pass
+
+                # Update win rate (simplified)
+                # TODO: Implement proper win/loss calculation based on position P&L
+
+                await self.db_queries.update(metrics)
+            else:
+                # Create new metrics for today
+                metrics_data = {
+                    "total_trades": 1,
+                    "winning_trades": 0,  # TODO: Calculate based on P&L
+                    "losing_trades": 0,   # TODO: Calculate based on P&L
+                    "total_pnl": Decimal("0"),  # TODO: Calculate based on position P&L
+                    "win_rate": 0.0,  # TODO: Calculate based on win/loss ratio
+                    "sharpe_ratio": None,  # TODO: Calculate based on returns
+                    "max_drawdown": None   # TODO: Calculate based on equity curve
+                }
+
+                await self._store_performance_metrics(metrics_data)
+
+            logger.debug(f"Performance metrics updated for {self.exchange_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to update performance metrics: {e!s}")
+
+    async def _execute_database_transaction(self, operations: list[callable]) -> bool:
+        """
+        Execute multiple database operations in a transaction.
+
+        Args:
+            operations: List of async functions to execute
+
+        Returns:
+            bool: True if all operations succeeded, False otherwise
+        """
+        try:
+            if not self.db_session:
+                return False
+
+            async with self.db_session.begin():
+                for operation in operations:
+                    await operation()
+
+                return True
+
+        except Exception as e:
+            logger.error(f"Database transaction failed: {e!s}")
+            return False
+
+    # Note: _cleanup_data_module method removed to avoid circular dependency
 
     def is_connected(self) -> bool:
         """
@@ -346,6 +836,23 @@ class BaseExchange(ABC):
             # Basic health check - try to get account balance
             await self.get_account_balance()
             self.last_heartbeat = datetime.now()
+
+            # Check database health if available
+            if self.db_queries:
+                db_healthy = await self.db_queries.health_check()
+                if not db_healthy:
+                    logger.warning("Database health check failed", exchange=self.exchange_name)
+                    return False
+
+            # Check Redis health if available
+            if self.redis_client:
+                redis_healthy = await self.redis_client.health_check()
+                if not redis_healthy:
+                    logger.warning("Redis health check failed", exchange=self.exchange_name)
+                    return False
+
+            # Note: Data module health check removed to avoid circular dependency
+
             return True
         except Exception as e:
             logger.warning("Health check failed", exchange=self.exchange_name, error=str(e))

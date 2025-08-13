@@ -25,6 +25,10 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils.validators import validate_order_request, validate_symbol
+from src.utils.helpers import normalize_price, round_to_precision
+
 # Note: Using generic Exception handling for REST API as no specific
 # exceptions are documented
 
@@ -119,9 +123,13 @@ class CoinbaseOrderManager:
             if not self.client:
                 raise ExchangeConnectionError("Not connected to Coinbase")
 
-            # Validate order
+            # Validate order using utils validators
+            if not validate_order_request(order):
+                raise ValidationError("Order validation failed using utils validators")
+
+            # Additional Coinbase-specific validation
             if not await self._validate_order(order):
-                raise ValidationError("Order validation failed")
+                raise ValidationError("Coinbase-specific validation failed")
 
             # Apply rate limiting
             await self.rate_limiter.acquire("orders_per_second", 1)
@@ -400,7 +408,7 @@ class CoinbaseOrderManager:
 
     async def _validate_order(self, order: OrderRequest) -> bool:
         """
-        Validate order before placement.
+        Validate order before placement using utils validators.
 
         Args:
             order: Order to validate
@@ -409,19 +417,14 @@ class CoinbaseOrderManager:
             bool: True if valid, False otherwise
         """
         try:
-            # Check required fields
-            if not order.symbol or not order.side or not order.order_type or not order.quantity:
-                logger.error("Missing required order fields")
+            # Use utils validators for comprehensive validation
+            if not validate_order_request(order):
+                logger.error("Order validation failed using utils validators")
                 return False
 
-            # Check quantity
-            if order.quantity <= 0:
-                logger.error("Order quantity must be positive")
-                return False
-
-            # Check price for limit orders
-            if order.order_type == OrderType.LIMIT and (not order.price or order.price <= 0):
-                logger.error("Limit orders must have a positive price")
+            # Additional Coinbase-specific validation
+            if not validate_symbol(order.symbol):
+                logger.error("Invalid symbol format for Coinbase")
                 return False
 
             # Check symbol format (Coinbase uses format like "BTC-USD")
@@ -454,21 +457,21 @@ class CoinbaseOrderManager:
         # Configure order based on type
         if order.order_type == OrderType.MARKET:
             coinbase_order["order_configuration"] = {
-                "market_market_ioc": {"quote_size": str(order.quantity)}
+                "market_market_ioc": {"quote_size": str(round_to_precision(float(order.quantity), 8))}
             }
         elif order.order_type == OrderType.LIMIT:
             coinbase_order["order_configuration"] = {
                 "limit_limit_gtc": {
-                    "base_size": str(order.quantity),
-                    "limit_price": str(order.price),
+                    "base_size": str(round_to_precision(float(order.quantity), 8)),
+                    "limit_price": str(normalize_price(float(order.price), order.symbol)),
                 }
             }
         elif order.order_type == OrderType.STOP_LOSS:
             coinbase_order["order_configuration"] = {
                 "stop_limit_stop_limit_gtc": {
-                    "base_size": str(order.quantity),
-                    "limit_price": str(order.price),
-                    "stop_price": str(order.stop_price),
+                    "base_size": str(round_to_precision(float(order.quantity), 8)),
+                    "limit_price": str(normalize_price(float(order.price), order.symbol)),
+                    "stop_price": str(normalize_price(float(order.stop_price), order.symbol)),
                 }
             }
 

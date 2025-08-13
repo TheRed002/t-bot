@@ -749,8 +749,9 @@ class StatisticalFeatureCalculator:
                         f"Failed to calculate {feature} for {symbol}: {e!s}")
                     results[feature] = None
 
+            successful_count = len([r for r in results.values() if r is not None])
             logger.info(
-                f"Calculated {len([r for r in results.values() if r is not None])} statistical features for {symbol}"
+                f"Calculated {successful_count} statistical features for {symbol}"
             )
             return results
 

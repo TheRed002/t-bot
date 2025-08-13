@@ -34,6 +34,10 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils.validators import validate_order_request
+from src.utils.helpers import normalize_price, round_to_precision
+
 logger = get_logger(__name__)
 
 
@@ -88,7 +92,11 @@ class OKXOrderManager:
             ValidationError: If order request is invalid
         """
         try:
-            # Validate order request
+            # Validate order request using utils validators
+            if not validate_order_request(order):
+                raise ValidationError("Order validation failed using utils validators")
+
+            # Additional OKX-specific validation
             self._validate_order_request(order)
 
             # Convert order to OKX format
@@ -417,17 +425,18 @@ class OKXOrderManager:
             "tdMode": "cash",  # Spot trading
             "side": order.side.value.lower(),
             "ordType": self._convert_order_type_to_okx(order.order_type),
-            "sz": str(order.quantity),
+            "sz": str(round_to_precision(float(order.quantity), 8)),
         }
 
         # Add price for limit orders
         if order.price:
-            okx_order["px"] = str(order.price)
+            okx_order["px"] = str(normalize_price(float(order.price), order.symbol))
 
         # Add stop price for stop orders
         if order.stop_price:
-            okx_order["slTriggerPx"] = str(order.stop_price)
-            okx_order["slOrdPx"] = str(order.price or order.stop_price)
+            okx_order["slTriggerPx"] = str(normalize_price(float(order.stop_price), order.symbol))
+            okx_order["slOrdPx"] = str(normalize_price(
+                float(order.price or order.stop_price), order.symbol))
 
         # Add client order ID if provided
         if order.client_order_id:

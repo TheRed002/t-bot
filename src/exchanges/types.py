@@ -21,8 +21,6 @@ from pydantic import BaseModel, Field
 # Use centralized validators to avoid duplication
 from src.utils.validators import (
     validate_symbol as core_validate_symbol,
-    validate_price as core_validate_price,
-    validate_quantity as core_validate_quantity,
 )
 
 
@@ -47,31 +45,6 @@ class ExchangeTypes:
             normalized = core_validate_symbol(symbol)
             # Exchange-specific stricter rule: alphanumeric only
             return bool(re.match(r"^[A-Z0-9]+$", normalized))
-        except Exception:
-            return False
-
-    @staticmethod
-    def validate_quantity(quantity: Decimal, min_quantity: Decimal = Decimal("0")) -> bool:
-        """Validate order quantity using core validator with minimal duplication."""
-        if not isinstance(quantity, Decimal):
-            return False
-        try:
-            # Symbol context impacts precision only; boolean validity here
-            # depends on positivity and minimum threshold
-            normalized = core_validate_quantity(
-                float(quantity), "BTCUSDT", float(min_quantity))
-            return Decimal(normalized) > min_quantity
-        except Exception:
-            return False
-
-    @staticmethod
-    def validate_price(price: Decimal, min_price: Decimal = Decimal("0")) -> bool:
-        """Validate order price using core validator; return boolean outcome."""
-        if not isinstance(price, Decimal):
-            return False
-        try:
-            normalized = core_validate_price(float(price), "BTCUSDT")
-            return Decimal(normalized) > min_price
         except Exception:
             return False
 

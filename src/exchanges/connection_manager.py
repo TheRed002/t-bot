@@ -25,11 +25,18 @@ from src.error_handling.connection_manager import ConnectionManager as ErrorConn
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
 
 # MANDATORY: Import from P-007 (advanced rate limiting)
 from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
 from src.exchanges.health_monitor import ConnectionHealthMonitor
 from src.exchanges.websocket_pool import WebSocketConnectionPool
+
+# MANDATORY: Import from P-007A (utils)
+from src.utils.decorators import retry, log_calls
+from src.utils.helpers import test_connection, measure_latency
+from src.utils.constants import TIMEOUTS
+
 
 logger = get_logger(__name__)
 
@@ -80,6 +87,8 @@ class WebSocketConnection:
 
         logger.info(f"Initialized WebSocket connection for {exchange_name}")
 
+    @retry(max_attempts=3, base_delay=1.0)
+    @log_calls
     async def connect(self) -> bool:
         """
         Connect to the WebSocket.
@@ -324,6 +333,38 @@ class ConnectionManager:
         logger.debug(f"ConnectionManager initialized with P-007 components for {exchange_name}")
         logger.info(f"Initialized connection manager for {exchange_name}")
 
+    async def _handle_connection_error(self, error: Exception, operation: str, connection_id: str = None) -> None:
+        """
+        Handle connection-related errors using the error handler.
+
+        Args:
+            error: The exception that occurred
+            operation: The operation being performed
+            connection_id: The connection identifier
+        """
+        try:
+            # Create error context
+            error_context = self.error_handler.create_error_context(
+                error=error,
+                component="exchange_connection_manager",
+                operation=operation,
+                details={
+                    "exchange_name": self.exchange_name,
+                    "operation": operation,
+                    "connection_id": connection_id
+                }
+            )
+
+            # Use network disconnection recovery for connection failures
+            recovery_scenario = NetworkDisconnectionRecovery(self.config)
+
+            # Handle the error
+            self.error_handler.handle_error(error_context, recovery_scenario)
+
+        except Exception as e:
+            # Fallback to basic logging if error handling fails
+            logger.error(f"Error handling failed for {operation}: {e!s}")
+
     async def get_rest_connection(self, endpoint: str = "default") -> Any | None:
         """
         Get a REST API connection.
@@ -495,19 +536,18 @@ class ConnectionManager:
             # Mark connection as failed in health monitor
             await self.health_monitor.mark_failed(connection)
 
-            # Trigger recovery scenario
-            # TODO: Remove in production - placeholder for recovery scenario integration
-            # from src.error_handling.recovery_scenarios import RecoveryScenario
-            # await self.error_handler.handle_error(
-            #     RecoveryScenario.CONNECTION_FAILURE,
-            #     exchange=exchange,
-            #     connection_id=getattr(connection, "id", str(id(connection))),
-            # )
+            # Handle connection failure using error handler
+            connection_id = getattr(connection, "id", str(id(connection)))
+            await self._handle_connection_error(
+                ExchangeConnectionError("Connection failure detected"),
+                "handle_connection_failure",
+                connection_id
+            )
 
             logger.warning(
                 "Handled connection failure",
                 exchange=exchange,
-                connection_id=getattr(connection, "id", str(id(connection))),
+                connection_id=connection_id,
             )
 
         except ValidationError:
@@ -578,6 +618,56 @@ class ConnectionManager:
 
         self.last_health_check = datetime.now()
         return health_status
+
+    async def check_network_health(self) -> dict[str, Any]:
+        """
+        Check network connectivity and latency using utils helpers.
+
+        Returns:
+            Dict[str, Any]: Network health information
+        """
+        try:
+            network_health = {}
+
+            # Test connection to exchange endpoints
+            for endpoint, connection in self.rest_connections.items():
+                try:
+                    # Extract host and port from endpoint
+                    if "://" in endpoint:
+                        host = endpoint.split("://")[1].split("/")[0]
+                        if ":" in host:
+                            host, port_str = host.split(":")
+                            port = int(port_str)
+                        else:
+                            port = 443 if "https" in endpoint else 80
+                    else:
+                        host = endpoint
+                        port = 80
+
+                    # Test connection using utils helpers
+                    is_connected = test_connection(host, port, timeout=TIMEOUTS.get("short", 5.0))
+                    latency = measure_latency(host, port, timeout=TIMEOUTS.get("short", 5.0))
+
+                    network_health[f"network_{endpoint}"] = {
+                        "connected": is_connected,
+                        "latency_ms": latency,
+                        "timestamp": datetime.now().isoformat()
+                    }
+
+                except Exception as e:
+                    logger.error(f"Network health check failed for {endpoint}: {e!s}")
+                    network_health[f"network_{endpoint}"] = {
+                        "connected": False,
+                        "latency_ms": -1,
+                        "error": str(e),
+                        "timestamp": datetime.now().isoformat()
+                    }
+
+            return network_health
+
+        except Exception as e:
+            logger.error(f"Network health check failed: {e!s}")
+            return {"error": str(e)}
 
     async def reconnect_all(self) -> dict[str, bool]:
         """

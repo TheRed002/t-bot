@@ -17,7 +17,7 @@ Dependencies:
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -212,8 +212,6 @@ class AlternativeFeatureCalculator:
 
         try:
             lookback_hours = lookback_hours or self.default_lookbacks["news_sentiment"]
-            end_time = datetime.now(timezone.utc)
-            start_time_filter = end_time - timedelta(hours=lookback_hours)
 
             # Get news data
             if not self.news_source:
@@ -729,9 +727,9 @@ class AlternativeFeatureCalculator:
                             symbol
                         )
                     elif feature.upper() == "MARKET_MICROSTRUCTURE":
-                        results[
-                            "MARKET_MICROSTRUCTURE"
-                        ] = await self.calculate_market_microstructure(symbol)
+                        results["MARKET_MICROSTRUCTURE"] = (
+                            await self.calculate_market_microstructure(symbol)
+                        )
                     else:
                         logger.warning(
                             f"Unknown alternative feature: {feature}")
@@ -741,8 +739,9 @@ class AlternativeFeatureCalculator:
                         f"Failed to calculate {feature} for {symbol}: {e!s}")
                     results[feature] = None
 
+            successful_count = len([r for r in results.values() if r is not None])
             logger.info(
-                f"Calculated {len([r for r in results.values() if r is not None])} alternative features for {symbol}"
+                f"Calculated {successful_count} alternative features for {symbol}"
             )
             return results
 

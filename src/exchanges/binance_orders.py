@@ -25,6 +25,12 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import OrderRejectionRecovery
+
+# MANDATORY: Import from P-007A (utils)
+from src.utils.validators import validate_price, validate_quantity
+from src.utils.helpers import round_to_precision, normalize_price
+from src.utils.constants import FEE_STRUCTURES, PRECISION_LEVELS
 
 logger = get_logger(__name__)
 
@@ -71,6 +77,45 @@ class BinanceOrderManager:
 
         logger.info("Initialized Binance order manager")
 
+    async def _handle_order_error(self, error: Exception, operation: str, order: OrderRequest = None) -> None:
+        """
+        Handle order-related errors using the error handler.
+
+        Args:
+            error: The exception that occurred
+            operation: The operation being performed
+            order: The order involved in the operation
+        """
+        try:
+            # Create error context
+            error_context = self.error_handler.create_error_context(
+                error=error,
+                component="binance_order_manager",
+                operation=operation,
+                symbol=order.symbol if order else None,
+                order_id=order.client_order_id if order else None,
+                details={
+                    "exchange_name": self.exchange_name,
+                    "operation": operation,
+                    "order_type": order.order_type.value if order else None
+                }
+            )
+
+            # Determine recovery scenario
+            if isinstance(error, OrderRejectionError):
+                recovery_scenario = OrderRejectionRecovery(self.config)
+            elif isinstance(error, (ValidationError, ExecutionError)):
+                recovery_scenario = None
+            else:
+                recovery_scenario = None
+
+            # Handle the error
+            self.error_handler.handle_error(error_context, recovery_scenario)
+
+        except Exception as e:
+            # Fallback to basic logging if error handling fails
+            logger.error(f"Error handling failed for {operation}: {e!s}")
+
     async def place_market_order(self, order: OrderRequest) -> OrderResponse:
         """
         Place a market order on Binance.
@@ -106,10 +151,10 @@ class BinanceOrderManager:
             return response
 
         except BinanceOrderException as e:
-            logger.error(f"Binance market order error: {e}")
+            await self._handle_order_error(e, "place_market_order", order)
             raise OrderRejectionError(f"Market order rejected: {e}")
         except BinanceAPIException as e:
-            logger.error(f"Binance API error placing market order: {e}")
+            await self._handle_order_error(e, "place_market_order", order)
             raise ExchangeError(f"Failed to place market order: {e}")
         except Exception as e:
             logger.error(f"Error placing market order on Binance: {e!s}")
@@ -393,15 +438,21 @@ class BinanceOrderManager:
             Decimal: Calculated fee amount
         """
         try:
-            # Binance fee structure (simplified)
-            # Maker: 0.1%, Taker: 0.1% (can be reduced with BNB)
+            # Use fee structure from constants
+            fee_structure = FEE_STRUCTURES.get("binance", FEE_STRUCTURES.get("default", {}))
+            fee_rate = Decimal(str(fee_structure.get("taker_fee", "0.001")))  # Default 0.1%
 
-            # Calculate fee based on order value
-            order_value = order.quantity * fill_price
-            fee_rate = Decimal("0.001")  # 0.1%
+            # Calculate fee based on order value using helper functions
+            normalized_price = normalize_price(float(fill_price), order.symbol)
+            precision = PRECISION_LEVELS.get("binance", {}).get("fee", 8)
+            normalized_quantity = round_to_precision(float(order.quantity), precision)
+
+            order_value = Decimal(str(normalized_quantity)) * Decimal(str(normalized_price))
             fee = order_value * fee_rate
 
-            return fee
+            # Round fee to appropriate precision
+            rounded_fee = round_to_precision(float(fee), precision)
+            return Decimal(str(rounded_fee))
 
         except Exception as e:
             logger.error(f"Error calculating fees: {e!s}")
@@ -414,8 +465,8 @@ class BinanceOrderManager:
         if order.order_type != OrderType.MARKET:
             raise ValidationError("Order type must be MARKET for market orders")
 
-        if not order.quantity or order.quantity <= 0:
-            raise ValidationError("Market order must have positive quantity")
+        if not validate_quantity(order.quantity):
+            raise ValidationError("Market order must have valid quantity")
 
         if order.price:
             raise ValidationError("Market orders should not have a price")
@@ -425,81 +476,97 @@ class BinanceOrderManager:
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("Order type must be LIMIT for limit orders")
 
-        if not order.quantity or order.quantity <= 0:
-            raise ValidationError("Limit order must have positive quantity")
+        if not validate_quantity(order.quantity):
+            raise ValidationError("Limit order must have valid quantity")
 
-        if not order.price or order.price <= 0:
-            raise ValidationError("Limit order must have positive price")
+        if not validate_price(order.price):
+            raise ValidationError("Limit order must have valid price")
 
     def _validate_stop_loss_order(self, order: OrderRequest) -> None:
         """Validate stop-loss order parameters."""
         if order.order_type != OrderType.STOP_LOSS:
             raise ValidationError("Order type must be STOP_LOSS for stop-loss orders")
 
-        if not order.quantity or order.quantity <= 0:
-            raise ValidationError("Stop-loss order must have positive quantity")
+        if not validate_quantity(order.quantity):
+            raise ValidationError("Stop-loss order must have valid quantity")
 
-        if not order.stop_price or order.stop_price <= 0:
-            raise ValidationError("Stop-loss order must have positive stop price")
+        if not validate_price(order.stop_price):
+            raise ValidationError("Stop-loss order must have valid stop price")
 
     def _validate_oco_order(self, order: OrderRequest) -> None:
         """Validate OCO order parameters."""
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("OCO orders must be LIMIT type")
 
-        if not order.quantity or order.quantity <= 0:
-            raise ValidationError("OCO order must have positive quantity")
+        if not validate_quantity(order.quantity):
+            raise ValidationError("OCO order must have valid quantity")
 
-        if not order.price or order.price <= 0:
-            raise ValidationError("OCO order must have positive limit price")
+        if not validate_price(order.price):
+            raise ValidationError("OCO order must have valid limit price")
 
-        if not order.stop_price or order.stop_price <= 0:
-            raise ValidationError("OCO order must have positive stop price")
+        if not validate_price(order.stop_price):
+            raise ValidationError("OCO order must have valid stop price")
 
     # Conversion methods
 
     def _convert_market_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert market order to Binance format."""
+        # Use helper function for quantity precision
+        rounded_quantity = round_to_precision(float(order.quantity), 8)
+
         return {
             "symbol": order.symbol,
             "side": order.side.value.upper(),
             "type": "MARKET",
-            "quantity": str(order.quantity),
+            "quantity": str(Decimal(str(rounded_quantity))),
             "newClientOrderId": order.client_order_id,
         }
 
     def _convert_limit_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert limit order to Binance format."""
+        # Use helper functions for precision and normalization
+        normalized_price = normalize_price(float(order.price), order.symbol)
+        rounded_quantity = round_to_precision(float(order.quantity), 8)
+
         return {
             "symbol": order.symbol,
             "side": order.side.value.upper(),
             "type": "LIMIT",
-            "quantity": str(order.quantity),
-            "price": str(order.price),
+            "quantity": str(Decimal(str(rounded_quantity))),
+            "price": str(Decimal(str(normalized_price))),
             "timeInForce": order.time_in_force,
             "newClientOrderId": order.client_order_id,
         }
 
     def _convert_stop_loss_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert stop-loss order to Binance format."""
+        # Use helper functions for precision and normalization
+        normalized_stop_price = normalize_price(float(order.stop_price), order.symbol)
+        rounded_quantity = round_to_precision(float(order.quantity), 8)
+
         return {
             "symbol": order.symbol,
             "side": order.side.value.upper(),
             "type": "STOP_LOSS",
-            "quantity": str(order.quantity),
-            "stopPrice": str(order.stop_price),
+            "quantity": str(Decimal(str(rounded_quantity))),
+            "stopPrice": str(Decimal(str(normalized_stop_price))),
             "newClientOrderId": order.client_order_id,
         }
 
     def _convert_oco_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert OCO order to Binance format."""
+        # Use helper functions for precision and normalization
+        normalized_price = normalize_price(float(order.price), order.symbol)
+        normalized_stop_price = normalize_price(float(order.stop_price), order.symbol)
+        rounded_quantity = round_to_precision(float(order.quantity), 8)
+
         return {
             "symbol": order.symbol,
             "side": order.side.value.upper(),
-            "quantity": str(order.quantity),
-            "price": str(order.price),
-            "stopPrice": str(order.stop_price),
-            "stopLimitPrice": str(order.stop_price),
+            "quantity": str(Decimal(str(rounded_quantity))),
+            "price": str(Decimal(str(normalized_price))),
+            "stopPrice": str(Decimal(str(normalized_stop_price))),
+            "stopLimitPrice": str(Decimal(str(normalized_stop_price))),
             "stopLimitTimeInForce": order.time_in_force,
             "newClientOrderId": order.client_order_id,
         }

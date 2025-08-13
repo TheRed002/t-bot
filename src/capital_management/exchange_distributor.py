@@ -28,6 +28,7 @@ from src.core.logging import get_logger
 # MANDATORY: Import from P-001
 from src.core.types import ExchangeAllocation
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.exchanges.base import BaseExchange
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
@@ -77,6 +78,9 @@ class ExchangeDistributor:
 
         # Error handler
         self.error_handler = ErrorHandler(config)
+
+        # Recovery scenarios
+        self.partial_fill_recovery = PartialFillRecovery(config)
 
         # TODO: Remove this in production - This is a placeholder implementation
         # Initialize exchange allocations
@@ -218,7 +222,7 @@ class ExchangeDistributor:
                     exchange=exchange,
                     utilized=format_currency(float(utilized_amount)),
                     available=format_currency(float(allocation.available_amount)),
-                    utilization_rate=f"{allocation.utilization_rate: .2 %}",
+                    utilization_rate=f"{allocation.utilization_rate:.2%}",
                 )
 
         except Exception as e:

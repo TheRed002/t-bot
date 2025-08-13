@@ -25,7 +25,7 @@ from src.core.logging import get_logger
 # MANDATORY: Import from P-001
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
-from src.utils.decorators import time_execution
+from src.utils.decorators import time_execution, log_calls
 
 logger = get_logger(__name__)
 
@@ -96,6 +96,7 @@ class ConnectionHealthMonitor:
         )
 
     @time_execution
+    @log_calls
     async def monitor_connection(self, connection: Any) -> None:
         """
         Start monitoring a connection.
@@ -148,6 +149,7 @@ class ConnectionHealthMonitor:
             raise ExchangeConnectionError(f"Connection monitoring failed: {e!s}")
 
     @time_execution
+    @log_calls
     async def mark_failed(self, connection: Any) -> None:
         """
         Mark a connection as failed.
