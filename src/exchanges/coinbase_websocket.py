@@ -440,7 +440,7 @@ class CoinbaseWebSocketHandler:
         """Handle account update message."""
         try:
             account_id = message.get("account_id", "")
-            balance = message.get("balance", {})
+            _ = message.get("balance", {})
 
             logger.info(f"Account {account_id} balance updated")
 

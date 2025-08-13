@@ -269,15 +269,17 @@ class WebSocketConnectionPool:
         # based on the exchange and connection type
 
         class MockWebSocketConnection:
-            def __init__(self, conn_id, conn_type):
+            def __init__(self, conn_id, conn_type, exchange):
                 self.id = conn_id
                 self.type = conn_type
                 self.is_connected = True
-                self.exchange = self.exchange
+                self.exchange = exchange
                 self.stream_type = conn_type.value
 
         return MockWebSocketConnection(
-            f"{self.exchange}_{connection_type.value}_{int(time.time() * 1000)}", connection_type
+            f"{self.exchange}_{connection_type.value}_{int(time.time() * 1000)}",
+            connection_type,
+            self.exchange,
         )
 
     def _is_connection_healthy(self, connection: PooledConnection) -> bool:

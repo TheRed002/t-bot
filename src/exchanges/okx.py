@@ -44,6 +44,7 @@ from src.core.types import (
     OrderType,
     Ticker,
     Trade,
+    Position,
 )
 
 # MANDATORY: Import from P-002A
@@ -198,7 +199,8 @@ class OKXExchange(BaseExchange):
 
         except Exception as e:
             logger.error(f"Error disconnecting from OKX exchange: {e!s}")
-            raise ExchangeConnectionError(f"Error disconnecting from OKX: {e!s}")
+            raise ExchangeConnectionError(
+                f"Error disconnecting from OKX: {e!s}")
 
     async def get_account_balance(self) -> dict[str, Decimal]:
         """
@@ -209,7 +211,8 @@ class OKXExchange(BaseExchange):
         """
         try:
             if not self.account_client:
-                raise ExchangeConnectionError("OKX account client not initialized")
+                raise ExchangeConnectionError(
+                    "OKX account client not initialized")
 
             # Get account balance from OKX
             result = self.account_client.get_balance()
@@ -240,7 +243,8 @@ class OKXExchange(BaseExchange):
 
         except Exception as e:
             logger.error(f"Failed to get account balance from OKX: {e!s}")
-            raise ExchangeError(f"Failed to get account balance from OKX: {e!s}")
+            raise ExchangeError(
+                f"Failed to get account balance from OKX: {e!s}")
 
     @time_execution
     async def place_order(self, order: OrderRequest) -> OrderResponse:
@@ -259,7 +263,8 @@ class OKXExchange(BaseExchange):
         """
         try:
             if not self.trade_client:
-                raise ExchangeConnectionError("OKX trade client not initialized")
+                raise ExchangeConnectionError(
+                    "OKX trade client not initialized")
 
             # Validate order request
             if not await self.pre_trade_validation(order):
@@ -274,12 +279,14 @@ class OKXExchange(BaseExchange):
             if result.get("code") != "0":
                 error_msg = result.get("msg", "Unknown error")
                 if "insufficient" in error_msg.lower():
-                    raise ExchangeInsufficientFundsError(f"Insufficient funds: {error_msg}")
+                    raise ExchangeInsufficientFundsError(
+                        f"Insufficient funds: {error_msg}")
                 else:
                     raise ExchangeError(f"Order placement failed: {error_msg}")
 
             # Convert response to unified format
-            order_response = self._convert_okx_order_to_response(result.get("data", [{}])[0])
+            order_response = self._convert_okx_order_to_response(
+                result.get("data", [{}])[0])
 
             # Track active order
             self.active_orders[order_response.id] = {
@@ -291,7 +298,8 @@ class OKXExchange(BaseExchange):
             # Post-trade processing
             await self.post_trade_processing(order_response)
 
-            logger.info(f"Successfully placed order on OKX: {order_response.id}")
+            logger.info(
+                f"Successfully placed order on OKX: {order_response.id}")
             return order_response
 
         except Exception as e:
@@ -313,7 +321,8 @@ class OKXExchange(BaseExchange):
         """
         try:
             if not self.trade_client:
-                raise ExchangeConnectionError("OKX trade client not initialized")
+                raise ExchangeConnectionError(
+                    "OKX trade client not initialized")
 
             # Cancel order on OKX
             result = self.trade_client.cancel_order(ordId=order_id)
@@ -348,16 +357,16 @@ class OKXExchange(BaseExchange):
         """
         try:
             if not self.trade_client:
-                raise ExchangeConnectionError("OKX trade client not initialized")
+                raise ExchangeConnectionError(
+                    "OKX trade client not initialized")
 
             # Get order status from OKX
             result = self.trade_client.get_order_details(ordId=order_id)
 
             if result.get("code") != "0":
                 logger.warning(
-                    f"Failed to get order status for {order_id}: {
-                        result.get('msg', 'Unknown error')
-                    }"
+                    f"Failed to get order status for {order_id}: "
+                    f"{result.get('msg', 'Unknown error')}"
                 )
                 return OrderStatus.UNKNOWN
 
@@ -367,7 +376,8 @@ class OKXExchange(BaseExchange):
             return self._convert_okx_status_to_order_status(status)
 
         except Exception as e:
-            logger.error(f"Failed to get order status for {order_id} on OKX: {e!s}")
+            logger.error(
+                f"Failed to get order status for {order_id} on OKX: {e!s}")
             return OrderStatus.UNKNOWN
 
     @time_execution
@@ -384,13 +394,15 @@ class OKXExchange(BaseExchange):
         """
         try:
             if not self.public_client:
-                raise ExchangeConnectionError("OKX public client not initialized")
+                raise ExchangeConnectionError(
+                    "OKX public client not initialized")
 
             # Convert timeframe to OKX format
             okx_timeframe = self._convert_timeframe_to_okx(timeframe)
 
             # Get candlestick data from OKX
-            result = self.public_client.get_candlesticks(instId=symbol, bar=okx_timeframe, limit=1)
+            result = self.public_client.get_candlesticks(
+                instId=symbol, bar=okx_timeframe, limit=1)
 
             if result.get("code") != "0":
                 raise ExchangeError(
@@ -403,7 +415,8 @@ class OKXExchange(BaseExchange):
 
             # Parse candlestick data
             candle = data[0]
-            timestamp = datetime.fromtimestamp(int(candle[0]) / 1000, tz=timezone.utc)
+            timestamp = datetime.fromtimestamp(
+                int(candle[0]) / 1000, tz=timezone.utc)
 
             market_data = MarketData(
                 symbol=symbol,
@@ -415,11 +428,13 @@ class OKXExchange(BaseExchange):
                 low_price=Decimal(candle[3]),
             )
 
-            logger.debug(f"Retrieved market data for {symbol}: {market_data.price}")
+            logger.debug(
+                f"Retrieved market data for {symbol}: {market_data.price}")
             return market_data
 
         except Exception as e:
-            logger.error(f"Failed to get market data for {symbol} from OKX: {e!s}")
+            logger.error(
+                f"Failed to get market data for {symbol} from OKX: {e!s}")
             raise ExchangeError(f"Failed to get market data from OKX: {e!s}")
 
     async def subscribe_to_stream(self, symbol: str, callback: Callable) -> None:
@@ -445,7 +460,8 @@ class OKXExchange(BaseExchange):
             logger.info(f"Subscribed to {stream_name} stream on OKX")
 
         except Exception as e:
-            logger.error(f"Failed to subscribe to stream for {symbol} on OKX: {e!s}")
+            logger.error(
+                f"Failed to subscribe to stream for {symbol} on OKX: {e!s}")
             raise ExchangeError(f"Failed to subscribe to stream on OKX: {e!s}")
 
     @time_execution
@@ -462,7 +478,8 @@ class OKXExchange(BaseExchange):
         """
         try:
             if not self.public_client:
-                raise ExchangeConnectionError("OKX public client not initialized")
+                raise ExchangeConnectionError(
+                    "OKX public client not initialized")
 
             # Get order book from OKX
             result = self.public_client.get_orderbook(instId=symbol, sz=depth)
@@ -473,18 +490,23 @@ class OKXExchange(BaseExchange):
                 )
 
             data = result.get("data", [{}])[0]
-            bids = [[Decimal(price), Decimal(size)] for price, size in data.get("bids", [])]
-            asks = [[Decimal(price), Decimal(size)] for price, size in data.get("asks", [])]
+            bids = [[Decimal(price), Decimal(size)]
+                    for price, size in data.get("bids", [])]
+            asks = [[Decimal(price), Decimal(size)]
+                    for price, size in data.get("asks", [])]
 
             order_book = OrderBook(
-                symbol=symbol, bids=bids, asks=asks, timestamp=datetime.now(timezone.utc)
+                symbol=symbol, bids=bids, asks=asks, timestamp=datetime.now(
+                    timezone.utc)
             )
 
-            logger.debug(f"Retrieved order book for {symbol}: {len(bids)} bids, {len(asks)} asks")
+            logger.debug(
+                f"Retrieved order book for {symbol}: {len(bids)} bids, {len(asks)} asks")
             return order_book
 
         except Exception as e:
-            logger.error(f"Failed to get order book for {symbol} from OKX: {e!s}")
+            logger.error(
+                f"Failed to get order book for {symbol} from OKX: {e!s}")
             raise ExchangeError(f"Failed to get order book from OKX: {e!s}")
 
     @time_execution
@@ -501,7 +523,8 @@ class OKXExchange(BaseExchange):
         """
         try:
             if not self.public_client:
-                raise ExchangeConnectionError("OKX public client not initialized")
+                raise ExchangeConnectionError(
+                    "OKX public client not initialized")
 
             # Get trade history from OKX
             result = self.public_client.get_trades(instId=symbol, limit=limit)
@@ -518,7 +541,8 @@ class OKXExchange(BaseExchange):
                 trade = Trade(
                     id=trade_data.get("tradeId", ""),
                     symbol=symbol,
-                    side=OrderSide.BUY if trade_data.get("side") == "buy" else OrderSide.SELL,
+                    side=OrderSide.BUY if trade_data.get(
+                        "side") == "buy" else OrderSide.SELL,
                     quantity=Decimal(trade_data.get("sz", "0")),
                     price=Decimal(trade_data.get("px", "0")),
                     timestamp=datetime.fromtimestamp(
@@ -529,12 +553,66 @@ class OKXExchange(BaseExchange):
                 )
                 trades.append(trade)
 
-            logger.debug(f"Retrieved {len(trades)} trades for {symbol} from OKX")
+            logger.debug(
+                f"Retrieved {len(trades)} trades for {symbol} from OKX")
             return trades
 
         except Exception as e:
-            logger.error(f"Failed to get trade history for {symbol} from OKX: {e!s}")
+            logger.error(
+                f"Failed to get trade history for {symbol} from OKX: {e!s}")
             raise ExchangeError(f"Failed to get trade history from OKX: {e!s}")
+
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
+        """Return open orders using Trade client when available; otherwise empty list."""
+        try:
+            if not self.trade_client:
+                return []
+            params = {"instId": symbol} if symbol else {}
+            # get_open_orders API may vary; try and handle gracefully
+            result = self.trade_client.get_open_orders(**params)
+            if not isinstance(result, dict) or result.get("code") not in (None, "0"):
+                return []
+            data = result.get("data", []) if isinstance(result.get("data", []), list) else []
+            orders: list[OrderResponse] = []
+            for o in data:
+                try:
+                    orders.append(
+                        OrderResponse(
+                            id=str(o.get("ordId", "")),
+                            client_order_id=o.get("clOrdId"),
+                            symbol=o.get("instId", ""),
+                            side=OrderSide.BUY if o.get("side") == "buy" else OrderSide.SELL,
+                            order_type=OrderType.MARKET if o.get(
+                                "ordType") == "market" else OrderType.LIMIT,
+                            quantity=Decimal(str(o.get("sz", "0"))),
+                            price=Decimal(str(o.get("px", "0"))) if o.get("px") else None,
+                            filled_quantity=Decimal(str(o.get("accFillSz", "0"))),
+                            status=OrderStatus.PENDING,
+                            timestamp=datetime.fromtimestamp(
+                                int(o.get("cTime", 0)) / 1000, tz=timezone.utc),
+                        )
+                    )
+                except Exception:
+                    continue
+            return orders
+        except Exception:
+            return []
+
+    async def get_positions(self) -> list[Position]:
+        """Return positions for spot/futures. For spot, return empty list."""
+        try:
+            # If futures endpoints are configured, query here; default empty for spot
+            return []
+        except Exception:
+            return []
+
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
+        """Return open orders if available; default empty (placeholder)."""
+        return []
+
+    async def get_positions(self) -> list[Position]:
+        """Spot implementation default: no positions; return empty list."""
+        return []
 
     @time_execution
     async def get_exchange_info(self) -> ExchangeInfo:
@@ -546,7 +624,8 @@ class OKXExchange(BaseExchange):
         """
         try:
             if not self.public_client:
-                raise ExchangeConnectionError("OKX public client not initialized")
+                raise ExchangeConnectionError(
+                    "OKX public client not initialized")
 
             # Get instruments (symbols) from OKX
             result = self.public_client.get_instruments(instType="SPOT")
@@ -571,7 +650,8 @@ class OKXExchange(BaseExchange):
                 api_version="v5",
             )
 
-            logger.info(f"Retrieved exchange info from OKX: {len(supported_symbols)} symbols")
+            logger.info(
+                f"Retrieved exchange info from OKX: {len(supported_symbols)} symbols")
             return exchange_info
 
         except Exception as e:
@@ -591,13 +671,15 @@ class OKXExchange(BaseExchange):
         """
         try:
             if not self.public_client:
-                raise ExchangeConnectionError("OKX public client not initialized")
+                raise ExchangeConnectionError(
+                    "OKX public client not initialized")
 
             # Get ticker from OKX
             result = self.public_client.get_ticker(instId=symbol)
 
             if result.get("code") != "0":
-                raise ExchangeError(f"Failed to get ticker: {result.get('msg', 'Unknown error')}")
+                raise ExchangeError(
+                    f"Failed to get ticker: {result.get('msg', 'Unknown error')}")
 
             data = result.get("data", [{}])[0]
 
@@ -611,7 +693,8 @@ class OKXExchange(BaseExchange):
                 timestamp=datetime.now(timezone.utc),
             )
 
-            logger.debug(f"Retrieved ticker for {symbol} from OKX: {ticker.last_price}")
+            logger.debug(
+                f"Retrieved ticker for {symbol} from OKX: {ticker.last_price}")
             return ticker
 
         except Exception as e:
@@ -658,12 +741,15 @@ class OKXExchange(BaseExchange):
             id=result.get("ordId", ""),
             client_order_id=result.get("clOrdId"),
             symbol=result.get("instId", ""),
-            side=OrderSide.BUY if result.get("side") == "buy" else OrderSide.SELL,
-            order_type=self._convert_okx_order_type_to_unified(result.get("ordType", "")),
+            side=OrderSide.BUY if result.get(
+                "side") == "buy" else OrderSide.SELL,
+            order_type=self._convert_okx_order_type_to_unified(
+                result.get("ordType", "")),
             quantity=Decimal(result.get("sz", "0")),
             price=Decimal(result.get("px", "0")) if result.get("px") else None,
             filled_quantity=Decimal(result.get("accFillSz", "0")),
-            status=self._convert_okx_status_to_order_status(result.get("state", "")).value,
+            status=self._convert_okx_status_to_order_status(
+                result.get("state", "")).value,
             timestamp=datetime.now(timezone.utc),
         )
 
@@ -760,8 +846,10 @@ class OKXExchange(BaseExchange):
             logger.info(f"Initializing WebSocket for {stream_name} on OKX")
 
         except Exception as e:
-            logger.error(f"Failed to initialize WebSocket for {stream_name} on OKX: {e!s}")
-            raise ExchangeConnectionError(f"Failed to initialize WebSocket on OKX: {e!s}")
+            logger.error(
+                f"Failed to initialize WebSocket for {stream_name} on OKX: {e!s}")
+            raise ExchangeConnectionError(
+                f"Failed to initialize WebSocket on OKX: {e!s}")
 
     async def _handle_stream(self, stream_name: str, stream) -> None:
         """

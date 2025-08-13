@@ -28,6 +28,7 @@ from src.core.types import (
     OrderRequest,
     OrderResponse,
     OrderStatus,
+    Position,
     Ticker,
     Trade,
 )
@@ -206,6 +207,28 @@ class BaseExchange(ABC):
             List[Trade]: List of historical trades
         """
         pass
+
+    # Optional lifecycle/portfolio helpers for higher layers (risk/emergency)
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
+        """
+        Optional: Return open orders. Default implementation returns empty list.
+
+        Args:
+            symbol: Optional symbol filter
+
+        Returns:
+            List[OrderResponse]: Open orders
+        """
+        return []
+
+    async def get_positions(self) -> list[Position]:  # type: ignore[name-defined]
+        """
+        Optional: Return current open positions. Default implementation returns empty list.
+
+        Returns:
+            List[Position]: Open positions
+        """
+        return []
 
     @abstractmethod
     async def get_exchange_info(self) -> ExchangeInfo:

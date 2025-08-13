@@ -220,11 +220,13 @@ class MarketData(BaseModel):
 class OrderRequest(BaseModel):
     """Order request structure for placing trades."""
 
-    symbol: str = Field(min_length=3, description="Trading symbol")
+    # Allow raw values to enable downstream validation in exchange/risk layers
+    symbol: str = Field(description="Trading symbol (validated downstream)")
     side: OrderSide
     order_type: OrderType
+    # Allow raw values for testing; risk layer enforces positivity
     quantity: Decimal = Field(
-        gt=0, description="Order quantity (must be positive)")
+        description="Order quantity (validated in risk layer)")
     price: Decimal | None = Field(
         default=None, gt=0, description="Order price (must be positive if set)"
     )

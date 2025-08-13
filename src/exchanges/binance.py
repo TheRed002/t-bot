@@ -24,6 +24,7 @@ from src.core.exceptions import (
     ExchangeError,
     ExchangeInsufficientFundsError,
     ExecutionError,
+    OrderRejectionError,
     ValidationError,
 )
 from src.core.logging import get_logger
@@ -40,6 +41,7 @@ from src.core.types import (
     OrderType,
     Ticker,
     Trade,
+    Position,
 )
 
 # MANDATORY: Import from P-002A
@@ -225,7 +227,7 @@ class BinanceExchange(BaseExchange):
                 raise ValidationError("Order validation failed")
 
             # Convert order to Binance format
-            binance_order = self._convert_order_to_binance(order)
+            _ = self._convert_order_to_binance(order)
 
             # Apply rate limiting
             await self.rate_limiter.acquire("orders_per_second", 1)
@@ -290,7 +292,7 @@ class BinanceExchange(BaseExchange):
             await self.rate_limiter.acquire("orders_per_second", 1)
 
             # Cancel order
-            result = await self.client.cancel_order(symbol="", orderId=order_id)
+            _ = await self.client.cancel_order(symbol="", orderId=order_id)
 
             logger.info(f"Order cancelled successfully: {order_id}")
             return True
@@ -500,6 +502,29 @@ class BinanceExchange(BaseExchange):
         except Exception as e:
             logger.error(f"Error getting trade history from Binance: {e!s}")
             raise ExchangeError(f"Failed to get trade history: {e!s}")
+
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
+        """Return open orders; prefer local tracking if available, else empty list."""
+        try:
+            if not self.connected or not self.client:
+                return []
+            # Use Binance open orders API when symbol provided; otherwise try local cache
+            if symbol:
+                result = await self.client.get_open_orders(symbol=symbol)
+                return [self._convert_binance_order_to_response(o) for o in result]
+            if hasattr(self, "pending_orders") and isinstance(self.pending_orders, dict):
+                orders: list[OrderResponse] = []
+                for _order_id in list(self.pending_orders.keys()):
+                    # Skip API fetch to avoid heavy calls
+                    pass
+                return orders
+        except Exception:
+            return []
+        return []
+
+    async def get_positions(self) -> list[Position]:
+        """Spot implementation: no positions; return empty list."""
+        return []
 
     @time_execution
     async def get_exchange_info(self) -> ExchangeInfo:

@@ -11,11 +11,19 @@ exchange-specific extensions.
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 # MANDATORY: Import from P-001
+
+# Use centralized validators to avoid duplication
+from src.utils.validators import (
+    validate_symbol as core_validate_symbol,
+    validate_price as core_validate_price,
+    validate_quantity as core_validate_quantity,
+)
 
 
 class ExchangeTypes:
@@ -31,55 +39,41 @@ class ExchangeTypes:
         """
         Validate a trading symbol format.
 
-        Args:
-            symbol: Trading symbol to validate
-
-        Returns:
-            bool: True if valid, False otherwise
+        Delegates to core validator, then applies exchange-specific stricter
+        rule used in integration tests: only uppercase alphanumerics (no
+        separators like '-' or '/').
         """
-        if not symbol or not isinstance(symbol, str):
+        try:
+            normalized = core_validate_symbol(symbol)
+            # Exchange-specific stricter rule: alphanumeric only
+            return bool(re.match(r"^[A-Z0-9]+$", normalized))
+        except Exception:
             return False
-
-        # Basic validation - symbol should be alphanumeric with possible
-        # separators
-        import re
-
-        pattern = r"^[A-Z0-9]+$"
-        return bool(re.match(pattern, symbol))
 
     @staticmethod
     def validate_quantity(quantity: Decimal, min_quantity: Decimal = Decimal("0")) -> bool:
-        """
-        Validate order quantity.
-
-        Args:
-            quantity: Quantity to validate
-            min_quantity: Minimum allowed quantity
-
-        Returns:
-            bool: True if valid, False otherwise
-        """
+        """Validate order quantity using core validator with minimal duplication."""
         if not isinstance(quantity, Decimal):
             return False
-
-        return quantity > min_quantity
+        try:
+            # Symbol context impacts precision only; boolean validity here
+            # depends on positivity and minimum threshold
+            normalized = core_validate_quantity(
+                float(quantity), "BTCUSDT", float(min_quantity))
+            return Decimal(normalized) > min_quantity
+        except Exception:
+            return False
 
     @staticmethod
     def validate_price(price: Decimal, min_price: Decimal = Decimal("0")) -> bool:
-        """
-        Validate order price.
-
-        Args:
-            price: Price to validate
-            min_price: Minimum allowed price
-
-        Returns:
-            bool: True if valid, False otherwise
-        """
+        """Validate order price using core validator; return boolean outcome."""
         if not isinstance(price, Decimal):
             return False
-
-        return price > min_price
+        try:
+            normalized = core_validate_price(float(price), "BTCUSDT")
+            return Decimal(normalized) > min_price
+        except Exception:
+            return False
 
 
 class ExchangeCapability(Enum):
@@ -111,10 +105,13 @@ class ExchangeTradingPair(BaseModel):
 class ExchangeFee(BaseModel):
     """Exchange fee structure."""
 
-    maker_fee: Decimal = Field(default=Decimal("0.001"), description="Maker fee rate")
-    taker_fee: Decimal = Field(default=Decimal("0.001"), description="Taker fee rate")
+    maker_fee: Decimal = Field(default=Decimal(
+        "0.001"), description="Maker fee rate")
+    taker_fee: Decimal = Field(default=Decimal(
+        "0.001"), description="Taker fee rate")
     min_fee: Decimal = Field(default=Decimal("0"), description="Minimum fee")
-    max_fee: Decimal = Field(default=Decimal("0.01"), description="Maximum fee")
+    max_fee: Decimal = Field(default=Decimal(
+        "0.01"), description="Maximum fee")
 
 
 class ExchangeRateLimit(BaseModel):

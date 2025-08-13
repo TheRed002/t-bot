@@ -42,6 +42,7 @@ from src.core.types import (
     OrderType,
     Ticker,
     Trade,
+    Position,
 )
 
 # MANDATORY: Import from P-002A
@@ -290,7 +291,7 @@ class CoinbaseExchange(BaseExchange):
             await self.rate_limiter.acquire("orders_per_second", 1)
 
             # Cancel order
-            result = await self.client.cancel_orders([order_id])
+            _ = await self.client.cancel_orders([order_id])
 
             # Update cache
             if order_id in self.order_status_cache:
@@ -353,7 +354,7 @@ class CoinbaseExchange(BaseExchange):
                 raise ExchangeConnectionError("Not connected to Coinbase")
 
             # Get product details
-            product = await self.client.get_product(symbol)
+            _ = await self.client.get_product(symbol)
 
             # Get latest ticker
             ticker = await self.client.get_product_ticker(symbol)
@@ -489,6 +490,21 @@ class CoinbaseExchange(BaseExchange):
         except Exception as e:
             logger.error(f"Failed to get trade history for {symbol}: {e!s}")
             raise ExchangeError(f"Failed to get trade history: {e!s}")
+
+    async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
+        """Return open orders using REST client when available; else empty list."""
+        try:
+            if not self.connected or not self.client:
+                return []
+            # Coinbase REST supports listing orders
+            orders = await self.client.list_orders(product_id=symbol, order_status="OPEN")
+            return [self._convert_coinbase_order_to_response(o) for o in orders]
+        except Exception:
+            return []
+
+    async def get_positions(self) -> list[Position]:
+        """Spot implementation: positions not available; return empty list."""
+        return []
 
     @time_execution
     async def get_exchange_info(self) -> ExchangeInfo:

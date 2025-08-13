@@ -130,7 +130,8 @@ class EmergencyControls:
     def register_exchange(self, exchange_name: str, exchange: BaseExchange) -> None:
         """Register exchange for emergency control actions."""
         self.exchanges[exchange_name] = exchange
-        self.logger.info("Exchange registered for emergency controls", exchange_name=exchange_name)
+        self.logger.info(
+            "Exchange registered for emergency controls", exchange_name=exchange_name)
 
     @time_execution
     async def activate_emergency_stop(self, reason: str, trigger_type: CircuitBreakerType) -> None:
@@ -165,7 +166,8 @@ class EmergencyControls:
             await self._execute_emergency_procedures()
 
         except Exception as e:
-            self.logger.error("Failed to activate emergency stop", error=str(e), reason=reason)
+            self.logger.error("Failed to activate emergency stop",
+                              error=str(e), reason=reason)
             # Handle error handler call safely (for testing with Mock objects)
             try:
                 if hasattr(self.error_handler, "handle_error"):
@@ -173,8 +175,10 @@ class EmergencyControls:
                         e, "emergency_controls", "activate_emergency_stop"
                     )
             except Exception as handler_error:
-                self.logger.error("Error handler failed", error=str(handler_error))
-            raise EmergencyStopError(f"Failed to activate emergency stop: {e!s}")
+                self.logger.error("Error handler failed",
+                                  error=str(handler_error))
+            raise EmergencyStopError(
+                f"Failed to activate emergency stop: {e!s}")
 
     @time_execution
     async def _execute_emergency_procedures(self) -> None:
@@ -204,7 +208,8 @@ class EmergencyControls:
                         e, "emergency_controls", "_execute_emergency_procedures"
                     )
             except Exception as handler_error:
-                self.logger.error("Error handler failed", error=str(handler_error))
+                self.logger.error("Error handler failed",
+                                  error=str(handler_error))
             raise
 
     @time_execution
@@ -214,8 +219,13 @@ class EmergencyControls:
 
         for exchange_name, exchange in self.exchanges.items():
             try:
-                # Get pending orders from exchange
-                pending_orders = await exchange.get_pending_orders()
+                # Get pending/open orders from exchange (support multiple interfaces)
+                if hasattr(exchange, "get_pending_orders"):
+                    pending_orders = await exchange.get_pending_orders()
+                elif hasattr(exchange, "get_open_orders"):
+                    pending_orders = await exchange.get_open_orders()
+                else:
+                    pending_orders = []
 
                 for order in pending_orders:
                     try:
@@ -256,7 +266,8 @@ class EmergencyControls:
         if self.emergency_events:
             self.emergency_events[-1].orders_cancelled = total_cancelled
 
-        self.logger.info("Emergency order cancellation completed", total_cancelled=total_cancelled)
+        self.logger.info("Emergency order cancellation completed",
+                         total_cancelled=total_cancelled)
 
     @time_execution
     async def _close_all_positions(self) -> None:
@@ -265,8 +276,11 @@ class EmergencyControls:
 
         for exchange_name, exchange in self.exchanges.items():
             try:
-                # Get open positions from exchange
-                positions = await exchange.get_positions()
+                # Get open positions if exchange provides it; otherwise skip
+                if hasattr(exchange, "get_positions"):
+                    positions = await exchange.get_positions()
+                else:
+                    positions = []
 
                 for position in positions:
                     if position.quantity != 0:  # Only close non-zero positions
@@ -279,9 +293,10 @@ class EmergencyControls:
                                 else OrderSide.BUY,
                                 order_type=OrderType.MARKET,
                                 quantity=abs(position.quantity),
-                                client_order_id=f"emergency_close_{position.symbol}_{
-                                    datetime.now().timestamp()
-                                }",
+                                client_order_id=(
+                                    f"emergency_close_{position.symbol}_"
+                                    f"{int(datetime.now().timestamp())}"
+                                ),
                             )
 
                             # Place emergency close order
@@ -324,7 +339,8 @@ class EmergencyControls:
         if self.emergency_events:
             self.emergency_events[-1].positions_affected = total_positions
 
-        self.logger.info("Emergency position closure completed", total_positions=total_positions)
+        self.logger.info("Emergency position closure completed",
+                         total_positions=total_positions)
 
     @time_execution
     async def _block_new_orders(self) -> None:
@@ -441,7 +457,8 @@ class EmergencyControls:
                         # TODO: Add currency conversion logic
                         pass
             except Exception as e:
-                self.logger.error("Failed to get balance for portfolio calculation", error=str(e))
+                self.logger.error(
+                    "Failed to get balance for portfolio calculation", error=str(e))
 
         return total_value
 
@@ -472,7 +489,8 @@ class EmergencyControls:
                 )
 
         except Exception as e:
-            self.logger.error("Failed to deactivate emergency stop", error=str(e), reason=reason)
+            self.logger.error(
+                "Failed to deactivate emergency stop", error=str(e), reason=reason)
             # Handle error handler call safely (for testing with Mock objects)
             try:
                 if hasattr(self.error_handler, "handle_error"):
@@ -480,7 +498,8 @@ class EmergencyControls:
                         e, "emergency_controls", "deactivate_emergency_stop"
                     )
             except Exception as handler_error:
-                self.logger.error("Error handler failed", error=str(handler_error))
+                self.logger.error("Error handler failed",
+                                  error=str(handler_error))
             raise
 
     @time_execution
@@ -493,7 +512,8 @@ class EmergencyControls:
             if await self._validate_recovery_completion():
                 await self.deactivate_emergency_stop("Recovery validation completed")
             else:
-                self.logger.warning("Recovery validation failed, extending recovery period")
+                self.logger.warning(
+                    "Recovery validation failed, extending recovery period")
 
     @time_execution
     async def _validate_recovery_completion(self) -> bool:
@@ -539,7 +559,8 @@ class EmergencyControls:
         self.manual_override_user = user_id
         self.manual_override_time = datetime.now()
 
-        self.logger.warning("Manual override activated", user_id=user_id, reason=reason)
+        self.logger.warning("Manual override activated",
+                            user_id=user_id, reason=reason)
 
     @time_execution
     async def deactivate_manual_override(self, user_id: str) -> None:
@@ -556,7 +577,8 @@ class EmergencyControls:
 
             self.logger.info("Manual override deactivated", user_id=user_id)
         else:
-            raise ValidationError("Only the user who activated override can deactivate it")
+            raise ValidationError(
+                "Only the user who activated override can deactivate it")
 
     def get_status(self) -> dict[str, Any]:
         """Get current emergency controls status."""

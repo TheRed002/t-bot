@@ -36,7 +36,8 @@ class DatabaseConfig(BaseConfig):
     """Database configuration for PostgreSQL, Redis, and InfluxDB."""
 
     # PostgreSQL
-    postgresql_host: str = Field(default="localhost", description="PostgreSQL host")
+    postgresql_host: str = Field(
+        default="localhost", description="PostgreSQL host")
     postgresql_port: int = Field(default=5432, description="PostgreSQL port")
     postgresql_database: str = Field(
         default="trading_bot", pattern=r"^[a-zA-Z0-9_-]+$", description="PostgreSQL database name"
@@ -47,20 +48,26 @@ class DatabaseConfig(BaseConfig):
     postgresql_password: str = Field(
         default="trading_bot_password", min_length=8, description="PostgreSQL password"
     )
-    postgresql_pool_size: int = Field(default=10, description="PostgreSQL connection pool size")
+    postgresql_pool_size: int = Field(
+        default=10, description="PostgreSQL connection pool size")
 
     # Redis
     redis_host: str = Field(default="localhost", description="Redis host")
     redis_port: int = Field(default=6379, description="Redis port")
-    redis_password: str | None = Field(default=None, description="Redis password")
+    redis_password: str | None = Field(
+        default=None, description="Redis password")
     redis_db: int = Field(default=0, description="Redis database number")
 
     # InfluxDB
-    influxdb_host: str = Field(default="localhost", description="InfluxDB host")
+    influxdb_host: str = Field(
+        default="localhost", description="InfluxDB host")
     influxdb_port: int = Field(default=8086, description="InfluxDB port")
-    influxdb_token: str = Field(default="test-token", description="InfluxDB token")
-    influxdb_org: str = Field(default="test-org", description="InfluxDB organization")
-    influxdb_bucket: str = Field(default="trading-data", description="InfluxDB bucket")
+    influxdb_token: str = Field(
+        default="test-token", description="InfluxDB token")
+    influxdb_org: str = Field(
+        default="test-org", description="InfluxDB organization")
+    influxdb_bucket: str = Field(
+        default="trading-data", description="InfluxDB bucket")
 
     @field_validator("postgresql_port", "redis_port", "influxdb_port")
     @classmethod
@@ -90,7 +97,8 @@ class SecurityConfig(BaseConfig):
         pattern=r"^(HS256|HS384|HS512|RS256|RS384|RS512)$",
         description="JWT algorithm",
     )
-    jwt_expire_minutes: int = Field(default=30, description="JWT expiration time in minutes")
+    jwt_expire_minutes: int = Field(
+        default=30, description="JWT expiration time in minutes")
     encryption_key: str = Field(
         default="test-encryption-key-32-chars-long-for-testing", description="Encryption key"
     )
@@ -100,7 +108,8 @@ class SecurityConfig(BaseConfig):
     def validate_jwt_expire(cls, v):
         """Validate JWT expiration time."""
         if not 1 <= v <= 1440:  # 1 minute to 24 hours
-            raise ValueError(f"JWT expire minutes must be between 1 and 1440, got {v}")
+            raise ValueError(
+                f"JWT expire minutes must be between 1 and 1440, got {v}")
         return v
 
     @field_validator("secret_key", "encryption_key")
@@ -108,7 +117,8 @@ class SecurityConfig(BaseConfig):
     def validate_key_length(cls, v):
         """Validate key lengths for security."""
         if len(v) < 32:
-            raise ValueError(f"Key must be at least 32 characters long, got {len(v)}")
+            raise ValueError(
+                f"Key must be at least 32 characters long, got {len(v)}")
         return v
 
 
@@ -124,9 +134,12 @@ class ErrorHandlingConfig(BaseConfig):
     )
 
     # Retry policies
-    max_retry_attempts: int = Field(default=3, description="Maximum retry attempts")
-    retry_backoff_factor: float = Field(default=2.0, description="Retry backoff factor")
-    retry_max_delay: int = Field(default=60, description="Maximum retry delay in seconds")
+    max_retry_attempts: int = Field(
+        default=3, description="Maximum retry attempts")
+    retry_backoff_factor: float = Field(
+        default=2.0, description="Retry backoff factor")
+    retry_max_delay: int = Field(
+        default=60, description="Maximum retry delay in seconds")
 
     # Error pattern analytics
     pattern_detection_enabled: bool = Field(
@@ -135,7 +148,8 @@ class ErrorHandlingConfig(BaseConfig):
     correlation_analysis_enabled: bool = Field(
         default=True, description="Enable correlation analysis"
     )
-    predictive_alerts_enabled: bool = Field(default=True, description="Enable predictive alerts")
+    predictive_alerts_enabled: bool = Field(
+        default=True, description="Enable predictive alerts")
 
     # State monitoring
     state_validation_frequency: int = Field(
@@ -187,24 +201,35 @@ class ExchangeConfig(BaseConfig):
     """Exchange configuration for API credentials and rate limits."""
 
     # Default settings
-    default_timeout: int = Field(default=30, description="Default exchange API timeout")
-    max_retries: int = Field(default=3, description="Maximum retry attempts for exchange API calls")
+    default_timeout: int = Field(
+        default=30, description="Default exchange API timeout")
+    max_retries: int = Field(
+        default=3, description="Maximum retry attempts for exchange API calls")
 
     # Binance
-    binance_api_key: str = Field(default="", min_length=0, description="Binance API key")
-    binance_api_secret: str = Field(default="", min_length=0, description="Binance API secret")
-    binance_testnet: bool = Field(default=True, description="Use Binance testnet")
+    binance_api_key: str = Field(
+        default="", min_length=0, description="Binance API key")
+    binance_api_secret: str = Field(
+        default="", min_length=0, description="Binance API secret")
+    binance_testnet: bool = Field(
+        default=True, description="Use Binance testnet")
 
     # OKX
-    okx_api_key: str = Field(default="", min_length=0, description="OKX API key")
-    okx_api_secret: str = Field(default="", min_length=0, description="OKX API secret")
-    okx_passphrase: str = Field(default="", min_length=0, description="OKX API passphrase")
+    okx_api_key: str = Field(default="", min_length=0,
+                             description="OKX API key")
+    okx_api_secret: str = Field(
+        default="", min_length=0, description="OKX API secret")
+    okx_passphrase: str = Field(
+        default="", min_length=0, description="OKX API passphrase")
     okx_sandbox: bool = Field(default=True, description="Use OKX sandbox")
 
     # Coinbase
-    coinbase_api_key: str = Field(default="", min_length=0, description="Coinbase API key")
-    coinbase_api_secret: str = Field(default="", min_length=0, description="Coinbase API secret")
-    coinbase_sandbox: bool = Field(default=True, description="Use Coinbase sandbox")
+    coinbase_api_key: str = Field(
+        default="", min_length=0, description="Coinbase API key")
+    coinbase_api_secret: str = Field(
+        default="", min_length=0, description="Coinbase API secret")
+    coinbase_sandbox: bool = Field(
+        default=True, description="Use Coinbase sandbox")
 
     # Rate limiting configuration
     rate_limits: dict[str, dict[str, int]] = Field(
@@ -244,9 +269,17 @@ class ExchangeConfig(BaseConfig):
     )
     @classmethod
     def validate_api_credentials(cls, v: str) -> str:
-        """Validate API credentials - either empty (for testing) or minimum length."""
-        if v and len(v) < 16:  # If provided, must be at least 16 chars
-            raise ValueError(f"API credential must be at least 16 characters long, got {len(v)}")
+        """Validate API credentials.
+
+        Allows any length in non-production environments to enable testing with
+        dummy values (e.g., "test_api_key"). Enforces a minimum length in
+        production-like environments.
+        """
+        env = os.getenv("ENVIRONMENT", "development").lower()
+        if env in ("production", "staging") and v and len(v) < 16:
+            raise ValueError(
+                f"API credential must be at least 16 characters long, got {len(v)}"
+            )
         return v
 
 
@@ -265,12 +298,15 @@ class RiskConfig(BaseConfig):
     )
 
     # Portfolio limits
-    max_total_positions: int = Field(default=10, description="Maximum total positions")
-    max_positions_per_symbol: int = Field(default=1, description="Maximum positions per symbol")
+    max_total_positions: int = Field(
+        default=10, description="Maximum total positions")
+    max_positions_per_symbol: int = Field(
+        default=1, description="Maximum positions per symbol")
     max_portfolio_exposure: float = Field(
         default=0.95, description="Maximum portfolio exposure (95%)"
     )
-    max_sector_exposure: float = Field(default=0.25, description="Maximum sector exposure (25%)")
+    max_sector_exposure: float = Field(
+        default=0.25, description="Maximum sector exposure (25%)")
     max_correlation_exposure: float = Field(
         default=0.5, description="Maximum correlation exposure (50%)"
     )
@@ -282,7 +318,8 @@ class RiskConfig(BaseConfig):
     max_daily_loss_pct: float = Field(
         default=0.05, description="Maximum daily loss percentage (5%)"
     )
-    max_drawdown_pct: float = Field(default=0.15, description="Maximum drawdown percentage (15%)")
+    max_drawdown_pct: float = Field(
+        default=0.15, description="Maximum drawdown percentage (15%)")
     var_confidence_level: float = Field(
         default=0.95, ge=0.5, le=0.999, description="VaR confidence level (95%)"
     )
@@ -291,11 +328,14 @@ class RiskConfig(BaseConfig):
     kelly_lookback_days: int = Field(
         default=30, description="Kelly Criterion lookback period in days"
     )
-    kelly_max_fraction: float = Field(default=0.25, description="Maximum Kelly fraction (25%)")
+    kelly_max_fraction: float = Field(
+        default=0.25, description="Maximum Kelly fraction (25%)")
 
     # Volatility adjustment
-    volatility_window: int = Field(default=20, description="Volatility calculation window")
-    volatility_target: float = Field(default=0.02, description="Volatility target (2% daily)")
+    volatility_window: int = Field(
+        default=20, description="Volatility calculation window")
+    volatility_target: float = Field(
+        default=0.02, description="Volatility target (2% daily)")
 
     # Risk calculation settings
     var_calculation_window: int = Field(
@@ -361,7 +401,8 @@ class CapitalManagementConfig(BaseConfig):
     base_currency: str = Field(
         default="USDT", pattern=r"^[A-Z]{3,10}$", description="Base currency for all calculations"
     )
-    total_capital: float = Field(default=10000.0, gt=0, description="Total available capital")
+    total_capital: float = Field(
+        default=10000.0, gt=0, description="Total available capital")
     emergency_reserve_pct: float = Field(
         default=0.1, description="Emergency reserve percentage (10%)"
     )
@@ -370,7 +411,8 @@ class CapitalManagementConfig(BaseConfig):
     allocation_strategy: str = Field(
         default="risk_parity", description="Capital allocation strategy"
     )
-    rebalance_frequency_hours: int = Field(default=24, description="Rebalancing frequency in hours")
+    rebalance_frequency_hours: int = Field(
+        default=24, description="Rebalancing frequency in hours")
     min_allocation_pct: float = Field(
         default=0.01, description="Minimum allocation percentage (1%)"
     )
@@ -382,15 +424,19 @@ class CapitalManagementConfig(BaseConfig):
     max_exchange_allocation_pct: float = Field(
         default=0.6, description="Maximum exchange allocation (60%)"
     )
-    min_exchange_balance: float = Field(default=100.0, description="Minimum exchange balance")
+    min_exchange_balance: float = Field(
+        default=100.0, description="Minimum exchange balance")
 
     # Fund flow controls
     max_daily_reallocation_pct: float = Field(
         default=0.2, description="Maximum daily reallocation (20%)"
     )
-    fund_flow_cooldown_minutes: int = Field(default=60, description="Fund flow cooldown in minutes")
-    min_deposit_amount: float = Field(default=1000.0, description="Minimum deposit amount")
-    min_withdrawal_amount: float = Field(default=100.0, description="Minimum withdrawal amount")
+    fund_flow_cooldown_minutes: int = Field(
+        default=60, description="Fund flow cooldown in minutes")
+    min_deposit_amount: float = Field(
+        default=1000.0, description="Minimum deposit amount")
+    min_withdrawal_amount: float = Field(
+        default=100.0, description="Minimum withdrawal amount")
     max_withdrawal_pct: float = Field(
         default=0.2, description="Maximum withdrawal percentage (20%)"
     )
@@ -400,9 +446,12 @@ class CapitalManagementConfig(BaseConfig):
         default=["USDT", "BUSD", "USDC", "BTC", "ETH"],
         description="Supported currencies for trading",
     )
-    hedging_enabled: bool = Field(default=True, description="Enable currency hedging")
-    hedging_threshold: float = Field(default=0.1, description="Hedging threshold (10% exposure)")
-    hedge_ratio: float = Field(default=0.8, description="Hedge coverage ratio (80%)")
+    hedging_enabled: bool = Field(
+        default=True, description="Enable currency hedging")
+    hedging_threshold: float = Field(
+        default=0.1, description="Hedging threshold (10% exposure)")
+    hedge_ratio: float = Field(
+        default=0.8, description="Hedge coverage ratio (80%)")
 
     # Withdrawal rules
     withdrawal_rules: dict[str, dict[str, Any]] = Field(
@@ -422,15 +471,22 @@ class CapitalManagementConfig(BaseConfig):
     )
 
     # Auto-compounding
-    auto_compound_enabled: bool = Field(default=True, description="Enable auto-compounding")
-    auto_compound_frequency: str = Field(default="weekly", description="Auto-compound frequency")
-    profit_threshold: float = Field(default=100.0, description="Minimum profit for compounding")
+    auto_compound_enabled: bool = Field(
+        default=True, description="Enable auto-compounding")
+    auto_compound_frequency: str = Field(
+        default="weekly", description="Auto-compound frequency")
+    profit_threshold: float = Field(
+        default=100.0, description="Minimum profit for compounding")
 
     # Capital protection
-    max_daily_loss_pct: float = Field(default=0.05, description="Maximum daily loss (5%)")
-    max_weekly_loss_pct: float = Field(default=0.10, description="Maximum weekly loss (10%)")
-    max_monthly_loss_pct: float = Field(default=0.15, description="Maximum monthly loss (15%)")
-    profit_lock_pct: float = Field(default=0.5, description="Profit lock percentage (50%)")
+    max_daily_loss_pct: float = Field(
+        default=0.05, description="Maximum daily loss (5%)")
+    max_weekly_loss_pct: float = Field(
+        default=0.10, description="Maximum weekly loss (10%)")
+    max_monthly_loss_pct: float = Field(
+        default=0.15, description="Maximum monthly loss (15%)")
+    profit_lock_pct: float = Field(
+        default=0.5, description="Profit lock percentage (50%)")
 
     # Per-strategy minimum allocations
     per_strategy_minimum: dict[str, float] = Field(
@@ -491,8 +547,10 @@ class StrategyManagementConfig(BaseConfig):
     """Strategy management configuration for P-011 framework."""
 
     # Global strategy settings
-    max_concurrent_strategies: int = Field(default=10, description="Maximum concurrent strategies")
-    strategy_restart_delay: int = Field(default=60, description="Strategy restart delay in seconds")
+    max_concurrent_strategies: int = Field(
+        default=10, description="Maximum concurrent strategies")
+    strategy_restart_delay: int = Field(
+        default=60, description="Strategy restart delay in seconds")
     performance_window_days: int = Field(
         default=30, description="Performance evaluation window in days"
     )
@@ -504,19 +562,25 @@ class StrategyManagementConfig(BaseConfig):
     default_position_size: float = Field(
         default=0.02, description="Default position size percentage"
     )
-    default_stop_loss: float = Field(default=0.02, description="Default stop loss percentage")
-    default_take_profit: float = Field(default=0.04, description="Default take profit percentage")
+    default_stop_loss: float = Field(
+        default=0.02, description="Default stop loss percentage")
+    default_take_profit: float = Field(
+        default=0.04, description="Default take profit percentage")
 
     # Hot reloading
-    enable_hot_reload: bool = Field(default=True, description="Enable hot reloading of strategies")
+    enable_hot_reload: bool = Field(
+        default=True, description="Enable hot reloading of strategies")
     config_check_interval: int = Field(
         default=30, description="Configuration check interval in seconds"
     )
 
     # Strategy performance thresholds
-    min_win_rate: float = Field(default=0.4, description="Minimum acceptable win rate")
-    min_sharpe_ratio: float = Field(default=0.5, description="Minimum acceptable Sharpe ratio")
-    max_drawdown_threshold: float = Field(default=0.15, description="Maximum acceptable drawdown")
+    min_win_rate: float = Field(
+        default=0.4, description="Minimum acceptable win rate")
+    min_sharpe_ratio: float = Field(
+        default=0.5, description="Minimum acceptable Sharpe ratio")
+    max_drawdown_threshold: float = Field(
+        default=0.15, description="Maximum acceptable drawdown")
 
     # Strategy monitoring
     performance_evaluation_frequency: int = Field(
@@ -582,12 +646,15 @@ class Config(BaseConfig):
     """
 
     # Environment
-    environment: str = Field(default="development", description="Application environment")
+    environment: str = Field(default="development",
+                             description="Application environment")
     debug: bool = Field(default=False, description="Debug mode")
 
     # Application
-    app_name: str = Field(default="trading-bot-suite", description="Application name")
-    app_version: str = Field(default="1.0.0", description="Application version")
+    app_name: str = Field(default="trading-bot-suite",
+                          description="Application name")
+    app_version: str = Field(
+        default="1.0.0", description="Application version")
 
     # Sub-configurations
     database: DatabaseConfig = DatabaseConfig()
@@ -632,7 +699,8 @@ class Config(BaseConfig):
         """
         yaml_path = Path(yaml_path)
         if not yaml_path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {yaml_path}")
+            raise FileNotFoundError(
+                f"Configuration file not found: {yaml_path}")
 
         try:
             with open(yaml_path, encoding="utf-8") as f:
@@ -669,7 +737,8 @@ class Config(BaseConfig):
         # Create config with YAML data as base, env vars will override
         # due to pydantic-settings precedence
         os.environ.update(
-            {k: str(v) for k, v in yaml_data.items() if k not in os.environ and v is not None}
+            {k: str(v) for k, v in yaml_data.items()
+             if k not in os.environ and v is not None}
         )
 
         return cls()

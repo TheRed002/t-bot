@@ -8,17 +8,10 @@ CRITICAL: These tests ensure the Coinbase implementation works correctly
 in a real environment with proper error handling and recovery.
 """
 
-from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
-from src.core.exceptions import (
-    ExchangeConnectionError,
-    ExchangeError,
-)
-
-# Import core types and exceptions
+from src.exchanges.factory import ExchangeFactory
+from src.exchanges.coinbase_websocket import CoinbaseWebSocketHandler
+from src.exchanges.coinbase_orders import CoinbaseOrderManager
+from src.exchanges.coinbase import CoinbaseExchange
 from src.core.types import (
     MarketData,
     OrderRequest,
@@ -28,18 +21,38 @@ from src.core.types import (
     OrderType,
     Ticker,
 )
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+)
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
+import warnings
+
+import pytest
+from src.core.config import Config
+
+# Suppress unawaited coroutine RuntimeWarnings in this module-specific context
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+
+# Import core types and exceptions
 
 # Import the classes to test
-from src.exchanges.coinbase import CoinbaseExchange
-from src.exchanges.coinbase_orders import CoinbaseOrderManager
-from src.exchanges.coinbase_websocket import CoinbaseWebSocketHandler
-from src.exchanges.factory import ExchangeFactory
 
 # Import test utilities
 
 
 class TestCoinbaseIntegration:
     """Integration tests for Coinbase exchange."""
+
+    @pytest.fixture
+    def config(self):
+        cfg = Config()
+        cfg.exchanges.coinbase_sandbox = True
+        cfg.exchanges.binance_testnet = True
+        cfg.exchanges.okx_sandbox = True
+        return cfg
 
     @pytest.fixture
     def exchange_factory(self, config):

@@ -44,8 +44,12 @@ from src.exchanges.types import (
 
 @pytest.fixture(scope="session")
 def config():
-    """Provide test configuration."""
-    return Config()
+    """Provide test configuration with sandbox/testnet enabled for exchanges."""
+    cfg = Config()
+    cfg.exchanges.binance_testnet = True
+    cfg.exchanges.okx_sandbox = True
+    cfg.exchanges.coinbase_sandbox = True
+    return cfg
 
 
 @pytest.fixture(scope="session")

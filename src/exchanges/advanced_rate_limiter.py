@@ -113,14 +113,20 @@ class AdvancedRateLimiter:
             # Check exchange-specific limits
             if not await limiter.check_limit(endpoint, weight):
                 logger.warning(
-                    f"Rate limit exceeded: exchange {exchange}, endpoint {endpoint}, weight {weight}"
+                    "Rate limit exceeded",
+                    exchange=exchange,
+                    endpoint=endpoint,
+                    weight=weight,
                 )
                 return False
 
             # Check global limits
             if not await self._check_global_limits(exchange, endpoint, weight):
                 logger.warning(
-                    f"Global rate limit exceeded: exchange {exchange}, endpoint {endpoint}, weight {weight}"
+                    "Global rate limit exceeded",
+                    exchange=exchange,
+                    endpoint=endpoint,
+                    weight=weight,
                 )
                 return False
 
@@ -128,7 +134,10 @@ class AdvancedRateLimiter:
             self._record_request(exchange, endpoint, weight)
 
             logger.debug(
-                f"Rate limit check passed: exchange {exchange}, endpoint {endpoint}, weight {weight}"
+                "Rate limit check passed",
+                exchange=exchange,
+                endpoint=endpoint,
+                weight=weight,
             )
             return True
 
@@ -166,7 +175,10 @@ class AdvancedRateLimiter:
             wait_time = await limiter.wait_for_reset(endpoint)
 
             logger.debug(
-                f"Rate limit wait completed: exchange {exchange}, endpoint {endpoint}, wait_time {wait_time}"
+                "Rate limit wait completed",
+                exchange=exchange,
+                endpoint=endpoint,
+                wait_time=wait_time,
             )
             return wait_time
 
@@ -349,14 +361,18 @@ class BinanceRateLimiter:
         recent_orders = [t for t in self.order_usage if t > ten_seconds_ago]
         if len(recent_orders) >= self.order_limit_10s:
             logger.warning(
-                f"Binance order limit exceeded(10s): {len(recent_orders)} orders, limit {self.order_limit_10s}"
+                "Binance order limit exceeded(10s)",
+                recent_orders=len(recent_orders),
+                limit=self.order_limit_10s,
             )
             return False
 
         # Check 24-hour limit
         if len(self.order_usage) >= self.order_limit_24h:
             logger.warning(
-                f"Binance order limit exceeded(24h): {len(self.order_usage)} orders, limit {self.order_limit_24h}"
+                "Binance order limit exceeded(24h)",
+                total_orders=len(self.order_usage),
+                limit=self.order_limit_24h,
             )
             return False
 
@@ -392,7 +408,7 @@ class OKXRateLimiter:
         self.usage: dict[str, list[datetime]] = defaultdict(list)
 
         # TODO: Remove in production
-        logger.debug(f"OKXRateLimiter initialized with limits: {self.limits}")
+        logger.debug("OKXRateLimiter initialized", limits=self.limits)
 
     async def check_limit(self, endpoint: str, weight: int = 1) -> bool:
         """
@@ -431,12 +447,19 @@ class OKXRateLimiter:
             # Check if limit exceeded
             if len(self.usage[endpoint_type]) >= max_requests:
                 logger.warning(
-                    f"OKX rate limit exceeded: {endpoint_type} endpoint {endpoint}, {len(self.usage[endpoint_type])} requests, limit {max_requests}"
+                    "OKX rate limit exceeded",
+                    endpoint_type=endpoint_type,
+                    endpoint=endpoint,
+                    requests=len(self.usage[endpoint_type]),
+                    limit=max_requests,
                 )
                 return False
 
             logger.debug(
-                f"OKX rate limit check passed: {endpoint_type} endpoint {endpoint}")
+                "OKX rate limit check passed",
+                endpoint_type=endpoint_type,
+                endpoint=endpoint,
+            )
             return True
 
         except ValidationError:
@@ -639,7 +662,9 @@ class CoinbaseRateLimiter:
 
             if wait_time > 0:
                 logger.info(
-                    f"Waiting for Coinbase rate limit reset: endpoint {endpoint}, wait time {wait_time}"
+                    "Waiting for Coinbase rate limit reset",
+                    endpoint=endpoint,
+                    wait_time=wait_time,
                 )
                 await asyncio.sleep(wait_time)
 
@@ -685,7 +710,9 @@ class CoinbaseRateLimiter:
 
         if len(self.private_usage) >= self.private_limit:
             logger.warning(
-                f"Coinbase private rate limit exceeded: {len(self.private_usage)} requests, limit {self.private_limit}"
+                "Coinbase private rate limit exceeded",
+                requests=len(self.private_usage),
+                limit=self.private_limit,
             )
             return False
 
@@ -701,7 +728,9 @@ class CoinbaseRateLimiter:
 
         if len(self.public_usage) >= self.public_limit:
             logger.warning(
-                f"Coinbase public rate limit exceeded: {len(self.public_usage)} requests, limit {self.public_limit}"
+                "Coinbase public rate limit exceeded",
+                requests=len(self.public_usage),
+                limit=self.public_limit,
             )
             return False
 

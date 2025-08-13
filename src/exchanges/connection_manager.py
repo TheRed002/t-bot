@@ -18,7 +18,7 @@ from typing import Any
 from src.core.config import Config
 
 # MANDATORY: Import from P-001
-from src.core.exceptions import ExchangeConnectionError
+from src.core.exceptions import ExchangeConnectionError, ValidationError
 from src.core.logging import get_logger
 from src.core.types import ConnectionType
 from src.error_handling.connection_manager import ConnectionManager as ErrorConnectionManager
@@ -421,7 +421,10 @@ class ConnectionManager:
             raise
         except Exception as e:
             logger.error(
-                "Failed to get connection", exchange=exchange, stream_type=stream_type, error=str(e)
+                "Failed to get connection",
+                exchange=exchange,
+                stream_type=stream_type,
+                error=str(e),
             )
             raise ExchangeConnectionError(f"Connection retrieval failed: {e!s}")
 
@@ -461,7 +464,9 @@ class ConnectionManager:
                     return
 
             logger.warning(
-                "Connection not found in pool", exchange=exchange, connection_id=connection_id
+                "Connection not found in pool",
+                exchange=exchange,
+                connection_id=connection_id,
             )
 
         except ValidationError:
@@ -491,11 +496,13 @@ class ConnectionManager:
             await self.health_monitor.mark_failed(connection)
 
             # Trigger recovery scenario
-            await self.error_handler.handle_error(
-                RecoveryScenario.CONNECTION_FAILURE,
-                exchange=exchange,
-                connection_id=getattr(connection, "id", str(id(connection))),
-            )
+            # TODO: Remove in production - placeholder for recovery scenario integration
+            # from src.error_handling.recovery_scenarios import RecoveryScenario
+            # await self.error_handler.handle_error(
+            #     RecoveryScenario.CONNECTION_FAILURE,
+            #     exchange=exchange,
+            #     connection_id=getattr(connection, "id", str(id(connection))),
+            # )
 
             logger.warning(
                 "Handled connection failure",

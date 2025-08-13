@@ -124,8 +124,10 @@ class ExchangeFactory:
                 raise ExchangeError(f"Failed to connect to {exchange_name}")
 
             # TODO: Remove in production
-            logger.debug(f"Exchange {exchange_name} created with P-007 components")
-            logger.info(f"Created and connected to {exchange_name}")
+            logger.debug(
+                "Exchange created with P-007 components", exchange=exchange_name
+            )
+            logger.info("Created and connected to exchange", exchange=exchange_name)
             return exchange
 
         except Exception as e:
@@ -143,7 +145,8 @@ class ExchangeFactory:
             create_if_missing: Whether to create a new instance if not found
 
         Returns:
-            Optional[BaseExchange]: Exchange instance or None if not found and create_if_missing=False
+            Optional[BaseExchange]: Exchange instance or None if not found and
+            create_if_missing=False
         """
         # Check if we already have an active instance
         if exchange_name in self._active_exchanges:
@@ -154,7 +157,8 @@ class ExchangeFactory:
                 return exchange
             else:
                 logger.warning(
-                    f"Exchange {exchange_name} failed health check, removing from active pool"
+                    "Exchange failed health check, removing from active pool",
+                    exchange=exchange_name,
                 )
                 await self.remove_exchange(exchange_name)
 
@@ -165,7 +169,9 @@ class ExchangeFactory:
                 self._active_exchanges[exchange_name] = exchange
                 return exchange
             except Exception as e:
-                logger.error(f"Failed to get/create exchange {exchange_name}: {e!s}")
+                logger.error(
+                    "Failed to get/create exchange", exchange=exchange_name, error=str(e)
+                )
                 return None
 
         return None
@@ -185,10 +191,12 @@ class ExchangeFactory:
                 exchange = self._active_exchanges[exchange_name]
                 await exchange.disconnect()
                 del self._active_exchanges[exchange_name]
-                logger.info(f"Removed exchange {exchange_name} from active pool")
+                logger.info("Removed exchange from active pool", exchange=exchange_name)
                 return True
             except Exception as e:
-                logger.error(f"Failed to remove exchange {exchange_name}: {e!s}")
+                logger.error(
+                    "Failed to remove exchange", exchange=exchange_name, error=str(e)
+                )
                 # Remove from active exchanges even if disconnect fails
                 del self._active_exchanges[exchange_name]
                 return False

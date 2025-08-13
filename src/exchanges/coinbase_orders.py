@@ -165,7 +165,7 @@ class CoinbaseOrderManager:
                 raise ExchangeConnectionError("Not connected to Coinbase")
 
             # Cancel order
-            result = await self.client.cancel_orders([order_id])
+            _ = await self.client.cancel_orders([order_id])
 
             # Update tracking
             if order_id in self.order_status_cache:
@@ -333,7 +333,7 @@ class CoinbaseOrderManager:
         """
         try:
             # Get product information for fee calculation
-            product = await self.client.get_product(order.symbol)
+            _ = await self.client.get_product(order.symbol)
 
             # Calculate fees based on order type and size
             if order.order_type == OrderType.MARKET:

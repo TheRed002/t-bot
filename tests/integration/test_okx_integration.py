@@ -39,7 +39,7 @@ class TestOKXIntegration:
 
     @pytest.fixture
     def config(self):
-        """Create test configuration."""
+        """Create test configuration using sandbox URLs."""
         config = Config()
         config.exchanges.okx_api_key = "test_api_key"
         config.exchanges.okx_api_secret = "test_api_secret"

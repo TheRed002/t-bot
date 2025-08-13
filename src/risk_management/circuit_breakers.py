@@ -18,7 +18,6 @@ Circuit Breaker Types:
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from decimal import Decimal
-from enum import Enum
 from typing import Any
 
 from src.core.config import Config
@@ -31,6 +30,7 @@ from src.core.logging import get_logger
 from src.core.types import (
     CircuitBreakerEvent,
     CircuitBreakerType,
+    CircuitBreakerStatus,
 )
 
 # MANDATORY: Import from P-002A
@@ -41,16 +41,15 @@ from src.risk_management.base import BaseRiskManager
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
+from src.utils.helpers import calculate_volatility
 
 logger = get_logger(__name__)
 
 
-class CircuitBreakerState(Enum):
-    """Circuit breaker state enumeration."""
+"""Use core CircuitBreakerStatus for breaker states (no local duplication)."""
 
-    CLOSED = "closed"  # Normal operation
-    OPEN = "open"  # Circuit breaker triggered, trading halted
-    HALF_OPEN = "half_open"  # Testing if system has recovered
+# Backward compatibility for tests expecting CircuitBreakerState symbol
+CircuitBreakerState = CircuitBreakerStatus
 
 
 # Use CircuitBreakerType from core types instead of defining new enum
@@ -82,7 +81,7 @@ class BaseCircuitBreaker(ABC):
         self.logger = logger.bind(component="circuit_breaker")
 
         # Circuit breaker state
-        self.state = CircuitBreakerState.CLOSED
+        self.state = CircuitBreakerStatus.CLOSED
         self.trigger_time: datetime | None = None
         self.recovery_time: datetime | None = None
         self.trigger_count = 0
@@ -147,10 +146,10 @@ class BaseCircuitBreaker(ABC):
             bool: True if circuit breaker is triggered
         """
         try:
-            if self.state == CircuitBreakerState.OPEN:
+            if self.state == CircuitBreakerStatus.OPEN:
                 # Check if recovery timeout has passed
                 if self.trigger_time and datetime.now() - self.trigger_time > self.recovery_timeout:
-                    self.state = CircuitBreakerState.HALF_OPEN
+                    self.state = CircuitBreakerStatus.HALF_OPEN
                     self.logger.info(
                         "Circuit breaker transitioning to half-open state",
                         breaker_type=self.__class__.__name__,
@@ -162,7 +161,7 @@ class BaseCircuitBreaker(ABC):
                 return True
 
             # If half-open and condition passes, close circuit breaker
-            if self.state == CircuitBreakerState.HALF_OPEN:
+            if self.state == CircuitBreakerStatus.HALF_OPEN:
                 await self._close_circuit_breaker()
 
             return False
@@ -173,10 +172,13 @@ class BaseCircuitBreaker(ABC):
                 error=str(e),
                 breaker_type=self.__class__.__name__,
             )
-            # Handle error handler call safely (for testing with Mock objects)
+            # Route through central error handler with context
             try:
-                if hasattr(self.error_handler, "handle_error"):
-                    await self.error_handler.handle_error(e, "circuit_breaker", "evaluate")
+                if hasattr(self.error_handler, "create_error_context"):
+                    context = self.error_handler.create_error_context(
+                        e, component="circuit_breaker", operation="evaluate"
+                    )
+                    await self.error_handler.handle_error(e, context)
             except Exception as handler_error:
                 self.logger.error("Error handler failed", error=str(handler_error))
 
@@ -187,8 +189,8 @@ class BaseCircuitBreaker(ABC):
 
     async def _trigger_circuit_breaker(self, data: dict[str, Any]) -> None:
         """Trigger the circuit breaker and log the event."""
-        if self.state == CircuitBreakerState.CLOSED:
-            self.state = CircuitBreakerState.OPEN
+        if self.state == CircuitBreakerStatus.CLOSED:
+            self.state = CircuitBreakerStatus.OPEN
             self.trigger_time = datetime.now()
             self.trigger_count += 1
 
@@ -237,7 +239,7 @@ class BaseCircuitBreaker(ABC):
 
     async def _close_circuit_breaker(self) -> None:
         """Close the circuit breaker after successful recovery."""
-        self.state = CircuitBreakerState.CLOSED
+        self.state = CircuitBreakerStatus.CLOSED
         self.recovery_time = datetime.now()
 
         self.logger.info(
@@ -258,7 +260,7 @@ class BaseCircuitBreaker(ABC):
 
     def reset(self) -> None:
         """Reset circuit breaker to initial state."""
-        self.state = CircuitBreakerState.CLOSED
+        self.state = CircuitBreakerStatus.CLOSED
         self.trigger_time = None
         self.recovery_time = None
         self.trigger_count = 0
@@ -391,11 +393,11 @@ class VolatilitySpikeBreaker(BaseCircuitBreaker):
             return Decimal("0")
 
         # Calculate volatility (standard deviation of returns)
-        mean_return = sum(returns) / len(returns)
-        variance = sum((r - mean_return) ** 2 for r in returns) / len(returns)
-        volatility = variance.sqrt()
-
-        return volatility
+        try:
+            vol_float = calculate_volatility([float(r) for r in returns])
+            return Decimal(str(vol_float))
+        except Exception:
+            return Decimal("0")
 
     @time_execution
     async def check_condition(self, data: dict[str, Any]) -> bool:
@@ -589,7 +591,7 @@ class CircuitBreakerManager:
         triggered = []
 
         for name, breaker in self.circuit_breakers.items():
-            if breaker.state == CircuitBreakerState.OPEN:
+            if breaker.state == CircuitBreakerStatus.OPEN:
                 triggered.append(name)
 
         return triggered

@@ -120,9 +120,10 @@ class GlobalRateCoordinator:
             raise
         except Exception as e:
             logger.error(
-                f"Global rate limit check failed: request_type {request_type}, count {
-                    count
-                }, error {e!s}"
+                "Global rate limit check failed",
+                request_type=request_type,
+                count=count,
+                error=str(e),
             )
             raise ExchangeRateLimitError(f"Global rate limit check failed: {e!s}")
 
@@ -151,14 +152,20 @@ class GlobalRateCoordinator:
             # Check global limits first
             if not await self.check_global_limits(request_type, 1):
                 logger.warning(
-                    f"Global rate limit exceeded: exchange {exchange}, endpoint {endpoint}, request_type {request_type}"
+                    "Global rate limit exceeded",
+                    exchange=exchange,
+                    endpoint=endpoint,
+                    request_type=request_type,
                 )
                 return False
 
             # Check exchange-specific limits
             if not await self._check_exchange_specific_limits(exchange, endpoint, request_type):
                 logger.warning(
-                    f"Exchange-specific rate limit exceeded: exchange {exchange}, endpoint {endpoint}, request_type {request_type}"
+                    "Exchange-specific rate limit exceeded",
+                    exchange=exchange,
+                    endpoint=endpoint,
+                    request_type=request_type,
                 )
                 return False
 
@@ -166,7 +173,10 @@ class GlobalRateCoordinator:
             self._record_exchange_usage(exchange, endpoint, request_type)
 
             logger.debug(
-                f"Request coordination successful: exchange {exchange}, endpoint {endpoint}, request_type {request_type}"
+                "Request coordination successful",
+                exchange=exchange,
+                endpoint=endpoint,
+                request_type=request_type,
             )
             return True
 
@@ -174,9 +184,11 @@ class GlobalRateCoordinator:
             raise
         except Exception as e:
             logger.error(
-                f"Request coordination failed: exchange {exchange}, endpoint {
-                    endpoint
-                }, request_type {request_type}, error {e!s}"
+                "Request coordination failed",
+                exchange=exchange,
+                endpoint=endpoint,
+                request_type=request_type,
+                error=str(e),
             )
             raise ExchangeRateLimitError(f"Request coordination failed: {e!s}")
 
@@ -191,9 +203,10 @@ class GlobalRateCoordinator:
         # Check if adding these orders would exceed limit
         if len(self.order_history) + count > self.global_limits["orders_per_minute"]:
             logger.warning(
-                f"Global order limit exceeded: {len(self.order_history)} current orders, {
-                    count
-                } new orders, limit {self.global_limits['orders_per_minute']}"
+                "Global order limit exceeded",
+                current_orders=len(self.order_history),
+                new_orders=count,
+                limit=self.global_limits["orders_per_minute"],
             )
             return False
 
@@ -210,11 +223,10 @@ class GlobalRateCoordinator:
         # Check if adding these connections would exceed limit
         if len(self.connection_history) + count > self.global_limits["concurrent_connections"]:
             logger.warning(
-                f"Global connection limit exceeded: {
-                    len(self.connection_history)
-                } current connections, {count} new connections, limit {
-                    self.global_limits['concurrent_connections']
-                }"
+                "Global connection limit exceeded",
+                current_connections=len(self.connection_history),
+                new_connections=count,
+                limit=self.global_limits["concurrent_connections"],
             )
             return False
 
@@ -236,11 +248,10 @@ class GlobalRateCoordinator:
             > self.global_limits["total_requests_per_minute"]
         ):
             logger.warning(
-                f"Global request limit exceeded: {
-                    len(self.request_history['general'])
-                } current requests, {count} new requests, limit {
-                    self.global_limits['total_requests_per_minute']
-                }"
+                "Global request limit exceeded",
+                current_requests=len(self.request_history["general"]),
+                new_requests=count,
+                limit=self.global_limits["total_requests_per_minute"],
             )
             return False
 

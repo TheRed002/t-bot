@@ -86,7 +86,7 @@ class BinanceOrderManager:
             self._validate_market_order(order)
 
             # Convert to Binance format
-            binance_order = self._convert_market_order_to_binance(order)
+            _ = self._convert_market_order_to_binance(order)
 
             # Place order
             result = await self.client.order_market(
@@ -130,7 +130,7 @@ class BinanceOrderManager:
             self._validate_limit_order(order)
 
             # Convert to Binance format
-            binance_order = self._convert_limit_order_to_binance(order)
+            _ = self._convert_limit_order_to_binance(order)
 
             # Place order
             result = await self.client.order_limit(
@@ -176,7 +176,7 @@ class BinanceOrderManager:
             self._validate_stop_loss_order(order)
 
             # Convert to Binance format
-            binance_order = self._convert_stop_loss_order_to_binance(order)
+            _ = self._convert_stop_loss_order_to_binance(order)
 
             # Place order
             result = await self.client.order_stop_loss(
@@ -221,7 +221,7 @@ class BinanceOrderManager:
             self._validate_oco_order(order)
 
             # Convert to Binance format
-            binance_order = self._convert_oco_order_to_binance(order)
+            _ = self._convert_oco_order_to_binance(order)
 
             # Place order
             result = await self.client.order_oco(
@@ -268,7 +268,7 @@ class BinanceOrderManager:
         """
         try:
             # Cancel order
-            result = await self.client.cancel_order(symbol=symbol, orderId=order_id)
+            _ = await self.client.cancel_order(symbol=symbol, orderId=order_id)
 
             # Update tracking
             if order_id in self.pending_orders:
