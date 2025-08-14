@@ -356,9 +356,8 @@ class TestBulkOperationsPerformance:
         avg_time = total_time / 10000
 
         print(
-            f"Bulk market data creation: {avg_time: .6f}s per market data({
-                len(market_data_list)
-            } items)"
+            f"Bulk market data creation: {avg_time:.6f}s per market data "
+            f"({len(market_data_list)} items)"
         )
         assert avg_time < 0.001  # Should be under 1ms per market data
         assert len(market_data_list) == 10000

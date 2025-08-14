@@ -17,14 +17,12 @@ from typing import Any
 
 import pytest
 
-from src.core.types import MarketData, Signal, SignalDirection
+from src.core.types import MarketData, Signal, SignalDirection, ValidationLevel, ValidationResult
 
 # Import the components to test
 from src.data.quality.validation import (
     DataValidator,
     ValidationIssue,
-    ValidationLevel,
-    ValidationResult,
 )
 
 

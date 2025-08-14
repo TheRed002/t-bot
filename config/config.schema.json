@@ -13,7 +13,7 @@
         "total_capital": {
           "default": 10000.0,
           "description": "Total available capital",
-          "exclusiveMinimum": 0,
+          "exclusiveMinimum": 0.0,
           "title": "Total Capital",
           "type": "number"
         },
@@ -124,7 +124,6 @@
         },
         "withdrawal_rules": {
           "additionalProperties": {
-            "additionalProperties": true,
             "type": "object"
           },
           "default": {
@@ -849,7 +848,11 @@
       "type": "string"
     },
     "database": {
-      "$ref": "#/$defs/DatabaseConfig",
+      "allOf": [
+        {
+          "$ref": "#/$defs/DatabaseConfig"
+        }
+      ],
       "default": {
         "postgresql_host": "localhost",
         "postgresql_port": 5432,
@@ -869,7 +872,11 @@
       }
     },
     "security": {
-      "$ref": "#/$defs/SecurityConfig",
+      "allOf": [
+        {
+          "$ref": "#/$defs/SecurityConfig"
+        }
+      ],
       "default": {
         "secret_key": "your-super-secret-key-32-chars-long-for-production",
         "jwt_algorithm": "HS256",
@@ -878,7 +885,11 @@
       }
     },
     "error_handling": {
-      "$ref": "#/$defs/ErrorHandlingConfig",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ErrorHandlingConfig"
+        }
+      ],
       "default": {
         "circuit_breaker_failure_threshold": 5,
         "circuit_breaker_recovery_timeout": 30,
@@ -898,7 +909,11 @@
       }
     },
     "exchanges": {
-      "$ref": "#/$defs/ExchangeConfig",
+      "allOf": [
+        {
+          "$ref": "#/$defs/ExchangeConfig"
+        }
+      ],
       "default": {
         "default_timeout": 30,
         "max_retries": 3,
@@ -937,7 +952,11 @@
       }
     },
     "risk": {
-      "$ref": "#/$defs/RiskConfig",
+      "allOf": [
+        {
+          "$ref": "#/$defs/RiskConfig"
+        }
+      ],
       "default": {
         "default_position_size_method": "fixed_percentage",
         "default_position_size_pct": 0.02,
@@ -964,7 +983,11 @@
       }
     },
     "capital_management": {
-      "$ref": "#/$defs/CapitalManagementConfig",
+      "allOf": [
+        {
+          "$ref": "#/$defs/CapitalManagementConfig"
+        }
+      ],
       "default": {
         "base_currency": "USDT",
         "total_capital": 10000.0,
@@ -1027,7 +1050,11 @@
       }
     },
     "strategies": {
-      "$ref": "#/$defs/StrategyManagementConfig",
+      "allOf": [
+        {
+          "$ref": "#/$defs/StrategyManagementConfig"
+        }
+      ],
       "default": {
         "max_concurrent_strategies": 10,
         "strategy_restart_delay": 60,

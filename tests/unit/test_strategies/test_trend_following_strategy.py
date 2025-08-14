@@ -927,9 +927,8 @@ class TestTrendFollowingStrategy:
         print(f"Generated signals: {len(signals)}")
         for signal in signals:
             print(
-                f"Signal: {signal.direction}, confidence: {signal.confidence}, metadata: {
-                    signal.metadata
-                }"
+                f"Signal: {signal.direction}, confidence: {signal.confidence}, "
+                f"metadata: {signal.metadata}"
             )
 
         # Just test that the method runs without errors
@@ -949,9 +948,8 @@ class TestTrendFollowingStrategy:
         print(f"Generated signals: {len(signals)}")
         for signal in signals:
             print(
-                f"Signal: {signal.direction}, confidence: {signal.confidence}, metadata: {
-                    signal.metadata
-                }"
+                f"Signal: {signal.direction}, confidence: {signal.confidence}, "
+                f"metadata: {signal.metadata}"
             )
 
         # Just test that the method runs without errors
