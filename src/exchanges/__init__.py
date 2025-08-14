@@ -8,16 +8,11 @@ CRITICAL: This integrates with P-001 (core types, exceptions, config),
 P-002A (error handling), and P-003 (base exchange interface) components.
 """
 
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 # Import base exchange interface
-from .base import BaseExchange
-from .connection_manager import ConnectionManager
-
-# Import exchange factory
-from .factory import ExchangeFactory
-
-# Import rate limiter and connection manager
-from .rate_limiter import RateLimiter
-
 # Import exchange-related types
 from src.core.types import (
     ExchangeInfo,
@@ -26,10 +21,19 @@ from src.core.types import (
     Ticker,
     Trade,
 )
+
+from .base import BaseExchange
+from .connection_manager import ConnectionManager
+
+# Import exchange factory
+from .factory import ExchangeFactory
+
+# Import rate limiter and connection manager
+from .rate_limiter import RateLimiter
 from .types import (
     ExchangeCapability,
-    ExchangeTradingPair,
     ExchangeRateLimit,
+    ExchangeTradingPair,
 )
 
 # Import Binance exchange implementation (P-004)
@@ -38,8 +42,7 @@ try:
 
     BINANCE_AVAILABLE = True
 except ImportError as e:
-    # TODO: Remove in production
-    print(f"Warning: Binance exchange not available: {e}")
+    logger.warning(f"Binance exchange not available: {e}")
     BINANCE_AVAILABLE = False
 
 # Import WebSocket handler (P-004)
@@ -48,8 +51,7 @@ try:
 
     BINANCE_WEBSOCKET_AVAILABLE = True
 except ImportError as e:
-    # TODO: Remove in production
-    print(f"Warning: Binance WebSocket handler not available: {e}")
+    logger.warning(f"Binance WebSocket handler not available: {e}")
     BINANCE_WEBSOCKET_AVAILABLE = False
 
 # Import order manager (P-004)
@@ -58,8 +60,7 @@ try:
 
     BINANCE_ORDERS_AVAILABLE = True
 except ImportError as e:
-    # TODO: Remove in production
-    print(f"Warning: Binance order manager not available: {e}")
+    logger.warning(f"Binance order manager not available: {e}")
     BINANCE_ORDERS_AVAILABLE = False
 
 # Import OKX exchange implementation (P-005)
@@ -68,8 +69,7 @@ try:
 
     OKX_AVAILABLE = True
 except ImportError as e:
-    # TODO: Remove in production
-    print(f"Warning: OKX exchange not available: {e}")
+    logger.warning(f"OKX exchange not available: {e}")
     OKX_AVAILABLE = False
 
 # Import OKX WebSocket handler (P-005)
@@ -78,8 +78,7 @@ try:
 
     OKX_WEBSOCKET_AVAILABLE = True
 except ImportError as e:
-    # TODO: Remove in production
-    print(f"Warning: OKX WebSocket handler not available: {e}")
+    logger.warning(f"OKX WebSocket handler not available: {e}")
     OKX_WEBSOCKET_AVAILABLE = False
 
 # Import OKX order manager (P-005)
@@ -88,8 +87,7 @@ try:
 
     OKX_ORDERS_AVAILABLE = True
 except ImportError as e:
-    # TODO: Remove in production
-    print(f"Warning: OKX order manager not available: {e}")
+    logger.warning(f"OKX order manager not available: {e}")
     OKX_ORDERS_AVAILABLE = False
 
 # Import Coinbase exchange implementation (P-006)
@@ -98,8 +96,7 @@ try:
 
     COINBASE_AVAILABLE = True
 except ImportError as e:
-    # TODO: Remove in production
-    print(f"Warning: Coinbase exchange not available: {e}")
+    logger.warning(f"Coinbase exchange not available: {e}")
     COINBASE_AVAILABLE = False
 
 # Import Coinbase WebSocket handler (P-006)
@@ -108,8 +105,7 @@ try:
 
     COINBASE_WEBSOCKET_AVAILABLE = True
 except ImportError as e:
-    # TODO: Remove in production
-    print(f"Warning: Coinbase WebSocket handler not available: {e}")
+    logger.warning(f"Coinbase WebSocket handler not available: {e}")
     COINBASE_WEBSOCKET_AVAILABLE = False
 
 # Import Coinbase order manager (P-006)
@@ -118,8 +114,7 @@ try:
 
     COINBASE_ORDERS_AVAILABLE = True
 except ImportError as e:
-    # TODO: Remove in production
-    print(f"Warning: Coinbase order manager not available: {e}")
+    logger.warning(f"Coinbase order manager not available: {e}")
     COINBASE_ORDERS_AVAILABLE = False
 
 
@@ -133,27 +128,27 @@ def register_exchanges(factory: ExchangeFactory) -> None:
     # Register Binance exchange (P-004)
     if BINANCE_AVAILABLE:
         factory.register_exchange("binance", BinanceExchange)
-        print("Registered Binance exchange")
+        logger.info("Registered Binance exchange")
     else:
-        print("Warning: Binance exchange not registered - dependencies missing")
+        logger.warning("Binance exchange not registered - dependencies missing")
 
     # Register OKX exchange (P-005)
     if OKX_AVAILABLE:
         factory.register_exchange("okx", OKXExchange)
-        print("Registered OKX exchange")
+        logger.info("Registered OKX exchange")
     else:
-        print("Warning: OKX exchange not registered - dependencies missing")
+        logger.warning("OKX exchange not registered - dependencies missing")
 
     # Register Coinbase exchange (P-006)
     if COINBASE_AVAILABLE:
         factory.register_exchange("coinbase", CoinbaseExchange)
-        print("Registered Coinbase exchange")
+        logger.info("Registered Coinbase exchange")
     else:
-        print("Warning: Coinbase exchange not registered - dependencies missing")
+        logger.warning("Coinbase exchange not registered - dependencies missing")
 
     # TODO: Register other exchanges as they are implemented
 
-    print(f"Registered {len(factory.get_supported_exchanges())} exchanges")
+    logger.info(f"Registered {len(factory.get_supported_exchanges())} exchanges")
 
 
 # Export main classes

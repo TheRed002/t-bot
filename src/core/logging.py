@@ -72,8 +72,7 @@ def _add_correlation_id(
 ) -> dict[str, Any]:
     """Add correlation ID to event dict."""
     if event_dict is not None:
-        event_dict.update(
-            correlation_id=correlation_context.get_correlation_id())
+        event_dict.update(correlation_id=correlation_context.get_correlation_id())
         return event_dict
     return {"correlation_id": correlation_context.get_correlation_id()}
 
@@ -84,8 +83,7 @@ def _safe_unicode_decoder(
     """Safe unicode decoder for event dict."""
     if event_dict is not None:
         return cast(
-            dict[str, Any], structlog.processors.UnicodeDecoder()(
-                logger, method_name, event_dict)
+            dict[str, Any], structlog.processors.UnicodeDecoder()(logger, method_name, event_dict)
         )
     return {}
 
@@ -448,9 +446,14 @@ def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None
         try:
             if log_file.stat().st_mtime < cutoff_time:
                 log_file.unlink()
-                print(f"Removed old log file: {log_file}")
+                # Use basic logging here since structured logger may not be set up
+                import logging
+
+                logging.info(f"Removed old log file: {log_file}")
         except OSError as e:
-            print(f"Failed to remove old log file {log_file}: {e}")
+            import logging
+
+            logging.warning(f"Failed to remove old log file {log_file}: {e}")
 
 
 def setup_production_logging(log_dir: str = "logs", app_name: str = "trading-bot") -> None:

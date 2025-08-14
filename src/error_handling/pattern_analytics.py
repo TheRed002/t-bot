@@ -63,6 +63,7 @@ class ErrorPatternAnalytics:
         self.trend_window_hours = 24  # hours to analyze for trends
         # minimum confidence for pattern detection
         self.pattern_confidence_threshold = 0.8
+        self._pattern_analysis_task: asyncio.Task | None = None
 
     @time_execution
     def add_error_event(self, error_context: dict[str, Any]):
@@ -85,7 +86,7 @@ class ErrorPatternAnalytics:
             self.error_history = self.error_history[-10000:]
 
         # Trigger pattern analysis
-        asyncio.create_task(self._analyze_patterns())
+        self._pattern_analysis_task = asyncio.create_task(self._analyze_patterns())
 
     @time_execution
     async def _analyze_patterns(self):

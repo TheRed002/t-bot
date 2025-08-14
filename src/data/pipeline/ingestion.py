@@ -33,16 +33,19 @@ from src.data.sources.alternative_data import AlternativeDataSource
 from src.data.sources.market_data import MarketDataSource
 from src.data.sources.news_data import NewsDataSource
 from src.data.sources.social_media import SocialMediaDataSource
+from src.error_handling.connection_manager import ConnectionManager
 
 # Import from P-002 database components
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import DataFeedInterruptionRecovery, NetworkDisconnectionRecovery
-from src.error_handling.connection_manager import ConnectionManager
 from src.error_handling.pattern_analytics import ErrorPatternAnalytics
+from src.error_handling.recovery_scenarios import (
+    DataFeedInterruptionRecovery,
+    NetworkDisconnectionRecovery,
+)
 
 # Import from P-007A utilities
-from src.utils.decorators import retry, time_execution
+from src.utils.decorators import retry
 
 logger = get_logger(__name__)
 
@@ -177,8 +180,8 @@ class DataIngestionPipeline:
                     endpoint="market_data",
                     connection_options={
                         "retry_attempts": self.ingestion_config.retry_attempts,
-                        "timeout": 30
-                    }
+                        "timeout": 30,
+                    },
                 )
 
             # Initialize news data source
@@ -193,8 +196,8 @@ class DataIngestionPipeline:
                     endpoint="news_api",
                     connection_options={
                         "retry_attempts": self.ingestion_config.retry_attempts,
-                        "timeout": 30
-                    }
+                        "timeout": 30,
+                    },
                 )
 
             # Initialize social media source
@@ -209,8 +212,8 @@ class DataIngestionPipeline:
                     endpoint="social_media",
                     connection_options={
                         "retry_attempts": self.ingestion_config.retry_attempts,
-                        "timeout": 30
-                    }
+                        "timeout": 30,
+                    },
                 )
 
             # Initialize alternative data source
@@ -225,8 +228,8 @@ class DataIngestionPipeline:
                     endpoint="alternative_data",
                     connection_options={
                         "retry_attempts": self.ingestion_config.retry_attempts,
-                        "timeout": 30
-                    }
+                        "timeout": 30,
+                    },
                 )
 
             logger.info("DataIngestionPipeline initialized successfully")
@@ -237,10 +240,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="initialize",
-                details={
-                    "stage": "initialization",
-                    "sources": self.ingestion_config.sources
-                }
+                details={"stage": "initialization", "sources": self.ingestion_config.sources},
             )
 
             self.error_handler.handle_error(error_context)
@@ -259,7 +259,8 @@ class DataIngestionPipeline:
             # Check connection health before starting
             connection_status = await self.connection_manager.get_all_connection_status()
             unhealthy_connections = [
-                conn_id for conn_id, status in connection_status.items()
+                conn_id
+                for conn_id, status in connection_status.items()
                 if not status.get("is_healthy", False)
             ]
 
@@ -279,12 +280,10 @@ class DataIngestionPipeline:
                 await self._start_batch_ingestion()
 
             # Start buffer processing task
-            self.active_tasks["buffer_processor"] = asyncio.create_task(
-                self._process_buffers())
+            self.active_tasks["buffer_processor"] = asyncio.create_task(self._process_buffers())
 
             # Start metrics collection task
-            self.active_tasks["metrics_collector"] = asyncio.create_task(
-                self._collect_metrics())
+            self.active_tasks["metrics_collector"] = asyncio.create_task(self._collect_metrics())
 
             logger.info("DataIngestionPipeline started successfully")
 
@@ -294,10 +293,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="start",
-                details={
-                    "stage": "startup",
-                    "mode": self.ingestion_config.mode.value
-                }
+                details={"stage": "startup", "mode": self.ingestion_config.mode.value},
             )
 
             self.error_handler.handle_error(error_context)
@@ -341,9 +337,12 @@ class DataIngestionPipeline:
                 operation="start_real_time_ingestion",
                 details={
                     "stage": "real_time_startup",
-                    "sources": [s for s in ["market_data", "news_data", "social_media"]
-                                if getattr(self, f"{s}_source")]
-                }
+                    "sources": [
+                        s
+                        for s in ["market_data", "news_data", "social_media"]
+                        if getattr(self, f"{s}_source")
+                    ],
+                },
             )
 
             self.error_handler.handle_error(error_context)
@@ -377,9 +376,12 @@ class DataIngestionPipeline:
                 operation="start_batch_ingestion",
                 details={
                     "stage": "batch_startup",
-                    "sources": [s for s in ["alternative_data", "market_data"]
-                                if getattr(self, f"{s}_source")]
-                }
+                    "sources": [
+                        s
+                        for s in ["alternative_data", "market_data"]
+                        if getattr(self, f"{s}_source")
+                    ],
+                },
             )
 
             self.error_handler.handle_error(error_context)
@@ -396,12 +398,10 @@ class DataIngestionPipeline:
             await self.market_data_source.subscribe_to_ticker(
                 exchange_name="binance",  # Primary exchange
                 symbol=symbol,
-                callback=lambda ticker: self._handle_market_data(
-                    ticker, symbol),
+                callback=lambda ticker: self._handle_market_data(ticker, symbol),
             )
 
-            logger.info(
-                f"Started real-time market data ingestion for {symbol}")
+            logger.info(f"Started real-time market data ingestion for {symbol}")
 
             # Keep the task alive
             while self.status == PipelineStatus.RUNNING:
@@ -414,18 +414,13 @@ class DataIngestionPipeline:
                 component="DataIngestionPipeline",
                 operation="ingest_market_data_real_time",
                 symbol=symbol,
-                details={
-                    "data_type": "market_data",
-                    "mode": "real_time",
-                    "exchange": "binance"
-                }
+                details={"data_type": "market_data", "mode": "real_time", "exchange": "binance"},
             )
 
             self.error_handler.handle_error(error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(
-                f"Real-time market data ingestion failed for {symbol}: {e!s}")
+            logger.error(f"Real-time market data ingestion failed for {symbol}: {e!s}")
             self.metrics.failed_ingestions += 1
             raise
 
@@ -454,10 +449,7 @@ class DataIngestionPipeline:
                         error=e,
                         component="DataIngestionPipeline",
                         operation="ingest_news_data_real_time",
-                        details={
-                            "data_type": "news_data",
-                            "mode": "real_time"
-                        }
+                        details={"data_type": "news_data", "mode": "real_time"},
                     )
 
                     self.error_handler.handle_error(error_context)
@@ -473,11 +465,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="ingest_news_data_real_time",
-                details={
-                    "data_type": "news_data",
-                    "mode": "real_time",
-                    "severity": "fatal"
-                }
+                details={"data_type": "news_data", "mode": "real_time", "severity": "fatal"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -509,10 +497,7 @@ class DataIngestionPipeline:
                         error=e,
                         component="DataIngestionPipeline",
                         operation="ingest_social_data_real_time",
-                        details={
-                            "data_type": "social_media",
-                            "mode": "real_time"
-                        }
+                        details={"data_type": "social_media", "mode": "real_time"},
                     )
 
                     self.error_handler.handle_error(error_context)
@@ -528,11 +513,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="ingest_social_data_real_time",
-                details={
-                    "data_type": "social_media",
-                    "mode": "real_time",
-                    "severity": "fatal"
-                }
+                details={"data_type": "social_media", "mode": "real_time", "severity": "fatal"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -565,10 +546,7 @@ class DataIngestionPipeline:
                         error=e,
                         component="DataIngestionPipeline",
                         operation="ingest_alternative_data_batch",
-                        details={
-                            "data_type": "alternative_data",
-                            "mode": "batch"
-                        }
+                        details={"data_type": "alternative_data", "mode": "batch"},
                     )
 
                     self.error_handler.handle_error(error_context)
@@ -584,11 +562,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="ingest_alternative_data_batch",
-                details={
-                    "data_type": "alternative_data",
-                    "mode": "batch",
-                    "severity": "fatal"
-                }
+                details={"data_type": "alternative_data", "mode": "batch", "severity": "fatal"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -633,15 +607,14 @@ class DataIngestionPipeline:
                             "data_type": "market_data",
                             "mode": "batch",
                             "start_time": start_time.isoformat(),
-                            "end_time": end_time.isoformat()
-                        }
+                            "end_time": end_time.isoformat(),
+                        },
                     )
 
                     self.error_handler.handle_error(error_context)
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                    logger.warning(
-                        f"Failed to ingest historical data for {symbol}: {e!s}")
+                    logger.warning(f"Failed to ingest historical data for {symbol}: {e!s}")
                     self.metrics.failed_ingestions += 1
                     continue
 
@@ -651,11 +624,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="ingest_historical_market_data",
-                details={
-                    "data_type": "market_data",
-                    "mode": "batch",
-                    "severity": "fatal"
-                }
+                details={"data_type": "market_data", "mode": "batch", "severity": "fatal"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -695,10 +664,7 @@ class DataIngestionPipeline:
                         component="DataIngestionPipeline",
                         operation="handle_market_data_callback",
                         symbol=symbol,
-                        details={
-                            "data_type": "market_data",
-                            "callback_type": "market_data"
-                        }
+                        details={"data_type": "market_data", "callback_type": "market_data"},
                     )
 
                     self.error_handler.handle_error(error_context)
@@ -713,10 +679,7 @@ class DataIngestionPipeline:
                 component="DataIngestionPipeline",
                 operation="handle_market_data",
                 symbol=symbol,
-                details={
-                    "data_type": "market_data",
-                    "stage": "data_handling"
-                }
+                details={"data_type": "market_data", "stage": "data_handling"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -753,8 +716,8 @@ class DataIngestionPipeline:
                 details={
                     "source": source,
                     "buffer_size": len(self.data_buffers.get(source, [])),
-                    "max_buffer_size": self.ingestion_config.buffer_size
-                }
+                    "max_buffer_size": self.ingestion_config.buffer_size,
+                },
             )
 
             self.error_handler.handle_error(error_context)
@@ -771,7 +734,7 @@ class DataIngestionPipeline:
                         try:
                             # Extract batch
                             batch = buffer[: self.ingestion_config.batch_size]
-                            self.data_buffers[source] = buffer[self.ingestion_config.batch_size:]
+                            self.data_buffers[source] = buffer[self.ingestion_config.batch_size :]
 
                             # Process batch (placeholder for storage integration)
                             logger.debug(f"Processing batch of {len(batch)} items from {source}")
@@ -788,8 +751,8 @@ class DataIngestionPipeline:
                                 details={
                                     "source": source,
                                     "batch_size": len(batch),
-                                    "stage": "batch_processing"
-                                }
+                                    "stage": "batch_processing",
+                                },
                             )
 
                             self.error_handler.handle_error(error_context)
@@ -805,10 +768,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="process_buffers",
-                details={
-                    "stage": "buffer_processing",
-                    "severity": "fatal"
-                }
+                details={"stage": "buffer_processing", "severity": "fatal"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -823,11 +783,14 @@ class DataIngestionPipeline:
                 try:
                     # Calculate buffer utilization
                     total_buffer_items = sum(len(buffer) for buffer in self.data_buffers.values())
-                    self.metrics.buffer_utilization = total_buffer_items / \
-                        (len(self.data_buffers) * self.ingestion_config.buffer_size)
+                    self.metrics.buffer_utilization = total_buffer_items / (
+                        len(self.data_buffers) * self.ingestion_config.buffer_size
+                    )
 
                     # Calculate error rate
-                    total_operations = self.metrics.successful_ingestions + self.metrics.failed_ingestions
+                    total_operations = (
+                        self.metrics.successful_ingestions + self.metrics.failed_ingestions
+                    )
                     if total_operations > 0:
                         self.metrics.error_rate = self.metrics.failed_ingestions / total_operations
 
@@ -835,8 +798,9 @@ class DataIngestionPipeline:
                     current_time = datetime.now(timezone.utc)
                     time_diff = (current_time - self.metrics.last_update_time).total_seconds()
                     if time_diff > 0:
-                        new_records = self.metrics.total_records_processed - \
-                            getattr(self, '_last_total_records', 0)
+                        new_records = self.metrics.total_records_processed - getattr(
+                            self, "_last_total_records", 0
+                        )
                         self.metrics.records_per_second = new_records / time_diff
                         self._last_total_records = self.metrics.total_records_processed
 
@@ -850,9 +814,7 @@ class DataIngestionPipeline:
                         error=e,
                         component="DataIngestionPipeline",
                         operation="collect_metrics",
-                        details={
-                            "stage": "metrics_collection"
-                        }
+                        details={"stage": "metrics_collection"},
                     )
 
                     self.error_handler.handle_error(error_context)
@@ -867,10 +829,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="collect_metrics",
-                details={
-                    "stage": "metrics_collection",
-                    "severity": "fatal"
-                }
+                details={"stage": "metrics_collection", "severity": "fatal"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -893,9 +852,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="pause",
-                details={
-                    "current_status": self.status.value
-                }
+                details={"current_status": self.status.value},
             )
 
             self.error_handler.handle_error(error_context)
@@ -918,9 +875,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="resume",
-                details={
-                    "current_status": self.status.value
-                }
+                details={"current_status": self.status.value},
             )
 
             self.error_handler.handle_error(error_context)
@@ -972,8 +927,8 @@ class DataIngestionPipeline:
                 operation="stop",
                 details={
                     "current_status": self.status.value,
-                    "active_tasks": list(self.active_tasks.keys())
-                }
+                    "active_tasks": list(self.active_tasks.keys()),
+                },
             )
 
             self.error_handler.handle_error(error_context)
@@ -996,10 +951,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="register_callback",
-                details={
-                    "data_type": data_type,
-                    "callback_type": type(callback).__name__
-                }
+                details={"data_type": data_type, "callback_type": type(callback).__name__},
             )
 
             self.error_handler.handle_error(error_context)
@@ -1038,14 +990,14 @@ class DataIngestionPipeline:
                     "records_per_second": self.metrics.records_per_second,
                     "buffer_utilization": self.metrics.buffer_utilization,
                     "error_rate": self.metrics.error_rate,
-                    "last_update_time": self.metrics.last_update_time.isoformat()
+                    "last_update_time": self.metrics.last_update_time.isoformat(),
                 },
                 "connection_status": connection_status,
                 "error_patterns": pattern_summary,
                 "error_correlations": correlation_summary,
                 "error_trends": trend_summary,
                 "circuit_breaker_status": circuit_breaker_status,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         except Exception as e:
@@ -1054,9 +1006,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="get_status",
-                details={
-                    "operation": "status_retrieval"
-                }
+                details={"operation": "status_retrieval"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -1066,7 +1016,7 @@ class DataIngestionPipeline:
             return {
                 "error": str(e),
                 "error_id": error_context.error_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
     async def cleanup(self) -> None:
@@ -1094,9 +1044,7 @@ class DataIngestionPipeline:
                 error=e,
                 component="DataIngestionPipeline",
                 operation="cleanup",
-                details={
-                    "operation": "cleanup"
-                }
+                details={"operation": "cleanup"},
             )
 
             self.error_handler.handle_error(error_context)

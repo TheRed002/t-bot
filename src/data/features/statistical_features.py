@@ -112,8 +112,7 @@ class StatisticalFeatureCalculator:
                 },
             )
             self.regime_threshold = stats_config.get("regime_threshold", 0.02)
-            self.correlation_threshold = stats_config.get(
-                "correlation_threshold", 0.7)
+            self.correlation_threshold = stats_config.get("correlation_threshold", 0.7)
         else:
             self.default_windows = {
                 "rolling_stats": 20,
@@ -193,8 +192,7 @@ class StatisticalFeatureCalculator:
             # Keep only recent data
             max_rows = getattr(self.config, "max_price_history", 2000)
             if len(self.price_data[symbol]) > max_rows:
-                self.price_data[symbol] = self.price_data[symbol].tail(
-                    max_rows)
+                self.price_data[symbol] = self.price_data[symbol].tail(max_rows)
 
             # Clear cache for this symbol
             if symbol in self.feature_cache:
@@ -235,10 +233,8 @@ class StatisticalFeatureCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"window": window, "field": field,
-                              "reason": "insufficient_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    metadata={"window": window, "field": field, "reason": "insufficient_data"},
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate rolling statistics
@@ -251,17 +247,13 @@ class StatisticalFeatureCalculator:
             rolling_max = data_series.rolling(window=window).max().iloc[-1]
 
             # Calculate additional metrics
-            rolling_median = data_series.rolling(
-                window=window).median().iloc[-1]
-            rolling_quantile_25 = data_series.rolling(
-                window=window).quantile(0.25).iloc[-1]
-            rolling_quantile_75 = data_series.rolling(
-                window=window).quantile(0.75).iloc[-1]
+            rolling_median = data_series.rolling(window=window).median().iloc[-1]
+            rolling_quantile_25 = data_series.rolling(window=window).quantile(0.25).iloc[-1]
+            rolling_quantile_75 = data_series.rolling(window=window).quantile(0.75).iloc[-1]
 
             # Calculate Z-score of latest value
             latest_value = data_series.iloc[-1]
-            z_score = ((latest_value - rolling_mean) /
-                       rolling_std) if rolling_std > 0 else 0
+            z_score = ((latest_value - rolling_mean) / rolling_std) if rolling_std > 0 else 0
 
             statistical_values = {
                 "mean": rolling_mean,
@@ -290,8 +282,7 @@ class StatisticalFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(
-                f"Rolling stats calculation failed for {symbol}: {e!s}")
+            logger.error(f"Rolling stats calculation failed for {symbol}: {e!s}")
             raise DataError(f"Rolling stats calculation failed: {e!s}")
 
     @time_execution
@@ -325,10 +316,8 @@ class StatisticalFeatureCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"max_lags": max_lags, "field": field,
-                              "reason": "insufficient_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    metadata={"max_lags": max_lags, "field": field, "reason": "insufficient_data"},
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate autocorrelations
@@ -350,8 +339,7 @@ class StatisticalFeatureCalculator:
             try:
                 from statsmodels.stats.diagnostic import acorr_ljungbox
 
-                ljung_box_stat = acorr_ljungbox(
-                    data_series, lags=min(10, max_lags), return_df=True)
+                ljung_box_stat = acorr_ljungbox(data_series, lags=min(10, max_lags), return_df=True)
                 ljung_box_pvalue = ljung_box_stat["lb_pvalue"].min()
             except ImportError:
                 ljung_box_pvalue = None
@@ -374,15 +362,13 @@ class StatisticalFeatureCalculator:
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc),
                 value=autocorr_values,
-                metadata={"max_lags": max_lags, "field": field,
-                          "n_observations": len(data_series)},
+                metadata={"max_lags": max_lags, "field": field, "n_observations": len(data_series)},
                 calculation_time=(datetime.now() - start_time).total_seconds(),
             )
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(
-                f"Autocorrelation calculation failed for {symbol}: {e!s}")
+            logger.error(f"Autocorrelation calculation failed for {symbol}: {e!s}")
             raise DataError(f"Autocorrelation calculation failed: {e!s}")
 
     @time_execution
@@ -416,10 +402,8 @@ class StatisticalFeatureCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"window": window, "field": field,
-                              "reason": "insufficient_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    metadata={"window": window, "field": field, "reason": "insufficient_data"},
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Get recent data
@@ -464,8 +448,7 @@ class StatisticalFeatureCalculator:
             directional_movement = np.sum(np.sign(returns) == np.sign(returns.shift(1))) / len(
                 returns
             )
-            trending_strength = abs(returns_mean) / \
-                returns_std if returns_std > 0 else 0
+            trending_strength = abs(returns_mean) / returns_std if returns_std > 0 else 0
 
             regime_values = {
                 "regime": regime.value,
@@ -485,8 +468,7 @@ class StatisticalFeatureCalculator:
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc),
                 value=regime_values,
-                metadata={"window": window, "field": field,
-                          "threshold": self.regime_threshold},
+                metadata={"window": window, "field": field, "threshold": self.regime_threshold},
                 calculation_time=(datetime.now() - start_time).total_seconds(),
             )
 
@@ -516,10 +498,8 @@ class StatisticalFeatureCalculator:
 
         try:
             if symbol1 not in self.price_data or symbol2 not in self.price_data:
-                missing = [s for s in [symbol1, symbol2]
-                           if s not in self.price_data]
-                raise DataError(
-                    f"No price data available for symbols: {missing}")
+                missing = [s for s in [symbol1, symbol2] if s not in self.price_data]
+                raise DataError(f"No price data available for symbols: {missing}")
 
             df1 = self.price_data[symbol1]
             df2 = self.price_data[symbol2]
@@ -543,8 +523,7 @@ class StatisticalFeatureCalculator:
                         "field": field,
                         "reason": "insufficient_common_data",
                     },
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Get data series
@@ -561,8 +540,7 @@ class StatisticalFeatureCalculator:
                 else:  # lag < 0
                     ccorr = series1[-lag:].corr(series2[:lag])
 
-                cross_correlations.append(
-                    ccorr if not np.isnan(ccorr) else 0.0)
+                cross_correlations.append(ccorr if not np.isnan(ccorr) else 0.0)
 
             # Find maximum correlation and its lag
             max_corr_idx = np.argmax(np.abs(cross_correlations))
@@ -571,7 +549,7 @@ class StatisticalFeatureCalculator:
 
             # Calculate lead-lag relationship
             # symbol1 leads symbol2
-            positive_lags = cross_correlations[max_lags + 1:]
+            positive_lags = cross_correlations[max_lags + 1 :]
             # symbol2 leads symbol1
             negative_lags = cross_correlations[:max_lags]
 
@@ -607,8 +585,7 @@ class StatisticalFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(
-                f"Cross-correlation calculation failed for {symbol1}-{symbol2}: {e!s}")
+            logger.error(f"Cross-correlation calculation failed for {symbol1}-{symbol2}: {e!s}")
             raise DataError(f"Cross-correlation calculation failed: {e!s}")
 
     @time_execution
@@ -640,8 +617,7 @@ class StatisticalFeatureCalculator:
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"field": field, "reason": "insufficient_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Prepare time series with datetime index
@@ -658,20 +634,16 @@ class StatisticalFeatureCalculator:
             df_copy["month"] = df_copy.index.month
 
             # Calculate seasonal patterns
-            hourly_pattern = data_series.groupby(
-                df_copy["hour"]).mean().to_dict()
-            daily_pattern = data_series.groupby(
-                df_copy["day_of_week"]).mean().to_dict()
-            monthly_pattern = data_series.groupby(
-                df_copy["month"]).mean().to_dict()
+            hourly_pattern = data_series.groupby(df_copy["hour"]).mean().to_dict()
+            daily_pattern = data_series.groupby(df_copy["day_of_week"]).mean().to_dict()
+            monthly_pattern = data_series.groupby(df_copy["month"]).mean().to_dict()
 
             # Spectral analysis for dominant frequencies
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     frequencies, power = periodogram(data_series.values)
-                    dominant_freq_idx = np.argmax(
-                        power[1:]) + 1  # Skip DC component
+                    dominant_freq_idx = np.argmax(power[1:]) + 1  # Skip DC component
                     dominant_frequency = frequencies[dominant_freq_idx]
                     dominant_period = 1 / dominant_frequency if dominant_frequency > 0 else None
             except Exception:
@@ -741,23 +713,18 @@ class StatisticalFeatureCalculator:
                     elif feature.upper() == "SEASONALITY":
                         results["SEASONALITY"] = await self.detect_seasonality(symbol)
                     else:
-                        logger.warning(
-                            f"Unknown statistical feature: {feature}")
+                        logger.warning(f"Unknown statistical feature: {feature}")
 
                 except Exception as e:
-                    logger.error(
-                        f"Failed to calculate {feature} for {symbol}: {e!s}")
+                    logger.error(f"Failed to calculate {feature} for {symbol}: {e!s}")
                     results[feature] = None
 
             successful_count = len([r for r in results.values() if r is not None])
-            logger.info(
-                f"Calculated {successful_count} statistical features for {symbol}"
-            )
+            logger.info(f"Calculated {successful_count} statistical features for {symbol}")
             return results
 
         except Exception as e:
-            logger.error(
-                f"Batch statistical feature calculation failed for {symbol}: {e!s}")
+            logger.error(f"Batch statistical feature calculation failed for {symbol}: {e!s}")
             raise DataError(f"Batch calculation failed: {e!s}")
 
     @time_execution

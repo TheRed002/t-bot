@@ -125,8 +125,7 @@ class OKXWebSocketManager:
         except Exception as e:
             logger.error(f"Failed to connect to OKX WebSocket: {e!s}")
             self.connected = False
-            raise ExchangeConnectionError(
-                f"Failed to connect to OKX WebSocket: {e!s}")
+            raise ExchangeConnectionError(f"Failed to connect to OKX WebSocket: {e!s}")
 
     async def disconnect(self) -> None:
         """Disconnect from OKX WebSocket."""
@@ -151,8 +150,7 @@ class OKXWebSocketManager:
 
         except Exception as e:
             logger.error(f"Error disconnecting from OKX WebSocket: {e!s}")
-            raise ExchangeConnectionError(
-                f"Error disconnecting from OKX WebSocket: {e!s}")
+            raise ExchangeConnectionError(f"Error disconnecting from OKX WebSocket: {e!s}")
 
     async def subscribe_to_ticker(self, symbol: str, callback: Callable) -> None:
         """
@@ -209,8 +207,7 @@ class OKXWebSocketManager:
             logger.info(f"Subscribed to order book stream for {symbol}")
 
         except Exception as e:
-            logger.error(
-                f"Failed to subscribe to order book for {symbol}: {e!s}")
+            logger.error(f"Failed to subscribe to order book for {symbol}: {e!s}")
             raise ExchangeError(f"Failed to subscribe to order book: {e!s}")
 
     async def subscribe_to_trades(self, symbol: str, callback: Callable) -> None:
@@ -251,8 +248,7 @@ class OKXWebSocketManager:
         """
         try:
             if not self.private_ws:
-                raise ExchangeConnectionError(
-                    "Private WebSocket not connected")
+                raise ExchangeConnectionError("Private WebSocket not connected")
 
             stream_name = "account"
 
@@ -262,16 +258,14 @@ class OKXWebSocketManager:
             self.private_subscriptions[stream_name].append(callback)
 
             # Subscribe to account stream
-            subscribe_message = {"op": "subscribe",
-                                 "args": [{"channel": "account"}]}
+            subscribe_message = {"op": "subscribe", "args": [{"channel": "account"}]}
 
             await self._send_private_message(subscribe_message)
             logger.info("Subscribed to account stream")
 
         except Exception as e:
             logger.error(f"Failed to subscribe to account stream: {e!s}")
-            raise ExchangeError(
-                f"Failed to subscribe to account stream: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to account stream: {e!s}")
 
     async def _connect_public_websocket(self) -> None:
         """
@@ -289,8 +283,7 @@ class OKXWebSocketManager:
 
         except Exception as e:
             logger.error(f"Failed to connect to OKX public WebSocket: {e!s}")
-            raise ExchangeConnectionError(
-                f"Failed to connect to public WebSocket: {e!s}")
+            raise ExchangeConnectionError(f"Failed to connect to public WebSocket: {e!s}")
 
     async def _connect_private_websocket(self) -> None:
         """
@@ -311,8 +304,7 @@ class OKXWebSocketManager:
 
         except Exception as e:
             logger.error(f"Failed to connect to OKX private WebSocket: {e!s}")
-            raise ExchangeConnectionError(
-                f"Failed to connect to private WebSocket: {e!s}")
+            raise ExchangeConnectionError(f"Failed to connect to private WebSocket: {e!s}")
 
     async def _authenticate_private_websocket(self) -> None:
         """
@@ -325,8 +317,7 @@ class OKXWebSocketManager:
             message = timestamp + "GET" + "/users/self/verify"
             signature = base64.b64encode(
                 hmac.new(
-                    self.api_secret.encode(
-                        "utf-8"), message.encode("utf-8"), hashlib.sha256
+                    self.api_secret.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
                 ).digest()
             ).decode("utf-8")
 
@@ -462,11 +453,9 @@ class OKXWebSocketManager:
         event = data.get("event", "")
 
         if event == "subscribe":
-            logger.info(
-                f"Successfully subscribed to channel: {data.get('arg', {})}")
+            logger.info(f"Successfully subscribed to channel: {data.get('arg', {})}")
         elif event == "error":
-            logger.error(
-                f"Public WebSocket error: {data.get('msg', 'Unknown error')}")
+            logger.error(f"Public WebSocket error: {data.get('msg', 'Unknown error')}")
         else:
             logger.debug(f"Public event: {event}")
 
@@ -482,11 +471,9 @@ class OKXWebSocketManager:
         if event == "login":
             logger.info("Successfully logged in to private WebSocket")
         elif event == "subscribe":
-            logger.info(
-                f"Successfully subscribed to private channel: {data.get('arg', {})}")
+            logger.info(f"Successfully subscribed to private channel: {data.get('arg', {})}")
         elif event == "error":
-            logger.error(
-                f"Private WebSocket error: {data.get('msg', 'Unknown error')}")
+            logger.error(f"Private WebSocket error: {data.get('msg', 'Unknown error')}")
         else:
             logger.debug(f"Private event: {event}")
 
@@ -563,8 +550,7 @@ class OKXWebSocketManager:
                         ask=Decimal(ticker_data.get("askPx", "0")),
                         last_price=Decimal(ticker_data.get("last", "0")),
                         volume_24h=Decimal(ticker_data.get("vol24h", "0")),
-                        price_change_24h=Decimal(
-                            ticker_data.get("change24h", "0")),
+                        price_change_24h=Decimal(ticker_data.get("change24h", "0")),
                         timestamp=datetime.now(timezone.utc),
                     )
 
@@ -600,8 +586,7 @@ class OKXWebSocketManager:
                     ]
 
                     order_book = OrderBook(
-                        symbol=symbol, bids=bids, asks=asks, timestamp=datetime.now(
-                            timezone.utc)
+                        symbol=symbol, bids=bids, asks=asks, timestamp=datetime.now(timezone.utc)
                     )
 
                     # Call all registered callbacks
@@ -609,8 +594,7 @@ class OKXWebSocketManager:
                         try:
                             await callback(order_book)
                         except Exception as e:
-                            logger.error(
-                                f"Error in order book callback: {e!s}")
+                            logger.error(f"Error in order book callback: {e!s}")
 
         except Exception as e:
             logger.error(f"Error handling order book data: {e!s}")
@@ -632,8 +616,7 @@ class OKXWebSocketManager:
                     trade = Trade(
                         id=trade_data.get("tradeId", ""),
                         symbol=symbol,
-                        side=OrderSide.BUY if trade_data.get(
-                            "side") == "buy" else OrderSide.SELL,
+                        side=OrderSide.BUY if trade_data.get("side") == "buy" else OrderSide.SELL,
                         quantity=Decimal(trade_data.get("sz", "0")),
                         price=Decimal(trade_data.get("px", "0")),
                         timestamp=datetime.fromtimestamp(
@@ -700,8 +683,7 @@ class OKXWebSocketManager:
         """
         try:
             if not self.private_ws:
-                raise ExchangeConnectionError(
-                    "Private WebSocket not connected")
+                raise ExchangeConnectionError("Private WebSocket not connected")
 
             await self.private_ws.send(json.dumps(message))
 
@@ -715,8 +697,7 @@ class OKXWebSocketManager:
         """
         try:
             if self.reconnect_attempts >= self.max_reconnect_attempts:
-                logger.error(
-                    "Max reconnection attempts reached for public WebSocket")
+                logger.error("Max reconnection attempts reached for public WebSocket")
                 return
 
             self.reconnect_attempts += 1
@@ -740,8 +721,7 @@ class OKXWebSocketManager:
         """
         try:
             if self.reconnect_attempts >= self.max_reconnect_attempts:
-                logger.error(
-                    "Max reconnection attempts reached for private WebSocket")
+                logger.error("Max reconnection attempts reached for private WebSocket")
                 return
 
             self.reconnect_attempts += 1

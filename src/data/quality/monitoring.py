@@ -88,8 +88,7 @@ class QualityMonitor:
 
         self.drift_threshold = getattr(config, "drift_threshold", 0.05)
         self.distribution_window = getattr(config, "distribution_window", 100)
-        self.alert_cooldown = getattr(
-            config, "alert_cooldown", 3600)  # 1 hour cooldown
+        self.alert_cooldown = getattr(config, "alert_cooldown", 3600)  # 1 hour cooldown
 
         # Data storage for monitoring
         self.price_distributions: dict[str, list[float]] = {}
@@ -169,8 +168,7 @@ class QualityMonitor:
             return quality_score, drift_alerts
 
         except Exception as e:
-            logger.error("Data quality monitoring failed",
-                         symbol=data.symbol, error=str(e))
+            logger.error("Data quality monitoring failed", symbol=data.symbol, error=str(e))
             return 0.0, []
 
     @time_execution
@@ -196,8 +194,7 @@ class QualityMonitor:
             drift_alerts = await self._detect_signal_drift(signals)
 
             # Calculate overall quality score
-            quality_score = avg_confidence * 0.7 + \
-                (1.0 - len(drift_alerts) * 0.1) * 0.3
+            quality_score = avg_confidence * 0.7 + (1.0 - len(drift_alerts) * 0.1) * 0.3
 
             # Update statistics
             self.monitoring_stats["total_checks"] += 1
@@ -380,8 +377,7 @@ class QualityMonitor:
         # Freshness score (0-1)
         freshness_score = 1.0
         if data.timestamp:
-            age_seconds = (datetime.now(timezone.utc) -
-                           data.timestamp).total_seconds()
+            age_seconds = (datetime.now(timezone.utc) - data.timestamp).total_seconds()
             if age_seconds > 60:  # 1 minute threshold
                 # Decay over 5 minutes
                 freshness_score = max(0.0, 1.0 - (age_seconds - 60) / 300)
@@ -397,14 +393,12 @@ class QualityMonitor:
             if data.price:
                 current_price = float(data.price)
                 mean_price = statistics.mean(recent_prices)
-                std_price = statistics.stdev(
-                    recent_prices) if len(recent_prices) > 1 else 0
+                std_price = statistics.stdev(recent_prices) if len(recent_prices) > 1 else 0
 
                 if std_price > 0:
                     z_score = abs(current_price - mean_price) / std_price
                     if z_score > 3.0:  # 3 standard deviations
-                        consistency_score = max(
-                            0.0, 1.0 - (z_score - 3.0) / 2.0)
+                        consistency_score = max(0.0, 1.0 - (z_score - 3.0) / 2.0)
         score_components.append(consistency_score * 0.2)  # 20% weight
 
         # Calculate weighted average
@@ -434,7 +428,7 @@ class QualityMonitor:
             if window_size >= 5:  # Need at least 5 points for meaningful drift detection
                 recent_prices = self.price_distributions[data.symbol][-window_size:]
                 historical_prices = self.price_distributions[data.symbol][
-                    -2 * window_size: -window_size
+                    -2 * window_size : -window_size
                 ]
 
                 if len(historical_prices) >= 5:  # Need at least 5 historical points
@@ -475,7 +469,7 @@ class QualityMonitor:
             if window_size >= 5:  # Need at least 5 points for meaningful drift detection
                 recent_volumes = self.volume_distributions[data.symbol][-window_size:]
                 historical_volumes = self.volume_distributions[data.symbol][
-                    -2 * window_size: -window_size
+                    -2 * window_size : -window_size
                 ]
 
                 if len(historical_volumes) >= 5:  # Need at least 5 historical points
@@ -489,8 +483,7 @@ class QualityMonitor:
                                 drift_type=DriftType.COVARIATE_DRIFT,
                                 feature="volume",
                                 severity=(
-                                    QualityLevel.POOR if drift_score > 0.2
-                                    else QualityLevel.FAIR
+                                    QualityLevel.POOR if drift_score > 0.2 else QualityLevel.FAIR
                                 ),
                                 description=(
                                     f"Volume distribution drift detected: {drift_score:.3f}"
@@ -525,8 +518,7 @@ class QualityMonitor:
 
         if len(confidences) >= 10:
             mean_confidence = statistics.mean(confidences)
-            std_confidence = statistics.stdev(
-                confidences) if len(confidences) > 1 else 0
+            std_confidence = statistics.stdev(confidences) if len(confidences) > 1 else 0
 
             # Check for low confidence drift
             if mean_confidence < 0.6:  # Low average confidence
@@ -578,14 +570,11 @@ class QualityMonitor:
             recent_mean = statistics.mean(recent)
             historical_mean = statistics.mean(historical)
             recent_std = statistics.stdev(recent) if len(recent) > 1 else 0
-            historical_std = statistics.stdev(
-                historical) if len(historical) > 1 else 0
+            historical_std = statistics.stdev(historical) if len(historical) > 1 else 0
 
             # Calculate drift score using multiple metrics
-            mean_drift = abs(recent_mean - historical_mean) / \
-                max(historical_mean, 1e-6)
-            std_drift = abs(recent_std - historical_std) / \
-                max(historical_std, 1e-6)
+            mean_drift = abs(recent_mean - historical_mean) / max(historical_mean, 1e-6)
+            std_drift = abs(recent_std - historical_std) / max(historical_std, 1e-6)
 
             # Combined drift score
             drift_score = (mean_drift + std_drift) / 2.0
@@ -593,8 +582,7 @@ class QualityMonitor:
             return min(1.0, drift_score)
 
         except Exception as e:
-            logger.warning(
-                "Distribution drift calculation failed", error=str(e))
+            logger.warning("Distribution drift calculation failed", error=str(e))
             return 0.0
 
     async def _generate_recommendations(self, report: dict[str, Any]) -> list[str]:
@@ -621,8 +609,7 @@ class QualityMonitor:
 
         alert_summary = report.get("alert_summary", {})
         if alert_summary.get("critical_alerts", 0) > 0:
-            recommendations.append(
-                "Critical alerts detected. Immediate attention required.")
+            recommendations.append("Critical alerts detected. Immediate attention required.")
 
         # Distribution recommendations
         distribution_summary = report.get("distribution_summary", {})
@@ -635,8 +622,7 @@ class QualityMonitor:
                 )
 
         if not recommendations:
-            recommendations.append(
-                "Data quality is good. Continue monitoring for any changes.")
+            recommendations.append("Data quality is good. Continue monitoring for any changes.")
 
         return recommendations
 

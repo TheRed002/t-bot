@@ -102,8 +102,7 @@ class SocialMediaDataSource:
 
         # Monitoring settings
         self.active = False
-        self.update_interval = config.social_media.get(
-            "update_interval", 300)  # 5 minutes
+        self.update_interval = config.social_media.get("update_interval", 300)  # 5 minutes
         self.max_posts_per_symbol = config.social_media.get("max_posts", 200)
 
         # Statistics
@@ -120,14 +119,14 @@ class SocialMediaDataSource:
 
         logger.info("SocialMediaDataSource initialized")
 
+    @retry(max_attempts=3, base_delay=2.0)
     async def initialize(self) -> None:
         """Initialize social media data source connections."""
         try:
             # Create HTTP session with appropriate headers
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
-                headers={"User-Agent": "TradingBot/1.0",
-                         "Accept": "application/json"},
+                headers={"User-Agent": "TradingBot/1.0", "Accept": "application/json"},
             )
 
             # Test connections to available platforms
@@ -137,9 +136,9 @@ class SocialMediaDataSource:
 
         except Exception as e:
             logger.error(f"Failed to initialize SocialMediaDataSource: {e!s}")
-            raise DataSourceError(
-                f"Social media data source initialization failed: {e!s}")
+            raise DataSourceError(f"Social media data source initialization failed: {e!s}")
 
+    @retry(max_attempts=2, base_delay=1.0)
     async def _test_connections(self) -> None:
         """Test connections to social media platforms."""
         try:
@@ -161,8 +160,7 @@ class SocialMediaDataSource:
             if not platforms_available:
                 logger.warning("No social media platforms configured")
             else:
-                logger.info(
-                    f"Social media platforms available: {platforms_available}")
+                logger.info(f"Social media platforms available: {platforms_available}")
 
         except Exception as e:
             logger.error(f"Social media connection test failed: {e!s}")
@@ -201,8 +199,7 @@ class SocialMediaDataSource:
                     all_posts.extend(posts)
 
             # Calculate aggregated metrics
-            metrics = self._calculate_social_metrics(
-                symbol, all_posts, hours_back)
+            metrics = self._calculate_social_metrics(symbol, all_posts, hours_back)
 
             # Cache results
             cache_key = f"{symbol}_{hours_back}h"
@@ -238,8 +235,7 @@ class SocialMediaDataSource:
                 content = f"  # {symbol} looking {'bullish' if i % 2 == 0 else 'bearish'} today!"
 
                 # Simulate sentiment analysis
-                sentiment, sentiment_score = self._analyze_social_sentiment(
-                    content)
+                sentiment, sentiment_score = self._analyze_social_sentiment(content)
 
                 post = SocialPost(
                     id=f"twitter_{symbol}_{i}",
@@ -251,8 +247,7 @@ class SocialMediaDataSource:
                     sentiment_score=sentiment_score,
                     engagement_score=float(i * 10),  # Simulate engagement
                     symbols=[symbol],
-                    metrics={"likes": i * 5,
-                             "retweets": i * 2, "replies": i * 1},
+                    metrics={"likes": i * 5, "retweets": i * 2, "replies": i * 1},
                     metadata={"platform_specific": "twitter_data"},
                 )
                 posts.append(post)
@@ -283,8 +278,7 @@ class SocialMediaDataSource:
                 content = f"Discussion about {symbol} price action and future prospects..."
 
                 # Simulate sentiment analysis
-                sentiment, sentiment_score = self._analyze_social_sentiment(
-                    content)
+                sentiment, sentiment_score = self._analyze_social_sentiment(content)
 
                 post = SocialPost(
                     id=f"reddit_{symbol}_{i}",
@@ -296,8 +290,7 @@ class SocialMediaDataSource:
                     sentiment_score=sentiment_score,
                     engagement_score=float(i * 15),  # Simulate engagement
                     symbols=[symbol],
-                    metrics={"upvotes": i * 8,
-                             "downvotes": i * 1, "comments": i * 3},
+                    metrics={"upvotes": i * 8, "downvotes": i * 1, "comments": i * 3},
                     metadata={"subreddit": "CryptoCurrency"},
                 )
                 posts.append(post)
@@ -404,12 +397,10 @@ class SocialMediaDataSource:
 
         # Calculate trending score (based on recent posts and engagement)
         recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
-        recent_posts = [
-            post for post in posts if post.created_at > recent_cutoff]
+        recent_posts = [post for post in posts if post.created_at > recent_cutoff]
 
         if recent_posts:
-            recent_engagement = sum(
-                post.engagement_score for post in recent_posts)
+            recent_engagement = sum(post.engagement_score for post in recent_posts)
             trending_score = (len(recent_posts) / len(posts)) * (
                 recent_engagement / engagement_volume
             )
@@ -440,8 +431,7 @@ class SocialMediaDataSource:
         """
         try:
             # Common crypto symbols to check
-            symbols = ["BTC", "ETH", "ADA", "DOT",
-                       "LINK", "MATIC", "SOL", "AVAX"]
+            symbols = ["BTC", "ETH", "ADA", "DOT", "LINK", "MATIC", "SOL", "AVAX"]
             trending_data = []
 
             for symbol in symbols:
@@ -459,8 +449,7 @@ class SocialMediaDataSource:
                     )
 
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to get metrics for {symbol}: {e!s}")
+                    logger.warning(f"Failed to get metrics for {symbol}: {e!s}")
                     continue
 
             # Sort by trending score
@@ -503,10 +492,8 @@ class SocialMediaDataSource:
                             recent_posts.extend(reddit_posts)
 
                         # Filter for very recent posts (last 15 minutes)
-                        cutoff_time = datetime.now(
-                            timezone.utc) - timedelta(minutes=15)
-                        new_posts = [
-                            post for post in recent_posts if post.created_at > cutoff_time]
+                        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=15)
+                        new_posts = [post for post in recent_posts if post.created_at > cutoff_time]
 
                         if new_posts:
                             callback(symbol, new_posts)

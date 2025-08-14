@@ -116,8 +116,7 @@ class BinanceWebSocketHandler:
             logger.info("Successfully disconnected Binance WebSocket streams")
 
         except Exception as e:
-            logger.error(
-                f"Error disconnecting Binance WebSocket streams: {e!s}")
+            logger.error(f"Error disconnecting Binance WebSocket streams: {e!s}")
 
     async def subscribe_to_ticker_stream(self, symbol: str, callback: Callable) -> None:
         """
@@ -141,8 +140,7 @@ class BinanceWebSocketHandler:
                 self.active_streams[stream_name] = stream
 
                 # Start async stream handler
-                task = asyncio.create_task(
-                    self._handle_ticker_stream(stream_name, stream))
+                task = asyncio.create_task(self._handle_ticker_stream(stream_name, stream))
                 self.stream_handlers[stream_name] = task
 
                 logger.info(f"Subscribed to ticker stream: {stream_name}")
@@ -177,16 +175,14 @@ class BinanceWebSocketHandler:
                 self.active_streams[stream_name] = stream
 
                 # Start async stream handler
-                task = asyncio.create_task(
-                    self._handle_orderbook_stream(stream_name, stream))
+                task = asyncio.create_task(self._handle_orderbook_stream(stream_name, stream))
                 self.stream_handlers[stream_name] = task
 
                 logger.info(f"Subscribed to orderbook stream: {stream_name}")
 
         except Exception as e:
             logger.error(f"Error subscribing to orderbook stream: {e!s}")
-            raise ExchangeError(
-                f"Failed to subscribe to orderbook stream: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to orderbook stream: {e!s}")
 
     async def subscribe_to_trade_stream(self, symbol: str, callback: Callable) -> None:
         """
@@ -210,8 +206,7 @@ class BinanceWebSocketHandler:
                 self.active_streams[stream_name] = stream
 
                 # Start async stream handler
-                task = asyncio.create_task(
-                    self._handle_trade_stream(stream_name, stream))
+                task = asyncio.create_task(self._handle_trade_stream(stream_name, stream))
                 self.stream_handlers[stream_name] = task
 
                 logger.info(f"Subscribed to trade stream: {stream_name}")
@@ -241,16 +236,14 @@ class BinanceWebSocketHandler:
                 self.active_streams[stream_name] = stream
 
                 # Start async stream handler
-                task = asyncio.create_task(
-                    self._handle_user_data_stream(stream_name, stream))
+                task = asyncio.create_task(self._handle_user_data_stream(stream_name, stream))
                 self.stream_handlers[stream_name] = task
 
                 logger.info(f"Subscribed to user data stream: {stream_name}")
 
         except Exception as e:
             logger.error(f"Error subscribing to user data stream: {e!s}")
-            raise ExchangeError(
-                f"Failed to subscribe to user data stream: {e!s}")
+            raise ExchangeError(f"Failed to subscribe to user data stream: {e!s}")
 
     async def unsubscribe_from_stream(self, stream_name: str) -> bool:
         """
@@ -278,8 +271,7 @@ class BinanceWebSocketHandler:
             return False
 
         except Exception as e:
-            logger.error(
-                f"Error unsubscribing from stream {stream_name}: {e!s}")
+            logger.error(f"Error unsubscribing from stream {stream_name}: {e!s}")
             return False
 
     # Stream handlers
@@ -299,8 +291,7 @@ class BinanceWebSocketHandler:
                                 try:
                                     await callback(ticker_data)
                                 except Exception as e:
-                                    logger.error(
-                                        f"Error in ticker callback: {e!s}")
+                                    logger.error(f"Error in ticker callback: {e!s}")
 
                     except Exception as e:
                         logger.error(f"Error processing ticker message: {e!s}")
@@ -326,18 +317,15 @@ class BinanceWebSocketHandler:
                                 try:
                                     await callback(orderbook_data)
                                 except Exception as e:
-                                    logger.error(
-                                        f"Error in orderbook callback: {e!s}")
+                                    logger.error(f"Error in orderbook callback: {e!s}")
 
                     except Exception as e:
-                        logger.error(
-                            f"Error processing orderbook message: {e!s}")
+                        logger.error(f"Error processing orderbook message: {e!s}")
 
         except asyncio.CancelledError:
             logger.info(f"Orderbook stream {stream_name} cancelled")
         except Exception as e:
-            logger.error(
-                f"Error handling orderbook stream {stream_name}: {e!s}")
+            logger.error(f"Error handling orderbook stream {stream_name}: {e!s}")
             await self._handle_stream_error(stream_name)
 
     async def _handle_trade_stream(self, stream_name: str, stream) -> None:
@@ -355,8 +343,7 @@ class BinanceWebSocketHandler:
                                 try:
                                     await callback(trade_data)
                                 except Exception as e:
-                                    logger.error(
-                                        f"Error in trade callback: {e!s}")
+                                    logger.error(f"Error in trade callback: {e!s}")
 
                     except Exception as e:
                         logger.error(f"Error processing trade message: {e!s}")
@@ -390,18 +377,15 @@ class BinanceWebSocketHandler:
                                 try:
                                     await callback(msg)
                                 except Exception as e:
-                                    logger.error(
-                                        f"Error in user data callback: {e!s}")
+                                    logger.error(f"Error in user data callback: {e!s}")
 
                     except Exception as e:
-                        logger.error(
-                            f"Error processing user data message: {e!s}")
+                        logger.error(f"Error processing user data message: {e!s}")
 
         except asyncio.CancelledError:
             logger.info(f"User data stream {stream_name} cancelled")
         except Exception as e:
-            logger.error(
-                f"Error handling user data stream {stream_name}: {e!s}")
+            logger.error(f"Error handling user data stream {stream_name}: {e!s}")
             await self._handle_stream_error(stream_name)
 
     # Message conversion methods
@@ -420,10 +404,8 @@ class BinanceWebSocketHandler:
 
     def _convert_orderbook_message(self, msg: dict) -> OrderBook:
         """Convert Binance order book message to OrderBook format."""
-        bids = [[Decimal(str(price)), Decimal(str(qty))]
-                for price, qty in msg["b"]]
-        asks = [[Decimal(str(price)), Decimal(str(qty))]
-                for price, qty in msg["a"]]
+        bids = [[Decimal(str(price)), Decimal(str(qty))] for price, qty in msg["b"]]
+        asks = [[Decimal(str(price)), Decimal(str(qty))] for price, qty in msg["a"]]
 
         return OrderBook(
             symbol=msg["s"],
@@ -472,8 +454,7 @@ class BinanceWebSocketHandler:
             status = msg["X"]
             executed_qty = Decimal(str(msg["z"]))
 
-            logger.debug(
-                f"Order execution: {order_id}, status: {status}, executed: {executed_qty}")
+            logger.debug(f"Order execution: {order_id}, status: {status}, executed: {executed_qty}")
 
         except Exception as e:
             logger.error(f"Error handling execution report: {e!s}")
@@ -523,11 +504,9 @@ class BinanceWebSocketHandler:
 
                 # Reconnect logic would go here
                 # For now, just log the error
-                logger.error(
-                    f"Stream {stream_name} reconnection not implemented")
+                logger.error(f"Stream {stream_name} reconnection not implemented")
             else:
-                logger.error(
-                    f"Max reconnection attempts reached for stream {stream_name}")
+                logger.error(f"Max reconnection attempts reached for stream {stream_name}")
 
         except Exception as e:
             logger.error(f"Error handling stream error: {e!s}")

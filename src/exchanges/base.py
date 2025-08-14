@@ -15,10 +15,10 @@ from decimal import Decimal
 
 from src.core.config import Config
 from src.core.exceptions import (
-    ExchangeRateLimitError,
-    ValidationError,
     ExchangeConnectionError,
+    ExchangeRateLimitError,
     OrderRejectionError,
+    ValidationError,
 )
 from src.core.logging import get_logger
 
@@ -34,25 +34,27 @@ from src.core.types import (
     Ticker,
     Trade,
 )
+
+# MANDATORY: Import from P-001 (database)
+from src.database.connection import get_async_session
+from src.database.models import BalanceSnapshot, PerformanceMetrics
+from src.database.queries import DatabaseQueries
+from src.database.redis_client import RedisClient
 from src.error_handling.connection_manager import ConnectionManager as ErrorConnectionManager
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import (
+    NetworkDisconnectionRecovery,
+    OrderRejectionRecovery,
+)
 
 # MANDATORY: Import from P-007 (advanced rate limiting)
 from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
 from src.exchanges.connection_manager import ConnectionManager
 
 # MANDATORY: Import from P-007A (utils)
-from src.utils.decorators import retry, log_calls, time_execution, memory_usage, log_errors
-from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery, OrderRejectionRecovery
-
-# MANDATORY: Import from P-001 (database)
-from src.database.connection import get_async_session
-from src.database.queries import DatabaseQueries
-from src.database.models import BalanceSnapshot, PerformanceMetrics
-from src.database.redis_client import RedisClient
-
+from src.utils.decorators import log_calls, log_errors, memory_usage, retry, time_execution
 
 logger = get_logger(__name__)
 
@@ -84,7 +86,7 @@ class BaseExchange(ABC):
 
         # Initialize error handling
         self.error_handler = ErrorHandler(config.error_handling)
-        self.connection_manager = ErrorConnectionManager(config.error_handling)
+        self.error_connection_manager = ErrorConnectionManager(config.error_handling)
 
         # P-007: Advanced rate limiting and connection management integration
         self.advanced_rate_limiter = AdvancedRateLimiter(config)
@@ -147,7 +149,9 @@ class BaseExchange(ABC):
 
     # Note: _initialize_data_module method removed to avoid circular dependency
 
-    async def _handle_exchange_error(self, error: Exception, operation: str, context: dict = None) -> None:
+    async def _handle_exchange_error(
+        self, error: Exception, operation: str, context: dict = None
+    ) -> None:
         """
         Handle exchange errors using the error handler with proper context.
 
@@ -167,8 +171,8 @@ class BaseExchange(ABC):
                 details={
                     "exchange_name": self.exchange_name,
                     "operation": operation,
-                    **(context if context else {})
-                }
+                    **(context if context else {}),
+                },
             )
 
             # Handle the error with appropriate recovery scenario
@@ -248,7 +252,7 @@ class BaseExchange(ABC):
                         total_balance=total_balance,
                         available_balance=total_balance,  # Simplified for now
                         locked_balance=Decimal("0"),  # Simplified for now
-                        timestamp=datetime.now()
+                        timestamp=datetime.now(),
                     )
 
                     await self.db_queries.create(balance_snapshot)
@@ -299,7 +303,7 @@ class BaseExchange(ABC):
                 total_pnl=metrics.get("total_pnl", Decimal("0")),
                 win_rate=metrics.get("win_rate", 0.0),
                 sharpe_ratio=metrics.get("sharpe_ratio"),
-                max_drawdown=metrics.get("max_drawdown")
+                max_drawdown=metrics.get("max_drawdown"),
             )
 
             # Store in database
@@ -371,8 +375,7 @@ class BaseExchange(ABC):
             if self.market_data_source:
                 # Subscribe to ticker updates for real-time data
                 market_data = await self.market_data_source.get_historical_data(
-                    self.exchange_name, symbol,
-                    start_time=None, end_time=None, interval=timeframe
+                    self.exchange_name, symbol, start_time=None, end_time=None, interval=timeframe
                 )
 
                 if market_data:
@@ -414,7 +417,7 @@ class BaseExchange(ABC):
                 "technical_indicators": {},
                 "statistical_features": {},
                 "validation_results": {},
-                "quality_score": 0.0
+                "quality_score": 0.0,
             }
 
             # Process data if processor is available
@@ -433,7 +436,9 @@ class BaseExchange(ABC):
                     "sma_20": await self.technical_indicators.calculate_sma(symbol, 20, "price"),
                     "rsi_14": await self.technical_indicators.calculate_rsi(symbol, 14),
                     "macd": await self.technical_indicators.calculate_macd(symbol),
-                    "bollinger": await self.technical_indicators.calculate_bollinger_bands(symbol, 20, 2.0)
+                    "bollinger": await self.technical_indicators.calculate_bollinger_bands(
+                        symbol, 20, 2.0
+                    ),
                 }
 
             # Calculate statistical features if available
@@ -442,22 +447,27 @@ class BaseExchange(ABC):
 
                 # Calculate common statistical features
                 result["statistical_features"] = {
-                    "rolling_stats": await self.statistical_features.calculate_rolling_stats(symbol, 20, "price"),
-                    "autocorrelation": await self.statistical_features.calculate_autocorrelation(symbol, 10, "price"),
-                    "regime": await self.statistical_features.detect_regime(symbol, 50, "price")
+                    "rolling_stats": await self.statistical_features.calculate_rolling_stats(
+                        symbol, 20, "price"
+                    ),
+                    "autocorrelation": await self.statistical_features.calculate_autocorrelation(
+                        symbol, 10, "price"
+                    ),
+                    "regime": await self.statistical_features.detect_regime(symbol, 50, "price"),
                 }
 
             # Validate data if validator is available
             if self.data_validator:
-                is_valid, validation_issues = await self.data_validator.validate_market_data(raw_data)
-                result["validation_results"] = {
-                    "is_valid": is_valid,
-                    "issues": validation_issues
-                }
+                is_valid, validation_issues = await self.data_validator.validate_market_data(
+                    raw_data
+                )
+                result["validation_results"] = {"is_valid": is_valid, "issues": validation_issues}
 
             # Monitor data quality if monitor is available
             if self.quality_monitor:
-                quality_score, drift_alerts = await self.quality_monitor.monitor_data_quality(raw_data)
+                quality_score, drift_alerts = await self.quality_monitor.monitor_data_quality(
+                    raw_data
+                )
                 result["quality_score"] = quality_score
 
             return result
@@ -467,7 +477,9 @@ class BaseExchange(ABC):
             return {}
 
     @abstractmethod
-    async def _get_market_data_from_exchange(self, symbol: str, timeframe: str = "1m") -> MarketData:
+    async def _get_market_data_from_exchange(
+        self, symbol: str, timeframe: str = "1m"
+    ) -> MarketData:
         """
         Get market data from exchange API (to be implemented by subclasses).
 
@@ -680,7 +692,7 @@ class BaseExchange(ABC):
                 fee=Decimal("0"),  # Will be calculated separately
                 pnl=Decimal("0"),  # Will be calculated separately
                 status=order_response.status,
-                timestamp=order_response.timestamp
+                timestamp=order_response.timestamp,
             )
 
             # Store in database
@@ -731,9 +743,7 @@ class BaseExchange(ABC):
             # Get current performance metrics for today
             today = datetime.now().date()
             existing_metrics = await self.db_queries.get_performance_metrics_by_bot(
-                f"{self.exchange_name}_bot",
-                start_date=today,
-                end_date=today
+                f"{self.exchange_name}_bot", start_date=today, end_date=today
             )
 
             if existing_metrics:
@@ -758,11 +768,11 @@ class BaseExchange(ABC):
                 metrics_data = {
                     "total_trades": 1,
                     "winning_trades": 0,  # TODO: Calculate based on P&L
-                    "losing_trades": 0,   # TODO: Calculate based on P&L
+                    "losing_trades": 0,  # TODO: Calculate based on P&L
                     "total_pnl": Decimal("0"),  # TODO: Calculate based on position P&L
                     "win_rate": 0.0,  # TODO: Calculate based on win/loss ratio
                     "sharpe_ratio": None,  # TODO: Calculate based on returns
-                    "max_drawdown": None   # TODO: Calculate based on equity curve
+                    "max_drawdown": None,  # TODO: Calculate based on equity curve
                 }
 
                 await self._store_performance_metrics(metrics_data)

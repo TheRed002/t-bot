@@ -440,11 +440,8 @@ class MeanReversionStrategy(BaseStrategy):
 
                     # TODO: Remove in production - Debug logging
                     logger.debug(
-                        f"ATR calculation result: {atr}, high_history_len: {
-                            len(self.high_history)
-                        }, low_history_len: {len(self.low_history)}, price_history_len: {
-                            len(self.price_history)
-                        }"
+                        f"ATR calculation result: {atr}, high_history_len: {len(self.high_history)}, "
+                        f"low_history_len: {len(self.low_history)}, price_history_len: {len(self.price_history)}"
                     )
 
                     if atr is not None and atr > 0:

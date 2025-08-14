@@ -8,16 +8,15 @@ CRITICAL: This integrates with P-001 (core types) and provides
 exchange-specific extensions.
 """
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-import re
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 # MANDATORY: Import from P-001
-
 # Use centralized validators to avoid duplication
 from src.utils.validators import (
     validate_symbol as core_validate_symbol,
@@ -78,13 +77,10 @@ class ExchangeTradingPair(BaseModel):
 class ExchangeFee(BaseModel):
     """Exchange fee structure."""
 
-    maker_fee: Decimal = Field(default=Decimal(
-        "0.001"), description="Maker fee rate")
-    taker_fee: Decimal = Field(default=Decimal(
-        "0.001"), description="Taker fee rate")
+    maker_fee: Decimal = Field(default=Decimal("0.001"), description="Maker fee rate")
+    taker_fee: Decimal = Field(default=Decimal("0.001"), description="Taker fee rate")
     min_fee: Decimal = Field(default=Decimal("0"), description="Minimum fee")
-    max_fee: Decimal = Field(default=Decimal(
-        "0.01"), description="Maximum fee")
+    max_fee: Decimal = Field(default=Decimal("0.01"), description="Maximum fee")
 
 
 class ExchangeRateLimit(BaseModel):

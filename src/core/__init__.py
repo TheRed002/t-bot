@@ -29,6 +29,7 @@ from .logging import (
 )
 from .types import (
     DriftType,
+    ErrorPattern,
     IngestionMode,
     MarketData,
     NewsSentiment,

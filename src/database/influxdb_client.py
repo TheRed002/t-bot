@@ -51,13 +51,13 @@ class InfluxDBClientWrapper:
                 self.client.ping()
                 logger.info("InfluxDB connection established")
             except Exception as e:
-                raise DataSourceError(f"InfluxDB health check failed: {e!s}")
+                raise DataSourceError(f"InfluxDB health check failed: {e!s}") from e
 
             logger.info("InfluxDB connection established")
 
         except Exception as e:
             logger.error("InfluxDB connection failed", error=str(e))
-            raise DataSourceError(f"InfluxDB connection failed: {e!s}")
+            raise DataSourceError(f"InfluxDB connection failed: {e!s}") from e
 
     def disconnect(self) -> None:
         """Disconnect from InfluxDB."""
@@ -81,7 +81,7 @@ class InfluxDBClientWrapper:
 
         # Add fields
         for key, value in fields.items():
-            if isinstance(value, (int, float)):
+            if isinstance(value, int | float):
                 point.field(key, value)
             elif isinstance(value, bool):
                 point.field(key, value)
@@ -105,7 +105,7 @@ class InfluxDBClientWrapper:
             self.write_api.write(bucket=self.bucket, record=point)
         except Exception as e:
             logger.error("Failed to write point to InfluxDB", error=str(e))
-            raise DataError(f"Failed to write point to InfluxDB: {e!s}")
+            raise DataError(f"Failed to write point to InfluxDB: {e!s}") from e
 
     def write_points(self, points: list[Point]) -> None:
         """Write multiple points to InfluxDB."""
@@ -113,7 +113,7 @@ class InfluxDBClientWrapper:
             self.write_api.write(bucket=self.bucket, record=points)
         except Exception as e:
             logger.error("Failed to write points to InfluxDB", error=str(e))
-            raise DataError(f"Failed to write points to InfluxDB: {e!s}")
+            raise DataError(f"Failed to write points to InfluxDB: {e!s}") from e
 
     # Market data utilities
     def write_market_data(
@@ -271,7 +271,7 @@ class InfluxDBClientWrapper:
             return self._parse_query_result(result)
         except Exception as e:
             logger.error("Failed to query market data", error=str(e))
-            raise DataError(f"Failed to query market data: {e!s}")
+            raise DataError(f"Failed to query market data: {e!s}") from e
 
     def query_trades(
         self, bot_id: str, start_time: datetime, end_time: datetime, limit: int = 1000
@@ -290,7 +290,7 @@ class InfluxDBClientWrapper:
             return self._parse_query_result(result)
         except Exception as e:
             logger.error("Failed to query trades", error=str(e))
-            raise DataError(f"Failed to query trades: {e!s}")
+            raise DataError(f"Failed to query trades: {e!s}") from e
 
     def query_performance_metrics(
         self, bot_id: str, start_time: datetime, end_time: datetime
@@ -308,7 +308,7 @@ class InfluxDBClientWrapper:
             return self._parse_query_result(result)
         except Exception as e:
             logger.error("Failed to query performance metrics", error=str(e))
-            raise DataError(f"Failed to query performance metrics: {e!s}")
+            raise DataError(f"Failed to query performance metrics: {e!s}") from e
 
     def _parse_query_result(self, result) -> list[dict[str, Any]]:
         """Parse InfluxDB query result into list of dictionaries."""

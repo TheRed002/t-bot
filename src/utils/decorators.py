@@ -117,9 +117,6 @@ def time_execution(func: Callable) -> Callable:
             )
             raise
 
-            # Track function execution for monitoring
-        logger.debug(f"Function {func.__name__} executed successfully")
-
     return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
 
 
@@ -370,10 +367,11 @@ def circuit_breaker(
     """
 
     def decorator(func: Callable) -> Callable:
-        # Circuit breaker state
+        # Circuit breaker state with thread safety
         failure_count = 0
         last_failure_time = 0
         circuit_state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
+        lock = threading.Lock()
 
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs) -> Any:
@@ -382,40 +380,46 @@ def circuit_breaker(
             current_time = time.time()
 
             # Check if circuit is open and recovery timeout has passed
-            if circuit_state == "OPEN" and current_time - last_failure_time > recovery_timeout:
-                circuit_state = "HALF_OPEN"
-                logger.info("Circuit breaker transitioning to HALF_OPEN", function=func.__name__)
+            with lock:
+                if circuit_state == "OPEN" and current_time - last_failure_time > recovery_timeout:
+                    circuit_state = "HALF_OPEN"
+                    logger.info(
+                        "Circuit breaker transitioning to HALF_OPEN", function=func.__name__
+                    )
 
-            # If circuit is open, reject the call
-            if circuit_state == "OPEN":
-                raise TimeoutError(f"Circuit breaker is OPEN for {func.__name__}")
+                # If circuit is open, reject the call
+                if circuit_state == "OPEN":
+                    raise TimeoutError(f"Circuit breaker is OPEN for {func.__name__}")
 
             try:
                 result = await func(*args, **kwargs)
 
                 # Success - close circuit if it was half-open
-                if circuit_state == "HALF_OPEN":
-                    circuit_state = "CLOSED"
-                    failure_count = 0
-                    logger.info(
-                        "Circuit breaker CLOSED after successful recovery", function=func.__name__
-                    )
+                with lock:
+                    if circuit_state == "HALF_OPEN":
+                        circuit_state = "CLOSED"
+                        failure_count = 0
+                        logger.info(
+                            "Circuit breaker CLOSED after successful recovery",
+                            function=func.__name__,
+                        )
 
                 return result
 
             except expected_exception:
-                failure_count += 1
-                last_failure_time = current_time
+                with lock:
+                    failure_count += 1
+                    last_failure_time = current_time
 
-                # Check if we should open the circuit
-                if failure_count >= failure_threshold:
-                    circuit_state = "OPEN"
-                    logger.error(
-                        "Circuit breaker OPENED due to repeated failures",
-                        function=func.__name__,
-                        failure_count=failure_count,
-                        threshold=failure_threshold,
-                    )
+                    # Check if we should open the circuit
+                    if failure_count >= failure_threshold:
+                        circuit_state = "OPEN"
+                        logger.error(
+                            "Circuit breaker OPENED due to repeated failures",
+                            function=func.__name__,
+                            failure_count=failure_count,
+                            threshold=failure_threshold,
+                        )
 
                 raise
 
@@ -426,40 +430,46 @@ def circuit_breaker(
             current_time = time.time()
 
             # Check if circuit is open and recovery timeout has passed
-            if circuit_state == "OPEN" and current_time - last_failure_time > recovery_timeout:
-                circuit_state = "HALF_OPEN"
-                logger.info("Circuit breaker transitioning to HALF_OPEN", function=func.__name__)
+            with lock:
+                if circuit_state == "OPEN" and current_time - last_failure_time > recovery_timeout:
+                    circuit_state = "HALF_OPEN"
+                    logger.info(
+                        "Circuit breaker transitioning to HALF_OPEN", function=func.__name__
+                    )
 
-            # If circuit is open, reject the call
-            if circuit_state == "OPEN":
-                raise TimeoutError(f"Circuit breaker is OPEN for {func.__name__}")
+                # If circuit is open, reject the call
+                if circuit_state == "OPEN":
+                    raise TimeoutError(f"Circuit breaker is OPEN for {func.__name__}")
 
             try:
                 result = func(*args, **kwargs)
 
                 # Success - close circuit if it was half-open
-                if circuit_state == "HALF_OPEN":
-                    circuit_state = "CLOSED"
-                    failure_count = 0
-                    logger.info(
-                        "Circuit breaker CLOSED after successful recovery", function=func.__name__
-                    )
+                with lock:
+                    if circuit_state == "HALF_OPEN":
+                        circuit_state = "CLOSED"
+                        failure_count = 0
+                        logger.info(
+                            "Circuit breaker CLOSED after successful recovery",
+                            function=func.__name__,
+                        )
 
                 return result
 
             except expected_exception:
-                failure_count += 1
-                last_failure_time = current_time
+                with lock:
+                    failure_count += 1
+                    last_failure_time = current_time
 
-                # Check if we should open the circuit
-                if failure_count >= failure_threshold:
-                    circuit_state = "OPEN"
-                    logger.error(
-                        "Circuit breaker OPENED due to repeated failures",
-                        function=func.__name__,
-                        failure_count=failure_count,
-                        threshold=failure_threshold,
-                    )
+                    # Check if we should open the circuit
+                    if failure_count >= failure_threshold:
+                        circuit_state = "OPEN"
+                        logger.error(
+                            "Circuit breaker OPENED due to repeated failures",
+                            function=func.__name__,
+                            failure_count=failure_count,
+                            threshold=failure_threshold,
+                        )
 
                 raise
 

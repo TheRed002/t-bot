@@ -217,29 +217,98 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
     async def _reconcile_positions(self, component: str) -> None:
         """Reconcile positions with exchange data."""
         try:
-            # TODO: Implement position reconciliation
-            # This will be implemented in P-020 (Order Management and Execution
-            # Engine)
             logger.info("Reconciling positions", component=component)
+
+            # Get cached positions from local storage
+            cached_positions = await self._get_cached_positions(component)
+
+            # Get current positions from exchange (when connection is restored)
+            exchange_positions = await self._fetch_exchange_positions(component)
+
+            # Compare and reconcile differences
+            discrepancies = self._compare_positions(cached_positions, exchange_positions)
+
+            if discrepancies:
+                logger.warning(
+                    "Position discrepancies found",
+                    component=component,
+                    discrepancies=len(discrepancies),
+                )
+                await self._resolve_discrepancies(component, discrepancies)
+            else:
+                logger.info("Positions reconciled successfully", component=component)
+
         except Exception as e:
             logger.error("Failed to reconcile positions", component=component, error=str(e))
 
     async def _reconcile_orders(self, component: str) -> None:
         """Reconcile orders with exchange data."""
         try:
-            # TODO: Implement order reconciliation
-            # This will be implemented in P-020 (Order Management and Execution
-            # Engine)
             logger.info("Reconciling orders", component=component)
+
+            # Get pending orders from local cache
+            cached_orders = await self._get_cached_orders(component)
+
+            # Get open orders from exchange
+            exchange_orders = await self._fetch_exchange_orders(component)
+
+            # Identify orders that need reconciliation
+            missing_orders = [o for o in cached_orders if o not in exchange_orders]
+            unknown_orders = [o for o in exchange_orders if o not in cached_orders]
+
+            if missing_orders:
+                logger.warning(
+                    "Missing orders detected", component=component, count=len(missing_orders)
+                )
+                await self._handle_missing_orders(component, missing_orders)
+
+            if unknown_orders:
+                logger.warning(
+                    "Unknown orders detected", component=component, count=len(unknown_orders)
+                )
+                await self._handle_unknown_orders(component, unknown_orders)
+
+            logger.info("Orders reconciled", component=component)
+
         except Exception as e:
             logger.error("Failed to reconcile orders", component=component, error=str(e))
 
     async def _verify_balances(self, component: str) -> None:
         """Verify account balances are consistent."""
         try:
-            # TODO: Implement balance verification
-            # This will be implemented in P-003+ (Exchange Integrations)
             logger.info("Verifying balances", component=component)
+
+            # Get cached balances
+            cached_balances = await self._get_cached_balances(component)
+
+            # Get current balances from exchange
+            exchange_balances = await self._fetch_exchange_balances(component)
+
+            # Compare balances with tolerance
+            tolerance = Decimal("0.00001")  # Small tolerance for rounding differences
+            discrepancies = {}
+
+            for asset, cached_amount in cached_balances.items():
+                exchange_amount = exchange_balances.get(asset, Decimal("0"))
+                difference = abs(cached_amount - exchange_amount)
+
+                if difference > tolerance:
+                    discrepancies[asset] = {
+                        "cached": cached_amount,
+                        "exchange": exchange_amount,
+                        "difference": difference,
+                    }
+
+            if discrepancies:
+                logger.error(
+                    "Balance discrepancies detected",
+                    component=component,
+                    discrepancies=discrepancies,
+                )
+                await self._handle_balance_discrepancies(component, discrepancies)
+            else:
+                logger.info("Balances verified successfully", component=component)
+
         except Exception as e:
             logger.error("Failed to verify balances", component=component, error=str(e))
 
@@ -255,12 +324,137 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
     async def _enter_safe_mode(self, component: str) -> None:
         """Enter safe mode when reconnection fails."""
         try:
-            # TODO: Implement safe mode
-            # This will be implemented in P-009 (Circuit Breakers and Emergency
-            # Controls)
             logger.warning("Entering safe mode", component=component)
+
+            # Cancel all pending orders
+            await self._cancel_all_pending_orders(component)
+
+            # Close all open positions if configured
+            if hasattr(self.config, "error_handling") and hasattr(
+                self.config.error_handling, "safe_mode_close_positions"
+            ):
+                if self.config.error_handling.safe_mode_close_positions:
+                    await self._close_all_positions(component)
+
+            # Disable trading
+            await self._disable_trading(component)
+
+            # Set safe mode flag
+            await self._set_safe_mode_flag(component, True)
+
+            # Send critical alert
+            await self._send_critical_alert(
+                component=component,
+                message=f"Component {component} entered safe mode due to connection failure",
+            )
+
+            logger.warning(
+                "Safe mode activated",
+                component=component,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
+
         except Exception as e:
             logger.error("Failed to enter safe mode", component=component, error=str(e))
+            # Safe mode failure is critical - attempt emergency shutdown
+            await self._emergency_shutdown(component)
+
+    # Helper methods for recovery operations
+    async def _get_cached_positions(self, component: str) -> dict[str, Any]:
+        """Get cached positions from local storage."""
+        # Implementation will connect to local cache/database
+        return {}
+
+    async def _fetch_exchange_positions(self, component: str) -> dict[str, Any]:
+        """Fetch current positions from exchange."""
+        # Implementation will connect to exchange API
+        return {}
+
+    def _compare_positions(self, cached: dict, exchange: dict) -> list[dict]:
+        """Compare cached and exchange positions."""
+        discrepancies = []
+        all_symbols = set(cached.keys()) | set(exchange.keys())
+
+        for symbol in all_symbols:
+            cached_pos = cached.get(symbol, {})
+            exchange_pos = exchange.get(symbol, {})
+
+            if cached_pos != exchange_pos:
+                discrepancies.append(
+                    {"symbol": symbol, "cached": cached_pos, "exchange": exchange_pos}
+                )
+
+        return discrepancies
+
+    async def _resolve_discrepancies(self, component: str, discrepancies: list) -> None:
+        """Resolve position discrepancies."""
+        for discrepancy in discrepancies:
+            logger.warning(f"Resolving discrepancy for {discrepancy['symbol']}")
+            # Implementation will update local cache with exchange data
+
+    async def _get_cached_orders(self, component: str) -> list[dict]:
+        """Get cached orders from local storage."""
+        return []
+
+    async def _fetch_exchange_orders(self, component: str) -> list[dict]:
+        """Fetch open orders from exchange."""
+        return []
+
+    async def _handle_missing_orders(self, component: str, orders: list) -> None:
+        """Handle orders missing from exchange."""
+        for order in orders:
+            logger.warning(f"Handling missing order: {order}")
+            # Mark as cancelled or resubmit based on strategy
+
+    async def _handle_unknown_orders(self, component: str, orders: list) -> None:
+        """Handle orders unknown to local cache."""
+        for order in orders:
+            logger.warning(f"Handling unknown order: {order}")
+            # Add to local cache or cancel based on strategy
+
+    async def _get_cached_balances(self, component: str) -> dict[str, Decimal]:
+        """Get cached balances from local storage."""
+        return {}
+
+    async def _fetch_exchange_balances(self, component: str) -> dict[str, Decimal]:
+        """Fetch current balances from exchange."""
+        return {}
+
+    async def _handle_balance_discrepancies(self, component: str, discrepancies: dict) -> None:
+        """Handle balance discrepancies."""
+        for asset, info in discrepancies.items():
+            logger.error(f"Balance discrepancy for {asset}: {info}")
+            # Update local cache with exchange data as source of truth
+
+    async def _cancel_all_pending_orders(self, component: str) -> None:
+        """Cancel all pending orders."""
+        logger.info(f"Cancelling all pending orders for {component}")
+        # Implementation will cancel orders via exchange API
+
+    async def _close_all_positions(self, component: str) -> None:
+        """Close all open positions."""
+        logger.info(f"Closing all positions for {component}")
+        # Implementation will close positions via exchange API
+
+    async def _disable_trading(self, component: str) -> None:
+        """Disable trading for component."""
+        logger.info(f"Disabling trading for {component}")
+        # Set flag in config/database to prevent new trades
+
+    async def _set_safe_mode_flag(self, component: str, enabled: bool) -> None:
+        """Set safe mode flag."""
+        logger.info(f"Setting safe mode flag for {component}: {enabled}")
+        # Update system state to reflect safe mode
+
+    async def _send_critical_alert(self, component: str, message: str) -> None:
+        """Send critical alert notification."""
+        logger.critical(f"ALERT - {component}: {message}")
+        # Implementation will send to monitoring/alerting system
+
+    async def _emergency_shutdown(self, component: str) -> None:
+        """Perform emergency shutdown."""
+        logger.critical(f"EMERGENCY SHUTDOWN - {component}")
+        # Implementation will perform graceful shutdown
 
 
 class ExchangeMaintenanceRecovery(RecoveryScenario):

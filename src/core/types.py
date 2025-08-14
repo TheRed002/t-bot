@@ -173,13 +173,11 @@ class Signal(BaseModel):
     """
 
     direction: SignalDirection
-    confidence: float = Field(
-        ge=0.0, le=1.0, description="Signal confidence between 0 and 1")
+    confidence: float = Field(ge=0.0, le=1.0, description="Signal confidence between 0 and 1")
     timestamp: datetime
     symbol: str
     strategy_name: str
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional signal metadata")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional signal metadata")
 
 
 class MarketData(BaseModel):
@@ -200,21 +198,14 @@ class MarketData(BaseModel):
     # Allow potentially invalid raw values; downstream validators (DataValidator)
     # enforce correctness so tests can construct edge cases.
     symbol: str = Field(description="Trading symbol")
-    price: Decimal = Field(
-        description="Current price (raw value; may be validated elsewhere)")
-    volume: Decimal = Field(
-        description="Volume (raw value; may be validated elsewhere)")
+    price: Decimal = Field(description="Current price (raw value; may be validated elsewhere)")
+    volume: Decimal = Field(description="Volume (raw value; may be validated elsewhere)")
     timestamp: datetime
-    bid: Decimal | None = Field(
-        default=None, description="Bid price (raw value)")
-    ask: Decimal | None = Field(
-        default=None, description="Ask price (raw value)")
-    open_price: Decimal | None = Field(
-        default=None, description="Open price (raw value)")
-    high_price: Decimal | None = Field(
-        default=None, description="High price (raw value)")
-    low_price: Decimal | None = Field(
-        default=None, description="Low price (raw value)")
+    bid: Decimal | None = Field(default=None, description="Bid price (raw value)")
+    ask: Decimal | None = Field(default=None, description="Ask price (raw value)")
+    open_price: Decimal | None = Field(default=None, description="Open price (raw value)")
+    high_price: Decimal | None = Field(default=None, description="High price (raw value)")
+    low_price: Decimal | None = Field(default=None, description="Low price (raw value)")
 
 
 class OrderRequest(BaseModel):
@@ -225,8 +216,7 @@ class OrderRequest(BaseModel):
     side: OrderSide
     order_type: OrderType
     # Allow raw values for testing; risk layer enforces positivity
-    quantity: Decimal = Field(
-        description="Order quantity (validated in risk layer)")
+    quantity: Decimal = Field(description="Order quantity (validated in risk layer)")
     price: Decimal | None = Field(
         default=None, gt=0, description="Order price (must be positive if set)"
     )
@@ -269,12 +259,9 @@ class Position(BaseModel):
     """
 
     symbol: str = Field(min_length=3, description="Trading symbol")
-    quantity: Decimal = Field(
-        gt=0, description="Position quantity (must be positive)")
-    entry_price: Decimal = Field(
-        gt=0, description="Entry price (must be positive)")
-    current_price: Decimal = Field(
-        gt=0, description="Current price (must be positive)")
+    quantity: Decimal = Field(gt=0, description="Position quantity (must be positive)")
+    entry_price: Decimal = Field(gt=0, description="Entry price (must be positive)")
+    current_price: Decimal = Field(gt=0, description="Current price (must be positive)")
     unrealized_pnl: Decimal
     side: OrderSide
     timestamp: datetime
@@ -345,12 +332,10 @@ class Trade(BaseModel):
     id: str = Field(min_length=1, description="Trade ID")
     symbol: str = Field(min_length=3, description="Trading symbol")
     side: OrderSide
-    quantity: Decimal = Field(
-        gt=0, description="Trade quantity (must be positive)")
+    quantity: Decimal = Field(gt=0, description="Trade quantity (must be positive)")
     price: Decimal = Field(gt=0, description="Trade price (must be positive)")
     timestamp: datetime
-    fee: Decimal = Field(ge=0, default=Decimal(
-        "0"), description="Trade fee (must be non-negative)")
+    fee: Decimal = Field(ge=0, default=Decimal("0"), description="Trade fee (must be non-negative)")
     fee_currency: str = Field(
         default="USDT", pattern=r"^[A-Z]{3,10}$", description="Fee currency code"
     )
@@ -380,13 +365,10 @@ class RiskMetrics(BaseModel):
 
     var_1d: Decimal = Field(description="1-day Value at Risk")
     var_5d: Decimal = Field(description="5-day Value at Risk")
-    expected_shortfall: Decimal = Field(
-        description="Expected shortfall (Conditional VaR)")
+    expected_shortfall: Decimal = Field(description="Expected shortfall (Conditional VaR)")
     max_drawdown: Decimal = Field(description="Maximum historical drawdown")
-    sharpe_ratio: Decimal | None = Field(
-        default=None, description="Sharpe ratio")
-    current_drawdown: Decimal = Field(
-        default=Decimal("0"), description="Current drawdown")
+    sharpe_ratio: Decimal | None = Field(default=None, description="Sharpe ratio")
+    current_drawdown: Decimal = Field(default=Decimal("0"), description="Current drawdown")
     risk_level: RiskLevel = Field(description="Current risk level")
     timestamp: datetime = Field(description="Timestamp of risk calculation")
 
@@ -395,10 +377,8 @@ class PositionLimits(BaseModel):
     """Position limits for risk management."""
 
     max_position_size: Decimal = Field(description="Maximum position size")
-    max_positions_per_symbol: int = Field(
-        default=1, description="Maximum positions per symbol")
-    max_total_positions: int = Field(
-        default=10, description="Maximum total positions")
+    max_positions_per_symbol: int = Field(default=1, description="Maximum positions per symbol")
+    max_total_positions: int = Field(default=10, description="Maximum total positions")
     max_portfolio_exposure: Decimal = Field(
         default=Decimal("0.95"), description="Maximum portfolio exposure (95%)"
     )
@@ -486,17 +466,13 @@ class CapitalAllocation(BaseModel):
     strategy_id: str = Field(
         min_length=1, pattern=r"^[a-zA-Z0-9_-]+$", description="Strategy identifier"
     )
-    exchange: str = Field(
-        min_length=3, pattern=r"^[a-z]+$", description="Exchange name")
-    allocated_amount: Decimal = Field(
-        gt=0, description="Total allocated capital")
+    exchange: str = Field(min_length=3, pattern=r"^[a-z]+$", description="Exchange name")
+    allocated_amount: Decimal = Field(gt=0, description="Total allocated capital")
     utilized_amount: Decimal = Field(
         default=Decimal("0"), ge=0, description="Currently utilized capital"
     )
-    available_amount: Decimal = Field(
-        ge=0, description="Available capital for trading")
-    allocation_percentage: float = Field(
-        description="Allocation percentage of total capital")
+    available_amount: Decimal = Field(ge=0, description="Available capital for trading")
+    allocation_percentage: float = Field(description="Allocation percentage of total capital")
     last_rebalance: datetime = Field(description="Last rebalancing timestamp")
 
     @field_validator("allocation_percentage")
@@ -504,25 +480,19 @@ class CapitalAllocation(BaseModel):
     def validate_allocation_percentage(cls, v: float) -> float:
         """Validate allocation percentage is between 0 and 1."""
         if not 0.0 <= v <= 1.0:
-            raise ValueError(
-                f"Allocation percentage must be between 0 and 1, got {v}")
+            raise ValueError(f"Allocation percentage must be between 0 and 1, got {v}")
         return v
 
 
 class FundFlow(BaseModel):
     """Fund flow record for capital movements."""
 
-    from_strategy: str | None = Field(
-        default=None, description="Source strategy")
-    to_strategy: str | None = Field(
-        default=None, description="Target strategy")
-    from_exchange: str | None = Field(
-        default=None, description="Source exchange")
-    to_exchange: str | None = Field(
-        default=None, description="Target exchange")
+    from_strategy: str | None = Field(default=None, description="Source strategy")
+    to_strategy: str | None = Field(default=None, description="Target strategy")
+    from_exchange: str | None = Field(default=None, description="Source exchange")
+    to_exchange: str | None = Field(default=None, description="Target exchange")
     amount: Decimal = Field(description="Flow amount")
-    currency: str = Field(
-        default="USDT", pattern=r"^[A-Z]{3,10}$", description="Currency code")
+    currency: str = Field(default="USDT", pattern=r"^[A-Z]{3,10}$", description="Currency code")
     reason: str = Field(min_length=1, description="Flow reason")
     timestamp: datetime = Field(description="Flow timestamp")
     converted_amount: Decimal | None = Field(
@@ -553,8 +523,7 @@ class CapitalMetrics(BaseModel):
         le=3.0,  # Allow up to 300% efficiency for exceptional performance
         description="Real allocation efficiency based on utilization, performance, and market conditions",
     )
-    rebalance_frequency_hours: int = Field(
-        description="Rebalancing frequency in hours")
+    rebalance_frequency_hours: int = Field(description="Rebalancing frequency in hours")
     emergency_reserve: Decimal = Field(description="Emergency reserve amount")
     last_updated: datetime = Field(description="Last metrics update timestamp")
     allocation_count: int = Field(description="Number of active allocations")
@@ -564,8 +533,7 @@ class CapitalMetrics(BaseModel):
     def validate_utilization_rate(cls, v):
         """Validate utilization rate is between 0 and 1."""
         if not 0.0 <= v <= 1.0:
-            raise ValueError(
-                f"Utilization rate must be between 0 and 1, got {v}")
+            raise ValueError(f"Utilization rate must be between 0 and 1, got {v}")
         return v
 
     @field_validator("allocation_efficiency")
@@ -573,8 +541,7 @@ class CapitalMetrics(BaseModel):
     def validate_allocation_efficiency(cls, v):
         """Validate allocation efficiency is between 0 and 3 (300% efficiency allowed)."""
         if not 0.0 <= v <= 3.0:
-            raise ValueError(
-                f"Allocation efficiency must be between 0 and 3, got {v}")
+            raise ValueError(f"Allocation efficiency must be between 0 and 3, got {v}")
         return v
 
 
@@ -582,15 +549,11 @@ class CurrencyExposure(BaseModel):
     """Currency exposure tracking."""
 
     currency: str = Field(description="Currency code")
-    total_exposure: Decimal = Field(
-        description="Total exposure in this currency")
-    base_currency_equivalent: Decimal = Field(
-        description="Equivalent in base currency")
-    exposure_percentage: float = Field(
-        description="Percentage of total portfolio")
+    total_exposure: Decimal = Field(description="Total exposure in this currency")
+    base_currency_equivalent: Decimal = Field(description="Equivalent in base currency")
+    exposure_percentage: float = Field(description="Percentage of total portfolio")
     hedging_required: bool = Field(description="Whether hedging is required")
-    hedge_amount: Decimal = Field(
-        default=Decimal("0"), description="Amount to hedge")
+    hedge_amount: Decimal = Field(default=Decimal("0"), description="Amount to hedge")
     timestamp: datetime = Field(description="Exposure calculation timestamp")
 
     @field_validator("exposure_percentage")
@@ -598,16 +561,14 @@ class CurrencyExposure(BaseModel):
     def validate_exposure_percentage(cls, v):
         """Validate exposure percentage is between 0 and 1."""
         if not 0.0 <= v <= 1.0:
-            raise ValueError(
-                f"Exposure percentage must be between 0 and 1, got {v}")
+            raise ValueError(f"Exposure percentage must be between 0 and 1, got {v}")
         return v
 
 
 class ExchangeAllocation(BaseModel):
     """Exchange-specific capital allocation."""
 
-    exchange: str = Field(
-        min_length=3, pattern=r"^[a-z]+$", description="Exchange name")
+    exchange: str = Field(min_length=3, pattern=r"^[a-z]+$", description="Exchange name")
     allocated_amount: Decimal = Field(gt=0, description="Allocated capital")
     available_amount: Decimal = Field(ge=0, description="Available capital")
     utilization_rate: float = Field(description="Utilization rate")
@@ -631,14 +592,10 @@ class WithdrawalRule(BaseModel):
     name: str = Field(description="Rule name")
     description: str = Field(description="Rule description")
     enabled: bool = Field(default=True, description="Whether rule is enabled")
-    threshold: float | None = Field(
-        default=None, description="Performance threshold")
-    min_amount: Decimal | None = Field(
-        default=None, description="Minimum withdrawal amount")
-    max_percentage: float | None = Field(
-        default=None, description="Maximum withdrawal percentage")
-    cooldown_hours: int | None = Field(
-        default=None, description="Cooldown period in hours")
+    threshold: float | None = Field(default=None, description="Performance threshold")
+    min_amount: Decimal | None = Field(default=None, description="Minimum withdrawal amount")
+    max_percentage: float | None = Field(default=None, description="Maximum withdrawal percentage")
+    cooldown_hours: int | None = Field(default=None, description="Cooldown period in hours")
 
     @field_validator("threshold", "max_percentage")
     @classmethod
@@ -652,20 +609,13 @@ class WithdrawalRule(BaseModel):
 class CapitalProtection(BaseModel):
     """Capital protection configuration."""
 
-    emergency_reserve_pct: float = Field(
-        default=0.1, description="Emergency reserve percentage")
-    max_daily_loss_pct: float = Field(
-        default=0.05, description="Maximum daily loss percentage")
-    max_weekly_loss_pct: float = Field(
-        default=0.10, description="Maximum weekly loss percentage")
-    max_monthly_loss_pct: float = Field(
-        default=0.15, description="Maximum monthly loss percentage")
-    profit_lock_pct: float = Field(
-        default=0.5, description="Profit lock percentage")
-    auto_compound_enabled: bool = Field(
-        default=True, description="Enable auto-compounding")
-    auto_compound_frequency: str = Field(
-        default="weekly", description="Auto-compound frequency")
+    emergency_reserve_pct: float = Field(default=0.1, description="Emergency reserve percentage")
+    max_daily_loss_pct: float = Field(default=0.05, description="Maximum daily loss percentage")
+    max_weekly_loss_pct: float = Field(default=0.10, description="Maximum weekly loss percentage")
+    max_monthly_loss_pct: float = Field(default=0.15, description="Maximum monthly loss percentage")
+    profit_lock_pct: float = Field(default=0.5, description="Profit lock percentage")
+    auto_compound_enabled: bool = Field(default=True, description="Enable auto-compounding")
+    auto_compound_frequency: str = Field(default="weekly", description="Auto-compound frequency")
     profit_threshold: Decimal = Field(
         default=Decimal("100"), description="Minimum profit for compounding"
     )
@@ -712,8 +662,7 @@ class StrategyConfig(BaseModel):
 
     name: str = Field(min_length=1, description="Strategy name")
     strategy_type: StrategyType = Field(description="Strategy type")
-    enabled: bool = Field(
-        default=True, description="Whether strategy is enabled")
+    enabled: bool = Field(default=True, description="Whether strategy is enabled")
     symbols: list[str] = Field(min_length=1, description="Trading symbols")
     timeframe: str = Field(
         default="1h", pattern=r"^(1m|5m|15m|30m|1h|4h|1d)$", description="Trading timeframe"
@@ -721,13 +670,11 @@ class StrategyConfig(BaseModel):
     min_confidence: float = Field(
         default=0.6, ge=0.0, le=1.0, description="Minimum signal confidence"
     )
-    max_positions: int = Field(
-        default=5, ge=1, description="Maximum positions")
+    max_positions: int = Field(default=5, ge=1, description="Maximum positions")
     position_size_pct: float = Field(
         default=0.02, ge=0.001, le=0.1, description="Position size percentage"
     )
-    stop_loss_pct: float = Field(
-        default=0.02, ge=0.001, le=0.1, description="Stop loss percentage")
+    stop_loss_pct: float = Field(default=0.02, ge=0.001, le=0.1, description="Stop loss percentage")
     take_profit_pct: float = Field(
         default=0.04, ge=0.001, le=0.2, description="Take profit percentage"
     )
@@ -767,16 +714,12 @@ class StrategyMetrics(BaseModel):
     """Strategy performance metrics model."""
 
     total_trades: int = Field(default=0, description="Total number of trades")
-    winning_trades: int = Field(
-        default=0, description="Number of winning trades")
-    losing_trades: int = Field(
-        default=0, description="Number of losing trades")
+    winning_trades: int = Field(default=0, description="Number of winning trades")
+    losing_trades: int = Field(default=0, description="Number of losing trades")
     total_pnl: Decimal = Field(default=Decimal("0"), description="Total P&L")
     win_rate: float = Field(default=0.0, description="Win rate percentage")
-    sharpe_ratio: float | None = Field(
-        default=None, description="Sharpe ratio")
-    max_drawdown: float | None = Field(
-        default=None, description="Maximum drawdown")
+    sharpe_ratio: float | None = Field(default=None, description="Sharpe ratio")
+    max_drawdown: float | None = Field(default=None, description="Maximum drawdown")
     last_updated: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Last metrics update timestamp",

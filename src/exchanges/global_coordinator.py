@@ -25,7 +25,7 @@ from src.core.types import RequestType
 
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
-from src.utils.decorators import time_execution, log_calls
+from src.utils.decorators import log_calls, time_execution
 
 logger = get_logger(__name__)
 

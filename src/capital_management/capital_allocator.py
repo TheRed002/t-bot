@@ -24,6 +24,7 @@ from typing import Any
 from src.core.config import Config
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
+from src.utils.decorators import retry
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -31,8 +32,7 @@ from src.core.types import (
     CapitalAllocation,
     CapitalMetrics,
 )
-from src.database.connection import get_redis_client
-from src.database.connection import get_influxdb_client
+from src.database.connection import get_influxdb_client, get_redis_client
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.risk_management.base import BaseRiskManager
@@ -128,6 +128,7 @@ class CapitalAllocator:
             available_capital=format_currency(float(self.available_capital)),
         )
 
+    @retry(max_attempts=2, base_delay=0.5)
     async def _get_cached_allocations(self) -> dict[str, CapitalAllocation] | None:
         """Get cached allocations from Redis."""
         if not self.redis_client:
@@ -144,6 +145,7 @@ class CapitalAllocator:
             logger.warning("Failed to get cached allocations", error=str(e))
         return None
 
+    @retry(max_attempts=2, base_delay=0.5)
     async def _cache_allocations(self, allocations: dict[str, CapitalAllocation]) -> None:
         """Cache allocations in Redis."""
         if not self.redis_client:
@@ -155,13 +157,12 @@ class CapitalAllocator:
                 cache_data[key] = allocation.model_dump()
 
             await self.redis_client.set(
-                self.cache_keys["allocations"],
-                cache_data,
-                ttl=self.cache_ttl
+                self.cache_keys["allocations"], cache_data, ttl=self.cache_ttl
             )
         except Exception as e:
             logger.warning("Failed to cache allocations", error=str(e))
 
+    @retry(max_attempts=2, base_delay=0.5)
     async def _get_cached_performance(self) -> dict[str, dict[str, float]] | None:
         """Get cached performance data from Redis."""
         if not self.redis_client:
@@ -174,19 +175,19 @@ class CapitalAllocator:
             logger.warning("Failed to get cached performance", error=str(e))
         return None
 
+    @retry(max_attempts=2, base_delay=0.5)
     async def _cache_performance(self, performance: dict[str, dict[str, float]]) -> None:
         """Cache performance data in Redis."""
         if not self.redis_client:
             return
         try:
             await self.redis_client.set(
-                self.cache_keys["performance"],
-                performance,
-                ttl=self.cache_ttl
+                self.cache_keys["performance"], performance, ttl=self.cache_ttl
             )
         except Exception as e:
             logger.warning("Failed to cache performance", error=str(e))
 
+    @retry(max_attempts=2, base_delay=0.5)
     async def _get_cached_metrics(self) -> CapitalMetrics | None:
         """Get cached metrics from Redis."""
         if not self.redis_client:
@@ -205,9 +206,7 @@ class CapitalAllocator:
             return
         try:
             await self.redis_client.set(
-                self.cache_keys["metrics"],
-                metrics.model_dump(),
-                ttl=self.cache_ttl
+                self.cache_keys["metrics"], metrics.model_dump(), ttl=self.cache_ttl
             )
         except Exception as e:
             logger.warning("Failed to cache metrics", error=str(e))
@@ -219,13 +218,17 @@ class CapitalAllocator:
         try:
             # Create a point for capital metrics
             from influxdb_client import Point
-            point = Point("capital_metrics").tag("component", "capital_allocator").field(
-                "total_capital", float(metrics.total_capital)
-            ).field("allocated_capital", float(metrics.allocated_capital)).field(
-                "available_capital", float(metrics.available_capital)
-            ).field("utilization_rate", metrics.utilization_rate).field(
-                "allocation_efficiency", metrics.allocation_efficiency
-            ).field("allocation_count", metrics.allocation_count)
+
+            point = (
+                Point("capital_metrics")
+                .tag("component", "capital_allocator")
+                .field("total_capital", float(metrics.total_capital))
+                .field("allocated_capital", float(metrics.allocated_capital))
+                .field("available_capital", float(metrics.available_capital))
+                .field("utilization_rate", metrics.utilization_rate)
+                .field("allocation_efficiency", metrics.allocation_efficiency)
+                .field("allocation_count", metrics.allocation_count)
+            )
 
             # Write to InfluxDB
             self.influx_client.write_api().write(bucket="trading_bot", record=point)
@@ -233,8 +236,12 @@ class CapitalAllocator:
             logger.warning("Failed to store metrics in InfluxDB", error=str(e))
 
     async def _store_allocation_change_influxdb(
-        self, strategy_id: str, exchange: str, amount: Decimal,
-        allocation_type: str, timestamp: datetime
+        self,
+        strategy_id: str,
+        exchange: str,
+        amount: Decimal,
+        allocation_type: str,
+        timestamp: datetime,
     ) -> None:
         """Store allocation changes in InfluxDB for tracking."""
         if not self.influx_client:
@@ -242,10 +249,14 @@ class CapitalAllocator:
         try:
             # Create a point for allocation changes
             from influxdb_client import Point
-            point = Point("allocation_changes").tag("component", "capital_allocator").tag(
-                "strategy_id", strategy_id
-            ).tag("exchange", exchange).tag("allocation_type", allocation_type).field(
-                "amount", float(amount)
+
+            point = (
+                Point("allocation_changes")
+                .tag("component", "capital_allocator")
+                .tag("strategy_id", strategy_id)
+                .tag("exchange", exchange)
+                .tag("allocation_type", allocation_type)
+                .field("amount", float(amount))
             )
 
             # Write to InfluxDB
@@ -349,7 +360,7 @@ class CapitalAllocator:
                     "requested_amount": float(requested_amount),
                     "available_capital": float(self.available_capital),
                     "total_capital": float(self.total_capital),
-                }
+                },
             )
 
             # Handle error with recovery strategy
@@ -420,7 +431,7 @@ class CapitalAllocator:
                     "strategy_count": len(self.strategy_allocations),
                     "total_capital": float(self.total_capital),
                     "available_capital": float(self.available_capital),
-                }
+                },
             )
 
             # Handle error with recovery strategy
@@ -472,7 +483,7 @@ class CapitalAllocator:
                     "strategy_id": strategy_id,
                     "exchange": exchange,
                     "utilized_amount": float(utilized_amount),
-                }
+                },
             )
 
             # Handle error with recovery strategy
@@ -549,7 +560,7 @@ class CapitalAllocator:
                 details={
                     "strategy_count": len(self.strategy_allocations),
                     "total_capital": float(self.total_capital),
-                }
+                },
             )
 
             # Handle error with recovery strategy

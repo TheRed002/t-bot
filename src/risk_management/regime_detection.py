@@ -40,8 +40,7 @@ class MarketRegimeDetector:
         self.volatility_window = config.get("volatility_window", 20)
         self.trend_window = config.get("trend_window", 50)
         self.correlation_window = config.get("correlation_window", 30)
-        self.regime_change_threshold = config.get(
-            "regime_change_threshold", 0.7)
+        self.regime_change_threshold = config.get("regime_change_threshold", 0.7)
 
         # Volatility thresholds (annualized)
         self.volatility_thresholds = {
@@ -116,10 +115,8 @@ class MarketRegimeDetector:
             return regime
 
         except Exception as e:
-            logger.error("Error detecting volatility regime",
-                         symbol=symbol, error=str(e))
-            raise RiskManagementError(
-                f"Volatility regime detection failed: {e!s}")
+            logger.error("Error detecting volatility regime", symbol=symbol, error=str(e))
+            raise RiskManagementError(f"Volatility regime detection failed: {e!s}")
 
     @time_execution
     async def detect_trend_regime(self, symbol: str, price_data: list[float]) -> MarketRegime:
@@ -171,8 +168,7 @@ class MarketRegimeDetector:
             return regime
 
         except Exception as e:
-            logger.error("Error detecting trend regime",
-                         symbol=symbol, error=str(e))
+            logger.error("Error detecting trend regime", symbol=symbol, error=str(e))
             raise RiskManagementError(f"Trend regime detection failed: {e!s}")
 
     @time_execution
@@ -191,8 +187,7 @@ class MarketRegimeDetector:
         """
         try:
             if len(symbols) < 2:
-                logger.warning(
-                    "Insufficient symbols for correlation regime detection")
+                logger.warning("Insufficient symbols for correlation regime detection")
                 return MarketRegime.LOW_CORRELATION
 
             # Calculate returns for all symbols
@@ -242,8 +237,7 @@ class MarketRegimeDetector:
 
         except Exception as e:
             logger.error("Error detecting correlation regime", error=str(e))
-            raise RiskManagementError(
-                f"Correlation regime detection failed: {e!s}")
+            raise RiskManagementError(f"Correlation regime detection failed: {e!s}")
 
     @time_execution
     async def detect_comprehensive_regime(self, market_data: list[MarketData]) -> MarketRegime:
@@ -295,10 +289,8 @@ class MarketRegimeDetector:
             return comprehensive_regime
 
         except Exception as e:
-            logger.error(
-                "Error in comprehensive regime detection", error=str(e))
-            raise RiskManagementError(
-                f"Comprehensive regime detection failed: {e!s}")
+            logger.error("Error in comprehensive regime detection", error=str(e))
+            raise RiskManagementError(f"Comprehensive regime detection failed: {e!s}")
 
     def _combine_regimes(
         self,
@@ -375,8 +367,7 @@ class MarketRegimeDetector:
                         "correlation_window": self.correlation_window,
                     },
                     description=(
-                        f"Regime change from {self.current_regime.value} to "
-                        f"{new_regime.value}"
+                        f"Regime change from {self.current_regime.value} to {new_regime.value}"
                     ),
                 )
 
@@ -391,8 +382,7 @@ class MarketRegimeDetector:
                 )
 
                 # TODO: Remove in production - Debug logging
-                logger.debug("Regime change event created",
-                             event_data=event.model_dump())
+                logger.debug("Regime change event created", event_data=event.model_dump())
 
     def _calculate_change_confidence(self, new_regime: MarketRegime) -> float:
         """
@@ -410,8 +400,7 @@ class MarketRegimeDetector:
 
         # Check if this is a reversal or continuation
         recent_changes = (
-            self.regime_history[-3:] if len(
-                self.regime_history) >= 3 else self.regime_history
+            self.regime_history[-3:] if len(self.regime_history) >= 3 else self.regime_history
         )
 
         # Higher confidence if this is a new regime type

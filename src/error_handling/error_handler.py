@@ -153,14 +153,13 @@ class ErrorHandler:
     @time_execution
     def classify_error(self, error: Exception) -> ErrorSeverity:
         """Classify error severity based on error type and context."""
-        if isinstance(error, (StateConsistencyError, SecurityError)):
+        if isinstance(error, StateConsistencyError | SecurityError):
             return ErrorSeverity.CRITICAL
         elif isinstance(
-            error, (RiskManagementError, ExchangeError,
-                    ConnectionError, ExecutionError)
+            error, RiskManagementError | ExchangeError | ConnectionError | ExecutionError
         ):
             return ErrorSeverity.HIGH
-        elif isinstance(error, (DataError, ModelError)):
+        elif isinstance(error, DataError | ModelError):
             return ErrorSeverity.MEDIUM
         elif isinstance(error, ValidationError):
             return ErrorSeverity.LOW
@@ -224,19 +223,16 @@ class ErrorHandler:
         self._update_error_patterns(context)
 
         # Check if error should trigger circuit breaker
-        circuit_breaker_triggered = False
         circuit_breaker_key = self._get_circuit_breaker_key(context)
         if circuit_breaker_key and circuit_breaker_key in self.circuit_breakers:
             try:
-                self.circuit_breakers[circuit_breaker_key].call(
-                    lambda: self._raise_error(error))
+                self.circuit_breakers[circuit_breaker_key].call(lambda: self._raise_error(error))
             except TradingBotError:
                 logger.warning(
                     "Circuit breaker triggered",
                     circuit_breaker=circuit_breaker_key,
                     error_id=context.error_id,
                 )
-                circuit_breaker_triggered = True
 
         # Attempt recovery if strategy provided and not at max attempts
         if recovery_strategy and context.recovery_attempts < context.max_recovery_attempts:
@@ -318,8 +314,7 @@ class ErrorHandler:
             "details": context.details,
         }
 
-        logger.critical("Error escalation required",
-                        escalation_data=escalation_message)
+        logger.critical("Error escalation required", escalation_data=escalation_message)
 
         # TODO: Implement notification channels (Discord, email, SMS)
         # This will be implemented in P-031 (Alerting and Notification System)

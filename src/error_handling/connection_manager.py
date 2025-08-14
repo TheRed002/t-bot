@@ -77,6 +77,7 @@ class ConnectionManager:
         }
         self.message_queues: dict[str, list[dict[str, Any]]] = {}
         self.heartbeat_intervals: dict[str, int] = {"exchange": 30, "database": 60, "websocket": 10}
+        self._health_monitor_tasks: dict[str, asyncio.Task] = {}
 
     @time_execution
     @retry(max_attempts=5)
@@ -126,7 +127,9 @@ class ConnectionManager:
                 )
 
                 # Start health monitoring
-                asyncio.create_task(self._monitor_connection_health(connection_id))
+                self._health_monitor_tasks[connection_id] = asyncio.create_task(
+                    self._monitor_connection_health(connection_id)
+                )
 
                 logger.info(
                     "Connection established successfully",
@@ -291,21 +294,47 @@ class ConnectionManager:
         connection_type = connection_info["type"]
 
         try:
-            # TODO: Implement actual heartbeat logic
-            # This will be implemented in P-003+ (Exchange Integrations)
-
             if connection_type == "exchange":
-                # Simulate exchange heartbeat
-                return True
+                # Exchange heartbeat - check API connectivity
+                if hasattr(connection, "ping"):
+                    response = await connection.ping()
+                    return response is not None
+                elif hasattr(connection, "get_server_time"):
+                    response = await connection.get_server_time()
+                    return response is not None
+                else:
+                    # Fallback: assume healthy if connection exists
+                    return connection is not None
+
             elif connection_type == "database":
-                # Simulate database heartbeat
-                return True
+                # Database heartbeat - execute simple query
+                if hasattr(connection, "execute"):
+                    result = await connection.execute("SELECT 1")
+                    return result is not None
+                elif hasattr(connection, "ping"):
+                    return await connection.ping()
+                else:
+                    return connection is not None
+
             elif connection_type == "websocket":
-                # Simulate WebSocket heartbeat
-                return True
+                # WebSocket heartbeat - check connection state
+                if hasattr(connection, "state"):
+                    # Check if WebSocket is open (usually state == 1)
+                    return connection.state == 1
+                elif hasattr(connection, "is_open"):
+                    return connection.is_open()
+                elif hasattr(connection, "ping"):
+                    await connection.ping()
+                    return True
+                else:
+                    return connection is not None
+
             else:
-                # Generic heartbeat
-                return True
+                # Generic heartbeat - check if connection object exists
+                if hasattr(connection, "ping"):
+                    return await connection.ping()
+                else:
+                    return connection is not None
 
         except Exception as e:
             logger.error("Heartbeat failed", connection_id=connection_id, error=str(e))

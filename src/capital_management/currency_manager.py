@@ -30,7 +30,7 @@ from src.core.types import CurrencyExposure, FundFlow
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.exchanges.base import BaseExchange
-from src.utils.decorators import time_execution
+from src.utils.decorators import retry, time_execution
 from src.utils.formatters import format_currency
 from src.utils.validators import validate_quantity
 

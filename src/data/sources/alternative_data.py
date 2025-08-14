@@ -108,8 +108,7 @@ class AlternativeDataSource:
         self.satellite_cache: dict[str, list[AlternativeDataPoint]] = {}
 
         # Monitoring settings
-        self.update_interval = config.alternative_data.get(
-            "update_interval", 3600)  # 1 hour
+        self.update_interval = config.alternative_data.get("update_interval", 3600)  # 1 hour
 
         # Statistics
         self.stats = {
@@ -126,14 +125,14 @@ class AlternativeDataSource:
 
         logger.info("AlternativeDataSource initialized")
 
+    @retry(max_attempts=3, base_delay=2.0)
     async def initialize(self) -> None:
         """Initialize alternative data source connections."""
         try:
             # Create HTTP session
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=60),
-                headers={"User-Agent": "TradingBot/1.0",
-                         "Accept": "application/json"},
+                headers={"User-Agent": "TradingBot/1.0", "Accept": "application/json"},
             )
 
             # Test available data sources
@@ -143,9 +142,9 @@ class AlternativeDataSource:
 
         except Exception as e:
             logger.error(f"Failed to initialize AlternativeDataSource: {e!s}")
-            raise DataSourceError(
-                f"Alternative data source initialization failed: {e!s}")
+            raise DataSourceError(f"Alternative data source initialization failed: {e!s}")
 
+    @retry(max_attempts=2, base_delay=1.0)
     async def _test_data_sources(self) -> None:
         """Test connections to alternative data sources."""
         try:
@@ -177,8 +176,7 @@ class AlternativeDataSource:
             if not available_sources:
                 logger.warning("No alternative data sources configured")
             else:
-                logger.info(
-                    f"Alternative data sources available: {available_sources}")
+                logger.info(f"Alternative data sources available: {available_sources}")
 
         except Exception as e:
             logger.error(f"Alternative data source test failed: {e!s}")
@@ -205,8 +203,7 @@ class AlternativeDataSource:
 
             all_indicators = []
             end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now() -
-                          timedelta(days=days_back)).strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
 
             for indicator_id in indicators:
                 try:
@@ -218,8 +215,7 @@ class AlternativeDataSource:
                     all_indicators.extend(indicator_data)
 
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to fetch indicator {indicator_id}: {e!s}")
+                    logger.warning(f"Failed to fetch indicator {indicator_id}: {e!s}")
                     continue
 
             # Cache results
@@ -229,8 +225,7 @@ class AlternativeDataSource:
             self.stats["total_data_points"] += len(all_indicators)
             self.stats["successful_requests"] += 1
             self.stats["source_stats"]["fred"]["requests"] += 1
-            self.stats["source_stats"]["fred"]["data_points"] += len(
-                all_indicators)
+            self.stats["source_stats"]["fred"]["data_points"] += len(all_indicators)
 
             logger.info(f"Retrieved {len(all_indicators)} economic indicators")
             return all_indicators
@@ -238,8 +233,7 @@ class AlternativeDataSource:
         except Exception as e:
             self.stats["failed_requests"] += 1
             logger.error(f"Failed to get economic indicators: {e!s}")
-            raise DataSourceError(
-                f"Economic indicators retrieval failed: {e!s}")
+            raise DataSourceError(f"Economic indicators retrieval failed: {e!s}")
 
     async def _fetch_fred_indicator(
         self, indicator_id: str, start_date: str, end_date: str
@@ -266,8 +260,7 @@ class AlternativeDataSource:
 
             metadata = indicator_metadata.get(
                 indicator_id,
-                {"name": f"Indicator {indicator_id}",
-                    "unit": "Value", "impact": "medium"},
+                {"name": f"Indicator {indicator_id}", "unit": "Value", "impact": "medium"},
             )
 
             # Simulate data points (in production, parse actual FRED response)
@@ -300,8 +293,7 @@ class AlternativeDataSource:
             return indicators
 
         except Exception as e:
-            logger.error(
-                f"Failed to fetch FRED indicator {indicator_id}: {e!s}")
+            logger.error(f"Failed to fetch FRED indicator {indicator_id}: {e!s}")
             return []
 
     @time_execution
@@ -330,8 +322,7 @@ class AlternativeDataSource:
                     all_weather_data.extend(weather_data)
 
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to fetch weather for {location}: {e!s}")
+                    logger.warning(f"Failed to fetch weather for {location}: {e!s}")
                     continue
 
             # Cache results
@@ -341,11 +332,9 @@ class AlternativeDataSource:
             self.stats["total_data_points"] += len(all_weather_data)
             self.stats["successful_requests"] += 1
             self.stats["source_stats"]["weather"]["requests"] += 1
-            self.stats["source_stats"]["weather"]["data_points"] += len(
-                all_weather_data)
+            self.stats["source_stats"]["weather"]["data_points"] += len(all_weather_data)
 
-            logger.info(
-                f"Retrieved {len(all_weather_data)} weather data points")
+            logger.info(f"Retrieved {len(all_weather_data)} weather data points")
             return all_weather_data
 
         except Exception as e:
@@ -383,8 +372,7 @@ class AlternativeDataSource:
                         geography=location,
                         frequency="daily",
                         unit="celsius",
-                        metadata={"location": location,
-                                  "weather_type": "temperature"},
+                        metadata={"location": location, "weather_type": "temperature"},
                     )
                 )
 
@@ -399,8 +387,7 @@ class AlternativeDataSource:
                         geography=location,
                         frequency="daily",
                         unit="percent",
-                        metadata={"location": location,
-                                  "weather_type": "humidity"},
+                        metadata={"location": location, "weather_type": "humidity"},
                     )
                 )
 
@@ -416,8 +403,7 @@ class AlternativeDataSource:
                             geography=location,
                             frequency="daily",
                             unit="mm",
-                            metadata={"location": location,
-                                      "weather_type": "precipitation"},
+                            metadata={"location": location, "weather_type": "precipitation"},
                         )
                     )
 
@@ -457,8 +443,7 @@ class AlternativeDataSource:
                         all_satellite_data.extend(satellite_data)
 
                     except Exception as e:
-                        logger.warning(
-                            f"Failed to fetch {indicator} for {region}: {e!s}")
+                        logger.warning(f"Failed to fetch {indicator} for {region}: {e!s}")
                         continue
 
             # Cache results
@@ -468,11 +453,9 @@ class AlternativeDataSource:
             self.stats["total_data_points"] += len(all_satellite_data)
             self.stats["successful_requests"] += 1
             self.stats["source_stats"]["satellite"]["requests"] += 1
-            self.stats["source_stats"]["satellite"]["data_points"] += len(
-                all_satellite_data)
+            self.stats["source_stats"]["satellite"]["data_points"] += len(all_satellite_data)
 
-            logger.info(
-                f"Retrieved {len(all_satellite_data)} satellite data points")
+            logger.info(f"Retrieved {len(all_satellite_data)} satellite data points")
             return all_satellite_data
 
         except Exception as e:
@@ -534,8 +517,7 @@ class AlternativeDataSource:
             return satellite_points
 
         except Exception as e:
-            logger.error(
-                f"Failed to fetch satellite data for {region}/{indicator}: {e!s}")
+            logger.error(f"Failed to fetch satellite data for {region}/{indicator}: {e!s}")
             return []
 
     @time_execution
@@ -556,8 +538,7 @@ class AlternativeDataSource:
 
             # Collect economic indicators
             if config.get("economic", {}).get("enabled", False):
-                indicators = config["economic"].get(
-                    "indicators", ["GDP", "UNRATE"])
+                indicators = config["economic"].get("indicators", ["GDP", "UNRATE"])
                 economic_data = await self.get_economic_indicators(indicators)
                 # Convert to AlternativeDataPoint format
                 for indicator in economic_data:
@@ -581,16 +562,14 @@ class AlternativeDataSource:
 
             # Collect weather data
             if config.get("weather", {}).get("enabled", False):
-                locations = config["weather"].get(
-                    "locations", ["New York", "London"])
+                locations = config["weather"].get("locations", ["New York", "London"])
                 weather_data = await self.get_weather_data(locations)
                 dataset["weather"] = weather_data
 
             # Collect satellite data
             if config.get("satellite", {}).get("enabled", False):
                 regions = config["satellite"].get("regions", ["US", "EU"])
-                indicators = config["satellite"].get(
-                    "indicators", ["nightlight"])
+                indicators = config["satellite"].get("indicators", ["nightlight"])
                 satellite_data = await self.get_satellite_data(regions, indicators)
                 dataset["satellite"] = satellite_data
 
@@ -601,8 +580,7 @@ class AlternativeDataSource:
 
         except Exception as e:
             logger.error(f"Failed to get comprehensive dataset: {e!s}")
-            raise DataSourceError(
-                f"Comprehensive dataset collection failed: {e!s}")
+            raise DataSourceError(f"Comprehensive dataset collection failed: {e!s}")
 
     async def get_source_statistics(self) -> dict[str, Any]:
         """Get alternative data source statistics."""

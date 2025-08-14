@@ -71,8 +71,7 @@ class NewsDataSource:
 
         # API configuration
         self.api_key = config.news_api.get("api_key")
-        self.base_url = config.news_api.get(
-            "base_url", "https://newsapi.org/v2")
+        self.base_url = config.news_api.get("base_url", "https://newsapi.org/v2")
         self.session: aiohttp.ClientSession | None = None
 
         # Data storage
@@ -81,8 +80,7 @@ class NewsDataSource:
 
         # Monitoring
         self.active = False
-        self.update_interval = config.news_api.get(
-            "update_interval", 300)  # 5 minutes
+        self.update_interval = config.news_api.get("update_interval", 300)  # 5 minutes
         self.max_articles_per_symbol = config.news_api.get("max_articles", 100)
 
         # Statistics
@@ -95,6 +93,7 @@ class NewsDataSource:
 
         logger.info("NewsDataSource initialized")
 
+    @retry(max_attempts=3, base_delay=2.0)
     async def initialize(self) -> None:
         """Initialize news data source connections."""
         try:
@@ -104,8 +103,7 @@ class NewsDataSource:
             # Create HTTP session
             self.session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30),
-                headers={"Authorization": f"Bearer {self.api_key}",
-                         "User-Agent": "TradingBot/1.0"},
+                headers={"Authorization": f"Bearer {self.api_key}", "User-Agent": "TradingBot/1.0"},
             )
 
             # Test API connection
@@ -115,8 +113,7 @@ class NewsDataSource:
 
         except Exception as e:
             logger.error(f"Failed to initialize NewsDataSource: {e!s}")
-            raise DataSourceError(
-                f"News data source initialization failed: {e!s}")
+            raise DataSourceError(f"News data source initialization failed: {e!s}")
 
     @retry(max_attempts=3, base_delay=2.0)
     async def _test_connection(self) -> None:
@@ -129,8 +126,7 @@ class NewsDataSource:
                 if response.status == 200:
                     logger.info("NewsAPI connection test successful")
                 else:
-                    raise DataSourceError(
-                        f"NewsAPI test failed with status {response.status}")
+                    raise DataSourceError(f"NewsAPI test failed with status {response.status}")
 
         except Exception as e:
             logger.error(f"NewsAPI connection test failed: {e!s}")
@@ -175,12 +171,10 @@ class NewsDataSource:
 
             # Remove duplicates and sort by relevance
             unique_articles = self._deduplicate_articles(all_articles)
-            relevant_articles = self._filter_and_score_articles(
-                unique_articles, symbol)
+            relevant_articles = self._filter_and_score_articles(unique_articles, symbol)
 
             # Sort by relevance and limit results
-            relevant_articles.sort(
-                key=lambda x: x.relevance_score, reverse=True)
+            relevant_articles.sort(key=lambda x: x.relevance_score, reverse=True)
             result = relevant_articles[:max_articles]
 
             # Cache results
@@ -199,6 +193,7 @@ class NewsDataSource:
             logger.error(f"Failed to get news for {symbol}: {e!s}")
             raise DataSourceError(f"News retrieval failed: {e!s}")
 
+    @retry(max_attempts=3, base_delay=1.0)
     async def _fetch_articles(
         self, query: str, from_date: datetime, to_date: datetime, page_size: int = 50
     ) -> list[NewsArticle]:
@@ -226,8 +221,7 @@ class NewsDataSource:
 
                     return articles
                 else:
-                    logger.warning(
-                        f"NewsAPI request failed with status {response.status}")
+                    logger.warning(f"NewsAPI request failed with status {response.status}")
                     return []
 
         except Exception as e:
@@ -248,8 +242,7 @@ class NewsDataSource:
 
             # Calculate sentiment (simplified - in production use proper NLP)
             sentiment, sentiment_score = self._analyze_sentiment(
-                article_data.get("title", "") + " " +
-                article_data.get("description", "")
+                article_data.get("title", "") + " " + article_data.get("description", "")
             )
 
             # Extract relevant symbols
@@ -294,11 +287,9 @@ class NewsDataSource:
         queries = []
         if symbol in symbol_mapping:
             for term in symbol_mapping[symbol]:
-                queries.append(
-                    f'"{term}" AND (crypto OR cryptocurrency OR trading)')
+                queries.append(f'"{term}" AND (crypto OR cryptocurrency OR trading)')
         else:
-            queries.append(
-                f'"{symbol}" AND (crypto OR cryptocurrency OR trading)')
+            queries.append(f'"{symbol}" AND (crypto OR cryptocurrency OR trading)')
 
         return queries
 
@@ -310,16 +301,13 @@ class NewsDataSource:
         text = text.lower()
 
         # Simple keyword-based sentiment analysis
-        positive_words = ["bullish", "surge", "rally",
-                          "gain", "up", "high", "positive", "rise"]
-        negative_words = ["bearish", "crash", "drop",
-                          "fall", "down", "low", "negative", "decline"]
+        positive_words = ["bullish", "surge", "rally", "gain", "up", "high", "positive", "rise"]
+        negative_words = ["bearish", "crash", "drop", "fall", "down", "low", "negative", "decline"]
 
         positive_count = sum(1 for word in positive_words if word in text)
         negative_count = sum(1 for word in negative_words if word in text)
 
-        sentiment_score = (positive_count - negative_count) / \
-            max(len(text.split()), 1)
+        sentiment_score = (positive_count - negative_count) / max(len(text.split()), 1)
 
         if sentiment_score > 0.05:
             sentiment = (
@@ -327,8 +315,7 @@ class NewsDataSource:
             )
         elif sentiment_score < -0.05:
             sentiment = (
-                NewsSentiment.NEGATIVE if sentiment_score > -
-                0.15 else NewsSentiment.VERY_NEGATIVE
+                NewsSentiment.NEGATIVE if sentiment_score > -0.15 else NewsSentiment.VERY_NEGATIVE
             )
         else:
             sentiment = NewsSentiment.NEUTRAL
@@ -338,12 +325,10 @@ class NewsDataSource:
     def _extract_symbols(self, article_data: dict[str, Any], query: str) -> list[str]:
         """Extract relevant trading symbols from article."""
         symbols = []
-        text = (article_data.get("title", "") + " " +
-                article_data.get("description", "")).upper()
+        text = (article_data.get("title", "") + " " + article_data.get("description", "")).upper()
 
         # Common crypto symbols
-        crypto_symbols = ["BTC", "ETH", "ADA",
-                          "DOT", "LINK", "MATIC", "SOL", "AVAX"]
+        crypto_symbols = ["BTC", "ETH", "ADA", "DOT", "LINK", "MATIC", "SOL", "AVAX"]
 
         for symbol in crypto_symbols:
             if symbol in text:
@@ -354,8 +339,7 @@ class NewsDataSource:
     def _calculate_relevance(self, article_data: dict[str, Any], query: str) -> float:
         """Calculate relevance score for an article."""
         relevance_score = 0.0
-        text = (article_data.get("title", "") + " " +
-                article_data.get("description", "")).lower()
+        text = (article_data.get("title", "") + " " + article_data.get("description", "")).lower()
 
         # Check for query terms
         query_terms = query.lower().split()
@@ -364,17 +348,14 @@ class NewsDataSource:
                 relevance_score += 0.3
 
         # Check for trading-related terms
-        trading_terms = ["trading", "price", "market",
-                         "exchange", "crypto", "cryptocurrency"]
+        trading_terms = ["trading", "price", "market", "exchange", "crypto", "cryptocurrency"]
         for term in trading_terms:
             if term in text:
                 relevance_score += 0.1
 
         # Bonus for recent articles
-        published_at = datetime.fromisoformat(
-            article_data["publishedAt"].replace("Z", "+00:00"))
-        hours_old = (datetime.now(timezone.utc) -
-                     published_at).total_seconds() / 3600
+        published_at = datetime.fromisoformat(article_data["publishedAt"].replace("Z", "+00:00"))
+        hours_old = (datetime.now(timezone.utc) - published_at).total_seconds() / 3600
 
         if hours_old < 6:
             relevance_score += 0.2
@@ -435,8 +416,7 @@ class NewsDataSource:
 
                 if articles:
                     # Calculate aggregate sentiment
-                    total_score = sum(
-                        article.sentiment_score for article in articles)
+                    total_score = sum(article.sentiment_score for article in articles)
                     avg_score = total_score / len(articles)
 
                     # Count sentiment types
@@ -467,8 +447,7 @@ class NewsDataSource:
 
         except Exception as e:
             logger.error(f"Failed to get market sentiment: {e!s}")
-            raise DataSourceError(
-                f"Market sentiment calculation failed: {e!s}")
+            raise DataSourceError(f"Market sentiment calculation failed: {e!s}")
 
     async def cleanup(self) -> None:
         """Cleanup news data source resources."""

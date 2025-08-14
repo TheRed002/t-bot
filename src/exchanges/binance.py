@@ -39,9 +39,9 @@ from src.core.types import (
     OrderSide,
     OrderStatus,
     OrderType,
+    Position,
     Ticker,
     Trade,
-    Position,
 )
 
 # MANDATORY: Import from P-002A
@@ -52,8 +52,7 @@ from src.exchanges.rate_limiter import RateLimiter
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.constants import API_ENDPOINTS
-from src.utils.decorators import time_execution, retry, cache_result, log_calls
-
+from src.utils.decorators import cache_result, log_calls, retry, time_execution
 
 logger = get_logger(__name__)
 
@@ -281,22 +280,19 @@ class BinanceExchange(BaseExchange):
 
         except BinanceOrderException as e:
             await self._handle_exchange_error(
-                e, "place_order",
-                {"symbol": order.symbol, "order_id": order.client_order_id}
+                e, "place_order", {"symbol": order.symbol, "order_id": order.client_order_id}
             )
             if "insufficient balance" in str(e).lower():
                 raise ExchangeInsufficientFundsError(f"Insufficient balance: {e}")
             raise OrderRejectionError(f"Order rejected: {e}")
         except BinanceAPIException as e:
             await self._handle_exchange_error(
-                e, "place_order",
-                {"symbol": order.symbol, "order_id": order.client_order_id}
+                e, "place_order", {"symbol": order.symbol, "order_id": order.client_order_id}
             )
             raise ExchangeError(f"Failed to place order: {e}")
         except Exception as e:
             await self._handle_exchange_error(
-                e, "place_order",
-                {"symbol": order.symbol, "order_id": order.client_order_id}
+                e, "place_order", {"symbol": order.symbol, "order_id": order.client_order_id}
             )
             raise ExecutionError(f"Failed to place order: {e!s}")
 
@@ -366,7 +362,9 @@ class BinanceExchange(BaseExchange):
 
     @time_execution
     @cache_result(ttl_seconds=5)  # Cache market data for 5 seconds
-    async def _get_market_data_from_exchange(self, symbol: str, timeframe: str = "1m") -> MarketData:
+    async def _get_market_data_from_exchange(
+        self, symbol: str, timeframe: str = "1m"
+    ) -> MarketData:
         """
         Get market data from Binance API.
 
@@ -403,15 +401,18 @@ class BinanceExchange(BaseExchange):
             )
 
             # Cache market data in Redis
-            await self._cache_market_data(symbol, {
-                "price": str(market_data.price),
-                "volume": str(market_data.volume),
-                "timestamp": market_data.timestamp.isoformat(),
-                "open_price": str(market_data.open_price),
-                "high_price": str(market_data.high_price),
-                "low_price": str(market_data.low_price),
-                "timeframe": timeframe
-            })
+            await self._cache_market_data(
+                symbol,
+                {
+                    "price": str(market_data.price),
+                    "volume": str(market_data.volume),
+                    "timestamp": market_data.timestamp.isoformat(),
+                    "open_price": str(market_data.open_price),
+                    "high_price": str(market_data.high_price),
+                    "low_price": str(market_data.low_price),
+                    "timeframe": timeframe,
+                },
+            )
 
             return market_data
 

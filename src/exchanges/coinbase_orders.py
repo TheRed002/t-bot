@@ -24,10 +24,10 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
+from src.utils.helpers import normalize_price, round_to_precision
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.validators import validate_order_request, validate_symbol
-from src.utils.helpers import normalize_price, round_to_precision
 
 # Note: Using generic Exception handling for REST API as no specific
 # exceptions are documented
@@ -457,7 +457,9 @@ class CoinbaseOrderManager:
         # Configure order based on type
         if order.order_type == OrderType.MARKET:
             coinbase_order["order_configuration"] = {
-                "market_market_ioc": {"quote_size": str(round_to_precision(float(order.quantity), 8))}
+                "market_market_ioc": {
+                    "quote_size": str(round_to_precision(float(order.quantity), 8))
+                }
             }
         elif order.order_type == OrderType.LIMIT:
             coinbase_order["order_configuration"] = {

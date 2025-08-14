@@ -28,8 +28,8 @@ from src.core.types import MarketData, Signal, ValidationLevel
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import DataFeedInterruptionRecovery
 from src.error_handling.pattern_analytics import ErrorPatternAnalytics
+from src.error_handling.recovery_scenarios import DataFeedInterruptionRecovery
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
@@ -86,8 +86,7 @@ class DataValidator:
         self.outlier_std_threshold = getattr(
             config, "outlier_std_threshold", 3.0
         )  # 3 standard deviations
-        self.max_data_age_seconds = getattr(
-            config, "max_data_age_seconds", 60)  # 1 minute max age
+        self.max_data_age_seconds = getattr(config, "max_data_age_seconds", 60)  # 1 minute max age
 
         # Statistical tracking for outlier detection
         self.price_history: dict[str, list[float]] = {}
@@ -154,10 +153,8 @@ class DataValidator:
             await self._update_statistics(data)
 
             # Determine overall validation result
-            critical_issues = [
-                i for i in issues if i.level == ValidationLevel.CRITICAL]
-            high_issues = [i for i in issues if i.level ==
-                           ValidationLevel.HIGH]
+            critical_issues = [i for i in issues if i.level == ValidationLevel.CRITICAL]
+            high_issues = [i for i in issues if i.level == ValidationLevel.HIGH]
 
             is_valid = len(critical_issues) == 0 and len(high_issues) == 0
 
@@ -183,10 +180,7 @@ class DataValidator:
                 component="DataValidator",
                 operation="validate_market_data",
                 symbol=data.symbol if data and data.symbol else "unknown",
-                details={
-                    "data_type": "market_data",
-                    "validation_stage": "main_validation"
-                }
+                details={"data_type": "market_data", "validation_stage": "main_validation"},
             )
 
             # Handle the error through the error handling framework
@@ -207,7 +201,7 @@ class DataValidator:
                 metadata={
                     "error_type": type(e).__name__,
                     "error_id": error_context.error_id,
-                    "severity": error_context.severity.value
+                    "severity": error_context.severity.value,
                 },
             )
             return False, [issue]
@@ -287,8 +281,7 @@ class DataValidator:
                 )
 
             # Determine overall validation result
-            critical_issues = [
-                i for i in issues if i.level == ValidationLevel.CRITICAL]
+            critical_issues = [i for i in issues if i.level == ValidationLevel.CRITICAL]
             high_issues = [i for i in issues if i.level == ValidationLevel.HIGH]
 
             is_valid = len(critical_issues) == 0 and len(high_issues) == 0
@@ -315,10 +308,7 @@ class DataValidator:
                 component="DataValidator",
                 operation="validate_signal",
                 symbol=signal.symbol if signal else "unknown",
-                details={
-                    "data_type": "signal",
-                    "validation_stage": "signal_validation"
-                }
+                details={"data_type": "signal", "validation_stage": "signal_validation"},
             )
 
             # Handle the error through the error handling framework
@@ -339,7 +329,7 @@ class DataValidator:
                 metadata={
                     "error_type": type(e).__name__,
                     "error_id": error_context.error_id,
-                    "severity": error_context.severity.value
+                    "severity": error_context.severity.value,
                 },
             )
             return False, [issue]
@@ -418,30 +408,29 @@ class DataValidator:
                 component="DataValidator",
                 operation="validate_schema",
                 symbol=data.symbol if data and data.symbol else "unknown",
-                details={
-                    "validation_stage": "schema_validation",
-                    "data_type": "market_data"
-                }
+                details={"validation_stage": "schema_validation", "data_type": "market_data"},
             )
 
             self.error_handler.handle_error(error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for schema validation failure
-            return [ValidationIssue(
-                field="schema_validation",
-                value="exception",
-                expected="successful_schema_validation",
-                message=f"Schema validation failed: {e!s}",
-                level=ValidationLevel.CRITICAL,
-                timestamp=datetime.now(timezone.utc),
-                source="DataValidator",
-                metadata={
-                    "error_type": type(e).__name__,
-                    "error_id": error_context.error_id,
-                    "severity": error_context.severity.value
-                },
-            )]
+            return [
+                ValidationIssue(
+                    field="schema_validation",
+                    value="exception",
+                    expected="successful_schema_validation",
+                    message=f"Schema validation failed: {e!s}",
+                    level=ValidationLevel.CRITICAL,
+                    timestamp=datetime.now(timezone.utc),
+                    source="DataValidator",
+                    metadata={
+                        "error_type": type(e).__name__,
+                        "error_id": error_context.error_id,
+                        "severity": error_context.severity.value,
+                    },
+                )
+            ]
 
     async def _validate_ranges(self, data: MarketData) -> list[ValidationIssue]:
         """Validate data ranges and bounds"""
@@ -496,7 +485,7 @@ class DataValidator:
                             metadata={
                                 "previous_price": prev_price,
                                 "current_price": float(data.price),
-                                "change_percentage": price_change
+                                "change_percentage": price_change,
                             },
                         )
                     )
@@ -519,7 +508,7 @@ class DataValidator:
                             metadata={
                                 "previous_volume": prev_volume,
                                 "current_volume": float(data.volume),
-                                "change_percentage": volume_change
+                                "change_percentage": volume_change,
                             },
                         )
                     )
@@ -533,30 +522,29 @@ class DataValidator:
                 component="DataValidator",
                 operation="validate_ranges",
                 symbol=data.symbol if data and data.symbol else "unknown",
-                details={
-                    "validation_stage": "range_validation",
-                    "data_type": "market_data"
-                }
+                details={"validation_stage": "range_validation", "data_type": "market_data"},
             )
 
             self.error_handler.handle_error(error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for range validation failure
-            return [ValidationIssue(
-                field="range_validation",
-                value="exception",
-                expected="successful_range_validation",
-                message=f"Range validation failed: {e!s}",
-                level=ValidationLevel.CRITICAL,
-                timestamp=datetime.now(timezone.utc),
-                source="DataValidator",
-                metadata={
-                    "error_type": type(e).__name__,
-                    "error_id": error_context.error_id,
-                    "severity": error_context.severity.value
-                },
-            )]
+            return [
+                ValidationIssue(
+                    field="range_validation",
+                    value="exception",
+                    expected="successful_range_validation",
+                    message=f"Range validation failed: {e!s}",
+                    level=ValidationLevel.CRITICAL,
+                    timestamp=datetime.now(timezone.utc),
+                    source="DataValidator",
+                    metadata={
+                        "error_type": type(e).__name__,
+                        "error_id": error_context.error_id,
+                        "severity": error_context.severity.value,
+                    },
+                )
+            ]
 
     async def _validate_business_rules(self, data: MarketData) -> list[ValidationIssue]:
         """Validate business rules and trading logic"""
@@ -619,28 +607,30 @@ class DataValidator:
                 symbol=data.symbol if data and data.symbol else "unknown",
                 details={
                     "validation_stage": "business_rules_validation",
-                    "data_type": "market_data"
-                }
+                    "data_type": "market_data",
+                },
             )
 
             self.error_handler.handle_error(error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for business rule validation failure
-            return [ValidationIssue(
-                field="business_rules_validation",
-                value="exception",
-                expected="successful_business_rules_validation",
-                message=f"Business rules validation failed: {e!s}",
-                level=ValidationLevel.CRITICAL,
-                timestamp=datetime.now(timezone.utc),
-                source="DataValidator",
-                metadata={
-                    "error_type": type(e).__name__,
-                    "error_id": error_context.error_id,
-                    "severity": error_context.severity.value
-                },
-            )]
+            return [
+                ValidationIssue(
+                    field="business_rules_validation",
+                    value="exception",
+                    expected="successful_business_rules_validation",
+                    message=f"Business rules validation failed: {e!s}",
+                    level=ValidationLevel.CRITICAL,
+                    timestamp=datetime.now(timezone.utc),
+                    source="DataValidator",
+                    metadata={
+                        "error_type": type(e).__name__,
+                        "error_id": error_context.error_id,
+                        "severity": error_context.severity.value,
+                    },
+                )
+            ]
 
     async def _detect_outliers(self, data: MarketData) -> list[ValidationIssue]:
         """Detect statistical outliers in the data"""
@@ -674,7 +664,7 @@ class DataValidator:
                                 "z_score": z_score,
                                 "mean_price": mean_price,
                                 "std_price": std_price,
-                                "threshold": self.outlier_std_threshold
+                                "threshold": self.outlier_std_threshold,
                             },
                         )
                     )
@@ -704,7 +694,7 @@ class DataValidator:
                                     "z_score": z_score,
                                     "mean_volume": mean_volume,
                                     "std_volume": std_volume,
-                                    "threshold": self.outlier_std_threshold
+                                    "threshold": self.outlier_std_threshold,
                                 },
                             )
                         )
@@ -718,30 +708,29 @@ class DataValidator:
                 component="DataValidator",
                 operation="detect_outliers",
                 symbol=data.symbol if data and data.symbol else "unknown",
-                details={
-                    "validation_stage": "outlier_detection",
-                    "data_type": "market_data"
-                }
+                details={"validation_stage": "outlier_detection", "data_type": "market_data"},
             )
 
             self.error_handler.handle_error(error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for outlier detection failure
-            return [ValidationIssue(
-                field="outlier_detection",
-                value="exception",
-                expected="successful_outlier_detection",
-                message=f"Outlier detection failed: {e!s}",
-                level=ValidationLevel.CRITICAL,
-                timestamp=datetime.now(timezone.utc),
-                source="DataValidator",
-                metadata={
-                    "error_type": type(e).__name__,
-                    "error_id": error_context.error_id,
-                    "severity": error_context.severity.value
-                },
-            )]
+            return [
+                ValidationIssue(
+                    field="outlier_detection",
+                    value="exception",
+                    expected="successful_outlier_detection",
+                    message=f"Outlier detection failed: {e!s}",
+                    level=ValidationLevel.CRITICAL,
+                    timestamp=datetime.now(timezone.utc),
+                    source="DataValidator",
+                    metadata={
+                        "error_type": type(e).__name__,
+                        "error_id": error_context.error_id,
+                        "severity": error_context.severity.value,
+                    },
+                )
+            ]
 
     async def _validate_freshness(self, data: MarketData) -> list[ValidationIssue]:
         """Validate data freshness and timeliness"""
@@ -765,7 +754,7 @@ class DataValidator:
                             "data_age_seconds": data_age,
                             "max_age_seconds": self.max_data_age_seconds,
                             "current_time": current_time.isoformat(),
-                            "data_time": data.timestamp.isoformat()
+                            "data_time": data.timestamp.isoformat(),
                         },
                     )
                 )
@@ -784,7 +773,7 @@ class DataValidator:
                         metadata={
                             "data_time": data.timestamp.isoformat(),
                             "current_time": current_time.isoformat(),
-                            "time_difference": (data.timestamp - current_time).total_seconds()
+                            "time_difference": (data.timestamp - current_time).total_seconds(),
                         },
                     )
                 )
@@ -798,30 +787,29 @@ class DataValidator:
                 component="DataValidator",
                 operation="validate_freshness",
                 symbol=data.symbol if data and data.symbol else "unknown",
-                details={
-                    "validation_stage": "freshness_validation",
-                    "data_type": "market_data"
-                }
+                details={"validation_stage": "freshness_validation", "data_type": "market_data"},
             )
 
             self.error_handler.handle_error(error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for freshness validation failure
-            return [ValidationIssue(
-                field="freshness_validation",
-                value="exception",
-                expected="successful_freshness_validation",
-                message=f"Freshness validation failed: {e!s}",
-                level=ValidationLevel.CRITICAL,
-                timestamp=datetime.now(timezone.utc),
-                source="DataValidator",
-                metadata={
-                    "error_type": type(e).__name__,
-                    "error_id": error_context.error_id,
-                    "severity": error_context.severity.value
-                },
-            )]
+            return [
+                ValidationIssue(
+                    field="freshness_validation",
+                    value="exception",
+                    expected="successful_freshness_validation",
+                    message=f"Freshness validation failed: {e!s}",
+                    level=ValidationLevel.CRITICAL,
+                    timestamp=datetime.now(timezone.utc),
+                    source="DataValidator",
+                    metadata={
+                        "error_type": type(e).__name__,
+                        "error_id": error_context.error_id,
+                        "severity": error_context.severity.value,
+                    },
+                )
+            ]
 
     async def _update_statistics(self, data: MarketData) -> None:
         """Update statistical tracking for outlier detection"""
@@ -834,7 +822,9 @@ class DataValidator:
 
             # Maintain history size
             if len(self.price_history[data.symbol]) > self.max_history_size:
-                self.price_history[data.symbol] = self.price_history[data.symbol][-self.max_history_size:]
+                self.price_history[data.symbol] = self.price_history[data.symbol][
+                    -self.max_history_size :
+                ]
 
             # Update volume history
             if data.symbol not in self.volume_history:
@@ -844,7 +834,9 @@ class DataValidator:
 
             # Maintain history size
             if len(self.volume_history[data.symbol]) > self.max_history_size:
-                self.volume_history[data.symbol] = self.volume_history[data.symbol][-self.max_history_size:]
+                self.volume_history[data.symbol] = self.volume_history[data.symbol][
+                    -self.max_history_size :
+                ]
 
         except Exception as e:
             # Use ErrorHandler for statistics update errors
@@ -853,10 +845,7 @@ class DataValidator:
                 component="DataValidator",
                 operation="update_statistics",
                 symbol=data.symbol if data and data.symbol else "unknown",
-                details={
-                    "operation": "statistics_update",
-                    "data_type": "market_data"
-                }
+                details={"operation": "statistics_update", "data_type": "market_data"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -891,7 +880,7 @@ class DataValidator:
                             "primary_price": float(primary_data.price),
                             "secondary_price": float(secondary_data.price),
                             "difference_percentage": price_diff,
-                            "threshold": self.consistency_threshold
+                            "threshold": self.consistency_threshold,
                         },
                     )
                 )
@@ -914,7 +903,7 @@ class DataValidator:
                                 "primary_volume": float(primary_data.volume),
                                 "secondary_volume": float(secondary_data.volume),
                                 "difference_percentage": volume_diff,
-                                "threshold": self.consistency_threshold
+                                "threshold": self.consistency_threshold,
                             },
                         )
                     )
@@ -922,12 +911,13 @@ class DataValidator:
             is_consistent = len(issues) == 0
 
             if is_consistent:
-                logger.debug("Cross-source consistency validated",
-                             symbol=primary_data.symbol)
+                logger.debug("Cross-source consistency validated", symbol=primary_data.symbol)
             else:
-                logger.warning("Cross-source consistency issues detected",
-                               symbol=primary_data.symbol,
-                               issue_count=len(issues))
+                logger.warning(
+                    "Cross-source consistency issues detected",
+                    symbol=primary_data.symbol,
+                    issue_count=len(issues),
+                )
 
             return is_consistent, issues
 
@@ -940,8 +930,8 @@ class DataValidator:
                 symbol=primary_data.symbol if primary_data and primary_data.symbol else "unknown",
                 details={
                     "validation_stage": "cross_source_consistency",
-                    "data_type": "market_data"
-                }
+                    "data_type": "market_data",
+                },
             )
 
             self.error_handler.handle_error(error_context)
@@ -958,7 +948,7 @@ class DataValidator:
                 metadata={
                     "error_type": type(e).__name__,
                     "error_id": error_context.error_id,
-                    "severity": error_context.severity.value
+                    "severity": error_context.severity.value,
                 },
             )
             return False, [issue]
@@ -982,13 +972,13 @@ class DataValidator:
                     "volume_change_threshold": self.volume_change_threshold,
                     "outlier_std_threshold": self.outlier_std_threshold,
                     "max_data_age_seconds": self.max_data_age_seconds,
-                    "consistency_threshold": self.consistency_threshold
+                    "consistency_threshold": self.consistency_threshold,
                 },
                 "error_patterns": pattern_summary,
                 "error_correlations": correlation_summary,
                 "error_trends": trend_summary,
                 "circuit_breaker_status": circuit_breaker_status,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         except Exception as e:
@@ -997,9 +987,7 @@ class DataValidator:
                 error=e,
                 component="DataValidator",
                 operation="get_validation_summary",
-                details={
-                    "operation": "summary_generation"
-                }
+                details={"operation": "summary_generation"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -1009,7 +997,7 @@ class DataValidator:
             return {
                 "error": str(e),
                 "error_id": error_context.error_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
     async def cleanup(self) -> None:
@@ -1028,9 +1016,7 @@ class DataValidator:
                 error=e,
                 component="DataValidator",
                 operation="cleanup",
-                details={
-                    "operation": "cleanup"
-                }
+                details={"operation": "cleanup"},
             )
 
             self.error_handler.handle_error(error_context)

@@ -20,27 +20,25 @@ from .recovery_scenarios import (
     PartialFillRecovery,
 )
 from .state_monitor import StateMonitor
-from src.core.exceptions import StateConsistencyError
 
 __all__ = [
-    # Core error handling
-    "ErrorHandler",
-    "ErrorSeverity",
-    "ErrorContext",
-    # Recovery scenarios
-    "PartialFillRecovery",
-    "NetworkDisconnectionRecovery",
-    "ExchangeMaintenanceRecovery",
-    "DataFeedInterruptionRecovery",
-    "OrderRejectionRecovery",
     "APIRateLimitRecovery",
     # Connection management
     "ConnectionManager",
     "ConnectionState",
-    # State monitoring
-    "StateMonitor",
-    "StateConsistencyError",
+    "DataFeedInterruptionRecovery",
+    "ErrorContext",
+    # Core error handling
+    "ErrorHandler",
+    "ErrorPattern",
     # Pattern analytics
     "ErrorPatternAnalytics",
-    "ErrorPattern",
+    "ErrorSeverity",
+    "ExchangeMaintenanceRecovery",
+    "NetworkDisconnectionRecovery",
+    "OrderRejectionRecovery",
+    # Recovery scenarios
+    "PartialFillRecovery",
+    # State monitoring
+    "StateMonitor",
 ]

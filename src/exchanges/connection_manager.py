@@ -31,12 +31,11 @@ from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
 from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
 from src.exchanges.health_monitor import ConnectionHealthMonitor
 from src.exchanges.websocket_pool import WebSocketConnectionPool
-
-# MANDATORY: Import from P-007A (utils)
-from src.utils.decorators import retry, log_calls
-from src.utils.helpers import test_connection, measure_latency
 from src.utils.constants import TIMEOUTS
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils.decorators import log_calls, retry
+from src.utils.helpers import measure_latency, test_connection
 
 logger = get_logger(__name__)
 
@@ -333,7 +332,9 @@ class ConnectionManager:
         logger.debug(f"ConnectionManager initialized with P-007 components for {exchange_name}")
         logger.info(f"Initialized connection manager for {exchange_name}")
 
-    async def _handle_connection_error(self, error: Exception, operation: str, connection_id: str = None) -> None:
+    async def _handle_connection_error(
+        self, error: Exception, operation: str, connection_id: str = None
+    ) -> None:
         """
         Handle connection-related errors using the error handler.
 
@@ -351,8 +352,8 @@ class ConnectionManager:
                 details={
                     "exchange_name": self.exchange_name,
                     "operation": operation,
-                    "connection_id": connection_id
-                }
+                    "connection_id": connection_id,
+                },
             )
 
             # Use network disconnection recovery for connection failures
@@ -541,7 +542,7 @@ class ConnectionManager:
             await self._handle_connection_error(
                 ExchangeConnectionError("Connection failure detected"),
                 "handle_connection_failure",
-                connection_id
+                connection_id,
             )
 
             logger.warning(
@@ -651,7 +652,7 @@ class ConnectionManager:
                     network_health[f"network_{endpoint}"] = {
                         "connected": is_connected,
                         "latency_ms": latency,
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
                     }
 
                 except Exception as e:
@@ -660,7 +661,7 @@ class ConnectionManager:
                         "connected": False,
                         "latency_ms": -1,
                         "error": str(e),
-                        "timestamp": datetime.now().isoformat()
+                        "timestamp": datetime.now().isoformat(),
                     }
 
             return network_health

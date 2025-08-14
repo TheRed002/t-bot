@@ -22,11 +22,11 @@ from src.core.logging import get_logger
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import APIRateLimitRecovery
+from src.utils.constants import RATE_LIMITS
 
 # MANDATORY: Import from P-007A (utils)
-from src.utils.decorators import retry, log_calls
-from src.utils.constants import RATE_LIMITS
-from src.error_handling.recovery_scenarios import APIRateLimitRecovery
+from src.utils.decorators import log_calls, retry
 
 logger = get_logger(__name__)
 
@@ -129,22 +129,25 @@ class RateLimiter:
         self.buckets: dict[str, TokenBucket] = {}
 
         # Requests per minute bucket
-        requests_per_minute = rate_limits.get("requests_per_minute",
-                                              default_limits.get("requests_per_minute", 1200))
+        requests_per_minute = rate_limits.get(
+            "requests_per_minute", default_limits.get("requests_per_minute", 1200)
+        )
         self.buckets["requests_per_minute"] = TokenBucket(
             capacity=requests_per_minute, refill_rate=requests_per_minute, refill_time=60.0
         )
 
         # Orders per second bucket
-        orders_per_second = rate_limits.get("orders_per_second",
-                                            default_limits.get("orders_per_second", 10))
+        orders_per_second = rate_limits.get(
+            "orders_per_second", default_limits.get("orders_per_second", 10)
+        )
         self.buckets["orders_per_second"] = TokenBucket(
             capacity=orders_per_second, refill_rate=orders_per_second, refill_time=1.0
         )
 
         # WebSocket connections bucket
-        websocket_connections = rate_limits.get("websocket_connections",
-                                                default_limits.get("websocket_connections", 5))
+        websocket_connections = rate_limits.get(
+            "websocket_connections", default_limits.get("websocket_connections", 5)
+        )
         self.buckets["websocket_connections"] = TokenBucket(
             capacity=websocket_connections,
             refill_rate=websocket_connections,
@@ -157,7 +160,9 @@ class RateLimiter:
 
         logger.info(f"Initialized rate limiter for {exchange_name}")
 
-    async def _handle_rate_limit_error(self, error: Exception, operation: str, bucket_name: str = None) -> None:
+    async def _handle_rate_limit_error(
+        self, error: Exception, operation: str, bucket_name: str = None
+    ) -> None:
         """
         Handle rate limit errors using the error handler.
 
@@ -175,8 +180,8 @@ class RateLimiter:
                 details={
                     "exchange_name": self.exchange_name,
                     "operation": operation,
-                    "bucket_name": bucket_name
-                }
+                    "bucket_name": bucket_name,
+                },
             )
 
             # Use API rate limit recovery for rate limit violations

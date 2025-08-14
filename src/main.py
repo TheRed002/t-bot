@@ -388,13 +388,14 @@ async def application_context():
 
 async def main() -> None:
     """Main application entry point."""
+    logger = get_logger(__name__)
     try:
         async with application_context() as app:
             await app.run()
     except KeyboardInterrupt:
-        print("\nApplication interrupted by user")
+        logger.info("Application interrupted by user")
     except Exception as e:
-        print(f"Application failed: {e}")
+        logger.error(f"Application failed: {e}")
         sys.exit(1)
 
 

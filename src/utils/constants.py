@@ -143,6 +143,9 @@ TIMEOUTS = {
     "websocket": 5,  # WebSocket connection timeout
     "order_timeout": 15,  # Order placement timeout
     "data_timeout": 20,  # Data retrieval timeout
+    "HEALTH_CHECK_INTERVAL": 30,  # Health check interval in seconds
+    "DB_POOL_RECYCLE": 3600,  # Database pool recycle time in seconds
+    "REDIS_DEFAULT_TTL": 3600,  # Redis default TTL in seconds
 }
 
 # HTTP status codes
@@ -260,6 +263,9 @@ LIMITS = {
     "max_circuit_breaker_failures": 5,  # Maximum failures before circuit breaker
     "max_cache_size_mb": 512,  # Maximum cache size in MB
     "max_websocket_connections": 50,  # Maximum WebSocket connections
+    "DB_MAX_OVERFLOW": 20,  # Database pool max overflow
+    "DB_SYNC_POOL_SIZE": 5,  # Database sync pool size
+    "DB_SYNC_MAX_OVERFLOW": 10,  # Database sync pool max overflow
 }
 
 # Thresholds for different operations

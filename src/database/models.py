@@ -17,16 +17,16 @@ from sqlalchemy import (
     DECIMAL,
     Boolean,
     CheckConstraint,
+    Column,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
-    Column,
-    Numeric,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column, relationship
@@ -440,10 +440,18 @@ class PerformanceMetrics(Base):
     )
 
     # Performance ratios
-    win_rate: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    profit_factor: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    sharpe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
-    max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
+    win_rate: Mapped[Decimal] = mapped_column(
+        DECIMAL(precision=10, scale=4), default=0.0, nullable=False
+    )
+    profit_factor: Mapped[Decimal] = mapped_column(
+        DECIMAL(precision=10, scale=4), default=0.0, nullable=False
+    )
+    sharpe_ratio: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(precision=10, scale=4), nullable=True
+    )
+    max_drawdown: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(precision=10, scale=4), nullable=True
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -567,6 +575,7 @@ class AuditLog(Base):
 
 class CapitalAllocationDB(Base):
     """Database model for capital allocations."""
+
     __tablename__ = "capital_allocations"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -581,13 +590,14 @@ class CapitalAllocationDB(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
-        Index('idx_strategy_exchange', 'strategy_id', 'exchange'),
-        Index('idx_created_at', 'created_at'),
+        Index("idx_strategy_exchange", "strategy_id", "exchange"),
+        Index("idx_created_at", "created_at"),
     )
 
 
 class FundFlowDB(Base):
     """Database model for fund flows."""
+
     __tablename__ = "fund_flows"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -604,14 +614,15 @@ class FundFlowDB(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
-        Index('idx_timestamp', 'timestamp'),
-        Index('idx_reason', 'reason'),
-        Index('idx_currency', 'currency'),
+        Index("idx_timestamp", "timestamp"),
+        Index("idx_reason", "reason"),
+        Index("idx_currency", "currency"),
     )
 
 
 class CurrencyExposureDB(Base):
     """Database model for currency exposures."""
+
     __tablename__ = "currency_exposures"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -623,13 +634,14 @@ class CurrencyExposureDB(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
-        Index('idx_currency', 'currency'),
-        Index('idx_last_updated', 'last_updated'),
+        Index("idx_currency", "currency"),
+        Index("idx_last_updated", "last_updated"),
     )
 
 
 class ExchangeAllocationDB(Base):
     """Database model for exchange allocations."""
+
     __tablename__ = "exchange_allocations"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -643,13 +655,14 @@ class ExchangeAllocationDB(Base):
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     __table_args__ = (
-        Index('idx_exchange', 'exchange'),
-        Index('idx_last_rebalance', 'last_rebalance'),
+        Index("idx_exchange", "exchange"),
+        Index("idx_last_rebalance", "last_rebalance"),
     )
 
 
 class MarketDataRecord(Base):
     """Database model for market data records."""
+
     __tablename__ = "market_data_records"
 
     id: Mapped[str] = mapped_column(
@@ -662,26 +675,38 @@ class MarketDataRecord(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
     # Price data
-    open_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    high_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    low_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    close_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    open_price: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(precision=20, scale=8), nullable=True
+    )
+    high_price: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(precision=20, scale=8), nullable=True
+    )
+    low_price: Mapped[Decimal | None] = mapped_column(DECIMAL(precision=20, scale=8), nullable=True)
+    close_price: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(precision=20, scale=8), nullable=True
+    )
+    price: Mapped[Decimal | None] = mapped_column(DECIMAL(precision=20, scale=8), nullable=True)
 
     # Volume and trade data
-    volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    quote_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    trades_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    volume: Mapped[Decimal | None] = mapped_column(DECIMAL(precision=20, scale=8), nullable=True)
+    quote_volume: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(precision=20, scale=8), nullable=True
+    )
+    trades_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Bid/Ask data
-    bid: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    ask: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    bid_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    ask_volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bid: Mapped[Decimal | None] = mapped_column(DECIMAL(precision=20, scale=8), nullable=True)
+    ask: Mapped[Decimal | None] = mapped_column(DECIMAL(precision=20, scale=8), nullable=True)
+    bid_volume: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(precision=20, scale=8), nullable=True
+    )
+    ask_volume: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(precision=20, scale=8), nullable=True
+    )
 
     # Metadata
     data_source: Mapped[str] = mapped_column(String(100), nullable=False, default="exchange")
-    quality_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     validation_status: Mapped[str] = mapped_column(String(20), nullable=False, default="valid")
 
     # Timestamps
@@ -704,6 +729,7 @@ class MarketDataRecord(Base):
 
 class FeatureRecord(Base):
     """Database model for calculated features."""
+
     __tablename__ = "feature_records"
 
     id: Mapped[str] = mapped_column(
@@ -715,22 +741,23 @@ class FeatureRecord(Base):
     feature_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     feature_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     calculation_timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True)
+        DateTime(timezone=True), nullable=False, index=True
+    )
 
     # Feature values
     feature_value: Mapped[float] = mapped_column(Float, nullable=False)
-    confidence_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # Calculation metadata
-    lookback_period: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    parameters: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    lookback_period: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    parameters: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     calculation_method: Mapped[str] = mapped_column(String(100), nullable=False, default="standard")
 
     # Data source
-    source_data_start: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True)
-    source_data_end: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True)
+    source_data_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source_data_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -742,13 +769,19 @@ class FeatureRecord(Base):
         Index("idx_feature_symbol_type", "symbol", "feature_type"),
         Index("idx_feature_timestamp", "calculation_timestamp"),
         Index("idx_feature_name", "feature_name"),
-        UniqueConstraint("symbol", "feature_type", "feature_name",
-                         "calculation_timestamp", name="uq_feature_unique"),
+        UniqueConstraint(
+            "symbol",
+            "feature_type",
+            "feature_name",
+            "calculation_timestamp",
+            name="uq_feature_unique",
+        ),
     )
 
 
 class DataQualityRecord(Base):
     """Database model for data quality metrics."""
+
     __tablename__ = "data_quality_records"
 
     id: Mapped[str] = mapped_column(
@@ -759,7 +792,8 @@ class DataQualityRecord(Base):
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     data_source: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     quality_check_timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True)
+        DateTime(timezone=True), nullable=False, index=True
+    )
 
     # Quality metrics
     completeness_score: Mapped[float] = mapped_column(Float, nullable=False)
@@ -772,14 +806,14 @@ class DataQualityRecord(Base):
     missing_data_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     outlier_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    validation_errors: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    validation_errors: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # Metadata
     check_type: Mapped[str] = mapped_column(String(50), nullable=False, default="comprehensive")
-    data_period_start: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True)
-    data_period_end: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True)
+    data_period_start: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    data_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
@@ -797,6 +831,7 @@ class DataQualityRecord(Base):
 
 class DataPipelineRecord(Base):
     """Database model for data pipeline execution tracking."""
+
     __tablename__ = "data_pipeline_records"
 
     id: Mapped[str] = mapped_column(
@@ -807,7 +842,8 @@ class DataPipelineRecord(Base):
     pipeline_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     execution_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     execution_timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True)
+        DateTime(timezone=True), nullable=False, index=True
+    )
 
     # Execution status
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
@@ -817,22 +853,22 @@ class DataPipelineRecord(Base):
     records_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     records_successful: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     records_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    processing_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Error tracking
     error_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    error_messages: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
-    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_messages: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Metadata
-    configuration: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    dependencies: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    configuration: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    dependencies: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # Timestamps
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

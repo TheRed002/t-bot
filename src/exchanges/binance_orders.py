@@ -26,11 +26,11 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import OrderRejectionRecovery
+from src.utils.constants import FEE_STRUCTURES, PRECISION_LEVELS
+from src.utils.helpers import normalize_price, round_to_precision, round_to_precision_decimal
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.validators import validate_price, validate_quantity
-from src.utils.helpers import round_to_precision, normalize_price
-from src.utils.constants import FEE_STRUCTURES, PRECISION_LEVELS
 
 logger = get_logger(__name__)
 
@@ -77,7 +77,9 @@ class BinanceOrderManager:
 
         logger.info("Initialized Binance order manager")
 
-    async def _handle_order_error(self, error: Exception, operation: str, order: OrderRequest = None) -> None:
+    async def _handle_order_error(
+        self, error: Exception, operation: str, order: OrderRequest = None
+    ) -> None:
         """
         Handle order-related errors using the error handler.
 
@@ -97,8 +99,8 @@ class BinanceOrderManager:
                 details={
                     "exchange_name": self.exchange_name,
                     "operation": operation,
-                    "order_type": order.order_type.value if order else None
-                }
+                    "order_type": order.order_type.value if order else None,
+                },
             )
 
             # Determine recovery scenario
@@ -443,16 +445,17 @@ class BinanceOrderManager:
             fee_rate = Decimal(str(fee_structure.get("taker_fee", "0.001")))  # Default 0.1%
 
             # Calculate fee based on order value using helper functions
-            normalized_price = normalize_price(float(fill_price), order.symbol)
+            # Keep everything as Decimal for precision
+            normalized_price = Decimal(str(normalize_price(float(fill_price), order.symbol)))
             precision = PRECISION_LEVELS.get("binance", {}).get("fee", 8)
-            normalized_quantity = round_to_precision(float(order.quantity), precision)
+            normalized_quantity = round_to_precision_decimal(order.quantity, precision)
 
-            order_value = Decimal(str(normalized_quantity)) * Decimal(str(normalized_price))
+            order_value = normalized_quantity * normalized_price
             fee = order_value * fee_rate
 
             # Round fee to appropriate precision
-            rounded_fee = round_to_precision(float(fee), precision)
-            return Decimal(str(rounded_fee))
+            rounded_fee = round_to_precision_decimal(fee, precision)
+            return rounded_fee
 
         except Exception as e:
             logger.error(f"Error calculating fees: {e!s}")

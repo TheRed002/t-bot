@@ -23,6 +23,7 @@ from typing import Any
 from src.core.config import Config
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
+from src.utils.decorators import retry
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -30,8 +31,7 @@ from src.core.types import (
     FundFlow,
     WithdrawalRule,
 )
-from src.database.connection import get_redis_client
-from src.database.connection import get_influxdb_client
+from src.database.connection import get_influxdb_client, get_redis_client
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.utils.decorators import time_execution
@@ -140,9 +140,7 @@ class FundFlowManager:
             # Convert FundFlow objects to dict for caching
             cache_data = [flow.model_dump() for flow in flows]
             await self.redis_client.set(
-                self.cache_keys["fund_flows"],
-                cache_data,
-                ttl=self.cache_ttl
+                self.cache_keys["fund_flows"], cache_data, ttl=self.cache_ttl
             )
         except Exception as e:
             logger.warning("Failed to cache fund flows", error=str(e))
@@ -168,11 +166,16 @@ class FundFlowManager:
         try:
             # Create a point for fund flows
             from influxdb_client import Point
-            point = Point("fund_flows").tag("component", "fund_flow_manager").tag(
-                "currency", flow.currency
-            ).tag("reason", flow.reason).tag("from_exchange", flow.from_exchange or "none").tag(
-                "to_exchange", flow.to_exchange or "none"
-            ).field("amount", float(flow.amount))
+
+            point = (
+                Point("fund_flows")
+                .tag("component", "fund_flow_manager")
+                .tag("currency", flow.currency)
+                .tag("reason", flow.reason)
+                .tag("from_exchange", flow.from_exchange or "none")
+                .tag("to_exchange", flow.to_exchange or "none")
+                .field("amount", float(flow.amount))
+            )
 
             # Write to InfluxDB
             self.influx_client.write_api().write(bucket="trading_bot", record=point)
@@ -244,7 +247,7 @@ class FundFlowManager:
                     "currency": currency,
                     "exchange": exchange,
                     "total_capital": float(self.total_capital),
-                }
+                },
             )
 
             # Handle error with recovery strategy
@@ -349,7 +352,7 @@ class FundFlowManager:
                     "exchange": exchange,
                     "reason": reason,
                     "total_capital": float(self.total_capital),
-                }
+                },
             )
 
             # Handle error with recovery strategy

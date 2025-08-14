@@ -147,8 +147,7 @@ class TechnicalIndicatorCalculator:
             # Initialize DataFrame if not exists
             if symbol not in self.price_data:
                 self.price_data[symbol] = pd.DataFrame(
-                    columns=["timestamp", "open",
-                             "high", "low", "close", "volume"]
+                    columns=["timestamp", "open", "high", "low", "close", "volume"]
                 )
 
             # Add new data point
@@ -168,8 +167,7 @@ class TechnicalIndicatorCalculator:
             # Keep only recent data (configurable window)
             max_rows = getattr(self.config, "max_price_history", 1000)
             if len(self.price_data[symbol]) > max_rows:
-                self.price_data[symbol] = self.price_data[symbol].tail(
-                    max_rows)
+                self.price_data[symbol] = self.price_data[symbol].tail(max_rows)
 
             # Clear cache for this symbol
             if symbol in self.feature_cache:
@@ -205,22 +203,19 @@ class TechnicalIndicatorCalculator:
             df = self.price_data[symbol]
 
             if len(df) < period:
-                logger.warning(
-                    f"Insufficient data for SMA calculation: {len(df)} < {period}")
+                logger.warning(f"Insufficient data for SMA calculation: {len(df)} < {period}")
                 return IndicatorResult(
                     indicator_name="SMA",
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate SMA using TA-Lib
             sma_values = talib.SMA(df[field].values, timeperiod=period)
-            latest_value = sma_values[-1] if not np.isnan(
-                sma_values[-1]) else None
+            latest_value = sma_values[-1] if not np.isnan(sma_values[-1]) else None
 
             self.calculation_stats["successful_calculations"] += 1
 
@@ -244,8 +239,8 @@ class TechnicalIndicatorCalculator:
                     "indicator": "SMA",
                     "period": period,
                     "field": field,
-                    "data_length": len(df) if symbol in self.price_data else 0
-                }
+                    "data_length": len(df) if symbol in self.price_data else 0,
+                },
             )
 
             # Handle the error through the error handling framework
@@ -290,14 +285,12 @@ class TechnicalIndicatorCalculator:
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate EMA using TA-Lib
             ema_values = talib.EMA(df[field].values, timeperiod=period)
-            latest_value = ema_values[-1] if not np.isnan(
-                ema_values[-1]) else None
+            latest_value = ema_values[-1] if not np.isnan(ema_values[-1]) else None
 
             self.calculation_stats["successful_calculations"] += 1
 
@@ -321,8 +314,8 @@ class TechnicalIndicatorCalculator:
                     "indicator": "EMA",
                     "period": period,
                     "field": field,
-                    "data_length": len(df) if symbol in self.price_data else 0
-                }
+                    "data_length": len(df) if symbol in self.price_data else 0,
+                },
             )
 
             # Handle the error through the error handling framework
@@ -364,14 +357,12 @@ class TechnicalIndicatorCalculator:
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate RSI using TA-Lib
             rsi_values = talib.RSI(df["close"].values, timeperiod=period)
-            latest_value = rsi_values[-1] if not np.isnan(
-                rsi_values[-1]) else None
+            latest_value = rsi_values[-1] if not np.isnan(rsi_values[-1]) else None
 
             # Determine signal
             signal = None
@@ -404,8 +395,8 @@ class TechnicalIndicatorCalculator:
                 details={
                     "indicator": "RSI",
                     "period": period,
-                    "data_length": len(df) if symbol in self.price_data else 0
-                }
+                    "data_length": len(df) if symbol in self.price_data else 0,
+                },
             )
 
             # Handle the error through the error handling framework
@@ -465,8 +456,7 @@ class TechnicalIndicatorCalculator:
                         "signal_period": signal_period,
                         "reason": "insufficient_data",
                     },
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate MACD using TA-Lib
@@ -478,12 +468,9 @@ class TechnicalIndicatorCalculator:
             )
 
             # Get latest values
-            latest_macd = macd_line[-1] if not np.isnan(
-                macd_line[-1]) else None
-            latest_signal = macd_signal[-1] if not np.isnan(
-                macd_signal[-1]) else None
-            latest_histogram = macd_histogram[-1] if not np.isnan(
-                macd_histogram[-1]) else None
+            latest_macd = macd_line[-1] if not np.isnan(macd_line[-1]) else None
+            latest_signal = macd_signal[-1] if not np.isnan(macd_signal[-1]) else None
+            latest_histogram = macd_histogram[-1] if not np.isnan(macd_histogram[-1]) else None
 
             # Determine trend signal
             trend_signal = None
@@ -526,8 +513,8 @@ class TechnicalIndicatorCalculator:
                     "fast_period": fast_period,
                     "slow_period": slow_period,
                     "signal_period": signal_period,
-                    "data_length": len(df) if symbol in self.price_data else 0
-                }
+                    "data_length": len(df) if symbol in self.price_data else 0,
+                },
             )
 
             # Handle the error through the error handling framework
@@ -571,10 +558,8 @@ class TechnicalIndicatorCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"period": period, "std_dev": std_dev,
-                              "reason": "insufficient_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    metadata={"period": period, "std_dev": std_dev, "reason": "insufficient_data"},
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate Bollinger Bands using TA-Lib
@@ -583,12 +568,9 @@ class TechnicalIndicatorCalculator:
             )
 
             # Get latest values
-            latest_upper = upper_band[-1] if not np.isnan(
-                upper_band[-1]) else None
-            latest_middle = middle_band[-1] if not np.isnan(
-                middle_band[-1]) else None
-            latest_lower = lower_band[-1] if not np.isnan(
-                lower_band[-1]) else None
+            latest_upper = upper_band[-1] if not np.isnan(upper_band[-1]) else None
+            latest_middle = middle_band[-1] if not np.isnan(middle_band[-1]) else None
+            latest_lower = lower_band[-1] if not np.isnan(lower_band[-1]) else None
             latest_price = df["close"].iloc[-1]
 
             # Calculate band position and width
@@ -597,10 +579,8 @@ class TechnicalIndicatorCalculator:
             signal = None
 
             if all(x is not None for x in [latest_upper, latest_middle, latest_lower]):
-                band_width = (latest_upper - latest_lower) / \
-                    latest_middle * 100
-                band_position = (latest_price - latest_lower) / \
-                    (latest_upper - latest_lower) * 100
+                band_width = (latest_upper - latest_lower) / latest_middle * 100
+                band_position = (latest_price - latest_lower) / (latest_upper - latest_lower) * 100
 
                 # Generate signals
                 if latest_price <= latest_lower:
@@ -642,8 +622,8 @@ class TechnicalIndicatorCalculator:
                     "period": period,
                     "std_dev": std_dev,
                     "field": field,
-                    "data_length": len(df) if symbol in self.price_data else 0
-                }
+                    "data_length": len(df) if symbol in self.price_data else 0,
+                },
             )
 
             # Handle the error through the error handling framework
@@ -685,8 +665,7 @@ class TechnicalIndicatorCalculator:
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate ATR using TA-Lib
@@ -694,8 +673,7 @@ class TechnicalIndicatorCalculator:
                 df["high"].values, df["low"].values, df["close"].values, timeperiod=period
             )
 
-            latest_value = atr_values[-1] if not np.isnan(
-                atr_values[-1]) else None
+            latest_value = atr_values[-1] if not np.isnan(atr_values[-1]) else None
             latest_price = df["close"].iloc[-1]
 
             # Calculate volatility percentage
@@ -728,8 +706,8 @@ class TechnicalIndicatorCalculator:
                 details={
                     "indicator": "ATR",
                     "period": period,
-                    "data_length": len(df) if symbol in self.price_data else 0
-                }
+                    "data_length": len(df) if symbol in self.price_data else 0,
+                },
             )
 
             # Handle the error through the error handling framework
@@ -777,14 +755,11 @@ class TechnicalIndicatorCalculator:
                         logger.warning(f"Unknown indicator: {indicator}")
 
                 except Exception as e:
-                    logger.error(
-                        f"Failed to calculate {indicator} for {symbol}: {e!s}")
+                    logger.error(f"Failed to calculate {indicator} for {symbol}: {e!s}")
                     results[indicator] = None
 
             successful_count = len([r for r in results.values() if r is not None])
-            logger.info(
-                f"Calculated {successful_count} indicators for {symbol}"
-            )
+            logger.info(f"Calculated {successful_count} indicators for {symbol}")
             return results
 
         except Exception as e:
@@ -794,10 +769,7 @@ class TechnicalIndicatorCalculator:
                 component="TechnicalIndicatorCalculator",
                 operation="calculate_batch_indicators",
                 symbol=symbol,
-                details={
-                    "indicators": indicators,
-                    "indicators_count": len(indicators)
-                }
+                details={"indicators": indicators, "indicators_count": len(indicators)},
             )
 
             # Handle the error through the error handling framework
@@ -806,8 +778,7 @@ class TechnicalIndicatorCalculator:
             # Add error event to pattern analytics
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(
-                f"Batch indicator calculation failed for {symbol}: {e!s}")
+            logger.error(f"Batch indicator calculation failed for {symbol}: {e!s}")
             raise DataError(f"Batch calculation failed: {e!s}")
 
     @time_execution
@@ -850,9 +821,7 @@ class TechnicalIndicatorCalculator:
                 error=e,
                 component="TechnicalIndicatorCalculator",
                 operation="get_calculation_summary",
-                details={
-                    "operation": "summary_generation"
-                }
+                details={"operation": "summary_generation"},
             )
 
             # Handle the error through the error handling framework
@@ -881,7 +850,7 @@ class TechnicalIndicatorCalculator:
                 "error_trends": trend_summary,
                 "circuit_breaker_status": circuit_breaker_status,
                 "calculation_stats": self.calculation_stats.copy(),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         except Exception as e:
@@ -890,9 +859,7 @@ class TechnicalIndicatorCalculator:
                 error=e,
                 component="TechnicalIndicatorCalculator",
                 operation="get_error_analytics",
-                details={
-                    "operation": "analytics_retrieval"
-                }
+                details={"operation": "analytics_retrieval"},
             )
 
             self.error_handler.handle_error(error_context)
@@ -902,7 +869,7 @@ class TechnicalIndicatorCalculator:
             return {
                 "error": str(e),
                 "error_id": error_context.error_id,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
     async def cleanup(self) -> None:
@@ -932,9 +899,7 @@ class TechnicalIndicatorCalculator:
                 error=e,
                 component="TechnicalIndicatorCalculator",
                 operation="cleanup",
-                details={
-                    "operation": "cleanup"
-                }
+                details={"operation": "cleanup"},
             )
 
             self.error_handler.handle_error(error_context)

@@ -29,8 +29,8 @@ from src.core.logging import get_logger
 # MANDATORY: Import from P-001
 from src.core.types import (
     CircuitBreakerEvent,
-    CircuitBreakerType,
     CircuitBreakerStatus,
+    CircuitBreakerType,
 )
 
 # MANDATORY: Import from P-002A

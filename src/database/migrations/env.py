@@ -92,7 +92,7 @@ def run_migrations_online() -> None:
     In this scenario we need to create an Engine
     and associate a connection with the context.
     """
-    configuration = config.get_section(config.config_ini_section)
+    configuration = context.config.get_section(context.config.config_ini_section)
     configuration["sqlalchemy.url"] = get_url()
 
     connectable = engine_from_config(

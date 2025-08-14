@@ -40,9 +40,9 @@ from src.core.types import (
     OrderSide,
     OrderStatus,
     OrderType,
+    Position,
     Ticker,
     Trade,
-    Position,
 )
 
 # MANDATORY: Import from P-002A
@@ -53,8 +53,7 @@ from src.exchanges.rate_limiter import RateLimiter
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.constants import API_ENDPOINTS
-from src.utils.decorators import time_execution, retry, cache_result, log_calls
-
+from src.utils.decorators import cache_result, log_calls, retry, time_execution
 
 logger = get_logger(__name__)
 
@@ -236,7 +235,9 @@ class CoinbaseExchange(BaseExchange):
             # Re-raise connection errors as-is
             raise
         except Exception as e:
-            await self._handle_exchange_error(e, "get_account_balance", {"exchange_name": self.exchange_name})
+            await self._handle_exchange_error(
+                e, "get_account_balance", {"exchange_name": self.exchange_name}
+            )
             raise ExchangeError(f"Failed to get account balance: {e!s}")
 
     @time_execution

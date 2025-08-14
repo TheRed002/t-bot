@@ -19,12 +19,12 @@ from src.core.types import ExchangeInfo, ExchangeStatus
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 
+# MANDATORY: Import from P-007A (utils)
+from src.utils.decorators import log_calls, retry
+
 # MANDATORY: Import from P-007 (advanced rate limiting)
 # Import base exchange interface
 from .base import BaseExchange
-
-# MANDATORY: Import from P-007A (utils)
-from src.utils.decorators import retry, log_calls
 
 logger = get_logger(__name__)
 
@@ -129,9 +129,7 @@ class ExchangeFactory:
                 raise ExchangeError(f"Failed to connect to {exchange_name}")
 
             # TODO: Remove in production
-            logger.debug(
-                "Exchange created with P-007 components", exchange=exchange_name
-            )
+            logger.debug("Exchange created with P-007 components", exchange=exchange_name)
             logger.info("Created and connected to exchange", exchange=exchange_name)
             return exchange
 
@@ -174,9 +172,7 @@ class ExchangeFactory:
                 self._active_exchanges[exchange_name] = exchange
                 return exchange
             except Exception as e:
-                logger.error(
-                    "Failed to get/create exchange", exchange=exchange_name, error=str(e)
-                )
+                logger.error("Failed to get/create exchange", exchange=exchange_name, error=str(e))
                 return None
 
         return None
@@ -199,9 +195,7 @@ class ExchangeFactory:
                 logger.info("Removed exchange from active pool", exchange=exchange_name)
                 return True
             except Exception as e:
-                logger.error(
-                    "Failed to remove exchange", exchange=exchange_name, error=str(e)
-                )
+                logger.error("Failed to remove exchange", exchange=exchange_name, error=str(e))
                 # Remove from active exchanges even if disconnect fails
                 del self._active_exchanges[exchange_name]
                 return False

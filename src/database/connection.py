@@ -84,13 +84,10 @@ class DatabaseConnectionManager:
                 handled = await self.error_handler.handle_error(e, error_context, recovery_scenario)
 
                 if not handled:
-                    logger.error(
-                        "Failed to initialize database connections", error=str(e))
-                    raise DataSourceError(
-                        f"Database initialization failed: {e!s}")
+                    logger.error("Failed to initialize database connections", error=str(e))
+                    raise DataSourceError(f"Database initialization failed: {e!s}") from e
                 else:
-                    logger.info(
-                        "Database connections recovered after error handling")
+                    logger.info("Database connections recovered after error handling")
 
     def _start_health_monitoring(self) -> None:
         """Start health monitoring task with network testing."""
@@ -99,17 +96,14 @@ class DatabaseConnectionManager:
             try:
                 db_host = self.config.database.postgresql_host
                 db_port = self.config.database.postgresql_port
-                logger.info(
-                    f"Starting health monitoring for {db_host}:{db_port}")
-                monitor_interval = getattr(
-                    TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
+                logger.info(f"Starting health monitoring for {db_host}:{db_port}")
+                monitor_interval = getattr(TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
                 logger.debug(f"Health check interval: {monitor_interval}s")
             except Exception as e:
                 logger.warning(f"Health monitoring setup warning: {e}")
 
             # Start the monitoring task
-            self._health_check_task = asyncio.create_task(
-                self._health_check_loop())
+            self._health_check_task = asyncio.create_task(self._health_check_loop())
             logger.info("Database health monitoring started")
 
     async def _health_check_loop(self) -> None:
@@ -117,8 +111,7 @@ class DatabaseConnectionManager:
         while True:
             try:
                 # Use timeout constants from utils
-                health_check_interval = getattr(
-                    TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
+                health_check_interval = getattr(TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
                 await asyncio.sleep(health_check_interval)
 
                 # Use utils constants and performance monitoring
@@ -165,6 +158,7 @@ class DatabaseConnectionManager:
             # Use NullPool under pytest to avoid pooled connection GC warnings
             try:
                 from sqlalchemy.pool import NullPool as _NullPool
+
                 use_null_pool = bool(os.getenv("PYTEST_CURRENT_TEST"))
             except Exception:
                 use_null_pool = False
@@ -195,6 +189,7 @@ class DatabaseConnectionManager:
             sync_max_overflow = getattr(LIMITS, "DB_SYNC_MAX_OVERFLOW", 10)
 
             from sqlalchemy.pool import NullPool as _NullPool
+
             sync_pool_class = _NullPool if use_null_pool else QueuePool
 
             if sync_pool_class.__name__ == "NullPool":
@@ -233,10 +228,9 @@ class DatabaseConnectionManager:
 
             if not handled:
                 logger.error("PostgreSQL connection failed", error=str(e))
-                raise DataSourceError(f"PostgreSQL connection failed: {e!s}")
+                raise DataSourceError(f"PostgreSQL connection failed: {e!s}") from e
             else:
-                logger.info(
-                    "PostgreSQL connection recovered after error handling")
+                logger.info("PostgreSQL connection recovered after error handling")
 
     @time_execution
     @circuit_breaker(failure_threshold=2, recovery_timeout=15)
@@ -271,7 +265,7 @@ class DatabaseConnectionManager:
 
             if not handled:
                 logger.error("Redis connection failed", error=str(e))
-                raise DataSourceError(f"Redis connection failed: {e!s}")
+                raise DataSourceError(f"Redis connection failed: {e!s}") from e
             else:
                 logger.info("Redis connection recovered after error handling")
 
@@ -291,7 +285,7 @@ class DatabaseConnectionManager:
             try:
                 self.influxdb_client.ping()
             except Exception as e:
-                raise DataSourceError(f"InfluxDB health check failed: {e!s}")
+                raise DataSourceError(f"InfluxDB health check failed: {e!s}") from e
 
             logger.info("InfluxDB connection established")
 
@@ -308,38 +302,44 @@ class DatabaseConnectionManager:
 
             # Use ErrorHandler for sophisticated error management
             recovery_scenario = NetworkDisconnectionRecovery(self.config)
-            handled = await self.error_handler.handle_error(error_context, recovery_scenario)
+            handled = await self.error_handler.handle_error(e, error_context, recovery_scenario)
 
             if not handled:
                 logger.error("InfluxDB connection failed", error=str(e))
-                raise DataSourceError(f"InfluxDB connection failed: {e!s}")
+                raise DataSourceError(f"InfluxDB connection failed: {e!s}") from e
             else:
-                logger.info(
-                    "InfluxDB connection recovered after error handling")
+                logger.info("InfluxDB connection recovered after error handling")
 
     # Removed duplicate async _start_health_monitoring and _health_monitor.
     # Single health monitor loop is implemented in _health_check_loop.
 
-    @time_execution
-    async def get_async_session(self) -> AsyncSession:
-        """Get async database session."""
+    @asynccontextmanager
+    async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
+        """Get async database session with proper context management."""
         if not self.async_engine:
             raise DataSourceError("Database not initialized")
 
         async_session = async_sessionmaker(
             self.async_engine, class_=AsyncSession, expire_on_commit=False
         )
-        # Return a new session; callers should use context manager and close it
-        return async_session()
+
+        async with async_session() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+            finally:
+                await session.close()
 
     def get_sync_session(self) -> Session:
         """Get sync database session."""
         if not self.sync_engine:
             raise DataSourceError("Database not initialized")
 
-        SessionLocal = sessionmaker(
-            bind=self.sync_engine, expire_on_commit=False)
-        return SessionLocal()
+        session_local = sessionmaker(bind=self.sync_engine, expire_on_commit=False)
+        return session_local()
 
     async def get_redis_client(self) -> redis.Redis:
         """Get Redis client."""
@@ -422,15 +422,8 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     if not _connection_manager:
         raise DataSourceError("Database not initialized")
 
-    session = await _connection_manager.get_async_session()
-    try:
+    async with _connection_manager.get_async_session() as session:
         yield session
-        await session.commit()
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
 
 
 def get_sync_session() -> Session:

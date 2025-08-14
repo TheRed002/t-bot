@@ -14,29 +14,28 @@ Dependencies:
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from src.core.config import Config
-from src.core.exceptions import DataError, DataSourceError
 from src.core.logging import get_logger
 from src.core.types import MarketData, StorageMode
 
 # Import from P-002 database components
 from src.database.connection import get_async_session
-from src.database.queries import DatabaseQueries
-from src.database.models import (
-    MarketDataRecord,
-    FeatureRecord,
-    DataQualityRecord,
-    DataPipelineRecord,
-)
 from src.database.influxdb_client import InfluxDBClientWrapper
+from src.database.models import (
+    DataPipelineRecord,
+    DataQualityRecord,
+    FeatureRecord,
+    MarketDataRecord,
+)
+from src.database.queries import DatabaseQueries
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
-from src.utils.decorators import time_execution, retry, cache_result
+from src.utils.decorators import cache_result, time_execution
 
 logger = get_logger(__name__)
 
@@ -61,9 +60,7 @@ class DataIntegrationService:
         # Storage configuration
         storage_config = getattr(config, "data_storage", {})
         if hasattr(storage_config, "get"):
-            self.storage_mode = StorageMode(
-                storage_config.get("mode", "batch")
-            )
+            self.storage_mode = StorageMode(storage_config.get("mode", "batch"))
             self.batch_size = storage_config.get("batch_size", 100)
             self.cleanup_interval = storage_config.get("cleanup_interval", 3600)
         else:
@@ -91,9 +88,7 @@ class DataIntegrationService:
 
     @time_execution
     async def store_market_data(
-        self,
-        market_data: Union[MarketData, List[MarketData]],
-        exchange: str = "unknown"
+        self, market_data: MarketData | list[MarketData], exchange: str = "unknown"
     ) -> bool:
         """
         Store market data using proper database integration.
@@ -150,11 +145,7 @@ class DataIntegrationService:
             logger.error(f"Single market data storage failed: {e}")
             return False
 
-    async def _store_market_data_batch(
-        self,
-        data_list: List[MarketData],
-        exchange: str
-    ) -> bool:
+    async def _store_market_data_batch(self, data_list: list[MarketData], exchange: str) -> bool:
         """Store a batch of market data records."""
         try:
             # Store to InfluxDB for time series analysis
@@ -173,9 +164,7 @@ class DataIntegrationService:
             return False
 
     async def _store_market_data_to_postgresql(
-        self,
-        data_list: List[MarketData],
-        exchange: str
+        self, data_list: list[MarketData], exchange: str
     ) -> bool:
         """Store market data to PostgreSQL using proper database models."""
         try:
@@ -197,9 +186,9 @@ class DataIntegrationService:
                         volume=float(data.volume) if data.volume else None,
                         bid=float(data.bid) if data.bid else None,
                         ask=float(data.ask) if data.ask else None,
-                        data_source='exchange',
+                        data_source="exchange",
                         quality_score=1.0,  # Default quality score
-                        validation_status='valid'
+                        validation_status="valid",
                     )
                     records.append(record)
 
@@ -221,12 +210,12 @@ class DataIntegrationService:
         feature_type: str,
         feature_name: str,
         feature_value: float,
-        calculation_timestamp: Optional[datetime] = None,
-        confidence_score: Optional[float] = None,
-        lookback_period: Optional[int] = None,
-        parameters: Optional[Dict[str, Any]] = None,
-        source_data_start: Optional[datetime] = None,
-        source_data_end: Optional[datetime] = None
+        calculation_timestamp: datetime | None = None,
+        confidence_score: float | None = None,
+        lookback_period: int | None = None,
+        parameters: dict[str, Any] | None = None,
+        source_data_start: datetime | None = None,
+        source_data_end: datetime | None = None,
     ) -> bool:
         """
         Store a calculated feature using proper database integration.
@@ -259,9 +248,9 @@ class DataIntegrationService:
                     confidence_score=confidence_score,
                     lookback_period=lookback_period,
                     parameters=parameters,
-                    calculation_method='standard',
+                    calculation_method="standard",
                     source_data_start=source_data_start,
-                    source_data_end=source_data_end
+                    source_data_end=source_data_end,
                 )
 
                 await db_queries.create_feature_record(feature_record)
@@ -285,10 +274,10 @@ class DataIntegrationService:
         missing_data_count: int = 0,
         outlier_count: int = 0,
         duplicate_count: int = 0,
-        validation_errors: Optional[List[str]] = None,
+        validation_errors: list[str] | None = None,
         check_type: str = "comprehensive",
-        data_period_start: Optional[datetime] = None,
-        data_period_end: Optional[datetime] = None
+        data_period_start: datetime | None = None,
+        data_period_end: datetime | None = None,
     ) -> bool:
         """
         Store data quality metrics using proper database integration.
@@ -331,7 +320,7 @@ class DataIntegrationService:
                     validation_errors=validation_errors,
                     check_type=check_type,
                     data_period_start=data_period_start,
-                    data_period_end=data_period_end
+                    data_period_end=data_period_end,
                 )
 
                 await db_queries.create_data_quality_record(quality_record)
@@ -346,10 +335,10 @@ class DataIntegrationService:
     async def track_pipeline_execution(
         self,
         pipeline_name: str,
-        execution_id: Optional[str] = None,
-        configuration: Optional[Dict[str, Any]] = None,
-        dependencies: Optional[List[str]] = None
-    ) -> Optional[str]:
+        execution_id: str | None = None,
+        configuration: dict[str, Any] | None = None,
+        dependencies: list[str] | None = None,
+    ) -> str | None:
         """
         Start tracking a data pipeline execution.
 
@@ -373,14 +362,14 @@ class DataIntegrationService:
                     pipeline_name=pipeline_name,
                     execution_id=execution_id,
                     execution_timestamp=datetime.now(timezone.utc),
-                    status='running',
-                    stage='started',
+                    status="running",
+                    stage="started",
                     records_processed=0,
                     records_successful=0,
                     records_failed=0,
                     error_count=0,
                     configuration=configuration,
-                    dependencies=dependencies
+                    dependencies=dependencies,
                 )
 
                 await db_queries.create_data_pipeline_record(pipeline_record)
@@ -395,12 +384,12 @@ class DataIntegrationService:
         self,
         execution_id: str,
         status: str,
-        stage: Optional[str] = None,
-        records_processed: Optional[int] = None,
-        records_successful: Optional[int] = None,
-        records_failed: Optional[int] = None,
-        processing_time_ms: Optional[int] = None,
-        error_message: Optional[str] = None
+        stage: str | None = None,
+        records_processed: int | None = None,
+        records_successful: int | None = None,
+        records_failed: int | None = None,
+        processing_time_ms: int | None = None,
+        error_message: str | None = None,
     ) -> bool:
         """
         Update pipeline execution status.
@@ -427,14 +416,25 @@ class DataIntegrationService:
                     execution_id=execution_id,
                     status=status,
                     stage=stage,
-                    error_message=error_message
+                    error_message=error_message,
                 )
 
-                if success and any(v is not None for v in [records_processed, records_successful, records_failed, processing_time_ms]):
+                if success and any(
+                    v is not None
+                    for v in [
+                        records_processed,
+                        records_successful,
+                        records_failed,
+                        processing_time_ms,
+                    ]
+                ):
                     # Update additional metrics
                     await self._update_pipeline_metrics(
-                        execution_id, records_processed, records_successful,
-                        records_failed, processing_time_ms
+                        execution_id,
+                        records_processed,
+                        records_successful,
+                        records_failed,
+                        processing_time_ms,
                     )
 
                 logger.info(f"Updated pipeline {execution_id} status to {status}")
@@ -447,10 +447,10 @@ class DataIntegrationService:
     async def _update_pipeline_metrics(
         self,
         execution_id: str,
-        records_processed: Optional[int],
-        records_successful: Optional[int],
-        records_failed: Optional[int],
-        processing_time_ms: Optional[int]
+        records_processed: int | None,
+        records_successful: int | None,
+        records_failed: int | None,
+        processing_time_ms: int | None,
     ) -> bool:
         """Update pipeline execution metrics."""
         try:
@@ -489,10 +489,10 @@ class DataIntegrationService:
         self,
         symbol: str,
         exchange: str,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
-        limit: Optional[int] = None
-    ) -> List[MarketDataRecord]:
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        limit: int | None = None,
+    ) -> list[MarketDataRecord]:
         """
         Retrieve market data using proper database integration.
 
@@ -515,7 +515,7 @@ class DataIntegrationService:
                     exchange=exchange,
                     start_time=start_time,
                     end_time=end_time,
-                    limit=limit
+                    limit=limit,
                 )
 
                 logger.info(f"Retrieved {len(records)} market data records for {symbol}")
@@ -529,11 +529,11 @@ class DataIntegrationService:
     async def get_features(
         self,
         symbol: str,
-        feature_type: Optional[str] = None,
-        feature_name: Optional[str] = None,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None
-    ) -> List[FeatureRecord]:
+        feature_type: str | None = None,
+        feature_name: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[FeatureRecord]:
         """
         Retrieve calculated features using proper database integration.
 
@@ -556,7 +556,7 @@ class DataIntegrationService:
                     feature_type=feature_type,
                     feature_name=feature_name,
                     start_time=start_time,
-                    end_time=end_time
+                    end_time=end_time,
                 )
 
                 logger.info(f"Retrieved {len(features)} features for {symbol}")
@@ -593,11 +593,8 @@ class DataIntegrationService:
             return 0
 
     async def get_data_quality_summary(
-        self,
-        symbol: Optional[str] = None,
-        data_source: Optional[str] = None,
-        days: int = 7
-    ) -> Dict[str, Any]:
+        self, symbol: str | None = None, data_source: str | None = None, days: int = 7
+    ) -> dict[str, Any]:
         """
         Get data quality summary using proper database integration.
 
@@ -616,9 +613,7 @@ class DataIntegrationService:
                 db_queries = DatabaseQueries(session)
 
                 quality_records = await db_queries.get_data_quality_records(
-                    symbol=symbol,
-                    data_source=data_source,
-                    start_time=start_time
+                    symbol=symbol, data_source=data_source, start_time=start_time
                 )
 
                 if not quality_records:
@@ -626,7 +621,7 @@ class DataIntegrationService:
                         "total_records": 0,
                         "average_overall_score": 0.0,
                         "quality_distribution": {},
-                        "top_issues": []
+                        "top_issues": [],
                     }
 
                 # Calculate summary statistics
@@ -638,7 +633,7 @@ class DataIntegrationService:
                     "excellent": len([r for r in quality_records if r.overall_score >= 0.9]),
                     "good": len([r for r in quality_records if 0.7 <= r.overall_score < 0.9]),
                     "fair": len([r for r in quality_records if 0.5 <= r.overall_score < 0.7]),
-                    "poor": len([r for r in quality_records if r.overall_score < 0.5])
+                    "poor": len([r for r in quality_records if r.overall_score < 0.5]),
                 }
 
                 # Top issues
@@ -649,14 +644,14 @@ class DataIntegrationService:
                 top_issues = [
                     {"type": "missing_data", "count": total_missing},
                     {"type": "outliers", "count": total_outliers},
-                    {"type": "duplicates", "count": total_duplicates}
+                    {"type": "duplicates", "count": total_duplicates},
                 ]
 
                 return {
                     "total_records": total_records,
                     "average_overall_score": round(avg_overall_score, 3),
                     "quality_distribution": quality_distribution,
-                    "top_issues": top_issues
+                    "top_issues": top_issues,
                 }
 
         except Exception as e:

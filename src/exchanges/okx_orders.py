@@ -33,10 +33,10 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
+from src.utils.helpers import normalize_price, round_to_precision
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.validators import validate_order_request
-from src.utils.helpers import normalize_price, round_to_precision
 
 logger = get_logger(__name__)
 
@@ -108,14 +108,12 @@ class OKXOrderManager:
             if result.get("code") != "0":
                 error_msg = result.get("msg", "Unknown error")
                 if "insufficient" in error_msg.lower():
-                    raise ExchangeInsufficientFundsError(
-                        f"Insufficient funds: {error_msg}")
+                    raise ExchangeInsufficientFundsError(f"Insufficient funds: {error_msg}")
                 else:
                     raise ExchangeError(f"Order placement failed: {error_msg}")
 
             # Convert response to unified format
-            order_response = self._convert_okx_order_to_response(
-                result.get("data", [{}])[0])
+            order_response = self._convert_okx_order_to_response(result.get("data", [{}])[0])
 
             # Track active order
             self.active_orders[order_response.id] = {
@@ -125,8 +123,7 @@ class OKXOrderManager:
                 "fills": [],
             }
 
-            logger.info(
-                f"Successfully placed order on OKX: {order_response.id}")
+            logger.info(f"Successfully placed order on OKX: {order_response.id}")
             return order_response
 
         except Exception as e:
@@ -193,8 +190,7 @@ class OKXOrderManager:
             return self._convert_okx_status_to_order_status(status)
 
         except Exception as e:
-            logger.error(
-                f"Failed to get order status for {order_id} on OKX: {e!s}")
+            logger.error(f"Failed to get order status for {order_id} on OKX: {e!s}")
             return OrderStatus.UNKNOWN
 
     async def get_order_fills(self, order_id: str) -> list[OrderResponse]:
@@ -243,8 +239,7 @@ class OKXOrderManager:
             return trades
 
         except Exception as e:
-            logger.error(
-                f"Failed to get order fills for {order_id} on OKX: {e!s}")
+            logger.error(f"Failed to get order fills for {order_id} on OKX: {e!s}")
             return []
 
     async def place_stop_loss_order(
@@ -276,8 +271,7 @@ class OKXOrderManager:
 
         except Exception as e:
             logger.error(f"Failed to place stop-loss order on OKX: {e!s}")
-            raise ExchangeError(
-                f"Failed to place stop-loss order on OKX: {e!s}")
+            raise ExchangeError(f"Failed to place stop-loss order on OKX: {e!s}")
 
     async def place_take_profit_order(
         self, order: OrderRequest, take_profit_price: Decimal
@@ -308,8 +302,7 @@ class OKXOrderManager:
 
         except Exception as e:
             logger.error(f"Failed to place take-profit order on OKX: {e!s}")
-            raise ExchangeError(
-                f"Failed to place take-profit order on OKX: {e!s}")
+            raise ExchangeError(f"Failed to place take-profit order on OKX: {e!s}")
 
     async def place_oco_order(
         self, order: OrderRequest, stop_price: Decimal, take_profit_price: Decimal
@@ -337,8 +330,7 @@ class OKXOrderManager:
             self.active_orders[stop_order.id]["oco_group"] = oco_group_id
             self.active_orders[tp_order.id]["oco_group"] = oco_group_id
 
-            logger.info(
-                f"Placed OCO orders: stop={stop_order.id}, tp={tp_order.id}")
+            logger.info(f"Placed OCO orders: stop={stop_order.id}, tp={tp_order.id}")
             return [stop_order, tp_order]
 
         except Exception as e:
@@ -393,16 +385,14 @@ class OKXOrderManager:
                 raise ValidationError("Price is required for limit orders")
 
             if (
-                order.order_type in [
-                    OrderType.STOP_LOSS, OrderType.TAKE_PROFIT]
+                order.order_type in [OrderType.STOP_LOSS, OrderType.TAKE_PROFIT]
                 and not order.stop_price
             ):
                 raise ValidationError("Stop price is required for stop orders")
 
             # Check symbol format (OKX uses format like 'BTC-USDT')
             if "-" not in order.symbol:
-                raise ValidationError(
-                    f"Invalid symbol format for OKX: {order.symbol}")
+                raise ValidationError(f"Invalid symbol format for OKX: {order.symbol}")
 
             logger.debug(f"Order validation passed for {order.symbol}")
 
@@ -435,8 +425,9 @@ class OKXOrderManager:
         # Add stop price for stop orders
         if order.stop_price:
             okx_order["slTriggerPx"] = str(normalize_price(float(order.stop_price), order.symbol))
-            okx_order["slOrdPx"] = str(normalize_price(
-                float(order.price or order.stop_price), order.symbol))
+            okx_order["slOrdPx"] = str(
+                normalize_price(float(order.price or order.stop_price), order.symbol)
+            )
 
         # Add client order ID if provided
         if order.client_order_id:
@@ -461,15 +452,12 @@ class OKXOrderManager:
             id=result.get("ordId", ""),
             client_order_id=result.get("clOrdId"),
             symbol=result.get("instId", ""),
-            side=OrderSide.BUY if result.get(
-                "side") == "buy" else OrderSide.SELL,
-            order_type=self._convert_okx_order_type_to_unified(
-                result.get("ordType", "")),
+            side=OrderSide.BUY if result.get("side") == "buy" else OrderSide.SELL,
+            order_type=self._convert_okx_order_type_to_unified(result.get("ordType", "")),
             quantity=Decimal(result.get("sz", "0")),
             price=Decimal(result.get("px", "0")) if result.get("px") else None,
             filled_quantity=Decimal(result.get("accFillSz", "0")),
-            status=self._convert_okx_status_to_order_status(
-                result.get("state", "")).value,
+            status=self._convert_okx_status_to_order_status(result.get("state", "")).value,
             timestamp=datetime.now(timezone.utc),
         )
 
@@ -584,5 +572,4 @@ class OKXOrderManager:
         """
         self.maker_fee_rate = maker_rate
         self.taker_fee_rate = taker_rate
-        logger.info(
-            f"Updated fee rates: maker={maker_rate}, taker={taker_rate}")
+        logger.info(f"Updated fee rates: maker={maker_rate}, taker={taker_rate}")

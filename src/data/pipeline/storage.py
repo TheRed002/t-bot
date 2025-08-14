@@ -25,7 +25,6 @@ from src.core.logging import get_logger
 from src.core.types import MarketData, StorageMode
 
 # Import from P-002 database components
-from src.database.connection import get_async_session
 from src.database.influxdb_client import InfluxDBClientWrapper
 
 # Import from P-002A error handling
@@ -68,12 +67,10 @@ class DataStorageManager:
         # Storage configuration
         storage_config = getattr(config, "data_storage", {})
         if hasattr(storage_config, "get"):
-            self.storage_mode = StorageMode(
-                storage_config.get("mode", "batch"))
+            self.storage_mode = StorageMode(storage_config.get("mode", "batch"))
             self.batch_size = storage_config.get("batch_size", 100)
             self.buffer_threshold = storage_config.get("buffer_threshold", 50)
-            self.cleanup_interval = storage_config.get(
-                "cleanup_interval", 3600)
+            self.cleanup_interval = storage_config.get("cleanup_interval", 3600)
         else:
             self.storage_mode = StorageMode("batch")
             self.batch_size = 100
@@ -93,8 +90,7 @@ class DataStorageManager:
             try:
                 self.influx_client.connect()
             except Exception:
-                logger.warning(
-                    "InfluxDB connection could not be established during initialization")
+                logger.warning("InfluxDB connection could not be established during initialization")
         else:
             # Default InfluxDB configuration
             self.influx_client = InfluxDBClientWrapper(
@@ -236,8 +232,7 @@ class DataStorageManager:
                         fields["low"] = float(md.low_price)
                     if md.open_price is not None:
                         fields["open"] = float(md.open_price)
-                    self.influx_client.write_market_data(
-                        md.symbol, fields, md.timestamp)
+                    self.influx_client.write_market_data(md.symbol, fields, md.timestamp)
 
                 # Update metrics
                 stored_count = len(market_data_points)
@@ -268,7 +263,10 @@ class DataStorageManager:
             await self.influx_client.write_market_data_batch(data_list)
 
             # Also store to PostgreSQL for persistent storage
-            if self.storage_mode == StorageMode.HYBRID or self.storage_mode == StorageMode.PERSISTENT:
+            if (
+                self.storage_mode == StorageMode.HYBRID
+                or self.storage_mode == StorageMode.PERSISTENT
+            ):
                 await self._store_batch_to_postgresql(data_list)
 
             # Update metrics
@@ -296,12 +294,11 @@ class DataStorageManager:
             int: Number of records cleaned up
         """
         try:
-            cutoff_date = datetime.now(
-                timezone.utc) - timedelta(days=days_to_keep)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_to_keep)
 
             # Use proper database queries instead of raw SQL
-            from src.database.queries import DatabaseQueries
             from src.database.connection import get_async_session
+            from src.database.queries import DatabaseQueries
 
             async with get_async_session() as session:
                 db_queries = DatabaseQueries(session)
@@ -372,9 +369,9 @@ class DataStorageManager:
             bool: True if successful, False otherwise
         """
         try:
-            from src.database.queries import DatabaseQueries
             from src.database.connection import get_async_session
             from src.database.models import MarketDataRecord
+            from src.database.queries import DatabaseQueries
 
             async with get_async_session() as session:
                 db_queries = DatabaseQueries(session)
@@ -384,7 +381,7 @@ class DataStorageManager:
                 for data in data_list:
                     record = MarketDataRecord(
                         symbol=data.symbol,
-                        exchange=getattr(data, 'exchange', 'unknown'),
+                        exchange=getattr(data, "exchange", "unknown"),
                         timestamp=data.timestamp or datetime.now(timezone.utc),
                         open_price=float(data.open_price) if data.open_price else None,
                         high_price=float(data.high_price) if data.high_price else None,
@@ -394,9 +391,9 @@ class DataStorageManager:
                         volume=float(data.volume) if data.volume else None,
                         bid=float(data.bid) if data.bid else None,
                         ask=float(data.ask) if data.ask else None,
-                        data_source='exchange',
+                        data_source="exchange",
                         quality_score=1.0,  # Default quality score
-                        validation_status='valid'
+                        validation_status="valid",
                     )
                     records.append(record)
 

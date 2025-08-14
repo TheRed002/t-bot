@@ -119,8 +119,7 @@ class AlternativeFeatureCalculator:
                     "very_negative": -1.0,
                 },
             )
-            self.update_interval = alt_config.get(
-                "update_interval", 300)  # 5 minutes
+            self.update_interval = alt_config.get("update_interval", 300)  # 5 minutes
         else:
             self.default_lookbacks = {
                 "news_sentiment": 24,
@@ -188,10 +187,8 @@ class AlternativeFeatureCalculator:
                 await self.alt_data_source.initialize()
             logger.info("Alternative data sources initialized")
         except Exception as e:
-            logger.error(
-                f"Failed to initialize alternative data sources: {e!s}")
-            raise DataError(
-                f"Alternative data source initialization failed: {e!s}")
+            logger.error(f"Failed to initialize alternative data sources: {e!s}")
+            raise DataError(f"Alternative data source initialization failed: {e!s}")
 
     @time_execution
     @cache_result(ttl_seconds=300)
@@ -224,8 +221,7 @@ class AlternativeFeatureCalculator:
                         "lookback_hours": lookback_hours,
                         "reason": "news_source_not_available",
                     },
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             news_articles = await self.news_source.get_news_for_symbol(
@@ -238,10 +234,8 @@ class AlternativeFeatureCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"lookback_hours": lookback_hours,
-                              "reason": "no_news_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    metadata={"lookback_hours": lookback_hours, "reason": "no_news_data"},
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Process sentiment scores
@@ -259,8 +253,7 @@ class AlternativeFeatureCalculator:
 
                     # Map sentiment to numerical score
                     if sentiment_str in self.sentiment_weights:
-                        sentiment_scores.append(
-                            self.sentiment_weights[sentiment_str])
+                        sentiment_scores.append(self.sentiment_weights[sentiment_str])
                         sentiment_counts[sentiment_str] += 1
                         article_count += 1
 
@@ -270,10 +263,8 @@ class AlternativeFeatureCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"lookback_hours": lookback_hours,
-                              "reason": "no_sentiment_scores"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    metadata={"lookback_hours": lookback_hours, "reason": "no_sentiment_scores"},
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate sentiment features
@@ -283,12 +274,10 @@ class AlternativeFeatureCalculator:
 
             # Calculate time-weighted sentiment (recent news weighted more)
             time_weights = np.exp(-np.arange(len(sentiment_scores)) * 0.1)
-            weighted_sentiment = np.average(
-                sentiment_scores, weights=time_weights)
+            weighted_sentiment = np.average(sentiment_scores, weights=time_weights)
 
             # Determine sentiment strength
-            sentiment_strength = self._determine_sentiment_strength(
-                avg_sentiment, sentiment_std)
+            sentiment_strength = self._determine_sentiment_strength(avg_sentiment, sentiment_std)
 
             sentiment_values = {
                 "average_sentiment": avg_sentiment,
@@ -319,8 +308,7 @@ class AlternativeFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(
-                f"News sentiment calculation failed for {symbol}: {e!s}")
+            logger.error(f"News sentiment calculation failed for {symbol}: {e!s}")
             raise DataError(f"News sentiment calculation failed: {e!s}")
 
     @time_execution
@@ -354,8 +342,7 @@ class AlternativeFeatureCalculator:
                         "lookback_hours": lookback_hours,
                         "reason": "social_source_not_available",
                     },
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             social_sentiment = await self.social_source.get_social_sentiment(
@@ -371,10 +358,8 @@ class AlternativeFeatureCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"lookback_hours": lookback_hours,
-                              "reason": "no_social_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    metadata={"lookback_hours": lookback_hours, "reason": "no_social_data"},
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Process social sentiment scores
@@ -399,8 +384,7 @@ class AlternativeFeatureCalculator:
                                 "bearish": "negative",
                                 "very_bearish": "very_negative",
                             }
-                            sentiment_str = social_to_news_map.get(
-                                sentiment_enum.value, "neutral")
+                            sentiment_str = social_to_news_map.get(sentiment_enum.value, "neutral")
                         else:
                             sentiment_str = str(sentiment_enum).lower()
 
@@ -428,10 +412,8 @@ class AlternativeFeatureCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"lookback_hours": lookback_hours,
-                              "reason": "no_sentiment_scores"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    metadata={"lookback_hours": lookback_hours, "reason": "no_sentiment_scores"},
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Calculate overall social sentiment features
@@ -445,18 +427,15 @@ class AlternativeFeatureCalculator:
                     for post in [p for posts in social_sentiment.values() for p in posts]
                 ]
                 volume_weighted_sentiment = np.average(
-                    sentiment_scores, weights=engagement_weights[: len(
-                        sentiment_scores)]
+                    sentiment_scores, weights=engagement_weights[: len(sentiment_scores)]
                 )
             else:
                 volume_weighted_sentiment = avg_sentiment
 
             # Calculate sentiment momentum (recent vs older posts)
             if len(sentiment_scores) >= 10:
-                recent_sentiment = np.mean(
-                    sentiment_scores[-len(sentiment_scores) // 3:])
-                older_sentiment = np.mean(
-                    sentiment_scores[: len(sentiment_scores) // 3])
+                recent_sentiment = np.mean(sentiment_scores[-len(sentiment_scores) // 3 :])
+                older_sentiment = np.mean(sentiment_scores[: len(sentiment_scores) // 3])
                 sentiment_momentum = recent_sentiment - older_sentiment
             else:
                 sentiment_momentum = 0.0
@@ -489,8 +468,7 @@ class AlternativeFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(
-                f"Social sentiment calculation failed for {symbol}: {e!s}")
+            logger.error(f"Social sentiment calculation failed for {symbol}: {e!s}")
             raise DataError(f"Social sentiment calculation failed: {e!s}")
 
     @time_execution
@@ -524,13 +502,11 @@ class AlternativeFeatureCalculator:
                         "lookback_hours": lookback_hours,
                         "reason": "alt_data_source_not_available",
                     },
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             economic_data = await self.alt_data_source.get_economic_indicators(
-                indicators=["inflation", "unemployment",
-                            "gdp_growth", "interest_rates"],
+                indicators=["inflation", "unemployment", "gdp_growth", "interest_rates"],
                 lookback_days=lookback_hours // 24,
             )
 
@@ -540,10 +516,8 @@ class AlternativeFeatureCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"lookback_hours": lookback_hours,
-                              "reason": "no_economic_data"},
-                    calculation_time=(
-                        datetime.now() - start_time).total_seconds(),
+                    metadata={"lookback_hours": lookback_hours, "reason": "no_economic_data"},
+                    calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
             # Process economic indicators
@@ -577,8 +551,7 @@ class AlternativeFeatureCalculator:
             }
             for indicator, weight in weights.items():
                 if f"{indicator}_change" in indicator_changes:
-                    economic_score += weight * \
-                        indicator_changes[f"{indicator}_change"]
+                    economic_score += weight * indicator_changes[f"{indicator}_change"]
                     weight_sum += abs(weight)
 
             if weight_sum > 0:
@@ -593,8 +566,7 @@ class AlternativeFeatureCalculator:
                         (
                             datetime.now(timezone.utc)
                             - datetime.fromisoformat(
-                                data_points[-1]["timestamp"].replace(
-                                    "Z", "+00:00")
+                                data_points[-1]["timestamp"].replace("Z", "+00:00")
                             )
                         ).total_seconds()
                         / 3600
@@ -611,15 +583,13 @@ class AlternativeFeatureCalculator:
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc),
                 value=economic_values,
-                metadata={"lookback_hours": lookback_hours,
-                          "indicators_count": len(economic_data)},
+                metadata={"lookback_hours": lookback_hours, "indicators_count": len(economic_data)},
                 calculation_time=(datetime.now() - start_time).total_seconds(),
             )
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(
-                f"Economic indicators calculation failed for {symbol}: {e!s}")
+            logger.error(f"Economic indicators calculation failed for {symbol}: {e!s}")
             raise DataError(f"Economic indicators calculation failed: {e!s}")
 
     def _calculate_sentiment_trend(self, sentiment_scores: list[float]) -> float:
@@ -688,15 +658,13 @@ class AlternativeFeatureCalculator:
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc),
                 value=microstructure_values,
-                metadata={"lookback_hours": lookback_hours,
-                          "status": "placeholder_implementation"},
+                metadata={"lookback_hours": lookback_hours, "status": "placeholder_implementation"},
                 calculation_time=(datetime.now() - start_time).total_seconds(),
             )
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(
-                f"Market microstructure calculation failed for {symbol}: {e!s}")
+            logger.error(f"Market microstructure calculation failed for {symbol}: {e!s}")
             raise DataError(f"Market microstructure calculation failed: {e!s}")
 
     @time_execution
@@ -727,27 +695,22 @@ class AlternativeFeatureCalculator:
                             symbol
                         )
                     elif feature.upper() == "MARKET_MICROSTRUCTURE":
-                        results["MARKET_MICROSTRUCTURE"] = (
-                            await self.calculate_market_microstructure(symbol)
-                        )
+                        results[
+                            "MARKET_MICROSTRUCTURE"
+                        ] = await self.calculate_market_microstructure(symbol)
                     else:
-                        logger.warning(
-                            f"Unknown alternative feature: {feature}")
+                        logger.warning(f"Unknown alternative feature: {feature}")
 
                 except Exception as e:
-                    logger.error(
-                        f"Failed to calculate {feature} for {symbol}: {e!s}")
+                    logger.error(f"Failed to calculate {feature} for {symbol}: {e!s}")
                     results[feature] = None
 
             successful_count = len([r for r in results.values() if r is not None])
-            logger.info(
-                f"Calculated {successful_count} alternative features for {symbol}"
-            )
+            logger.info(f"Calculated {successful_count} alternative features for {symbol}")
             return results
 
         except Exception as e:
-            logger.error(
-                f"Batch alternative feature calculation failed for {symbol}: {e!s}")
+            logger.error(f"Batch alternative feature calculation failed for {symbol}: {e!s}")
             raise DataError(f"Batch calculation failed: {e!s}")
 
     @time_execution

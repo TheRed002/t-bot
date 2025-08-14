@@ -89,9 +89,8 @@ class DataCleaner:
         """
         self.config = config
         # Allow dict-like configs in tests
-        cfg_get = (config.get if isinstance(config, dict) else getattr)
-        self.error_handler = ErrorHandler(
-            config if not isinstance(config, dict) else Config())
+        cfg_get = config.get if isinstance(config, dict) else getattr
+        self.error_handler = ErrorHandler(config if not isinstance(config, dict) else Config())
 
         # Cleaning thresholds
         self.outlier_threshold = (
@@ -420,10 +419,8 @@ class DataCleaner:
 
         # Outlier detection (need at least 10 data points)
         if len(price_history) >= 10:
-            mean_price = statistics.mean(
-                price_history[:-1])  # Exclude current price
-            std_price = statistics.stdev(
-                price_history[:-1]) if len(price_history) > 1 else 0
+            mean_price = statistics.mean(price_history[:-1])  # Exclude current price
+            std_price = statistics.stdev(price_history[:-1]) if len(price_history) > 1 else 0
 
             if std_price > 0:
                 z_score = abs(current_price - mean_price) / std_price
@@ -432,8 +429,7 @@ class DataCleaner:
                     # Strategy: adjust to mean + threshold * std
                     if self.config.get("outlier_strategy") == CleaningStrategy.ADJUST:
                         adjusted_price = mean_price + (
-                            self.outlier_threshold * std_price *
-                            np.sign(current_price - mean_price)
+                            self.outlier_threshold * std_price * np.sign(current_price - mean_price)
                         )
                         data.price = Decimal(str(adjusted_price))
                         adjusted_count += 1
@@ -470,8 +466,7 @@ class DataCleaner:
 
             if len(volume_history) >= 10:
                 mean_volume = statistics.mean(volume_history[:-1])
-                std_volume = statistics.stdev(
-                    volume_history[:-1]) if len(volume_history) > 1 else 0
+                std_volume = statistics.stdev(volume_history[:-1]) if len(volume_history) > 1 else 0
 
                 if std_volume > 0:
                     z_score = abs(current_volume - mean_volume) / std_volume
@@ -513,16 +508,14 @@ class DataCleaner:
         # Apply smoothing if enough data points
         if len(price_history) >= self.smoothing_window:
             # Simple moving average smoothing
-            smoothed_price = statistics.mean(
-                price_history[-self.smoothing_window:])
+            smoothed_price = statistics.mean(price_history[-self.smoothing_window :])
             data.price = Decimal(str(smoothed_price))
 
             # Smooth volume if available
             if data.volume and data.symbol in self.volume_history:
                 volume_history = self.volume_history[data.symbol]
                 if len(volume_history) >= self.smoothing_window:
-                    smoothed_volume = statistics.mean(
-                        volume_history[-self.smoothing_window:])
+                    smoothed_volume = statistics.mean(volume_history[-self.smoothing_window :])
                     data.volume = Decimal(str(smoothed_volume))
 
         return data
@@ -561,13 +554,11 @@ class DataCleaner:
         # Ensure price precision
         if data.price:
             # Round to 8 decimal places for crypto
-            data.price = Decimal(str(float(data.price))).quantize(
-                Decimal("0.00000001"))
+            data.price = Decimal(str(float(data.price))).quantize(Decimal("0.00000001"))
 
         # Ensure volume precision
         if data.volume:
-            data.volume = Decimal(str(float(data.volume))
-                                  ).quantize(Decimal("0.00000001"))
+            data.volume = Decimal(str(float(data.volume))).quantize(Decimal("0.00000001"))
 
         return data
 
