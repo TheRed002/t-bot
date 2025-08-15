@@ -468,7 +468,7 @@ class BinanceOrderManager:
         if order.order_type != OrderType.MARKET:
             raise ValidationError("Order type must be MARKET for market orders")
 
-        if not validate_quantity(order.quantity):
+        if not validate_quantity(float(order.quantity), order.symbol):
             raise ValidationError("Market order must have valid quantity")
 
         if order.price:
@@ -479,7 +479,7 @@ class BinanceOrderManager:
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("Order type must be LIMIT for limit orders")
 
-        if not validate_quantity(order.quantity):
+        if not validate_quantity(float(order.quantity), order.symbol):
             raise ValidationError("Limit order must have valid quantity")
 
         if not validate_price(order.price):
@@ -490,7 +490,7 @@ class BinanceOrderManager:
         if order.order_type != OrderType.STOP_LOSS:
             raise ValidationError("Order type must be STOP_LOSS for stop-loss orders")
 
-        if not validate_quantity(order.quantity):
+        if not validate_quantity(float(order.quantity), order.symbol):
             raise ValidationError("Stop-loss order must have valid quantity")
 
         if not validate_price(order.stop_price):
@@ -501,7 +501,7 @@ class BinanceOrderManager:
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("OCO orders must be LIMIT type")
 
-        if not validate_quantity(order.quantity):
+        if not validate_quantity(float(order.quantity), order.symbol):
             raise ValidationError("OCO order must have valid quantity")
 
         if not validate_price(order.price):
