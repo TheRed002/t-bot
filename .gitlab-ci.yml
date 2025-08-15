@@ -1,0 +1,501 @@
+# GitLab CI/CD Pipeline for T-Bot Trading System
+# This provides an alternative to GitHub Actions for GitLab users
+
+stages:
+  - quality-gates
+  - test
+  - build
+  - security
+  - deploy-staging
+  - deploy-production
+
+variables:
+  PYTHON_VERSION: "3.10.12"
+  NODE_VERSION: "18"
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  REGISTRY: $CI_REGISTRY
+  BACKEND_IMAGE: $CI_REGISTRY_IMAGE/backend
+  FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/frontend
+  POSTGRES_DB: tbot_test
+  POSTGRES_USER: tbot_user
+  POSTGRES_PASSWORD: test_password
+  POSTGRES_HOST_AUTH_METHOD: trust
+
+# ==============================================================================
+# Templates
+# ==============================================================================
+.python-template: &python-template
+  image: python:3.10.12-slim
+  before_script:
+    - apt-get update -qy
+    - apt-get install -y --no-install-recommends build-essential libpq-dev wget gcc g++
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+
+.node-template: &node-template
+  image: node:18-alpine
+  before_script:
+    - cd frontend
+    - npm ci
+  cache:
+    key: 
+      files:
+        - frontend/package-lock.json
+    paths:
+      - frontend/node_modules/
+
+.docker-template: &docker-template
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+# ==============================================================================
+# Quality Gates Stage
+# ==============================================================================
+ruff-check:
+  stage: quality-gates
+  <<: *python-template
+  script:
+    - pip install ruff
+    - ruff check src/ tests/ --output-format=gitlab
+  artifacts:
+    reports:
+      codequality: gl-code-quality-report.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+black-format:
+  stage: quality-gates
+  <<: *python-template
+  script:
+    - pip install black
+    - black --check --diff src/ tests/ --line-length 100
+
+mypy-check:
+  stage: quality-gates
+  <<: *python-template
+  script:
+    - pip install mypy
+    - mypy src/ --ignore-missing-imports --install-types --non-interactive
+
+bandit-security:
+  stage: quality-gates
+  <<: *python-template
+  script:
+    - pip install bandit
+    - bandit -r src/ -f json -o bandit-report.json
+    - bandit -r src/ --severity-level medium
+  artifacts:
+    reports:
+      sast: bandit-report.json
+    expire_in: 1 week
+
+safety-check:
+  stage: quality-gates
+  <<: *python-template
+  script:
+    - pip install safety
+    - safety check --json --output safety-report.json
+    - safety check
+  artifacts:
+    paths:
+      - safety-report.json
+    expire_in: 1 week
+
+eslint-frontend:
+  stage: quality-gates
+  <<: *node-template
+  script:
+    - npm run lint
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+typescript-check:
+  stage: quality-gates
+  <<: *node-template
+  script:
+    - npm run type-check
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ==============================================================================
+# Test Stage
+# ==============================================================================
+unit-tests:
+  stage: test
+  <<: *python-template
+  services:
+    - postgres:15-alpine
+    - redis:7-alpine
+  variables:
+    DATABASE_URL: "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB"
+    REDIS_URL: "redis://redis:6379"
+  before_script:
+    - apt-get update -qy
+    - apt-get install -y --no-install-recommends build-essential libpq-dev wget gcc g++ curl
+    # Install TA-Lib
+    - cd /tmp
+    - wget -q https://github.com/TA-Lib/ta-lib/releases/download/v0.6.4/ta-lib-0.6.4-src.tar.gz
+    - tar -xzf ta-lib-0.6.4-src.tar.gz
+    - cd ta-lib-0.6.4/
+    - ./configure --prefix=/usr
+    - make -j$(nproc)
+    - make install
+    - cd $CI_PROJECT_DIR
+    - python -m pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip install pytest-cov pytest-mock pytest-xdist
+  script:
+    - pytest tests/unit/ --cov=src --cov-report=xml --cov-report=html --cov-report=term --maxfail=5 --tb=short -v
+    - pytest tests/integration/ --maxfail=3 --tb=short -v
+  coverage: '/TOTAL.+ ([0-9]{1,3}%)/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - htmlcov/
+    expire_in: 1 week
+
+frontend-tests:
+  stage: test
+  <<: *node-template
+  script:
+    - npm run test:coverage
+  coverage: '/All files[^|]*\|[^|]*\s+([\d\.]+)/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: frontend/coverage/cobertura-coverage.xml
+    paths:
+      - frontend/coverage/
+    expire_in: 1 week
+
+performance-tests:
+  stage: test
+  <<: *python-template
+  script:
+    - pytest tests/performance/ --maxfail=1 --tb=short -v
+  allow_failure: true
+
+# ==============================================================================
+# Build Stage
+# ==============================================================================
+build-backend:
+  stage: build
+  <<: *docker-template
+  script:
+    - docker build --target production -t $BACKEND_IMAGE:$CI_COMMIT_SHA .
+    - docker tag $BACKEND_IMAGE:$CI_COMMIT_SHA $BACKEND_IMAGE:latest
+    - docker push $BACKEND_IMAGE:$CI_COMMIT_SHA
+    - docker push $BACKEND_IMAGE:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - Dockerfile
+        - requirements.txt
+        - src/**/*
+
+build-frontend:
+  stage: build
+  <<: *docker-template
+  script:
+    - cd frontend
+    - docker build -t $FRONTEND_IMAGE:$CI_COMMIT_SHA .
+    - docker tag $FRONTEND_IMAGE:$CI_COMMIT_SHA $FRONTEND_IMAGE:latest
+    - docker push $FRONTEND_IMAGE:$CI_COMMIT_SHA
+    - docker push $FRONTEND_IMAGE:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes:
+        - frontend/**/*
+
+# Multi-architecture build (optional, requires GitLab Runner with buildx)
+build-multiarch:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+    - docker buildx create --use
+  script:
+    - docker buildx build --platform linux/amd64,linux/arm64 --target production -t $BACKEND_IMAGE:$CI_COMMIT_SHA-multiarch --push .
+    - cd frontend
+    - docker buildx build --platform linux/amd64,linux/arm64 -t $FRONTEND_IMAGE:$CI_COMMIT_SHA-multiarch --push .
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+  allow_failure: true
+
+# ==============================================================================
+# Security Stage
+# ==============================================================================
+container-scan-backend:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --format template --template "@contrib/gitlab.tpl" --output gl-container-scanning-report.json $BACKEND_IMAGE:$CI_COMMIT_SHA
+  artifacts:
+    reports:
+      container_scanning: gl-container-scanning-report.json
+  dependencies:
+    - build-backend
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+container-scan-frontend:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --format template --template "@contrib/gitlab.tpl" --output gl-container-scanning-frontend-report.json $FRONTEND_IMAGE:$CI_COMMIT_SHA
+  artifacts:
+    reports:
+      container_scanning: gl-container-scanning-frontend-report.json
+  dependencies:
+    - build-frontend
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+semgrep-sast:
+  stage: security
+  image: returntocorp/semgrep:latest
+  script:
+    - semgrep ci --gitlab-sast > gl-sast-report.json
+  artifacts:
+    reports:
+      sast: gl-sast-report.json
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ==============================================================================
+# Deploy Staging Stage
+# ==============================================================================
+deploy-staging:
+  stage: deploy-staging
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  environment:
+    name: staging
+    url: https://staging.tbot.example.com
+  before_script:
+    - apk add --no-cache curl
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - echo "Deploying to staging environment"
+    - |
+      cat > docker-compose.staging.yml << EOF
+      version: '3.8'
+      services:
+        postgres:
+          image: postgres:15-alpine
+          environment:
+            POSTGRES_DB: tbot_staging
+            POSTGRES_USER: $STAGING_DB_USER
+            POSTGRES_PASSWORD: $STAGING_DB_PASSWORD
+          volumes:
+            - postgres_data:/var/lib/postgresql/data
+          restart: unless-stopped
+
+        redis:
+          image: redis:7-alpine
+          volumes:
+            - redis_data:/data
+          restart: unless-stopped
+
+        backend:
+          image: $BACKEND_IMAGE:$CI_COMMIT_SHA
+          environment:
+            ENV: staging
+            SECRET_KEY: $STAGING_SECRET_KEY
+            JWT_SECRET: $STAGING_JWT_SECRET
+            DATABASE_URL: postgresql://$STAGING_DB_USER:$STAGING_DB_PASSWORD@postgres:5432/tbot_staging
+            REDIS_URL: redis://redis:6379
+          ports:
+            - "8000:8000"
+          depends_on:
+            - postgres
+            - redis
+          restart: unless-stopped
+
+        frontend:
+          image: $FRONTEND_IMAGE:$CI_COMMIT_SHA
+          ports:
+            - "3000:3000"
+          depends_on:
+            - backend
+          restart: unless-stopped
+
+      volumes:
+        postgres_data:
+        redis_data:
+      EOF
+    # Deploy using docker-compose or your preferred deployment method
+    - echo "Staging deployment configuration ready"
+    # Perform health checks
+    - sleep 30
+    - echo "Staging deployment completed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  when: manual
+
+# ==============================================================================
+# Deploy Production Stage
+# ==============================================================================
+deploy-production:
+  stage: deploy-production
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  environment:
+    name: production
+    url: https://tbot.example.com
+  before_script:
+    - apk add --no-cache curl
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - echo "Deploying to production environment"
+    - echo "Creating production database backup"
+    # Add actual backup logic here
+    - |
+      cat > docker-compose.production.yml << EOF
+      version: '3.8'
+      services:
+        postgres:
+          image: postgres:15-alpine
+          environment:
+            POSTGRES_DB: tbot_production
+            POSTGRES_USER: $PRODUCTION_DB_USER
+            POSTGRES_PASSWORD: $PRODUCTION_DB_PASSWORD
+          volumes:
+            - postgres_data:/var/lib/postgresql/data
+          restart: unless-stopped
+          deploy:
+            resources:
+              limits:
+                memory: 2G
+                cpus: '1.0'
+
+        redis:
+          image: redis:7-alpine
+          volumes:
+            - redis_data:/data
+          restart: unless-stopped
+          deploy:
+            resources:
+              limits:
+                memory: 512M
+                cpus: '0.5'
+
+        backend:
+          image: $BACKEND_IMAGE:$CI_COMMIT_SHA
+          environment:
+            ENV: production
+            SECRET_KEY: $PRODUCTION_SECRET_KEY
+            JWT_SECRET: $PRODUCTION_JWT_SECRET
+            DATABASE_URL: postgresql://$PRODUCTION_DB_USER:$PRODUCTION_DB_PASSWORD@postgres:5432/tbot_production
+            REDIS_URL: redis://redis:6379
+          ports:
+            - "8000:8000"
+          depends_on:
+            - postgres
+            - redis
+          restart: unless-stopped
+          deploy:
+            replicas: 3
+            resources:
+              limits:
+                memory: 1G
+                cpus: '0.5'
+
+        frontend:
+          image: $FRONTEND_IMAGE:$CI_COMMIT_SHA
+          ports:
+            - "3000:3000"
+          depends_on:
+            - backend
+          restart: unless-stopped
+          deploy:
+            replicas: 2
+            resources:
+              limits:
+                memory: 512M
+                cpus: '0.25'
+
+      volumes:
+        postgres_data:
+        redis_data:
+      EOF
+    # Deploy using docker-compose or your preferred deployment method
+    - echo "Production deployment configuration ready"
+    # Run database migrations
+    - echo "Running database migrations"
+    # Perform comprehensive health checks
+    - sleep 60
+    - echo "Production deployment completed"
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+  when: manual
+
+# ==============================================================================
+# Cleanup Jobs
+# ==============================================================================
+cleanup-registry:
+  stage: .post
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl jq
+  script:
+    - echo "Cleaning up old container images"
+    # Add registry cleanup logic here
+    - echo "Registry cleanup completed"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  when: manual
+
+# ==============================================================================
+# Scheduled Jobs
+# ==============================================================================
+security-scan-scheduled:
+  stage: security
+  <<: *python-template
+  script:
+    - pip install bandit safety
+    - bandit -r src/ -f json -o bandit-scheduled-report.json
+    - safety check --json --output safety-scheduled-report.json
+  artifacts:
+    paths:
+      - bandit-scheduled-report.json
+      - safety-scheduled-report.json
+    expire_in: 1 month
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+dependency-update:
+  stage: .pre
+  <<: *python-template
+  script:
+    - pip install pip-upgrader
+    - pip-upgrader --skip-package-installation
+    - |
+      if ! diff -q requirements.txt requirements.txt.backup > /dev/null 2>&1; then
+        echo "Dependencies have updates available"
+        # Create MR for dependency updates
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  when: manual

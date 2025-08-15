@@ -1,0 +1,60 @@
+# ZAP Security Scan Rules Configuration
+# This file defines rules for OWASP ZAP security scanning
+
+# Format: RULE_ID	THRESHOLD	NEW_THRESHOLD	NAME	DESCRIPTION
+# IGNORE - ignore the rule completely
+# FAIL - fail if rule matches
+# WARN - warn if rule matches
+# INFO - for information only
+
+10003	WARN	WARN	Sensitive Information in URL	
+10010	FAIL	FAIL	Cookie Without Secure Flag	
+10011	FAIL	FAIL	Cookie Without HttpOnly Flag	
+10015	WARN	WARN	Incomplete or No Cache-control Header Set	
+10016	WARN	WARN	Web Browser XSS Protection Not Enabled	
+10017	WARN	WARN	Cross-Domain JavaScript Source File Inclusion	
+10019	WARN	WARN	Content-Type Header Missing	
+10020	WARN	WARN	X-Frame-Options Header Not Set	
+10021	WARN	WARN	X-Content-Type-Options Header Missing	
+10023	WARN	WARN	Information Disclosure - Debug Error Messages	
+10024	WARN	WARN	Information Disclosure - Sensitive Information in HTTP Referrer Header	
+10025	WARN	WARN	Information Disclosure - Sensitive Information in URL	
+10026	WARN	WARN	HTTP Parameter Override	
+10027	WARN	WARN	Information Disclosure - Suspicious Comments	
+10028	WARN	WARN	Open Redirect	
+10029	WARN	WARN	Cookie Poisoning	
+10030	WARN	WARN	User Controllable Charset	
+10031	WARN	WARN	User Controllable HTML Element Attribute (Potential XSS)	
+10032	WARN	WARN	Viewstate Without MAC Signature	
+10033	WARN	WARN	Directory Browsing	
+10034	WARN	WARN	Heartbleed OpenSSL Vulnerability	
+10035	FAIL	FAIL	Strict-Transport-Security Header Not Set	
+10036	WARN	WARN	Server Leaks Version Information via "Server" HTTP Response Header Field	
+10037	WARN	WARN	Server Leaks Information via "X-Powered-By" HTTP Response Header Field(s)	
+10038	WARN	WARN	Content Security Policy (CSP) Header Not Set	
+10039	WARN	WARN	X-Backend-Server Header Information Leak	
+10040	FAIL	FAIL	Secure Pages Include Mixed Content	
+10041	WARN	WARN	HTTP to HTTPS Insecure Transition in Form Post	
+10042	WARN	WARN	HTTPS to HTTP Insecure Transition in Form Post	
+10043	WARN	WARN	User Controllable JavaScript Event (XSS)	
+10044	WARN	WARN	Big Redirect Detected (Potential Sensitive Information Leak)	
+10045	WARN	WARN	Source Code Disclosure - /WEB-INF folder	
+10046	WARN	WARN	Source Code Disclosure - /META-INF folder	
+10047	WARN	WARN	Source Code Disclosure - Suspected	
+10048	WARN	WARN	Remote Code Execution - Shell Shock	
+10049	WARN	WARN	Content Cacheability	
+10050	WARN	WARN	Retrieved from Cache	
+10051	WARN	WARN	Relative Path Confusion	
+10052	WARN	WARN	X-ChromeLogger-Data (XCOLD) Header Information Leak	
+10054	WARN	WARN	Cookie without SameSite Attribute	
+10055	FAIL	FAIL	CSP Scanner: Wildcard Directive	
+10056	WARN	WARN	CSP Scanner: Missing Anti-clickjacking Directive	
+10057	WARN	WARN	Username Hash Found	
+10058	WARN	WARN	GET for POST	
+10061	WARN	WARN	X-AspNet-Version Response Header	
+10062	WARN	WARN	PII Disclosure	
+10063	WARN	WARN	Feature Policy Header Not Set	
+10096	WARN	WARN	Timestamp Disclosure	
+10097	WARN	WARN	Hash Disclosure	
+10098	WARN	WARN	Cross-Domain Misconfiguration	
+10099	WARN	WARN	Source Code Disclosure

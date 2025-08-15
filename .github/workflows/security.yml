@@ -1,0 +1,430 @@
+name: Security Scans
+
+on:
+  # Run security scans on schedule
+  schedule:
+    - cron: '0 2 * * 1'  # Every Monday at 2 AM UTC
+  # Allow manual triggering
+  workflow_dispatch:
+  # Run on security-related file changes
+  push:
+    paths:
+      - 'requirements.txt'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'Dockerfile'
+      - 'frontend/Dockerfile'
+      - '.github/workflows/security.yml'
+
+env:
+  PYTHON_VERSION: '3.10.12'
+  NODE_VERSION: '18'
+
+jobs:
+  # ==============================================================================
+  # Dependency Vulnerability Scanning
+  # ==============================================================================
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install Python security tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety bandit semgrep pip-audit
+
+    - name: Install project dependencies for analysis
+      run: |
+        pip install -r requirements.txt
+
+    - name: Run Safety scan for Python dependencies
+      run: |
+        safety check --json --output safety-report.json || true
+        safety check --full-report --output safety-detailed.txt || true
+        safety check
+
+    - name: Run pip-audit for Python dependencies
+      run: |
+        pip-audit --format=json --output=pip-audit-report.json || true
+        pip-audit
+
+    - name: Set up Node.js for frontend dependencies
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      working-directory: ./frontend
+      run: npm ci
+
+    - name: Run npm audit for frontend dependencies
+      working-directory: ./frontend
+      run: |
+        npm audit --audit-level=moderate --json > ../npm-audit-report.json || true
+        npm audit --audit-level=moderate
+
+    - name: Upload dependency scan results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: dependency-scan-results
+        path: |
+          safety-report.json
+          safety-detailed.txt
+          pip-audit-report.json
+          npm-audit-report.json
+
+  # ==============================================================================
+  # Static Code Security Analysis
+  # ==============================================================================
+  static-analysis:
+    name: Static Code Security Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install analysis tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit semgrep
+
+    - name: Run Bandit security linter
+      run: |
+        bandit -r src/ -f json -o bandit-report.json || true
+        bandit -r src/ --severity-level medium
+
+    - name: Run Semgrep security analysis
+      uses: returntocorp/semgrep-action@v1
+      with:
+        config: >-
+          p/security-audit
+          p/secrets
+          p/python
+          p/javascript
+          p/typescript
+          p/dockerfile
+          p/yaml
+        generateSarif: "1"
+        auditOn: push
+
+    - name: Upload static analysis results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: static-analysis-results
+        path: |
+          bandit-report.json
+          semgrep.sarif
+
+  # ==============================================================================
+  # Container Image Security Scanning
+  # ==============================================================================
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build backend image for scanning
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        target: production
+        load: true
+        tags: tbot-backend:security-scan
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Build frontend image for scanning
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        file: ./frontend/Dockerfile
+        load: true
+        tags: tbot-frontend:security-scan
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Run Trivy vulnerability scanner on backend
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'tbot-backend:security-scan'
+        format: 'sarif'
+        output: 'backend-trivy-results.sarif'
+
+    - name: Run Trivy vulnerability scanner on frontend
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: 'tbot-frontend:security-scan'
+        format: 'sarif'
+        output: 'frontend-trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'backend-trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'frontend-trivy-results.sarif'
+
+    - name: Run Grype vulnerability scanner
+      uses: anchore/scan-action@v3
+      with:
+        image: "tbot-backend:security-scan"
+        format: sarif
+        output-file: backend-grype-results.sarif
+
+    - name: Upload Grype scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'backend-grype-results.sarif'
+
+  # ==============================================================================
+  # Secrets Detection
+  # ==============================================================================
+  secrets-scan:
+    name: Secrets Detection
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Run TruffleHog secrets scanner
+      uses: trufflesecurity/trufflehog@main
+      with:
+        path: ./
+        base: main
+        head: HEAD
+        extra_args: --debug --only-verified
+
+    - name: Run GitLeaks secrets scanner
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE}}
+
+  # ==============================================================================
+  # Infrastructure Security Check
+  # ==============================================================================
+  infrastructure-scan:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Checkov on Dockerfiles
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: .
+        framework: dockerfile
+        output_format: sarif
+        output_file_path: checkov-dockerfile-results.sarif
+
+    - name: Run Checkov on Docker Compose
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: .
+        framework: docker_compose
+        output_format: sarif
+        output_file_path: checkov-compose-results.sarif
+
+    - name: Upload Checkov scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'checkov-dockerfile-results.sarif'
+
+    - name: Upload Checkov scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'checkov-compose-results.sarif'
+
+  # ==============================================================================
+  # OWASP ZAP Dynamic Security Testing
+  # ==============================================================================
+  dynamic-scan:
+    name: Dynamic Security Testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event_name == 'workflow_dispatch'  # Only run on manual trigger
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Start application for testing
+      run: |
+        # Start the application in test mode
+        docker-compose -f docker-compose.yml up -d
+        
+        # Wait for services to be ready
+        timeout 120 bash -c 'until curl -f http://localhost:8000/health; do sleep 5; done'
+
+    - name: Run OWASP ZAP baseline scan
+      uses: zaproxy/action-baseline@v0.10.0
+      with:
+        target: 'http://localhost:8000'
+        rules_file_name: '.zap/rules.tsv'
+        cmd_options: '-a'
+
+    - name: Run OWASP ZAP full scan on API
+      uses: zaproxy/action-api-scan@v0.5.0
+      with:
+        target: 'http://localhost:8000/openapi.json'
+        rules_file_name: '.zap/rules.tsv'
+        cmd_options: '-a'
+
+    - name: Cleanup
+      if: always()
+      run: |
+        docker-compose -f docker-compose.yml down -v
+
+  # ==============================================================================
+  # Security Report Generation
+  # ==============================================================================
+  generate-report:
+    name: Generate Security Report
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, static-analysis, container-scan, secrets-scan, infrastructure-scan]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all security artifacts
+      uses: actions/download-artifact@v3
+
+    - name: Generate security summary report
+      run: |
+        mkdir -p security-reports
+        
+        echo "# T-Bot Security Scan Report" > security-reports/summary.md
+        echo "**Scan Date:** $(date)" >> security-reports/summary.md
+        echo "**Repository:** ${{ github.repository }}" >> security-reports/summary.md
+        echo "**Branch:** ${{ github.ref_name }}" >> security-reports/summary.md
+        echo "" >> security-reports/summary.md
+        
+        echo "## Job Results" >> security-reports/summary.md
+        echo "- **Dependency Scan:** ${{ needs.dependency-scan.result }}" >> security-reports/summary.md
+        echo "- **Static Analysis:** ${{ needs.static-analysis.result }}" >> security-reports/summary.md
+        echo "- **Container Scan:** ${{ needs.container-scan.result }}" >> security-reports/summary.md
+        echo "- **Secrets Scan:** ${{ needs.secrets-scan.result }}" >> security-reports/summary.md
+        echo "- **Infrastructure Scan:** ${{ needs.infrastructure-scan.result }}" >> security-reports/summary.md
+        echo "" >> security-reports/summary.md
+        
+        # Process scan results if they exist
+        if [ -d "dependency-scan-results" ]; then
+          echo "## Dependency Vulnerabilities" >> security-reports/summary.md
+          if [ -f "dependency-scan-results/safety-detailed.txt" ]; then
+            echo "### Python Dependencies" >> security-reports/summary.md
+            echo '```' >> security-reports/summary.md
+            head -50 dependency-scan-results/safety-detailed.txt >> security-reports/summary.md
+            echo '```' >> security-reports/summary.md
+          fi
+        fi
+        
+        echo "" >> security-reports/summary.md
+        echo "## Recommendations" >> security-reports/summary.md
+        echo "- Review all critical and high severity vulnerabilities" >> security-reports/summary.md
+        echo "- Update dependencies with known vulnerabilities" >> security-reports/summary.md
+        echo "- Address any secrets or sensitive data exposure" >> security-reports/summary.md
+        echo "- Fix container security issues before deployment" >> security-reports/summary.md
+
+    - name: Upload security report
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-report
+        path: security-reports/
+
+    - name: Comment on PR if applicable
+      uses: actions/github-script@v7
+      if: github.event_name == 'pull_request'
+      with:
+        script: |
+          const fs = require('fs');
+          if (fs.existsSync('security-reports/summary.md')) {
+            const report = fs.readFileSync('security-reports/summary.md', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## 🔒 Security Scan Results\n\n' + report
+            });
+          }
+
+  # ==============================================================================
+  # Notify Security Team
+  # ==============================================================================
+  notify:
+    name: Notify Security Team
+    runs-on: ubuntu-latest
+    needs: [dependency-scan, static-analysis, container-scan, secrets-scan, infrastructure-scan]
+    if: failure() || (success() && github.event_name == 'schedule')
+    
+    steps:
+    - name: Send security notification
+      run: |
+        # Send notification to security team about scan results
+        # This could be Slack, email, PagerDuty, etc.
+        
+        if [[ "${{ needs.dependency-scan.result }}" == "failure" ]] || \
+           [[ "${{ needs.static-analysis.result }}" == "failure" ]] || \
+           [[ "${{ needs.container-scan.result }}" == "failure" ]] || \
+           [[ "${{ needs.secrets-scan.result }}" == "failure" ]] || \
+           [[ "${{ needs.infrastructure-scan.result }}" == "failure" ]]; then
+          echo "🚨 Security scan failures detected!"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          # Send alert to security team
+        else
+          echo "✅ All security scans passed"
+          # Send success notification if scheduled run
+        fi

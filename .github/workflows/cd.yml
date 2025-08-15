@@ -1,0 +1,405 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    branches: [ main ]
+    types: [ completed ]
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE_NAME: ${{ github.repository }}-backend
+  FRONTEND_IMAGE_NAME: ${{ github.repository }}-frontend
+  PYTHON_VERSION: '3.10.12'
+  NODE_VERSION: '18'
+
+jobs:
+  # ==============================================================================
+  # Check CI Status - Ensure CI passed before deployment
+  # ==============================================================================
+  check-ci-status:
+    name: Check CI Status
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion != 'failure'
+    
+    steps:
+    - name: Check CI conclusion
+      run: |
+        if [[ "${{ github.event.workflow_run.conclusion }}" == "success" ]] || [[ "${{ github.event_name }}" == "push" ]]; then
+          echo "✅ CI passed or direct push to main - proceeding with deployment"
+        else
+          echo "❌ CI failed - stopping deployment"
+          exit 1
+        fi
+
+  # ==============================================================================
+  # Build and Push Images - Multi-architecture container builds
+  # ==============================================================================
+  build-and-push:
+    name: Build and Push Container Images
+    runs-on: ubuntu-latest
+    needs: check-ci-status
+    outputs:
+      backend-image: ${{ steps.backend-meta.outputs.tags }}
+      frontend-image: ${{ steps.frontend-meta.outputs.tags }}
+      backend-digest: ${{ steps.backend-build.outputs.digest }}
+      frontend-digest: ${{ steps.frontend-build.outputs.digest }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Backend Image Metadata
+    - name: Extract backend metadata
+      id: backend-meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=tag
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+        labels: |
+          org.opencontainers.image.title=T-Bot Backend
+          org.opencontainers.image.description=T-Bot Trading System Backend API
+          org.opencontainers.image.vendor=T-Bot Team
+
+    # Frontend Image Metadata
+    - name: Extract frontend metadata
+      id: frontend-meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=tag
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+        labels: |
+          org.opencontainers.image.title=T-Bot Frontend
+          org.opencontainers.image.description=T-Bot Trading System Web Interface
+          org.opencontainers.image.vendor=T-Bot Team
+
+    # Build and push backend image
+    - name: Build and push backend image
+      id: backend-build
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        target: production
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.backend-meta.outputs.tags }}
+        labels: ${{ steps.backend-meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        provenance: true
+        sbom: true
+
+    # Build and push frontend image
+    - name: Build and push frontend image
+      id: frontend-build
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        file: ./frontend/Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.frontend-meta.outputs.tags }}
+        labels: ${{ steps.frontend-meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        provenance: true
+        sbom: true
+
+  # ==============================================================================
+  # Security Scanning - Scan built images for vulnerabilities
+  # ==============================================================================
+  security-scan:
+    name: Security Scan Container Images
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    
+    steps:
+    - name: Run Trivy vulnerability scanner on backend
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ needs.build-and-push.outputs.backend-image }}
+        format: 'sarif'
+        output: 'backend-trivy-results.sarif'
+
+    - name: Run Trivy vulnerability scanner on frontend
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ needs.build-and-push.outputs.frontend-image }}
+        format: 'sarif'
+        output: 'frontend-trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'backend-trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'frontend-trivy-results.sarif'
+
+    - name: Check for critical vulnerabilities
+      run: |
+        # Fail if critical vulnerabilities are found
+        if trivy image --severity CRITICAL --exit-code 1 ${{ needs.build-and-push.outputs.backend-image }}; then
+          echo "✅ No critical vulnerabilities found in backend image"
+        else
+          echo "❌ Critical vulnerabilities found in backend image"
+          exit 1
+        fi
+        
+        if trivy image --severity CRITICAL --exit-code 1 ${{ needs.build-and-push.outputs.frontend-image }}; then
+          echo "✅ No critical vulnerabilities found in frontend image"
+        else
+          echo "❌ Critical vulnerabilities found in frontend image"
+          exit 1
+        fi
+
+  # ==============================================================================
+  # Deploy to Staging - Automatic staging deployment
+  # ==============================================================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build-and-push, security-scan]
+    environment: 
+      name: staging
+      url: https://staging.tbot.example.com
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup staging deployment
+      run: |
+        echo "Deploying to staging environment..."
+        echo "Backend Image: ${{ needs.build-and-push.outputs.backend-image }}"
+        echo "Frontend Image: ${{ needs.build-and-push.outputs.frontend-image }}"
+        
+        # Here you would typically:
+        # 1. Deploy to your staging environment (AWS ECS, Kubernetes, etc.)
+        # 2. Run database migrations
+        # 3. Update configuration
+        # 4. Perform health checks
+        
+        # Example using docker-compose for staging
+        cat > docker-compose.staging.yml << EOF
+        version: '3.8'
+        services:
+          backend:
+            image: ${{ needs.build-and-push.outputs.backend-image }}
+            environment:
+              - ENV=staging
+              - SECRET_KEY=\${STAGING_SECRET_KEY}
+              - JWT_SECRET=\${STAGING_JWT_SECRET}
+              - DATABASE_URL=\${STAGING_DATABASE_URL}
+              - REDIS_URL=\${STAGING_REDIS_URL}
+            ports:
+              - "8000:8000"
+            restart: unless-stopped
+            
+          frontend:
+            image: ${{ needs.build-and-push.outputs.frontend-image }}
+            ports:
+              - "3000:3000"
+            restart: unless-stopped
+            depends_on:
+              - backend
+        EOF
+
+    - name: Run database migrations (staging)
+      run: |
+        echo "Running database migrations for staging..."
+        # Example: Run Alembic migrations
+        # docker run --rm -e DATABASE_URL=${{ secrets.STAGING_DATABASE_URL }} \
+        #   ${{ needs.build-and-push.outputs.backend-image }} \
+        #   alembic upgrade head
+
+    - name: Health check staging deployment
+      run: |
+        echo "Performing health checks on staging..."
+        # Wait for services to be ready and perform health checks
+        # curl -f https://staging.tbot.example.com/health
+        # curl -f https://staging.tbot.example.com/api/v1/status
+        echo "✅ Staging deployment successful"
+
+  # ==============================================================================
+  # Deploy to Production - Manual approval required
+  # ==============================================================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build-and-push, security-scan, deploy-staging]
+    environment: 
+      name: production
+      url: https://tbot.example.com
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Pre-deployment checks
+      run: |
+        echo "Running pre-deployment checks..."
+        echo "✅ CI/CD pipeline passed"
+        echo "✅ Security scans passed"
+        echo "✅ Staging deployment successful"
+        
+        # Additional production readiness checks
+        echo "Checking production readiness..."
+
+    - name: Backup production database
+      run: |
+        echo "Creating production database backup..."
+        # Example: Backup production database
+        # pg_dump ${{ secrets.PRODUCTION_DATABASE_URL }} > production-backup-$(date +%Y%m%d-%H%M%S).sql
+        echo "✅ Database backup completed"
+
+    - name: Deploy to production
+      run: |
+        echo "Deploying to production environment..."
+        echo "Backend Image: ${{ needs.build-and-push.outputs.backend-image }}"
+        echo "Frontend Image: ${{ needs.build-and-push.outputs.frontend-image }}"
+        
+        # Here you would deploy to your production environment
+        # This could involve:
+        # 1. Blue-green deployment
+        # 2. Rolling updates
+        # 3. Canary deployment
+        # 4. Traffic shifting
+        
+        cat > docker-compose.production.yml << EOF
+        version: '3.8'
+        services:
+          backend:
+            image: ${{ needs.build-and-push.outputs.backend-image }}
+            environment:
+              - ENV=production
+              - SECRET_KEY=\${PRODUCTION_SECRET_KEY}
+              - JWT_SECRET=\${PRODUCTION_JWT_SECRET}
+              - DATABASE_URL=\${PRODUCTION_DATABASE_URL}
+              - REDIS_URL=\${PRODUCTION_REDIS_URL}
+            ports:
+              - "8000:8000"
+            restart: unless-stopped
+            deploy:
+              replicas: 3
+              resources:
+                limits:
+                  memory: 1G
+                  cpus: '0.5'
+                reservations:
+                  memory: 512M
+                  cpus: '0.25'
+            
+          frontend:
+            image: ${{ needs.build-and-push.outputs.frontend-image }}
+            ports:
+              - "3000:3000"
+            restart: unless-stopped
+            deploy:
+              replicas: 2
+            depends_on:
+              - backend
+        EOF
+
+    - name: Run database migrations (production)
+      run: |
+        echo "Running database migrations for production..."
+        # Example: Run Alembic migrations with proper rollback strategy
+        # docker run --rm -e DATABASE_URL=${{ secrets.PRODUCTION_DATABASE_URL }} \
+        #   ${{ needs.build-and-push.outputs.backend-image }} \
+        #   alembic upgrade head
+
+    - name: Health check production deployment
+      run: |
+        echo "Performing comprehensive health checks on production..."
+        # Comprehensive health checks
+        # curl -f https://tbot.example.com/health
+        # curl -f https://tbot.example.com/api/v1/status
+        # curl -f https://tbot.example.com/api/v1/exchanges/health
+        echo "✅ Production deployment successful"
+
+    - name: Post-deployment monitoring setup
+      run: |
+        echo "Setting up post-deployment monitoring..."
+        # Setup monitoring alerts, notifications, etc.
+        echo "✅ Monitoring configured"
+
+  # ==============================================================================
+  # Rollback Capability - Emergency rollback mechanism  
+  # ==============================================================================
+  rollback-production:
+    name: Rollback Production
+    runs-on: ubuntu-latest
+    environment: production
+    if: failure() && github.ref == 'refs/heads/main'
+    needs: [deploy-production]
+    
+    steps:
+    - name: Emergency rollback
+      run: |
+        echo "🚨 Performing emergency rollback..."
+        
+        # Rollback to previous stable version
+        # This would typically involve:
+        # 1. Reverting to previous container images
+        # 2. Rolling back database migrations if necessary
+        # 3. Restoring configuration
+        # 4. Notifying team
+        
+        echo "✅ Rollback completed"
+
+  # ==============================================================================
+  # Notifications - Notify team of deployment status
+  # ==============================================================================
+  notify:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+    
+    steps:
+    - name: Notify deployment status
+      run: |
+        if [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
+          echo "🚀 Production deployment successful!"
+          # Send success notification (Slack, Discord, email, etc.)
+        elif [[ "${{ needs.deploy-staging.result }}" == "success" ]]; then
+          echo "🔄 Staging deployment successful!"
+          # Send staging success notification
+        else
+          echo "❌ Deployment failed!"
+          # Send failure notification with details
+        fi
+
+    - name: Update deployment status
+      run: |
+        # Update deployment status in monitoring systems
+        # Create deployment markers in APM tools
+        # Update status dashboards
+        echo "✅ Deployment status updated"

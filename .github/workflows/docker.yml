@@ -1,0 +1,514 @@
+name: Docker Build
+
+on:
+  push:
+    branches: [ main, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Dockerfile'
+      - 'frontend/Dockerfile'
+      - 'docker-compose*.yml'
+      - 'requirements.txt'
+      - 'frontend/package*.json'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE_NAME: ${{ github.repository }}-backend
+  FRONTEND_IMAGE_NAME: ${{ github.repository }}-frontend
+
+jobs:
+  # ==============================================================================
+  # Build Matrix - Multi-architecture builds
+  # ==============================================================================
+  build-matrix:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        include:
+          - component: backend
+            context: .
+            dockerfile: ./Dockerfile
+            target: production
+            platforms: linux/amd64,linux/arm64
+          - component: frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+            target: production
+            platforms: linux/amd64,linux/arm64
+    outputs:
+      backend-image: ${{ steps.backend-meta.outputs.tags }}
+      frontend-image: ${{ steps.frontend-meta.outputs.tags }}
+      backend-digest: ${{ steps.backend-build.outputs.digest }}
+      frontend-digest: ${{ steps.frontend-build.outputs.digest }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU for multi-architecture builds
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: linux/amd64,linux/arm64
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver: docker-container
+        use: true
+
+    - name: Log in to Container Registry
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Backend Image Metadata
+    - name: Extract backend metadata
+      id: backend-meta
+      if: matrix.component == 'backend'
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr,prefix=pr-
+          type=ref,event=tag
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=dev,enable=${{ github.ref == 'refs/heads/develop' }}
+        labels: |
+          org.opencontainers.image.title=T-Bot Backend
+          org.opencontainers.image.description=T-Bot Trading System Backend API
+          org.opencontainers.image.vendor=T-Bot Team
+          org.opencontainers.image.created={{date 'RFC3339'}}
+          org.opencontainers.image.revision={{.FullCommit}}
+          org.opencontainers.image.source={{.GitURL}}
+
+    # Frontend Image Metadata
+    - name: Extract frontend metadata
+      id: frontend-meta
+      if: matrix.component == 'frontend'
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr,prefix=pr-
+          type=ref,event=tag
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=raw,value=dev,enable=${{ github.ref == 'refs/heads/develop' }}
+        labels: |
+          org.opencontainers.image.title=T-Bot Frontend
+          org.opencontainers.image.description=T-Bot Trading System Web Interface
+          org.opencontainers.image.vendor=T-Bot Team
+          org.opencontainers.image.created={{date 'RFC3339'}}
+          org.opencontainers.image.revision={{.FullCommit}}
+          org.opencontainers.image.source={{.GitURL}}
+
+    # Build Backend Image
+    - name: Build and push backend image
+      id: backend-build
+      if: matrix.component == 'backend'
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ matrix.context }}
+        file: ${{ matrix.dockerfile }}
+        target: ${{ matrix.target }}
+        platforms: ${{ matrix.platforms }}
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.backend-meta.outputs.tags }}
+        labels: ${{ steps.backend-meta.outputs.labels }}
+        cache-from: |
+          type=gha,scope=backend
+          type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:cache
+        cache-to: |
+          type=gha,mode=max,scope=backend
+          type=registry,ref=${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:cache,mode=max
+        provenance: true
+        sbom: true
+        build-args: |
+          BUILDKIT_CONTEXT_KEEP_GIT_DIR=1
+
+    # Build Frontend Image
+    - name: Build and push frontend image
+      id: frontend-build
+      if: matrix.component == 'frontend'
+      uses: docker/build-push-action@v5
+      with:
+        context: ${{ matrix.context }}
+        file: ${{ matrix.dockerfile }}
+        target: ${{ matrix.target }}
+        platforms: ${{ matrix.platforms }}
+        push: ${{ github.event_name != 'pull_request' }}
+        tags: ${{ steps.frontend-meta.outputs.tags }}
+        labels: ${{ steps.frontend-meta.outputs.labels }}
+        cache-from: |
+          type=gha,scope=frontend
+          type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:cache
+        cache-to: |
+          type=gha,mode=max,scope=frontend
+          type=registry,ref=${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:cache,mode=max
+        provenance: true
+        sbom: true
+        build-args: |
+          BUILDKIT_CONTEXT_KEEP_GIT_DIR=1
+
+  # ==============================================================================
+  # Test Images - Verify built images work correctly
+  # ==============================================================================
+  test-images:
+    name: Test Docker Images
+    runs-on: ubuntu-latest
+    needs: build-matrix
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    
+    steps:
+    - name: Set up QEMU for cross-platform testing
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: linux/${{ matrix.arch }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Test backend image (${{ matrix.arch }})
+      if: github.event_name != 'pull_request'
+      run: |
+        # Get the correct image tag
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          TAG="latest"
+        elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          TAG="dev"
+        else
+          TAG="${{ github.sha }}"
+        fi
+        
+        IMAGE="${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${TAG}"
+        
+        echo "Testing backend image: ${IMAGE}"
+        
+        # Run container with health check
+        docker run --rm -d --name tbot-backend-test-${{ matrix.arch }} \
+          --platform linux/${{ matrix.arch }} \
+          -p 8000:8000 \
+          -e SECRET_KEY=test-secret \
+          -e JWT_SECRET=test-jwt-secret \
+          -e DATABASE_URL=sqlite:///tmp/test.db \
+          -e REDIS_URL=redis://localhost:6379 \
+          "${IMAGE}"
+        
+        # Wait for container to start (up to 2 minutes)
+        timeout 120 bash -c 'until docker exec tbot-backend-test-${{ matrix.arch }} curl -f http://localhost:8000/health; do sleep 5; done'
+        
+        # Test basic endpoints
+        docker exec tbot-backend-test-${{ matrix.arch }} curl -f http://localhost:8000/health
+        docker exec tbot-backend-test-${{ matrix.arch }} curl -f http://localhost:8000/docs
+        
+        # Clean up
+        docker stop tbot-backend-test-${{ matrix.arch }}
+        
+        echo "✅ Backend image test passed for ${{ matrix.arch }}"
+
+    - name: Test frontend image (${{ matrix.arch }})
+      if: github.event_name != 'pull_request'
+      run: |
+        # Get the correct image tag
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          TAG="latest"
+        elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+          TAG="dev"
+        else
+          TAG="${{ github.sha }}"
+        fi
+        
+        IMAGE="${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${TAG}"
+        
+        echo "Testing frontend image: ${IMAGE}"
+        
+        # Run container
+        docker run --rm -d --name tbot-frontend-test-${{ matrix.arch }} \
+          --platform linux/${{ matrix.arch }} \
+          -p 3000:3000 \
+          "${IMAGE}"
+        
+        # Wait for container to start (up to 90 seconds)
+        timeout 90 bash -c 'until docker exec tbot-frontend-test-${{ matrix.arch }} curl -f http://localhost:3000; do sleep 5; done'
+        
+        # Test that the frontend serves content
+        docker exec tbot-frontend-test-${{ matrix.arch }} curl -f http://localhost:3000
+        
+        # Clean up
+        docker stop tbot-frontend-test-${{ matrix.arch }}
+        
+        echo "✅ Frontend image test passed for ${{ matrix.arch }}"
+
+  # ==============================================================================
+  # Security Scan - Scan built images for vulnerabilities
+  # ==============================================================================
+  security-scan:
+    name: Security Scan Images
+    runs-on: ubuntu-latest
+    needs: build-matrix
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 20
+    
+    steps:
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Run Trivy vulnerability scanner on backend
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'backend-trivy-results.sarif'
+
+    - name: Run Trivy vulnerability scanner on frontend
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'frontend-trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'backend-trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'frontend-trivy-results.sarif'
+
+    - name: Check for critical vulnerabilities
+      run: |
+        # Get the correct image tags
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          BACKEND_TAG="${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest"
+          FRONTEND_TAG="${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest"
+        else
+          BACKEND_TAG="${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}"
+          FRONTEND_TAG="${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}"
+        fi
+        
+        # Check for critical vulnerabilities in backend
+        echo "Checking backend image for critical vulnerabilities..."
+        if trivy image --severity CRITICAL --exit-code 1 "${BACKEND_TAG}"; then
+          echo "✅ No critical vulnerabilities found in backend image"
+        else
+          echo "❌ Critical vulnerabilities found in backend image"
+          exit 1
+        fi
+        
+        # Check for critical vulnerabilities in frontend
+        echo "Checking frontend image for critical vulnerabilities..."
+        if trivy image --severity CRITICAL --exit-code 1 "${FRONTEND_TAG}"; then
+          echo "✅ No critical vulnerabilities found in frontend image"
+        else
+          echo "❌ Critical vulnerabilities found in frontend image"
+          exit 1
+        fi
+
+  # ==============================================================================
+  # Integration Test - Test full application stack
+  # ==============================================================================
+  integration-test:
+    name: Integration Test with Docker Compose
+    runs-on: ubuntu-latest
+    needs: [build-matrix, test-images]
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 25
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Create integration docker-compose
+      run: |
+        # Get the correct image tags
+        if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          BACKEND_TAG="${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest"
+          FRONTEND_TAG="${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest"
+        else
+          BACKEND_TAG="${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}"
+          FRONTEND_TAG="${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}"
+        fi
+        
+        cat > docker-compose.integration.yml << EOF
+        version: '3.8'
+        services:
+          postgres:
+            image: postgres:15-alpine
+            environment:
+              POSTGRES_DB: tbot_test
+              POSTGRES_USER: tbot_user
+              POSTGRES_PASSWORD: test_password
+            ports:
+              - "5432:5432"
+            healthcheck:
+              test: ["CMD-SHELL", "pg_isready -U tbot_user -d tbot_test"]
+              interval: 10s
+              timeout: 5s
+              retries: 5
+          
+          redis:
+            image: redis:7-alpine
+            ports:
+              - "6379:6379"
+            healthcheck:
+              test: ["CMD", "redis-cli", "ping"]
+              interval: 10s
+              timeout: 5s
+              retries: 5
+          
+          backend:
+            image: ${BACKEND_TAG}
+            environment:
+              - SECRET_KEY=integration-test-secret
+              - JWT_SECRET=integration-test-jwt-secret
+              - DATABASE_URL=postgresql://tbot_user:test_password@postgres:5432/tbot_test
+              - REDIS_URL=redis://redis:6379
+              - ENV=integration_test
+            ports:
+              - "8000:8000"
+            depends_on:
+              postgres:
+                condition: service_healthy
+              redis:
+                condition: service_healthy
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+              start_period: 40s
+          
+          frontend:
+            image: ${FRONTEND_TAG}
+            ports:
+              - "3000:3000"
+            depends_on:
+              backend:
+                condition: service_healthy
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:3000"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+              start_period: 30s
+        EOF
+
+    - name: Start integration test environment
+      run: |
+        docker-compose -f docker-compose.integration.yml up -d
+        
+        # Wait for all services to be healthy
+        echo "Waiting for services to be ready..."
+        timeout 180 bash -c 'until docker-compose -f docker-compose.integration.yml ps | grep -E "(healthy|Up)"; do sleep 5; done'
+
+    - name: Run integration tests
+      run: |
+        # Test database connectivity
+        docker-compose -f docker-compose.integration.yml exec -T postgres psql -U tbot_user -d tbot_test -c "SELECT version();"
+        
+        # Test Redis connectivity
+        docker-compose -f docker-compose.integration.yml exec -T redis redis-cli ping
+        
+        # Test backend API endpoints
+        curl -f http://localhost:8000/health
+        curl -f http://localhost:8000/docs
+        curl -f http://localhost:8000/openapi.json
+        
+        # Test frontend
+        curl -f http://localhost:3000
+        
+        # Test API response format
+        HEALTH_RESPONSE=$(curl -s http://localhost:8000/health)
+        echo "Health response: $HEALTH_RESPONSE"
+        
+        # Basic smoke test for trading functionality
+        # (This would be expanded with actual API tests)
+        echo "✅ All integration tests passed"
+
+    - name: Cleanup integration test environment
+      if: always()
+      run: |
+        docker-compose -f docker-compose.integration.yml down -v
+        docker system prune -f
+
+  # ==============================================================================
+  # Update Image Tags - Update latest tags and cleanup old images
+  # ==============================================================================
+  update-tags:
+    name: Update Image Tags
+    runs-on: ubuntu-latest
+    needs: [security-scan, integration-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update latest tags
+      run: |
+        # Pull and re-tag images as latest
+        docker pull ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}
+        docker tag ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest
+        docker push ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:latest
+        
+        docker pull ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}
+        docker tag ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest
+        docker push ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:latest
+
+    - name: Create release manifest
+      run: |
+        cat > release-manifest.json << EOF
+        {
+          "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "commit_sha": "${{ github.sha }}",
+          "images": {
+            "backend": "${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}:${{ github.sha }}",
+            "frontend": "${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}:${{ github.sha }}"
+          },
+          "security_scan": "passed",
+          "integration_test": "passed"
+        }
+        EOF
+        
+        echo "Release manifest created"
+        cat release-manifest.json

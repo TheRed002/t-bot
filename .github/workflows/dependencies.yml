@@ -1,0 +1,498 @@
+name: Dependency Updates
+
+on:
+  # Run dependency updates on schedule
+  schedule:
+    - cron: '0 6 * * MON'  # Every Monday at 6 AM UTC
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      update_type:
+        description: 'Type of update to perform'
+        required: true
+        default: 'minor'
+        type: choice
+        options:
+          - 'patch'
+          - 'minor'
+          - 'major'
+          - 'security'
+
+env:
+  PYTHON_VERSION: '3.10.12'
+  NODE_VERSION: '18'
+
+jobs:
+  # ==============================================================================
+  # Python Dependencies Update
+  # ==============================================================================
+  update-python-deps:
+    name: Update Python Dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      has-updates: ${{ steps.check-updates.outputs.has-updates }}
+      pr-number: ${{ steps.create-pr.outputs.pr-number }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install dependency management tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-upgrader safety pip-audit
+
+    - name: Backup current requirements
+      run: |
+        cp requirements.txt requirements.txt.backup
+
+    - name: Check for security updates
+      id: security-check
+      run: |
+        pip install -r requirements.txt
+        safety check --json --output safety-report.json || true
+        pip-audit --format=json --output=pip-audit-report.json || true
+        
+        # Check if there are security vulnerabilities
+        if [ -f safety-report.json ] && [ "$(jq '.vulnerabilities | length' safety-report.json)" -gt 0 ]; then
+          echo "security-updates=true" >> $GITHUB_OUTPUT
+        else
+          echo "security-updates=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Update dependencies based on type
+      run: |
+        UPDATE_TYPE="${{ github.event.inputs.update_type || 'minor' }}"
+        
+        case $UPDATE_TYPE in
+          "patch")
+            echo "Performing patch updates (bug fixes only)..."
+            pip-upgrader --patch-only --skip-package-installation
+            ;;
+          "minor")
+            echo "Performing minor updates (new features, no breaking changes)..."
+            pip-upgrader --minor-only --skip-package-installation
+            ;;
+          "major")
+            echo "Performing major updates (may include breaking changes)..."
+            pip-upgrader --skip-package-installation
+            ;;
+          "security")
+            echo "Performing security updates only..."
+            if [ -f safety-report.json ]; then
+              # Extract vulnerable packages and update them
+              jq -r '.vulnerabilities[].package_name' safety-report.json | sort -u | while read package; do
+                pip install --upgrade "$package"
+                pip freeze | grep "^$package==" >> requirements.txt.new
+              done
+              
+              if [ -f requirements.txt.new ]; then
+                # Update requirements.txt with security fixes
+                while IFS= read -r line; do
+                  package_name=$(echo "$line" | cut -d'=' -f1)
+                  sed -i "s/^${package_name}==.*/${line}/" requirements.txt
+                done < requirements.txt.new
+                rm requirements.txt.new
+              fi
+            fi
+            ;;
+        esac
+
+    - name: Test updated dependencies
+      run: |
+        # Install updated dependencies to check for conflicts
+        pip install -r requirements.txt
+        
+        # Run a basic import test for critical packages
+        python -c "
+        try:
+            import fastapi
+            import pydantic
+            import sqlalchemy
+            import redis
+            import numpy
+            import pandas
+            print('✅ Critical imports successful')
+        except ImportError as e:
+            print(f'❌ Import error: {e}')
+            exit(1)
+        "
+
+    - name: Check for changes
+      id: check-updates
+      run: |
+        if ! diff -q requirements.txt requirements.txt.backup > /dev/null; then
+          echo "has-updates=true" >> $GITHUB_OUTPUT
+          echo "Python dependencies have updates available"
+          
+          # Show what changed
+          echo "## Dependency Changes" >> changes.md
+          echo "### Python Dependencies" >> changes.md
+          echo '```diff' >> changes.md
+          diff -u requirements.txt.backup requirements.txt >> changes.md || true
+          echo '```' >> changes.md
+        else
+          echo "has-updates=false" >> $GITHUB_OUTPUT
+          echo "No Python dependency updates available"
+        fi
+
+    - name: Create Pull Request
+      id: create-pr
+      if: steps.check-updates.outputs.has-updates == 'true'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "chore: update Python dependencies (${{ github.event.inputs.update_type || 'minor' }})"
+        title: "🔄 Update Python Dependencies (${{ github.event.inputs.update_type || 'minor' }})"
+        body: |
+          ## Python Dependency Updates
+          
+          This PR updates Python dependencies with **${{ github.event.inputs.update_type || 'minor' }}** level changes.
+          
+          ### Security Status
+          - Security updates needed: ${{ steps.security-check.outputs.security-updates }}
+          
+          ### Changes Made
+          - Updated dependencies in `requirements.txt`
+          - Verified critical imports work correctly
+          - Ran basic compatibility tests
+          
+          ### Testing Checklist
+          - [ ] CI pipeline passes
+          - [ ] Unit tests pass
+          - [ ] Integration tests pass
+          - [ ] Security scans pass
+          - [ ] Manual testing completed
+          
+          ### Security Reports
+          See attached artifacts for detailed security scan results.
+          
+          ---
+          🤖 Auto-generated by dependency update workflow
+        branch: update/python-dependencies-${{ github.run_number }}
+        delete-branch: true
+        labels: |
+          dependencies
+          python
+          automated
+          ${{ github.event.inputs.update_type || 'minor' }}
+
+    - name: Upload dependency reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: python-dependency-reports
+        path: |
+          safety-report.json
+          pip-audit-report.json
+          changes.md
+
+  # ==============================================================================
+  # Frontend Dependencies Update
+  # ==============================================================================
+  update-frontend-deps:
+    name: Update Frontend Dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      has-updates: ${{ steps.check-updates.outputs.has-updates }}
+      pr-number: ${{ steps.create-pr.outputs.pr-number }}
+    defaults:
+      run:
+        working-directory: ./frontend
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Backup current package files
+      run: |
+        cp package.json package.json.backup
+        cp package-lock.json package-lock.json.backup
+
+    - name: Check for security vulnerabilities
+      id: security-check
+      run: |
+        npm audit --audit-level=moderate --json > npm-audit-report.json || true
+        
+        if [ -f npm-audit-report.json ]; then
+          VULN_COUNT=$(jq '.metadata.vulnerabilities.total' npm-audit-report.json)
+          if [ "$VULN_COUNT" -gt 0 ]; then
+            echo "security-updates=true" >> $GITHUB_OUTPUT
+          else
+            echo "security-updates=false" >> $GITHUB_OUTPUT
+          fi
+        fi
+
+    - name: Update dependencies based on type
+      run: |
+        UPDATE_TYPE="${{ github.event.inputs.update_type || 'minor' }}"
+        
+        case $UPDATE_TYPE in
+          "patch")
+            echo "Performing patch updates..."
+            npx npm-check-updates --target patch --upgrade
+            ;;
+          "minor")
+            echo "Performing minor updates..."
+            npx npm-check-updates --target minor --upgrade
+            ;;
+          "major")
+            echo "Performing major updates..."
+            npx npm-check-updates --upgrade
+            ;;
+          "security")
+            echo "Performing security updates only..."
+            npm audit fix --only=prod
+            ;;
+        esac
+        
+        # Install updated dependencies
+        npm install
+
+    - name: Test updated dependencies
+      run: |
+        # Build the project to check for compilation errors
+        npm run build:dev
+        
+        # Run type checking
+        npm run type-check
+        
+        # Run linting
+        npm run lint
+
+    - name: Check for changes
+      id: check-updates
+      run: |
+        if ! diff -q package.json package.json.backup > /dev/null || ! diff -q package-lock.json package-lock.json.backup > /dev/null; then
+          echo "has-updates=true" >> $GITHUB_OUTPUT
+          echo "Frontend dependencies have updates available"
+          
+          # Show what changed
+          echo "## Frontend Dependency Changes" >> ../changes-frontend.md
+          echo '```diff' >> ../changes-frontend.md
+          diff -u package.json.backup package.json >> ../changes-frontend.md || true
+          echo '```' >> ../changes-frontend.md
+        else
+          echo "has-updates=false" >> $GITHUB_OUTPUT
+          echo "No frontend dependency updates available"
+        fi
+
+    - name: Create Pull Request
+      id: create-pr
+      if: steps.check-updates.outputs.has-updates == 'true'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: "chore: update frontend dependencies (${{ github.event.inputs.update_type || 'minor' }})"
+        title: "🔄 Update Frontend Dependencies (${{ github.event.inputs.update_type || 'minor' }})"
+        body: |
+          ## Frontend Dependency Updates
+          
+          This PR updates frontend (React/TypeScript) dependencies with **${{ github.event.inputs.update_type || 'minor' }}** level changes.
+          
+          ### Security Status
+          - Security updates needed: ${{ steps.security-check.outputs.security-updates }}
+          
+          ### Changes Made
+          - Updated dependencies in `frontend/package.json`
+          - Updated lockfile `frontend/package-lock.json`
+          - Verified project builds successfully
+          - Ran type checking and linting
+          
+          ### Testing Checklist
+          - [ ] CI pipeline passes
+          - [ ] Frontend tests pass
+          - [ ] Build succeeds
+          - [ ] Type checking passes
+          - [ ] ESLint passes
+          - [ ] Manual testing completed
+          
+          ### Security Reports
+          See attached artifacts for detailed security scan results.
+          
+          ---
+          🤖 Auto-generated by dependency update workflow
+        branch: update/frontend-dependencies-${{ github.run_number }}
+        delete-branch: true
+        labels: |
+          dependencies
+          frontend
+          automated
+          ${{ github.event.inputs.update_type || 'minor' }}
+
+    - name: Upload dependency reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: frontend-dependency-reports
+        path: |
+          frontend/npm-audit-report.json
+          changes-frontend.md
+
+  # ==============================================================================
+  # Test Updated Dependencies
+  # ==============================================================================
+  test-updates:
+    name: Test Dependency Updates
+    runs-on: ubuntu-latest
+    needs: [update-python-deps, update-frontend-deps]
+    if: needs.update-python-deps.outputs.has-updates == 'true' || needs.update-frontend-deps.outputs.has-updates == 'true'
+    timeout-minutes: 30
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: tbot_test
+          POSTGRES_USER: tbot_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+    - name: Checkout updated code
+      uses: actions/checkout@v4
+      with:
+        ref: update/python-dependencies-${{ github.run_number }}
+
+    - name: Set up Python
+      if: needs.update-python-deps.outputs.has-updates == 'true'
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Install updated Python dependencies
+      if: needs.update-python-deps.outputs.has-updates == 'true'
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -r requirements.txt
+        pip install pytest-cov pytest-mock pytest-xdist
+
+    - name: Run Python tests with updated dependencies
+      if: needs.update-python-deps.outputs.has-updates == 'true'
+      run: |
+        pytest tests/unit/ --maxfail=5 -x
+        pytest tests/integration/ --maxfail=3 -x
+
+    - name: Set up Node.js
+      if: needs.update-frontend-deps.outputs.has-updates == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Test updated frontend dependencies
+      if: needs.update-frontend-deps.outputs.has-updates == 'true'
+      working-directory: ./frontend
+      run: |
+        npm ci
+        npm run build
+        npm run test
+        npm run lint
+        npm run type-check
+
+    - name: Comment on PR with test results
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const pythonPR = '${{ needs.update-python-deps.outputs.pr-number }}';
+          const frontendPR = '${{ needs.update-frontend-deps.outputs.pr-number }}';
+          
+          let message = '## 🧪 Automated Test Results\n\n';
+          
+          if (pythonPR) {
+            message += `### Python Dependencies\n`;
+            message += `- Tests: ${{ job.status }}\n`;
+          }
+          
+          if (frontendPR) {
+            message += `### Frontend Dependencies\n`;
+            message += `- Build: ${{ job.status }}\n`;
+            message += `- Tests: ${{ job.status }}\n`;
+          }
+          
+          message += '\n---\n🤖 Automated testing completed';
+          
+          // Comment on relevant PRs
+          if (pythonPR) {
+            await github.rest.issues.createComment({
+              issue_number: pythonPR,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });
+          }
+          
+          if (frontendPR) {
+            await github.rest.issues.createComment({
+              issue_number: frontendPR,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message
+            });
+          }
+
+  # ==============================================================================
+  # Notify Team
+  # ==============================================================================
+  notify:
+    name: Notify Team
+    runs-on: ubuntu-latest
+    needs: [update-python-deps, update-frontend-deps, test-updates]
+    if: always() && (needs.update-python-deps.outputs.has-updates == 'true' || needs.update-frontend-deps.outputs.has-updates == 'true')
+    
+    steps:
+    - name: Send dependency update notification
+      run: |
+        echo "🔄 Dependency update workflow completed"
+        echo "Python updates: ${{ needs.update-python-deps.outputs.has-updates }}"
+        echo "Frontend updates: ${{ needs.update-frontend-deps.outputs.has-updates }}"
+        echo "Tests: ${{ needs.test-updates.result }}"
+        
+        # Send notification to team (Slack, Discord, email, etc.)
+        if [[ "${{ needs.test-updates.result }}" == "success" ]]; then
+          echo "✅ All dependency updates tested successfully"
+        else
+          echo "❌ Some dependency update tests failed"
+          echo "Manual review required"
+        fi
