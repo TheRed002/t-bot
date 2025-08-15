@@ -551,6 +551,298 @@
       "title": "ExchangeConfig",
       "type": "object"
     },
+    "MLConfig": {
+      "description": "Machine Learning configuration for P-014 framework.",
+      "properties": {
+        "model_registry_path": {
+          "default": "models/registry",
+          "description": "Path to model registry",
+          "title": "Model Registry Path",
+          "type": "string"
+        },
+        "artifact_store_path": {
+          "default": "models/artifacts",
+          "description": "Path to model artifacts",
+          "title": "Artifact Store Path",
+          "type": "string"
+        },
+        "model_cache_size": {
+          "default": 10,
+          "description": "Number of models to cache in memory",
+          "title": "Model Cache Size",
+          "type": "integer"
+        },
+        "default_train_test_split": {
+          "default": 0.8,
+          "description": "Default train/test split ratio",
+          "title": "Default Train Test Split",
+          "type": "number"
+        },
+        "default_validation_split": {
+          "default": 0.2,
+          "description": "Default validation split ratio",
+          "title": "Default Validation Split",
+          "type": "number"
+        },
+        "max_training_time_hours": {
+          "default": 24,
+          "description": "Maximum training time in hours",
+          "title": "Max Training Time Hours",
+          "type": "integer"
+        },
+        "feature_selection_threshold": {
+          "default": 0.01,
+          "description": "Feature importance threshold for selection",
+          "title": "Feature Selection Threshold",
+          "type": "number"
+        },
+        "max_features": {
+          "default": 1000,
+          "description": "Maximum number of features",
+          "title": "Max Features",
+          "type": "integer"
+        },
+        "feature_cache_ttl_hours": {
+          "default": 24,
+          "description": "Feature cache TTL in hours",
+          "title": "Feature Cache Ttl Hours",
+          "type": "integer"
+        },
+        "optuna_n_trials": {
+          "default": 100,
+          "description": "Number of Optuna trials",
+          "title": "Optuna N Trials",
+          "type": "integer"
+        },
+        "optuna_timeout_hours": {
+          "default": 12,
+          "description": "Optuna timeout in hours",
+          "title": "Optuna Timeout Hours",
+          "type": "integer"
+        },
+        "optuna_pruning_enabled": {
+          "default": true,
+          "description": "Enable Optuna pruning",
+          "title": "Optuna Pruning Enabled",
+          "type": "boolean"
+        },
+        "cross_validation_folds": {
+          "default": 5,
+          "description": "Number of CV folds",
+          "title": "Cross Validation Folds",
+          "type": "integer"
+        },
+        "validation_frequency_days": {
+          "default": 7,
+          "description": "Validation frequency in days",
+          "title": "Validation Frequency Days",
+          "type": "integer"
+        },
+        "performance_degradation_threshold": {
+          "default": 0.1,
+          "description": "Performance degradation threshold",
+          "title": "Performance Degradation Threshold",
+          "type": "number"
+        },
+        "drift_detection_enabled": {
+          "default": true,
+          "description": "Enable drift detection",
+          "title": "Drift Detection Enabled",
+          "type": "boolean"
+        },
+        "drift_check_frequency_hours": {
+          "default": 6,
+          "description": "Drift check frequency in hours",
+          "title": "Drift Check Frequency Hours",
+          "type": "integer"
+        },
+        "drift_threshold": {
+          "default": 0.05,
+          "description": "Drift detection threshold",
+          "title": "Drift Threshold",
+          "type": "number"
+        },
+        "inference_batch_size": {
+          "default": 1000,
+          "description": "Inference batch size",
+          "title": "Inference Batch Size",
+          "type": "integer"
+        },
+        "prediction_cache_ttl_minutes": {
+          "default": 5,
+          "description": "Prediction cache TTL in minutes",
+          "title": "Prediction Cache Ttl Minutes",
+          "type": "integer"
+        },
+        "model_warmup_enabled": {
+          "default": true,
+          "description": "Enable model warmup on startup",
+          "title": "Model Warmup Enabled",
+          "type": "boolean"
+        },
+        "supported_model_types": {
+          "default": [
+            "price_predictor",
+            "direction_classifier",
+            "volatility_forecaster",
+            "regime_detector"
+          ],
+          "description": "Supported ML model types",
+          "items": {
+            "type": "string"
+          },
+          "title": "Supported Model Types",
+          "type": "array"
+        },
+        "min_accuracy_threshold": {
+          "default": 0.55,
+          "description": "Minimum model accuracy threshold",
+          "title": "Min Accuracy Threshold",
+          "type": "number"
+        },
+        "min_precision_threshold": {
+          "default": 0.5,
+          "description": "Minimum model precision threshold",
+          "title": "Min Precision Threshold",
+          "type": "number"
+        },
+        "min_recall_threshold": {
+          "default": 0.5,
+          "description": "Minimum model recall threshold",
+          "title": "Min Recall Threshold",
+          "type": "number"
+        },
+        "min_f1_threshold": {
+          "default": 0.5,
+          "description": "Minimum model F1 score threshold",
+          "title": "Min F1 Threshold",
+          "type": "number"
+        },
+        "max_memory_gb": {
+          "default": 8.0,
+          "description": "Maximum memory usage in GB",
+          "title": "Max Memory Gb",
+          "type": "number"
+        },
+        "max_cpu_cores": {
+          "default": 4,
+          "description": "Maximum CPU cores for training",
+          "title": "Max Cpu Cores",
+          "type": "integer"
+        },
+        "gpu_enabled": {
+          "default": false,
+          "description": "Enable GPU acceleration",
+          "title": "Gpu Enabled",
+          "type": "boolean"
+        },
+        "validation_threshold": {
+          "default": 0.6,
+          "description": "Overall model validation threshold",
+          "title": "Validation Threshold",
+          "type": "number"
+        },
+        "significance_level": {
+          "default": 0.05,
+          "description": "Statistical significance level",
+          "title": "Significance Level",
+          "type": "number"
+        },
+        "stability_window": {
+          "default": 10,
+          "description": "Number of periods for stability analysis",
+          "title": "Stability Window",
+          "type": "integer"
+        },
+        "min_validation_samples": {
+          "default": 100,
+          "description": "Minimum samples for validation",
+          "title": "Min Validation Samples",
+          "type": "integer"
+        },
+        "min_drift_samples": {
+          "default": 50,
+          "description": "Minimum samples for drift detection",
+          "title": "Min Drift Samples",
+          "type": "integer"
+        },
+        "drift_reference_window": {
+          "default": 1000,
+          "description": "Reference window size for drift detection",
+          "title": "Drift Reference Window",
+          "type": "integer"
+        },
+        "drift_detection_window": {
+          "default": 500,
+          "description": "Detection window size for drift detection",
+          "title": "Drift Detection Window",
+          "type": "integer"
+        },
+        "batch_size": {
+          "default": 1000,
+          "description": "Batch size for processing",
+          "title": "Batch Size",
+          "type": "integer"
+        },
+        "max_workers": {
+          "default": 4,
+          "description": "Maximum worker threads",
+          "title": "Max Workers",
+          "type": "integer"
+        },
+        "use_multiprocessing": {
+          "default": false,
+          "description": "Enable multiprocessing",
+          "title": "Use Multiprocessing",
+          "type": "boolean"
+        },
+        "chunk_size": {
+          "default": 100,
+          "description": "Chunk size for batch processing",
+          "title": "Chunk Size",
+          "type": "integer"
+        },
+        "max_memory_mb": {
+          "default": 2048,
+          "description": "Maximum memory in MB",
+          "title": "Max Memory Mb",
+          "type": "integer"
+        },
+        "use_log_returns": {
+          "default": true,
+          "description": "Use log returns for calculations",
+          "title": "Use Log Returns",
+          "type": "boolean"
+        },
+        "scaling_method": {
+          "default": "standard",
+          "description": "Feature scaling method",
+          "title": "Scaling Method",
+          "type": "string"
+        },
+        "class_weights": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "balanced",
+          "description": "Class weights for imbalanced data",
+          "title": "Class Weights"
+        },
+        "random_state": {
+          "default": 42,
+          "description": "Random seed for reproducibility",
+          "title": "Random State",
+          "type": "integer"
+        }
+      },
+      "title": "MLConfig",
+      "type": "object"
+    },
     "RiskConfig": {
       "description": "Risk management configuration for P-008 framework.",
       "properties": {
@@ -822,7 +1114,7 @@
       "type": "object"
     }
   },
-  "description": "Master configuration class for the entire application.\n\nAggregates all configuration classes and provides utility methods\nfor database URLs, environment checks, and schema generation.\n\nAttributes:\n    environment: Application environment (development/staging/production)\n    debug: Debug mode flag\n    app_name: Application name\n    app_version: Application version\n    database: Database configuration settings\n    security: Security configuration settings\n    error_handling: Error handling configuration\n    exchanges: Exchange API configuration\n    risk: Risk management configuration\n    capital_management: Capital management configuration\n    strategies: Strategy management configuration",
+  "description": "Master configuration class for the entire application.\n\nAggregates all configuration classes and provides utility methods\nfor database URLs, environment checks, and schema generation.\n\nAttributes:\n    environment: Application environment (development/staging/production)\n    debug: Debug mode flag\n    app_name: Application name\n    app_version: Application version\n    database: Database configuration settings\n    security: Security configuration settings\n    error_handling: Error handling configuration\n    exchanges: Exchange API configuration\n    risk: Risk management configuration\n    capital_management: Capital management configuration\n    strategies: Strategy management configuration\n    ml: Machine learning configuration",
   "properties": {
     "environment": {
       "default": "development",
@@ -1044,6 +1336,61 @@
         "performance_evaluation_frequency": 24,
         "auto_disable_poor_performers": true,
         "performance_alert_threshold": 0.3
+      }
+    },
+    "ml": {
+      "$ref": "#/$defs/MLConfig",
+      "default": {
+        "model_registry_path": "models/registry",
+        "artifact_store_path": "models/artifacts",
+        "model_cache_size": 10,
+        "default_train_test_split": 0.8,
+        "default_validation_split": 0.2,
+        "max_training_time_hours": 24,
+        "feature_selection_threshold": 0.01,
+        "max_features": 1000,
+        "feature_cache_ttl_hours": 24,
+        "optuna_n_trials": 100,
+        "optuna_timeout_hours": 12,
+        "optuna_pruning_enabled": true,
+        "cross_validation_folds": 5,
+        "validation_frequency_days": 7,
+        "performance_degradation_threshold": 0.1,
+        "drift_detection_enabled": true,
+        "drift_check_frequency_hours": 6,
+        "drift_threshold": 0.05,
+        "inference_batch_size": 1000,
+        "prediction_cache_ttl_minutes": 5,
+        "model_warmup_enabled": true,
+        "supported_model_types": [
+          "price_predictor",
+          "direction_classifier",
+          "volatility_forecaster",
+          "regime_detector"
+        ],
+        "min_accuracy_threshold": 0.55,
+        "min_precision_threshold": 0.5,
+        "min_recall_threshold": 0.5,
+        "min_f1_threshold": 0.5,
+        "max_memory_gb": 8.0,
+        "max_cpu_cores": 4,
+        "gpu_enabled": false,
+        "validation_threshold": 0.6,
+        "significance_level": 0.05,
+        "stability_window": 10,
+        "min_validation_samples": 100,
+        "min_drift_samples": 50,
+        "drift_reference_window": 1000,
+        "drift_detection_window": 500,
+        "batch_size": 1000,
+        "max_workers": 4,
+        "use_multiprocessing": false,
+        "chunk_size": 100,
+        "max_memory_mb": 2048,
+        "use_log_returns": true,
+        "scaling_method": "standard",
+        "class_weights": "balanced",
+        "random_state": 42
       }
     }
   },

@@ -68,7 +68,8 @@ class TestKellyCriterionPrecision:
         """Set high decimal precision for calculations."""
         getcontext().prec = 50  # Very high precision for testing
 
-    def test_kelly_mathematical_accuracy_known_values(self, position_sizer, sample_signal):
+    @pytest.mark.asyncio
+    async def test_kelly_mathematical_accuracy_known_values(self, position_sizer, sample_signal):
         """Test Kelly calculation with known mathematical values."""
         portfolio_value = Decimal("10000")
         
@@ -90,13 +91,13 @@ class TestKellyCriterionPrecision:
         expected_position_size = portfolio_value * Decimal(str(expected_kelly_final))
         
         # Calculate actual Kelly
-        actual_size = position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
+        actual_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
         
         # Should be close to expected (allowing for floating point precision)
         ratio = float(actual_size / expected_position_size)
         assert 0.95 <= ratio <= 1.05  # Within 5% tolerance
 
-    def test_kelly_edge_case_all_positive_returns(self, position_sizer, sample_signal):
+    async def test_kelly_edge_case_all_positive_returns(self, position_sizer, sample_signal):
         """Test Kelly with all positive returns (extreme optimism)."""
         portfolio_value = Decimal("10000")
         
@@ -104,7 +105,7 @@ class TestKellyCriterionPrecision:
         returns = [0.01, 0.02, 0.015, 0.025, 0.01] * 6  # 30 positive returns
         position_sizer.return_history["BTCUSDT"] = returns
         
-        position_size = position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
+        position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
         
         # Should be capped at max Kelly fraction
         max_allowed = portfolio_value * Decimal(str(position_sizer.risk_config.kelly_max_fraction))
@@ -113,7 +114,7 @@ class TestKellyCriterionPrecision:
         assert position_size <= max_with_confidence
         assert position_size > Decimal("0")
 
-    def test_kelly_edge_case_all_negative_returns(self, position_sizer, sample_signal):
+    async def test_kelly_edge_case_all_negative_returns(self, position_sizer, sample_signal):
         """Test Kelly with all negative returns (extreme pessimism)."""
         portfolio_value = Decimal("10000")
         
@@ -122,7 +123,7 @@ class TestKellyCriterionPrecision:
         position_sizer.return_history["BTCUSDT"] = returns
         
         # Kelly with all negative returns should fallback to fixed percentage
-        position_size = position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
+        position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
         
         # Should fallback to fixed percentage sizing
         expected_fallback = portfolio_value * Decimal("0.02") * Decimal(str(sample_signal.confidence))

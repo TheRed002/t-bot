@@ -447,6 +447,7 @@ class TestRuleBasedAIStrategy:
         """Create test configuration for hybrid strategy."""
         return {
             'name': 'TestHybridStrategy',
+            'symbols': ['BTC/USD'],
             'position_size_pct': 0.02,
             'stop_loss_pct': 0.05,
             'take_profit_pct': 0.10,
@@ -488,7 +489,7 @@ class TestRuleBasedAIStrategy:
         strategy = RuleBasedAIStrategy(config)
         
         assert strategy.name == 'TestHybridStrategy'
-        assert strategy.strategy_type == StrategyType.HYBRID
+        assert strategy.config.strategy_type == StrategyType.HYBRID
         assert strategy.rule_weight == 0.6
         assert strategy.ai_weight == 0.4
         assert strategy.min_confidence_threshold == 0.65
@@ -824,6 +825,7 @@ async def test_hybrid_strategy_integration():
     """Integration test of complete hybrid strategy."""
     config = {
         'name': 'IntegrationTestStrategy',
+        'symbols': ['BTC/USD'],
         'position_size_pct': 0.02,
         'stop_loss_pct': 0.05,
         'take_profit_pct': 0.10,
@@ -890,6 +892,7 @@ async def test_hybrid_strategy_performance():
     """Test hybrid strategy performance with large dataset."""
     config = {
         'name': 'PerformanceTestStrategy',
+        'symbols': ['BTC/USD'],
         'position_size_pct': 0.02,
         'rule_weight': 0.5,
         'ai_weight': 0.5,

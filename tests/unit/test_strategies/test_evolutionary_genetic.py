@@ -33,13 +33,42 @@ class MockStrategy(BaseStrategy):
     """Mock strategy for genetic algorithm testing."""
     
     def __init__(self, **kwargs):
-        super().__init__(kwargs)
+        # Extract custom parameters
         self.param1 = kwargs.get('param1', 1.0)
         self.param2 = kwargs.get('param2', 10)
         self.param3 = kwargs.get('param3', 'option1')
+        
+        # Create proper config for BaseStrategy
+        config = {
+            'name': 'test_strategy',
+            'strategy_type': 'static',  # Use valid StrategyType enum value
+            'symbols': kwargs.get('symbols', ['BTC/USD']),
+            'parameters': {
+                'param1': self.param1,
+                'param2': self.param2,
+                'param3': self.param3
+            }
+        }
+        super().__init__(config)
     
     async def generate_signal(self, symbol: str, data):
         return None
+    
+    async def _generate_signals_impl(self, data):
+        """Implementation required by BaseStrategy."""
+        return []
+    
+    def get_position_size(self, signal, portfolio_value):
+        """Implementation required by BaseStrategy."""
+        return 1000.0
+    
+    def should_exit(self, position, current_data):
+        """Implementation required by BaseStrategy."""
+        return False
+    
+    async def validate_signal(self, signal):
+        """Implementation required by BaseStrategy."""
+        return True
 
 
 class MockFitnessEvaluator(FitnessEvaluator):
