@@ -19,8 +19,10 @@ Dependencies:
 """
 
 from .feature_engineering import FeatureEngineer
+from .model_manager import ModelManager
 
 __version__ = "1.0.0"
 __all__ = [
     "FeatureEngineer",
+    "ModelManager",
 ]

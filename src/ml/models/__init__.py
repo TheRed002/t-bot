@@ -7,9 +7,15 @@ and market regime detection.
 """
 
 from .base_model import BaseModel
+from .direction_classifier import DirectionClassifier
 from .price_predictor import PricePredictor
+from .regime_detector import RegimeDetector
+from .volatility_forecaster import VolatilityForecaster
 
 __all__ = [
     "BaseModel",
+    "DirectionClassifier",
     "PricePredictor",
+    "RegimeDetector",
+    "VolatilityForecaster",
 ]

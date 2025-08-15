@@ -10,7 +10,7 @@ CRITICAL: This file will be extended by ALL subsequent prompts. Use exact patter
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 from pydantic import Field, field_validator
@@ -662,6 +662,44 @@ class MLConfig(BaseConfig):
     max_memory_gb: float = Field(default=8.0, description="Maximum memory usage in GB")
     max_cpu_cores: int = Field(default=4, description="Maximum CPU cores for training")
     gpu_enabled: bool = Field(default=False, description="Enable GPU acceleration")
+    
+    # Additional validation parameters
+    validation_threshold: float = Field(
+        default=0.6, description="Overall model validation threshold"
+    )
+    significance_level: float = Field(
+        default=0.05, description="Statistical significance level"
+    )
+    stability_window: int = Field(
+        default=10, description="Number of periods for stability analysis"
+    )
+    min_validation_samples: int = Field(
+        default=100, description="Minimum samples for validation"
+    )
+    
+    # Additional drift detection parameters
+    min_drift_samples: int = Field(
+        default=50, description="Minimum samples for drift detection"
+    )
+    drift_reference_window: int = Field(
+        default=1000, description="Reference window size for drift detection"
+    )
+    drift_detection_window: int = Field(
+        default=500, description="Detection window size for drift detection"
+    )
+    
+    # Additional model parameters
+    batch_size: int = Field(default=1000, description="Batch size for processing")
+    max_workers: int = Field(default=4, description="Maximum worker threads")
+    use_multiprocessing: bool = Field(default=False, description="Enable multiprocessing")
+    chunk_size: int = Field(default=100, description="Chunk size for batch processing")
+    max_memory_mb: int = Field(default=2048, description="Maximum memory in MB")
+    
+    # Model-specific parameters
+    use_log_returns: bool = Field(default=True, description="Use log returns for calculations")
+    scaling_method: str = Field(default="standard", description="Feature scaling method")
+    class_weights: Optional[str] = Field(default="balanced", description="Class weights for imbalanced data")
+    random_state: int = Field(default=42, description="Random seed for reproducibility")
     
     @field_validator(
         "default_train_test_split",

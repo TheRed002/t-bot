@@ -1000,3 +1000,39 @@ class MLPrediction(Base):
         Index("idx_predictions_request", "request_id"),
         Index("idx_predictions_type", "prediction_type"),
     )
+
+
+class MLDriftDetection(Base):
+    """Database model for ML drift detection results."""
+    
+    __tablename__ = "ml_drift_detection"
+    
+    # Primary key
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    
+    # Drift detection identification
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    drift_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # feature, prediction, performance
+    
+    # Detection results
+    detection_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    drift_detected: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    drift_score: Mapped[float] = mapped_column(Float, nullable=False)
+    
+    # Detailed results
+    drift_details: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    
+    # Data samples information
+    reference_samples: Mapped[int] = mapped_column(Integer, nullable=False)
+    current_samples: Mapped[int] = mapped_column(Integer, nullable=False)
+    
+    # Constraints
+    __table_args__ = (
+        Index("idx_drift_model_type", "model_name", "drift_type"),
+        Index("idx_drift_timestamp", "detection_timestamp"),
+        Index("idx_drift_detected", "drift_detected"),
+    )
