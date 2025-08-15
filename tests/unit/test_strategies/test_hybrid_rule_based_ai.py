@@ -519,7 +519,7 @@ class TestRuleBasedAIStrategy:
         strategy.volume_history[symbol] = [1000 + i*5 for i in range(100)]
         
         with patch.object(strategy.regime_detector, 'detect_comprehensive_regime') as mock_regime:
-            mock_regime.return_value = MarketRegime.TRENDING
+            mock_regime.return_value = MarketRegime.TRENDING_UP
             
             with patch.object(strategy.rule_engine, 'evaluate_rules') as mock_rules:
                 mock_rules.return_value = {
@@ -687,8 +687,10 @@ class TestRuleBasedAIStrategy:
         position = Position(
             symbol="BTC/USD",
             side=OrderSide.BUY,
-            size=Decimal("0.1"),
+            quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
+            current_price=Decimal("47500"),
+            unrealized_pnl=Decimal("-250"),
             timestamp=datetime.now()
         )
         
@@ -697,7 +699,6 @@ class TestRuleBasedAIStrategy:
             symbol="BTC/USD",
             timestamp=datetime.now(),
             price=Decimal("47500"),  # 5% loss
-            current_price=Decimal("47500"),
             volume=Decimal("1000"),
             bid=Decimal("47450"),
             ask=Decimal("47550")
@@ -711,8 +712,10 @@ class TestRuleBasedAIStrategy:
         position = Position(
             symbol="BTC/USD",
             side=OrderSide.BUY,
-            size=Decimal("0.1"),
+            quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
+            current_price=Decimal("55500"),
+            unrealized_pnl=Decimal("550"),
             timestamp=datetime.now()
         )
         
@@ -721,7 +724,6 @@ class TestRuleBasedAIStrategy:
             symbol="BTC/USD",
             timestamp=datetime.now(),
             price=Decimal("55500"),  # 11% profit
-            current_price=Decimal("55500"),
             volume=Decimal("1000"),
             bid=Decimal("55450"),
             ask=Decimal("55550")
@@ -735,8 +737,10 @@ class TestRuleBasedAIStrategy:
         position = Position(
             symbol="BTC/USD",
             side=OrderSide.BUY,
-            size=Decimal("0.1"),
+            quantity=Decimal("0.1"),
             entry_price=Decimal("50000"),
+            current_price=Decimal("50100"),
+            unrealized_pnl=Decimal("10"),
             timestamp=datetime.now()
         )
         
@@ -748,7 +752,6 @@ class TestRuleBasedAIStrategy:
             symbol="BTC/USD",
             timestamp=datetime.now(),
             price=Decimal("50100"),  # Small profit
-            current_price=Decimal("50100"),
             volume=Decimal("1000"),
             bid=Decimal("50050"),
             ask=Decimal("50150")
@@ -865,7 +868,7 @@ async def test_hybrid_strategy_integration():
     )
     
     with patch.object(strategy.regime_detector, 'detect_comprehensive_regime') as mock_regime:
-        mock_regime.return_value = MarketRegime.TRENDING
+        mock_regime.return_value = MarketRegime.TRENDING_UP
         
         # Generate signals
         signals = await strategy._generate_signals_impl(market_data)
@@ -927,7 +930,7 @@ async def test_hybrid_strategy_performance():
     )
     
     with patch.object(strategy.regime_detector, 'detect_comprehensive_regime') as mock_regime:
-        mock_regime.return_value = MarketRegime.TRENDING
+        mock_regime.return_value = MarketRegime.TRENDING_UP
         
         import time
         start_time = time.time()

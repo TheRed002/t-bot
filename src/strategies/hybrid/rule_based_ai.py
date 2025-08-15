@@ -700,13 +700,13 @@ class RuleBasedAIStrategy(BaseStrategy):
         """Determine if position should be closed using hybrid analysis."""
         try:
             # Basic stop-loss and take-profit checks
-            current_price = data.current_price
+            current_price = data.price
             entry_price = position.entry_price
             
             if position.side.value == "buy":
-                pnl_pct = (current_price - entry_price) / entry_price
+                pnl_pct = float((current_price - entry_price) / entry_price)
             else:
-                pnl_pct = (entry_price - current_price) / entry_price
+                pnl_pct = float((entry_price - current_price) / entry_price)
                 
             # Stop loss
             if pnl_pct <= -self.config.stop_loss_pct:

@@ -392,14 +392,17 @@ class GeneticAlgorithm:
                 val1 = genes1[param]
                 val2 = genes2[param]
                 
-                if isinstance(val1, (int, float)):
+                # Check if this is a categorical parameter
+                param_range = self.parameter_ranges.get(param, (0, 1))
+                is_categorical = (len(param_range) == 2 and param_range[1] is None)
+                
+                if not is_categorical and isinstance(val1, (int, float)) and not isinstance(val1, bool):
                     # Numeric distance (normalized)
-                    param_range = self.parameter_ranges.get(param, (0, 1))
                     range_size = param_range[1] - param_range[0]
                     if range_size > 0:
                         distance += abs(val1 - val2) / range_size
                 else:
-                    # Categorical distance
+                    # Categorical distance (including boolean)
                     distance += 0 if val1 == val2 else 1
                 
                 num_params += 1

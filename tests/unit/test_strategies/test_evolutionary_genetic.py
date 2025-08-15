@@ -798,33 +798,29 @@ async def test_genetic_algorithm_integration():
     
     # Mock the backtest engine to return consistent results
     with patch('src.strategies.evolutionary.genetic.BacktestEngine') as MockEngine:
-        def create_mock_result(strategy):
-            # Vary fitness based on parameters to test evolution
-            param_value = strategy.genes.get('threshold', 0.3)
-            fitness_value = param_value * 100  # Simple fitness function
-            
-            return BacktestResult(
-                total_return=fitness_value,
-                annual_return=fitness_value * 1.2,
-                sharpe_ratio=1.0,
-                sortino_ratio=1.1,
-                max_drawdown=5.0,
-                win_rate=60.0,
-                total_trades=50,
-                winning_trades=30,
-                losing_trades=20,
-                avg_win=100.0,
-                avg_loss=50.0,
-                profit_factor=2.0,
-                volatility=0.15,
-                var_95=200.0,
-                cvar_95=300.0,
-                equity_curve=[],
-                trades=[],
-                daily_returns=[]
-            )
+        # Create a simple mock result
+        mock_result = BacktestResult(
+            total_return=15.5,
+            annual_return=18.2,
+            sharpe_ratio=1.25,
+            sortino_ratio=1.45,
+            max_drawdown=8.5,
+            win_rate=65.5,
+            total_trades=100,
+            winning_trades=65,
+            losing_trades=35,
+            avg_win=150.25,
+            avg_loss=85.75,
+            profit_factor=2.15,
+            volatility=0.12,
+            var_95=250.50,
+            cvar_95=320.75,
+            equity_curve=[],
+            trades=[],
+            daily_returns=[]
+        )
         
-        MockEngine.return_value.run = AsyncMock(side_effect=lambda: create_mock_result(MockEngine.return_value.strategy))
+        MockEngine.return_value.run = AsyncMock(return_value=mock_result)
         
         best_individual = await ga.evolve()
         
