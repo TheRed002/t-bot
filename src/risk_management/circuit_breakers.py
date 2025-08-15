@@ -38,6 +38,7 @@ from src.error_handling.error_handler import ErrorHandler
 
 # MANDATORY: Import from P-008
 from src.risk_management.base import BaseRiskManager
+from src.risk_management.correlation_monitor import CorrelationMonitor, CorrelationThresholds, CorrelationMetrics
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -494,6 +495,185 @@ class SystemErrorRateBreaker(BaseCircuitBreaker):
         return current_value > threshold_value
 
 
+class CorrelationSpikeBreaker(BaseCircuitBreaker):
+    """
+    Circuit breaker for portfolio correlation spike detection.
+
+    Triggers when portfolio correlation exceeds dangerous levels, indicating
+    systemic risk where all positions may move against the portfolio simultaneously.
+    Implements graduated response based on correlation thresholds.
+    """
+
+    breaker_type = CircuitBreakerType.CORRELATION_SPIKE
+
+    def __init__(self, config: Config, risk_manager: BaseRiskManager):
+        super().__init__(config, risk_manager)
+
+        # Initialize correlation monitor with configuration
+        correlation_thresholds = CorrelationThresholds(
+            warning_threshold=Decimal("0.6"),      # 60% warning threshold
+            critical_threshold=Decimal("0.8"),     # 80% critical threshold
+            max_positions_high_corr=3,             # Max 3 positions at 60%+ correlation
+            max_positions_critical_corr=1,         # Max 1 position at 80%+ correlation
+            lookback_periods=50,                   # 50 periods for correlation calculation
+            min_periods=10                         # Minimum 10 periods required
+        )
+
+        self.correlation_monitor = CorrelationMonitor(config, correlation_thresholds)
+        self.thresholds = correlation_thresholds
+        self.logger = logger.bind(breaker_type="correlation_spike")
+
+        # Correlation tracking
+        self.last_correlation_metrics: CorrelationMetrics | None = None
+        self.correlation_spike_count = 0
+        self.consecutive_high_correlation_periods = 0
+        self.max_consecutive_periods = 3  # Trigger after 3 consecutive high correlation periods
+
+    async def get_threshold_value(self) -> Decimal:
+        """Get correlation spike threshold."""
+        return self.thresholds.critical_threshold
+
+    async def get_current_value(self, data: dict[str, Any]) -> Decimal:
+        """Get current maximum correlation value."""
+        positions = data.get("positions", [])
+        market_data_updates = data.get("market_data", [])
+
+        # Update correlation monitor with latest market data
+        if market_data_updates:
+            for market_data in market_data_updates:
+                await self.correlation_monitor.update_price_data(market_data)
+
+        # Calculate current correlation metrics
+        if positions:
+            try:
+                correlation_metrics = (
+                    await self.correlation_monitor.calculate_portfolio_correlation(positions)
+                )
+                self.last_correlation_metrics = correlation_metrics
+                return correlation_metrics.max_pairwise_correlation
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to calculate correlation metrics",
+                    error=str(e),
+                    position_count=len(positions)
+                )
+                return Decimal("0.0")
+
+        return Decimal("0.0")
+
+    @time_execution
+    async def check_condition(self, data: dict[str, Any]) -> bool:
+        """
+        Check if correlation spike circuit breaker should trigger.
+
+        Implements graduated response:
+        1. Warning level: Track consecutive high correlation periods
+        2. Critical level: Immediate trigger if above critical threshold
+        3. Concentration risk: Consider position size weighting
+        """
+        current_correlation = await self.get_current_value(data)
+        threshold = await self.get_threshold_value()
+
+        # No correlation data available
+        if current_correlation == Decimal("0.0"):
+            self.consecutive_high_correlation_periods = 0
+            return False
+
+        # Critical level - immediate trigger (use absolute value for comparison)
+        if abs(current_correlation) >= threshold:
+            self.correlation_spike_count += 1
+            self.consecutive_high_correlation_periods += 1
+
+            self.logger.warning(
+                "Critical correlation spike detected",
+                correlation=current_correlation,
+                threshold=threshold,
+                spike_count=self.correlation_spike_count
+            )
+            return True
+
+        # Warning level - track consecutive periods
+        warning_threshold = self.thresholds.warning_threshold
+        if abs(current_correlation) >= warning_threshold:
+            self.consecutive_high_correlation_periods += 1
+
+            # Trigger if we've had too many consecutive high correlation periods
+            if self.consecutive_high_correlation_periods >= self.max_consecutive_periods:
+                self.correlation_spike_count += 1
+
+                self.logger.warning(
+                    "Sustained correlation spike detected",
+                    correlation=current_correlation,
+                    consecutive_periods=self.consecutive_high_correlation_periods,
+                    spike_count=self.correlation_spike_count
+                )
+                return True
+
+            self.logger.info(
+                "High correlation detected",
+                correlation=current_correlation,
+                consecutive_periods=self.consecutive_high_correlation_periods
+            )
+        else:
+            # Reset counter when correlation drops below warning
+            self.consecutive_high_correlation_periods = 0
+
+        # Additional check for concentration risk
+        if self.last_correlation_metrics:
+            concentration_risk = self.last_correlation_metrics.portfolio_concentration_risk
+            if concentration_risk > Decimal("0.5"):  # 50% concentration risk threshold
+                self.logger.warning(
+                    "High portfolio concentration risk detected",
+                    concentration_risk=concentration_risk,
+                    avg_correlation=self.last_correlation_metrics.average_correlation
+                )
+                # Don't trigger immediately but increase sensitivity
+                # Reduce the consecutive period requirement
+                if (abs(current_correlation) >= warning_threshold and
+                    self.consecutive_high_correlation_periods >= 2):
+                    return True
+
+        return False
+
+    def get_correlation_metrics(self) -> dict[str, Any] | None:
+        """Get the latest correlation metrics."""
+        if self.last_correlation_metrics is None:
+            return None
+
+        return {
+            "average_correlation": str(self.last_correlation_metrics.average_correlation),
+            "max_pairwise_correlation": str(self.last_correlation_metrics.max_pairwise_correlation),
+            "correlation_spike": self.last_correlation_metrics.correlation_spike,
+            "correlated_pairs_count": self.last_correlation_metrics.correlated_pairs_count,
+            "portfolio_concentration_risk": str(
+                self.last_correlation_metrics.portfolio_concentration_risk
+            ),
+            "timestamp": self.last_correlation_metrics.timestamp.isoformat()
+        }
+
+    async def get_position_limits(self) -> dict[str, Any]:
+        """Get position limits based on current correlation levels."""
+        if self.last_correlation_metrics is None:
+            return {"max_positions": None, "reduction_factor": Decimal("1.0")}
+
+        # Use the correlation monitor's position limit calculation
+        limits = await self.correlation_monitor.get_position_limits_for_correlation(
+            self.last_correlation_metrics
+        )
+        return limits
+
+    async def cleanup_old_data(self, cutoff_time) -> None:
+        """Clean up old correlation data."""
+        await self.correlation_monitor.cleanup_old_data(cutoff_time)
+
+    def reset(self) -> None:
+        """Reset correlation circuit breaker state."""
+        super().reset()
+        self.correlation_spike_count = 0
+        self.consecutive_high_correlation_periods = 0
+        self.last_correlation_metrics = None
+
+
 class CircuitBreakerManager:
     """
     Manager for all circuit breakers in the system.
@@ -521,6 +701,7 @@ class CircuitBreakerManager:
             "volatility_spike": VolatilitySpikeBreaker(config, risk_manager),
             "model_confidence": ModelConfidenceBreaker(config, risk_manager),
             "system_error_rate": SystemErrorRateBreaker(config, risk_manager),
+            "correlation_spike": CorrelationSpikeBreaker(config, risk_manager),
         }
 
         self.logger.info(

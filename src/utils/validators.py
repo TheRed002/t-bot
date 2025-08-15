@@ -28,6 +28,9 @@ from src.core.config import Config
 # Import from P-001 core components
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
+from src.utils.decimal_utils import (
+    to_decimal, format_decimal, ZERO
+)
 from src.core.types import (
     MarketData,
     OrderRequest,
@@ -48,7 +51,7 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-def validate_price(price: float, symbol: str, exchange: str = "binance") -> Decimal:
+def validate_price(price: float | Decimal, symbol: str, exchange: str = "binance") -> Decimal:
     """
     Validate and normalize price values.
 
@@ -66,15 +69,16 @@ def validate_price(price: float, symbol: str, exchange: str = "binance") -> Deci
     if not isinstance(price, (int, float, Decimal)):
         raise ValidationError(f"Price must be a number for {symbol}, got {type(price).__name__}")
 
-    if price <= 0:
-        raise ValidationError(f"Price must be positive for {symbol}, got {price}")
+    # Convert to Decimal for all operations
+    decimal_price = to_decimal(price)
+    
+    if decimal_price <= ZERO:
+        raise ValidationError(f"Price must be positive for {symbol}, got {decimal_price}")
 
-    if price > 1_000_000:  # Sanity check for extremely high prices
-        raise ValidationError(f"Price {price} for {symbol} exceeds maximum allowed")
+    if decimal_price > to_decimal("1000000"):  # Sanity check for extremely high prices
+        raise ValidationError(f"Price {decimal_price} for {symbol} exceeds maximum allowed")
 
     try:
-        # Convert to Decimal for financial precision
-        decimal_price = Decimal(str(price))
 
         # Get precision from exchange-specific rules
         precision = get_price_precision(symbol, exchange)
@@ -117,7 +121,7 @@ def get_price_precision(symbol: str, exchange: str) -> int:
     return exchange_rules["default"]
 
 
-def validate_quantity(quantity: float, symbol: str, min_qty: float | None = None) -> Decimal:
+def validate_quantity(quantity: float | Decimal, symbol: str, min_qty: float | Decimal | None = None) -> Decimal:
     """
     Validate trading quantity.
 
@@ -137,15 +141,18 @@ def validate_quantity(quantity: float, symbol: str, min_qty: float | None = None
             f"Quantity must be a number for {symbol}, got {type(quantity).__name__}"
         )
 
-    if quantity <= 0:
-        raise ValidationError(f"Quantity must be positive for {symbol}, got {quantity}")
+    # Convert to Decimal for all operations
+    decimal_qty = to_decimal(quantity)
+    
+    if decimal_qty <= ZERO:
+        raise ValidationError(f"Quantity must be positive for {symbol}, got {decimal_qty}")
 
-    if min_qty and quantity < min_qty:
-        raise ValidationError(f"Quantity {quantity} below minimum {min_qty} for {symbol}")
+    if min_qty:
+        min_qty_decimal = to_decimal(min_qty)
+        if decimal_qty < min_qty_decimal:
+            raise ValidationError(f"Quantity {decimal_qty} below minimum {min_qty_decimal} for {symbol}")
 
     try:
-        # Convert to Decimal for financial precision
-        decimal_qty = Decimal(str(quantity))
 
         # Determine precision based on symbol
         if "BTC" in symbol.upper():

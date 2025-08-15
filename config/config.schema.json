@@ -1149,14 +1149,14 @@
         "postgresql_username": "trading_bot",
         "postgresql_password": "trading_bot_password",
         "postgresql_pool_size": 10,
-        "redis_host": "172.27.176.1",
+        "redis_host": "redis",
         "redis_port": 6379,
-        "redis_password": "redis_password",
+        "redis_password": "redis_dev_password",
         "redis_db": 0,
         "influxdb_host": "172.27.176.1",
         "influxdb_port": 8086,
-        "influxdb_token": "trading_bot_token",
-        "influxdb_org": "trading_bot_dev",
+        "influxdb_token": "tbot_dev_token",
+        "influxdb_org": "tbot_dev",
         "influxdb_bucket": "trading_data_dev"
       }
     },
@@ -1165,7 +1165,7 @@
       "default": {
         "secret_key": "your-super-secret-key-32-chars-long-for-production",
         "jwt_algorithm": "HS256",
-        "jwt_expire_minutes": 30,
+        "jwt_expire_minutes": 60,
         "encryption_key": "your-encryption-key-32-chars-long-for-production"
       }
     },
@@ -1194,14 +1194,14 @@
       "default": {
         "default_timeout": 30,
         "max_retries": 3,
-        "binance_api_key": "",
+        "binance_api_key": "your_binance_testnet_api_key",
         "binance_api_secret": "",
         "binance_testnet": true,
-        "okx_api_key": "",
+        "okx_api_key": "your_okx_demo_api_key",
         "okx_api_secret": "",
-        "okx_passphrase": "",
+        "okx_passphrase": "your_okx_demo_passphrase",
         "okx_sandbox": true,
-        "coinbase_api_key": "",
+        "coinbase_api_key": "your_coinbase_sandbox_api_key",
         "coinbase_api_secret": "",
         "coinbase_sandbox": true,
         "rate_limits": {

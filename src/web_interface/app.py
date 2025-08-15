@@ -155,10 +155,31 @@ def create_app(
     # 1. Error handling (outermost)
     app.add_middleware(ErrorHandlerMiddleware, debug=web_config.get("debug", False))
 
-    # 2. Rate limiting
+    # 1.5. Security middleware
+    from src.web_interface.middleware.security import SecurityMiddleware
+    app.add_middleware(SecurityMiddleware, enable_csp=True, enable_input_validation=True)
+
+    # 2. Connection pooling for performance
+    from src.web_interface.middleware.connection_pool import (
+        ConnectionPoolMiddleware,
+        set_global_pool_manager
+    )
+    connection_pool_middleware = ConnectionPoolMiddleware(app, config)
+    app.add_middleware(ConnectionPoolMiddleware, config=config)
+    set_global_pool_manager(connection_pool_middleware.pool_manager)
+
+    # 3. Decimal precision middleware for financial data integrity
+    from src.web_interface.middleware.decimal_precision import (
+        DecimalPrecisionMiddleware, 
+        DecimalValidationMiddleware
+    )
+    app.add_middleware(DecimalValidationMiddleware)
+    app.add_middleware(DecimalPrecisionMiddleware)
+
+    # 4. Rate limiting
     app.add_middleware(RateLimitMiddleware, config=config)
 
-    # 3. Authentication (innermost)
+    # 5. Authentication (innermost)
     from src.web_interface.security.jwt_handler import JWTHandler
 
     jwt_handler = JWTHandler(config)
@@ -266,6 +287,22 @@ def _register_routes(app: FastAPI) -> None:
         app.include_router(monitoring_router, prefix="/api/monitoring", tags=["Monitoring"])
     except ImportError as e:
         logger.warning(f"Failed to import monitoring router: {e}")
+
+    # Playground routes
+    try:
+        from src.web_interface.api.playground import router as playground_router
+
+        app.include_router(playground_router, prefix="/api/playground", tags=["Playground"])
+    except ImportError as e:
+        logger.warning(f"Failed to import playground router: {e}")
+
+    # Optimization routes
+    try:
+        from src.web_interface.api.optimization import router as optimization_router
+
+        app.include_router(optimization_router, prefix="/api/optimization", tags=["Optimization"])
+    except ImportError as e:
+        logger.warning(f"Failed to import optimization router: {e}")
 
     # WebSocket routes (will be implemented next)
     try:

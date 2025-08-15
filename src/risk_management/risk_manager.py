@@ -16,6 +16,10 @@ from typing import Any
 from src.core.config import Config
 from src.core.exceptions import PositionLimitError, RiskManagementError, ValidationError
 from src.core.logging import get_logger
+from src.utils.decimal_utils import (
+    to_decimal, format_decimal, safe_divide,
+    ZERO, ONE, validate_positive
+)
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -67,13 +71,13 @@ class RiskManager(BaseRiskManager):
 
         # Initialize position limits
         self.position_limits = PositionLimits(
-            max_position_size=Decimal(str(config.risk.max_position_size_pct)),
+            max_position_size=to_decimal(config.risk.max_position_size_pct),
             max_positions_per_symbol=config.risk.max_positions_per_symbol,
             max_total_positions=config.risk.max_total_positions,
-            max_portfolio_exposure=Decimal(str(config.risk.max_portfolio_exposure)),
-            max_sector_exposure=Decimal(str(config.risk.max_sector_exposure)),
-            max_correlation_exposure=Decimal(str(config.risk.max_correlation_exposure)),
-            max_leverage=Decimal(str(config.risk.max_leverage)),
+            max_portfolio_exposure=to_decimal(config.risk.max_portfolio_exposure),
+            max_sector_exposure=to_decimal(config.risk.max_sector_exposure),
+            max_correlation_exposure=to_decimal(config.risk.max_correlation_exposure),
+            max_leverage=to_decimal(config.risk.max_leverage),
         )
 
         self.logger.info("Risk manager initialized with all components")
@@ -115,8 +119,8 @@ class RiskManager(BaseRiskManager):
                 "Position size calculated",
                 symbol=signal.symbol,
                 confidence=signal.confidence,
-                portfolio_value=float(portfolio_value),
-                position_size=float(position_size),
+                portfolio_value=format_decimal(portfolio_value),
+                position_size=format_decimal(position_size),
             )
 
             return position_size
@@ -209,17 +213,15 @@ class RiskManager(BaseRiskManager):
                 raise ValidationError("Invalid order price")
 
             # Check position size limits
-            order_value = order.quantity * (order.price or Decimal("0"))
-            max_position_size = portfolio_value * Decimal(
-                str(self.risk_config.max_position_size_pct)
-            )
+            order_value = order.quantity * (order.price or ZERO)
+            max_position_size = portfolio_value * to_decimal(self.risk_config.max_position_size_pct)
 
             if order_value > max_position_size:
                 await self._log_risk_violation(
                     "order_size_limit",
                     {
-                        "order_value": float(order_value),
-                        "max_position_size": float(max_position_size),
+                        "order_value": format_decimal(order_value),
+                        "max_position_size": format_decimal(max_position_size),
                         "symbol": order.symbol,
                     },
                 )
@@ -234,10 +236,10 @@ class RiskManager(BaseRiskManager):
                 await self._log_risk_violation(
                     "portfolio_exposure_limit",
                     {
-                        "current_exposure": float(current_exposure),
-                        "order_value": float(order_value),
-                        "total_exposure": float(total_exposure),
-                        "max_exposure": float(max_exposure),
+                        "current_exposure": format_decimal(current_exposure),
+                        "order_value": format_decimal(order_value),
+                        "total_exposure": format_decimal(total_exposure),
+                        "max_exposure": format_decimal(max_exposure),
                     },
                 )
                 raise PositionLimitError("Order would exceed portfolio exposure limit")
@@ -245,8 +247,8 @@ class RiskManager(BaseRiskManager):
             self.logger.info(
                 "Order validation passed",
                 symbol=order.symbol,
-                quantity=float(order.quantity),
-                order_value=float(order_value),
+                quantity=format_decimal(order.quantity),
+                order_value=format_decimal(order_value),
             )
 
             return True
@@ -291,8 +293,8 @@ class RiskManager(BaseRiskManager):
 
             self.logger.info(
                 "Risk metrics calculated",
-                var_1d=float(risk_metrics.var_1d),
-                current_drawdown=float(risk_metrics.current_drawdown),
+                var_1d=format_decimal(risk_metrics.var_1d),
+                current_drawdown=format_decimal(risk_metrics.current_drawdown),
                 risk_level=risk_metrics.risk_level.value,
             )
 
@@ -355,25 +357,29 @@ class RiskManager(BaseRiskManager):
 
             # Check stop loss
             stop_loss_pct = self.risk_config.max_daily_loss_pct
-            if position.unrealized_pnl < 0:
-                loss_pct = abs(position.unrealized_pnl) / (position.quantity * position.entry_price)
+            if position.unrealized_pnl < ZERO:
+                loss_pct = safe_divide(
+                    abs(position.unrealized_pnl),
+                    position.quantity * position.entry_price,
+                    ZERO
+                )
                 if loss_pct >= stop_loss_pct:
                     self.logger.warning(
                         "Position hit stop loss",
                         symbol=position.symbol,
-                        loss_pct=float(loss_pct),
+                        loss_pct=format_decimal(loss_pct),
                         stop_loss_pct=stop_loss_pct,
                     )
                     return True
 
             # Check drawdown limit
-            if self.risk_metrics and self.risk_metrics.current_drawdown > Decimal(
-                str(self.risk_config.max_drawdown_pct)
+            if self.risk_metrics and self.risk_metrics.current_drawdown > to_decimal(
+                self.risk_config.max_drawdown_pct
             ):
                 self.logger.warning(
                     "Position exit due to drawdown limit",
                     symbol=position.symbol,
-                    current_drawdown=float(self.risk_metrics.current_drawdown),
+                    current_drawdown=format_decimal(self.risk_metrics.current_drawdown),
                     max_drawdown=self.risk_config.max_drawdown_pct,
                 )
                 return True
@@ -415,19 +421,19 @@ class RiskManager(BaseRiskManager):
         # Update position sizer with current prices
         for position in positions:
             await self.position_sizer.update_price_history(
-                position.symbol, float(position.current_price)
+                position.symbol, position.current_price
             )
             await self.portfolio_limits.update_return_history(
-                position.symbol, float(position.current_price)
+                position.symbol, position.current_price
             )
             await self.risk_calculator.update_position_returns(
-                position.symbol, float(position.current_price)
+                position.symbol, position.current_price
             )
 
         self.logger.debug(
             "Portfolio state updated across all components",
             position_count=len(positions),
-            portfolio_value=float(portfolio_value),
+            portfolio_value=format_decimal(portfolio_value),
         )
 
     @time_execution

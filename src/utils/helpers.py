@@ -34,6 +34,9 @@ import yaml
 # Import from P-001 core components
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
+from src.utils.decimal_utils import (
+    to_decimal, ZERO
+)
 
 logger = get_logger(__name__)
 
@@ -454,12 +457,12 @@ def convert_currency(
     return round(converted_amount, precision)
 
 
-def normalize_price(price: float, symbol: str) -> Decimal:
+def normalize_price(price: float | Decimal, symbol: str) -> Decimal:
     """
     Normalize price to appropriate precision for a given symbol.
 
     Args:
-        price: Price to normalize
+        price: Price to normalize (accepts float or Decimal)
         symbol: Trading symbol
 
     Returns:
@@ -468,8 +471,11 @@ def normalize_price(price: float, symbol: str) -> Decimal:
     Raises:
         ValidationError: If price is invalid
     """
-    if price <= 0:
-        raise ValidationError(f"Price must be positive for {symbol}, got {price}")
+    # Convert to Decimal for all operations
+    decimal_price = to_decimal(price)
+    
+    if decimal_price <= ZERO:
+        raise ValidationError(f"Price must be positive for {symbol}, got {decimal_price}")
 
     # Determine precision based on symbol
     if "BTC" in symbol.upper():
@@ -481,8 +487,7 @@ def normalize_price(price: float, symbol: str) -> Decimal:
     else:
         precision = 4
 
-    # Convert to Decimal and round
-    decimal_price = Decimal(str(price))
+    # Round to appropriate precision
     normalized_price = decimal_price.quantize(
         Decimal(f"0.{'0' * (precision - 1)}1"), rounding=ROUND_HALF_UP
     )

@@ -420,6 +420,203 @@ export interface ChartConfig {
   height: number;
 }
 
+// Playground types for testing strategies and configurations
+export interface PlaygroundConfiguration {
+  id?: string;
+  name: string;
+  description?: string;
+  symbols: string[];
+  positionSizing: {
+    type: 'fixed' | 'percentage' | 'kelly_criterion';
+    value: number;
+    maxPositions: number;
+  };
+  tradingSide: 'long' | 'short' | 'both';
+  riskSettings: {
+    stopLossPercentage: number;
+    takeProfitPercentage: number;
+    maxDrawdownPercentage: number;
+    maxRiskPerTrade: number;
+  };
+  portfolioSettings: {
+    maxPositions: number;
+    allocationStrategy: 'equal_weight' | 'risk_parity' | 'market_cap' | 'custom';
+    rebalanceFrequency: 'daily' | 'weekly' | 'monthly' | 'never';
+  };
+  strategy: {
+    type: string;
+    parameters: Record<string, any>;
+  };
+  model?: {
+    type: string;
+    version: string;
+    parameters: Record<string, any>;
+  };
+  timeframe: TimeInterval;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PlaygroundExecution {
+  id: string;
+  configurationId: string;
+  mode: 'historical' | 'live' | 'sandbox' | 'production';
+  status: 'idle' | 'running' | 'paused' | 'completed' | 'error' | 'stopped';
+  progress: number;
+  startTime?: string;
+  endTime?: string;
+  duration?: number;
+  settings: {
+    startDate?: string;
+    endDate?: string;
+    speed: number; // 1x, 5x, 10x, etc.
+    initialBalance: number;
+    commission: number;
+  };
+  metrics?: PlaygroundMetrics;
+  trades?: PlaygroundTrade[];
+  logs: PlaygroundLog[];
+  error?: string;
+}
+
+export interface PlaygroundMetrics {
+  totalReturn: number;
+  annualizedReturn: number;
+  sharpeRatio: number;
+  sortinoRatio: number;
+  maxDrawdown: number;
+  volatility: number;
+  winRate: number;
+  profitFactor: number;
+  totalTrades: number;
+  avgTradeSize: number;
+  avgHoldingPeriod: number;
+  finalBalance: number;
+  peakBalance: number;
+  benchmark?: {
+    symbol: string;
+    return: number;
+    volatility: number;
+    correlation: number;
+  };
+}
+
+export interface PlaygroundTrade {
+  id: string;
+  executionId: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  quantity: number;
+  price: number;
+  timestamp: string;
+  pnl?: number;
+  commission: number;
+  reason: string; // strategy signal that triggered the trade
+  confidence?: number; // if using ML models
+}
+
+export interface PlaygroundLog {
+  id: string;
+  timestamp: string;
+  level: 'debug' | 'info' | 'warning' | 'error';
+  category: 'strategy' | 'risk' | 'execution' | 'data' | 'system';
+  message: string;
+  data?: Record<string, any>;
+}
+
+export interface PlaygroundState {
+  configurations: PlaygroundConfiguration[];
+  activeConfiguration: PlaygroundConfiguration | null;
+  executions: PlaygroundExecution[];
+  activeExecution: PlaygroundExecution | null;
+  comparisonExecutions: PlaygroundExecution[];
+  isLoading: boolean;
+  error: string | null;
+  filters: {
+    status?: PlaygroundExecution['status'][];
+    mode?: PlaygroundExecution['mode'][];
+    dateRange?: DateRange;
+  };
+}
+
+export interface PlaygroundPreset {
+  id: string;
+  name: string;
+  description: string;
+  category: 'conservative' | 'moderate' | 'aggressive' | 'experimental';
+  configuration: PlaygroundConfiguration;
+  author: string;
+  rating?: number;
+  downloads: number;
+  createdAt: string;
+}
+
+// Advanced playground features
+export interface PlaygroundBatch {
+  id: string;
+  name: string;
+  description?: string;
+  configurations: PlaygroundConfiguration[];
+  status: 'pending' | 'running' | 'completed' | 'error';
+  startTime?: string;
+  endTime?: string;
+  results?: {
+    bestConfiguration: PlaygroundConfiguration;
+    results: Array<{
+      configurationId: string;
+      metrics: PlaygroundMetrics;
+      rank: number;
+    }>;
+  };
+  settings: {
+    crossValidationFolds: number;
+    optimizationMetric: 'sharpe_ratio' | 'return' | 'calmar_ratio' | 'sortino_ratio';
+    overfittingProtection: {
+      enabled: boolean;
+      walkForwardWindows: number;
+      outOfSamplePercentage: number;
+    };
+  };
+}
+
+export interface ParameterOptimization {
+  parameter: string;
+  type: 'range' | 'discrete' | 'categorical';
+  min?: number;
+  max?: number;
+  step?: number;
+  values?: any[];
+  current?: any;
+  optimal?: any;
+  sensitivity?: number;
+}
+
+export interface ABTest {
+  id: string;
+  name: string;
+  configurations: {
+    control: PlaygroundConfiguration;
+    treatment: PlaygroundConfiguration;
+  };
+  executions: {
+    control: PlaygroundExecution;
+    treatment: PlaygroundExecution;
+  };
+  results?: {
+    significanceLevel: number;
+    pValue: number;
+    confidenceInterval: [number, number];
+    winner: 'control' | 'treatment' | 'inconclusive';
+    effect: {
+      magnitude: number;
+      direction: 'positive' | 'negative';
+      metric: string;
+    };
+  };
+  status: 'setup' | 'running' | 'completed' | 'failed';
+  createdAt: string;
+}
+
 // Export commonly used utility types
 export type LoadingState = 'idle' | 'loading' | 'succeeded' | 'failed';
 export type SortDirection = 'asc' | 'desc';

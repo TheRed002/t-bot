@@ -425,6 +425,7 @@ class CircuitBreakerType(Enum):
     VOLATILITY_SPIKE = "volatility_spike"
     MODEL_CONFIDENCE = "model_confidence"
     SYSTEM_ERROR_RATE = "system_error_rate"
+    CORRELATION_SPIKE = "correlation_spike"
     MANUAL_TRIGGER = "manual_trigger"
 
 

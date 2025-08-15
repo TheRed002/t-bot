@@ -474,6 +474,12 @@ class OptimizationConstraintError(OptimizationError):
     pass
 
 
+class AnalysisError(TradingBotError):
+    """Analysis and results processing errors."""
+
+    pass
+
+
 # Circuit breaker and retry exceptions
 class CircuitBreakerOpen(TradingBotError):
     """Circuit breaker is open due to too many failures."""

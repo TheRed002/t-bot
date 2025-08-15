@@ -19,6 +19,10 @@ from binance.exceptions import BinanceAPIException, BinanceOrderException
 from src.core.config import Config
 from src.core.exceptions import ExchangeError, ExecutionError, OrderRejectionError, ValidationError
 from src.core.logging import get_logger
+from src.utils.decimal_utils import (
+    to_decimal, format_decimal, round_quantity, round_price,
+    ZERO, ONE
+)
 
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
@@ -446,7 +450,7 @@ class BinanceOrderManager:
 
             # Calculate fee based on order value using helper functions
             # Keep everything as Decimal for precision
-            normalized_price = Decimal(str(normalize_price(float(fill_price), order.symbol)))
+            normalized_price = to_decimal(normalize_price(fill_price, order.symbol))
             precision = PRECISION_LEVELS.get("binance", {}).get("fee", 8)
             normalized_quantity = round_to_precision_decimal(order.quantity, precision)
 
@@ -468,7 +472,7 @@ class BinanceOrderManager:
         if order.order_type != OrderType.MARKET:
             raise ValidationError("Order type must be MARKET for market orders")
 
-        if not validate_quantity(float(order.quantity), order.symbol):
+        if not validate_quantity(order.quantity, order.symbol):
             raise ValidationError("Market order must have valid quantity")
 
         if order.price:
@@ -479,7 +483,7 @@ class BinanceOrderManager:
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("Order type must be LIMIT for limit orders")
 
-        if not validate_quantity(float(order.quantity), order.symbol):
+        if not validate_quantity(order.quantity, order.symbol):
             raise ValidationError("Limit order must have valid quantity")
 
         if not validate_price(order.price):
@@ -490,7 +494,7 @@ class BinanceOrderManager:
         if order.order_type != OrderType.STOP_LOSS:
             raise ValidationError("Order type must be STOP_LOSS for stop-loss orders")
 
-        if not validate_quantity(float(order.quantity), order.symbol):
+        if not validate_quantity(order.quantity, order.symbol):
             raise ValidationError("Stop-loss order must have valid quantity")
 
         if not validate_price(order.stop_price):
@@ -501,7 +505,7 @@ class BinanceOrderManager:
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("OCO orders must be LIMIT type")
 
-        if not validate_quantity(float(order.quantity), order.symbol):
+        if not validate_quantity(order.quantity, order.symbol):
             raise ValidationError("OCO order must have valid quantity")
 
         if not validate_price(order.price):
@@ -515,7 +519,7 @@ class BinanceOrderManager:
     def _convert_market_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert market order to Binance format."""
         # Use helper function for quantity precision
-        rounded_quantity = round_to_precision(float(order.quantity), 8)
+        rounded_quantity = round_to_precision_decimal(order.quantity, 8)
 
         return {
             "symbol": order.symbol,
@@ -528,8 +532,8 @@ class BinanceOrderManager:
     def _convert_limit_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert limit order to Binance format."""
         # Use helper functions for precision and normalization
-        normalized_price = normalize_price(float(order.price), order.symbol)
-        rounded_quantity = round_to_precision(float(order.quantity), 8)
+        normalized_price = normalize_price(order.price, order.symbol)
+        rounded_quantity = round_to_precision_decimal(order.quantity, 8)
 
         return {
             "symbol": order.symbol,
@@ -544,8 +548,8 @@ class BinanceOrderManager:
     def _convert_stop_loss_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert stop-loss order to Binance format."""
         # Use helper functions for precision and normalization
-        normalized_stop_price = normalize_price(float(order.stop_price), order.symbol)
-        rounded_quantity = round_to_precision(float(order.quantity), 8)
+        normalized_stop_price = normalize_price(order.stop_price, order.symbol)
+        rounded_quantity = round_to_precision_decimal(order.quantity, 8)
 
         return {
             "symbol": order.symbol,
@@ -559,9 +563,9 @@ class BinanceOrderManager:
     def _convert_oco_order_to_binance(self, order: OrderRequest) -> dict[str, Any]:
         """Convert OCO order to Binance format."""
         # Use helper functions for precision and normalization
-        normalized_price = normalize_price(float(order.price), order.symbol)
-        normalized_stop_price = normalize_price(float(order.stop_price), order.symbol)
-        rounded_quantity = round_to_precision(float(order.quantity), 8)
+        normalized_price = normalize_price(order.price, order.symbol)
+        normalized_stop_price = normalize_price(order.stop_price, order.symbol)
+        rounded_quantity = round_to_precision_decimal(order.quantity, 8)
 
         return {
             "symbol": order.symbol,

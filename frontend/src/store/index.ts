@@ -15,6 +15,7 @@ import riskReducer from './slices/riskSlice';
 import marketReducer from './slices/marketSlice';
 import uiReducer from './slices/uiSlice';
 import websocketReducer from './slices/websocketSlice';
+import playgroundReducer from './slices/playgroundSlice';
 
 // Import middleware
 import { authMiddleware } from './middleware/authMiddleware';
@@ -32,6 +33,7 @@ export const store = configureStore({
     market: marketReducer,
     ui: uiReducer,
     websocket: websocketReducer,
+    playground: playgroundReducer,
   },
   
   middleware: (getDefaultMiddleware) =>
@@ -80,6 +82,7 @@ export * from './slices/riskSlice';
 export * from './slices/marketSlice';
 export * from './slices/uiSlice';
 export * from './slices/websocketSlice';
+export * from './slices/playgroundSlice';
 
 // Export store instance
 export default store;

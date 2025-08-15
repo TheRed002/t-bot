@@ -21,6 +21,10 @@ from uuid import uuid4
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
 from src.core.logging import get_logger
+from src.utils.decimal_utils import (
+    to_decimal, format_decimal, safe_divide,
+    ZERO, ONE, round_quantity, round_price
+)
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -32,6 +36,9 @@ from src.core.types import (
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
+
+# Import idempotency manager
+from src.execution.idempotency_manager import OrderIdempotencyManager
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import log_calls, time_execution
@@ -216,16 +223,20 @@ class OrderManager:
     - Risk-aware order management workflows
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, redis_client=None):
         """
         Initialize order manager.
 
         Args:
             config: Application configuration
+            redis_client: Optional Redis client for idempotency management
         """
         self.config = config
         self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
         self.error_handler = ErrorHandler(config.error_handling)
+
+        # Initialize idempotency manager
+        self.idempotency_manager = OrderIdempotencyManager(config, redis_client)
 
         # Order tracking with thread safety
         self._order_lock = RLock()
@@ -282,6 +293,9 @@ class OrderManager:
     async def start(self) -> None:
         """Start the order manager and its background tasks."""
         if not self._cleanup_started:
+            # Start idempotency manager
+            await self.idempotency_manager.start()
+
             self._start_cleanup_task()
 
             # Start WebSocket connections for real-time updates
@@ -289,7 +303,7 @@ class OrderManager:
                 await self._initialize_websocket_connections()
 
             self._cleanup_started = True
-            self.logger.info("Order manager started with enhanced P-020 features")
+            self.logger.info("Order manager started with enhanced P-020 features and idempotency")
 
     def _start_cleanup_task(self) -> None:
         """Start the periodic cleanup task."""
@@ -343,6 +357,35 @@ class OrderManager:
             if len(self.managed_orders) >= self.max_concurrent_orders:
                 raise ExecutionError("Maximum concurrent orders reached")
 
+            # Get or create idempotency key
+            client_order_id, is_duplicate = await self.idempotency_manager.get_or_create_idempotency_key(
+                order_request,
+                metadata={
+                    "execution_id": execution_id,
+                    "exchange": exchange.exchange_name,
+                    "created_by": "order_manager"
+                }
+            )
+
+            # Set client_order_id on the order request
+            order_request.client_order_id = client_order_id
+
+            # If this is a duplicate, check if we should allow retry
+            if is_duplicate:
+                can_retry, retry_count = await self.idempotency_manager.can_retry_order(client_order_id)
+
+                if not can_retry:
+                    raise ExecutionError(
+                        f"Duplicate order detected and max retries exceeded: {client_order_id} "
+                        f"(retry count: {retry_count})"
+                    )
+
+                self.logger.warning(
+                    f"Retrying duplicate order: {client_order_id} (attempt {retry_count + 1})",
+                    execution_id=execution_id,
+                    retry_count=retry_count
+                )
+
             # Create managed order
             managed_order = ManagedOrder(order_request, execution_id)
             managed_order.timeout_minutes = timeout_minutes or self.default_order_timeout_minutes
@@ -358,7 +401,7 @@ class OrderManager:
                 "Submitting order",
                 execution_id=execution_id,
                 symbol=order_request.symbol,
-                quantity=float(order_request.quantity),
+                quantity=format_decimal(order_request.quantity),
                 side=order_request.side.value,
                 order_type=order_request.order_type.value
             )
@@ -400,13 +443,18 @@ class OrderManager:
             self.logger.info(
                 "Order submitted successfully",
                 order_id=order_response.id,
-                execution_id=execution_id
+                execution_id=execution_id,
+                client_order_id=client_order_id
             )
 
             return managed_order
 
         except Exception as e:
             self.logger.error(f"Order submission failed: {e}")
+
+            # Mark idempotency key as failed if we have a client_order_id
+            if "client_order_id" in locals() and client_order_id:
+                await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
 
             # Update statistics
             self.order_statistics["rejected_orders"] += 1
@@ -469,7 +517,7 @@ class OrderManager:
             managed_order.add_audit_entry("order_routed", {
                 "selected_exchange": route_info.selected_exchange,
                 "routing_reason": route_info.routing_reason,
-                "expected_cost_bps": float(route_info.expected_cost_bps)
+                "expected_cost_bps": format_decimal(route_info.expected_cost_bps)
             })
 
             # Track routing decision
@@ -909,6 +957,27 @@ class OrderManager:
                     "filled_quantity": float(managed_order.filled_quantity)
                 })
 
+                # Mark idempotency key as completed
+                if managed_order.order_request.client_order_id and managed_order.order_id:
+                    # Create a minimal order response for idempotency tracking
+                    from src.core.types import OrderResponse
+                    order_response = OrderResponse(
+                        id=managed_order.order_id,
+                        client_order_id=managed_order.order_request.client_order_id,
+                        symbol=managed_order.order_request.symbol,
+                        side=managed_order.order_request.side,
+                        order_type=managed_order.order_request.order_type,
+                        quantity=managed_order.order_request.quantity,
+                        price=managed_order.order_request.price,
+                        filled_quantity=managed_order.filled_quantity,
+                        status=new_status.value,
+                        timestamp=datetime.now(timezone.utc)
+                    )
+                    await self.idempotency_manager.mark_order_completed(
+                        managed_order.order_request.client_order_id,
+                        order_response
+                    )
+
                 # Update statistics
                 self.order_statistics["completed_orders"] += 1
                 self.order_statistics["total_volume"] += managed_order.filled_quantity
@@ -929,6 +998,14 @@ class OrderManager:
 
             elif new_status == OrderStatus.CANCELLED:
                 await self._add_order_event(managed_order, "order_cancelled", {})
+
+                # Mark idempotency key as failed for cancelled orders
+                if managed_order.order_request.client_order_id:
+                    await self.idempotency_manager.mark_order_failed(
+                        managed_order.order_request.client_order_id,
+                        "Order cancelled"
+                    )
+
                 self.order_statistics["cancelled_orders"] += 1
 
                 if managed_order.on_cancel_callback:
@@ -936,6 +1013,14 @@ class OrderManager:
 
             elif new_status == OrderStatus.REJECTED:
                 await self._add_order_event(managed_order, "order_rejected", {})
+
+                # Mark idempotency key as failed for rejected orders
+                if managed_order.order_request.client_order_id:
+                    await self.idempotency_manager.mark_order_failed(
+                        managed_order.order_request.client_order_id,
+                        "Order rejected by exchange"
+                    )
+
                 self.order_statistics["rejected_orders"] += 1
 
                 if managed_order.on_error_callback:
@@ -1439,6 +1524,7 @@ class OrderManager:
             # P-020 Enhanced metrics
             routing_stats = await self.get_routing_statistics()
             aggregation_opportunities = await self.get_aggregation_opportunities()
+            idempotency_stats = self.idempotency_manager.get_statistics()
 
             return {
                 "active_orders": len(active_orders),
@@ -1459,6 +1545,7 @@ class OrderManager:
                 # P-020 Enhanced sections
                 "routing_statistics": routing_stats,
                 "aggregation_opportunities": aggregation_opportunities,
+                "idempotency_statistics": idempotency_stats,
                 "websocket_status": {
                     "enabled": self.websocket_enabled,
                     "active_connections": len(self.websocket_connections),
@@ -1555,6 +1642,9 @@ class OrderManager:
             if self.monitoring_tasks:
                 await asyncio.gather(*self.monitoring_tasks.values(), return_exceptions=True)
 
+            # Shutdown idempotency manager
+            await self.idempotency_manager.shutdown()
+
             # Export final order history for compliance
             try:
                 final_history = await self.export_order_history()
@@ -1562,7 +1652,7 @@ class OrderManager:
             except Exception as e:
                 self.logger.warning(f"Final history export failed: {e}")
 
-            self.logger.info("Order manager shutdown completed with P-020 features")
+            self.logger.info("Order manager shutdown completed with P-020 features and idempotency")
 
         except Exception as e:
             self.logger.error(f"Order manager shutdown failed: {e}")

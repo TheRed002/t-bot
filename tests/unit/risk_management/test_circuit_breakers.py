@@ -27,6 +27,7 @@ from src.risk_management.base import BaseRiskManager
 from src.risk_management.circuit_breakers import (
     CircuitBreakerManager,
     CircuitBreakerState,
+    CorrelationSpikeBreaker,
     DailyLossLimitBreaker,
     DrawdownLimitBreaker,
     ModelConfidenceBreaker,

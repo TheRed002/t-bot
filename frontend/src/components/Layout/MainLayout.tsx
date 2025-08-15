@@ -9,6 +9,7 @@ import { Menu as MenuIcon, Notifications as NotificationsIcon } from '@mui/icons
 import { useAppDispatch, useAppSelector } from '@/store';
 import { toggleSidebar } from '@/store/slices/uiSlice';
 import { colors } from '@/theme/colors';
+import Navigation from './Navigation';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -54,7 +55,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         </Toolbar>
       </AppBar>
 
-      {/* Sidebar placeholder */}
+      {/* Sidebar Navigation */}
       {sidebar.isOpen && (
         <Box
           sx={{
@@ -66,12 +67,10 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             height: '100vh',
             zIndex: (theme) => theme.zIndex.drawer,
             mt: 8, // Account for AppBar height
+            overflow: 'hidden',
           }}
         >
-          {/* Sidebar content will go here */}
-          <Typography sx={{ p: 2, color: colors.text.secondary }}>
-            Navigation placeholder
-          </Typography>
+          <Navigation />
         </Box>
       )}
 

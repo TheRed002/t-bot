@@ -15,10 +15,13 @@ import { websocketService } from '@/services/websocket';
 // Lazy load pages for better performance
 const LoginPage = lazy(() => import('@/pages/LoginPage'));
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'));
+const TradingPage = lazy(() => import('@/pages/TradingPage'));
 const BotManagementPage = lazy(() => import('@/pages/BotManagementPage'));
 const PortfolioPage = lazy(() => import('@/pages/PortfolioPage'));
 const StrategyCenterPage = lazy(() => import('@/pages/StrategyCenterPage'));
 const RiskDashboardPage = lazy(() => import('@/pages/RiskDashboardPage'));
+const PlaygroundPage = lazy(() => import('@/pages/Playground/PlaygroundPage'));
+const HelpPage = lazy(() => import('@/pages/HelpPage'));
 
 // Layout components
 import MainLayout from '@/components/Layout/MainLayout';
@@ -107,6 +110,9 @@ const App: React.FC = () => {
                       <Route path="/" element={<Navigate to="/dashboard" replace />} />
                       <Route path="/dashboard" element={<DashboardPage />} />
                       
+                      {/* Trading */}
+                      <Route path="/trading" element={<TradingPage />} />
+                      
                       {/* Bot Management */}
                       <Route path="/bots" element={<BotManagementPage />} />
                       <Route path="/bots/:botId" element={<BotManagementPage />} />
@@ -120,6 +126,12 @@ const App: React.FC = () => {
                       
                       {/* Risk Dashboard */}
                       <Route path="/risk" element={<RiskDashboardPage />} />
+                      
+                      {/* Playground */}
+                      <Route path="/playground" element={<PlaygroundPage />} />
+                      
+                      {/* Help & Documentation */}
+                      <Route path="/help" element={<HelpPage />} />
                       
                       {/* Catch-all route */}
                       <Route path="*" element={<Navigate to="/dashboard" replace />} />
