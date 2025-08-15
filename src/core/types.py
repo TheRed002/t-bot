@@ -1019,3 +1019,223 @@ class ExecutionInstruction(BaseModel):
         if v is not None and not 0.0 <= v <= 1.0:
             raise ValueError("Price tolerance must be between 0 and 1")
         return v
+
+
+# === Bot Management Types (P-017) ===
+
+class BotStatus(Enum):
+    """Bot status enumeration for lifecycle management."""
+    
+    CREATED = "created"
+    STARTING = "starting"
+    RUNNING = "running"
+    PAUSED = "paused"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    ERROR = "error"
+    TERMINATED = "terminated"
+
+
+class BotType(Enum):
+    """Bot type enumeration for different bot categories."""
+    
+    STRATEGY = "strategy"       # Single strategy bot
+    ARBITRAGE = "arbitrage"     # Cross-exchange arbitrage bot
+    MARKET_MAKER = "market_maker"  # Market making bot
+    HYBRID = "hybrid"           # Multi-strategy hybrid bot
+    SCANNER = "scanner"         # Opportunity scanner bot
+
+
+class ResourceType(Enum):
+    """Resource type enumeration for resource management."""
+    
+    CAPITAL = "capital"
+    API_RATE_LIMIT = "api_rate_limit"
+    WEBSOCKET_CONNECTIONS = "websocket_connections"
+    DATABASE_CONNECTIONS = "database_connections"
+    CPU = "cpu"
+    MEMORY = "memory"
+
+
+class BotPriority(Enum):
+    """Bot priority levels for resource allocation."""
+    
+    CRITICAL = "critical"   # Emergency or high-value bots
+    HIGH = "high"          # Important production bots
+    NORMAL = "normal"      # Standard trading bots
+    LOW = "low"           # Experimental or backup bots
+
+
+class BotConfiguration(BaseModel):
+    """Bot configuration model with all parameters."""
+    
+    # Basic identification
+    bot_id: str = Field(..., description="Unique bot identifier")
+    bot_name: str = Field(..., description="Human-readable bot name")
+    bot_type: BotType = Field(..., description="Bot type category")
+    
+    # Strategy configuration
+    strategy_name: str = Field(..., description="Strategy to run")
+    strategy_config: dict[str, Any] = Field(
+        default_factory=dict, description="Strategy-specific configuration"
+    )
+    
+    # Exchange and symbol configuration
+    exchanges: list[str] = Field(..., description="Exchanges to use")
+    symbols: list[str] = Field(..., description="Trading symbols")
+    
+    # Resource allocation
+    allocated_capital: Decimal = Field(..., gt=0, description="Allocated capital amount")
+    max_position_size: Decimal = Field(..., gt=0, description="Maximum position size")
+    risk_percentage: float = Field(..., gt=0, le=1, description="Risk percentage per trade")
+    
+    # Operational parameters
+    priority: BotPriority = Field(default=BotPriority.NORMAL, description="Bot priority")
+    auto_start: bool = Field(default=False, description="Auto-start on creation")
+    heartbeat_interval: int = Field(default=30, ge=5, description="Heartbeat interval in seconds")
+    
+    # Trading parameters
+    trading_mode: TradingMode = Field(default=TradingMode.PAPER, description="Trading mode")
+    max_daily_trades: int | None = Field(default=None, ge=1, description="Maximum daily trades")
+    max_concurrent_positions: int = Field(default=5, ge=1, description="Maximum concurrent positions")
+    
+    # Metadata
+    tags: list[str] = Field(default_factory=list, description="Bot tags for categorization")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class BotMetrics(BaseModel):
+    """Bot performance and operational metrics."""
+    
+    bot_id: str = Field(..., description="Bot identifier")
+    
+    # Performance metrics
+    total_trades: int = Field(default=0, description="Total number of trades")
+    profitable_trades: int = Field(default=0, description="Number of profitable trades")
+    losing_trades: int = Field(default=0, description="Number of losing trades")
+    total_pnl: Decimal = Field(default=Decimal("0"), description="Total profit/loss")
+    unrealized_pnl: Decimal = Field(default=Decimal("0"), description="Unrealized PnL")
+    
+    # Trading statistics
+    win_rate: float = Field(default=0.0, ge=0, le=1, description="Win rate percentage")
+    average_trade_pnl: Decimal = Field(default=Decimal("0"), description="Average trade PnL")
+    max_drawdown: Decimal = Field(default=Decimal("0"), description="Maximum drawdown")
+    sharpe_ratio: float | None = Field(default=None, description="Sharpe ratio")
+    
+    # Operational metrics
+    uptime_percentage: float = Field(default=0.0, ge=0, le=1, description="Uptime percentage")
+    error_count: int = Field(default=0, description="Number of errors encountered")
+    last_heartbeat: datetime | None = Field(default=None, description="Last heartbeat timestamp")
+    
+    # Resource usage
+    cpu_usage: float = Field(default=0.0, ge=0, description="CPU usage percentage")
+    memory_usage: float = Field(default=0.0, ge=0, description="Memory usage in MB")
+    api_calls_count: int = Field(default=0, description="API calls made")
+    
+    # Timestamps
+    start_time: datetime | None = Field(default=None, description="Bot start time")
+    last_trade_time: datetime | None = Field(default=None, description="Last trade timestamp")
+    metrics_updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Metrics last update time"
+    )
+
+
+class BotState(BaseModel):
+    """Bot state information for persistence and recovery."""
+    
+    bot_id: str = Field(..., description="Bot identifier")
+    status: BotStatus = Field(..., description="Current bot status")
+    
+    # Current positions and orders
+    open_positions: list[dict[str, Any]] = Field(
+        default_factory=list, description="Current open positions"
+    )
+    pending_orders: list[dict[str, Any]] = Field(
+        default_factory=list, description="Pending orders"
+    )
+    
+    # Strategy state
+    strategy_state: dict[str, Any] = Field(
+        default_factory=dict, description="Strategy-specific state data"
+    )
+    
+    # Execution state
+    last_execution_id: str | None = Field(default=None, description="Last execution ID")
+    execution_queue: list[dict[str, Any]] = Field(
+        default_factory=list, description="Queued executions"
+    )
+    
+    # Resource usage
+    allocated_capital: Decimal = Field(..., description="Currently allocated capital")
+    used_capital: Decimal = Field(default=Decimal("0"), description="Capital in use")
+    reserved_capital: Decimal = Field(default=Decimal("0"), description="Reserved capital")
+    
+    # Timestamps and versioning
+    state_version: int = Field(default=1, description="State version for conflict resolution")
+    last_updated: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Last state update time"
+    )
+    checkpoint_created: datetime | None = Field(
+        default=None, description="Last checkpoint creation time"
+    )
+
+
+class ResourceAllocation(BaseModel):
+    """Resource allocation model for bot resource management."""
+    
+    bot_id: str = Field(..., description="Bot identifier")
+    resource_type: ResourceType = Field(..., description="Type of resource")
+    
+    # Allocation details
+    allocated_amount: Decimal = Field(..., ge=0, description="Allocated resource amount")
+    used_amount: Decimal = Field(default=Decimal("0"), ge=0, description="Currently used amount")
+    reserved_amount: Decimal = Field(default=Decimal("0"), ge=0, description="Reserved amount")
+    
+    # Limits and constraints
+    max_amount: Decimal | None = Field(default=None, description="Maximum allowed amount")
+    min_amount: Decimal = Field(default=Decimal("0"), description="Minimum required amount")
+    
+    # Usage tracking
+    peak_usage: Decimal = Field(default=Decimal("0"), description="Peak usage recorded")
+    average_usage: Decimal = Field(default=Decimal("0"), description="Average usage")
+    last_usage_time: datetime | None = Field(default=None, description="Last usage timestamp")
+    
+    # Metadata
+    allocation_priority: BotPriority = Field(
+        default=BotPriority.NORMAL, description="Allocation priority"
+    )
+    expires_at: datetime | None = Field(default=None, description="Allocation expiry time")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Allocation creation time"
+    )
+
+
+class BotEvent(BaseModel):
+    """Bot event model for tracking bot lifecycle and actions."""
+    
+    event_id: str = Field(..., description="Unique event identifier")
+    bot_id: str = Field(..., description="Bot identifier")
+    event_type: str = Field(..., description="Type of event")
+    
+    # Event details
+    event_data: dict[str, Any] = Field(
+        default_factory=dict, description="Event-specific data"
+    )
+    severity: ValidationLevel = Field(
+        default=ValidationLevel.MEDIUM, description="Event severity"
+    )
+    
+    # Context
+    triggered_by: str | None = Field(default=None, description="Event trigger source")
+    correlation_id: str | None = Field(default=None, description="Correlation identifier")
+    
+    # Timestamps
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Event timestamp"
+    )
+    processed_at: datetime | None = Field(default=None, description="Processing timestamp")

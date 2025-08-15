@@ -6,6 +6,7 @@
 # Pydantic for configuration and data validation
 pydantic==2.11.7
 pydantic-settings==2.10.1
+email-validator==2.2.0
 PyYAML==6.0.2
 
 # Structured logging
@@ -65,5 +66,13 @@ seaborn>=0.13.0  # Statistical data visualization
 scipy>=1.11.0  # Scientific computing
 statsmodels>=0.14.0  # Statistical analysis for features
 
-# TODO: Add more dependencies as subsequent prompts are implemented
-# - P-026: fastapi, uvicorn 
+# Web Interface Dependencies (P-026, P-027, P-028)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+slowapi>=0.1.9  # Rate limiting
+python-dateutil>=2.8.2
+
+# TODO: Add more dependencies as subsequent prompts are implemented 
