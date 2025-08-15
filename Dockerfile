@@ -1,0 +1,173 @@
+# Multi-stage Dockerfile for T-Bot Trading System Backend
+# Optimized for production with security best practices
+
+# ==============================================================================
+# Base Stage - Common dependencies
+# ==============================================================================
+FROM python:3.10.12-slim as base
+
+# Set environment variables for Python
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=100
+
+# Install system dependencies required for TA-Lib and other packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    wget \
+    gcc \
+    g++ \
+    libpq-dev \
+    libssl-dev \
+    libffi-dev \
+    libblas-dev \
+    liblapack-dev \
+    libatlas-base-dev \
+    libfreetype6-dev \
+    libpng-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install TA-Lib from source
+RUN cd /tmp && \
+    wget -q https://github.com/TA-Lib/ta-lib/releases/download/v0.6.4/ta-lib-0.6.4-src.tar.gz && \
+    tar -xzf ta-lib-0.6.4-src.tar.gz && \
+    cd ta-lib-0.6.4/ && \
+    ./configure --prefix=/usr && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/ta-lib-0.6.4*
+
+# Create non-root user
+RUN groupadd --gid 1001 tbot && \
+    useradd --uid 1001 --gid tbot --shell /bin/bash --create-home tbot
+
+# ==============================================================================
+# Builder Stage - Install Python dependencies
+# ==============================================================================
+FROM base as builder
+
+# Set work directory
+WORKDIR /app
+
+# Copy requirements file
+COPY requirements.txt .
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install -r requirements.txt
+
+# ==============================================================================
+# Development Stage - For local development
+# ==============================================================================
+FROM base as development
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+# Create necessary directories
+RUN mkdir -p \
+    logs/application \
+    logs/system \
+    logs/exchange \
+    logs/database \
+    logs/ml \
+    data/raw \
+    data/processed \
+    data/features \
+    data/cache \
+    models/trained_models \
+    models/model_registry \
+    state/sessions \
+    state/recovery \
+    state/temp \
+    backups/database \
+    backups/config \
+    reports/performance \
+    reports/strategy \
+    reports/risk
+
+# Set proper permissions
+RUN chown -R tbot:tbot /app
+
+# Switch to non-root user
+USER tbot
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Development command with auto-reload
+CMD ["uvicorn", "src.web_interface.app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# ==============================================================================
+# Production Stage - Optimized for production deployment
+# ==============================================================================
+FROM base as production
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+
+# Copy application code with proper ownership
+COPY --chown=tbot:tbot src/ ./src/
+COPY --chown=tbot:tbot config/ ./config/
+COPY --chown=tbot:tbot alembic.ini ./
+COPY --chown=tbot:tbot pyproject.toml ./
+
+# Create necessary directories
+RUN mkdir -p \
+    logs/application \
+    logs/system \
+    logs/exchange \
+    logs/database \
+    logs/ml \
+    data/raw \
+    data/processed \
+    data/features \
+    data/cache \
+    models/trained_models \
+    models/model_registry \
+    state/sessions \
+    state/recovery \
+    state/temp \
+    backups/database \
+    backups/config \
+    reports/performance \
+    reports/strategy \
+    reports/risk && \
+    chown -R tbot:tbot /app
+
+# Switch to non-root user
+USER tbot
+
+# Expose port
+EXPOSE 8000
+
+# Health check with more appropriate timeout for production
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Production command with optimizations
+CMD ["uvicorn", "src.web_interface.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker"]
+
+# ==============================================================================
+# Default target is production
+# ==============================================================================
+FROM production

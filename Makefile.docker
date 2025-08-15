@@ -1,0 +1,221 @@
+# T-Bot Trading System - Docker Management Makefile
+
+# Default target
+.DEFAULT_GOAL := help
+
+# Variables
+COMPOSE_FILE := docker-compose.yml
+COMPOSE_FILE_PROD := docker-compose.prod.yml
+PROJECT_NAME := tbot
+
+# Colors
+RED := \033[31m
+GREEN := \033[32m
+YELLOW := \033[33m
+BLUE := \033[34m
+RESET := \033[0m
+
+.PHONY: help
+help: ## Show this help message
+	@echo "$(BLUE)T-Bot Trading System - Docker Commands$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)Development Commands:$(RESET)"
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  $(GREEN)%-20s$(RESET) %s\n", $$1, $$2}' $(MAKEFILE_LIST) | grep -v "prod"
+	@echo ""
+	@echo "$(YELLOW)Production Commands:$(RESET)"
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  $(GREEN)%-20s$(RESET) %s\n", $$1, $$2}' $(MAKEFILE_LIST) | grep "prod"
+
+##@ Development Commands
+
+.PHONY: dev-build
+dev-build: ## Build development images
+	@echo "$(BLUE)Building development images...$(RESET)"
+	docker-compose -f $(COMPOSE_FILE) build
+
+.PHONY: dev-up
+dev-up: ## Start development environment
+	@echo "$(BLUE)Starting development environment...$(RESET)"
+	./scripts/docker-dev.sh
+
+.PHONY: dev-down
+dev-down: ## Stop development environment
+	@echo "$(YELLOW)Stopping development environment...$(RESET)"
+	docker-compose -f $(COMPOSE_FILE) down
+
+.PHONY: dev-restart
+dev-restart: dev-down dev-up ## Restart development environment
+
+.PHONY: dev-logs
+dev-logs: ## View development logs
+	docker-compose -f $(COMPOSE_FILE) logs -f
+
+.PHONY: dev-logs-%
+dev-logs-%: ## View logs for specific service (e.g., make dev-logs-backend)
+	docker-compose -f $(COMPOSE_FILE) logs -f $*
+
+.PHONY: dev-shell-%
+dev-shell-%: ## Open shell in service container (e.g., make dev-shell-backend)
+	docker-compose -f $(COMPOSE_FILE) exec $* sh
+
+.PHONY: dev-health
+dev-health: ## Check development environment health
+	./scripts/health-check.sh
+
+##@ Production Commands
+
+.PHONY: prod-build
+prod-build: ## Build production images
+	@echo "$(BLUE)Building production images...$(RESET)"
+	docker-compose -f $(COMPOSE_FILE_PROD) build --no-cache
+
+.PHONY: prod-up
+prod-up: ## Start production environment
+	@echo "$(BLUE)Starting production environment...$(RESET)"
+	./scripts/docker-prod.sh
+
+.PHONY: prod-down
+prod-down: ## Stop production environment
+	@echo "$(YELLOW)Stopping production environment...$(RESET)"
+	docker-compose -f $(COMPOSE_FILE_PROD) down
+
+.PHONY: prod-restart
+prod-restart: prod-down prod-up ## Restart production environment
+
+.PHONY: prod-logs
+prod-logs: ## View production logs
+	docker-compose -f $(COMPOSE_FILE_PROD) logs -f
+
+.PHONY: prod-logs-%
+prod-logs-%: ## View logs for specific production service
+	docker-compose -f $(COMPOSE_FILE_PROD) logs -f $*
+
+.PHONY: prod-shell-%
+prod-shell-%: ## Open shell in production service container
+	docker-compose -f $(COMPOSE_FILE_PROD) exec $* sh
+
+.PHONY: prod-health
+prod-health: ## Check production environment health
+	./scripts/health-check.sh --prod
+
+##@ Database Commands
+
+.PHONY: db-migrate
+db-migrate: ## Run database migrations
+	@echo "$(BLUE)Running database migrations...$(RESET)"
+	docker-compose -f $(COMPOSE_FILE) exec backend alembic upgrade head
+
+.PHONY: db-migrate-prod
+db-migrate-prod: ## Run production database migrations
+	@echo "$(BLUE)Running production database migrations...$(RESET)"
+	docker-compose -f $(COMPOSE_FILE_PROD) exec backend alembic upgrade head
+
+.PHONY: db-backup
+db-backup: ## Backup development database
+	@echo "$(BLUE)Backing up development database...$(RESET)"
+	./scripts/backup-db.sh
+
+.PHONY: db-backup-prod
+db-backup-prod: ## Backup production database
+	@echo "$(BLUE)Backing up production database...$(RESET)"
+	./scripts/backup-db.sh --prod
+
+.PHONY: db-shell
+db-shell: ## Open PostgreSQL shell (development)
+	docker-compose -f $(COMPOSE_FILE) exec postgresql psql -U tbot -d tbot_dev
+
+.PHONY: db-shell-prod
+db-shell-prod: ## Open PostgreSQL shell (production)
+	docker-compose -f $(COMPOSE_FILE_PROD) exec postgresql psql -U tbot
+
+##@ Testing Commands
+
+.PHONY: test
+test: ## Run tests in development environment
+	@echo "$(BLUE)Running tests...$(RESET)"
+	docker-compose -f $(COMPOSE_FILE) exec backend pytest tests/ -v
+
+.PHONY: test-unit
+test-unit: ## Run unit tests
+	docker-compose -f $(COMPOSE_FILE) exec backend pytest tests/unit/ -v
+
+.PHONY: test-integration
+test-integration: ## Run integration tests
+	docker-compose -f $(COMPOSE_FILE) exec backend pytest tests/integration/ -v
+
+.PHONY: test-coverage
+test-coverage: ## Run tests with coverage
+	docker-compose -f $(COMPOSE_FILE) exec backend pytest tests/ --cov=src --cov-report=html --cov-report=term
+
+##@ Maintenance Commands
+
+.PHONY: clean
+clean: ## Clean up Docker resources
+	@echo "$(YELLOW)Cleaning up Docker resources...$(RESET)"
+	docker-compose -f $(COMPOSE_FILE) down -v --remove-orphans
+	docker-compose -f $(COMPOSE_FILE_PROD) down -v --remove-orphans
+	docker system prune -f
+
+.PHONY: clean-all
+clean-all: ## Clean up all Docker resources (including images)
+	@echo "$(RED)Cleaning up ALL Docker resources...$(RESET)"
+	docker-compose -f $(COMPOSE_FILE) down -v --remove-orphans --rmi all
+	docker-compose -f $(COMPOSE_FILE_PROD) down -v --remove-orphans --rmi all
+	docker system prune -af
+
+.PHONY: reset-volumes
+reset-volumes: ## Reset all volumes (WARNING: This will delete all data!)
+	@echo "$(RED)WARNING: This will delete all data!$(RESET)"
+	@read -p "Are you sure? [y/N] " -n 1 -r; \
+	echo ""; \
+	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+		docker-compose -f $(COMPOSE_FILE) down -v; \
+		docker volume prune -f; \
+		echo "$(GREEN)Volumes reset successfully$(RESET)"; \
+	else \
+		echo "$(YELLOW)Operation cancelled$(RESET)"; \
+	fi
+
+.PHONY: status
+status: ## Show container status
+	@echo "$(BLUE)Development Environment:$(RESET)"
+	docker-compose -f $(COMPOSE_FILE) ps
+	@echo ""
+	@echo "$(BLUE)Production Environment:$(RESET)"
+	docker-compose -f $(COMPOSE_FILE_PROD) ps
+
+.PHONY: stats
+stats: ## Show container resource usage
+	docker stats --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}"
+
+##@ Tools Commands
+
+.PHONY: tools-up
+tools-up: ## Start development tools (PgAdmin, Redis Commander)
+	docker-compose -f $(COMPOSE_FILE) --profile tools up -d
+
+.PHONY: monitoring-up
+monitoring-up: ## Start monitoring stack (production)
+	docker-compose -f $(COMPOSE_FILE_PROD) --profile monitoring up -d
+
+.PHONY: format
+format: ## Format code using ruff and black
+	docker-compose -f $(COMPOSE_FILE) exec backend ruff check src/ --fix
+	docker-compose -f $(COMPOSE_FILE) exec backend ruff format src/
+	docker-compose -f $(COMPOSE_FILE) exec backend black src/ --line-length 100
+
+.PHONY: lint
+lint: ## Lint code using ruff and mypy
+	docker-compose -f $(COMPOSE_FILE) exec backend ruff check src/
+	docker-compose -f $(COMPOSE_FILE) exec backend mypy src/ --ignore-missing-imports
+
+.PHONY: setup-secrets
+setup-secrets: ## Setup production secrets (interactive)
+	@echo "$(BLUE)Setting up production secrets...$(RESET)"
+	@mkdir -p secrets
+	@echo "$(YELLOW)Please provide the following secrets:$(RESET)"
+	@read -s -p "Database password: " db_pass && echo $$db_pass > secrets/db_password.txt
+	@read -s -p "JWT secret key (32+ chars): " jwt_secret && echo $$jwt_secret > secrets/jwt_secret.txt
+	@read -p "Binance API key: " binance_key && echo $$binance_key > secrets/binance_api_key.txt
+	@read -s -p "Binance secret key: " binance_secret && echo $$binance_secret > secrets/binance_secret_key.txt
+	@chmod 600 secrets/*.txt
+	@echo "$(GREEN)Secrets configured successfully$(RESET)"
