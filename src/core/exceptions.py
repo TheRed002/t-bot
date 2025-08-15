@@ -8,7 +8,8 @@ USAGE RULE: ALL prompts must import these exceptions:
 from src.core.exceptions import (
     TradingBotError, ExchangeError, RiskManagementError,
     ValidationError, ExecutionError, ModelError, DataError,
-    StateConsistencyError, SecurityError
+    StateConsistencyError, StateError, SynchronizationError, ConflictError,
+    SecurityError
 )
 """
 
@@ -249,6 +250,12 @@ class StateConsistencyError(TradingBotError):
     pass
 
 
+class StateError(StateConsistencyError):
+    """General state management errors."""
+
+    pass
+
+
 class StateCorruptionError(StateConsistencyError):
     """State data corruption detected."""
 
@@ -263,6 +270,18 @@ class StateSyncError(StateConsistencyError):
 
 class StateLockError(StateConsistencyError):
     """State lock acquisition failures."""
+
+    pass
+
+
+class SynchronizationError(StateConsistencyError):
+    """Real-time synchronization errors."""
+
+    pass
+
+
+class ConflictError(StateConsistencyError):
+    """State conflict errors."""
 
     pass
 

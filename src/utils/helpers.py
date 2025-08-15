@@ -599,6 +599,26 @@ def safe_write_file(file_path: str, content: str, encoding: str = "utf-8") -> No
         raise ValidationError(f"Cannot write file '{file_path}': {e!s}")
 
 
+async def ensure_directory_exists(directory_path: str | Path) -> None:
+    """
+    Ensure a directory exists, creating it if necessary.
+
+    Args:
+        directory_path: Path to directory to create
+
+    Raises:
+        ValidationError: If directory cannot be created
+    """
+    try:
+        path = Path(directory_path)
+        path.mkdir(parents=True, exist_ok=True)
+        logger.debug(f"Ensured directory exists: {directory_path}")
+
+    except Exception as e:
+        logger.error(f"Failed to create directory {directory_path}: {e}")
+        raise ValidationError(f"Cannot create directory '{directory_path}': {e}")
+
+
 def load_config_file(file_path: str) -> dict[str, Any]:
     """
     Load configuration from YAML or JSON file.

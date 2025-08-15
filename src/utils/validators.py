@@ -994,6 +994,63 @@ def validate_position(position: Position) -> bool:
     return True
 
 
+def validate_state_data(state_data: dict[str, Any]) -> bool:
+    """
+    Validate state data dictionary.
+
+    Args:
+        state_data: State data to validate
+
+    Returns:
+        True if valid, False otherwise
+
+    Raises:
+        ValidationError: If state data is invalid
+    """
+    try:
+        # Basic state data validation
+        if not isinstance(state_data, dict):
+            raise ValidationError("State data must be a dictionary")
+        
+        # Check for required fields if it's bot state
+        if "bot_id" in state_data:
+            if not state_data.get("bot_id"):
+                raise ValidationError("Bot ID is required in state data")
+            
+            if "status" in state_data and not state_data.get("status"):
+                raise ValidationError("Bot status is required in state data")
+        
+        logger.debug("State data validation passed")
+        return True
+        
+    except Exception as e:
+        logger.error(f"State data validation failed: {e}")
+        raise ValidationError(f"Invalid state data: {e}")
+
+
+def validate_order_data(order_data: dict[str, Any]) -> bool:
+    """
+    Validate order data dictionary.
+
+    Args:
+        order_data: Order data to validate
+
+    Returns:
+        True if valid, False otherwise
+
+    Raises:
+        ValidationError: If order data is invalid
+    """
+    try:
+        # Convert to OrderRequest for validation
+        order_request = OrderRequest(**order_data)
+        return validate_order_request(order_request)
+        
+    except Exception as e:
+        logger.error(f"Order data validation failed: {e}")
+        raise ValidationError(f"Invalid order data: {e}")
+
+
 def validate_order(order: OrderRequest) -> bool:
     """
     Validate order request.

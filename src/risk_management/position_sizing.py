@@ -204,13 +204,22 @@ class PositionSizer:
             mean_return = np.mean(returns_array)
             variance = np.var(returns_array)
 
-            if variance == 0:
-                self.logger.warning("Zero variance in returns, using fixed percentage")
+            if variance <= 1e-10:  # Near-zero variance (practically zero)
+                self.logger.warning("Zero or near-zero variance in returns, using fixed percentage")
                 return await self._fixed_percentage_sizing(signal, portfolio_value)
 
             # Kelly fraction = (mean_return) / variance
             # But we need to ensure it's a reasonable percentage of portfolio
             kelly_fraction = mean_return / variance
+
+            # Handle negative expected returns - fallback to fixed percentage
+            if mean_return <= 0 or kelly_fraction <= 0:
+                self.logger.warning(
+                    "Negative expected returns detected, using fixed percentage",
+                    mean_return=float(mean_return),
+                    kelly_fraction=float(kelly_fraction),
+                )
+                return await self._fixed_percentage_sizing(signal, portfolio_value)
 
             # Apply maximum Kelly fraction limit (25% by default)
             max_kelly = self.risk_config.kelly_max_fraction
@@ -389,9 +398,9 @@ class PositionSizer:
                 size = await self.calculate_position_size(signal, portfolio_value, method)
                 summary[method.value] = {
                     "position_size": float(size),
-                    "portfolio_percentage": float(size / portfolio_value)
-                    if portfolio_value > 0
-                    else 0,
+                    "portfolio_percentage": (
+                        float(size / portfolio_value) if portfolio_value > 0 else 0
+                    ),
                 }
             except Exception as e:
                 summary[method.value] = {

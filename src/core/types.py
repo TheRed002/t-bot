@@ -326,6 +326,21 @@ class OrderStatus(Enum):
     UNKNOWN = "unknown"
 
 
+class TradeState(Enum):
+    """Trade lifecycle state enumeration."""
+    
+    SIGNAL_GENERATED = "signal_generated"
+    PRE_TRADE_VALIDATION = "pre_trade_validation"
+    ORDER_CREATED = "order_created"
+    ORDER_SUBMITTED = "order_submitted"
+    PARTIALLY_FILLED = "partially_filled"
+    FULLY_FILLED = "fully_filled"
+    CANCELLED = "cancelled"
+    REJECTED = "rejected"
+    SETTLED = "settled"
+    ATTRIBUTED = "attributed"
+
+
 class Trade(BaseModel):
     """Trade execution record."""
 
