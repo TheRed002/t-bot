@@ -45,17 +45,26 @@ class TestAdvancedRateLimiter:
         assert hasattr(rate_limiter, "global_limits")
         assert hasattr(rate_limiter, "request_history")
 
-        # Check that all exchange limiters are initialized
+        # Exchange limiters use lazy initialization, so they should be empty initially
+        assert len(rate_limiter.exchange_limiters) == 0
+        
+        # Test that limiters can be created on demand
         expected_exchanges = ["binance", "okx", "coinbase"]
         for exchange in expected_exchanges:
+            limiter = rate_limiter._get_or_create_limiter(exchange)
+            assert limiter is not None
             assert exchange in rate_limiter.exchange_limiters
 
     @pytest.mark.asyncio
     async def test_check_rate_limit_valid_request(self, rate_limiter):
         """Test rate limit check with valid request."""
-        # Mock the exchange limiter to return True
-        with patch.object(
-            rate_limiter.exchange_limiters["binance"], "check_limit", return_value=True
+        # Create a mock limiter and mock the _get_or_create_limiter method
+        mock_limiter = AsyncMock()
+        mock_limiter.check_limit.return_value = True
+        
+        with (
+            patch.object(rate_limiter, "_get_or_create_limiter", return_value=mock_limiter),
+            patch.object(rate_limiter, "_check_global_limits", return_value=True)
         ):
             result = await rate_limiter.check_rate_limit("binance", "/api/v3/ticker/price", 1)
             assert result is True
@@ -81,10 +90,11 @@ class TestAdvancedRateLimiter:
     @pytest.mark.asyncio
     async def test_wait_if_needed_valid_request(self, rate_limiter):
         """Test wait if needed with valid request."""
-        # Mock the exchange limiter to return 0 wait time
-        with patch.object(
-            rate_limiter.exchange_limiters["binance"], "wait_for_reset", return_value=0.0
-        ):
+        # Create a mock limiter and mock the _get_or_create_limiter method
+        mock_limiter = AsyncMock()
+        mock_limiter.wait_for_reset.return_value = 0.0
+        
+        with patch.object(rate_limiter, "_get_or_create_limiter", return_value=mock_limiter):
             result = await rate_limiter.wait_if_needed("binance", "/api/v3/ticker/price")
             assert result == 0.0
 
@@ -115,44 +125,49 @@ class TestAdvancedRateLimiter:
     @pytest.mark.asyncio
     async def test_check_rate_limit_exchange_specific_limit_exceeded(self, rate_limiter):
         """Test rate limit check when exchange-specific limit is exceeded."""
-        # Mock the exchange limiter to return False
-        rate_limiter.exchange_limiters["binance"].check_limit = AsyncMock(return_value=False)
-
-        result = await rate_limiter.check_rate_limit("binance", "/api/v3/ticker/price", 1)
-        assert result is False
+        # Create a mock limiter that returns False
+        mock_limiter = AsyncMock()
+        mock_limiter.check_limit.return_value = False
+        
+        with patch.object(rate_limiter, "_get_or_create_limiter", return_value=mock_limiter):
+            result = await rate_limiter.check_rate_limit("binance", "/api/v3/ticker/price", 1)
+            assert result is False
 
     @pytest.mark.asyncio
     async def test_check_rate_limit_global_limit_exceeded(self, rate_limiter):
         """Test rate limit check when global limit is exceeded."""
-        # Mock the exchange limiter to return True but global check to return
-        # False
-        rate_limiter.exchange_limiters["binance"].check_limit = AsyncMock(return_value=True)
-        rate_limiter._check_global_limits = AsyncMock(return_value=False)
-
-        result = await rate_limiter.check_rate_limit("binance", "/api/v3/ticker/price", 1)
-        assert result is False
+        # Create a mock limiter that returns True
+        mock_limiter = AsyncMock()
+        mock_limiter.check_limit.return_value = True
+        
+        with (
+            patch.object(rate_limiter, "_get_or_create_limiter", return_value=mock_limiter),
+            patch.object(rate_limiter, "_check_global_limits", return_value=False)
+        ):
+            result = await rate_limiter.check_rate_limit("binance", "/api/v3/ticker/price", 1)
+            assert result is False
 
     @pytest.mark.asyncio
     async def test_check_rate_limit_exception_handling(self, rate_limiter):
         """Test rate limit check with exception handling."""
-        # Mock the exchange limiter to raise an exception
-        rate_limiter.exchange_limiters["binance"].check_limit = AsyncMock(
-            side_effect=Exception("Test error")
-        )
-
-        with pytest.raises(ExchangeRateLimitError):
-            await rate_limiter.check_rate_limit("binance", "/api/v3/ticker/price", 1)
+        # Create a mock limiter that raises an exception
+        mock_limiter = AsyncMock()
+        mock_limiter.check_limit.side_effect = Exception("Test error")
+        
+        with patch.object(rate_limiter, "_get_or_create_limiter", return_value=mock_limiter):
+            with pytest.raises(ExchangeRateLimitError):
+                await rate_limiter.check_rate_limit("binance", "/api/v3/ticker/price", 1)
 
     @pytest.mark.asyncio
     async def test_wait_if_needed_exception_handling(self, rate_limiter):
         """Test wait_if_needed with exception handling."""
-        # Mock the exchange limiter to raise an exception
-        rate_limiter.exchange_limiters["binance"].wait_for_reset = AsyncMock(
-            side_effect=Exception("Test error")
-        )
-
-        with pytest.raises(ExchangeRateLimitError):
-            await rate_limiter.wait_if_needed("binance", "/api/v3/ticker/price")
+        # Create a mock limiter that raises an exception
+        mock_limiter = AsyncMock()
+        mock_limiter.wait_for_reset.side_effect = Exception("Test error")
+        
+        with patch.object(rate_limiter, "_get_or_create_limiter", return_value=mock_limiter):
+            with pytest.raises(ExchangeRateLimitError):
+                await rate_limiter.wait_if_needed("binance", "/api/v3/ticker/price")
 
     @pytest.mark.asyncio
     async def test_check_global_limits(self, rate_limiter):
@@ -572,10 +587,14 @@ class TestAdvancedRateLimiterIntegration:
         """Test coordination between different rate limiters."""
         rate_limiter = AdvancedRateLimiter(config)
 
-        # Test that each exchange has its own rate limiter
-        assert isinstance(rate_limiter.exchange_limiters["binance"], BinanceRateLimiter)
-        assert isinstance(rate_limiter.exchange_limiters["okx"], OKXRateLimiter)
-        assert isinstance(rate_limiter.exchange_limiters["coinbase"], CoinbaseRateLimiter)
+        # Test that each exchange limiter is created properly via lazy initialization
+        binance_limiter = rate_limiter._get_or_create_limiter("binance")
+        okx_limiter = rate_limiter._get_or_create_limiter("okx")
+        coinbase_limiter = rate_limiter._get_or_create_limiter("coinbase")
+        
+        assert isinstance(binance_limiter, BinanceRateLimiter)
+        assert isinstance(okx_limiter, OKXRateLimiter)
+        assert isinstance(coinbase_limiter, CoinbaseRateLimiter)
 
     @pytest.mark.asyncio
     async def test_error_handling(self, config):

@@ -9,6 +9,7 @@ layer and will be used by all subsequent prompts for robust error handling.
 """
 
 from .connection_manager import ConnectionManager, ConnectionState
+from .decorators import with_circuit_breaker, with_retry, with_fallback
 from .error_handler import ErrorContext, ErrorHandler, ErrorSeverity
 from .pattern_analytics import ErrorPattern, ErrorPatternAnalytics
 from .recovery_scenarios import (
@@ -41,4 +42,8 @@ __all__ = [
     "PartialFillRecovery",
     # State monitoring
     "StateMonitor",
+    # Decorators
+    "with_circuit_breaker",
+    "with_retry",
+    "with_fallback",
 ]

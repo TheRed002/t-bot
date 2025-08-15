@@ -294,7 +294,10 @@ class TestNetworkDisconnectionRecovery:
         with patch("src.error_handling.recovery_scenarios.logger") as mock_logger:
             await network_recovery._reconcile_positions("exchange")
 
-            mock_logger.info.assert_called_once_with("Reconciling positions", component="exchange")
+            # Verify the first call is to start reconciliation
+            mock_logger.info.assert_any_call("Reconciling positions", component="exchange")
+            # Verify successful completion is logged
+            mock_logger.info.assert_any_call("Positions reconciled successfully", component="exchange")
 
     @pytest.mark.asyncio
     async def test_network_recovery_reconcile_orders(self, network_recovery):
@@ -302,7 +305,10 @@ class TestNetworkDisconnectionRecovery:
         with patch("src.error_handling.recovery_scenarios.logger") as mock_logger:
             await network_recovery._reconcile_orders("exchange")
 
-            mock_logger.info.assert_called_once_with("Reconciling orders", component="exchange")
+            # Verify the first call is to start reconciliation
+            mock_logger.info.assert_any_call("Reconciling orders", component="exchange")
+            # Verify successful completion is logged
+            mock_logger.info.assert_any_call("Orders reconciled", component="exchange")
 
     @pytest.mark.asyncio
     async def test_network_recovery_verify_balances(self, network_recovery):
@@ -310,7 +316,10 @@ class TestNetworkDisconnectionRecovery:
         with patch("src.error_handling.recovery_scenarios.logger") as mock_logger:
             await network_recovery._verify_balances("exchange")
 
-            mock_logger.info.assert_called_once_with("Verifying balances", component="exchange")
+            # Verify the first call is to start verification
+            mock_logger.info.assert_any_call("Verifying balances", component="exchange")
+            # Verify successful completion is logged
+            mock_logger.info.assert_any_call("Balances verified successfully", component="exchange")
 
     @pytest.mark.asyncio
     async def test_network_recovery_switch_to_online_mode(self, network_recovery):
@@ -328,7 +337,13 @@ class TestNetworkDisconnectionRecovery:
         with patch("src.error_handling.recovery_scenarios.logger") as mock_logger:
             await network_recovery._enter_safe_mode("exchange")
 
-            mock_logger.warning.assert_called_once_with("Entering safe mode", component="exchange")
+            # Verify the first call is to start entering safe mode
+            mock_logger.warning.assert_any_call("Entering safe mode", component="exchange")
+            # Verify safe mode activation is logged (timestamp may vary, so check without it)
+            assert any(
+                call[0][0] == "Safe mode activated" and call[1]["component"] == "exchange"
+                for call in mock_logger.warning.call_args_list
+            )
 
 
 class TestExchangeMaintenanceRecovery:

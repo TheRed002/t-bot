@@ -179,10 +179,10 @@ class AdvancedRateLimiter:
             if not exchange or not endpoint:
                 raise ValidationError("Exchange and endpoint are required")
 
-            if exchange not in self.exchange_limiters:
+            # Get exchange-specific limiter (with lazy initialization)
+            limiter = self._get_or_create_limiter(exchange)
+            if not limiter:
                 raise ExchangeRateLimitError(f"Unknown exchange: {exchange}")
-
-            limiter = self.exchange_limiters[exchange]
 
             # Wait for exchange-specific limits
             wait_time = await limiter.wait_for_reset(endpoint)

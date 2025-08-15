@@ -883,3 +883,120 @@ class DataPipelineRecord(Base):
         Index("idx_pipeline_stage", "stage"),
         Index("idx_pipeline_execution_id", "execution_id"),
     )
+
+
+# ML-specific database models for P-014
+class MLTrainingRun(Base):
+    """Database model for ML training runs."""
+
+    __tablename__ = "ml_training_runs"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+
+    # Training run identification
+    run_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    model_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("ml_models.id"), nullable=False, index=True
+    )
+    experiment_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+
+    # Training configuration
+    algorithm: Mapped[str] = mapped_column(String(50), nullable=False)
+    hyperparameters: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    feature_config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    # Training data
+    training_data_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    training_samples: Mapped[int] = mapped_column(Integer, nullable=False)
+    validation_samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    test_samples: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    feature_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Training metrics
+    training_metrics: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    validation_metrics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    test_metrics: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Training status
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Training duration
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    training_duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Artifact references
+    model_artifact_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    training_artifacts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    # Constraints
+    __table_args__ = (
+        Index("idx_training_runs_model_id", "model_id"),
+        Index("idx_training_runs_experiment", "experiment_name"),
+        Index("idx_training_runs_status", "status"),
+        Index("idx_training_runs_started", "started_at"),
+        CheckConstraint("status IN ('running', 'completed', 'failed', 'cancelled')", name="valid_training_status"),
+    )
+
+
+class MLPrediction(Base):
+    """Database model for ML predictions."""
+
+    __tablename__ = "ml_predictions"
+
+    id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+
+    # Prediction identification
+    request_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    model_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("ml_models.id"), nullable=False, index=True
+    )
+    symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+
+    # Prediction data
+    features: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    predictions: Mapped[list] = mapped_column(JSONB, nullable=False)
+    probabilities: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    confidence_scores: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
+    # Prediction metadata
+    prediction_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    prediction_horizon: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    feature_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Performance tracking
+    processing_time_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    cache_hit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Actual outcomes (for validation)
+    actual_values: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    prediction_error: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Timestamps
+    prediction_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    outcome_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Constraints
+    __table_args__ = (
+        Index("idx_predictions_model_symbol", "model_id", "symbol"),
+        Index("idx_predictions_timestamp", "prediction_timestamp"),
+        Index("idx_predictions_request", "request_id"),
+        Index("idx_predictions_type", "prediction_type"),
+    )

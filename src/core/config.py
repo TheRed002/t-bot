@@ -567,6 +567,150 @@ class StrategyManagementConfig(BaseConfig):
         return v
 
 
+class MLConfig(BaseConfig):
+    """Machine Learning configuration for P-014 framework."""
+
+    # Model registry settings
+    model_registry_path: str = Field(
+        default="models/registry", description="Path to model registry"
+    )
+    artifact_store_path: str = Field(
+        default="models/artifacts", description="Path to model artifacts"
+    )
+    model_cache_size: int = Field(default=10, description="Number of models to cache in memory")
+    
+    # Training settings
+    default_train_test_split: float = Field(
+        default=0.8, description="Default train/test split ratio"
+    )
+    default_validation_split: float = Field(
+        default=0.2, description="Default validation split ratio"
+    )
+    max_training_time_hours: int = Field(
+        default=24, description="Maximum training time in hours"
+    )
+    
+    # Feature engineering
+    feature_selection_threshold: float = Field(
+        default=0.01, description="Feature importance threshold for selection"
+    )
+    max_features: int = Field(default=1000, description="Maximum number of features")
+    feature_cache_ttl_hours: int = Field(
+        default=24, description="Feature cache TTL in hours"
+    )
+    
+    # Hyperparameter optimization
+    optuna_n_trials: int = Field(default=100, description="Number of Optuna trials")
+    optuna_timeout_hours: int = Field(default=12, description="Optuna timeout in hours")
+    optuna_pruning_enabled: bool = Field(
+        default=True, description="Enable Optuna pruning"
+    )
+    
+    # Model validation
+    cross_validation_folds: int = Field(default=5, description="Number of CV folds")
+    validation_frequency_days: int = Field(
+        default=7, description="Validation frequency in days"
+    )
+    performance_degradation_threshold: float = Field(
+        default=0.1, description="Performance degradation threshold"
+    )
+    
+    # Drift detection
+    drift_detection_enabled: bool = Field(
+        default=True, description="Enable drift detection"
+    )
+    drift_check_frequency_hours: int = Field(
+        default=6, description="Drift check frequency in hours"
+    )
+    drift_threshold: float = Field(default=0.05, description="Drift detection threshold")
+    
+    # Model serving
+    inference_batch_size: int = Field(default=1000, description="Inference batch size")
+    prediction_cache_ttl_minutes: int = Field(
+        default=5, description="Prediction cache TTL in minutes"
+    )
+    model_warmup_enabled: bool = Field(
+        default=True, description="Enable model warmup on startup"
+    )
+    
+    # Supported model types
+    supported_model_types: list[str] = Field(
+        default=[
+            "price_predictor",
+            "direction_classifier", 
+            "volatility_forecaster",
+            "regime_detector"
+        ],
+        description="Supported ML model types"
+    )
+    
+    # Model performance thresholds
+    min_accuracy_threshold: float = Field(
+        default=0.55, description="Minimum model accuracy threshold"
+    )
+    min_precision_threshold: float = Field(
+        default=0.50, description="Minimum model precision threshold"
+    )
+    min_recall_threshold: float = Field(
+        default=0.50, description="Minimum model recall threshold"
+    )
+    min_f1_threshold: float = Field(
+        default=0.50, description="Minimum model F1 score threshold"
+    )
+    
+    # Resource limits
+    max_memory_gb: float = Field(default=8.0, description="Maximum memory usage in GB")
+    max_cpu_cores: int = Field(default=4, description="Maximum CPU cores for training")
+    gpu_enabled: bool = Field(default=False, description="Enable GPU acceleration")
+    
+    @field_validator(
+        "default_train_test_split",
+        "default_validation_split", 
+        "feature_selection_threshold",
+        "performance_degradation_threshold",
+        "drift_threshold",
+        "min_accuracy_threshold",
+        "min_precision_threshold",
+        "min_recall_threshold",
+        "min_f1_threshold"
+    )
+    @classmethod
+    def validate_percentage_fields(cls, v):
+        """Validate percentage fields are between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError(f"Percentage must be between 0 and 1, got {v}")
+        return v
+    
+    @field_validator(
+        "model_cache_size",
+        "max_training_time_hours",
+        "max_features", 
+        "feature_cache_ttl_hours",
+        "optuna_n_trials",
+        "optuna_timeout_hours",
+        "cross_validation_folds",
+        "validation_frequency_days",
+        "drift_check_frequency_hours",
+        "inference_batch_size",
+        "prediction_cache_ttl_minutes",
+        "max_cpu_cores"
+    )
+    @classmethod
+    def validate_positive_integers(cls, v):
+        """Validate positive integer fields."""
+        if v <= 0:
+            raise ValueError(f"Value must be positive, got {v}")
+        return v
+    
+    @field_validator("max_memory_gb")
+    @classmethod
+    def validate_positive_float(cls, v):
+        """Validate positive float fields.""" 
+        if v <= 0:
+            raise ValueError(f"Value must be positive, got {v}")
+        return v
+
+
 class Config(BaseConfig):
     """Master configuration class for the entire application.
 
@@ -585,6 +729,7 @@ class Config(BaseConfig):
         risk: Risk management configuration
         capital_management: Capital management configuration
         strategies: Strategy management configuration
+        ml: Machine learning configuration
     """
 
     # Environment
@@ -603,6 +748,7 @@ class Config(BaseConfig):
     risk: RiskConfig = RiskConfig()
     capital_management: CapitalManagementConfig = CapitalManagementConfig()
     strategies: StrategyManagementConfig = StrategyManagementConfig()
+    ml: MLConfig = MLConfig()
 
     @field_validator("environment")
     @classmethod

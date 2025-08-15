@@ -417,5 +417,63 @@ class CurrencyError(CapitalManagementError):
     pass
 
 
+# Backtesting exceptions
+class BacktestError(TradingBotError):
+    """Backtesting execution errors."""
+
+    pass
+
+
+class BacktestDataError(BacktestError):
+    """Backtesting data issues."""
+
+    pass
+
+
+class BacktestConfigurationError(BacktestError):
+    """Backtesting configuration errors."""
+
+    pass
+
+
+# Optimization exceptions
+class OptimizationError(TradingBotError):
+    """Parameter and strategy optimization errors."""
+
+    pass
+
+
+class OptimizationConvergenceError(OptimizationError):
+    """Optimization convergence failures."""
+
+    pass
+
+
+class OptimizationConstraintError(OptimizationError):
+    """Optimization constraint violations."""
+
+    pass
+
+
+# Circuit breaker and retry exceptions
+class CircuitBreakerOpen(TradingBotError):
+    """Circuit breaker is open due to too many failures."""
+
+    pass
+
+
+class MaxRetriesExceeded(TradingBotError):
+    """Maximum retry attempts exceeded."""
+
+    pass
+
+
+# Simulation and backtesting exceptions
+class SimulationError(TradingBotError):
+    """Simulation execution errors."""
+
+    pass
+
+
 # REVERSE INTEGRATION: Future prompts may add specific sub-exceptions but must
 # extend these base classes, never replace them.
