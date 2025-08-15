@@ -797,3 +797,225 @@ class ErrorPattern:
             "suggested_action": self.suggested_action,
             "is_active": self.is_active,
         }
+
+
+# =============================================================================
+# Execution Engine Types (P-016)
+# =============================================================================
+
+
+class ExecutionAlgorithm(Enum):
+    """Execution algorithm enumeration for different execution strategies."""
+
+    TWAP = "twap"
+    VWAP = "vwap"
+    ICEBERG = "iceberg"
+    SMART_ROUTER = "smart_router"
+    MARKET = "market"
+    LIMIT = "limit"
+
+
+class ExecutionStatus(Enum):
+    """Execution status enumeration for tracking execution progress."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    PARTIALLY_FILLED = "partially_filled"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class SlippageType(Enum):
+    """Slippage type enumeration for cost analysis."""
+
+    MARKET_IMPACT = "market_impact"
+    TIMING = "timing"
+    OPPORTUNITY_COST = "opportunity_cost"
+    IMPLEMENTATION = "implementation"
+
+
+class ExecutionResult(BaseModel):
+    """Result of an execution operation with detailed metrics."""
+
+    execution_id: str = Field(description="Unique execution identifier")
+    original_order: OrderRequest = Field(description="Original order request")
+    child_orders: list[OrderResponse] = Field(
+        default_factory=list, description="List of child orders created during execution"
+    )
+    algorithm: ExecutionAlgorithm = Field(description="Execution algorithm used")
+    status: ExecutionStatus = Field(description="Current execution status")
+    
+    # Execution metrics
+    total_filled_quantity: Decimal = Field(
+        default=Decimal("0"), ge=0, description="Total quantity filled"
+    )
+    average_fill_price: Decimal | None = Field(
+        default=None, gt=0, description="Volume-weighted average fill price"
+    )
+    total_fees: Decimal = Field(default=Decimal("0"), ge=0, description="Total execution fees")
+    
+    # Timing metrics
+    start_time: datetime = Field(description="Execution start time")
+    end_time: datetime | None = Field(default=None, description="Execution end time")
+    execution_duration: float | None = Field(
+        default=None, ge=0, description="Execution duration in seconds"
+    )
+    
+    # Slippage and cost metrics
+    expected_price: Decimal | None = Field(
+        default=None, gt=0, description="Expected execution price"
+    )
+    price_slippage: Decimal = Field(
+        default=Decimal("0"), description="Price slippage (positive = adverse)"
+    )
+    market_impact: Decimal = Field(
+        default=Decimal("0"), description="Estimated market impact"
+    )
+    implementation_shortfall: Decimal = Field(
+        default=Decimal("0"), description="Implementation shortfall cost"
+    )
+    
+    # Execution details
+    number_of_trades: int = Field(default=0, ge=0, description="Number of individual trades")
+    participation_rate: float | None = Field(
+        default=None, ge=0, le=1, description="Market participation rate"
+    )
+    is_aggressive: bool = Field(default=False, description="Whether execution was aggressive")
+    
+    # Error handling
+    error_message: str | None = Field(default=None, description="Error message if failed")
+    retry_count: int = Field(default=0, ge=0, description="Number of retries attempted")
+    
+    # Metadata
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Additional execution metadata"
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="Result creation timestamp"
+    )
+
+    @field_validator("total_filled_quantity")
+    @classmethod
+    def validate_filled_quantity(cls, v: Decimal) -> Decimal:
+        """Validate filled quantity is non-negative."""
+        if v < 0:
+            raise ValueError("Filled quantity cannot be negative")
+        return v
+
+    @field_validator("participation_rate")
+    @classmethod
+    def validate_participation_rate(cls, v: float | None) -> float | None:
+        """Validate participation rate is between 0 and 1."""
+        if v is not None and not 0.0 <= v <= 1.0:
+            raise ValueError("Participation rate must be between 0 and 1")
+        return v
+
+
+class SlippageMetrics(BaseModel):
+    """Slippage analysis metrics for execution performance."""
+
+    symbol: str = Field(description="Trading symbol")
+    order_size: Decimal = Field(gt=0, description="Order size")
+    market_price: Decimal = Field(gt=0, description="Market price at order time")
+    execution_price: Decimal = Field(gt=0, description="Actual execution price")
+    
+    # Slippage calculations
+    price_slippage_bps: Decimal = Field(description="Price slippage in basis points")
+    market_impact_bps: Decimal = Field(description="Market impact in basis points")
+    timing_cost_bps: Decimal = Field(description="Timing cost in basis points")
+    total_cost_bps: Decimal = Field(description="Total transaction cost in basis points")
+    
+    # Market conditions
+    spread_bps: Decimal = Field(description="Bid-ask spread in basis points")
+    volume_ratio: float = Field(description="Order size to average daily volume ratio")
+    volatility: float = Field(description="Market volatility at execution time")
+    
+    # Cost breakdown
+    explicit_costs: Decimal = Field(
+        default=Decimal("0"), description="Explicit costs (fees, commissions)"
+    )
+    implicit_costs: Decimal = Field(
+        default=Decimal("0"), description="Implicit costs (slippage, impact)"
+    )
+    
+    timestamp: datetime = Field(description="Analysis timestamp")
+
+    @field_validator("volume_ratio")
+    @classmethod
+    def validate_volume_ratio(cls, v: float) -> float:
+        """Validate volume ratio is non-negative."""
+        if v < 0:
+            raise ValueError("Volume ratio cannot be negative")
+        return v
+
+
+class ExecutionInstruction(BaseModel):
+    """Instruction for executing an order with specific algorithm parameters."""
+
+    order: OrderRequest = Field(description="Base order to execute")
+    algorithm: ExecutionAlgorithm = Field(description="Execution algorithm to use")
+    
+    # Algorithm parameters
+    time_horizon_minutes: int | None = Field(
+        default=None, gt=0, description="Time horizon for execution in minutes"
+    )
+    participation_rate: float | None = Field(
+        default=None, gt=0, le=1, description="Target market participation rate"
+    )
+    max_slices: int | None = Field(
+        default=None, gt=0, description="Maximum number of order slices"
+    )
+    slice_size: Decimal | None = Field(
+        default=None, gt=0, description="Fixed slice size for orders"
+    )
+    display_quantity: Decimal | None = Field(
+        default=None, gt=0, description="Visible quantity for iceberg orders"
+    )
+    
+    # Risk controls
+    max_slippage_bps: Decimal | None = Field(
+        default=None, gt=0, description="Maximum acceptable slippage in basis points"
+    )
+    price_tolerance_pct: float | None = Field(
+        default=None, gt=0, le=1, description="Price tolerance percentage"
+    )
+    
+    # Routing preferences
+    preferred_exchanges: list[str] = Field(
+        default_factory=list, description="Preferred exchanges for routing"
+    )
+    avoid_exchanges: list[str] = Field(
+        default_factory=list, description="Exchanges to avoid"
+    )
+    
+    # Execution options
+    is_urgent: bool = Field(default=False, description="Whether execution is urgent")
+    allow_partial: bool = Field(default=True, description="Allow partial fills")
+    start_time: datetime | None = Field(default=None, description="Scheduled start time")
+    end_time: datetime | None = Field(default=None, description="Execution deadline")
+    
+    # Metadata
+    execution_id: str | None = Field(default=None, description="Execution tracking ID")
+    strategy_name: str | None = Field(default=None, description="Originating strategy name")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Additional execution metadata"
+    )
+
+    @field_validator("participation_rate")
+    @classmethod
+    def validate_participation_rate(cls, v: float | None) -> float | None:
+        """Validate participation rate is between 0 and 1."""
+        if v is not None and not 0.0 <= v <= 1.0:
+            raise ValueError("Participation rate must be between 0 and 1")
+        return v
+
+    @field_validator("price_tolerance_pct")
+    @classmethod
+    def validate_price_tolerance(cls, v: float | None) -> float | None:
+        """Validate price tolerance is between 0 and 1."""
+        if v is not None and not 0.0 <= v <= 1.0:
+            raise ValueError("Price tolerance must be between 0 and 1")
+        return v
