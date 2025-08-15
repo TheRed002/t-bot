@@ -1,0 +1,216 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # T-Bot Application Logs
+  - job_name: tbot-backend
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: tbot-backend
+          service: trading-bot
+          environment: development
+          __path__: /var/log/tbot/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            logger: logger
+            message: message
+            module: module
+            function: function
+            line: line
+            thread_id: thread_id
+            process_id: process_id
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - labels:
+          level:
+          logger:
+          module:
+          service:
+          environment:
+
+  # Trading-specific logs with structured parsing
+  - job_name: tbot-trading
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: tbot-trading
+          service: trading-operations
+          environment: development
+          __path__: /var/log/tbot/trading/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+            exchange: exchange
+            symbol: symbol
+            order_id: order_id
+            strategy: strategy
+            action: action
+            price: price
+            quantity: quantity
+            pnl: pnl
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - labels:
+          level:
+          exchange:
+          symbol:
+          strategy:
+          service:
+          environment:
+
+  # Risk management logs
+  - job_name: tbot-risk
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: tbot-risk
+          service: risk-management
+          environment: development
+          __path__: /var/log/tbot/risk/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+            risk_type: risk_type
+            limit_type: limit_type
+            current_value: current_value
+            limit_value: limit_value
+            violation: violation
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - labels:
+          level:
+          risk_type:
+          limit_type:
+          service:
+          environment:
+
+  # Exchange API logs
+  - job_name: tbot-exchange
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: tbot-exchange
+          service: exchange-api
+          environment: development
+          __path__: /var/log/tbot/exchange/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+            exchange: exchange
+            endpoint: endpoint
+            method: method
+            status_code: status_code
+            response_time: response_time
+            rate_limit_remaining: rate_limit_remaining
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - labels:
+          level:
+          exchange:
+          endpoint:
+          method:
+          service:
+          environment:
+
+  # Error logs with special handling
+  - job_name: tbot-errors
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: tbot-errors
+          service: error-tracking
+          environment: development
+          __path__: /var/log/tbot/errors/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+            message: message
+            exception_type: exception_type
+            exception_message: exception_message
+            stack_trace: stack_trace
+            component: component
+            function: function
+            severity: severity
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      - labels:
+          level:
+          exception_type:
+          component:
+          severity:
+          service:
+          environment:
+
+  # System logs from host
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: systemd-journal
+          service: system
+          environment: development
+          __path__: /var/log/host/syslog
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<timestamp>\S+\s+\d+\s+\d+:\d+:\d+)\s+(?P<hostname>\S+)\s+(?P<service>\S+):\s+(?P<message>.*)$'
+      - timestamp:
+          source: timestamp
+          format: Jan _2 15:04:05
+      - labels:
+          hostname:
+          service:
+
+  # Docker container logs
+  - job_name: docker
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker
+          service: containers
+          environment: development
+          __path__: /var/log/host/docker/*.log
+    pipeline_stages:
+      - json:
+          expressions:
+            time: time
+            stream: stream
+            log: log
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+      - output:
+          source: log

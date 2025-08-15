@@ -1,0 +1,260 @@
+groups:
+  - name: tbot.trading.alerts
+    interval: 30s
+    rules:
+      # Critical Trading Alerts
+      - alert: TBotOrderExecutionFailure
+        expr: rate(tbot_orders_total{status="failed"}[5m]) > 0.1
+        for: 1m
+        labels:
+          severity: critical
+          component: trading
+        annotations:
+          summary: "High order execution failure rate detected"
+          description: "Order execution failure rate is {{ $value }} failures/sec for the last 5 minutes"
+          runbook_url: "https://docs.tbot.com/runbooks/order-execution-failure"
+
+      - alert: TBotPortfolioLoss
+        expr: tbot_portfolio_pnl_usd{timeframe="1h"} < -10000
+        for: 2m
+        labels:
+          severity: critical
+          component: trading
+        annotations:
+          summary: "Significant portfolio loss detected"
+          description: "Portfolio has lost ${{ $value }} in the last hour"
+          runbook_url: "https://docs.tbot.com/runbooks/portfolio-loss"
+
+      - alert: TBotRiskLimitViolation
+        expr: rate(tbot_risk_limit_violations_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          component: risk
+        annotations:
+          summary: "Risk limit violation detected"
+          description: "Risk limit violation rate: {{ $value }} violations/sec"
+          runbook_url: "https://docs.tbot.com/runbooks/risk-violation"
+
+      - alert: TBotCircuitBreakerTriggered
+        expr: increase(tbot_risk_circuit_breaker_triggers_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          component: risk
+        annotations:
+          summary: "Circuit breaker triggered"
+          description: "Circuit breaker has been triggered {{ $value }} times in the last 5 minutes"
+          runbook_url: "https://docs.tbot.com/runbooks/circuit-breaker"
+
+      # High Severity Alerts
+      - alert: TBotExchangeConnectionDown
+        expr: tbot_exchange_health_score < 0.5
+        for: 2m
+        labels:
+          severity: high
+          component: exchange
+        annotations:
+          summary: "Exchange connection health degraded"
+          description: "Exchange {{ $labels.exchange }} health score is {{ $value }}"
+          runbook_url: "https://docs.tbot.com/runbooks/exchange-health"
+
+      - alert: TBotHighOrderSlippage
+        expr: histogram_quantile(0.95, rate(tbot_order_slippage_bps_bucket[5m])) > 50
+        for: 3m
+        labels:
+          severity: high
+          component: trading
+        annotations:
+          summary: "High order slippage detected"
+          description: "95th percentile order slippage is {{ $value }} basis points"
+          runbook_url: "https://docs.tbot.com/runbooks/high-slippage"
+
+      - alert: TBotSlowOrderExecution
+        expr: histogram_quantile(0.95, rate(tbot_order_execution_duration_seconds_bucket[5m])) > 5
+        for: 3m
+        labels:
+          severity: high
+          component: trading
+        annotations:
+          summary: "Slow order execution detected"
+          description: "95th percentile order execution time is {{ $value }} seconds"
+          runbook_url: "https://docs.tbot.com/runbooks/slow-execution"
+
+      - alert: TBotExchangeAPIErrors
+        expr: rate(tbot_exchange_errors_total[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: high
+          component: exchange
+        annotations:
+          summary: "High exchange API error rate"
+          description: "Exchange {{ $labels.exchange }} error rate: {{ $value }} errors/sec"
+          runbook_url: "https://docs.tbot.com/runbooks/api-errors"
+
+  - name: tbot.system.alerts
+    interval: 30s
+    rules:
+      # System Health Alerts
+      - alert: TBotHighCPUUsage
+        expr: tbot_system_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: medium
+          component: system
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value }}%"
+          runbook_url: "https://docs.tbot.com/runbooks/high-cpu"
+
+      - alert: TBotHighMemoryUsage
+        expr: tbot_system_memory_usage_percent > 85
+        for: 3m
+        labels:
+          severity: medium
+          component: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value }}%"
+          runbook_url: "https://docs.tbot.com/runbooks/high-memory"
+
+      - alert: TBotDiskSpaceWarning
+        expr: tbot_system_disk_usage_percent > 80
+        for: 5m
+        labels:
+          severity: medium
+          component: system
+        annotations:
+          summary: "Low disk space warning"
+          description: "Disk usage is {{ $value }}%"
+          runbook_url: "https://docs.tbot.com/runbooks/disk-space"
+
+      - alert: TBotDiskSpaceCritical
+        expr: tbot_system_disk_usage_percent > 95
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Critical disk space shortage"
+          description: "Disk usage is {{ $value }}%"
+          runbook_url: "https://docs.tbot.com/runbooks/disk-space"
+
+      - alert: TBotApplicationDown
+        expr: up{job="tbot-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "T-Bot application is down"
+          description: "T-Bot backend application is not responding"
+          runbook_url: "https://docs.tbot.com/runbooks/app-down"
+
+  - name: tbot.database.alerts
+    interval: 30s
+    rules:
+      - alert: TBotDatabaseConnectionsHigh
+        expr: tbot_database_connections_active > 80
+        for: 5m
+        labels:
+          severity: medium
+          component: database
+        annotations:
+          summary: "High database connection count"
+          description: "Active database connections: {{ $value }}"
+          runbook_url: "https://docs.tbot.com/runbooks/db-connections"
+
+      - alert: TBotSlowDatabaseQueries
+        expr: histogram_quantile(0.95, rate(tbot_database_query_duration_seconds_bucket[5m])) > 1
+        for: 3m
+        labels:
+          severity: medium
+          component: database
+        annotations:
+          summary: "Slow database queries detected"
+          description: "95th percentile query time is {{ $value }} seconds"
+          runbook_url: "https://docs.tbot.com/runbooks/slow-queries"
+
+      - alert: TBotCacheHitRateLow
+        expr: tbot_cache_hit_rate_percent < 70
+        for: 5m
+        labels:
+          severity: medium
+          component: cache
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache {{ $labels.cache_type }} hit rate is {{ $value }}%"
+          runbook_url: "https://docs.tbot.com/runbooks/cache-performance"
+
+  - name: tbot.performance.alerts
+    interval: 60s
+    rules:
+      - alert: TBotHighNetworkLatency
+        expr: histogram_quantile(0.95, rate(tbot_exchange_api_response_time_seconds_bucket[5m])) > 2
+        for: 3m
+        labels:
+          severity: medium
+          component: network
+        annotations:
+          summary: "High network latency to exchanges"
+          description: "95th percentile API response time to {{ $labels.exchange }} is {{ $value }} seconds"
+          runbook_url: "https://docs.tbot.com/runbooks/network-latency"
+
+      - alert: TBotWebsocketConnectionLoss
+        expr: tbot_exchange_websocket_connections == 0
+        for: 1m
+        labels:
+          severity: high
+          component: websocket
+        annotations:
+          summary: "WebSocket connections lost"
+          description: "No active WebSocket connections to {{ $labels.exchange }}"
+          runbook_url: "https://docs.tbot.com/runbooks/websocket-loss"
+
+      - alert: TBotRateLimitApproaching
+        expr: tbot_exchange_rate_limit_remaining < 100
+        for: 2m
+        labels:
+          severity: medium
+          component: rate-limit
+        annotations:
+          summary: "Rate limit approaching"
+          description: "Only {{ $value }} {{ $labels.limit_type }} requests remaining for {{ $labels.exchange }}"
+          runbook_url: "https://docs.tbot.com/runbooks/rate-limit"
+
+  - name: tbot.infrastructure.alerts
+    interval: 60s
+    rules:
+      - alert: PostgreSQLDown
+        expr: up{job="postgres-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL database is down"
+          description: "PostgreSQL database is not responding"
+          runbook_url: "https://docs.tbot.com/runbooks/postgres-down"
+
+      - alert: RedisDown
+        expr: up{job="redis-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "Redis cache is down"
+          description: "Redis cache server is not responding"
+          runbook_url: "https://docs.tbot.com/runbooks/redis-down"
+
+      - alert: PrometheusDown
+        expr: up{job="prometheus"} == 0
+        for: 2m
+        labels:
+          severity: high
+          component: monitoring
+        annotations:
+          summary: "Prometheus monitoring is down"
+          description: "Prometheus monitoring server is not responding"
+          runbook_url: "https://docs.tbot.com/runbooks/prometheus-down"

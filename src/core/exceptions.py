@@ -494,5 +494,30 @@ class SimulationError(TradingBotError):
     pass
 
 
+# Monitoring and observability exceptions
+class MonitoringError(TradingBotError):
+    """Monitoring and observability errors."""
+
+    pass
+
+
+class MetricsError(MonitoringError):
+    """Metrics collection and export errors."""
+
+    pass
+
+
+class AlertingError(MonitoringError):
+    """Alerting system errors."""
+
+    pass
+
+
+class TracingError(MonitoringError):
+    """Distributed tracing errors."""
+
+    pass
+
+
 # REVERSE INTEGRATION: Future prompts may add specific sub-exceptions but must
 # extend these base classes, never replace them.

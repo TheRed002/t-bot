@@ -75,4 +75,26 @@ python-multipart>=0.0.6
 slowapi>=0.1.9  # Rate limiting
 python-dateutil>=2.8.2
 
+# Monitoring Infrastructure Dependencies (P-030, P-031, P-032)
+# Prometheus and metrics
+prometheus-client>=0.20.0
+prometheus-fastapi-instrumentator>=6.1.0
+
+# OpenTelemetry instrumentation
+opentelemetry-api>=1.21.0
+opentelemetry-sdk>=1.21.0
+opentelemetry-exporter-jaeger>=1.21.0
+opentelemetry-exporter-otlp>=1.21.0
+opentelemetry-instrumentation-fastapi>=0.42b0
+opentelemetry-instrumentation-requests>=0.42b0
+opentelemetry-instrumentation-aiohttp-client>=0.42b0
+opentelemetry-instrumentation-asyncpg>=0.42b0
+opentelemetry-instrumentation-redis>=0.42b0
+opentelemetry-instrumentation-sqlalchemy>=0.42b0
+
+# Performance monitoring and profiling
+memory-profiler>=0.61.0
+py-spy>=0.3.14
+line-profiler>=4.1.3
+
 # TODO: Add more dependencies as subsequent prompts are implemented 

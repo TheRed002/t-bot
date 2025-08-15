@@ -77,7 +77,8 @@ class TestVaRAccuracy:
             low_price=Decimal("49000"),
         )
 
-    def test_var_normal_distribution_accuracy(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_normal_distribution_accuracy(self, risk_calculator):
         """Test VaR accuracy with normal distribution (baseline case)."""
         portfolio_value = Decimal("10000")
         
@@ -91,7 +92,7 @@ class TestVaRAccuracy:
         risk_calculator.portfolio_returns = returns.tolist()
         
         # Calculate VaR
-        var_1d = risk_calculator._calculate_var(1, portfolio_value)
+        var_1d = await risk_calculator._calculate_var(1, portfolio_value)
         
         # Theoretical VaR for normal distribution
         z_score = 1.645  # 95% confidence level
@@ -105,7 +106,8 @@ class TestVaRAccuracy:
         assert var_1d > Decimal("0")
         assert var_1d < portfolio_value * Decimal("0.1")  # Sanity check
 
-    def test_var_skewed_distribution(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_skewed_distribution(self, risk_calculator):
         """Test VaR with positively and negatively skewed distributions."""
         portfolio_value = Decimal("10000")
         
@@ -120,7 +122,7 @@ class TestVaRAccuracy:
             returns = stats.skewnorm.rvs(a=skew_param, size=252) * 0.02  # Scale to 2% volatility
             risk_calculator.portfolio_returns = returns.tolist()
             
-            var_1d = risk_calculator._calculate_var(1, portfolio_value)
+            var_1d = await risk_calculator._calculate_var(1, portfolio_value)
             
             # For negative skew (left tail), VaR should be higher than normal
             # For positive skew (right tail), VaR might be lower
@@ -131,7 +133,7 @@ class TestVaRAccuracy:
                 # Compare to normal case
                 normal_returns = np.random.normal(0, 0.02, 252)
                 risk_calculator.portfolio_returns = normal_returns.tolist()
-                normal_var = risk_calculator._calculate_var(1, portfolio_value)
+                normal_var = await risk_calculator._calculate_var(1, portfolio_value)
                 
                 # Reset to skewed returns
                 risk_calculator.portfolio_returns = returns.tolist()
@@ -140,7 +142,8 @@ class TestVaRAccuracy:
                 # (though this depends on the specific realization)
                 assert var_1d > Decimal("0")
 
-    def test_var_heavy_tailed_distribution(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_heavy_tailed_distribution(self, risk_calculator):
         """Test VaR with heavy-tailed distributions (fat tails)."""
         portfolio_value = Decimal("10000")
         
@@ -160,7 +163,7 @@ class TestVaRAccuracy:
             returns = stats.t.rvs(df=df, size=252) * 0.01  # Scale appropriately
             risk_calculator.portfolio_returns = returns.tolist()
             
-            var_1d = risk_calculator._calculate_var(1, portfolio_value)
+            var_1d = await risk_calculator._calculate_var(1, portfolio_value)
             var_results.append((df, var_1d, scenario))
             
             assert isinstance(var_1d, Decimal)
@@ -174,7 +177,8 @@ class TestVaRAccuracy:
         for df, var_val, scenario in var_results:
             assert var_val < portfolio_value * Decimal("0.5")  # Sanity check
 
-    def test_var_bimodal_distribution(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_bimodal_distribution(self, risk_calculator):
         """Test VaR with bimodal distributions (market regime changes)."""
         portfolio_value = Decimal("10000")
         
@@ -194,7 +198,7 @@ class TestVaRAccuracy:
         
         risk_calculator.portfolio_returns = bimodal_returns.tolist()
         
-        var_1d = risk_calculator._calculate_var(1, portfolio_value)
+        var_1d = await risk_calculator._calculate_var(1, portfolio_value)
         
         # VaR should capture the risk from both regimes
         assert isinstance(var_1d, Decimal)
@@ -209,7 +213,8 @@ class TestVaRAccuracy:
         ratio = float(var_1d / theoretical_var)
         assert 0.5 <= ratio <= 2.0  # Allow wider tolerance for complex distribution
 
-    def test_var_time_horizon_scaling(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_time_horizon_scaling(self, risk_calculator):
         """Test VaR scaling across different time horizons."""
         portfolio_value = Decimal("10000")
         
@@ -224,7 +229,7 @@ class TestVaRAccuracy:
         var_results = {}
         
         for days in time_horizons:
-            var_value = risk_calculator._calculate_var(days, portfolio_value)
+            var_value = await risk_calculator._calculate_var(days, portfolio_value)
             var_results[days] = var_value
         
         # Verify scaling relationship: VaR(T) = VaR(1) * sqrt(T)
@@ -245,7 +250,8 @@ class TestVaRAccuracy:
             assert current_var > prev_var, f"VaR not increasing with time horizon: {days} days"
             prev_var = current_var
 
-    def test_var_extreme_value_distribution(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_extreme_value_distribution(self, risk_calculator):
         """Test VaR with extreme value distributions (Gumbel, Weibull)."""
         portfolio_value = Decimal("10000")
         
@@ -264,13 +270,14 @@ class TestVaRAccuracy:
             
             risk_calculator.portfolio_returns = returns.tolist()
             
-            var_1d = risk_calculator._calculate_var(1, portfolio_value)
+            var_1d = await risk_calculator._calculate_var(1, portfolio_value)
             
             assert isinstance(var_1d, Decimal)
             assert var_1d > Decimal("0")
             assert var_1d < portfolio_value  # Sanity check
 
-    def test_var_insufficient_data_fallback(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_insufficient_data_fallback(self, risk_calculator):
         """Test VaR fallback behavior with insufficient data."""
         portfolio_value = Decimal("10000")
         
@@ -285,8 +292,8 @@ class TestVaRAccuracy:
         for returns, case_name in insufficient_data_cases:
             risk_calculator.portfolio_returns = returns
             
-            var_1d = risk_calculator._calculate_var(1, portfolio_value)
-            var_5d = risk_calculator._calculate_var(5, portfolio_value)
+            var_1d = await risk_calculator._calculate_var(1, portfolio_value)
+            var_5d = await risk_calculator._calculate_var(5, portfolio_value)
             
             # Should fall back to conservative estimates
             if len(returns) < 30:
@@ -300,7 +307,8 @@ class TestVaRAccuracy:
             # Verify scaling relationship even in fallback
             assert var_5d > var_1d
 
-    def test_var_confidence_level_accuracy(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_confidence_level_accuracy(self, risk_calculator):
         """Test VaR accuracy at different confidence levels."""
         portfolio_value = Decimal("10000")
         
@@ -318,7 +326,7 @@ class TestVaRAccuracy:
             original_conf = risk_calculator.risk_config.var_confidence_level
             risk_calculator.risk_config.var_confidence_level = conf_level
             
-            var_1d = risk_calculator._calculate_var(1, portfolio_value)
+            var_1d = await risk_calculator._calculate_var(1, portfolio_value)
             
             # Calculate expected VaR
             volatility = np.std(returns)
@@ -335,14 +343,15 @@ class TestVaRAccuracy:
         vars_by_confidence = []
         for conf_level in confidence_levels:
             risk_calculator.risk_config.var_confidence_level = conf_level
-            var_val = risk_calculator._calculate_var(1, portfolio_value)
+            var_val = await risk_calculator._calculate_var(1, portfolio_value)
             vars_by_confidence.append(var_val)
         
         # Should be monotonically increasing
         for i in range(1, len(vars_by_confidence)):
             assert vars_by_confidence[i] > vars_by_confidence[i-1]
 
-    def test_var_historical_simulation_vs_parametric(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_historical_simulation_vs_parametric(self, risk_calculator):
         """Test comparison between historical simulation and parametric VaR."""
         portfolio_value = Decimal("10000")
         
@@ -352,7 +361,7 @@ class TestVaRAccuracy:
         risk_calculator.portfolio_returns = returns.tolist()
         
         # Parametric VaR (current implementation)
-        parametric_var = risk_calculator._calculate_var(1, portfolio_value)
+        parametric_var = await risk_calculator._calculate_var(1, portfolio_value)
         
         # Historical simulation VaR
         confidence_level = risk_calculator.risk_config.var_confidence_level
@@ -364,7 +373,8 @@ class TestVaRAccuracy:
         ratio = float(parametric_var / historical_var) if historical_var > 0 else 1
         assert 0.7 <= ratio <= 1.4, f"Parametric vs Historical VaR mismatch: ratio={ratio}"
 
-    def test_var_with_autocorrelated_returns(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_with_autocorrelated_returns(self, risk_calculator):
         """Test VaR with autocorrelated (trending) returns."""
         portfolio_value = Decimal("10000")
         
@@ -382,7 +392,7 @@ class TestVaRAccuracy:
         
         risk_calculator.portfolio_returns = returns.tolist()
         
-        var_1d = risk_calculator._calculate_var(1, portfolio_value)
+        var_1d = await risk_calculator._calculate_var(1, portfolio_value)
         
         # Autocorrelated returns might affect VaR scaling
         assert isinstance(var_1d, Decimal)
@@ -391,13 +401,14 @@ class TestVaRAccuracy:
         # Compare to IID case
         iid_returns = np.random.normal(0, np.std(returns), n_samples)
         risk_calculator.portfolio_returns = iid_returns.tolist()
-        iid_var = risk_calculator._calculate_var(1, portfolio_value)
+        iid_var = await risk_calculator._calculate_var(1, portfolio_value)
         
         # Both should be reasonable estimates
         assert var_1d > Decimal("0")
         assert iid_var > Decimal("0")
 
-    def test_var_stress_scenarios(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_stress_scenarios(self, risk_calculator):
         """Test VaR under stress scenarios and extreme market conditions."""
         portfolio_value = Decimal("10000")
         
@@ -422,8 +433,8 @@ class TestVaRAccuracy:
             
             risk_calculator.portfolio_returns = returns
             
-            var_1d = risk_calculator._calculate_var(1, portfolio_value)
-            var_5d = risk_calculator._calculate_var(5, portfolio_value)
+            var_1d = await risk_calculator._calculate_var(1, portfolio_value)
+            var_5d = await risk_calculator._calculate_var(5, portfolio_value)
             
             # Verify VaR responds appropriately to stress
             assert isinstance(var_1d, Decimal)
@@ -436,7 +447,8 @@ class TestVaRAccuracy:
                 # Expect higher VaR in stress scenarios
                 assert var_1d > portfolio_value * Decimal("0.01")  # At least 1%
 
-    def test_var_numerical_edge_cases(self, risk_calculator):
+    @pytest.mark.asyncio
+    async def test_var_numerical_edge_cases(self, risk_calculator):
         """Test VaR calculation with numerical edge cases."""
         portfolio_value = Decimal("10000")
         
@@ -460,7 +472,7 @@ class TestVaRAccuracy:
         for returns, case_name in edge_cases:
             risk_calculator.portfolio_returns = returns
             
-            var_1d = risk_calculator._calculate_var(1, portfolio_value)
+            var_1d = await risk_calculator._calculate_var(1, portfolio_value)
             
             assert isinstance(var_1d, Decimal)
             assert var_1d >= Decimal("0")  # VaR should never be negative
@@ -475,6 +487,7 @@ class TestVaRAccuracy:
                 # Large returns should produce proportionally large VaR
                 assert var_1d > portfolio_value * Decimal("0.05")  # At least 5%
 
+    @pytest.mark.asyncio
     @pytest.mark.asyncio
     async def test_var_integration_with_risk_metrics(self, risk_calculator, sample_position, sample_market_data):
         """Test VaR integration with overall risk metrics calculation."""

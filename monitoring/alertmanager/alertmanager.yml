@@ -1,0 +1,247 @@
+global:
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'tbot-alerts@example.com'
+  smtp_auth_username: 'tbot-alerts@example.com'
+  smtp_auth_password: 'your-email-password'
+  slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'default'
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 5s
+      group_interval: 5s
+      repeat_interval: 5m
+      continue: true
+
+    # High severity alerts
+    - match:
+        severity: high
+      receiver: 'high-priority-alerts'
+      group_wait: 30s
+      group_interval: 30s
+      repeat_interval: 15m
+      continue: true
+
+    # Medium severity alerts
+    - match:
+        severity: medium
+      receiver: 'medium-priority-alerts'
+      group_wait: 2m
+      group_interval: 5m
+      repeat_interval: 1h
+
+    # Component-specific routing
+    - match:
+        component: trading
+      receiver: 'trading-team'
+      continue: true
+
+    - match:
+        component: risk
+      receiver: 'risk-team'
+      continue: true
+
+    - match:
+        component: system
+      receiver: 'ops-team'
+
+    - match:
+        component: database
+      receiver: 'ops-team'
+
+inhibit_rules:
+  # Inhibit duplicate alerts
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'medium'
+    equal: ['alertname', 'instance']
+
+  # Inhibit lower severity when higher exists
+  - source_match:
+      severity: 'high'
+    target_match:
+      severity: 'medium'
+    equal: ['alertname', 'instance']
+
+  # Application down inhibits all other alerts for that instance
+  - source_match:
+      alertname: 'TBotApplicationDown'
+    target_match_re:
+      alertname: 'TBot.*'
+    equal: ['instance']
+
+receivers:
+  - name: 'default'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#tbot-alerts'
+        username: 'T-Bot AlertManager'
+        icon_emoji: ':robot_face:'
+        title: 'T-Bot Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'trading-team@example.com,ops-team@example.com'
+        subject: '🚨 CRITICAL T-Bot Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          Alert: {{ .GroupLabels.alertname }}
+          Severity: CRITICAL
+          
+          {{ range .Alerts }}
+          Summary: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          
+          {{ if .Annotations.runbook_url }}
+          Runbook: {{ .Annotations.runbook_url }}
+          {{ end }}
+          {{ end }}
+          
+          Dashboard: http://grafana:3000/d/tbot-trading-overview
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#tbot-critical'
+        username: 'T-Bot Critical Alerts'
+        icon_emoji: ':rotating_light:'
+        title: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Instance:* {{ .Labels.instance }}
+          *Started:* {{ .StartsAt }}
+          {{ if .Annotations.runbook_url }}
+          *Runbook:* {{ .Annotations.runbook_url }}
+          {{ end }}
+          {{ end }}
+        actions:
+          - type: button
+            text: 'View Dashboard'
+            url: 'http://grafana:3000/d/tbot-trading-overview'
+          - type: button
+            text: 'Acknowledge'
+            url: 'http://backend:8000/api/monitoring/alerts/{{ .GroupLabels.fingerprint }}/acknowledge'
+
+  - name: 'high-priority-alerts'
+    email_configs:
+      - to: 'trading-team@example.com'
+        subject: '⚠️ HIGH T-Bot Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          Alert: {{ .GroupLabels.alertname }}
+          Severity: HIGH
+          
+          {{ range .Alerts }}
+          Summary: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          
+          {{ if .Annotations.runbook_url }}
+          Runbook: {{ .Annotations.runbook_url }}
+          {{ end }}
+          {{ end }}
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#tbot-alerts'
+        username: 'T-Bot Alerts'
+        icon_emoji: ':warning:'
+        title: '⚠️ HIGH: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Summary:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Instance:* {{ .Labels.instance }}
+          {{ end }}
+
+  - name: 'medium-priority-alerts'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#tbot-alerts'
+        username: 'T-Bot Alerts'
+        icon_emoji: ':information_source:'
+        title: 'ℹ️ MEDIUM: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Summary:* {{ .Annotations.summary }}
+          *Instance:* {{ .Labels.instance }}
+          {{ end }}
+
+  - name: 'trading-team'
+    email_configs:
+      - to: 'trading-team@example.com'
+        subject: '📈 T-Bot Trading Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          Trading Alert: {{ .GroupLabels.alertname }}
+          
+          {{ range .Alerts }}
+          Summary: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Exchange: {{ .Labels.exchange }}
+          Strategy: {{ .Labels.strategy }}
+          Symbol: {{ .Labels.symbol }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#trading-alerts'
+        username: 'T-Bot Trading'
+        icon_emoji: ':chart_with_upwards_trend:'
+        title: '📈 Trading: {{ .GroupLabels.alertname }}'
+
+  - name: 'risk-team'
+    email_configs:
+      - to: 'risk-team@example.com'
+        subject: '⚖️ T-Bot Risk Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          Risk Management Alert: {{ .GroupLabels.alertname }}
+          
+          {{ range .Alerts }}
+          Summary: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Risk Type: {{ .Labels.limit_type }}
+          Severity: {{ .Labels.severity }}
+          Started: {{ .StartsAt }}
+          
+          Immediate action may be required.
+          {{ end }}
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#risk-management'
+        username: 'T-Bot Risk Management'
+        icon_emoji: ':balance_scale:'
+        title: '⚖️ Risk: {{ .GroupLabels.alertname }}'
+
+  - name: 'ops-team'
+    email_configs:
+      - to: 'ops-team@example.com'
+        subject: '🔧 T-Bot Operations Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          Operations Alert: {{ .GroupLabels.alertname }}
+          
+          {{ range .Alerts }}
+          Summary: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Component: {{ .Labels.component }}
+          Instance: {{ .Labels.instance }}
+          Started: {{ .StartsAt }}
+          {{ end }}
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+        channel: '#ops-alerts'
+        username: 'T-Bot Operations'
+        icon_emoji: ':wrench:'
+        title: '🔧 Ops: {{ .GroupLabels.alertname }}'
+
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'

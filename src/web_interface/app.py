@@ -16,6 +16,12 @@ from src.web_interface.middleware.auth import AuthMiddleware
 from src.web_interface.middleware.error_handler import ErrorHandlerMiddleware
 from src.web_interface.middleware.rate_limit import RateLimitMiddleware
 from src.web_interface.security.auth import init_auth
+from src.monitoring.metrics import MetricsCollector, get_metrics_collector
+from src.monitoring.telemetry import (
+    OpenTelemetryConfig, setup_telemetry, instrument_fastapi, set_global_trading_tracer
+)
+from src.monitoring.alerting import AlertManager, NotificationConfig, set_global_alert_manager
+from src.monitoring.performance import PerformanceProfiler, set_global_profiler
 
 logger = get_logger(__name__)
 
@@ -164,6 +170,9 @@ def create_app(
     # Add startup and shutdown events (additional to lifespan)
     _register_events(app)
 
+    # Setup monitoring infrastructure
+    _setup_monitoring(app, config)
+
     logger.info("FastAPI application created and configured")
     return app
 
@@ -250,6 +259,14 @@ def _register_routes(app: FastAPI) -> None:
     except ImportError as e:
         logger.warning(f"Failed to import ML models router: {e}")
 
+    # Monitoring routes
+    try:
+        from src.web_interface.api.monitoring import router as monitoring_router
+
+        app.include_router(monitoring_router, prefix="/api/monitoring", tags=["Monitoring"])
+    except ImportError as e:
+        logger.warning(f"Failed to import monitoring router: {e}")
+
     # WebSocket routes (will be implemented next)
     try:
         from src.web_interface.websockets.bot_status import router as bot_ws_router
@@ -281,6 +298,74 @@ def _register_events(app: FastAPI) -> None:
         process_time = time.time() - start_time
         response.headers["X-Process-Time"] = str(process_time)
         return response
+
+
+def _setup_monitoring(app: FastAPI, config: Config) -> None:
+    """
+    Setup monitoring infrastructure for the application.
+    
+    Args:
+        app: FastAPI application
+        config: Application configuration
+    """
+    try:
+        logger.info("Setting up monitoring infrastructure")
+        
+        # Setup OpenTelemetry tracing
+        try:
+            telemetry_config = OpenTelemetryConfig(
+                service_name="tbot-trading-system",
+                service_version="1.0.0",
+                environment=getattr(config, "environment", "development"),
+                jaeger_enabled=True,
+                console_enabled=getattr(config, "debug", False)
+            )
+            trading_tracer = setup_telemetry(telemetry_config)
+            set_global_trading_tracer(trading_tracer)
+            instrument_fastapi(app, telemetry_config)
+            logger.info("OpenTelemetry tracing configured")
+        except Exception as e:
+            logger.warning(f"Failed to setup OpenTelemetry: {e}")
+        
+        # Setup metrics collection
+        try:
+            metrics_collector = MetricsCollector()
+            # Store globally for access
+            import src.monitoring.metrics
+            src.monitoring.metrics._global_collector = metrics_collector
+            logger.info("Prometheus metrics collector configured")
+        except Exception as e:
+            logger.warning(f"Failed to setup metrics collector: {e}")
+        
+        # Setup performance profiler
+        try:
+            profiler = PerformanceProfiler(
+                enable_memory_tracking=True,
+                enable_cpu_profiling=True
+            )
+            set_global_profiler(profiler)
+            logger.info("Performance profiler configured")
+        except Exception as e:
+            logger.warning(f"Failed to setup performance profiler: {e}")
+        
+        # Setup alert manager
+        try:
+            notification_config = NotificationConfig(
+                email_from="tbot-alerts@example.com",
+                email_to=["admin@example.com"],
+                slack_webhook_url=getattr(config, "slack_webhook_url", ""),
+                webhook_urls=getattr(config, "webhook_urls", [])
+            )
+            alert_manager = AlertManager(notification_config)
+            set_global_alert_manager(alert_manager)
+            logger.info("Alert manager configured")
+        except Exception as e:
+            logger.warning(f"Failed to setup alert manager: {e}")
+        
+        logger.info("Monitoring infrastructure setup completed")
+        
+    except Exception as e:
+        logger.error(f"Error setting up monitoring infrastructure: {e}")
 
 
 # API route placeholders (will be implemented in the next steps)
