@@ -63,6 +63,7 @@ lightgbm>=4.0.0  # Light gradient boosting
 matplotlib>=3.8.0  # Plotting for model analysis
 seaborn>=0.13.0  # Statistical data visualization
 scipy>=1.11.0  # Scientific computing
+statsmodels>=0.14.0  # Statistical analysis for features
 
 # TODO: Add more dependencies as subsequent prompts are implemented
 # - P-026: fastapi, uvicorn 
