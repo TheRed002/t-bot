@@ -51,3 +51,4 @@ Thumbs.db
 # Project  Specifics
 .coverage
 TODO.md
+.env

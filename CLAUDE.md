@@ -133,61 +133,84 @@ wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/a
 - Total exposure must stay within portfolio limits
 
 
-Current task:
-I see following error when I run make setup command
-Building wheels for collected packages: TA-Lib
-  Building wheel for TA-Lib (pyproject.toml) ... error
-  error: subprocess-exited-with-error
+Current Task:
+everything seems all mixed up when I run make setup command. Why following error? 
+"make[1]: Entering directory '/mnt/e/Work/P-41 Trading/code/t-bot'"
 
-  × Building wheel for TA-Lib (pyproject.toml) did not run successfully.
-  │ exit code: 1
-  ╰─> [37 lines of output]
-      <string>:75: UserWarning: Cannot find ta-lib library, installation may fail.
-      /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/setuptools/dist.py:759: SetuptoolsDeprecationWarning: License classifiers are deprecated.
-      !!
-
-              ********************************************************************************
-              Please consider removing the following classifiers in favor of a SPDX license expression:
-
-              License :: OSI Approved :: BSD License
-
-              See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
-              ********************************************************************************
-
-      !!
-        self._finalize_license_expression()
-      running bdist_wheel
-      running build
-      running build_py
-      creating build/lib.linux-x86_64-cpython-310/talib
-      copying talib/abstract.py -> build/lib.linux-x86_64-cpython-310/talib
-      copying talib/__init__.py -> build/lib.linux-x86_64-cpython-310/talib
-      copying talib/stream.py -> build/lib.linux-x86_64-cpython-310/talib
-      copying talib/deprecated.py -> build/lib.linux-x86_64-cpython-310/talib
-      running build_ext
-      building 'talib._ta_lib' extension
-      creating build/temp.linux-x86_64-cpython-310/talib
-      x86_64-linux-gnu-gcc -Wno-unused-result -Wsign-compare -DNDEBUG -g -fwrapv -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -fPIC -I/usr/include -I/usr/local/include -I/opt/include -I/opt/local/include -I/opt/homebrew/include -I/opt/homebrew/opt/ta-lib/include -I/tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include -I/home/bbc/.venv/include -I/usr/include/python3.10 -c talib/_ta_lib.c -o build/temp.linux-x86_64-cpython-310/talib/_ta_lib.o
-      In file included from /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include/numpy/ndarraytypes.h:1929,
-                       from /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include/numpy/ndarrayobject.h:12,
-                       from /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include/numpy/arrayobject.h:5,
-                       from talib/_ta_lib.c:1235:
-      /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include/numpy/npy_1_7_deprecated_api.h:17:2: warning: #warning "Using deprecated NumPy API, disable it with " "#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION" [-Wcpp]
-         17 | #warning "Using deprecated NumPy API, disable it with " \
-            |  ^~~~~~~
-      x86_64-linux-gnu-gcc -shared -Wl,-O1 -Wl,-Bsymbolic-functions -Wl,-Bsymbolic-functions -g -fwrapv -O2 build/temp.linux-x86_64-cpython-310/talib/_ta_lib.o -L/usr/lib -L/usr/local/lib -L/usr/lib64 -L/usr/local/lib64 -L/opt/lib -L/opt/local/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/ta-lib/lib -L/usr/lib/x86_64-linux-gnu -Wl,--enable-new-dtags,-rpath,/usr/lib -Wl,--enable-new-dtags,-rpath,/usr/local/lib -Wl,--enable-new-dtags,-rpath,/usr/lib64 -Wl,--enable-new-dtags,-rpath,/usr/local/lib64 -Wl,--enable-new-dtags,-rpath,/opt/lib -Wl,--enable-new-dtags,-rpath,/opt/local/lib -Wl,--enable-new-dtags,-rpath,/opt/homebrew/lib -Wl,--enable-new-dtags,-rpath,/opt/homebrew/opt/ta-lib/lib -lta_lib -o build/lib.linux-x86_64-cpython-310/talib/_ta_lib.cpython-310-x86_64-linux-gnu.so
-      /usr/bin/ld: cannot find -lta_lib: No such file or directory
-      collect2: error: ld returned 1 exit status
-      error: command '/usr/bin/x86_64-linux-gnu-gcc' failed with exit code 1
-      [end of output]
-
-  note: This error originates from a subprocess, and is likely not a problem with pip.
-  ERROR: Failed building wheel for TA-Lib
-Failed to build TA-Lib
-error: failed-wheel-build-for-install
-
-× Failed to build installable wheels for some pyproject.toml based projects
-╰─> TA-Lib
-make[1]: *** [Makefile:128: install-deps] Error 1
+(.venv) bbc@DESKTOP-G4N9FG8:/mnt/e/Work/P-41 Trading/code/t-bot$ make setup
+🔧 Complete T-Bot Setup...
+📋 Running pre-installation checks...
+[INFO] Running pre-installation checks...
+[INFO] Running on WSL
+[INFO] Checking Python installation...
+[SUCCESS] Python 3.10.12 found
+[SUCCESS] Python 3.10 detected (recommended)
+[SUCCESS] Virtual environment active: /home/bbc/.venv
+[INFO] Checking system dependencies...
+[SUCCESS] All build tools are installed
+[INFO] Setting up TA-Lib directories...
+[WARNING] /usr/local is not writable, will need sudo for installation
+[SUCCESS] Directories prepared
+[SUCCESS] Pre-installation checks completed!
+[INFO] You can now proceed with: make setup
+make[1]: Entering directory '/mnt/e/Work/P-41 Trading/code/t-bot'
+🐍 Setting up Python virtual environment...
+✅ Virtual environment created at ~/.venv
+Requirement already satisfied: pip in /home/bbc/.venv/lib/python3.10/site-packages (25.2)
+Requirement already satisfied: setuptools in /home/bbc/.venv/lib/python3.10/site-packages (80.9.0)
+Requirement already satisfied: wheel in /home/bbc/.venv/lib/python3.10/site-packages (0.45.1)
+✅ Virtual environment ready!
 make[1]: Leaving directory '/mnt/e/Work/P-41 Trading/code/t-bot'
-make: *** [Makefile:94: setup] Error 2
+make[1]: Entering directory '/mnt/e/Work/P-41 Trading/code/t-bot'
+📦 Installing external libraries...
+[INFO] Setting up environment for all external libraries...
+[SUCCESS] Master environment setup completed
+[INFO] Installing all external libraries...
+[INFO] Installing talib...
+[SUCCESS] talib is already properly installed - skipping
+[INFO] Installing cuda...
+[SUCCESS] cuda is already properly installed - skipping
+[INFO] Installing cudnn...
+[SUCCESS] cudnn is already properly installed - skipping
+[INFO] Installing lightgbm...
+[SUCCESS] lightgbm is already properly installed - skipping
+[SUCCESS] All external libraries are ready (4 already installed, 4 total)
+✅ External libraries installed!
+make[1]: Leaving directory '/mnt/e/Work/P-41 Trading/code/t-bot'
+make[1]: Entering directory '/mnt/e/Work/P-41 Trading/code/t-bot'
+📦 Installing Python dependencies...
+[INFO] Starting T-Bot requirements installation...
+[SUCCESS] Virtual environment is active: /home/bbc/.venv
+[INFO] Checking TA-Lib C library...
+[WARNING] TA-Lib C library not found, installing...
+[INFO] Installing TA-Lib 0.6.4...
+[INFO] Setting up environment for TA-Lib...
+[SUCCESS] TA-Lib environment setup completed
+[INFO] Checking TA-Lib installation...
+[SUCCESS] TA-Lib is installed and working
+[SUCCESS] TA-Lib is already installed and working
+[SUCCESS] TA-Lib C library installed successfully
+[WARNING] TA-Lib C library installed but not in ldconfig cache
+ℹ You may need to run: sudo ldconfig
+[INFO] Installing Python requirements...
+[INFO] Upgrading pip, setuptools, and wheel...
+Requirement already satisfied: pip in /home/bbc/.venv/lib/python3.10/site-packages (25.2)
+Requirement already satisfied: setuptools in /home/bbc/.venv/lib/python3.10/site-packages (80.9.0)
+Requirement already satisfied: wheel in /home/bbc/.venv/lib/python3.10/site-packages (0.45.1)
+[INFO] Installing numpy (required for TA-Lib)...
+Requirement already satisfied: numpy>=1.26.4 in /home/bbc/.venv/lib/python3.10/site-packages (2.1.3)
+[INFO] Installing TA-Lib Python package...
+Requirement already satisfied: TA-Lib in /home/bbc/.venv/lib/python3.10/site-packages (0.6.5)
+Requirement already satisfied: build in /home/bbc/.venv/lib/python3.10/site-packages (from TA-Lib) (1.3.0)
+Requirement already satisfied: numpy in /home/bbc/.venv/lib/python3.10/site-packages (from TA-Lib) (2.1.3)
+Requirement already satisfied: pip in /home/bbc/.venv/lib/python3.10/site-packages (from TA-Lib) (25.2)
+Requirement already satisfied: packaging>=19.1 in /home/bbc/.venv/lib/python3.10/site-packages (from build->TA-Lib) (25.0)
+Requirement already satisfied: pyproject_hooks in /home/bbc/.venv/lib/python3.10/site-packages (from build->TA-Lib) (1.2.0)
+Requirement already satisfied: tomli>=1.1.0 in /home/bbc/.venv/lib/python3.10/site-packages (from build->TA-Lib) (2.2.1)
+[SUCCESS] TA-Lib Python package installed successfully
+[INFO] Installing remaining requirements...
+ERROR: Could not open requirements file: [Errno 2] No such file or directory: '../../requirements.txt'
+[SUCCESS] All Python requirements installed
+[INFO] Verifying installation...
+TA-Lib version: 0.6.5
+[SUCCESS] TA-Lib Python package is working

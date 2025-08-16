@@ -128,15 +128,24 @@ install_python_requirements() {
     # Install other requirements
     print_status "Installing remaining requirements..."
     
+    # We should be in the project root when called from Makefile
+    if [[ ! -f "requirements.txt" ]]; then
+        print_error "Cannot find requirements.txt in current directory: $(pwd)"
+        print_info "Please run this script from the project root directory"
+        return 1
+    fi
+    
+    print_status "Installing from requirements.txt..."
+    
     # Install requirements without TA-Lib first (to avoid conflicts)
-    grep -v "TA-Lib" ../../requirements.txt > /tmp/requirements_no_talib.txt 2>/dev/null || true
+    grep -v "TA-Lib" requirements.txt > /tmp/requirements_no_talib.txt 2>/dev/null || true
     
     if [[ -f "/tmp/requirements_no_talib.txt" ]] && [[ -s "/tmp/requirements_no_talib.txt" ]]; then
         pip install -r /tmp/requirements_no_talib.txt
         rm /tmp/requirements_no_talib.txt
     else
         # If grep didn't work or file is empty, install the full requirements
-        pip install -r ../../requirements.txt
+        pip install -r requirements.txt
     fi
     
     print_success "All Python requirements installed"

@@ -91,13 +91,13 @@ setup: ## Complete setup (venv, deps, external libs, GPU)
 	@echo "🔧 Complete T-Bot Setup..."
 	@echo "📋 Running pre-installation checks..."
 	@bash $(SCRIPTS_DIR)/setup/pre_install.sh
-	@$(MAKE) setup-venv
-	@$(MAKE) setup-external
-	@$(MAKE) install-deps
-	@$(MAKE) setup-gpu
-	@$(MAKE) install-gpu-deps
-	@$(MAKE) services-up
-	@$(MAKE) migrate
+	@$(MAKE) -s setup-venv
+	@$(MAKE) -s setup-external
+	@$(MAKE) -s install-deps
+	@$(MAKE) -s setup-gpu
+	@$(MAKE) -s install-gpu-deps
+	@$(MAKE) -s services-up
+	@$(MAKE) -s migrate
 	@echo "✅ Complete setup finished!"
 	@echo "ℹ️  Run 'make run' to start the application"
 	@echo "ℹ️  Run 'make test' to verify everything works"
@@ -127,7 +127,7 @@ setup-gpu: ## Install GPU/CUDA dependencies
 
 install-deps: ## Install Python dependencies
 	@echo "📦 Installing Python dependencies..."
-	@bash $(SCRIPTS_DIR)/setup/install_requirements.sh
+	@cd $(PROJECT_DIR) && bash $(SCRIPTS_DIR)/setup/install_requirements.sh
 	@echo "✅ Python dependencies installed!"
 
 install-gpu-deps: ## Install GPU-enabled Python packages
