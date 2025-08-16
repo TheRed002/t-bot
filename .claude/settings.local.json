@@ -68,7 +68,18 @@
       "Bash(export MOCK_MODE=true)",
       "Bash(python:*)",
       "Bash(cd:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(git push origin main)",
+      "Bash(sudo apt-get:*)",
+      "Bash(sudo apt-get install:*)",
+      "Bash(bash:*)",
+      "Bash(ldconfig:*)",
+      "Bash(pip install:*)",
+      "Bash(cd:*)",
+      "Bash(export:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

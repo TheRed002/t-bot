@@ -114,10 +114,11 @@ install() {
     print_status "Installing all external libraries..."
     
     # Install libraries in dependency order
+    # TA-Lib must be installed first as it's needed by requirements.txt
     local install_order=(
-        "cuda.sh"      # CUDA first (dependency for others)
-        "cudnn.sh"     # cuDNN second (depends on CUDA)
-        "talib.sh"     # TA-Lib third (independent)
+        "talib.sh"     # TA-Lib first (needed by Python requirements)
+        "cuda.sh"      # CUDA second (dependency for GPU libs)
+        "cudnn.sh"     # cuDNN third (depends on CUDA)
         "lightgbm.sh"  # LightGBM last (depends on CUDA)
     )
     

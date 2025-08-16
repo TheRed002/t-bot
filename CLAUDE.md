@@ -134,14 +134,60 @@ wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/a
 
 
 Current task:
-I have pasted scripts/setup/. I created these in another project to setup external libs. Currently, when I run pip install, I face talib errors. So I thought we can maybe automate that process in some make setup command so that everything is installed via scripts. Please use setup scripts to install external deps. Also make sure that we are using gpu enabled code and libraries. Make sure we are using gpu enabled libs inside the code throughout to leverage gpu (4090) to speed up everything. Make the whole code base performant. 
-Fix all tests, all tests should pass
-clean up the code, remove extra files
-Use makefile for all project related stuff, we should never call any script directly
-move docker-compose files to docker directory.
-use configs from .env everywhere in project including docker compose files
-Dockerfile should be based on some python ml/ai image which has cuda support. We have cuda installed, make sure you install the relavant version of libs.
-Audit of complete system to make sure all configurations are correct, no hard coded values, no code duplications, no import errors, no logical errors, no syntax errors, no calculation errors. 
-Make sure the docker compose build command successfully builds the image
-Make sure running project va make actually runs all the servers required.
-Once everything is sorted out and working, lets clean up the code again and then commit the code to bitbucket. 
+I see following error when I run make setup command
+Building wheels for collected packages: TA-Lib
+  Building wheel for TA-Lib (pyproject.toml) ... error
+  error: subprocess-exited-with-error
+
+  × Building wheel for TA-Lib (pyproject.toml) did not run successfully.
+  │ exit code: 1
+  ╰─> [37 lines of output]
+      <string>:75: UserWarning: Cannot find ta-lib library, installation may fail.
+      /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/setuptools/dist.py:759: SetuptoolsDeprecationWarning: License classifiers are deprecated.
+      !!
+
+              ********************************************************************************
+              Please consider removing the following classifiers in favor of a SPDX license expression:
+
+              License :: OSI Approved :: BSD License
+
+              See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+              ********************************************************************************
+
+      !!
+        self._finalize_license_expression()
+      running bdist_wheel
+      running build
+      running build_py
+      creating build/lib.linux-x86_64-cpython-310/talib
+      copying talib/abstract.py -> build/lib.linux-x86_64-cpython-310/talib
+      copying talib/__init__.py -> build/lib.linux-x86_64-cpython-310/talib
+      copying talib/stream.py -> build/lib.linux-x86_64-cpython-310/talib
+      copying talib/deprecated.py -> build/lib.linux-x86_64-cpython-310/talib
+      running build_ext
+      building 'talib._ta_lib' extension
+      creating build/temp.linux-x86_64-cpython-310/talib
+      x86_64-linux-gnu-gcc -Wno-unused-result -Wsign-compare -DNDEBUG -g -fwrapv -O2 -Wall -g -fstack-protector-strong -Wformat -Werror=format-security -g -fwrapv -O2 -fPIC -I/usr/include -I/usr/local/include -I/opt/include -I/opt/local/include -I/opt/homebrew/include -I/opt/homebrew/opt/ta-lib/include -I/tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include -I/home/bbc/.venv/include -I/usr/include/python3.10 -c talib/_ta_lib.c -o build/temp.linux-x86_64-cpython-310/talib/_ta_lib.o
+      In file included from /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include/numpy/ndarraytypes.h:1929,
+                       from /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include/numpy/ndarrayobject.h:12,
+                       from /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include/numpy/arrayobject.h:5,
+                       from talib/_ta_lib.c:1235:
+      /tmp/pip-build-env-4enf1akj/overlay/lib/python3.10/site-packages/numpy/core/include/numpy/npy_1_7_deprecated_api.h:17:2: warning: #warning "Using deprecated NumPy API, disable it with " "#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION" [-Wcpp]
+         17 | #warning "Using deprecated NumPy API, disable it with " \
+            |  ^~~~~~~
+      x86_64-linux-gnu-gcc -shared -Wl,-O1 -Wl,-Bsymbolic-functions -Wl,-Bsymbolic-functions -g -fwrapv -O2 build/temp.linux-x86_64-cpython-310/talib/_ta_lib.o -L/usr/lib -L/usr/local/lib -L/usr/lib64 -L/usr/local/lib64 -L/opt/lib -L/opt/local/lib -L/opt/homebrew/lib -L/opt/homebrew/opt/ta-lib/lib -L/usr/lib/x86_64-linux-gnu -Wl,--enable-new-dtags,-rpath,/usr/lib -Wl,--enable-new-dtags,-rpath,/usr/local/lib -Wl,--enable-new-dtags,-rpath,/usr/lib64 -Wl,--enable-new-dtags,-rpath,/usr/local/lib64 -Wl,--enable-new-dtags,-rpath,/opt/lib -Wl,--enable-new-dtags,-rpath,/opt/local/lib -Wl,--enable-new-dtags,-rpath,/opt/homebrew/lib -Wl,--enable-new-dtags,-rpath,/opt/homebrew/opt/ta-lib/lib -lta_lib -o build/lib.linux-x86_64-cpython-310/talib/_ta_lib.cpython-310-x86_64-linux-gnu.so
+      /usr/bin/ld: cannot find -lta_lib: No such file or directory
+      collect2: error: ld returned 1 exit status
+      error: command '/usr/bin/x86_64-linux-gnu-gcc' failed with exit code 1
+      [end of output]
+
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+  ERROR: Failed building wheel for TA-Lib
+Failed to build TA-Lib
+error: failed-wheel-build-for-install
+
+× Failed to build installable wheels for some pyproject.toml based projects
+╰─> TA-Lib
+make[1]: *** [Makefile:128: install-deps] Error 1
+make[1]: Leaving directory '/mnt/e/Work/P-41 Trading/code/t-bot'
+make: *** [Makefile:94: setup] Error 2

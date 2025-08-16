@@ -89,6 +89,8 @@ help: ## Show this help message
 
 setup: ## Complete setup (venv, deps, external libs, GPU)
 	@echo "🔧 Complete T-Bot Setup..."
+	@echo "📋 Running pre-installation checks..."
+	@bash $(SCRIPTS_DIR)/setup/pre_install.sh
 	@$(MAKE) setup-venv
 	@$(MAKE) setup-external
 	@$(MAKE) install-deps
@@ -125,7 +127,7 @@ setup-gpu: ## Install GPU/CUDA dependencies
 
 install-deps: ## Install Python dependencies
 	@echo "📦 Installing Python dependencies..."
-	@$(PIP) install -r requirements.txt
+	@bash $(SCRIPTS_DIR)/setup/install_requirements.sh
 	@echo "✅ Python dependencies installed!"
 
 install-gpu-deps: ## Install GPU-enabled Python packages

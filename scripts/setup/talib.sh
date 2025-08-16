@@ -113,17 +113,39 @@ install() {
     # Install to system
     print_status "Installing TA-Lib to system..."
     print_debug "Installing TA-Lib to /usr/local"
-    if run_command "sudo make install" "TA-Lib system installation"; then
-        print_success "TA-Lib installed to system"
+    print_info "This step requires sudo access to install system libraries"
+    
+    # Try to install with sudo, or provide instructions if it fails
+    if command -v sudo &> /dev/null; then
+        if run_command "sudo make install" "TA-Lib system installation"; then
+            print_success "TA-Lib installed to system"
+        else
+            print_error "Failed to install TA-Lib with sudo"
+            print_info "Please run manually: cd $INSTALL_DIR/ta-lib-0.6.4 && sudo make install"
+            return 1
+        fi
     else
-        print_error "Failed to install TA-Lib"
-        return 1
+        # If sudo is not available, try without it (might work in some environments)
+        if run_command "make install" "TA-Lib system installation"; then
+            print_success "TA-Lib installed to system"
+        else
+            print_error "Cannot install TA-Lib without sudo"
+            print_info "Please run manually: cd $INSTALL_DIR/ta-lib-0.6.4 && sudo make install"
+            return 1
+        fi
     fi
     
     # Update library cache
     print_status "Updating library cache..."
     print_debug "Running ldconfig to update library cache"
-    run_command "sudo ldconfig" "Library cache update"
+    if command -v sudo &> /dev/null; then
+        run_command "sudo ldconfig" "Library cache update"
+    else
+        run_command "ldconfig" "Library cache update" || true
+    fi
+    
+    # Export library path for current session
+    export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
     
     # Verify installation
     if check_installed; then
