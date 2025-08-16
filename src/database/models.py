@@ -948,7 +948,10 @@ class MLTrainingRun(Base):
         Index("idx_training_runs_experiment", "experiment_name"),
         Index("idx_training_runs_status", "status"),
         Index("idx_training_runs_started", "started_at"),
-        CheckConstraint("status IN ('running', 'completed', 'failed', 'cancelled')", name="valid_training_status"),
+        CheckConstraint(
+            "status IN ('running', 'completed', 'failed', 'cancelled')",
+            name="valid_training_status",
+        ),
     )
 
 
@@ -991,7 +994,9 @@ class MLPrediction(Base):
     prediction_timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    outcome_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    outcome_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # Constraints
     __table_args__ = (
@@ -1004,32 +1009,34 @@ class MLPrediction(Base):
 
 class MLDriftDetection(Base):
     """Database model for ML drift detection results."""
-    
+
     __tablename__ = "ml_drift_detection"
-    
+
     # Primary key
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    
+
     # Drift detection identification
     model_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    drift_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # feature, prediction, performance
-    
+    drift_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # feature, prediction, performance
+
     # Detection results
     detection_timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     drift_detected: Mapped[bool] = mapped_column(Boolean, nullable=False)
     drift_score: Mapped[float] = mapped_column(Float, nullable=False)
-    
+
     # Detailed results
     drift_details: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    
+
     # Data samples information
     reference_samples: Mapped[int] = mapped_column(Integer, nullable=False)
     current_samples: Mapped[int] = mapped_column(Integer, nullable=False)
-    
+
     # Constraints
     __table_args__ = (
         Index("idx_drift_model_type", "model_name", "drift_type"),
@@ -1040,48 +1047,51 @@ class MLDriftDetection(Base):
 
 # State management database models for P-018, P-023, P-024, P-025
 
+
 class StateSnapshot(Base):
     """Database model for state snapshots and checkpoints."""
-    
+
     __tablename__ = "state_snapshots"
-    
+
     # Primary key
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    
+
     # Snapshot identification
     bot_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=False, index=True
     )
-    snapshot_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # checkpoint, backup, recovery
-    
+    snapshot_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # checkpoint, backup, recovery
+
     # Version information
     state_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     parent_snapshot_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("state_snapshots.id"), nullable=True
     )
-    
+
     # Snapshot data
     state_data: Mapped[dict] = mapped_column(JSONB, nullable=False)
     snapshot_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    
+
     # Integrity and compression
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
     compressed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     original_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     compressed_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    
+
     # Validation
     validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     validation_errors: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+
     # Relationships
     bot_instance: Mapped["BotInstance"] = relationship("BotInstance")
     parent_snapshot: Mapped[Optional["StateSnapshot"]] = relationship(
@@ -1090,7 +1100,7 @@ class StateSnapshot(Base):
     child_snapshots: Mapped[list["StateSnapshot"]] = relationship(
         "StateSnapshot", back_populates="parent_snapshot"
     )
-    
+
     # Constraints
     __table_args__ = (
         Index("idx_state_snapshots_bot_id", "bot_id"),
@@ -1103,65 +1113,83 @@ class StateSnapshot(Base):
 
 class TradeLifecycle(Base):
     """Database model for trade lifecycle tracking."""
-    
+
     __tablename__ = "trade_lifecycles"
-    
+
     # Primary key
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    
+
     # Trade identification
     trade_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     bot_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=False, index=True
     )
     strategy_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    
+
     # Trade details
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     side: Mapped[str] = mapped_column(String(10), nullable=False)
     order_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    
+
     # Lifecycle state
     current_state: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     previous_state: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    
+
     # Quantities and pricing
     original_quantity: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False)
-    filled_quantity: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False, default=Decimal("0"))
-    remaining_quantity: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False, default=Decimal("0"))
+    filled_quantity: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False, default=Decimal("0")
+    )
+    remaining_quantity: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False, default=Decimal("0")
+    )
     requested_price: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8), nullable=True)
-    average_fill_price: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False, default=Decimal("0"))
-    
+    average_fill_price: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False, default=Decimal("0")
+    )
+
     # Order tracking
     order_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     exchange_order_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
-    
+
     # Performance metrics
-    realized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False, default=Decimal("0"))
-    unrealized_pnl: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False, default=Decimal("0"))
+    realized_pnl: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False, default=Decimal("0")
+    )
+    unrealized_pnl: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False, default=Decimal("0")
+    )
     fees_paid: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False, default=Decimal("0"))
     slippage_bps: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    
+
     # Quality metrics
     quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     execution_quality: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    
+
     # Timing
     signal_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    order_submission_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    first_fill_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    final_fill_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    settlement_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+    order_submission_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    first_fill_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    final_fill_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    settlement_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Error tracking
     errors: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     warnings: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    
+
     # Metadata
     trade_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -1169,10 +1197,10 @@ class TradeLifecycle(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
-    
+
     # Relationships
     bot_instance: Mapped["BotInstance"] = relationship("BotInstance")
-    
+
     # Constraints
     __table_args__ = (
         Index("idx_trade_lifecycle_bot_id", "bot_id"),
@@ -1188,50 +1216,56 @@ class TradeLifecycle(Base):
 
 class QualityValidation(Base):
     """Database model for trade quality validations."""
-    
+
     __tablename__ = "quality_validations"
-    
+
     # Primary key
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    
+
     # Validation identification
     validation_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     trade_lifecycle_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("trade_lifecycles.id"), nullable=True, index=True
     )
-    validation_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # pre_trade, post_trade
-    
+    validation_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True
+    )  # pre_trade, post_trade
+
     # Validation results
-    overall_result: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # passed, failed, warning
+    overall_result: Mapped[str] = mapped_column(
+        String(20), nullable=False, index=True
+    )  # passed, failed, warning
     overall_score: Mapped[float] = mapped_column(Float, nullable=False)
-    risk_level: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # low, medium, high, critical
+    risk_level: Mapped[str] = mapped_column(
+        String(20), nullable=False, index=True
+    )  # low, medium, high, critical
     risk_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    
+
     # Validation checks
     validation_checks: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    
+
     # Processing metrics
     validation_time_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    
+
     # Recommendations
     recommendations: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    
+
     # Order context (for pre-trade validations)
     order_context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    
+
     # Execution context (for post-trade validations)
     execution_context: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    
+
     # Timestamps
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
-    
+
     # Relationships
     trade_lifecycle: Mapped[Optional["TradeLifecycle"]] = relationship("TradeLifecycle")
-    
+
     # Constraints
     __table_args__ = (
         Index("idx_quality_validations_type", "validation_type"),
@@ -1245,44 +1279,44 @@ class QualityValidation(Base):
 
 class StateSyncEvent(Base):
     """Database model for state synchronization events."""
-    
+
     __tablename__ = "state_sync_events"
-    
+
     # Primary key
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    
+
     # Event identification
     event_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    
+
     # Entity information
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     entity_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    
+
     # Version information
     old_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     new_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    
+
     # Change data
     changes: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     event_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    
+
     # Source information
     source_component: Mapped[str] = mapped_column(String(100), nullable=False, default="unknown")
     source_node: Mapped[str] = mapped_column(String(100), nullable=False, default="unknown")
-    
+
     # Processing status
     processed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     processing_errors: Mapped[list | None] = mapped_column(JSONB, nullable=True)
-    
+
     # Timestamps
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+
     # Constraints
     __table_args__ = (
         Index("idx_sync_events_type", "event_type"),
@@ -1295,42 +1329,44 @@ class StateSyncEvent(Base):
 
 class StateConflict(Base):
     """Database model for state conflicts."""
-    
+
     __tablename__ = "state_conflicts"
-    
+
     # Primary key
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    
+
     # Conflict identification
     conflict_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     entity_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    
+
     # Conflicting versions
     version_a: Mapped[int] = mapped_column(Integer, nullable=False)
     version_b: Mapped[int] = mapped_column(Integer, nullable=False)
     version_a_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     version_b_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    
+
     # Conflict data
     conflicting_fields: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     state_a: Mapped[dict] = mapped_column(JSONB, nullable=False)
     state_b: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    
+
     # Resolution
-    resolution_strategy: Mapped[str] = mapped_column(String(50), nullable=False, default="last_write_wins")
+    resolution_strategy: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="last_write_wins"
+    )
     resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     resolved_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     conflict_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    
+
     # Timestamps
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    
+
     # Constraints
     __table_args__ = (
         Index("idx_state_conflicts_entity", "entity_type", "entity_id"),

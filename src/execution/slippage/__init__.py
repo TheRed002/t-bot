@@ -12,4 +12,4 @@ Components:
 from .cost_analyzer import CostAnalyzer
 from .slippage_model import SlippageModel
 
-__all__ = ["SlippageModel", "CostAnalyzer"]
+__all__ = ["CostAnalyzer", "SlippageModel"]

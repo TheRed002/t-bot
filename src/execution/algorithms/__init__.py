@@ -19,9 +19,9 @@ from .twap import TWAPAlgorithm
 from .vwap import VWAPAlgorithm
 
 __all__ = [
-    "BaseAlgorithm", 
-    "TWAPAlgorithm", 
-    "VWAPAlgorithm", 
-    "IcebergAlgorithm", 
-    "SmartOrderRouter"
+    "BaseAlgorithm",
+    "IcebergAlgorithm",
+    "SmartOrderRouter",
+    "TWAPAlgorithm",
+    "VWAPAlgorithm",
 ]

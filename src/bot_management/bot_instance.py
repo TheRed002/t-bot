@@ -50,7 +50,7 @@ from src.utils.decorators import log_calls
 class BotInstance:
     """
     Individual bot instance that runs a specific trading strategy.
-    
+
     This class represents a single trading bot with its own:
     - Strategy instance and configuration
     - Exchange connections and execution engine
@@ -62,11 +62,11 @@ class BotInstance:
     def __init__(self, config: Config, bot_config: BotConfiguration):
         """
         Initialize bot instance with configuration.
-        
+
         Args:
             config: Application configuration
             bot_config: Bot-specific configuration
-            
+
         Raises:
             ValidationError: If configuration is invalid
         """
@@ -86,7 +86,7 @@ class BotInstance:
         self.bot_state = BotState(
             bot_id=bot_config.bot_id,
             status=BotStatus.CREATED,
-            allocated_capital=bot_config.allocated_capital
+            allocated_capital=bot_config.allocated_capital,
         )
 
         # Performance metrics
@@ -113,14 +113,14 @@ class BotInstance:
             "Bot instance created",
             bot_id=bot_config.bot_id,
             bot_type=bot_config.bot_type.value,
-            strategy=bot_config.strategy_name
+            strategy=bot_config.strategy_name,
         )
 
     @log_calls
     async def start(self) -> None:
         """
         Start the bot instance and begin trading operations.
-        
+
         Raises:
             ExecutionError: If startup fails
             ValidationError: If configuration is invalid
@@ -159,7 +159,7 @@ class BotInstance:
             self.logger.info(
                 "Bot instance started successfully",
                 bot_id=self.bot_config.bot_id,
-                strategy=self.bot_config.strategy_name
+                strategy=self.bot_config.strategy_name,
             )
 
         except Exception as e:
@@ -171,7 +171,7 @@ class BotInstance:
     async def stop(self) -> None:
         """
         Stop the bot instance and cleanup resources.
-        
+
         Raises:
             ExecutionError: If shutdown fails
         """
@@ -208,8 +208,10 @@ class BotInstance:
 
             # Update metrics
             if self.bot_metrics.start_time:
-                total_runtime = datetime.now(timezone.utc) - self.bot_metrics.start_time
-                self.bot_metrics.uptime_percentage = 1.0  # Will be calculated more accurately in monitoring
+                datetime.now(timezone.utc) - self.bot_metrics.start_time
+                self.bot_metrics.uptime_percentage = (
+                    1.0  # Will be calculated more accurately in monitoring
+                )
 
             self.logger.info("Bot instance stopped successfully", bot_id=self.bot_config.bot_id)
 
@@ -222,7 +224,7 @@ class BotInstance:
     async def pause(self) -> None:
         """
         Pause bot operations without closing positions.
-        
+
         Raises:
             ExecutionError: If pause fails
         """
@@ -249,7 +251,7 @@ class BotInstance:
     async def resume(self) -> None:
         """
         Resume bot operations from paused state.
-        
+
         Raises:
             ExecutionError: If resume fails
         """
@@ -304,7 +306,7 @@ class BotInstance:
         self.logger.debug(
             "Components initialized",
             primary_exchange=primary_exchange_name,
-            bot_id=self.bot_config.bot_id
+            bot_id=self.bot_config.bot_id,
         )
 
     async def _allocate_resources(self) -> None:
@@ -312,9 +314,7 @@ class BotInstance:
         try:
             # Allocate capital through capital allocator
             allocated = await self.capital_allocator.allocate_capital(
-                self.bot_config.bot_id,
-                self.bot_config.allocated_capital,
-                "bot_instance"
+                self.bot_config.bot_id, self.bot_config.allocated_capital, "bot_instance"
             )
 
             if not allocated:
@@ -326,7 +326,7 @@ class BotInstance:
             self.logger.debug(
                 "Resources allocated",
                 allocated_capital=float(self.bot_config.allocated_capital),
-                bot_id=self.bot_config.bot_id
+                bot_id=self.bot_config.bot_id,
             )
 
         except Exception as e:
@@ -337,8 +337,7 @@ class BotInstance:
         try:
             # Get strategy instance from factory
             self.strategy = await self.strategy_factory.create_strategy(
-                self.bot_config.strategy_name,
-                self.bot_config.strategy_config
+                self.bot_config.strategy_name, self.bot_config.strategy_config
             )
 
             if not self.strategy:
@@ -351,7 +350,7 @@ class BotInstance:
                 "max_position_size": self.bot_config.max_position_size,
                 "risk_percentage": self.bot_config.risk_percentage,
                 "trading_mode": self.bot_config.trading_mode.value,
-                **self.bot_config.strategy_config
+                **self.bot_config.strategy_config,
             }
 
             # Initialize strategy
@@ -363,7 +362,7 @@ class BotInstance:
             self.logger.info(
                 "Strategy initialized",
                 strategy=self.bot_config.strategy_name,
-                bot_id=self.bot_config.bot_id
+                bot_id=self.bot_config.bot_id,
             )
 
         except Exception as e:
@@ -401,8 +400,7 @@ class BotInstance:
                 except Exception as e:
                     self.bot_metrics.error_count += 1
                     self.logger.error(
-                        f"Strategy execution error: {e}",
-                        bot_id=self.bot_config.bot_id
+                        f"Strategy execution error: {e}", bot_id=self.bot_config.bot_id
                     )
                     # Continue running unless critical error
                     await asyncio.sleep(5)
@@ -411,15 +409,12 @@ class BotInstance:
             self.logger.info("Strategy execution cancelled", bot_id=self.bot_config.bot_id)
         except Exception as e:
             self.bot_state.status = BotStatus.ERROR
-            self.logger.error(
-                f"Strategy execution loop failed: {e}",
-                bot_id=self.bot_config.bot_id
-            )
+            self.logger.error(f"Strategy execution loop failed: {e}", bot_id=self.bot_config.bot_id)
 
     async def _process_trading_signal(self, signal) -> None:
         """
         Process a trading signal and execute orders.
-        
+
         Args:
             signal: Trading signal from strategy
         """
@@ -429,7 +424,7 @@ class BotInstance:
                 self.logger.warning(
                     "Maximum concurrent positions reached",
                     max_positions=self.bot_config.max_concurrent_positions,
-                    bot_id=self.bot_config.bot_id
+                    bot_id=self.bot_config.bot_id,
                 )
                 return
 
@@ -440,7 +435,7 @@ class BotInstance:
                 order_type=signal.order_type,
                 quantity=signal.quantity,
                 price=signal.price,
-                client_order_id=f"{self.bot_config.bot_id}_{uuid.uuid4().hex[:8]}"
+                client_order_id=f"{self.bot_config.bot_id}_{uuid.uuid4().hex[:8]}",
             )
 
             # Validate order with risk manager
@@ -451,7 +446,7 @@ class BotInstance:
                 self.logger.warning(
                     "Order rejected by risk manager",
                     symbol=signal.symbol,
-                    bot_id=self.bot_config.bot_id
+                    bot_id=self.bot_config.bot_id,
                 )
                 return
 
@@ -463,13 +458,11 @@ class BotInstance:
                 algorithm=ExecutionAlgorithm.TWAP,  # Default algorithm
                 time_horizon_minutes=30,
                 participation_rate=0.2,
-                strategy_name=self.bot_config.strategy_name
+                strategy_name=self.bot_config.strategy_name,
             )
 
             execution_result = await self.execution_engine.execute_order(
-                execution_instruction,
-                self.exchange_factory,
-                self.risk_manager
+                execution_instruction, self.exchange_factory, self.risk_manager
             )
 
             # Track execution and update metrics
@@ -480,7 +473,7 @@ class BotInstance:
                 execution_id=execution_result.execution_id,
                 symbol=signal.symbol,
                 side=signal.direction.value,
-                bot_id=self.bot_config.bot_id
+                bot_id=self.bot_config.bot_id,
             )
 
         except Exception as e:
@@ -488,7 +481,7 @@ class BotInstance:
             self.logger.error(
                 f"Failed to process trading signal: {e}",
                 symbol=signal.symbol if hasattr(signal, "symbol") else "unknown",
-                bot_id=self.bot_config.bot_id
+                bot_id=self.bot_config.bot_id,
             )
 
     async def _start_monitoring(self) -> None:
@@ -516,10 +509,7 @@ class BotInstance:
                     await asyncio.sleep(self.bot_config.heartbeat_interval)
 
                 except Exception as e:
-                    self.logger.error(
-                        f"Heartbeat error: {e}",
-                        bot_id=self.bot_config.bot_id
-                    )
+                    self.logger.error(f"Heartbeat error: {e}", bot_id=self.bot_config.bot_id)
                     await asyncio.sleep(10)  # Longer delay on error
 
         except asyncio.CancelledError:
@@ -535,20 +525,20 @@ class BotInstance:
             self.last_daily_reset = current_date
 
             self.logger.debug(
-                "Daily limits reset",
-                date=current_date.isoformat(),
-                bot_id=self.bot_config.bot_id
+                "Daily limits reset", date=current_date.isoformat(), bot_id=self.bot_config.bot_id
             )
 
         # Check if daily limit exceeded
-        if (self.bot_config.max_daily_trades and
-            self.daily_trade_count >= self.bot_config.max_daily_trades):
+        if (
+            self.bot_config.max_daily_trades
+            and self.daily_trade_count >= self.bot_config.max_daily_trades
+        ):
 
             self.logger.warning(
                 "Daily trade limit reached",
                 daily_count=self.daily_trade_count,
                 limit=self.bot_config.max_daily_trades,
-                bot_id=self.bot_config.bot_id
+                bot_id=self.bot_config.bot_id,
             )
             raise ExecutionError("Daily trade limit exceeded")
 
@@ -574,7 +564,7 @@ class BotInstance:
                 "side": order.side.value,
                 "quantity": Decimal("0"),
                 "average_price": Decimal("0"),
-                "unrealized_pnl": Decimal("0")
+                "unrealized_pnl": Decimal("0"),
             }
 
         # Update metrics
@@ -605,7 +595,9 @@ class BotInstance:
 
         # Calculate average trade PnL
         if self.bot_metrics.total_trades > 0:
-            self.bot_metrics.average_trade_pnl = self.bot_metrics.total_pnl / self.bot_metrics.total_trades
+            self.bot_metrics.average_trade_pnl = (
+                self.bot_metrics.total_pnl / self.bot_metrics.total_trades
+            )
 
         # Update uptime percentage
         if self.bot_metrics.start_time:
@@ -619,6 +611,7 @@ class BotInstance:
         """Check and update resource usage metrics."""
         # Update CPU and memory usage (simplified)
         import psutil
+
         process = psutil.Process()
 
         self.bot_metrics.cpu_usage = process.cpu_percent()
@@ -637,7 +630,7 @@ class BotInstance:
             self.logger.debug(
                 "State checkpoint created",
                 version=self.bot_state.state_version,
-                bot_id=self.bot_config.bot_id
+                bot_id=self.bot_config.bot_id,
             )
 
     async def _close_open_positions(self) -> None:
@@ -648,7 +641,7 @@ class BotInstance:
         self.logger.info(
             "Closing open positions",
             position_count=len(self.position_tracker),
-            bot_id=self.bot_config.bot_id
+            bot_id=self.bot_config.bot_id,
         )
 
         # Implementation would close actual positions
@@ -663,7 +656,7 @@ class BotInstance:
         self.logger.info(
             "Cancelling pending orders",
             order_count=len(self.order_tracker),
-            bot_id=self.bot_config.bot_id
+            bot_id=self.bot_config.bot_id,
         )
 
         # Implementation would cancel actual orders
@@ -675,19 +668,14 @@ class BotInstance:
         try:
             # Release capital allocation
             await self.capital_allocator.release_capital(
-                self.bot_config.bot_id,
-                self.bot_state.allocated_capital
+                self.bot_config.bot_id, self.bot_state.allocated_capital
             )
 
-            self.logger.debug(
-                "Resources released",
-                bot_id=self.bot_config.bot_id
-            )
+            self.logger.debug("Resources released", bot_id=self.bot_config.bot_id)
 
         except Exception as e:
             self.logger.warning(
-                f"Failed to release some resources: {e}",
-                bot_id=self.bot_config.bot_id
+                f"Failed to release some resources: {e}", bot_id=self.bot_config.bot_id
             )
 
     def get_bot_state(self) -> BotState:
@@ -715,5 +703,9 @@ class BotInstance:
             "total_pnl": float(self.bot_metrics.total_pnl),
             "error_count": self.bot_metrics.error_count,
             "is_running": self.is_running,
-            "last_heartbeat": self.bot_metrics.last_heartbeat.isoformat() if self.bot_metrics.last_heartbeat else None
+            "last_heartbeat": (
+                self.bot_metrics.last_heartbeat.isoformat()
+                if self.bot_metrics.last_heartbeat
+                else None
+            ),
         }

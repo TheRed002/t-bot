@@ -296,7 +296,7 @@ class ModelCache:
         if model_id not in self.cache:
             return False
 
-        model = self.cache[model_id]
+        self.cache[model_id]
         memory_mb = self.memory_usage.get(model_id, 0.0)
 
         # Remove from all tracking structures
@@ -332,7 +332,7 @@ class ModelCache:
         try:
             # Get current process memory
             process = psutil.Process()
-            initial_memory = process.memory_info().rss
+            process.memory_info().rss
 
             # This is a rough estimation
             # In practice, you'd want more sophisticated memory estimation

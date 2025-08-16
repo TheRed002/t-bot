@@ -24,7 +24,6 @@ from typing import Any
 from src.core.config import Config
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
-from src.utils.decorators import retry
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -36,7 +35,7 @@ from src.database.connection import get_influxdb_client, get_redis_client
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.risk_management.base import BaseRiskManager
-from src.utils.decorators import time_execution
+from src.utils.decorators import retry, time_execution
 from src.utils.formatters import format_currency
 from src.utils.validators import validate_quantity
 
@@ -851,7 +850,7 @@ class CapitalAllocator:
         total_performance_score = 0.0
         strategy_count = 0
 
-        for strategy_id, metrics in self.strategy_performance.items():
+        for _strategy_id, metrics in self.strategy_performance.items():
             # Calculate composite performance score
             sharpe_ratio = metrics.get("sharpe_ratio", 0.0)
             return_rate = metrics.get("return_rate", 0.0)

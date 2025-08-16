@@ -154,9 +154,7 @@ class Application:
             for exchange_name in supported_exchanges:
                 if self.components["exchange_factory"].is_exchange_supported(exchange_name):
                     try:
-                        exchange = await self.components["exchange_factory"].create_exchange(
-                            exchange_name
-                        )
+                        await self.components["exchange_factory"].create_exchange(exchange_name)
                         self.logger.info(f"Initialized exchange: {exchange_name}")
                     except Exception as e:
                         self.logger.error(f"Failed to initialize exchange {exchange_name}: {e!s}")
@@ -211,7 +209,7 @@ class Application:
                 # Get first available exchange for strategies
                 exchanges = self.components["exchange_factory"].get_all_exchanges()
                 if exchanges:
-                    first_exchange = list(exchanges.values())[0]
+                    first_exchange = next(iter(exchanges.values()))
                     self.components["strategy_factory"].set_exchange(first_exchange)
 
             # Load and create strategies from configuration
@@ -226,7 +224,7 @@ class Application:
                     )
 
                     # Create strategy instance
-                    strategy = self.components["strategy_factory"].create_strategy(
+                    self.components["strategy_factory"].create_strategy(
                         strategy_name, config.dict()
                     )
 

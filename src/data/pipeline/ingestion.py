@@ -890,7 +890,7 @@ class DataIngestionPipeline:
                 self.status = PipelineStatus.STOPPED
 
                 # Cancel all active tasks
-                for task_name, task in self.active_tasks.items():
+                for _task_name, task in self.active_tasks.items():
                     if not task.done():
                         task.cancel()
                         try:

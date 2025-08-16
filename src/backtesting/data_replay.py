@@ -6,12 +6,12 @@ multiple timeframes, data sources, and replay modes.
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from collections.abc import Callable
+from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
 import pandas as pd
-from pydantic import BaseModel, Field
 
 from src.core.exceptions import DataError
 from src.core.logging import get_logger
@@ -33,7 +33,7 @@ class ReplayMode(Enum):
 class DataReplayManager:
     """
     Manages historical data replay for backtesting.
-    
+
     Features:
     - Multi-timeframe support
     - Data synchronization across symbols
@@ -43,7 +43,7 @@ class DataReplayManager:
 
     def __init__(
         self,
-        db_manager: Optional[DatabaseManager] = None,
+        db_manager: DatabaseManager | None = None,
         cache_size: int = 10000,
     ):
         """
@@ -55,23 +55,23 @@ class DataReplayManager:
         """
         self.db_manager = db_manager
         self.cache_size = cache_size
-        
+
         # Data storage
-        self._data_cache: Dict[str, pd.DataFrame] = {}
-        self._current_index: Dict[str, int] = {}
-        self._subscribers: List[Callable] = []
-        
+        self._data_cache: dict[str, pd.DataFrame] = {}
+        self._current_index: dict[str, int] = {}
+        self._subscribers: list[Callable] = []
+
         # Replay state
         self._replay_mode = ReplayMode.SEQUENTIAL
-        self._current_timestamp: Optional[datetime] = None
+        self._current_timestamp: datetime | None = None
         self._speed_multiplier = 1.0
-        
+
         logger.info("DataReplayManager initialized", cache_size=cache_size)
 
     @time_execution
     async def load_data(
         self,
-        symbols: List[str],
+        symbols: list[str],
         start_date: datetime,
         end_date: datetime,
         timeframe: str = "1h",
@@ -98,9 +98,7 @@ class DataReplayManager:
         for symbol in symbols:
             try:
                 if source == "database" and self.db_manager:
-                    data = await self._load_from_database(
-                        symbol, start_date, end_date, timeframe
-                    )
+                    data = await self._load_from_database(symbol, start_date, end_date, timeframe)
                 elif source == "csv":
                     data = await self._load_from_csv(symbol, start_date, end_date)
                 else:
@@ -110,16 +108,16 @@ class DataReplayManager:
 
                 # Validate and clean data
                 data = self._validate_data(data)
-                
+
                 # Cache data
                 self._data_cache[symbol] = data
                 self._current_index[symbol] = 0
-                
+
                 logger.info(f"Loaded data for {symbol}", records=len(data))
 
             except Exception as e:
                 logger.error(f"Failed to load data for {symbol}", error=str(e))
-                raise DataError(f"Failed to load data for {symbol}: {str(e)}")
+                raise DataError(f"Failed to load data for {symbol}: {e!s}")
 
     async def _load_from_database(
         self,
@@ -135,16 +133,14 @@ class DataReplayManager:
         query = """
             SELECT timestamp, open, high, low, close, volume
             FROM market_data
-            WHERE symbol = $1 
-            AND timestamp >= $2 
+            WHERE symbol = $1
+            AND timestamp >= $2
             AND timestamp <= $3
             AND timeframe = $4
             ORDER BY timestamp
         """
 
-        rows = await self.db_manager.fetch_all(
-            query, symbol, start_date, end_date, timeframe
-        )
+        rows = await self.db_manager.fetch_all(query, symbol, start_date, end_date, timeframe)
 
         if not rows:
             raise DataError(f"No data found for {symbol}")
@@ -160,15 +156,15 @@ class DataReplayManager:
         import os
 
         file_path = f"data/{symbol}.csv"
-        
+
         if not os.path.exists(file_path):
             raise DataError(f"CSV file not found: {file_path}")
 
         df = pd.read_csv(file_path, parse_dates=["timestamp"], index_col="timestamp")
-        
+
         # Filter by date range
         df = df[(df.index >= start_date) & (df.index <= end_date)]
-        
+
         return df
 
     async def _generate_synthetic_data(
@@ -190,22 +186,22 @@ class DataReplayManager:
             "4h": "4h",
             "1d": "1D",
         }
-        
+
         freq = freq_map.get(timeframe, "1h")
         dates = pd.date_range(start=start_date, end=end_date, freq=freq)
 
         # Generate price data using geometric Brownian motion
         np.random.seed(hash(symbol) % 2**32)  # Consistent per symbol
-        
+
         n = len(dates)
         dt = 1 / 252  # Daily time step
         mu = 0.1  # Annual drift
         sigma = 0.2  # Annual volatility
-        
+
         # Generate returns
         returns = np.random.normal(mu * dt, sigma * np.sqrt(dt), n)
         prices = 100 * np.exp(np.cumsum(returns))
-        
+
         # Generate OHLC from prices
         df = pd.DataFrame(index=dates)
         df["close"] = prices
@@ -213,7 +209,7 @@ class DataReplayManager:
         df["high"] = prices * (1 + np.abs(np.random.normal(0, 0.005, n)))
         df["low"] = prices * (1 - np.abs(np.random.normal(0, 0.005, n)))
         df["volume"] = np.random.uniform(1000, 10000, n)
-        
+
         return df
 
     def _validate_data(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -221,7 +217,7 @@ class DataReplayManager:
         # Check required columns
         required_columns = ["open", "high", "low", "close", "volume"]
         missing = set(required_columns) - set(data.columns)
-        
+
         if missing:
             raise DataError(f"Missing required columns: {missing}")
 
@@ -229,28 +225,26 @@ class DataReplayManager:
         before_rows = len(data)
         data = data.dropna()
         after_rows = len(data)
-        
+
         if after_rows < before_rows:
-            logger.warning(
-                f"Removed {before_rows - after_rows} rows with NaN values"
-            )
+            logger.warning(f"Removed {before_rows - after_rows} rows with NaN values")
 
         # Validate OHLC relationships
         invalid_ohlc = (
-            (data["high"] < data["low"]) |
-            (data["high"] < data["open"]) |
-            (data["high"] < data["close"]) |
-            (data["low"] > data["open"]) |
-            (data["low"] > data["close"])
+            (data["high"] < data["low"])
+            | (data["high"] < data["open"])
+            | (data["high"] < data["close"])
+            | (data["low"] > data["open"])
+            | (data["low"] > data["close"])
         )
-        
+
         if invalid_ohlc.any():
             logger.warning(f"Found {invalid_ohlc.sum()} invalid OHLC relationships")
             data = data[~invalid_ohlc]
 
         # Validate positive values
         negative_values = (data[required_columns] < 0).any(axis=1)
-        
+
         if negative_values.any():
             logger.warning(f"Found {negative_values.sum()} rows with negative values")
             data = data[~negative_values]
@@ -261,7 +255,7 @@ class DataReplayManager:
         self,
         mode: ReplayMode = ReplayMode.SEQUENTIAL,
         speed: float = 1.0,
-        callback: Optional[Callable] = None,
+        callback: Callable | None = None,
     ) -> None:
         """
         Start data replay.
@@ -273,7 +267,7 @@ class DataReplayManager:
         """
         self._replay_mode = mode
         self._speed_multiplier = speed
-        
+
         if callback:
             self._subscribers.append(callback)
 
@@ -292,7 +286,7 @@ class DataReplayManager:
         """Replay data in sequential order."""
         # Get all unique timestamps across symbols
         all_timestamps = set()
-        
+
         for data in self._data_cache.values():
             all_timestamps.update(data.index.tolist())
 
@@ -300,10 +294,10 @@ class DataReplayManager:
 
         for timestamp in sorted_timestamps:
             self._current_timestamp = timestamp
-            
+
             # Get data for this timestamp
             current_data = {}
-            
+
             for symbol, data in self._data_cache.items():
                 if timestamp in data.index:
                     current_data[symbol] = data.loc[timestamp]
@@ -324,19 +318,19 @@ class DataReplayManager:
         all_timestamps = []
         for data in self._data_cache.values():
             all_timestamps.extend(data.index.tolist())
-        
+
         all_timestamps = sorted(set(all_timestamps))
-        
+
         if not all_timestamps:
             return
 
         # Start from random position
         current_idx = random.randint(0, len(all_timestamps) - 1)
-        
+
         while True:
             timestamp = all_timestamps[current_idx]
             self._current_timestamp = timestamp
-            
+
             # Get data
             current_data = {}
             for symbol, data in self._data_cache.items():
@@ -360,7 +354,7 @@ class DataReplayManager:
 
         # Collect all data points
         all_data_points = []
-        
+
         for symbol, data in self._data_cache.items():
             for timestamp, row in data.iterrows():
                 all_data_points.append((timestamp, symbol, row))
@@ -370,12 +364,12 @@ class DataReplayManager:
 
         # Bootstrap resample
         n_samples = len(all_data_points)
-        
+
         for _ in range(n_samples):
             # Random sample with replacement
             timestamp, symbol, row = random.choice(all_data_points)
             self._current_timestamp = timestamp
-            
+
             # Notify subscribers
             await self._notify_subscribers(timestamp, {symbol: row})
 
@@ -389,7 +383,7 @@ class DataReplayManager:
 
         # Group data by periods (e.g., daily)
         period_data = {}
-        
+
         for symbol, data in self._data_cache.items():
             # Group by date
             for date, group in data.groupby(data.index.date):
@@ -404,16 +398,16 @@ class DataReplayManager:
         # Replay shuffled periods
         for date in shuffled_dates:
             period = period_data[date]
-            
+
             # Get all timestamps in this period
             timestamps = set()
             for symbol_data in period.values():
                 timestamps.update(symbol_data.index.tolist())
-            
+
             # Play period sequentially
             for timestamp in sorted(timestamps):
                 self._current_timestamp = timestamp
-                
+
                 current_data = {}
                 for symbol, data in period.items():
                     if timestamp in data.index:
@@ -424,9 +418,7 @@ class DataReplayManager:
                 if self._speed_multiplier > 0:
                     await asyncio.sleep(0.001 / self._speed_multiplier)
 
-    async def _notify_subscribers(
-        self, timestamp: datetime, data: Dict[str, pd.Series]
-    ) -> None:
+    async def _notify_subscribers(self, timestamp: datetime, data: dict[str, pd.Series]) -> None:
         """Notify all subscribers of new data."""
         for callback in self._subscribers:
             try:
@@ -435,31 +427,29 @@ class DataReplayManager:
                 else:
                     callback(timestamp, data)
             except Exception as e:
-                logger.error(f"Subscriber callback failed", error=str(e))
+                logger.error("Subscriber callback failed", error=str(e))
 
-    def get_current_data(self, symbol: str) -> Optional[pd.Series]:
+    def get_current_data(self, symbol: str) -> pd.Series | None:
         """Get current data point for a symbol."""
         if symbol not in self._data_cache:
             return None
 
         idx = self._current_index.get(symbol, 0)
-        
+
         if idx < len(self._data_cache[symbol]):
             return self._data_cache[symbol].iloc[idx]
-        
+
         return None
 
-    def get_historical_data(
-        self, symbol: str, lookback: int
-    ) -> Optional[pd.DataFrame]:
+    def get_historical_data(self, symbol: str, lookback: int) -> pd.DataFrame | None:
         """Get historical data with lookback."""
         if symbol not in self._data_cache:
             return None
 
         current_idx = self._current_index.get(symbol, 0)
         start_idx = max(0, current_idx - lookback)
-        
-        return self._data_cache[symbol].iloc[start_idx:current_idx + 1]
+
+        return self._data_cache[symbol].iloc[start_idx : current_idx + 1]
 
     def subscribe(self, callback: Callable) -> None:
         """Subscribe to data updates."""
@@ -474,14 +464,14 @@ class DataReplayManager:
         """Reset replay state."""
         for symbol in self._current_index:
             self._current_index[symbol] = 0
-        
+
         self._current_timestamp = None
         logger.info("Data replay reset")
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get data statistics."""
         stats = {}
-        
+
         for symbol, data in self._data_cache.items():
             stats[symbol] = {
                 "total_records": len(data),
@@ -490,5 +480,5 @@ class DataReplayManager:
                 "current_position": self._current_index.get(symbol, 0),
                 "memory_usage_mb": data.memory_usage(deep=True).sum() / 1024 / 1024,
             }
-        
+
         return stats

@@ -62,11 +62,18 @@ class TestSecurityConfig:
 
     def test_security_config_defaults(self):
         """Test security configuration defaults."""
-        security_config = SecurityConfig()
-
-        # Test default values
-        assert security_config.jwt_algorithm == "HS256"
-        assert security_config.jwt_expire_minutes == 30
+        import os
+        # Clear environment variable for test isolation
+        original_value = os.environ.pop('JWT_EXPIRE_MINUTES', None)
+        try:
+            security_config = SecurityConfig()
+            # Test default values
+            assert security_config.jwt_algorithm == "HS256"
+            assert security_config.jwt_expire_minutes == 30
+        finally:
+            # Restore original value if it existed
+            if original_value is not None:
+                os.environ['JWT_EXPIRE_MINUTES'] = original_value
 
     def test_jwt_expire_validation(self):
         """Test JWT expiration validation."""

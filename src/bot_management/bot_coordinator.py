@@ -30,7 +30,7 @@ from src.utils.decorators import log_calls
 class BotCoordinator:
     """
     Inter-bot communication and coordination manager.
-    
+
     This class provides:
     - Shared signal distribution between bots
     - Position conflict detection and resolution
@@ -43,7 +43,7 @@ class BotCoordinator:
     def __init__(self, config: Config):
         """
         Initialize bot coordinator.
-        
+
         Args:
             config: Application configuration
         """
@@ -67,10 +67,14 @@ class BotCoordinator:
         self.exchange_usage: dict[str, dict[str, int]] = {}  # exchange -> metric -> count
 
         # Configuration
-        self.max_symbol_exposure = Decimal(str(config.bot_management.get("max_symbol_exposure", "100000")))
+        self.max_symbol_exposure = Decimal(
+            str(config.bot_management.get("max_symbol_exposure", "100000"))
+        )
         self.coordination_interval = config.bot_management.get("coordination_interval", 10)
         self.signal_retention_minutes = config.bot_management.get("signal_retention_minutes", 60)
-        self.arbitrage_detection_enabled = config.bot_management.get("arbitrage_detection_enabled", True)
+        self.arbitrage_detection_enabled = config.bot_management.get(
+            "arbitrage_detection_enabled", True
+        )
 
         # Performance tracking
         self.coordination_metrics = {
@@ -79,7 +83,7 @@ class BotCoordinator:
             "conflicts_resolved": 0,
             "arbitrage_opportunities_found": 0,
             "cross_bot_risk_checks": 0,
-            "last_coordination_time": None
+            "last_coordination_time": None,
         }
 
         self.logger.info("Bot coordinator initialized")
@@ -88,7 +92,7 @@ class BotCoordinator:
     async def start(self) -> None:
         """
         Start the bot coordinator.
-        
+
         Raises:
             ExecutionError: If startup fails
         """
@@ -114,7 +118,7 @@ class BotCoordinator:
     async def stop(self) -> None:
         """
         Stop the bot coordinator.
-        
+
         Raises:
             ExecutionError: If shutdown fails
         """
@@ -149,11 +153,11 @@ class BotCoordinator:
     async def register_bot(self, bot_id: str, bot_config: BotConfiguration) -> None:
         """
         Register a bot with the coordinator.
-        
+
         Args:
             bot_id: Bot identifier
             bot_config: Bot configuration
-            
+
         Raises:
             ValidationError: If registration is invalid
         """
@@ -173,7 +177,7 @@ class BotCoordinator:
                     self.exchange_usage[exchange] = {
                         "active_bots": 0,
                         "total_positions": 0,
-                        "api_calls_per_minute": 0
+                        "api_calls_per_minute": 0,
                     }
                 self.exchange_usage[exchange]["active_bots"] += 1
 
@@ -182,7 +186,7 @@ class BotCoordinator:
                 bot_id=bot_id,
                 bot_type=bot_config.bot_type.value,
                 exchanges=bot_config.exchanges,
-                symbols=bot_config.symbols
+                symbols=bot_config.symbols,
             )
 
         except Exception as e:
@@ -193,7 +197,7 @@ class BotCoordinator:
     async def unregister_bot(self, bot_id: str) -> None:
         """
         Unregister a bot from the coordinator.
-        
+
         Args:
             bot_id: Bot identifier
         """
@@ -229,26 +233,21 @@ class BotCoordinator:
 
     @log_calls
     async def report_position_change(
-        self,
-        bot_id: str,
-        symbol: str,
-        side: OrderSide,
-        quantity: Decimal,
-        price: Decimal
+        self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal, price: Decimal
     ) -> dict[str, Any]:
         """
         Report a position change from a bot for coordination.
-        
+
         Args:
             bot_id: Bot identifier
             symbol: Trading symbol
             side: Order side (buy/sell)
             quantity: Position quantity
             price: Position price
-            
+
         Returns:
             dict: Coordination response with recommendations
-            
+
         Raises:
             ValidationError: If report is invalid
         """
@@ -268,7 +267,7 @@ class BotCoordinator:
                 "quantity": quantity,
                 "price": price,
                 "timestamp": datetime.now(timezone.utc),
-                "value": quantity * price
+                "value": quantity * price,
             }
 
             # Store previous position for exposure calculation
@@ -289,7 +288,7 @@ class BotCoordinator:
                 symbol=symbol,
                 side=side.value,
                 quantity=float(quantity),
-                conflicts=len(coordination_response.get("conflicts", []))
+                conflicts=len(coordination_response.get("conflicts", [])),
             )
 
             return coordination_response
@@ -300,22 +299,19 @@ class BotCoordinator:
 
     @log_calls
     async def share_signal(
-        self,
-        bot_id: str,
-        signal_data: dict[str, Any],
-        target_bots: list[str] | None = None
+        self, bot_id: str, signal_data: dict[str, Any], target_bots: list[str] | None = None
     ) -> int:
         """
         Share a trading signal with other bots.
-        
+
         Args:
             bot_id: Source bot identifier
             signal_data: Signal data to share
             target_bots: Optional list of target bot IDs (None for all)
-            
+
         Returns:
             int: Number of bots the signal was shared with
-            
+
         Raises:
             ValidationError: If signal is invalid
         """
@@ -336,7 +332,8 @@ class BotCoordinator:
                 "signal_data": signal_data,
                 "target_bots": target_bots or list(self.registered_bots.keys()),
                 "created_at": datetime.now(timezone.utc),
-                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=self.signal_retention_minutes)
+                "expires_at": datetime.now(timezone.utc)
+                + timedelta(minutes=self.signal_retention_minutes),
             }
 
             # Add to shared signals
@@ -353,7 +350,7 @@ class BotCoordinator:
                 signal_id=signal_entry["signal_id"],
                 symbol=signal_data["symbol"],
                 direction=signal_data["direction"],
-                target_count=target_count
+                target_count=target_count,
             )
 
             return target_count
@@ -366,10 +363,10 @@ class BotCoordinator:
     async def get_shared_signals(self, bot_id: str) -> list[dict[str, Any]]:
         """
         Get shared signals for a specific bot.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             list: List of relevant shared signals
         """
@@ -391,13 +388,16 @@ class BotCoordinator:
 
                 # Check if bot is a target
                 if bot_id in signal["target_bots"]:
-                    relevant_signals.append({
-                        "signal_id": signal["signal_id"],
-                        "source_bot": signal["source_bot"],
-                        "signal_data": signal["signal_data"],
-                        "created_at": signal["created_at"].isoformat(),
-                        "age_minutes": (current_time - signal["created_at"]).total_seconds() / 60
-                    })
+                    relevant_signals.append(
+                        {
+                            "signal_id": signal["signal_id"],
+                            "source_bot": signal["source_bot"],
+                            "signal_data": signal["signal_data"],
+                            "created_at": signal["created_at"].isoformat(),
+                            "age_minutes": (current_time - signal["created_at"]).total_seconds()
+                            / 60,
+                        }
+                    )
 
             return relevant_signals
 
@@ -407,21 +407,17 @@ class BotCoordinator:
 
     @log_calls
     async def check_cross_bot_risk(
-        self,
-        bot_id: str,
-        symbol: str,
-        side: OrderSide,
-        quantity: Decimal
+        self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal
     ) -> dict[str, Any]:
         """
         Check cross-bot risk for a proposed order.
-        
+
         Args:
             bot_id: Bot identifier
             symbol: Trading symbol
             side: Order side
             quantity: Order quantity
-            
+
         Returns:
             dict: Risk assessment with recommendations
         """
@@ -433,7 +429,7 @@ class BotCoordinator:
                 "risk_level": "low",
                 "warnings": [],
                 "recommendations": [],
-                "max_safe_quantity": quantity
+                "max_safe_quantity": quantity,
             }
 
             # Check symbol exposure limits
@@ -446,11 +442,13 @@ class BotCoordinator:
                 risk_assessment["warnings"].append(
                     f"Proposed order would exceed max symbol exposure: {float(proposed_total)} > {float(self.max_symbol_exposure)}"
                 )
-                risk_assessment["max_safe_quantity"] = max(Decimal("0"), self.max_symbol_exposure - current_exposure)
+                risk_assessment["max_safe_quantity"] = max(
+                    Decimal("0"), self.max_symbol_exposure - current_exposure
+                )
 
             # Check for position concentration
             bot_symbol_positions = 0
-            for pos_key, position in self.bot_positions.get(bot_id, {}).items():
+            for _pos_key, position in self.bot_positions.get(bot_id, {}).items():
                 if position["symbol"] == symbol:
                     bot_symbol_positions += 1
 
@@ -466,16 +464,20 @@ class BotCoordinator:
                 if other_bot_id == bot_id:
                     continue
 
-                for pos_key, position in positions.items():
-                    if (position["symbol"] == symbol and
-                        position["side"] != side.value and
-                        position["quantity"] > quantity * Decimal("0.5")):  # Significant opposing position
+                for _pos_key, position in positions.items():
+                    if (
+                        position["symbol"] == symbol
+                        and position["side"] != side.value
+                        and position["quantity"] > quantity * Decimal("0.5")
+                    ):  # Significant opposing position
 
-                        conflicting_bots.append({
-                            "bot_id": other_bot_id,
-                            "side": position["side"],
-                            "quantity": float(position["quantity"])
-                        })
+                        conflicting_bots.append(
+                            {
+                                "bot_id": other_bot_id,
+                                "side": position["side"],
+                                "quantity": float(position["quantity"]),
+                            }
+                        )
 
             if conflicting_bots:
                 risk_assessment["risk_level"] = "medium"
@@ -487,7 +489,9 @@ class BotCoordinator:
             # Generate recommendations
             if risk_assessment["risk_level"] == "high":
                 risk_assessment["recommendations"].append("Consider reducing position size")
-                risk_assessment["recommendations"].append("Coordinate with other bots before executing")
+                risk_assessment["recommendations"].append(
+                    "Coordinate with other bots before executing"
+                )
             elif risk_assessment["risk_level"] == "medium":
                 risk_assessment["recommendations"].append("Monitor position closely")
                 risk_assessment["recommendations"].append("Consider exit strategy")
@@ -501,7 +505,7 @@ class BotCoordinator:
                 "risk_level": "unknown",
                 "warnings": [f"Risk check failed: {e}"],
                 "recommendations": ["Manual review required"],
-                "max_safe_quantity": Decimal("0")
+                "max_safe_quantity": Decimal("0"),
             }
 
     async def get_coordination_summary(self) -> dict[str, Any]:
@@ -513,30 +517,37 @@ class BotCoordinator:
                 total_exposures[symbol] = {
                     "buy_exposure": float(sides.get("buy", Decimal("0"))),
                     "sell_exposure": float(sides.get("sell", Decimal("0"))),
-                    "net_exposure": float(sides.get("buy", Decimal("0")) - sides.get("sell", Decimal("0")))
+                    "net_exposure": float(
+                        sides.get("buy", Decimal("0")) - sides.get("sell", Decimal("0"))
+                    ),
                 }
 
             # Get active signals count
             current_time = datetime.now(timezone.utc)
-            active_signals = len([
-                s for s in self.shared_signals
-                if current_time <= s["expires_at"]
-            ])
+            active_signals = len(
+                [s for s in self.shared_signals if current_time <= s["expires_at"]]
+            )
 
             return {
                 "coordination_status": {
                     "is_running": self.is_running,
                     "registered_bots": len(self.registered_bots),
-                    "active_positions": sum(len(positions) for positions in self.bot_positions.values()),
+                    "active_positions": sum(
+                        len(positions) for positions in self.bot_positions.values()
+                    ),
                     "active_signals": active_signals,
-                    "arbitrage_opportunities": len(self.arbitrage_opportunities)
+                    "arbitrage_opportunities": len(self.arbitrage_opportunities),
                 },
                 "symbol_exposures": total_exposures,
                 "exchange_usage": self.exchange_usage,
                 "coordination_metrics": {
                     **self.coordination_metrics,
-                    "last_coordination_time": self.coordination_metrics["last_coordination_time"].isoformat() if self.coordination_metrics["last_coordination_time"] else None
-                }
+                    "last_coordination_time": (
+                        self.coordination_metrics["last_coordination_time"].isoformat()
+                        if self.coordination_metrics["last_coordination_time"]
+                        else None
+                    ),
+                },
             }
 
         except Exception as e:
@@ -603,7 +614,7 @@ class BotCoordinator:
         symbol: str,
         position: dict[str, Any],
         previous_position: dict[str, Any] | None = None,
-        remove: bool = False
+        remove: bool = False,
     ) -> None:
         """Update symbol exposure tracking."""
         if symbol not in self.symbol_exposure:
@@ -626,22 +637,19 @@ class BotCoordinator:
 
         # Ensure non-negative values
         for side_key in ["buy", "sell"]:
-            self.symbol_exposure[symbol][side_key] = max(Decimal("0"), self.symbol_exposure[symbol][side_key])
+            self.symbol_exposure[symbol][side_key] = max(
+                Decimal("0"), self.symbol_exposure[symbol][side_key]
+            )
 
     async def _analyze_position_change(
-        self,
-        bot_id: str,
-        symbol: str,
-        side: OrderSide,
-        quantity: Decimal,
-        price: Decimal
+        self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal, price: Decimal
     ) -> dict[str, Any]:
         """Analyze a position change for conflicts and recommendations."""
         response = {
             "conflicts": [],
             "recommendations": [],
             "risk_level": "low",
-            "coordination_actions": []
+            "coordination_actions": [],
         }
 
         # Check for direct conflicts with other bots
@@ -650,24 +658,29 @@ class BotCoordinator:
             if other_bot_id == bot_id:
                 continue
 
-            for pos_key, position in positions.items():
-                if (position["symbol"] == symbol and
-                    position["side"] != side.value):
+            for _pos_key, position in positions.items():
+                if position["symbol"] == symbol and position["side"] != side.value:
 
                     # Calculate conflict severity
                     conflict_value = min(quantity * price, position["quantity"] * position["price"])
 
                     if conflict_value > Decimal("1000"):  # Significant conflict threshold
-                        conflicts.append({
-                            "conflicting_bot": other_bot_id,
-                            "conflict_side": position["side"],
-                            "conflict_value": float(conflict_value),
-                            "severity": "high" if conflict_value > Decimal("10000") else "medium"
-                        })
+                        conflicts.append(
+                            {
+                                "conflicting_bot": other_bot_id,
+                                "conflict_side": position["side"],
+                                "conflict_value": float(conflict_value),
+                                "severity": (
+                                    "high" if conflict_value > Decimal("10000") else "medium"
+                                ),
+                            }
+                        )
 
         if conflicts:
             response["conflicts"] = conflicts
-            response["risk_level"] = "high" if any(c["severity"] == "high" for c in conflicts) else "medium"
+            response["risk_level"] = (
+                "high" if any(c["severity"] == "high" for c in conflicts) else "medium"
+            )
             response["recommendations"].append("Coordinate with conflicting bots")
             self.coordination_metrics["conflicts_detected"] += 1
 
@@ -683,7 +696,8 @@ class BotCoordinator:
 
             # Clean up old opportunities
             self.arbitrage_opportunities = [
-                opp for opp in self.arbitrage_opportunities
+                opp
+                for opp in self.arbitrage_opportunities
                 if (current_time - opp["detected_at"]).total_seconds() < 300  # 5 minutes
             ]
 
@@ -703,8 +717,8 @@ class BotCoordinator:
             # Analyze all bot positions for conflicts
             symbols_analyzed = set()
 
-            for bot_id, positions in self.bot_positions.items():
-                for pos_key, position in positions.items():
+            for _bot_id, positions in self.bot_positions.items():
+                for _pos_key, position in positions.items():
                     symbol = position["symbol"]
                     if symbol in symbols_analyzed:
                         continue
@@ -713,8 +727,8 @@ class BotCoordinator:
                     buy_exposure = Decimal("0")
                     sell_exposure = Decimal("0")
 
-                    for check_bot_id, check_positions in self.bot_positions.items():
-                        for check_pos_key, check_position in check_positions.items():
+                    for _check_bot_id, check_positions in self.bot_positions.items():
+                        for _check_pos_key, check_position in check_positions.items():
                             if check_position["symbol"] == symbol:
                                 if check_position["side"] == "buy":
                                     buy_exposure += check_position["quantity"]
@@ -723,14 +737,16 @@ class BotCoordinator:
 
                     # Check for excessive opposing positions
                     if buy_exposure > 0 and sell_exposure > 0:
-                        conflict_ratio = min(buy_exposure, sell_exposure) / max(buy_exposure, sell_exposure)
+                        conflict_ratio = min(buy_exposure, sell_exposure) / max(
+                            buy_exposure, sell_exposure
+                        )
                         if conflict_ratio > 0.5:  # Significant opposing positions
                             self.logger.warning(
                                 "Position conflict detected",
                                 symbol=symbol,
                                 buy_exposure=float(buy_exposure),
                                 sell_exposure=float(sell_exposure),
-                                conflict_ratio=float(conflict_ratio)
+                                conflict_ratio=float(conflict_ratio),
                             )
                             conflicts_resolved += 1
 
@@ -748,8 +764,7 @@ class BotCoordinator:
 
         initial_count = len(self.shared_signals)
         self.shared_signals = [
-            signal for signal in self.shared_signals
-            if current_time <= signal["expires_at"]
+            signal for signal in self.shared_signals if current_time <= signal["expires_at"]
         ]
 
         cleaned_count = initial_count - len(self.shared_signals)
@@ -775,10 +790,7 @@ class BotCoordinator:
         # For now, just update signal metrics
         current_time = datetime.now(timezone.utc)
 
-        active_signals = [
-            s for s in self.shared_signals
-            if current_time <= s["expires_at"]
-        ]
+        active_signals = [s for s in self.shared_signals if current_time <= s["expires_at"]]
 
         # Group by symbol for correlation analysis
         symbol_signals = {}
@@ -795,7 +807,7 @@ class BotCoordinator:
                     "Multiple signals detected for symbol",
                     symbol=symbol,
                     signal_count=len(signals),
-                    sources=[s["source_bot"] for s in signals]
+                    sources=[s["source_bot"] for s in signals],
                 )
 
     async def _process_priority_signals(self) -> None:
@@ -803,17 +815,17 @@ class BotCoordinator:
         current_time = datetime.now(timezone.utc)
 
         priority_signals = [
-            s for s in self.shared_signals
-            if (current_time <= s["expires_at"] and
-                s["signal_data"].get("confidence", 0) > 0.8 and
-                s["signal_data"].get("priority", "normal") == "high")
+            s
+            for s in self.shared_signals
+            if (
+                current_time <= s["expires_at"]
+                and s["signal_data"].get("confidence", 0) > 0.8
+                and s["signal_data"].get("priority", "normal") == "high"
+            )
         ]
 
         if priority_signals:
-            self.logger.debug(
-                "Processing priority signals",
-                count=len(priority_signals)
-            )
+            self.logger.debug("Processing priority signals", count=len(priority_signals))
 
     async def _update_signal_statistics(self) -> None:
         """Update signal distribution statistics."""
@@ -828,14 +840,15 @@ class BotCoordinator:
 
         if signal_sources:
             self.logger.debug(
-                "Signal distribution statistics",
-                active_signals_by_source=signal_sources
+                "Signal distribution statistics", active_signals_by_source=signal_sources
             )
 
     # TODO: Methods below are stub implementations for test compatibility
     # These should be fully implemented in future versions
 
-    async def update_bot_position(self, bot_id: str, symbol: str, position_data: dict[str, Any]) -> None:
+    async def update_bot_position(
+        self, bot_id: str, symbol: str, position_data: dict[str, Any]
+    ) -> None:
         """Update bot position data (stub implementation)."""
         if bot_id not in self.bot_positions:
             self.bot_positions[bot_id] = {}
@@ -852,25 +865,23 @@ class BotCoordinator:
         """Check for position conflicts on a symbol (stub implementation)."""
         conflicts = []
         positions = []
-        
+
         for bot_id, bot_positions in self.bot_positions.items():
             if symbol in bot_positions:
-                positions.append({
-                    "bot_id": bot_id,
-                    "position": bot_positions[symbol]
-                })
-        
+                positions.append({"bot_id": bot_id, "position": bot_positions[symbol]})
+
         # Simple conflict detection - opposing sides
         for i, pos1 in enumerate(positions):
-            for pos2 in positions[i+1:]:
-                if (pos1["position"].get("side") == "buy" and 
-                    pos2["position"].get("side") == "sell"):
-                    conflicts.append({
-                        "type": "opposing_positions",
-                        "bots": [pos1["bot_id"], pos2["bot_id"]],
-                        "symbol": symbol
-                    })
-        
+            for pos2 in positions[i + 1 :]:
+                if pos1["position"].get("side") == "buy" and pos2["position"].get("side") == "sell":
+                    conflicts.append(
+                        {
+                            "type": "opposing_positions",
+                            "bots": [pos1["bot_id"], pos2["bot_id"]],
+                            "symbol": symbol,
+                        }
+                    )
+
         return conflicts
 
     async def coordinate_bot_actions(self, action_data: dict[str, Any]) -> dict[str, Any]:
@@ -878,7 +889,7 @@ class BotCoordinator:
         return {
             "status": "coordinated",
             "affected_bots": list(self.registered_bots.keys()),
-            "action_type": action_data.get("type", "unknown")
+            "action_type": action_data.get("type", "unknown"),
         }
 
     async def analyze_bot_interactions(self) -> dict[str, Any]:
@@ -886,22 +897,19 @@ class BotCoordinator:
         return {
             "total_interactions": len(self.shared_signals),
             "active_bots": len(self.registered_bots),
-            "signal_diversity": len(set(signal.get("signal_data", {}).get("symbol") 
-                                      for signal in self.shared_signals))
+            "signal_diversity": len(
+                set(signal.get("signal_data", {}).get("symbol") for signal in self.shared_signals)
+            ),
         }
 
     async def optimize_coordination(self) -> dict[str, Any]:
         """Optimize coordination parameters (stub implementation)."""
-        return {
-            "optimizations_applied": 0,
-            "efficiency_gain": 0.0,
-            "recommendations": []
-        }
+        return {"optimizations_applied": 0, "efficiency_gain": 0.0, "recommendations": []}
 
     async def emergency_coordination(self, emergency_type: str, action: str) -> None:
         """Handle emergency coordination (stub implementation)."""
         self.logger.warning(f"Emergency coordination triggered: {emergency_type} -> {action}")
-        
+
         # Add emergency signal to all bots
         emergency_signal = {
             "signal_id": str(uuid.uuid4()),
@@ -912,10 +920,10 @@ class BotCoordinator:
                 "confidence": 1.0,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "emergency_type": emergency_type,
-                "action": action
+                "action": action,
             },
             "target_bots": list(self.registered_bots.keys()),
             "created_at": datetime.now(timezone.utc),
-            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5)
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
         }
         self.shared_signals.append(emergency_signal)

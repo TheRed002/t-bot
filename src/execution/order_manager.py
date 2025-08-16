@@ -21,10 +21,6 @@ from uuid import uuid4
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
 from src.core.logging import get_logger
-from src.utils.decimal_utils import (
-    to_decimal, format_decimal, safe_divide,
-    ZERO, ONE, round_quantity, round_price
-)
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -39,6 +35,9 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Import idempotency manager
 from src.execution.idempotency_manager import OrderIdempotencyManager
+from src.utils.decimal_utils import (
+    format_decimal,
+)
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import log_calls, time_execution
@@ -55,7 +54,7 @@ class OrderRouteInfo:
         alternative_exchanges: list[str],
         routing_reason: str,
         expected_cost_bps: Decimal,
-        expected_execution_time_seconds: float
+        expected_execution_time_seconds: float,
     ):
         self.selected_exchange = selected_exchange
         self.alternative_exchanges = alternative_exchanges
@@ -74,7 +73,7 @@ class OrderModificationRequest:
         new_quantity: Decimal | None = None,
         new_price: Decimal | None = None,
         new_time_in_force: str | None = None,
-        modification_reason: str = "manual"
+        modification_reason: str = "manual",
     ):
         self.order_id = order_id
         self.new_quantity = new_quantity
@@ -92,7 +91,7 @@ class OrderAggregationRule:
         symbol: str,
         aggregation_window_seconds: int,
         min_order_count: int,
-        netting_enabled: bool = True
+        netting_enabled: bool = True,
     ):
         self.symbol = symbol
         self.aggregation_window_seconds = aggregation_window_seconds
@@ -112,7 +111,7 @@ class WebSocketOrderUpdate:
         average_price: Decimal | None,
         timestamp: datetime,
         exchange: str,
-        raw_data: dict[str, Any]
+        raw_data: dict[str, Any],
     ):
         self.order_id = order_id
         self.status = status
@@ -132,7 +131,7 @@ class OrderLifecycleEvent:
         event_type: str,
         order_id: str,
         timestamp: datetime,
-        data: dict[str, Any] | None = None
+        data: dict[str, Any] | None = None,
     ):
         self.event_type = event_type
         self.order_id = order_id
@@ -188,13 +187,15 @@ class ManagedOrder:
     def add_audit_entry(self, action: str, details: dict[str, Any]) -> None:
         """Add an entry to the audit trail with thread safety."""
         with self._lock:
-            self.audit_trail.append({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "action": action,
-                "details": details,
-                "order_id": self.order_id,
-                "execution_id": self.execution_id
-            })
+            self.audit_trail.append(
+                {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "action": action,
+                    "details": details,
+                    "order_id": self.order_id,
+                    "execution_id": self.execution_id,
+                }
+            )
 
     def update_status(self, new_status: OrderStatus, details: dict[str, Any] | None = None) -> None:
         """Update order status with thread safety."""
@@ -202,11 +203,14 @@ class ManagedOrder:
             old_status = self.status
             self.status = new_status
             self.updated_at = datetime.now(timezone.utc)
-            self.add_audit_entry("status_change", {
-                "old_status": old_status.value,
-                "new_status": new_status.value,
-                "details": details or {}
-            })
+            self.add_audit_entry(
+                "status_change",
+                {
+                    "old_status": old_status.value,
+                    "new_status": new_status.value,
+                    "details": details or {},
+                },
+            )
 
 
 class OrderManager:
@@ -241,7 +245,7 @@ class OrderManager:
         # Order tracking with thread safety
         self._order_lock = RLock()
         self.managed_orders: dict[str, ManagedOrder] = {}  # order_id -> ManagedOrder
-        self.execution_orders: dict[str, list[str]] = {}   # execution_id -> [order_ids]
+        self.execution_orders: dict[str, list[str]] = {}  # execution_id -> [order_ids]
 
         # P-020 Enhanced tracking
         self.symbol_orders: dict[str, list[str]] = defaultdict(list)  # symbol -> [order_ids]
@@ -252,8 +256,8 @@ class OrderManager:
 
         # Management configuration
         self.default_order_timeout_minutes = 60  # 1 hour default timeout
-        self.status_check_interval_seconds = 5   # Check status every 5 seconds
-        self.max_concurrent_orders = 100         # Maximum concurrent orders
+        self.status_check_interval_seconds = 5  # Check status every 5 seconds
+        self.max_concurrent_orders = 100  # Maximum concurrent orders
         self.order_history_retention_hours = 24  # Keep order history for 24 hours
 
         # P-020 Enhanced configuration
@@ -267,9 +271,9 @@ class OrderManager:
         # Monitoring and alerting
         self.monitoring_tasks: dict[str, asyncio.Task] = {}
         self.alert_thresholds = {
-            "high_rejection_rate": 0.1,    # 10% rejection rate
-            "slow_fill_rate": 0.5,         # 50% of orders taking > 5 minutes
-            "high_cancel_rate": 0.15       # 15% cancellation rate
+            "high_rejection_rate": 0.1,  # 10% rejection rate
+            "slow_fill_rate": 0.5,  # 50% of orders taking > 5 minutes
+            "high_cancel_rate": 0.15,  # 15% cancellation rate
         }
 
         # Performance tracking
@@ -281,7 +285,7 @@ class OrderManager:
             "partially_filled_orders": 0,
             "average_fill_time_seconds": 0.0,
             "total_volume": Decimal("0"),
-            "total_fees": Decimal("0")
+            "total_fees": Decimal("0"),
         }
 
         # Cleanup task
@@ -307,6 +311,7 @@ class OrderManager:
 
     def _start_cleanup_task(self) -> None:
         """Start the periodic cleanup task."""
+
         async def cleanup_periodically():
             while True:
                 try:
@@ -326,7 +331,7 @@ class OrderManager:
         exchange,
         execution_id: str,
         timeout_minutes: int | None = None,
-        callbacks: dict[str, Callable] | None = None
+        callbacks: dict[str, Callable] | None = None,
     ) -> ManagedOrder:
         """
         Submit an order with comprehensive lifecycle management.
@@ -358,13 +363,15 @@ class OrderManager:
                 raise ExecutionError("Maximum concurrent orders reached")
 
             # Get or create idempotency key
-            client_order_id, is_duplicate = await self.idempotency_manager.get_or_create_idempotency_key(
-                order_request,
-                metadata={
-                    "execution_id": execution_id,
-                    "exchange": exchange.exchange_name,
-                    "created_by": "order_manager"
-                }
+            client_order_id, is_duplicate = (
+                await self.idempotency_manager.get_or_create_idempotency_key(
+                    order_request,
+                    metadata={
+                        "execution_id": execution_id,
+                        "exchange": exchange.exchange_name,
+                        "created_by": "order_manager",
+                    },
+                )
             )
 
             # Set client_order_id on the order request
@@ -372,7 +379,9 @@ class OrderManager:
 
             # If this is a duplicate, check if we should allow retry
             if is_duplicate:
-                can_retry, retry_count = await self.idempotency_manager.can_retry_order(client_order_id)
+                can_retry, retry_count = await self.idempotency_manager.can_retry_order(
+                    client_order_id
+                )
 
                 if not can_retry:
                     raise ExecutionError(
@@ -383,7 +392,7 @@ class OrderManager:
                 self.logger.warning(
                     f"Retrying duplicate order: {client_order_id} (attempt {retry_count + 1})",
                     execution_id=execution_id,
-                    retry_count=retry_count
+                    retry_count=retry_count,
                 )
 
             # Create managed order
@@ -403,7 +412,7 @@ class OrderManager:
                 symbol=order_request.symbol,
                 quantity=format_decimal(order_request.quantity),
                 side=order_request.side.value,
-                order_type=order_request.order_type.value
+                order_type=order_request.order_type.value,
             )
 
             # Submit to exchange
@@ -429,9 +438,9 @@ class OrderManager:
                     "order_response": {
                         "id": order_response.id,
                         "status": order_response.status,
-                        "timestamp": order_response.timestamp.isoformat()
-                    }
-                }
+                        "timestamp": order_response.timestamp.isoformat(),
+                    },
+                },
             )
 
             # Start monitoring
@@ -444,7 +453,7 @@ class OrderManager:
                 "Order submitted successfully",
                 order_id=order_response.id,
                 execution_id=execution_id,
-                client_order_id=client_order_id
+                client_order_id=client_order_id,
             )
 
             return managed_order
@@ -479,7 +488,7 @@ class OrderManager:
         preferred_exchanges: list[str] | None = None,
         market_data: MarketData | None = None,
         timeout_minutes: int | None = None,
-        callbacks: dict[str, Callable] | None = None
+        callbacks: dict[str, Callable] | None = None,
     ) -> ManagedOrder:
         """
         Submit order with intelligent routing across exchanges.
@@ -514,11 +523,14 @@ class OrderManager:
 
             # Attach routing information
             managed_order.route_info = route_info
-            managed_order.add_audit_entry("order_routed", {
-                "selected_exchange": route_info.selected_exchange,
-                "routing_reason": route_info.routing_reason,
-                "expected_cost_bps": format_decimal(route_info.expected_cost_bps)
-            })
+            managed_order.add_audit_entry(
+                "order_routed",
+                {
+                    "selected_exchange": route_info.selected_exchange,
+                    "routing_reason": route_info.routing_reason,
+                    "expected_cost_bps": format_decimal(route_info.expected_cost_bps),
+                },
+            )
 
             # Track routing decision
             if managed_order.order_id:
@@ -532,7 +544,7 @@ class OrderManager:
                 "Order submitted with routing",
                 order_id=managed_order.order_id,
                 exchange=route_info.selected_exchange,
-                routing_reason=route_info.routing_reason
+                routing_reason=route_info.routing_reason,
             )
 
             return managed_order
@@ -542,10 +554,7 @@ class OrderManager:
             raise ExecutionError(f"Order submission with routing failed: {e}") from e
 
     @log_calls
-    async def modify_order(
-        self,
-        modification_request: OrderModificationRequest
-    ) -> bool:
+    async def modify_order(self, modification_request: OrderModificationRequest) -> bool:
         """
         Modify an existing order.
 
@@ -588,12 +597,25 @@ class OrderManager:
                     managed_order.order_request.price = modification_request.new_price
 
                 # Add audit entry
-                managed_order.add_audit_entry("order_modified", {
-                    "old_quantity": float(old_quantity) if modification_request.new_quantity else None,
-                    "new_quantity": float(modification_request.new_quantity) if modification_request.new_quantity else None,
-                    "new_price": float(modification_request.new_price) if modification_request.new_price else None,
-                    "reason": modification_request.modification_reason
-                })
+                managed_order.add_audit_entry(
+                    "order_modified",
+                    {
+                        "old_quantity": (
+                            float(old_quantity) if modification_request.new_quantity else None
+                        ),
+                        "new_quantity": (
+                            float(modification_request.new_quantity)
+                            if modification_request.new_quantity
+                            else None
+                        ),
+                        "new_price": (
+                            float(modification_request.new_price)
+                            if modification_request.new_price
+                            else None
+                        ),
+                        "reason": modification_request.modification_reason,
+                    },
+                )
 
                 managed_order.updated_at = datetime.now(timezone.utc)
 
@@ -611,9 +633,7 @@ class OrderManager:
 
     @log_calls
     async def aggregate_orders(
-        self,
-        symbol: str,
-        force_aggregation: bool = False
+        self, symbol: str, force_aggregation: bool = False
     ) -> ManagedOrder | None:
         """
         Aggregate pending orders for a symbol based on netting rules.
@@ -633,12 +653,15 @@ class OrderManager:
             with self._order_lock:
                 # Get pending orders for the symbol
                 pending_order_ids = [
-                    oid for oid in self.symbol_orders[symbol]
-                    if oid in self.managed_orders and
-                    self.managed_orders[oid].status == OrderStatus.PENDING
+                    oid
+                    for oid in self.symbol_orders[symbol]
+                    if oid in self.managed_orders
+                    and self.managed_orders[oid].status == OrderStatus.PENDING
                 ]
 
-                if len(pending_order_ids) < (aggregation_rule.min_order_count if aggregation_rule else 2):
+                if len(pending_order_ids) < (
+                    aggregation_rule.min_order_count if aggregation_rule else 2
+                ):
                     return None
 
                 # Calculate net position
@@ -675,7 +698,7 @@ class OrderManager:
                         quantity=abs(net_quantity),
                         price=template_order.order_request.price,
                         time_in_force=template_order.order_request.time_in_force,
-                        client_order_id=f"AGG_{uuid4().hex[:8]}"
+                        client_order_id=f"AGG_{uuid4().hex[:8]}",
                     )
 
                     # Create aggregated managed order
@@ -687,16 +710,22 @@ class OrderManager:
                     for oid in pending_order_ids:
                         child_order = self.managed_orders[oid]
                         child_order.parent_order_id = aggregated_order.execution_id
-                        child_order.add_audit_entry("aggregated", {
-                            "parent_execution_id": aggregated_order.execution_id,
-                            "net_quantity": float(net_quantity)
-                        })
+                        child_order.add_audit_entry(
+                            "aggregated",
+                            {
+                                "parent_execution_id": aggregated_order.execution_id,
+                                "net_quantity": float(net_quantity),
+                            },
+                        )
 
-                    aggregated_order.add_audit_entry("order_created_from_aggregation", {
-                        "child_order_count": len(pending_order_ids),
-                        "net_quantity": float(net_quantity),
-                        "symbol": symbol
-                    })
+                    aggregated_order.add_audit_entry(
+                        "order_created_from_aggregation",
+                        {
+                            "child_order_count": len(pending_order_ids),
+                            "net_quantity": float(net_quantity),
+                            "symbol": symbol,
+                        },
+                    )
 
                     self.logger.info(
                         f"Orders aggregated for {symbol}: {len(pending_order_ids)} orders -> net {net_quantity}"
@@ -724,7 +753,7 @@ class OrderManager:
                     self.websocket_connections[exchange] = {
                         "status": "connected",
                         "last_heartbeat": datetime.now(timezone.utc),
-                        "subscriptions": []
+                        "subscriptions": [],
                     }
 
                     # Start WebSocket message handler
@@ -754,10 +783,7 @@ class OrderManager:
         except Exception as e:
             self.logger.error(f"WebSocket handler error for {exchange}: {e}")
 
-    async def _process_websocket_order_update(
-        self,
-        update: WebSocketOrderUpdate
-    ) -> None:
+    async def _process_websocket_order_update(self, update: WebSocketOrderUpdate) -> None:
         """Process a WebSocket order update."""
         try:
             with self._order_lock:
@@ -768,12 +794,15 @@ class OrderManager:
                 old_status = managed_order.status
 
                 # Update order with WebSocket data
-                managed_order.update_status(update.status, {
-                    "source": "websocket",
-                    "exchange": update.exchange,
-                    "filled_quantity": float(update.filled_quantity),
-                    "remaining_quantity": float(update.remaining_quantity)
-                })
+                managed_order.update_status(
+                    update.status,
+                    {
+                        "source": "websocket",
+                        "exchange": update.exchange,
+                        "filled_quantity": float(update.filled_quantity),
+                        "remaining_quantity": float(update.remaining_quantity),
+                    },
+                )
 
                 managed_order.filled_quantity = update.filled_quantity
                 managed_order.remaining_quantity = update.remaining_quantity
@@ -796,7 +825,7 @@ class OrderManager:
         order_request: OrderRequest,
         exchange_factory,
         preferred_exchanges: list[str] | None = None,
-        market_data: MarketData | None = None
+        market_data: MarketData | None = None,
     ) -> OrderRouteInfo:
         """Select optimal exchange for order execution."""
         try:
@@ -834,7 +863,7 @@ class OrderManager:
                 alternative_exchanges=alternative_exchanges,
                 routing_reason=routing_reason,
                 expected_cost_bps=expected_cost_bps,
-                expected_execution_time_seconds=expected_time
+                expected_execution_time_seconds=expected_time,
             )
 
         except Exception as e:
@@ -845,11 +874,12 @@ class OrderManager:
                 alternative_exchanges=[],
                 routing_reason="error_fallback",
                 expected_cost_bps=Decimal("25"),
-                expected_execution_time_seconds=60.0
+                expected_execution_time_seconds=60.0,
             )
 
     async def _start_order_monitoring(self, managed_order: ManagedOrder, exchange) -> None:
         """Start monitoring an order's lifecycle."""
+
         async def monitor_order():
             try:
                 order_id = managed_order.order_id
@@ -875,7 +905,9 @@ class OrderManager:
                         break
 
                     # Check status periodically
-                    if (current_time - last_status_check).total_seconds() >= self.status_check_interval_seconds:
+                    if (
+                        current_time - last_status_check
+                    ).total_seconds() >= self.status_check_interval_seconds:
                         try:
                             await self._check_order_status(managed_order, exchange)
                             last_status_check = current_time
@@ -885,7 +917,7 @@ class OrderManager:
                                 OrderStatus.FILLED,
                                 OrderStatus.CANCELLED,
                                 OrderStatus.REJECTED,
-                                OrderStatus.EXPIRED
+                                OrderStatus.EXPIRED,
                             ]:
                                 break
 
@@ -928,10 +960,7 @@ class OrderManager:
                 await self._add_order_event(
                     managed_order,
                     "status_changed",
-                    {
-                        "old_status": old_status.value,
-                        "new_status": current_status.value
-                    }
+                    {"old_status": old_status.value, "new_status": current_status.value},
                 )
 
                 # Handle specific status changes
@@ -941,10 +970,7 @@ class OrderManager:
             self.logger.warning(f"Status check failed: {e}")
 
     async def _handle_status_change(
-        self,
-        managed_order: ManagedOrder,
-        old_status: OrderStatus,
-        new_status: OrderStatus
+        self, managed_order: ManagedOrder, old_status: OrderStatus, new_status: OrderStatus
     ) -> None:
         """Handle order status changes."""
         try:
@@ -953,14 +979,17 @@ class OrderManager:
                 managed_order.filled_quantity = managed_order.order_request.quantity
                 managed_order.remaining_quantity = Decimal("0")
 
-                await self._add_order_event(managed_order, "order_filled", {
-                    "filled_quantity": float(managed_order.filled_quantity)
-                })
+                await self._add_order_event(
+                    managed_order,
+                    "order_filled",
+                    {"filled_quantity": float(managed_order.filled_quantity)},
+                )
 
                 # Mark idempotency key as completed
                 if managed_order.order_request.client_order_id and managed_order.order_id:
                     # Create a minimal order response for idempotency tracking
                     from src.core.types import OrderResponse
+
                     order_response = OrderResponse(
                         id=managed_order.order_id,
                         client_order_id=managed_order.order_request.client_order_id,
@@ -971,11 +1000,10 @@ class OrderManager:
                         price=managed_order.order_request.price,
                         filled_quantity=managed_order.filled_quantity,
                         status=new_status.value,
-                        timestamp=datetime.now(timezone.utc)
+                        timestamp=datetime.now(timezone.utc),
                     )
                     await self.idempotency_manager.mark_order_completed(
-                        managed_order.order_request.client_order_id,
-                        order_response
+                        managed_order.order_request.client_order_id, order_response
                     )
 
                 # Update statistics
@@ -984,7 +1012,9 @@ class OrderManager:
 
                 # Calculate fill time
                 if managed_order.created_at:
-                    fill_time = (datetime.now(timezone.utc) - managed_order.created_at).total_seconds()
+                    fill_time = (
+                        datetime.now(timezone.utc) - managed_order.created_at
+                    ).total_seconds()
                     await self._update_average_fill_time(fill_time)
 
                 # Call completion callback
@@ -1002,8 +1032,7 @@ class OrderManager:
                 # Mark idempotency key as failed for cancelled orders
                 if managed_order.order_request.client_order_id:
                     await self.idempotency_manager.mark_order_failed(
-                        managed_order.order_request.client_order_id,
-                        "Order cancelled"
+                        managed_order.order_request.client_order_id, "Order cancelled"
                     )
 
                 self.order_statistics["cancelled_orders"] += 1
@@ -1017,14 +1046,15 @@ class OrderManager:
                 # Mark idempotency key as failed for rejected orders
                 if managed_order.order_request.client_order_id:
                     await self.idempotency_manager.mark_order_failed(
-                        managed_order.order_request.client_order_id,
-                        "Order rejected by exchange"
+                        managed_order.order_request.client_order_id, "Order rejected by exchange"
                     )
 
                 self.order_statistics["rejected_orders"] += 1
 
                 if managed_order.on_error_callback:
-                    await managed_order.on_error_callback(managed_order, "Order rejected by exchange")
+                    await managed_order.on_error_callback(
+                        managed_order, "Order rejected by exchange"
+                    )
 
         except Exception as e:
             self.logger.error(f"Status change handling failed: {e}")
@@ -1044,7 +1074,10 @@ class OrderManager:
             # Calculate average fill price
             if managed_order.average_fill_price:
                 # Weighted average
-                total_value = (managed_order.average_fill_price * (managed_order.filled_quantity - fill_quantity)) + (fill_price * fill_quantity)
+                total_value = (
+                    managed_order.average_fill_price
+                    * (managed_order.filled_quantity - fill_quantity)
+                ) + (fill_price * fill_quantity)
                 managed_order.average_fill_price = total_value / managed_order.filled_quantity
             else:
                 managed_order.average_fill_price = fill_price
@@ -1055,7 +1088,7 @@ class OrderManager:
                 "quantity": fill_quantity,
                 "price": fill_price,
                 "cumulative_quantity": managed_order.filled_quantity,
-                "remaining_quantity": managed_order.remaining_quantity
+                "remaining_quantity": managed_order.remaining_quantity,
             }
             managed_order.fills.append(fill_record)
 
@@ -1066,8 +1099,8 @@ class OrderManager:
                     "fill_quantity": float(fill_quantity),
                     "fill_price": float(fill_price),
                     "cumulative_filled": float(managed_order.filled_quantity),
-                    "remaining": float(managed_order.remaining_quantity)
-                }
+                    "remaining": float(managed_order.remaining_quantity),
+                },
             )
 
             # Update statistics
@@ -1084,17 +1117,14 @@ class OrderManager:
             self.logger.error(f"Partial fill handling failed: {e}")
 
     async def _add_order_event(
-        self,
-        managed_order: ManagedOrder,
-        event_type: str,
-        data: dict[str, Any]
+        self, managed_order: ManagedOrder, event_type: str, data: dict[str, Any]
     ) -> None:
         """Add an event to the order's lifecycle history."""
         event = OrderLifecycleEvent(
             event_type=event_type,
             order_id=managed_order.order_id or "unknown",
             timestamp=datetime.now(timezone.utc),
-            data=data
+            data=data,
         )
         managed_order.events.append(event)
         managed_order.updated_at = event.timestamp
@@ -1103,7 +1133,7 @@ class OrderManager:
             "Order event added",
             order_id=managed_order.order_id,
             event_type=event_type,
-            execution_id=managed_order.execution_id
+            execution_id=managed_order.execution_id,
         )
 
     @log_calls
@@ -1125,15 +1155,15 @@ class OrderManager:
 
             managed_order = self.managed_orders[order_id]
 
-            if managed_order.status in [OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED]:
+            if managed_order.status in [
+                OrderStatus.FILLED,
+                OrderStatus.CANCELLED,
+                OrderStatus.REJECTED,
+            ]:
                 self.logger.warning(f"Cannot cancel order in status: {managed_order.status.value}")
                 return False
 
-            await self._add_order_event(
-                managed_order,
-                "cancellation_requested",
-                {"reason": reason}
-            )
+            await self._add_order_event(managed_order, "cancellation_requested", {"reason": reason})
 
             # Note: In a real implementation, this would call exchange.cancel_order()
             # For now, simulate cancellation
@@ -1178,7 +1208,9 @@ class OrderManager:
             else:
                 # Running average
                 current_avg = self.order_statistics["average_fill_time_seconds"]
-                new_avg = ((current_avg * (total_completed - 1)) + fill_time_seconds) / total_completed
+                new_avg = (
+                    (current_avg * (total_completed - 1)) + fill_time_seconds
+                ) / total_completed
                 self.order_statistics["average_fill_time_seconds"] = new_avg
 
         except Exception as e:
@@ -1187,13 +1219,23 @@ class OrderManager:
     async def _cleanup_old_orders(self) -> None:
         """Clean up old completed orders to prevent memory growth."""
         try:
-            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=self.order_history_retention_hours)
+            cutoff_time = datetime.now(timezone.utc) - timedelta(
+                hours=self.order_history_retention_hours
+            )
             orders_to_remove = []
 
             for order_id, managed_order in self.managed_orders.items():
                 # Remove old completed orders
-                if (managed_order.status in [OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.EXPIRED] and
-                    managed_order.updated_at < cutoff_time):
+                if (
+                    managed_order.status
+                    in [
+                        OrderStatus.FILLED,
+                        OrderStatus.CANCELLED,
+                        OrderStatus.REJECTED,
+                        OrderStatus.EXPIRED,
+                    ]
+                    and managed_order.updated_at < cutoff_time
+                ):
                     orders_to_remove.append(order_id)
 
             # Remove orders
@@ -1240,16 +1282,15 @@ class OrderManager:
 
                 # Add lifecycle events to audit trail
                 for event in managed_order.events:
-                    audit_trail.append({
-                        "timestamp": event.timestamp.isoformat(),
-                        "action": "lifecycle_event",
-                        "details": {
-                            "event_type": event.event_type,
-                            "data": event.data
-                        },
-                        "order_id": order_id,
-                        "execution_id": managed_order.execution_id
-                    })
+                    audit_trail.append(
+                        {
+                            "timestamp": event.timestamp.isoformat(),
+                            "action": "lifecycle_event",
+                            "details": {"event_type": event.event_type, "data": event.data},
+                            "order_id": order_id,
+                            "execution_id": managed_order.execution_id,
+                        }
+                    )
 
                 # Sort by timestamp
                 audit_trail.sort(key=lambda x: x["timestamp"])
@@ -1266,7 +1307,7 @@ class OrderManager:
         symbol: str,
         aggregation_window_seconds: int,
         min_order_count: int,
-        netting_enabled: bool = True
+        netting_enabled: bool = True,
     ) -> None:
         """
         Set order aggregation rule for a symbol.
@@ -1281,11 +1322,13 @@ class OrderManager:
             symbol=symbol,
             aggregation_window_seconds=aggregation_window_seconds,
             min_order_count=min_order_count,
-            netting_enabled=netting_enabled
+            netting_enabled=netting_enabled,
         )
 
         self.order_aggregation_rules[symbol] = rule
-        self.logger.info(f"Aggregation rule set for {symbol}: {min_order_count} orders, {aggregation_window_seconds}s window")
+        self.logger.info(
+            f"Aggregation rule set for {symbol}: {min_order_count} orders, {aggregation_window_seconds}s window"
+        )
 
     @log_calls
     async def get_orders_by_symbol(self, symbol: str) -> list[ManagedOrder]:
@@ -1300,11 +1343,7 @@ class OrderManager:
         """
         with self._order_lock:
             order_ids = self.symbol_orders.get(symbol, [])
-            return [
-                self.managed_orders[oid]
-                for oid in order_ids
-                if oid in self.managed_orders
-            ]
+            return [self.managed_orders[oid] for oid in order_ids if oid in self.managed_orders]
 
     @log_calls
     async def get_orders_by_status(self, status: OrderStatus) -> list[ManagedOrder]:
@@ -1318,10 +1357,7 @@ class OrderManager:
             List[ManagedOrder]: Orders with the specified status
         """
         with self._order_lock:
-            return [
-                order for order in self.managed_orders.values()
-                if order.status == status
-            ]
+            return [order for order in self.managed_orders.values() if order.status == status]
 
     @log_calls
     async def get_routing_statistics(self) -> dict[str, Any]:
@@ -1357,7 +1393,7 @@ class OrderManager:
                 "websocket_connections": {
                     exchange: info["status"]
                     for exchange, info in self.websocket_connections.items()
-                }
+                },
             }
 
         except Exception as e:
@@ -1380,7 +1416,8 @@ class OrderManager:
                     pending_orders = [
                         self.managed_orders[oid]
                         for oid in order_ids
-                        if oid in self.managed_orders and self.managed_orders[oid].status == OrderStatus.PENDING
+                        if oid in self.managed_orders
+                        and self.managed_orders[oid].status == OrderStatus.PENDING
                     ]
 
                     if len(pending_orders) < 2:
@@ -1410,11 +1447,15 @@ class OrderManager:
                             rule is None or len(pending_orders) >= rule.min_order_count
                         ),
                         "perfect_netting": net_quantity == 0,
-                        "aggregation_rule": {
-                            "min_order_count": rule.min_order_count if rule else 2,
-                            "netting_enabled": rule.netting_enabled if rule else True,
-                            "window_seconds": rule.aggregation_window_seconds if rule else 60
-                        } if rule else None
+                        "aggregation_rule": (
+                            {
+                                "min_order_count": rule.min_order_count if rule else 2,
+                                "netting_enabled": rule.netting_enabled if rule else True,
+                                "window_seconds": rule.aggregation_window_seconds if rule else 60,
+                            }
+                            if rule
+                            else None
+                        ),
                     }
 
             return opportunities
@@ -1429,7 +1470,7 @@ class OrderManager:
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         symbols: list[str] | None = None,
-        statuses: list[OrderStatus] | None = None
+        statuses: list[OrderStatus] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Export order history for reporting and compliance.
@@ -1466,25 +1507,33 @@ class OrderManager:
                         "side": order.order_request.side.value,
                         "order_type": order.order_request.order_type.value,
                         "quantity": float(order.order_request.quantity),
-                        "price": float(order.order_request.price) if order.order_request.price else None,
+                        "price": (
+                            float(order.order_request.price) if order.order_request.price else None
+                        ),
                         "status": order.status.value,
                         "filled_quantity": float(order.filled_quantity),
                         "remaining_quantity": float(order.remaining_quantity),
-                        "average_fill_price": float(order.average_fill_price) if order.average_fill_price else None,
+                        "average_fill_price": (
+                            float(order.average_fill_price) if order.average_fill_price else None
+                        ),
                         "total_fees": float(order.total_fees),
                         "created_at": order.created_at.isoformat(),
                         "updated_at": order.updated_at.isoformat(),
-                        "routing_info": {
-                            "selected_exchange": order.route_info.selected_exchange,
-                            "routing_reason": order.route_info.routing_reason,
-                            "expected_cost_bps": float(order.route_info.expected_cost_bps)
-                        } if order.route_info else None,
+                        "routing_info": (
+                            {
+                                "selected_exchange": order.route_info.selected_exchange,
+                                "routing_reason": order.route_info.routing_reason,
+                                "expected_cost_bps": float(order.route_info.expected_cost_bps),
+                            }
+                            if order.route_info
+                            else None
+                        ),
                         "modifications_count": len(order.modification_history),
                         "parent_order_id": order.parent_order_id,
                         "child_order_count": len(order.child_order_ids),
                         "net_position_impact": float(order.net_position_impact),
                         "compliance_tags": order.compliance_tags,
-                        "audit_entries_count": len(order.audit_trail)
+                        "audit_entries_count": len(order.audit_trail),
                     }
 
                     history.append(record)
@@ -1503,8 +1552,15 @@ class OrderManager:
         """Get comprehensive order manager summary."""
         try:
             active_orders = [
-                order for order in self.managed_orders.values()
-                if order.status not in [OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.EXPIRED]
+                order
+                for order in self.managed_orders.values()
+                if order.status
+                not in [
+                    OrderStatus.FILLED,
+                    OrderStatus.CANCELLED,
+                    OrderStatus.REJECTED,
+                    OrderStatus.EXPIRED,
+                ]
             ]
 
             # Calculate performance metrics
@@ -1531,7 +1587,6 @@ class OrderManager:
                 "total_managed_orders": len(self.managed_orders),
                 "monitoring_tasks": len(self.monitoring_tasks),
                 "executions_tracked": len(self.execution_orders),
-
                 "performance_metrics": {
                     "total_orders": total_orders,
                     "success_rate": success_rate,
@@ -1539,9 +1594,8 @@ class OrderManager:
                     "cancellation_rate": cancel_rate,
                     "average_fill_time_seconds": self.order_statistics["average_fill_time_seconds"],
                     "total_volume": float(self.order_statistics["total_volume"]),
-                    "total_fees": float(self.order_statistics["total_fees"])
+                    "total_fees": float(self.order_statistics["total_fees"]),
                 },
-
                 # P-020 Enhanced sections
                 "routing_statistics": routing_stats,
                 "aggregation_opportunities": aggregation_opportunities,
@@ -1552,12 +1606,11 @@ class OrderManager:
                     "connection_status": {
                         exchange: info.get("status", "unknown")
                         for exchange, info in self.websocket_connections.items()
-                    }
+                    },
                 },
                 "order_tracking": {
                     "orders_by_symbol": {
-                        symbol: len(order_ids)
-                        for symbol, order_ids in self.symbol_orders.items()
+                        symbol: len(order_ids) for symbol, order_ids in self.symbol_orders.items()
                     },
                     "total_modifications": sum(
                         len(mods) for mods in self.order_modifications.values()
@@ -1566,9 +1619,8 @@ class OrderManager:
                     "pending_aggregation": {
                         symbol: len(order_ids)
                         for symbol, order_ids in self.pending_aggregation.items()
-                    }
+                    },
                 },
-
                 "configuration": {
                     "default_timeout_minutes": self.default_order_timeout_minutes,
                     "status_check_interval_seconds": self.status_check_interval_seconds,
@@ -1577,10 +1629,9 @@ class OrderManager:
                     "websocket_enabled": self.websocket_enabled,
                     "websocket_reconnect_attempts": self.websocket_reconnect_attempts,
                     "modification_timeout_seconds": self.modification_timeout_seconds,
-                    "max_child_orders_per_parent": self.max_child_orders_per_parent
+                    "max_child_orders_per_parent": self.max_child_orders_per_parent,
                 },
-
-                "alerts": await self._check_alert_conditions()
+                "alerts": await self._check_alert_conditions(),
             }
 
         except Exception as e:

@@ -5,19 +5,14 @@ This module provides centralized management for the entire ML model lifecycle
 including training, validation, deployment, monitoring, and retirement.
 """
 
-import asyncio
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any
 
 import pandas as pd
-from sqlalchemy.orm import Session
 
 from src.core.config import Config
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
-from src.database.connection import get_sync_session
-from src.database.models import MLTrainingRun
 from src.ml.feature_engineering import FeatureEngineer
 from src.ml.inference.batch_predictor import BatchPredictor
 from src.ml.inference.inference_engine import InferenceEngine
@@ -100,9 +95,9 @@ class ModelManager:
         model_name: str,
         training_data: pd.DataFrame,
         symbol: str,
-        model_params: Optional[Dict[str, Any]] = None,
-        training_params: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
+        model_params: dict[str, Any] | None = None,
+        training_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Create and train a new model.
 
@@ -204,7 +199,7 @@ class ModelManager:
     @log_calls
     async def deploy_model(
         self, model_name: str, deployment_stage: str = "production"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Deploy a model to a specific stage.
 
@@ -286,8 +281,8 @@ class ModelManager:
         self,
         model_name: str,
         monitoring_data: pd.DataFrame,
-        true_labels: Optional[pd.Series] = None,
-    ) -> Dict[str, Any]:
+        true_labels: pd.Series | None = None,
+    ) -> dict[str, Any]:
         """
         Monitor model performance and detect drift.
 
@@ -393,7 +388,7 @@ class ModelManager:
 
     @time_execution
     @log_calls
-    async def retire_model(self, model_name: str, reason: str = "replaced") -> Dict[str, Any]:
+    async def retire_model(self, model_name: str, reason: str = "replaced") -> dict[str, Any]:
         """
         Retire a model from active service.
 
@@ -454,8 +449,8 @@ class ModelManager:
         model: BaseModel,
         training_data: pd.DataFrame,
         symbol: str,
-        training_params: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        training_params: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         """Prepare data and train model."""
         try:
             # Use trainer for comprehensive training
@@ -470,8 +465,8 @@ class ModelManager:
             raise ValidationError(f"Model training preparation failed: {e}") from e
 
     async def _validate_trained_model(
-        self, model: BaseModel, test_data: Tuple[pd.DataFrame, pd.Series]
-    ) -> Dict[str, Any]:
+        self, model: BaseModel, test_data: tuple[pd.DataFrame, pd.Series]
+    ) -> dict[str, Any]:
         """Validate trained model."""
         try:
             X_test, y_test = test_data
@@ -488,10 +483,10 @@ class ModelManager:
     async def _register_model(
         self,
         model: BaseModel,
-        training_result: Dict[str, Any],
-        validation_result: Dict[str, Any],
+        training_result: dict[str, Any],
+        validation_result: dict[str, Any],
         symbol: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Register model in registry."""
         try:
             # Save model artifacts
@@ -519,8 +514,8 @@ class ModelManager:
             raise ValidationError(f"Model registration failed: {e}") from e
 
     async def _pre_deployment_validation(
-        self, model: BaseModel, model_info: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, model: BaseModel, model_info: dict[str, Any]
+    ) -> dict[str, Any]:
         """Perform pre-deployment validation."""
         try:
             checks = {
@@ -573,8 +568,8 @@ class ModelManager:
             logger.error(f"Failed to stop monitoring for {model_name}: {e}")
 
     async def _generate_monitoring_alerts(
-        self, model_name: str, monitoring_results: Dict[str, Any], overall_drift_detected: bool
-    ) -> List[Dict[str, Any]]:
+        self, model_name: str, monitoring_results: dict[str, Any], overall_drift_detected: bool
+    ) -> list[dict[str, Any]]:
         """Generate alerts based on monitoring results."""
         try:
             alerts = []
@@ -599,7 +594,7 @@ class ModelManager:
             logger.error(f"Alert generation failed: {e}")
             return []
 
-    def get_active_models(self) -> Dict[str, Any]:
+    def get_active_models(self) -> dict[str, Any]:
         """Get information about active models."""
         return {
             name: {
@@ -611,7 +606,7 @@ class ModelManager:
             for name, info in self.active_models.items()
         }
 
-    def get_model_status(self, model_name: str) -> Optional[Dict[str, Any]]:
+    def get_model_status(self, model_name: str) -> dict[str, Any] | None:
         """Get status information for a specific model."""
         if model_name in self.active_models:
             return {"status": "active", "details": self.active_models[model_name]}
@@ -623,7 +618,7 @@ class ModelManager:
 
         return None
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """Perform health check of the ML system."""
         try:
             health_status = {

@@ -3,7 +3,7 @@ State Management module for the T-Bot trading system.
 
 This module provides comprehensive state management capabilities including:
 - P-018: State persistence and recovery system
-- P-023: Trade lifecycle management  
+- P-023: Trade lifecycle management
 - P-024: Quality controls and validation
 - P-025: Real-time state synchronization
 
@@ -28,9 +28,9 @@ from .state_sync_manager import StateSyncManager
 from .trade_lifecycle_manager import TradeLifecycleManager
 
 __all__ = [
-    "StateManager",
-    "TradeLifecycleManager", 
-    "QualityController",
-    "StateSyncManager",
     "CheckpointManager",
+    "QualityController",
+    "StateManager",
+    "StateSyncManager",
+    "TradeLifecycleManager",
 ]

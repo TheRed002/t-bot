@@ -150,7 +150,7 @@ class BinanceWebSocketHandler:
             raise ExchangeError(f"Failed to subscribe to ticker stream: {e!s}")
 
     async def subscribe_to_orderbook_stream(
-        self, symbol: str, depth: str = "20", callback: Callable = None
+        self, symbol: str, depth: str = "20", callback: Callable | None = None
     ) -> None:
         """
         Subscribe to order book depth stream for a symbol.

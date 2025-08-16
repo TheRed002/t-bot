@@ -178,8 +178,7 @@ class OKXExchange(BaseExchange):
             # Initialize Redis client
             await self._initialize_redis()
 
-            # Initialize data module
-            await self._initialize_data_module()
+            # Data module initialization removed to avoid circular dependency
 
             self.connected = True
             self.status = "connected"
@@ -318,7 +317,7 @@ class OKXExchange(BaseExchange):
 
         except Exception as e:
             logger.error(f"Failed to place order on OKX: {e!s}")
-            if isinstance(e, (ExchangeError, ValidationError)):
+            if isinstance(e, ExchangeError | ValidationError):
                 raise
             raise ExchangeError(f"Failed to place order on OKX: {e!s}")
 
@@ -540,7 +539,7 @@ class OKXExchange(BaseExchange):
                     id=trade_data.get("tradeId", ""),
                     symbol=symbol,
                     side=OrderSide.BUY if trade_data.get("side") == "buy" else OrderSide.SELL,
-                    quantity=Decimal(trade_data.get("sz", "0")),
+                    amount=Decimal(trade_data.get("sz", "0")),
                     price=Decimal(trade_data.get("px", "0")),
                     timestamp=datetime.fromtimestamp(
                         int(trade_data.get("ts", 0)) / 1000, tz=timezone.utc
@@ -577,9 +576,11 @@ class OKXExchange(BaseExchange):
                             client_order_id=o.get("clOrdId"),
                             symbol=o.get("instId", ""),
                             side=OrderSide.BUY if o.get("side") == "buy" else OrderSide.SELL,
-                            order_type=OrderType.MARKET
-                            if o.get("ordType") == "market"
-                            else OrderType.LIMIT,
+                            order_type=(
+                                OrderType.MARKET
+                                if o.get("ordType") == "market"
+                                else OrderType.LIMIT
+                            ),
                             quantity=Decimal(str(o.get("sz", "0"))),
                             price=Decimal(str(o.get("px", "0"))) if o.get("px") else None,
                             filled_quantity=Decimal(str(o.get("accFillSz", "0"))),

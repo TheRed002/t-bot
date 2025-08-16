@@ -134,7 +134,7 @@ class BaseExchange(ABC):
         """
         try:
             # Get Redis URL from config (simplified for now)
-            redis_url = "redis://localhost:6379"  # TODO: Get from config
+            redis_url = self.config.get_redis_url()
             self.redis_client = RedisClient(redis_url)
             await self.redis_client.connect()
 
@@ -150,7 +150,7 @@ class BaseExchange(ABC):
     # Note: _initialize_data_module method removed to avoid circular dependency
 
     async def _handle_exchange_error(
-        self, error: Exception, operation: str, context: dict = None
+        self, error: Exception, operation: str, context: dict | None = None
     ) -> None:
         """
         Handle exchange errors using the error handler with proper context.
@@ -178,13 +178,13 @@ class BaseExchange(ABC):
             # Handle the error with appropriate recovery scenario
             if isinstance(error, ExchangeConnectionError):
                 recovery_scenario = NetworkDisconnectionRecovery(self.config)
-            elif isinstance(error, (OrderRejectionError, ValidationError)):
+            elif isinstance(error, OrderRejectionError | ValidationError):
                 recovery_scenario = OrderRejectionRecovery(self.config)
             else:
                 recovery_scenario = None
 
             # Handle the error
-            self.error_handler.handle_error(error_context, recovery_scenario)
+            await self.error_handler.handle_error(error_context, recovery_scenario)
 
         except Exception as e:
             # Fallback to basic logging if error handling fails
@@ -391,7 +391,7 @@ class BaseExchange(ABC):
             return await self._get_market_data_from_exchange(symbol, timeframe)
 
     async def get_processed_market_data(
-        self, symbol: str, timeframe: str = "1m", processing_steps: list = None
+        self, symbol: str, timeframe: str = "1m", processing_steps: list | None = None
     ) -> dict:
         """
         Get processed market data with advanced features and validation.

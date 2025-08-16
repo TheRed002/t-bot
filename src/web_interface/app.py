@@ -12,16 +12,19 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.config import Config
 from src.core.logging import get_logger
+from src.monitoring.alerting import AlertManager, NotificationConfig, set_global_alert_manager
+from src.monitoring.metrics import MetricsCollector
+from src.monitoring.performance import PerformanceProfiler, set_global_profiler
+from src.monitoring.telemetry import (
+    OpenTelemetryConfig,
+    instrument_fastapi,
+    set_global_trading_tracer,
+    setup_telemetry,
+)
 from src.web_interface.middleware.auth import AuthMiddleware
 from src.web_interface.middleware.error_handler import ErrorHandlerMiddleware
 from src.web_interface.middleware.rate_limit import RateLimitMiddleware
 from src.web_interface.security.auth import init_auth
-from src.monitoring.metrics import MetricsCollector, get_metrics_collector
-from src.monitoring.telemetry import (
-    OpenTelemetryConfig, setup_telemetry, instrument_fastapi, set_global_trading_tracer
-)
-from src.monitoring.alerting import AlertManager, NotificationConfig, set_global_alert_manager
-from src.monitoring.performance import PerformanceProfiler, set_global_profiler
 
 logger = get_logger(__name__)
 
@@ -157,22 +160,25 @@ def create_app(
 
     # 1.5. Security middleware
     from src.web_interface.middleware.security import SecurityMiddleware
+
     app.add_middleware(SecurityMiddleware, enable_csp=True, enable_input_validation=True)
 
     # 2. Connection pooling for performance
     from src.web_interface.middleware.connection_pool import (
         ConnectionPoolMiddleware,
-        set_global_pool_manager
+        set_global_pool_manager,
     )
+
     connection_pool_middleware = ConnectionPoolMiddleware(app, config)
     app.add_middleware(ConnectionPoolMiddleware, config=config)
     set_global_pool_manager(connection_pool_middleware.pool_manager)
 
     # 3. Decimal precision middleware for financial data integrity
     from src.web_interface.middleware.decimal_precision import (
-        DecimalPrecisionMiddleware, 
-        DecimalValidationMiddleware
+        DecimalPrecisionMiddleware,
+        DecimalValidationMiddleware,
     )
+
     app.add_middleware(DecimalValidationMiddleware)
     app.add_middleware(DecimalPrecisionMiddleware)
 
@@ -340,14 +346,14 @@ def _register_events(app: FastAPI) -> None:
 def _setup_monitoring(app: FastAPI, config: Config) -> None:
     """
     Setup monitoring infrastructure for the application.
-    
+
     Args:
         app: FastAPI application
         config: Application configuration
     """
     try:
         logger.info("Setting up monitoring infrastructure")
-        
+
         # Setup OpenTelemetry tracing
         try:
             telemetry_config = OpenTelemetryConfig(
@@ -355,7 +361,7 @@ def _setup_monitoring(app: FastAPI, config: Config) -> None:
                 service_version="1.0.0",
                 environment=getattr(config, "environment", "development"),
                 jaeger_enabled=True,
-                console_enabled=getattr(config, "debug", False)
+                console_enabled=getattr(config, "debug", False),
             )
             trading_tracer = setup_telemetry(telemetry_config)
             set_global_trading_tracer(trading_tracer)
@@ -363,44 +369,42 @@ def _setup_monitoring(app: FastAPI, config: Config) -> None:
             logger.info("OpenTelemetry tracing configured")
         except Exception as e:
             logger.warning(f"Failed to setup OpenTelemetry: {e}")
-        
+
         # Setup metrics collection
         try:
             metrics_collector = MetricsCollector()
             # Store globally for access
             import src.monitoring.metrics
+
             src.monitoring.metrics._global_collector = metrics_collector
             logger.info("Prometheus metrics collector configured")
         except Exception as e:
             logger.warning(f"Failed to setup metrics collector: {e}")
-        
+
         # Setup performance profiler
         try:
-            profiler = PerformanceProfiler(
-                enable_memory_tracking=True,
-                enable_cpu_profiling=True
-            )
+            profiler = PerformanceProfiler(enable_memory_tracking=True, enable_cpu_profiling=True)
             set_global_profiler(profiler)
             logger.info("Performance profiler configured")
         except Exception as e:
             logger.warning(f"Failed to setup performance profiler: {e}")
-        
+
         # Setup alert manager
         try:
             notification_config = NotificationConfig(
                 email_from="tbot-alerts@example.com",
                 email_to=["admin@example.com"],
                 slack_webhook_url=getattr(config, "slack_webhook_url", ""),
-                webhook_urls=getattr(config, "webhook_urls", [])
+                webhook_urls=getattr(config, "webhook_urls", []),
             )
             alert_manager = AlertManager(notification_config)
             set_global_alert_manager(alert_manager)
             logger.info("Alert manager configured")
         except Exception as e:
             logger.warning(f"Failed to setup alert manager: {e}")
-        
+
         logger.info("Monitoring infrastructure setup completed")
-        
+
     except Exception as e:
         logger.error(f"Error setting up monitoring infrastructure: {e}")
 
@@ -507,3 +511,16 @@ ROUTER_CREATORS = {
     "risk": create_risk_router,
     "ml_models": create_ml_router,
 }
+
+
+# Create app instance for Docker/production use
+# This will use default config and environment variables
+try:
+    app_config = Config()
+    app = create_app(app_config)
+    logger.info("Module-level FastAPI app created successfully")
+except Exception as e:
+    logger.error(f"Failed to create module-level app: {e}")
+    # Create a minimal app as fallback
+    app = FastAPI(title="T-Bot Trading System API (Fallback)")
+    logger.warning("Created fallback FastAPI app")

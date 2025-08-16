@@ -19,16 +19,20 @@ import numpy as np
 from src.core.config import Config
 from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.logging import get_logger
-from src.utils.decimal_utils import (
-    to_decimal, validate_positive, safe_divide,
-    ZERO, ONE, format_decimal, clamp_decimal
-)
 
 # MANDATORY: Import from P-001
 from src.core.types import PositionSizeMethod, Signal
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
+from src.utils.decimal_utils import (
+    ONE,
+    ZERO,
+    clamp_decimal,
+    format_decimal,
+    safe_divide,
+    to_decimal,
+)
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -111,7 +115,7 @@ class PositionSizer:
             # Apply maximum position size limit (25% absolute maximum)
             max_position_size = min(
                 portfolio_value * to_decimal(self.risk_config.max_position_size_pct),
-                portfolio_value * to_decimal("0.25")  # 25% hard limit
+                portfolio_value * to_decimal("0.25"),  # 25% hard limit
             )
             if position_size > max_position_size:
                 self.logger.warning(
@@ -182,14 +186,14 @@ class PositionSizer:
     async def _kelly_criterion_sizing(self, signal: Signal, portfolio_value: Decimal) -> Decimal:
         """
         Calculate position size using Kelly Criterion with Half-Kelly for safety.
-        
+
         Implements the proper Kelly formula: f = (p*b - q) / b
         where:
         - f = fraction of capital to wager
         - p = probability of winning
         - q = probability of losing (1 - p)
         - b = win/loss ratio (average win / average loss)
-        
+
         Uses Half-Kelly (f * 0.5) for conservative position sizing.
 
         Args:
@@ -214,12 +218,12 @@ class PositionSizer:
                 return await self._fixed_percentage_sizing(signal, portfolio_value)
 
             # All returns are already Decimal, just slice them
-            returns_decimal = returns[-self.risk_config.kelly_lookback_days:]
-            
+            returns_decimal = returns[-self.risk_config.kelly_lookback_days :]
+
             # Calculate win probability and win/loss ratio
             winning_returns = [r for r in returns_decimal if r > 0]
             losing_returns = [r for r in returns_decimal if r < 0]
-            
+
             # Edge case: all returns are zero or same sign
             if not winning_returns or not losing_returns:
                 self.logger.warning(
@@ -228,28 +232,28 @@ class PositionSizer:
                     losing_trades=len(losing_returns),
                 )
                 return await self._fixed_percentage_sizing(signal, portfolio_value)
-            
+
             # Calculate probabilities using Decimal
             total_trades = to_decimal(len(returns_decimal))
             win_probability = to_decimal(len(winning_returns)) / total_trades
             loss_probability = ONE - win_probability
-            
+
             # Calculate average win and loss magnitudes
             avg_win = sum(winning_returns) / to_decimal(len(winning_returns))
             avg_loss = abs(sum(losing_returns) / to_decimal(len(losing_returns)))
-            
+
             # Prevent division by zero
             if avg_loss <= to_decimal("0.0001"):
                 self.logger.warning("Average loss too small for Kelly calculation")
                 return await self._fixed_percentage_sizing(signal, portfolio_value)
-            
+
             # Calculate win/loss ratio (b in Kelly formula)
             win_loss_ratio = avg_win / avg_loss
-            
+
             # Calculate Kelly fraction: f = (p*b - q) / b
             numerator = (win_probability * win_loss_ratio) - loss_probability
             kelly_fraction = numerator / win_loss_ratio
-            
+
             # Handle negative Kelly (negative edge)
             if kelly_fraction <= ZERO:
                 self.logger.warning(
@@ -260,24 +264,24 @@ class PositionSizer:
                 )
                 # Use minimum position size for negative edge
                 return portfolio_value * to_decimal("0.01")  # 1% minimum
-            
+
             # Apply Half-Kelly for safety (multiply by 0.5)
             half_kelly_fraction = kelly_fraction * to_decimal("0.5")
-            
+
             # Apply confidence adjustment
             adjusted_fraction = half_kelly_fraction * to_decimal(signal.confidence)
-            
+
             # Apply bounds: min 1%, max 25% of portfolio
             # Enforce bounds using clamp_decimal
             final_fraction = clamp_decimal(
                 adjusted_fraction,
                 to_decimal("0.01"),  # 1% minimum
-                to_decimal("0.25")   # 25% maximum
+                to_decimal("0.25"),  # 25% maximum
             )
-            
+
             # Calculate position size
             position_size = portfolio_value * final_fraction
-            
+
             self.logger.debug(
                 "Kelly Criterion sizing (Half-Kelly)",
                 win_probability=format_decimal(win_probability),
@@ -291,7 +295,7 @@ class PositionSizer:
                 final_fraction=format_decimal(final_fraction),
                 position_size=format_decimal(position_size),
             )
-            
+
             return position_size
 
         except Exception as e:
@@ -332,7 +336,9 @@ class PositionSizer:
 
             # Calculate volatility (standard deviation of returns)
             # Convert Decimal prices to float for numpy operations
-            prices_array = np.array([float(p) for p in prices[-self.risk_config.volatility_window:]])
+            prices_array = np.array(
+                [float(p) for p in prices[-self.risk_config.volatility_window :]]
+            )
             returns = np.diff(prices_array) / prices_array[:-1]
             volatility = np.std(returns)
 
@@ -388,7 +394,7 @@ class PositionSizer:
         # Apply confidence weighting with non-linear scaling
         # Higher confidence gets proportionally larger position
         confidence = to_decimal(signal.confidence)
-        confidence_weight = confidence ** 2  # Square for non-linear scaling
+        confidence_weight = confidence**2  # Square for non-linear scaling
 
         position_size = base_size * confidence_weight
 
@@ -429,11 +435,7 @@ class PositionSizer:
 
             prev_price = self.price_history[symbol][-2]
             if prev_price > ZERO:
-                return_rate = safe_divide(
-                    decimal_price - prev_price,
-                    prev_price,
-                    ZERO
-                )
+                return_rate = safe_divide(decimal_price - prev_price, prev_price, ZERO)
                 self.return_history[symbol].append(return_rate)
 
                 # Keep only recent returns
@@ -502,7 +504,7 @@ class PositionSizer:
             # Check maximum position size (25% absolute maximum)
             max_size = min(
                 portfolio_value * to_decimal(self.risk_config.max_position_size_pct),
-                portfolio_value * to_decimal("0.25")  # 25% hard limit
+                portfolio_value * to_decimal("0.25"),  # 25% hard limit
             )
             if position_size > max_size:
                 self.logger.warning(

@@ -5,13 +5,13 @@ This module provides market regime detection models that identify different
 market conditions such as trending, ranging, volatile, or calm periods.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, adjusted_rand_score, silhouette_score
+from sklearn.metrics import accuracy_score, silhouette_score
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 
@@ -134,7 +134,7 @@ class RegimeDetector(BaseModel):
             logger.error(f"Failed to create model: {e}")
             raise ValidationError(f"Model creation failed: {e}") from e
 
-    def _define_regime_names(self) -> List[str]:
+    def _define_regime_names(self) -> list[str]:
         """Define regime names based on number of regimes."""
         if self.n_regimes == 2:
             return ["Low_Volatility", "High_Volatility"]
@@ -147,7 +147,7 @@ class RegimeDetector(BaseModel):
 
     @time_execution
     @log_calls
-    def fit(self, X: pd.DataFrame, y: Optional[pd.Series] = None) -> Dict[str, Any]:
+    def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> dict[str, Any]:
         """
         Train the regime detector.
 
@@ -313,7 +313,7 @@ class RegimeDetector(BaseModel):
 
     @time_execution
     @log_calls
-    def evaluate(self, X: pd.DataFrame, y: Optional[pd.Series] = None) -> Dict[str, Any]:
+    def evaluate(self, X: pd.DataFrame, y: pd.Series | None = None) -> dict[str, Any]:
         """
         Evaluate the regime detector.
 
@@ -493,7 +493,7 @@ class RegimeDetector(BaseModel):
 
     def _calculate_regime_statistics(
         self, features: pd.DataFrame, regime_labels: np.ndarray
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Calculate statistics for each detected regime."""
         try:
             regime_stats = {}
@@ -515,7 +515,7 @@ class RegimeDetector(BaseModel):
             logger.error(f"Failed to calculate regime statistics: {e}")
             return {}
 
-    def predict_regime_labels(self, X: pd.DataFrame) -> List[str]:
+    def predict_regime_labels(self, X: pd.DataFrame) -> list[str]:
         """
         Predict regime as string labels.
 
@@ -536,7 +536,7 @@ class RegimeDetector(BaseModel):
             logger.error(f"Regime label prediction failed: {e}")
             raise ValidationError(f"Regime label prediction failed: {e}") from e
 
-    def get_regime_probabilities(self, X: pd.DataFrame) -> Optional[np.ndarray]:
+    def get_regime_probabilities(self, X: pd.DataFrame) -> np.ndarray | None:
         """
         Get regime probabilities (if supported by the model).
 
@@ -571,7 +571,7 @@ class RegimeDetector(BaseModel):
             logger.error(f"Regime probability prediction failed: {e}")
             return None
 
-    def get_regime_statistics(self) -> Optional[Dict[str, Any]]:
+    def get_regime_statistics(self) -> dict[str, Any] | None:
         """
         Get regime statistics from training.
 
@@ -584,7 +584,7 @@ class RegimeDetector(BaseModel):
 
         return self.regime_stats_
 
-    def get_feature_importance(self) -> Optional[pd.Series]:
+    def get_feature_importance(self) -> pd.Series | None:
         """
         Get feature importance scores (supervised models only).
 

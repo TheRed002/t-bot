@@ -198,9 +198,11 @@ async def place_order(
             "client_order_id": client_order_id,
             "status": execution_result.status.value,
             "filled_quantity": float(execution_result.total_filled_quantity),
-            "average_fill_price": float(execution_result.average_fill_price)
-            if execution_result.average_fill_price
-            else None,
+            "average_fill_price": (
+                float(execution_result.average_fill_price)
+                if execution_result.average_fill_price
+                else None
+            ),
         }
 
     except Exception as e:
@@ -323,9 +325,9 @@ async def get_orders(
                 status=order_status,
                 filled_quantity=filled_qty,
                 remaining_quantity=quantity - filled_qty,
-                average_fill_price=Decimal("45000.00") + Decimal(str(i * 50))
-                if filled_qty > 0
-                else None,
+                average_fill_price=(
+                    Decimal("45000.00") + Decimal(str(i * 50)) if filled_qty > 0 else None
+                ),
                 commission=Decimal("0.1") if filled_qty > 0 else None,
                 commission_asset="USDT",
                 exchange=order_exchange,

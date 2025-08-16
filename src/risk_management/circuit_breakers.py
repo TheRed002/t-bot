@@ -38,7 +38,11 @@ from src.error_handling.error_handler import ErrorHandler
 
 # MANDATORY: Import from P-008
 from src.risk_management.base import BaseRiskManager
-from src.risk_management.correlation_monitor import CorrelationMonitor, CorrelationThresholds, CorrelationMetrics
+from src.risk_management.correlation_monitor import (
+    CorrelationMetrics,
+    CorrelationMonitor,
+    CorrelationThresholds,
+)
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -511,12 +515,12 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
 
         # Initialize correlation monitor with configuration
         correlation_thresholds = CorrelationThresholds(
-            warning_threshold=Decimal("0.6"),      # 60% warning threshold
-            critical_threshold=Decimal("0.8"),     # 80% critical threshold
-            max_positions_high_corr=3,             # Max 3 positions at 60%+ correlation
-            max_positions_critical_corr=1,         # Max 1 position at 80%+ correlation
-            lookback_periods=50,                   # 50 periods for correlation calculation
-            min_periods=10                         # Minimum 10 periods required
+            warning_threshold=Decimal("0.6"),  # 60% warning threshold
+            critical_threshold=Decimal("0.8"),  # 80% critical threshold
+            max_positions_high_corr=3,  # Max 3 positions at 60%+ correlation
+            max_positions_critical_corr=1,  # Max 1 position at 80%+ correlation
+            lookback_periods=50,  # 50 periods for correlation calculation
+            min_periods=10,  # Minimum 10 periods required
         )
 
         self.correlation_monitor = CorrelationMonitor(config, correlation_thresholds)
@@ -555,7 +559,7 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
                 self.logger.warning(
                     "Failed to calculate correlation metrics",
                     error=str(e),
-                    position_count=len(positions)
+                    position_count=len(positions),
                 )
                 return Decimal("0.0")
 
@@ -588,7 +592,7 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
                 "Critical correlation spike detected",
                 correlation=current_correlation,
                 threshold=threshold,
-                spike_count=self.correlation_spike_count
+                spike_count=self.correlation_spike_count,
             )
             return True
 
@@ -605,14 +609,14 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
                     "Sustained correlation spike detected",
                     correlation=current_correlation,
                     consecutive_periods=self.consecutive_high_correlation_periods,
-                    spike_count=self.correlation_spike_count
+                    spike_count=self.correlation_spike_count,
                 )
                 return True
 
             self.logger.info(
                 "High correlation detected",
                 correlation=current_correlation,
-                consecutive_periods=self.consecutive_high_correlation_periods
+                consecutive_periods=self.consecutive_high_correlation_periods,
             )
         else:
             # Reset counter when correlation drops below warning
@@ -625,12 +629,14 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
                 self.logger.warning(
                     "High portfolio concentration risk detected",
                     concentration_risk=concentration_risk,
-                    avg_correlation=self.last_correlation_metrics.average_correlation
+                    avg_correlation=self.last_correlation_metrics.average_correlation,
                 )
                 # Don't trigger immediately but increase sensitivity
                 # Reduce the consecutive period requirement
-                if (abs(current_correlation) >= warning_threshold and
-                    self.consecutive_high_correlation_periods >= 2):
+                if (
+                    abs(current_correlation) >= warning_threshold
+                    and self.consecutive_high_correlation_periods >= 2
+                ):
                     return True
 
         return False
@@ -648,7 +654,7 @@ class CorrelationSpikeBreaker(BaseCircuitBreaker):
             "portfolio_concentration_risk": str(
                 self.last_correlation_metrics.portfolio_concentration_risk
             ),
-            "timestamp": self.last_correlation_metrics.timestamp.isoformat()
+            "timestamp": self.last_correlation_metrics.timestamp.isoformat(),
         }
 
     async def get_position_limits(self) -> dict[str, Any]:

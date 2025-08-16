@@ -895,7 +895,7 @@ class ArbitrageOpportunity(BaseStrategy):
 
             # Calculate profit
             profit = final_usdt - start_usdt
-            profit_percentage = (profit / start_usdt) * 100
+            (profit / start_usdt) * 100
 
             # Account for fees and slippage
             total_fees = self._calculate_triangular_fees(btc_usdt_rate, eth_btc_rate, eth_usdt_rate)

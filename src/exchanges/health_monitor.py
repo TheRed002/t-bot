@@ -471,9 +471,9 @@ class ConnectionHealthMonitor:
             "healthy_connections": healthy_connections,
             "failed_connections": failed_connections,
             "recovered_connections": recovered_connections,
-            "health_percentage": (healthy_connections / total_connections * 100)
-            if total_connections > 0
-            else 0,
+            "health_percentage": (
+                (healthy_connections / total_connections * 100) if total_connections > 0 else 0
+            ),
             "is_monitoring": self.is_monitoring,
             "timestamp": datetime.now().isoformat(),
         }

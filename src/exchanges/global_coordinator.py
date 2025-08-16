@@ -502,9 +502,11 @@ class GlobalRateCoordinator:
         ) * 100
 
         return {
-            "status": "healthy"
-            if max(order_usage_pct, connection_usage_pct, request_usage_pct) < 90
-            else "warning",
+            "status": (
+                "healthy"
+                if max(order_usage_pct, connection_usage_pct, request_usage_pct) < 90
+                else "warning"
+            ),
             "order_usage_percent": round(order_usage_pct, 2),
             "connection_usage_percent": round(connection_usage_pct, 2),
             "request_usage_percent": round(request_usage_pct, 2),

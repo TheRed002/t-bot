@@ -28,9 +28,6 @@ from src.core.config import Config
 # Import from P-001 core components
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
-from src.utils.decimal_utils import (
-    to_decimal, format_decimal, ZERO
-)
 from src.core.types import (
     MarketData,
     OrderRequest,
@@ -42,6 +39,7 @@ from src.core.types import (
     Position,
     Signal,
 )
+from src.utils.decimal_utils import ZERO, to_decimal
 
 logger = get_logger(__name__)
 
@@ -66,12 +64,12 @@ def validate_price(price: float | Decimal, symbol: str, exchange: str = "binance
     Raises:
         ValidationError: If price is invalid
     """
-    if not isinstance(price, (int, float, Decimal)):
+    if not isinstance(price, int | float | Decimal):
         raise ValidationError(f"Price must be a number for {symbol}, got {type(price).__name__}")
 
     # Convert to Decimal for all operations
     decimal_price = to_decimal(price)
-    
+
     if decimal_price <= ZERO:
         raise ValidationError(f"Price must be positive for {symbol}, got {decimal_price}")
 
@@ -121,7 +119,9 @@ def get_price_precision(symbol: str, exchange: str) -> int:
     return exchange_rules["default"]
 
 
-def validate_quantity(quantity: float | Decimal, symbol: str, min_qty: float | Decimal | None = None) -> Decimal:
+def validate_quantity(
+    quantity: float | Decimal, symbol: str, min_qty: float | Decimal | None = None
+) -> Decimal:
     """
     Validate trading quantity.
 
@@ -136,21 +136,23 @@ def validate_quantity(quantity: float | Decimal, symbol: str, min_qty: float | D
     Raises:
         ValidationError: If quantity is invalid
     """
-    if not isinstance(quantity, (int, float, Decimal)):
+    if not isinstance(quantity, int | float | Decimal):
         raise ValidationError(
             f"Quantity must be a number for {symbol}, got {type(quantity).__name__}"
         )
 
     # Convert to Decimal for all operations
     decimal_qty = to_decimal(quantity)
-    
+
     if decimal_qty <= ZERO:
         raise ValidationError(f"Quantity must be positive for {symbol}, got {decimal_qty}")
 
     if min_qty:
         min_qty_decimal = to_decimal(min_qty)
         if decimal_qty < min_qty_decimal:
-            raise ValidationError(f"Quantity {decimal_qty} below minimum {min_qty_decimal} for {symbol}")
+            raise ValidationError(
+                f"Quantity {decimal_qty} below minimum {min_qty_decimal} for {symbol}"
+            )
 
     try:
 
@@ -307,7 +309,9 @@ def validate_market_data(data: MarketData) -> bool:
 # =============================================================================
 
 
-def validate_config(config: dict[str, Any] | Config, required_fields: list[str] = None) -> bool:
+def validate_config(
+    config: dict[str, Any] | Config, required_fields: list[str] | None = None
+) -> bool:
     """
     Validate configuration using core Config type or dictionary.
 
@@ -462,7 +466,9 @@ def validate_strategy_config(config: dict[str, Any] | Any) -> bool:
 # =============================================================================
 
 
-def validate_api_request(request_data: dict[str, Any], required_fields: list[str] = None) -> bool:
+def validate_api_request(
+    request_data: dict[str, Any], required_fields: list[str] | None = None
+) -> bool:
     """
     Validate API request payload.
 
@@ -487,7 +493,7 @@ def validate_api_request(request_data: dict[str, Any], required_fields: list[str
     return True
 
 
-def validate_webhook_payload(payload: dict[str, Any], signature: str = None) -> bool:
+def validate_webhook_payload(payload: dict[str, Any], signature: str | None = None) -> bool:
     """
     Validate webhook payload with optional signature verification.
 
@@ -514,7 +520,7 @@ def validate_webhook_payload(payload: dict[str, Any], signature: str = None) -> 
             timestamp = payload["timestamp"]
             if isinstance(timestamp, str):
                 datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-            elif isinstance(timestamp, (int, float)):
+            elif isinstance(timestamp, int | float):
                 datetime.fromtimestamp(timestamp)
         except (ValueError, TypeError):
             raise ValidationError("Invalid timestamp format in webhook payload")
@@ -682,7 +688,7 @@ def validate_timestamp(timestamp: Any) -> datetime:
         return timestamp
 
     try:
-        if isinstance(timestamp, (int, float)):
+        if isinstance(timestamp, int | float):
             return datetime.fromtimestamp(timestamp, tz=timezone.utc)
         elif isinstance(timestamp, str):
             # Try common formats
@@ -885,7 +891,7 @@ def validate_balance_data(balances: dict[str, float]) -> bool:
         if not isinstance(currency, str):
             raise ValidationError("Currency must be a string")
 
-        if not isinstance(balance, (int, float, Decimal)):
+        if not isinstance(balance, int | float | Decimal):
             raise ValidationError(f"Balance for {currency} must be a number")
 
         if balance < 0:
@@ -1018,18 +1024,18 @@ def validate_state_data(state_data: dict[str, Any]) -> bool:
         # Basic state data validation
         if not isinstance(state_data, dict):
             raise ValidationError("State data must be a dictionary")
-        
+
         # Check for required fields if it's bot state
         if "bot_id" in state_data:
             if not state_data.get("bot_id"):
                 raise ValidationError("Bot ID is required in state data")
-            
+
             if "status" in state_data and not state_data.get("status"):
                 raise ValidationError("Bot status is required in state data")
-        
+
         logger.debug("State data validation passed")
         return True
-        
+
     except Exception as e:
         logger.error(f"State data validation failed: {e}")
         raise ValidationError(f"Invalid state data: {e}")
@@ -1052,7 +1058,7 @@ def validate_order_data(order_data: dict[str, Any]) -> bool:
         # Convert to OrderRequest for validation
         order_request = OrderRequest(**order_data)
         return validate_order_request(order_request)
-        
+
     except Exception as e:
         logger.error(f"Order data validation failed: {e}")
         raise ValidationError(f"Invalid order data: {e}")

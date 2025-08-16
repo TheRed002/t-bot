@@ -201,7 +201,52 @@ circuit_breakers:
     enabled: true
     min_confidence: 0.5
     consecutive_failures: 5
+    
+  correlation_spike:  # New feature
+    enabled: true
+    warning_threshold: 0.60  # 60% correlation warning
+    critical_threshold: 0.80  # 80% correlation critical
+    lookback_periods: 50
+    consecutive_periods: 3  # Consecutive periods before trigger
+    position_limits:
+      warning: 3  # Max 3 positions at warning level
+      critical: 1  # Max 1 position at critical level
 ```
+
+##### 2.1.5 Correlation-Based Circuit Breaker System (New Feature)
+**Advanced Portfolio Risk Management:**
+- **Real-time Correlation Monitoring**: Continuous tracking of portfolio asset correlations
+- **Graduated Response System**: 
+  - Normal (<60%): No restrictions
+  - Warning (60-80%): Position limits, 40% size reduction
+  - Critical (>80%): Immediate trigger, 70% size reduction
+- **Position-Weighted Risk Assessment**: Considers position sizes in correlation calculations
+- **Dynamic Position Limits**: Automatically adjusts based on correlation levels
+- **Systemic Risk Detection**: Identifies market-wide risk events
+- **Memory-Efficient Implementation**: Rolling window with automatic data cleanup
+- **Thread-Safe Async Operations**: Uses asyncio.Lock for concurrent access
+
+##### 2.1.6 Decimal Precision Implementation (New Feature)
+**Financial-Grade Numerical Accuracy:**
+- **28-Digit Precision**: All financial calculations use Decimal type with 28-digit precision
+- **Proper Rounding**: ROUND_HALF_UP for financial calculations
+- **Zero-Error Guarantee**: Eliminates floating-point errors in:
+  - Price calculations
+  - Position sizing
+  - Portfolio value calculations
+  - Fee calculations
+  - Risk metrics
+- **Centralized Utilities**: `decimal_utils.py` module provides:
+  - Safe division with zero handling
+  - Price/quantity rounding to tick size
+  - Percentage and basis point calculations
+  - Common financial constants (ZERO, ONE, SATOSHI)
+- **Exchange Integration**: All exchange modules maintain Decimal precision
+- **Comprehensive Coverage**: Applied to all financial modules:
+  - Risk Management
+  - Order Execution
+  - Portfolio Management
+  - Strategy Calculations
 
 Circuit breakers halt trading when predefined risk thresholds are breached. They can be triggered by:
 - **Daily loss limit**
@@ -1128,6 +1173,34 @@ async def market_data_websocket(websocket: WebSocket)
 - **Position Sizing**: Current position sizes and limits
 - **Correlation Matrix**: Asset correlation visualization
 - **Risk Alerts**: Active risk warnings and notifications
+
+##### 9.3.6 Playground Interface
+- **Strategy Testing Environment**: Comprehensive testing suite for strategy development
+- **Interactive Backtesting**: Real-time backtesting with parameter adjustment
+- **Configuration Panel**: Visual strategy parameter configuration with validation
+- **Results Analysis**: Advanced analytics with performance metrics and visualizations
+- **Batch Optimization**: Multi-parameter optimization with overfitting detection
+- **Execution Controls**: Start, stop, pause, and monitor strategy execution
+- **Monitoring Dashboard**: Real-time monitoring of strategy performance during testing
+- **Feature Benefits**:
+  - Risk-free strategy testing with historical data
+  - Parameter optimization with anti-overfitting safeguards
+  - Performance comparison across multiple parameter sets
+  - Visual configuration of complex strategy parameters
+  - Integration with optimization modules for automated parameter tuning
+
+##### 9.3.7 Optimization Center
+- **Brute Force Optimizer**: Comprehensive parameter space exploration
+- **Parameter Space Definition**: Define parameter ranges and constraints
+- **Overfitting Prevention**: Built-in safeguards against parameter overfitting
+- **Results Validation**: Walk-forward analysis and out-of-sample testing
+- **Performance Metrics**: Advanced analytics including Sharpe ratio, maximum drawdown, and return metrics
+- **Feature Benefits**:
+  - Systematic exploration of strategy parameter combinations
+  - Statistical validation of optimization results
+  - Prevention of curve-fitting through robust validation techniques
+  - Integration with backtesting engine for comprehensive analysis
+  - Automated generation of parameter recommendations
 
 #### 9.4 Security Features
 - **Authentication**: JWT-based authentication with refresh tokens
@@ -3674,7 +3747,74 @@ echo "Database restore completed"
 - **Major Updates**: Quarterly significant enhancements
 - **Breaking Changes**: Careful planning with migration guides
 
-### 25. Conclusion
+### 25. Additional Development Features
+
+#### 25.1 Mock Exchange Mode
+A comprehensive mock exchange implementation that enables development and testing without real API keys.
+
+**Features:**
+- **Simulated Trading**: Full trading functionality with simulated order execution
+- **Mock Market Data**: Realistic price feeds and order book simulation
+- **Balance Management**: Virtual balances for testing portfolio management
+- **Order Lifecycle**: Complete order state transitions (pending, filled, cancelled)
+- **No API Keys Required**: Runs entirely locally without exchange credentials
+
+**Configuration:**
+```bash
+# Enable mock mode in .env
+MOCK_MODE=true
+
+# Or run directly with make command
+make run-mock
+```
+
+**Benefits:**
+- Safe development environment without financial risk
+- Faster development cycles without rate limiting
+- Consistent test data for reproducible results
+- Ideal for CI/CD pipelines and automated testing
+
+#### 25.2 Services-Only Docker Mode
+Flexible Docker configuration that separates external services from application containers, allowing local development with containerized dependencies.
+
+**Architecture:**
+- **docker-compose.services.yml**: Contains only external services (PostgreSQL, Redis, InfluxDB)
+- **Local Application**: Run T-Bot locally while using containerized services
+- **Makefile Integration**: Simple commands for service management
+
+**Commands:**
+```bash
+# Start external services only
+make services-up
+
+# Stop services
+make services-down
+
+# View service logs
+make services-logs
+
+# Clean up services and volumes
+make services-clean
+
+# Run application locally with services
+make run
+```
+
+**Benefits:**
+- Faster development with hot-reload capabilities
+- Direct IDE debugging support
+- Reduced resource usage (no application container)
+- Flexible deployment options
+- Easy service management through Makefile
+
+**Service Endpoints:**
+- PostgreSQL: `localhost:5432`
+- Redis: `localhost:6379`
+- InfluxDB: `localhost:8086`
+- PgAdmin (optional): `localhost:5050`
+- Redis Commander (optional): `localhost:8081`
+
+### 26. Conclusion
 
 This comprehensive specification defines a robust, scalable, and secure trading bot platform that combines traditional trading strategies with cutting-edge AI/ML capabilities. The system is designed to handle the complexities of modern financial markets while providing an intuitive interface for users to monitor and manage their trading operations.
 
@@ -3687,7 +3827,7 @@ Key differentiators include:
 
 The 27-week development timeline ensures systematic implementation with regular milestones and deliverables. The focus on security, performance, and reliability makes this platform suitable for production trading environments while maintaining the flexibility needed for continuous improvement and adaptation to changing market conditions.
 
-### 26. Glossary
+### 27. Glossary
 
 **Alpha**: Excess return of a trading strategy compared to market benchmark
 **API Rate Limiting**: Restriction on number of API calls per time period

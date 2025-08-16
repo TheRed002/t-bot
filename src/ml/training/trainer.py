@@ -46,7 +46,7 @@ class TrainingPipeline:
         """Fit all pipeline steps."""
         X_current = X.copy()
 
-        for name, transformer in self.steps:
+        for _name, transformer in self.steps:
             if hasattr(transformer, "fit"):
                 transformer.fit(X_current, y)
             if hasattr(transformer, "transform"):
@@ -62,7 +62,7 @@ class TrainingPipeline:
 
         X_current = X.copy()
 
-        for name, transformer in self.steps:
+        for _name, transformer in self.steps:
             if hasattr(transformer, "transform"):
                 X_current = transformer.transform(X_current)
 

@@ -23,7 +23,6 @@ from typing import Any
 from src.core.config import Config
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
-from src.utils.decorators import retry
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -610,9 +609,11 @@ class FundFlowManager:
                 description=rule_config.get("description", ""),
                 enabled=rule_config.get("enabled", True),
                 threshold=rule_config.get("threshold"),
-                min_amount=Decimal(str(rule_config.get("min_amount", 0)))
-                if rule_config.get("min_amount")
-                else None,
+                min_amount=(
+                    Decimal(str(rule_config.get("min_amount", 0)))
+                    if rule_config.get("min_amount")
+                    else None
+                ),
                 max_percentage=rule_config.get("max_percentage"),
                 cooldown_hours=rule_config.get("cooldown_hours"),
             )
@@ -743,7 +744,7 @@ class FundFlowManager:
             total_return = Decimal("0")
             strategy_count = 0
 
-            for strategy_id, metrics in self.strategy_performance.items():
+            for _strategy_id, metrics in self.strategy_performance.items():
                 if "total_pnl" in metrics and "initial_capital" in metrics:
                     initial_capital = Decimal(str(metrics["initial_capital"]))
                     if initial_capital > 0:
@@ -888,7 +889,7 @@ class FundFlowManager:
                 else:
                     # Handle case where metrics might be a single value
                     total_pnl += (
-                        float(metrics) if isinstance(metrics, (int, float, Decimal)) else 0.0
+                        float(metrics) if isinstance(metrics, int | float | Decimal) else 0.0
                     )
 
             summary = {
@@ -909,9 +910,9 @@ class FundFlowManager:
                 else:
                     # Handle case where metrics might be a single value
                     summary["strategies"][strategy_id] = {
-                        "pnl": float(metrics)
-                        if isinstance(metrics, (int, float, Decimal))
-                        else 0.0,
+                        "pnl": (
+                            float(metrics) if isinstance(metrics, int | float | Decimal) else 0.0
+                        ),
                         "performance_score": 0.0,
                         "last_updated": datetime.now(),
                     }

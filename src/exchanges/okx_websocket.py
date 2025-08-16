@@ -617,7 +617,7 @@ class OKXWebSocketManager:
                         id=trade_data.get("tradeId", ""),
                         symbol=symbol,
                         side=OrderSide.BUY if trade_data.get("side") == "buy" else OrderSide.SELL,
-                        quantity=Decimal(trade_data.get("sz", "0")),
+                        amount=Decimal(trade_data.get("sz", "0")),
                         price=Decimal(trade_data.get("px", "0")),
                         timestamp=datetime.fromtimestamp(
                             int(trade_data.get("ts", 0)) / 1000, tz=timezone.utc

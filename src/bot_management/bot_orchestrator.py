@@ -36,7 +36,7 @@ from .resource_manager import ResourceManager
 class BotOrchestrator:
     """
     Central orchestrator for managing multiple bot instances.
-    
+
     This class provides:
     - Bot creation and deletion operations
     - Bot lifecycle management (start/stop/pause/resume)
@@ -49,7 +49,7 @@ class BotOrchestrator:
     def __init__(self, config: Config):
         """
         Initialize bot orchestrator.
-        
+
         Args:
             config: Application configuration
         """
@@ -81,7 +81,7 @@ class BotOrchestrator:
             "total_pnl": Decimal("0"),
             "total_allocated_capital": Decimal("0"),
             "average_win_rate": 0.0,
-            "last_updated": datetime.now(timezone.utc)
+            "last_updated": datetime.now(timezone.utc),
         }
 
         # Configuration limits
@@ -95,7 +95,7 @@ class BotOrchestrator:
     async def start(self) -> None:
         """
         Start the bot orchestrator system.
-        
+
         Raises:
             ExecutionError: If startup fails
         """
@@ -129,7 +129,7 @@ class BotOrchestrator:
     async def stop(self) -> None:
         """
         Stop the bot orchestrator and all managed bots.
-        
+
         Raises:
             ExecutionError: If shutdown fails
         """
@@ -164,13 +164,13 @@ class BotOrchestrator:
     async def create_bot(self, bot_config: BotConfiguration) -> str:
         """
         Create a new bot instance.
-        
+
         Args:
             bot_config: Bot configuration
-            
+
         Returns:
             str: Bot ID of created bot
-            
+
         Raises:
             ValidationError: If configuration is invalid
             ExecutionError: If bot creation fails
@@ -189,9 +189,7 @@ class BotOrchestrator:
 
             # Request resource allocation
             allocation_successful = await self.resource_manager.request_resources(
-                bot_config.bot_id,
-                bot_config.allocated_capital,
-                bot_config.priority
+                bot_config.bot_id, bot_config.allocated_capital, bot_config.priority
             )
 
             if not allocation_successful:
@@ -222,7 +220,7 @@ class BotOrchestrator:
                 bot_id=bot_config.bot_id,
                 bot_type=bot_config.bot_type.value,
                 strategy=bot_config.strategy_name,
-                auto_start=bot_config.auto_start
+                auto_start=bot_config.auto_start,
             )
 
             return bot_config.bot_id
@@ -237,14 +235,14 @@ class BotOrchestrator:
     async def delete_bot(self, bot_id: str, force: bool = False) -> bool:
         """
         Delete a bot instance.
-        
+
         Args:
             bot_id: Bot identifier
             force: Force deletion even if bot is running
-            
+
         Returns:
             bool: True if deletion successful
-            
+
         Raises:
             ValidationError: If bot not found or cannot be deleted
             ExecutionError: If deletion fails
@@ -289,13 +287,13 @@ class BotOrchestrator:
     async def start_bot(self, bot_id: str) -> bool:
         """
         Start a specific bot instance.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             bool: True if start successful
-            
+
         Raises:
             ValidationError: If bot not found
             ExecutionError: If start fails
@@ -337,13 +335,13 @@ class BotOrchestrator:
     async def stop_bot(self, bot_id: str) -> bool:
         """
         Stop a specific bot instance.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             bool: True if stop successful
-            
+
         Raises:
             ValidationError: If bot not found
             ExecutionError: If stop fails
@@ -376,10 +374,10 @@ class BotOrchestrator:
     async def pause_bot(self, bot_id: str) -> bool:
         """
         Pause a specific bot instance.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             bool: True if pause successful
         """
@@ -402,10 +400,10 @@ class BotOrchestrator:
     async def resume_bot(self, bot_id: str) -> bool:
         """
         Resume a paused bot instance.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             bool: True if resume successful
         """
@@ -428,10 +426,10 @@ class BotOrchestrator:
     async def start_all_bots(self, priority_filter: BotPriority | None = None) -> dict[str, bool]:
         """
         Start all bots or bots matching priority filter.
-        
+
         Args:
             priority_filter: Optional priority filter
-            
+
         Returns:
             dict: Bot ID to success status mapping
         """
@@ -449,7 +447,7 @@ class BotOrchestrator:
         # Start bots in batches to respect concurrent startup limits
         batch_size = self.max_concurrent_startups
         for i in range(0, len(bots_to_start), batch_size):
-            batch = bots_to_start[i:i + batch_size]
+            batch = bots_to_start[i : i + batch_size]
 
             # Start batch concurrently
             tasks = [self.start_bot(bot_id) for bot_id in batch]
@@ -469,7 +467,7 @@ class BotOrchestrator:
             "Batch bot start completed",
             total_bots=len(bots_to_start),
             successful=sum(results.values()),
-            failed=len(results) - sum(results.values())
+            failed=len(results) - sum(results.values()),
         )
 
         return results
@@ -478,7 +476,7 @@ class BotOrchestrator:
     async def emergency_shutdown(self, reason: str) -> None:
         """
         Emergency shutdown of all bots and orchestrator.
-        
+
         Args:
             reason: Reason for emergency shutdown
         """
@@ -494,8 +492,7 @@ class BotOrchestrator:
 
             # Wait for all stops with timeout
             await asyncio.wait_for(
-                asyncio.gather(*stop_tasks, return_exceptions=True),
-                timeout=30.0
+                asyncio.gather(*stop_tasks, return_exceptions=True), timeout=30.0
             )
 
             # Stop orchestrator
@@ -517,27 +514,27 @@ class BotOrchestrator:
                 "is_running": self.is_running,
                 "emergency_shutdown": self.emergency_shutdown,
                 "total_bots": len(self.bot_instances),
-                "last_health_check": datetime.now(timezone.utc).isoformat()
+                "last_health_check": datetime.now(timezone.utc).isoformat(),
             },
             "global_metrics": self.global_metrics,
             "bots": bot_summaries,
             "resource_status": await self.resource_manager.get_resource_summary(),
-            "coordination_status": await self.bot_coordinator.get_coordination_summary()
+            "coordination_status": await self.bot_coordinator.get_coordination_summary(),
         }
 
     async def get_bot_list(self, status_filter: BotStatus | None = None) -> list[dict[str, Any]]:
         """
         Get list of all bots with optional status filter.
-        
+
         Args:
             status_filter: Optional status filter
-            
+
         Returns:
             list: List of bot summaries
         """
         bot_list = []
 
-        for bot_id, bot_instance in self.bot_instances.items():
+        for _bot_id, bot_instance in self.bot_instances.items():
             bot_state = bot_instance.get_bot_state()
 
             if status_filter is None or bot_state.status == status_filter:
@@ -630,17 +627,19 @@ class BotOrchestrator:
                 win_rates.append(bot_metrics.win_rate)
 
         # Update global metrics
-        self.global_metrics.update({
-            "total_bots": total_bots,
-            "running_bots": running_bots,
-            "paused_bots": paused_bots,
-            "error_bots": error_bots,
-            "total_trades": total_trades,
-            "total_pnl": total_pnl,
-            "total_allocated_capital": total_allocated_capital,
-            "average_win_rate": sum(win_rates) / len(win_rates) if win_rates else 0.0,
-            "last_updated": datetime.now(timezone.utc)
-        })
+        self.global_metrics.update(
+            {
+                "total_bots": total_bots,
+                "running_bots": running_bots,
+                "paused_bots": paused_bots,
+                "error_bots": error_bots,
+                "total_trades": total_trades,
+                "total_pnl": total_pnl,
+                "total_allocated_capital": total_allocated_capital,
+                "average_win_rate": sum(win_rates) / len(win_rates) if win_rates else 0.0,
+                "last_updated": datetime.now(timezone.utc),
+            }
+        )
 
     async def _check_bot_health(self) -> None:
         """Check health of all bot instances."""
@@ -652,14 +651,14 @@ class BotOrchestrator:
             # Check heartbeat freshness
             if bot_metrics.last_heartbeat:
                 heartbeat_age = datetime.now(timezone.utc) - bot_metrics.last_heartbeat
-                if heartbeat_age.total_seconds() > self.config.bot_management.get("heartbeat_timeout", 120):
+                if heartbeat_age.total_seconds() > self.config.bot_management.get(
+                    "heartbeat_timeout", 120
+                ):
                     unhealthy_bots.append(bot_id)
 
         if unhealthy_bots:
             self.logger.warning(
-                "Unhealthy bots detected",
-                unhealthy_bots=unhealthy_bots,
-                count=len(unhealthy_bots)
+                "Unhealthy bots detected", unhealthy_bots=unhealthy_bots, count=len(unhealthy_bots)
             )
 
     async def _check_resource_constraints(self) -> None:
@@ -672,7 +671,7 @@ class BotOrchestrator:
                 self.logger.warning(
                     "High resource usage detected",
                     resource_type=resource_type,
-                    usage=status.get("usage_percentage", 0)
+                    usage=status.get("usage_percentage", 0),
                 )
 
     async def _check_error_conditions(self) -> None:
@@ -686,7 +685,7 @@ class BotOrchestrator:
                 "High error rate detected",
                 error_bots=error_bot_count,
                 total_bots=total_bot_count,
-                error_rate=error_bot_count / total_bot_count
+                error_rate=error_bot_count / total_bot_count,
             )
 
     async def _stop_all_bots(self) -> None:
@@ -694,10 +693,7 @@ class BotOrchestrator:
         if not self.bot_instances:
             return
 
-        self.logger.info(
-            "Stopping all bots",
-            bot_count=len(self.bot_instances)
-        )
+        self.logger.info("Stopping all bots", bot_count=len(self.bot_instances))
 
         # Stop all bots concurrently
         stop_tasks = []

@@ -146,8 +146,7 @@ class BinanceExchange(BaseExchange):
             # Initialize Redis client
             await self._initialize_redis()
 
-            # Initialize data module
-            await self._initialize_data_module()
+            # Data module initialization removed to avoid circular dependency
 
             self.connected = True
             self.status = "connected"
@@ -527,7 +526,7 @@ class BinanceExchange(BaseExchange):
                     id=str(trade_data["id"]),
                     symbol=symbol,
                     side=OrderSide.BUY if trade_data["isBuyerMaker"] else OrderSide.SELL,
-                    quantity=Decimal(str(trade_data["qty"])),
+                    amount=Decimal(str(trade_data["qty"])),
                     price=Decimal(str(trade_data["price"])),
                     timestamp=datetime.fromtimestamp(trade_data["time"] / 1000, tz=timezone.utc),
                     fee=Decimal("0"),  # Fee not available in recent trades

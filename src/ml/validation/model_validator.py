@@ -6,8 +6,8 @@ performance validation, statistical tests, and production readiness checks.
 """
 
 import warnings
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -81,8 +81,8 @@ class ModelValidator:
         model: BaseModel,
         X_test: pd.DataFrame,
         y_test: pd.Series,
-        benchmark_score: Optional[float] = None,
-    ) -> Dict[str, Any]:
+        benchmark_score: float | None = None,
+    ) -> dict[str, Any]:
         """
         Validate model performance against benchmarks.
 
@@ -196,9 +196,9 @@ class ModelValidator:
     def validate_model_stability(
         self,
         model: BaseModel,
-        time_series_data: List[Tuple[pd.DataFrame, pd.Series]],
-        time_periods: List[datetime],
-    ) -> Dict[str, Any]:
+        time_series_data: list[tuple[pd.DataFrame, pd.Series]],
+        time_periods: list[datetime],
+    ) -> dict[str, Any]:
         """
         Validate model stability over time.
 
@@ -229,7 +229,9 @@ class ModelValidator:
             performance_over_time = []
 
             # Calculate performance for each time period
-            for i, ((X, y), timestamp) in enumerate(zip(time_series_data, time_periods)):
+            for i, ((X, y), timestamp) in enumerate(
+                zip(time_series_data, time_periods, strict=False)
+            ):
                 if X.empty or y.empty:
                     logger.warning(f"Empty data for time period {i}, skipping")
                     continue
@@ -311,7 +313,7 @@ class ModelValidator:
     @log_calls
     def validate_production_readiness(
         self, model: BaseModel, X_test: pd.DataFrame, y_test: pd.Series
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Validate model readiness for production deployment.
 
@@ -408,7 +410,7 @@ class ModelValidator:
 
     def _calculate_classification_metrics(
         self, y_true: pd.Series, y_pred: np.ndarray
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Calculate classification metrics."""
         try:
             metrics = {
@@ -424,7 +426,7 @@ class ModelValidator:
 
     def _calculate_regression_metrics(
         self, y_true: pd.Series, y_pred: np.ndarray
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Calculate regression metrics."""
         try:
             metrics = {
@@ -442,7 +444,7 @@ class ModelValidator:
 
     def _test_statistical_significance(
         self, y_true: pd.Series, y_pred: np.ndarray, model_type: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Test statistical significance of model predictions."""
         try:
             if model_type == "classification":
@@ -480,7 +482,7 @@ class ModelValidator:
                 "test_type": "failed",
             }
 
-    def _analyze_residuals(self, y_true: pd.Series, y_pred: np.ndarray) -> Dict[str, Any]:
+    def _analyze_residuals(self, y_true: pd.Series, y_pred: np.ndarray) -> dict[str, Any]:
         """Analyze residuals for regression models."""
         try:
             residuals = y_true - y_pred
@@ -518,7 +520,7 @@ class ModelValidator:
             logger.error(f"Residual analysis failed: {e}")
             return {}
 
-    def _analyze_performance_trend(self, performance_over_time: List[Dict]) -> Dict[str, Any]:
+    def _analyze_performance_trend(self, performance_over_time: list[dict]) -> dict[str, Any]:
         """Analyze performance trend over time."""
         try:
             if len(performance_over_time) < 3:
@@ -555,7 +557,7 @@ class ModelValidator:
 
     def _check_prediction_consistency(
         self, model: BaseModel, X_test: pd.DataFrame
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         """Check if model predictions are consistent."""
         try:
             # Make predictions twice with same data
@@ -573,12 +575,13 @@ class ModelValidator:
 
     def _check_computational_efficiency(
         self, model: BaseModel, X_test: pd.DataFrame
-    ) -> Dict[str, bool]:
+    ) -> dict[str, bool]:
         """Check computational efficiency of the model."""
         try:
-            import time
-            import psutil
             import os
+            import time
+
+            import psutil
 
             # Memory usage before prediction
             process = psutil.Process(os.getpid())
@@ -614,7 +617,7 @@ class ModelValidator:
                 "memory_efficient": True,
             }
 
-    def _check_error_handling(self, model: BaseModel, X_test: pd.DataFrame) -> Dict[str, bool]:
+    def _check_error_handling(self, model: BaseModel, X_test: pd.DataFrame) -> dict[str, bool]:
         """Check model error handling capabilities."""
         try:
             checks = {}
@@ -665,7 +668,7 @@ class ModelValidator:
                 "handles_errors_gracefully": False,
             }
 
-    def _check_data_quality_handling(self, model: BaseModel) -> Dict[str, bool]:
+    def _check_data_quality_handling(self, model: BaseModel) -> dict[str, bool]:
         """Check model's data quality handling capabilities."""
         try:
             # Check if model has data validation methods
@@ -691,11 +694,11 @@ class ModelValidator:
                 "handles_feature_scaling": False,
             }
 
-    def get_validation_history(self) -> List[Dict[str, Any]]:
+    def get_validation_history(self) -> list[dict[str, Any]]:
         """Get validation history."""
         return self.validation_history
 
-    def get_benchmark_results(self) -> Dict[str, Any]:
+    def get_benchmark_results(self) -> dict[str, Any]:
         """Get benchmark results."""
         return self.benchmark_results
 

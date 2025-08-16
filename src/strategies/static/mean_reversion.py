@@ -321,7 +321,7 @@ class MeanReversionStrategy(BaseStrategy):
                 return False
 
             z_score = metadata.get("z_score")
-            if not isinstance(z_score, (int, float)):
+            if not isinstance(z_score, int | float):
                 logger.warning(
                     "Invalid z_score type", strategy=self.name, z_score_type=type(z_score)
                 )

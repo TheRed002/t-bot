@@ -55,7 +55,7 @@ def format_currency(amount: float, currency: str = "USD", precision: int = 2) ->
     Raises:
         ValidationError: If amount is invalid
     """
-    if not isinstance(amount, (int, float, Decimal)):
+    if not isinstance(amount, int | float | Decimal):
         raise ValidationError(f"Amount must be a number, got {type(amount).__name__}")
 
     # Determine precision based on currency
@@ -93,7 +93,7 @@ def format_percentage(value: float, precision: int = 2) -> str:
     Raises:
         ValidationError: If value is invalid
     """
-    if not isinstance(value, (int, float, Decimal)):
+    if not isinstance(value, int | float | Decimal):
         raise ValidationError(f"Value must be a number, got {type(value).__name__}")
 
     # Convert to percentage
@@ -120,7 +120,7 @@ def format_pnl(pnl: float, currency: str = "USD") -> tuple[str, str]:
     Raises:
         ValidationError: If P&L is invalid
     """
-    if not isinstance(pnl, (int, float, Decimal)):
+    if not isinstance(pnl, int | float | Decimal):
         raise ValidationError(f"P&L must be a number, got {type(pnl).__name__}")
 
     formatted = format_currency(pnl, currency)
@@ -153,7 +153,7 @@ def format_quantity(quantity: float, symbol: str) -> str:
     Raises:
         ValidationError: If quantity is invalid
     """
-    if not isinstance(quantity, (int, float, Decimal)):
+    if not isinstance(quantity, int | float | Decimal):
         raise ValidationError(f"Quantity must be a number, got {type(quantity).__name__}")
 
     # Determine precision based on symbol
@@ -189,7 +189,7 @@ def format_price(price: float, symbol: str) -> str:
     Raises:
         ValidationError: If price is invalid
     """
-    if not isinstance(price, (int, float, Decimal)):
+    if not isinstance(price, int | float | Decimal):
         raise ValidationError(f"Price must be a number, got {type(price).__name__}")
 
     # Determine precision based on symbol
@@ -216,7 +216,9 @@ def format_price(price: float, symbol: str) -> str:
 # =============================================================================
 
 
-def format_api_response(data: Any, success: bool = True, message: str = None) -> dict[str, Any]:
+def format_api_response(
+    data: Any, success: bool = True, message: str | None = None
+) -> dict[str, Any]:
     """
     Format standardized API response.
 
@@ -240,7 +242,7 @@ def format_api_response(data: Any, success: bool = True, message: str = None) ->
     return response
 
 
-def format_error_response(error: Exception, error_code: str = None) -> dict[str, Any]:
+def format_error_response(error: Exception, error_code: str | None = None) -> dict[str, Any]:
     """
     Format error response for API.
 
@@ -368,7 +370,9 @@ def format_correlation_id(correlation_id: str) -> str:
     return formatted
 
 
-def format_structured_log(level: str, message: str, correlation_id: str = None, **kwargs) -> str:
+def format_structured_log(
+    level: str, message: str, correlation_id: str | None = None, **kwargs
+) -> str:
     """
     Format structured log as JSON string.
 
@@ -448,7 +452,7 @@ def format_ohlcv_data(ohlcv_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 raise ValidationError(f"Missing required field: {field}")
 
         # Format timestamp
-        if isinstance(candle["timestamp"], (int, float)):
+        if isinstance(candle["timestamp"], int | float):
             timestamp = datetime.fromtimestamp(candle["timestamp"], tz=timezone.utc)
         else:
             timestamp = candle["timestamp"]
@@ -468,7 +472,7 @@ def format_ohlcv_data(ohlcv_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def format_indicator_data(
-    indicator_name: str, values: list[float], timestamps: list[datetime] = None
+    indicator_name: str, values: list[float], timestamps: list[datetime] | None = None
 ) -> dict[str, Any]:
     """
     Format indicator data for charting.
@@ -502,7 +506,7 @@ def format_indicator_data(
 
 
 def format_chart_data(
-    symbol: str, ohlcv_data: list[dict[str, Any]], indicators: dict[str, list[float]] = None
+    symbol: str, ohlcv_data: list[dict[str, Any]], indicators: dict[str, list[float]] | None = None
 ) -> dict[str, Any]:
     """
     Format complete chart data.
@@ -650,7 +654,7 @@ def format_trade_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
 # =============================================================================
 
 
-def format_csv_data(data: list[dict[str, Any]], headers: list[str] = None) -> str:
+def format_csv_data(data: list[dict[str, Any]], headers: list[str] | None = None) -> str:
     """
     Format data as CSV string.
 

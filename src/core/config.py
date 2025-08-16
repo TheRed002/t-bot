@@ -10,7 +10,7 @@ CRITICAL: This file will be extended by ALL subsequent prompts. Use exact patter
 import json
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from pydantic import Field, field_validator
@@ -42,25 +42,27 @@ class DatabaseConfig(BaseConfig):
         default="trading_bot", pattern=r"^[a-zA-Z0-9_-]+$", description="PostgreSQL database name"
     )
     postgresql_username: str = Field(
-        default="trading_bot", pattern=r"^[a-zA-Z0-9_-]+$", description="PostgreSQL username"
+        default="tbot", pattern=r"^[a-zA-Z0-9_-]+$", description="PostgreSQL username"
     )
     postgresql_password: str = Field(
-        default="trading_bot_password", min_length=8, description="PostgreSQL password"
+        default="changeme_secure_password_123!", min_length=8, description="PostgreSQL password"
     )
-    postgresql_pool_size: int = Field(default=10, description="PostgreSQL connection pool size")
+    postgresql_pool_size: int = Field(default=20, description="PostgreSQL connection pool size")
 
     # Redis
     redis_host: str = Field(default="localhost", description="Redis host")
     redis_port: int = Field(default=6379, description="Redis port")
-    redis_password: str | None = Field(default=None, description="Redis password")
+    redis_password: str | None = Field(
+        default="redis_secure_password", description="Redis password"
+    )
     redis_db: int = Field(default=0, description="Redis database number")
 
     # InfluxDB
     influxdb_host: str = Field(default="localhost", description="InfluxDB host")
     influxdb_port: int = Field(default=8086, description="InfluxDB port")
-    influxdb_token: str = Field(default="test-token", description="InfluxDB token")
-    influxdb_org: str = Field(default="test-org", description="InfluxDB organization")
-    influxdb_bucket: str = Field(default="trading-data", description="InfluxDB bucket")
+    influxdb_token: str = Field(default="changeme_influxdb_token", description="InfluxDB token")
+    influxdb_org: str = Field(default="tbot_production", description="InfluxDB organization")
+    influxdb_bucket: str = Field(default="trading_data_production", description="InfluxDB bucket")
 
     @field_validator("postgresql_port", "redis_port", "influxdb_port")
     @classmethod
@@ -83,7 +85,8 @@ class SecurityConfig(BaseConfig):
     """Security configuration for authentication and encryption."""
 
     secret_key: str = Field(
-        default="test-secret-key-32-chars-long-for-testing", description="Secret key for JWT"
+        default="changeme_very_secure_jwt_secret_key_at_least_32_chars",
+        description="Secret key for JWT",
     )
     jwt_algorithm: str = Field(
         default="HS256",
@@ -92,7 +95,8 @@ class SecurityConfig(BaseConfig):
     )
     jwt_expire_minutes: int = Field(default=30, description="JWT expiration time in minutes")
     encryption_key: str = Field(
-        default="test-encryption-key-32-chars-long-for-testing", description="Encryption key"
+        default="changeme_secure_encryption_key_at_least_32_characters",
+        description="Encryption key",
     )
 
     @field_validator("jwt_expire_minutes")
@@ -578,7 +582,7 @@ class MLConfig(BaseConfig):
         default="models/artifacts", description="Path to model artifacts"
     )
     model_cache_size: int = Field(default=10, description="Number of models to cache in memory")
-    
+
     # Training settings
     default_train_test_split: float = Field(
         default=0.8, description="Default train/test split ratio"
@@ -586,64 +590,52 @@ class MLConfig(BaseConfig):
     default_validation_split: float = Field(
         default=0.2, description="Default validation split ratio"
     )
-    max_training_time_hours: int = Field(
-        default=24, description="Maximum training time in hours"
-    )
-    
+    max_training_time_hours: int = Field(default=24, description="Maximum training time in hours")
+
     # Feature engineering
     feature_selection_threshold: float = Field(
         default=0.01, description="Feature importance threshold for selection"
     )
     max_features: int = Field(default=1000, description="Maximum number of features")
-    feature_cache_ttl_hours: int = Field(
-        default=24, description="Feature cache TTL in hours"
-    )
-    
+    feature_cache_ttl_hours: int = Field(default=24, description="Feature cache TTL in hours")
+
     # Hyperparameter optimization
     optuna_n_trials: int = Field(default=100, description="Number of Optuna trials")
     optuna_timeout_hours: int = Field(default=12, description="Optuna timeout in hours")
-    optuna_pruning_enabled: bool = Field(
-        default=True, description="Enable Optuna pruning"
-    )
-    
+    optuna_pruning_enabled: bool = Field(default=True, description="Enable Optuna pruning")
+
     # Model validation
     cross_validation_folds: int = Field(default=5, description="Number of CV folds")
-    validation_frequency_days: int = Field(
-        default=7, description="Validation frequency in days"
-    )
+    validation_frequency_days: int = Field(default=7, description="Validation frequency in days")
     performance_degradation_threshold: float = Field(
         default=0.1, description="Performance degradation threshold"
     )
-    
+
     # Drift detection
-    drift_detection_enabled: bool = Field(
-        default=True, description="Enable drift detection"
-    )
+    drift_detection_enabled: bool = Field(default=True, description="Enable drift detection")
     drift_check_frequency_hours: int = Field(
         default=6, description="Drift check frequency in hours"
     )
     drift_threshold: float = Field(default=0.05, description="Drift detection threshold")
-    
+
     # Model serving
     inference_batch_size: int = Field(default=1000, description="Inference batch size")
     prediction_cache_ttl_minutes: int = Field(
         default=5, description="Prediction cache TTL in minutes"
     )
-    model_warmup_enabled: bool = Field(
-        default=True, description="Enable model warmup on startup"
-    )
-    
+    model_warmup_enabled: bool = Field(default=True, description="Enable model warmup on startup")
+
     # Supported model types
     supported_model_types: list[str] = Field(
         default=[
             "price_predictor",
-            "direction_classifier", 
+            "direction_classifier",
             "volatility_forecaster",
-            "regime_detector"
+            "regime_detector",
         ],
-        description="Supported ML model types"
+        description="Supported ML model types",
     )
-    
+
     # Model performance thresholds
     min_accuracy_threshold: float = Field(
         default=0.55, description="Minimum model accuracy threshold"
@@ -651,66 +643,58 @@ class MLConfig(BaseConfig):
     min_precision_threshold: float = Field(
         default=0.50, description="Minimum model precision threshold"
     )
-    min_recall_threshold: float = Field(
-        default=0.50, description="Minimum model recall threshold"
-    )
-    min_f1_threshold: float = Field(
-        default=0.50, description="Minimum model F1 score threshold"
-    )
-    
+    min_recall_threshold: float = Field(default=0.50, description="Minimum model recall threshold")
+    min_f1_threshold: float = Field(default=0.50, description="Minimum model F1 score threshold")
+
     # Resource limits
     max_memory_gb: float = Field(default=8.0, description="Maximum memory usage in GB")
     max_cpu_cores: int = Field(default=4, description="Maximum CPU cores for training")
     gpu_enabled: bool = Field(default=False, description="Enable GPU acceleration")
-    
+
     # Additional validation parameters
     validation_threshold: float = Field(
         default=0.6, description="Overall model validation threshold"
     )
-    significance_level: float = Field(
-        default=0.05, description="Statistical significance level"
-    )
+    significance_level: float = Field(default=0.05, description="Statistical significance level")
     stability_window: int = Field(
         default=10, description="Number of periods for stability analysis"
     )
-    min_validation_samples: int = Field(
-        default=100, description="Minimum samples for validation"
-    )
-    
+    min_validation_samples: int = Field(default=100, description="Minimum samples for validation")
+
     # Additional drift detection parameters
-    min_drift_samples: int = Field(
-        default=50, description="Minimum samples for drift detection"
-    )
+    min_drift_samples: int = Field(default=50, description="Minimum samples for drift detection")
     drift_reference_window: int = Field(
         default=1000, description="Reference window size for drift detection"
     )
     drift_detection_window: int = Field(
         default=500, description="Detection window size for drift detection"
     )
-    
+
     # Additional model parameters
     batch_size: int = Field(default=1000, description="Batch size for processing")
     max_workers: int = Field(default=4, description="Maximum worker threads")
     use_multiprocessing: bool = Field(default=False, description="Enable multiprocessing")
     chunk_size: int = Field(default=100, description="Chunk size for batch processing")
     max_memory_mb: int = Field(default=2048, description="Maximum memory in MB")
-    
+
     # Model-specific parameters
     use_log_returns: bool = Field(default=True, description="Use log returns for calculations")
     scaling_method: str = Field(default="standard", description="Feature scaling method")
-    class_weights: Optional[str] = Field(default="balanced", description="Class weights for imbalanced data")
+    class_weights: str | None = Field(
+        default="balanced", description="Class weights for imbalanced data"
+    )
     random_state: int = Field(default=42, description="Random seed for reproducibility")
-    
+
     @field_validator(
         "default_train_test_split",
-        "default_validation_split", 
+        "default_validation_split",
         "feature_selection_threshold",
         "performance_degradation_threshold",
         "drift_threshold",
         "min_accuracy_threshold",
         "min_precision_threshold",
         "min_recall_threshold",
-        "min_f1_threshold"
+        "min_f1_threshold",
     )
     @classmethod
     def validate_percentage_fields(cls, v):
@@ -718,11 +702,11 @@ class MLConfig(BaseConfig):
         if not 0.0 <= v <= 1.0:
             raise ValueError(f"Percentage must be between 0 and 1, got {v}")
         return v
-    
+
     @field_validator(
         "model_cache_size",
         "max_training_time_hours",
-        "max_features", 
+        "max_features",
         "feature_cache_ttl_hours",
         "optuna_n_trials",
         "optuna_timeout_hours",
@@ -731,7 +715,7 @@ class MLConfig(BaseConfig):
         "drift_check_frequency_hours",
         "inference_batch_size",
         "prediction_cache_ttl_minutes",
-        "max_cpu_cores"
+        "max_cpu_cores",
     )
     @classmethod
     def validate_positive_integers(cls, v):
@@ -739,11 +723,11 @@ class MLConfig(BaseConfig):
         if v <= 0:
             raise ValueError(f"Value must be positive, got {v}")
         return v
-    
+
     @field_validator("max_memory_gb")
     @classmethod
     def validate_positive_float(cls, v):
-        """Validate positive float fields.""" 
+        """Validate positive float fields."""
         if v <= 0:
             raise ValueError(f"Value must be positive, got {v}")
         return v

@@ -333,7 +333,7 @@ class ConnectionManager:
         logger.info(f"Initialized connection manager for {exchange_name}")
 
     async def _handle_connection_error(
-        self, error: Exception, operation: str, connection_id: str = None
+        self, error: Exception, operation: str, connection_id: str | None = None
     ) -> None:
         """
         Handle connection-related errors using the error handler.
@@ -405,7 +405,7 @@ class ConnectionManager:
         if len(self.websocket_connections) >= self.max_websocket_connections:
             logger.warning(f"Maximum WebSocket connections reached for {self.exchange_name}")
             # Return the first available connection
-            return list(self.websocket_connections.values())[0]
+            return next(iter(self.websocket_connections.values()))
 
         connection = WebSocketConnection(url, self.exchange_name, self.config)
         self.websocket_connections[connection_id] = connection
@@ -631,7 +631,7 @@ class ConnectionManager:
             network_health = {}
 
             # Test connection to exchange endpoints
-            for endpoint, connection in self.rest_connections.items():
+            for endpoint, _connection in self.rest_connections.items():
                 try:
                     # Extract host and port from endpoint
                     if "://" in endpoint:
@@ -714,9 +714,9 @@ class ConnectionManager:
             "websocket_connections": len(self.websocket_connections),
             "max_rest_connections": self.max_rest_connections,
             "max_websocket_connections": self.max_websocket_connections,
-            "last_health_check": self.last_health_check.isoformat()
-            if self.last_health_check
-            else None,
+            "last_health_check": (
+                self.last_health_check.isoformat() if self.last_health_check else None
+            ),
         }
 
     async def disconnect_all(self) -> None:

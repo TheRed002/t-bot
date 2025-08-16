@@ -1,5 +1,23 @@
 # T-Bot Trading System - Setup Guide
 
+## 🚀 Quick Start (5 Minutes)
+
+```bash
+# 1. Activate Python virtual environment (WSL/Linux)
+source ~/.venv/bin/activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Start external services (PostgreSQL, Redis, InfluxDB)
+make services-up
+
+# 4. Run in mock mode - NO API KEYS NEEDED!
+make run-mock
+
+# That's it! The system is running in mock trading mode.
+```
+
 ## Table of Contents
 
 1. [System Requirements](#system-requirements)
@@ -33,7 +51,8 @@
 
 ## Installation Methods
 
-### Method 1: Docker (Recommended for Production)
+### Method 1: Hybrid Development Setup (Recommended)
+This approach runs external services in Docker while the application runs locally for easier development and debugging.
 
 #### Step 1: Install Docker
 ```bash
@@ -56,23 +75,45 @@ cd t-bot
 
 #### Step 3: Configure Environment
 ```bash
-# Copy example environment file
-cp .env.example .env
-
-# Edit environment variables
+# The .env file is already configured for development
+# Review and adjust if needed
 nano .env
+
+# Key settings already configured:
+# - MOCK_MODE=true (no API keys required)
+# - Database: localhost:5432
+# - Redis: localhost:6379
+# - InfluxDB: localhost:8086
 ```
 
-#### Step 4: Build and Run
+#### Step 4: Start External Services Only
 ```bash
-# Build all containers
-docker-compose build
+# Start PostgreSQL, Redis, and InfluxDB
+make services-up
 
-# Start all services
-docker-compose up -d
+# Or manually:
+docker-compose -f docker-compose.services.yml up -d
 
 # Check status
-docker-compose ps
+docker-compose -f docker-compose.services.yml ps
+```
+
+#### Step 5: Run Application Locally
+```bash
+# Run in mock mode (no API keys needed)
+make run-mock
+
+# Or run with real connections (requires API keys)
+make run
+
+# Start web interface
+make web
+```
+
+### Method 2: Full Docker Setup (Production)
+```bash
+# For production deployment with everything in containers
+docker-compose -f docker-compose.yml up -d
 ```
 
 ### Method 2: Native Installation (Development)
@@ -308,6 +349,24 @@ sudo supervisorctl start all
 ```
 
 ## Configuration
+
+### Mock Mode (Development Without API Keys)
+The system includes a fully functional mock exchange that simulates real trading without requiring API keys:
+
+```bash
+# Enable mock mode in .env
+MOCK_MODE=true
+
+# Run with mock exchange
+make run-mock
+```
+
+Features of Mock Mode:
+- Simulated order execution with realistic delays
+- Mock balance management (starts with 10,000 USDT)
+- Real-time price simulation based on market data
+- Support for all order types (market, limit, stop-loss)
+- Perfect for testing strategies without risk
 
 ### Main Configuration File
 Create `config/config.yaml`:
@@ -589,32 +648,68 @@ redis-cli -a your_redis_password ping
 
 ## Running the System
 
-### Development Mode
+### Quick Start (Development with Mock Mode)
 
 ```bash
-# Terminal 1: Start backend
-source venv/bin/activate
-python -m uvicorn src.web_interface.app:app --reload --port 8000
+# 1. Start external services (PostgreSQL, Redis, InfluxDB)
+make services-up
 
-# Terminal 2: Start bot engine
-source venv/bin/activate
-python -m src.main
+# 2. Run in mock mode (no API keys required!)
+make run-mock
 
-# Terminal 3: Start frontend
-cd frontend
-npm start
+# 3. Optional: Start web interface
+make web
+```
 
-# Terminal 4: Start monitoring
-docker-compose -f docker-compose.monitoring.yml up
+### Development Mode Options
+
+```bash
+# Run with mock exchange (no API keys needed)
+make run-mock
+
+# Run with real exchanges (requires API keys in .env)
+make run
+
+# Start only external services
+make services-up
+
+# Stop external services
+make services-down
+
+# View service logs
+make services-logs
+
+# Clean up services and volumes
+make services-clean
+```
+
+### Testing Commands
+
+```bash
+# Run all tests
+make test
+
+# Run unit tests only
+make test-unit
+
+# Run integration tests
+make test-integration
+
+# Run with coverage report
+make coverage
+
+# Format and lint code
+make format
+make lint
 ```
 
 ### Production Mode
 
 ```bash
-# Using Docker Compose
-docker-compose -f docker-compose.prod.yml up -d
+# Using Docker Compose (full stack)
+docker-compose -f docker-compose.yml up -d
 
-# Using Supervisor
+# Using Supervisor (for production servers)
 sudo supervisorctl start all
 
 # Check status
@@ -622,20 +717,17 @@ sudo supervisorctl status
 docker-compose ps
 ```
 
-### Using Makefile
+### WSL-Specific Commands (Windows)
 
 ```bash
-# Development
-make dev
+# Run tests in WSL
+make wsl-test
 
-# Production
-make prod
+# Run unit tests in WSL
+make wsl-test-unit
 
-# Run tests
-make test
-
-# Clean up
-make clean
+# Run coverage in WSL
+make wsl-coverage
 ```
 
 ## Verification

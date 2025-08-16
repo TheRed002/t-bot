@@ -205,7 +205,7 @@ class StatisticalFeatureCalculator:
     @time_execution
     @cache_result(ttl_seconds=300)
     async def calculate_rolling_stats(
-        self, symbol: str, window: int = None, field: str = "returns"
+        self, symbol: str, window: int | None = None, field: str = "returns"
     ) -> StatisticalResult:
         """
         Calculate rolling statistical features.
@@ -288,7 +288,7 @@ class StatisticalFeatureCalculator:
     @time_execution
     @cache_result(ttl_seconds=600)
     async def calculate_autocorrelation(
-        self, symbol: str, max_lags: int = None, field: str = "returns"
+        self, symbol: str, max_lags: int | None = None, field: str = "returns"
     ) -> StatisticalResult:
         """
         Calculate autocorrelation features.
@@ -374,7 +374,7 @@ class StatisticalFeatureCalculator:
     @time_execution
     @cache_result(ttl_seconds=600)
     async def detect_regime(
-        self, symbol: str, window: int = None, field: str = "returns"
+        self, symbol: str, window: int | None = None, field: str = "returns"
     ) -> StatisticalResult:
         """
         Detect market regime (trending vs ranging).

@@ -450,9 +450,11 @@ class RiskCalculator:
         summary = {
             "current_portfolio_value": current_value,
             "peak_portfolio_value": peak_value,
-            "total_return": (current_value - self.portfolio_values[0]) / self.portfolio_values[0]
-            if len(self.portfolio_values) > 1
-            else 0,
+            "total_return": (
+                (current_value - self.portfolio_values[0]) / self.portfolio_values[0]
+                if len(self.portfolio_values) > 1
+                else 0
+            ),
             "data_points": len(self.portfolio_values),
             "return_data_points": len(self.portfolio_returns),
             "position_symbols": list(self.position_returns.keys()),

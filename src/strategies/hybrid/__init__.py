@@ -14,4 +14,4 @@ from .ensemble import EnsembleStrategy
 from .fallback import FallbackStrategy
 from .rule_based_ai import RuleBasedAIStrategy
 
-__all__ = ["RuleBasedAIStrategy", "EnsembleStrategy", "FallbackStrategy"]
+__all__ = ["EnsembleStrategy", "FallbackStrategy", "RuleBasedAIStrategy"]

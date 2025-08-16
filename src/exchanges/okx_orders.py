@@ -128,7 +128,7 @@ class OKXOrderManager:
 
         except Exception as e:
             logger.error(f"Failed to place order on OKX: {e!s}")
-            if isinstance(e, (ExchangeError, ValidationError)):
+            if isinstance(e, ExchangeError | ValidationError):
                 raise
             raise ExchangeError(f"Failed to place order on OKX: {e!s}")
 
@@ -542,7 +542,7 @@ class OKXOrderManager:
             List[Dict]: List of order history entries
         """
         history = []
-        for order_id, order_data in self.order_history.items():
+        for _order_id, order_data in self.order_history.items():
             if symbol is None or order_data["response"].symbol == symbol:
                 history.append(order_data)
 

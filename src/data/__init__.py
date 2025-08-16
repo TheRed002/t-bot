@@ -30,11 +30,11 @@ from .quality.validation import DataValidator
 from .services import DataIntegrationService
 
 __all__ = [
-    # Data Quality Management
-    "DataValidator",
     "DataCleaner",
-    "QualityMonitor",
     # Data Integration Service
     "DataIntegrationService",
+    # Data Quality Management
+    "DataValidator",
+    "QualityMonitor",
     # Quality submodule exports only (other submodules must be imported directly)
 ]

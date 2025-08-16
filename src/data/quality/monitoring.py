@@ -261,9 +261,11 @@ class QualityMonitor:
                             "avg_score": statistics.mean(scores),
                             "min_score": min(scores),
                             "max_score": max(scores),
-                            "trend": "improving"
-                            if len(scores) > 1 and scores[-1] > scores[-2]
-                            else "stable",
+                            "trend": (
+                                "improving"
+                                if len(scores) > 1 and scores[-1] > scores[-2]
+                                else "stable"
+                            ),
                         }
 
             # Drift summary
@@ -441,9 +443,9 @@ class QualityMonitor:
                             DriftAlert(
                                 drift_type=DriftType.COVARIATE_DRIFT,
                                 feature="price",
-                                severity=QualityLevel.POOR
-                                if drift_score > 0.2
-                                else QualityLevel.FAIR,
+                                severity=(
+                                    QualityLevel.POOR if drift_score > 0.2 else QualityLevel.FAIR
+                                ),
                                 description=f"Price distribution drift detected: {drift_score:.3f}",
                                 timestamp=datetime.now(timezone.utc),
                                 metadata={

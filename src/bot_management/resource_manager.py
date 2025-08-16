@@ -34,7 +34,7 @@ from src.utils.decorators import log_calls, time_execution
 class ResourceManager:
     """
     Central resource manager for bot instances.
-    
+
     This class manages:
     - Capital allocation per bot
     - API rate limit distribution
@@ -47,7 +47,7 @@ class ResourceManager:
     def __init__(self, config: Config):
         """
         Initialize resource manager.
-        
+
         Args:
             config: Application configuration
         """
@@ -83,11 +83,17 @@ class ResourceManager:
 
         self.global_resource_limits = {
             ResourceType.CAPITAL: Decimal(str(resource_config.get("total_capital", "1000000"))),
-            ResourceType.API_RATE_LIMIT: Decimal(str(resource_config.get("total_api_calls_per_minute", "6000"))),
-            ResourceType.WEBSOCKET_CONNECTIONS: Decimal(str(resource_config.get("max_websocket_connections", "100"))),
-            ResourceType.DATABASE_CONNECTIONS: Decimal(str(resource_config.get("max_database_connections", "50"))),
+            ResourceType.API_RATE_LIMIT: Decimal(
+                str(resource_config.get("total_api_calls_per_minute", "6000"))
+            ),
+            ResourceType.WEBSOCKET_CONNECTIONS: Decimal(
+                str(resource_config.get("max_websocket_connections", "100"))
+            ),
+            ResourceType.DATABASE_CONNECTIONS: Decimal(
+                str(resource_config.get("max_database_connections", "50"))
+            ),
             ResourceType.CPU: Decimal(str(resource_config.get("max_cpu_percentage", "80"))),
-            ResourceType.MEMORY: Decimal(str(resource_config.get("max_memory_mb", "8192")))
+            ResourceType.MEMORY: Decimal(str(resource_config.get("max_memory_mb", "8192"))),
         }
 
         # Initialize usage history
@@ -98,7 +104,7 @@ class ResourceManager:
     async def start(self) -> None:
         """
         Start the resource manager.
-        
+
         Raises:
             ExecutionError: If startup fails
         """
@@ -126,7 +132,7 @@ class ResourceManager:
     async def stop(self) -> None:
         """
         Stop the resource manager.
-        
+
         Raises:
             ExecutionError: If shutdown fails
         """
@@ -154,22 +160,19 @@ class ResourceManager:
     @time_execution
     @log_calls
     async def request_resources(
-        self,
-        bot_id: str,
-        capital_amount: Decimal,
-        priority: BotPriority = BotPriority.NORMAL
+        self, bot_id: str, capital_amount: Decimal, priority: BotPriority = BotPriority.NORMAL
     ) -> bool:
         """
         Request resource allocation for a bot.
-        
+
         Args:
             bot_id: Bot identifier
             capital_amount: Required capital amount
             priority: Bot priority for allocation
-            
+
         Returns:
             bool: True if all resources allocated successfully
-            
+
         Raises:
             ValidationError: If request is invalid
             ExecutionError: If allocation fails
@@ -182,7 +185,7 @@ class ResourceManager:
                 "Processing resource request",
                 bot_id=bot_id,
                 capital_amount=float(capital_amount),
-                priority=priority.value
+                priority=priority.value,
             )
 
             # Calculate resource requirements
@@ -196,7 +199,7 @@ class ResourceManager:
                 self.logger.warning(
                     "Insufficient resources available",
                     bot_id=bot_id,
-                    unavailable=availability_check["unavailable_resources"]
+                    unavailable=availability_check["unavailable_resources"],
                 )
                 return False
 
@@ -213,7 +216,7 @@ class ResourceManager:
                 "Resources allocated successfully",
                 bot_id=bot_id,
                 allocated_capital=float(capital_amount),
-                total_allocations=len(allocations)
+                total_allocations=len(allocations),
             )
 
             return True
@@ -228,13 +231,13 @@ class ResourceManager:
     async def release_resources(self, bot_id: str) -> bool:
         """
         Release all resources allocated to a bot.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             bool: True if release successful
-            
+
         Raises:
             ExecutionError: If release fails
         """
@@ -246,13 +249,11 @@ class ResourceManager:
             allocations = self.resource_allocations[bot_id]
 
             self.logger.info(
-                "Releasing bot resources",
-                bot_id=bot_id,
-                allocation_count=len(allocations)
+                "Releasing bot resources", bot_id=bot_id, allocation_count=len(allocations)
             )
 
             # Release each resource type
-            for resource_type, allocation in allocations.items():
+            for _resource_type, allocation in allocations.items():
                 await self._release_resource_allocation(allocation)
 
             # Remove from tracking
@@ -272,10 +273,10 @@ class ResourceManager:
     async def verify_resources(self, bot_id: str) -> bool:
         """
         Verify that allocated resources are still available and valid.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             bool: True if resources are available
         """
@@ -291,7 +292,7 @@ class ResourceManager:
                     self.logger.warning(
                         "Resource verification failed",
                         bot_id=bot_id,
-                        resource_type=resource_type.value
+                        resource_type=resource_type.value,
                     )
                     return False
 
@@ -303,14 +304,11 @@ class ResourceManager:
 
     @log_calls
     async def update_resource_usage(
-        self,
-        bot_id: str,
-        resource_type: ResourceType,
-        used_amount: Decimal
+        self, bot_id: str, resource_type: ResourceType, used_amount: Decimal
     ) -> None:
         """
         Update resource usage for a bot.
-        
+
         Args:
             bot_id: Bot identifier
             resource_type: Type of resource
@@ -340,7 +338,7 @@ class ResourceManager:
             self.logger.warning(
                 f"Failed to update resource usage: {e}",
                 bot_id=bot_id,
-                resource_type=resource_type.value
+                resource_type=resource_type.value,
             )
 
     async def get_resource_summary(self) -> dict[str, Any]:
@@ -371,14 +369,16 @@ class ResourceManager:
                     "allocated": float(allocated),
                     "used": float(used),
                     "allocation_percentage": float(allocated / limit) if limit > 0 else 0.0,
-                    "usage_percentage": float(used / limit) if limit > 0 else 0.0
+                    "usage_percentage": float(used / limit) if limit > 0 else 0.0,
                 }
 
             return {
                 "total_bots": len(self.resource_allocations),
-                "resource_limits": {rt.value: float(limit) for rt, limit in self.global_resource_limits.items()},
+                "resource_limits": {
+                    rt.value: float(limit) for rt, limit in self.global_resource_limits.items()
+                },
                 "resource_usage": usage_percentages,
-                "last_updated": datetime.now(timezone.utc).isoformat()
+                "last_updated": datetime.now(timezone.utc).isoformat(),
             }
 
         except Exception as e:
@@ -388,10 +388,10 @@ class ResourceManager:
     async def get_bot_resource_usage(self, bot_id: str) -> dict[str, Any] | None:
         """
         Get resource usage for a specific bot.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             dict: Bot resource usage or None if not found
         """
@@ -408,17 +408,20 @@ class ResourceManager:
                 "reserved": float(allocation.reserved_amount),
                 "peak_usage": float(allocation.peak_usage),
                 "average_usage": float(allocation.average_usage),
-                "usage_percentage": float(allocation.used_amount / allocation.allocated_amount) if allocation.allocated_amount > 0 else 0.0,
-                "last_usage": allocation.last_usage_time.isoformat() if allocation.last_usage_time else None
+                "usage_percentage": (
+                    float(allocation.used_amount / allocation.allocated_amount)
+                    if allocation.allocated_amount > 0
+                    else 0.0
+                ),
+                "last_usage": (
+                    allocation.last_usage_time.isoformat() if allocation.last_usage_time else None
+                ),
             }
 
         return bot_usage
 
     async def _calculate_resource_requirements(
-        self,
-        bot_id: str,
-        capital_amount: Decimal,
-        priority: BotPriority
+        self, bot_id: str, capital_amount: Decimal, priority: BotPriority
     ) -> dict[ResourceType, Decimal]:
         """Calculate resource requirements for a bot."""
         # Base requirements calculation
@@ -433,10 +436,12 @@ class ResourceManager:
             BotPriority.CRITICAL: Decimal("2.0"),
             BotPriority.HIGH: Decimal("1.5"),
             BotPriority.NORMAL: Decimal("1.0"),
-            BotPriority.LOW: Decimal("0.5")
+            BotPriority.LOW: Decimal("0.5"),
         }
 
-        requirements[ResourceType.API_RATE_LIMIT] = base_api_allocation * priority_multiplier[priority]
+        requirements[ResourceType.API_RATE_LIMIT] = (
+            base_api_allocation * priority_multiplier[priority]
+        )
 
         # WebSocket connections (typically 1-3 per bot)
         requirements[ResourceType.WEBSOCKET_CONNECTIONS] = Decimal("2")
@@ -449,7 +454,7 @@ class ResourceManager:
             BotPriority.CRITICAL: Decimal("15"),
             BotPriority.HIGH: Decimal("10"),
             BotPriority.NORMAL: Decimal("5"),
-            BotPriority.LOW: Decimal("2")
+            BotPriority.LOW: Decimal("2"),
         }
         requirements[ResourceType.CPU] = cpu_allocation[priority]
 
@@ -458,15 +463,14 @@ class ResourceManager:
             BotPriority.CRITICAL: Decimal("512"),
             BotPriority.HIGH: Decimal("256"),
             BotPriority.NORMAL: Decimal("128"),
-            BotPriority.LOW: Decimal("64")
+            BotPriority.LOW: Decimal("64"),
         }
         requirements[ResourceType.MEMORY] = memory_allocation[priority]
 
         return requirements
 
     async def _check_resource_availability(
-        self,
-        requirements: dict[ResourceType, Decimal]
+        self, requirements: dict[ResourceType, Decimal]
     ) -> dict[str, Any]:
         """Check if requested resources are available."""
         unavailable_resources = []
@@ -487,23 +491,23 @@ class ResourceManager:
             available = limit - used
 
             if required_amount > available:
-                unavailable_resources.append({
-                    "resource_type": resource_type.value,
-                    "required": float(required_amount),
-                    "available": float(available),
-                    "limit": float(limit),
-                    "current_usage": float(used)
-                })
+                unavailable_resources.append(
+                    {
+                        "resource_type": resource_type.value,
+                        "required": float(required_amount),
+                        "available": float(available),
+                        "limit": float(limit),
+                        "current_usage": float(used),
+                    }
+                )
 
         return {
             "all_available": len(unavailable_resources) == 0,
-            "unavailable_resources": unavailable_resources
+            "unavailable_resources": unavailable_resources,
         }
 
     async def _allocate_resources(
-        self,
-        bot_id: str,
-        requirements: dict[ResourceType, Decimal]
+        self, bot_id: str, requirements: dict[ResourceType, Decimal]
     ) -> dict[ResourceType, ResourceAllocation]:
         """Allocate resources for a bot."""
         allocations = {}
@@ -514,7 +518,7 @@ class ResourceManager:
                 resource_type=resource_type,
                 allocated_amount=amount,
                 max_amount=amount * Decimal("1.2"),  # 20% buffer
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
 
             # Special handling for capital allocation
@@ -542,14 +546,14 @@ class ResourceManager:
                 "Resource allocation released",
                 bot_id=allocation.bot_id,
                 resource_type=allocation.resource_type.value,
-                amount=float(allocation.allocated_amount)
+                amount=float(allocation.allocated_amount),
             )
 
         except Exception as e:
             self.logger.warning(
                 f"Failed to release resource allocation: {e}",
                 bot_id=allocation.bot_id,
-                resource_type=allocation.resource_type.value
+                resource_type=allocation.resource_type.value,
             )
 
     async def _verify_resource_allocation(self, allocation: ResourceAllocation) -> bool:
@@ -578,7 +582,7 @@ class ResourceManager:
             self.logger.warning(
                 f"Resource verification error: {e}",
                 bot_id=allocation.bot_id,
-                resource_type=allocation.resource_type.value
+                resource_type=allocation.resource_type.value,
             )
             return False
 
@@ -600,7 +604,9 @@ class ResourceManager:
 
                     # Periodic cleanup
                     cleanup_counter += 1
-                    if cleanup_counter >= (self.resource_cleanup_interval // self.monitoring_interval):
+                    if cleanup_counter >= (
+                        self.resource_cleanup_interval // self.monitoring_interval
+                    ):
                         await self._cleanup_expired_allocations()
                         cleanup_counter = 0
 
@@ -633,7 +639,11 @@ class ResourceManager:
                 "timestamp": current_time,
                 "total_allocated": total_allocated,
                 "total_used": total_used,
-                "usage_percentage": float(total_used / self.global_resource_limits[resource_type]) if self.global_resource_limits[resource_type] > 0 else 0.0
+                "usage_percentage": (
+                    float(total_used / self.global_resource_limits[resource_type])
+                    if self.global_resource_limits[resource_type] > 0
+                    else 0.0
+                ),
             }
 
             # Keep only recent history (last 24 hours)
@@ -643,8 +653,7 @@ class ResourceManager:
             # Cleanup old entries
             cutoff_time = current_time - timedelta(hours=24)
             self.resource_usage_history[resource_type] = [
-                entry for entry in history
-                if entry["timestamp"] > cutoff_time
+                entry for entry in history if entry["timestamp"] > cutoff_time
             ]
 
     async def _check_resource_violations(self) -> None:
@@ -662,18 +671,17 @@ class ResourceManager:
             usage_percentage = float(total_used / limit) if limit > 0 else 0.0
 
             if usage_percentage > 0.9:  # 90% threshold
-                violations.append({
-                    "resource_type": resource_type.value,
-                    "usage_percentage": usage_percentage,
-                    "total_used": float(total_used),
-                    "limit": float(limit)
-                })
+                violations.append(
+                    {
+                        "resource_type": resource_type.value,
+                        "usage_percentage": usage_percentage,
+                        "total_used": float(total_used),
+                        "limit": float(limit),
+                    }
+                )
 
         if violations:
-            self.logger.warning(
-                "Resource usage violations detected",
-                violations=violations
-            )
+            self.logger.warning("Resource usage violations detected", violations=violations)
 
     async def _optimize_resource_allocations(self) -> None:
         """Optimize resource allocations based on usage patterns."""
@@ -688,24 +696,27 @@ class ResourceManager:
                     utilization = allocation.average_usage / allocation.allocated_amount
 
                     if utilization < 0.2:  # Under-utilized
-                        optimization_suggestions.append({
-                            "bot_id": bot_id,
-                            "resource_type": resource_type.value,
-                            "suggestion": "reduce_allocation",
-                            "current_utilization": float(utilization)
-                        })
+                        optimization_suggestions.append(
+                            {
+                                "bot_id": bot_id,
+                                "resource_type": resource_type.value,
+                                "suggestion": "reduce_allocation",
+                                "current_utilization": float(utilization),
+                            }
+                        )
                     elif utilization > 0.8:  # Over-utilized
-                        optimization_suggestions.append({
-                            "bot_id": bot_id,
-                            "resource_type": resource_type.value,
-                            "suggestion": "increase_allocation",
-                            "current_utilization": float(utilization)
-                        })
+                        optimization_suggestions.append(
+                            {
+                                "bot_id": bot_id,
+                                "resource_type": resource_type.value,
+                                "suggestion": "increase_allocation",
+                                "current_utilization": float(utilization),
+                            }
+                        )
 
         if optimization_suggestions:
             self.logger.debug(
-                "Resource optimization suggestions available",
-                suggestions=optimization_suggestions
+                "Resource optimization suggestions available", suggestions=optimization_suggestions
             )
 
     async def _cleanup_expired_allocations(self) -> None:
@@ -720,10 +731,7 @@ class ResourceManager:
                     break
 
         for bot_id in expired_bots:
-            self.logger.info(
-                "Cleaning up expired resource allocation",
-                bot_id=bot_id
-            )
+            self.logger.info("Cleaning up expired resource allocation", bot_id=bot_id)
             await self.release_resources(bot_id)
 
     async def _release_all_resources(self) -> None:
@@ -735,8 +743,7 @@ class ResourceManager:
                 await self.release_resources(bot_id)
             except Exception as e:
                 self.logger.warning(
-                    f"Failed to release resources during shutdown: {e}",
-                    bot_id=bot_id
+                    f"Failed to release resources during shutdown: {e}", bot_id=bot_id
                 )
 
     async def _cleanup_failed_allocation(self, bot_id: str) -> None:
@@ -746,6 +753,5 @@ class ResourceManager:
                 await self.release_resources(bot_id)
             except Exception as e:
                 self.logger.warning(
-                    f"Failed to cleanup after allocation failure: {e}",
-                    bot_id=bot_id
+                    f"Failed to cleanup after allocation failure: {e}", bot_id=bot_id
                 )

@@ -8,20 +8,20 @@ and simulation with different parameters, models, and settings.
 import asyncio
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from enum import Enum
+from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from src.backtesting.engine import BacktestEngine
-from src.backtesting.metrics import BacktestMetrics
 from src.core.logging import get_logger
-from src.core.types import BotType, OrderSide
-from enum import Enum
+from src.core.types import BotType
+
 
 class TimeInterval(Enum):
     """Time interval enumeration for data intervals."""
+
     MINUTE_1 = "1m"
     MINUTE_5 = "5m"
     MINUTE_15 = "15m"
@@ -31,7 +31,8 @@ class TimeInterval(Enum):
     HOUR_12 = "12h"
     DAY_1 = "1d"
     WEEK_1 = "1w"
-from src.strategies.factory import StrategyFactory
+
+
 from src.web_interface.security.auth import User, get_current_user, get_trading_user
 
 logger = get_logger(__name__)
@@ -56,36 +57,40 @@ class PlaygroundConfigurationRequest(BaseModel):
 
     # Bot Configuration
     bot_name: str = Field(..., description="Name for the playground bot")
-    bot_type: BotType = Field(default=BotType.STRATEGY, description="Bot type (strategy/arbitrage/market_maker)")
-    
+    bot_type: BotType = Field(
+        default=BotType.STRATEGY, description="Bot type (strategy/arbitrage/market_maker)"
+    )
+
     # Symbol and Exchange Configuration
-    symbols: List[str] = Field(..., description="Trading symbols")
-    exchanges: List[str] = Field(..., description="Exchanges to use")
-    
+    symbols: list[str] = Field(..., description="Trading symbols")
+    exchanges: list[str] = Field(..., description="Exchanges to use")
+
     # Capital Management
     allocated_capital: Decimal = Field(..., gt=0, description="Capital allocated")
     risk_percentage: float = Field(..., gt=0, le=1, description="Risk per trade")
-    
+
     # Strategy Configuration
     strategy_name: str = Field(..., description="Strategy to use")
-    strategy_parameters: Dict[str, Any] = Field(default_factory=dict, description="Strategy parameters")
-    
+    strategy_parameters: dict[str, Any] = Field(
+        default_factory=dict, description="Strategy parameters"
+    )
+
     # Risk Settings
     stop_loss_percentage: float = Field(default=0.02, description="Stop loss percentage")
     take_profit_percentage: float = Field(default=0.04, description="Take profit percentage")
     max_position_size: Decimal = Field(default=Decimal("0.1"), description="Maximum position size")
-    
+
     # Model Selection
-    ml_model_id: Optional[str] = Field(None, description="ML model to use")
+    ml_model_id: str | None = Field(None, description="ML model to use")
     enable_ai_features: bool = Field(default=True, description="Enable AI features")
-    
+
     # Execution Mode
     sandbox_mode: bool = Field(default=True, description="Run in sandbox mode")
     use_historical_data: bool = Field(default=True, description="Use historical data")
-    
+
     # Backtesting Configuration (optional)
-    start_date: Optional[datetime] = Field(None, description="Backtest start date")
-    end_date: Optional[datetime] = Field(None, description="Backtest end date")
+    start_date: datetime | None = Field(None, description="Backtest start date")
+    end_date: datetime | None = Field(None, description="Backtest end date")
     time_interval: TimeInterval = Field(default=TimeInterval.HOUR_1, description="Data interval")
 
 
@@ -95,10 +100,10 @@ class PlaygroundSessionResponse(BaseModel):
     session_id: str
     bot_id: str
     status: str
-    configuration: Dict[str, Any]
+    configuration: dict[str, Any]
     created_at: datetime
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     is_backtest: bool
     is_sandbox: bool
 
@@ -132,7 +137,7 @@ class PlaygroundResultResponse(BaseModel):
     winning_trades: int
     losing_trades: int
     win_rate: float
-    sharpe_ratio: Optional[float]
+    sharpe_ratio: float | None
     max_drawdown: Decimal
     max_drawdown_percentage: float
     total_fees: Decimal
@@ -150,11 +155,11 @@ class PlaygroundLogEntry(BaseModel):
     message: str
     bot_id: str
     session_id: str
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 # In-memory storage for active playground sessions
-active_sessions: Dict[str, Dict[str, Any]] = {}
+active_sessions: dict[str, dict[str, Any]] = {}
 
 
 @router.post("/sessions", response_model=PlaygroundSessionResponse)
@@ -165,7 +170,7 @@ async def create_playground_session(
 ):
     """
     Create a new playground session for testing strategies and parameters.
-    
+
     This endpoint creates a new playground session where users can test different
     strategies, parameters, and models either in sandbox mode or with historical data.
     """
@@ -173,14 +178,16 @@ async def create_playground_session(
         # Generate unique identifiers
         session_id = str(uuid4())
         bot_id = f"playground_{session_id[:8]}"
-        
+
         # Validate strategy exists
-        if not strategy_factory or not strategy_factory.is_strategy_available(request.strategy_name):
+        if not strategy_factory or not strategy_factory.is_strategy_available(
+            request.strategy_name
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Strategy '{request.strategy_name}' not available"
+                detail=f"Strategy '{request.strategy_name}' not available",
             )
-        
+
         # Create configuration
         configuration = {
             "bot_name": request.bot_name,
@@ -203,10 +210,10 @@ async def create_playground_session(
             "time_interval": request.time_interval,
             "user_id": user.id,
         }
-        
+
         # Determine if this is a backtest
         is_backtest = request.use_historical_data and request.start_date and request.end_date
-        
+
         # Store session information
         session_data = {
             "session_id": session_id,
@@ -220,11 +227,11 @@ async def create_playground_session(
             "logs": [],
             "metrics": {},
         }
-        
+
         active_sessions[session_id] = session_data
-        
+
         logger.info(f"Created playground session {session_id} for user {user.username}")
-        
+
         return PlaygroundSessionResponse(
             session_id=session_id,
             bot_id=bot_id,
@@ -234,12 +241,12 @@ async def create_playground_session(
             is_backtest=is_backtest,
             is_sandbox=request.sandbox_mode,
         )
-        
+
     except Exception as e:
-        logger.error(f"Error creating playground session: {str(e)}")
+        logger.error(f"Error creating playground session: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create playground session: {str(e)}"
+            detail=f"Failed to create playground session: {e!s}",
         )
 
 
@@ -251,50 +258,49 @@ async def start_playground_session(
 ):
     """
     Start a playground session.
-    
+
     This will either start a bot in sandbox mode or begin a backtest with historical data.
     """
     try:
         if session_id not in active_sessions:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Playground session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Playground session not found"
             )
-        
+
         session = active_sessions[session_id]
-        
+
         # Verify user ownership
         if session["user_id"] != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to access this session"
+                detail="Not authorized to access this session",
             )
-        
+
         # Check if already started
         if session["status"] in ["running", "completed"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Session is already {session['status']}"
+                detail=f"Session is already {session['status']}",
             )
-        
+
         # Update session status
         session["status"] = "starting"
         session["started_at"] = datetime.utcnow()
-        
+
         # Start the playground session in background
         background_tasks.add_task(_run_playground_session, session_id)
-        
+
         logger.info(f"Starting playground session {session_id}")
-        
+
         return {"message": "Playground session started", "session_id": session_id}
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error starting playground session {session_id}: {str(e)}")
+        logger.error(f"Error starting playground session {session_id}: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start playground session: {str(e)}"
+            detail=f"Failed to start playground session: {e!s}",
         )
 
 
@@ -309,23 +315,22 @@ async def get_playground_session_status(
     try:
         if session_id not in active_sessions:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Playground session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Playground session not found"
             )
-        
+
         session = active_sessions[session_id]
-        
-        # Verify user ownership  
+
+        # Verify user ownership
         if session["user_id"] != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to access this session"
+                detail="Not authorized to access this session",
             )
-        
+
         metrics = session.get("metrics", {})
         start_time = session.get("started_at", session["created_at"])
         runtime_minutes = (datetime.utcnow() - start_time).total_seconds() / 60
-        
+
         return PlaygroundStatusResponse(
             session_id=session_id,
             bot_id=session["bot_id"],
@@ -341,14 +346,14 @@ async def get_playground_session_status(
             cpu_usage_percent=metrics.get("cpu_usage_percent", 0.0),
             last_update=datetime.utcnow(),
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting playground session status {session_id}: {str(e)}")
+        logger.error(f"Error getting playground session status {session_id}: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get session status: {str(e)}"
+            detail=f"Failed to get session status: {e!s}",
         )
 
 
@@ -363,28 +368,26 @@ async def get_playground_session_results(
     try:
         if session_id not in active_sessions:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Playground session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Playground session not found"
             )
-        
+
         session = active_sessions[session_id]
-        
+
         # Verify user ownership
         if session["user_id"] != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to access this session"
+                detail="Not authorized to access this session",
             )
-        
+
         # Check if session is completed
         if session["status"] != "completed":
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Session not yet completed"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Session not yet completed"
             )
-        
+
         results = session.get("results", {})
-        
+
         return PlaygroundResultResponse(
             session_id=session_id,
             bot_id=session["bot_id"],
@@ -403,22 +406,22 @@ async def get_playground_session_results(
             completed_at=session.get("completed_at", datetime.utcnow()),
             runtime_minutes=results.get("runtime_minutes", 0.0),
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting playground session results {session_id}: {str(e)}")
+        logger.error(f"Error getting playground session results {session_id}: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get session results: {str(e)}"
+            detail=f"Failed to get session results: {e!s}",
         )
 
 
-@router.get("/sessions/{session_id}/logs", response_model=List[PlaygroundLogEntry])
+@router.get("/sessions/{session_id}/logs", response_model=list[PlaygroundLogEntry])
 async def get_playground_session_logs(
     session_id: str,
     limit: int = Query(default=100, le=1000, description="Maximum number of logs to return"),
-    level: Optional[str] = Query(default=None, description="Filter by log level"),
+    level: str | None = Query(default=None, description="Filter by log level"),
     user: User = Depends(get_current_user),
 ):
     """
@@ -427,28 +430,27 @@ async def get_playground_session_logs(
     try:
         if session_id not in active_sessions:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Playground session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Playground session not found"
             )
-        
+
         session = active_sessions[session_id]
-        
+
         # Verify user ownership
         if session["user_id"] != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to access this session"
+                detail="Not authorized to access this session",
             )
-        
+
         logs = session.get("logs", [])
-        
+
         # Filter by level if specified
         if level:
             logs = [log for log in logs if log.get("level", "").upper() == level.upper()]
-        
+
         # Limit results
         logs = logs[-limit:]
-        
+
         return [
             PlaygroundLogEntry(
                 timestamp=log["timestamp"],
@@ -460,14 +462,14 @@ async def get_playground_session_logs(
             )
             for log in logs
         ]
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting playground session logs {session_id}: {str(e)}")
+        logger.error(f"Error getting playground session logs {session_id}: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get session logs: {str(e)}"
+            detail=f"Failed to get session logs: {e!s}",
         )
 
 
@@ -482,43 +484,42 @@ async def stop_playground_session(
     try:
         if session_id not in active_sessions:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Playground session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Playground session not found"
             )
-        
+
         session = active_sessions[session_id]
-        
+
         # Verify user ownership
         if session["user_id"] != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to access this session"
+                detail="Not authorized to access this session",
             )
-        
+
         # Update session status
         session["status"] = "stopping"
-        
+
         # If running a bot, stop it
         if not session["is_backtest"] and bot_orchestrator:
             try:
                 await bot_orchestrator.stop_bot(session["bot_id"])
             except Exception as e:
-                logger.warning(f"Error stopping playground bot {session['bot_id']}: {str(e)}")
-        
+                logger.warning(f"Error stopping playground bot {session['bot_id']}: {e!s}")
+
         session["status"] = "stopped"
         session["completed_at"] = datetime.utcnow()
-        
+
         logger.info(f"Stopped playground session {session_id}")
-        
+
         return {"message": "Playground session stopped", "session_id": session_id}
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error stopping playground session {session_id}: {str(e)}")
+        logger.error(f"Error stopping playground session {session_id}: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to stop playground session: {str(e)}"
+            detail=f"Failed to stop playground session: {e!s}",
         )
 
 
@@ -533,54 +534,53 @@ async def delete_playground_session(
     try:
         if session_id not in active_sessions:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Playground session not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Playground session not found"
             )
-        
+
         session = active_sessions[session_id]
-        
+
         # Verify user ownership
         if session["user_id"] != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to access this session"
+                detail="Not authorized to access this session",
             )
-        
+
         # Stop session if running
         if session["status"] in ["running", "starting"]:
             try:
                 await stop_playground_session(session_id, user)
             except Exception as e:
-                logger.warning(f"Error stopping session during deletion: {str(e)}")
-        
+                logger.warning(f"Error stopping session during deletion: {e!s}")
+
         # Clean up bot if exists
         if not session["is_backtest"] and bot_orchestrator:
             try:
                 await bot_orchestrator.remove_bot(session["bot_id"])
             except Exception as e:
-                logger.warning(f"Error removing playground bot {session['bot_id']}: {str(e)}")
-        
+                logger.warning(f"Error removing playground bot {session['bot_id']}: {e!s}")
+
         # Remove from active sessions
         del active_sessions[session_id]
-        
+
         logger.info(f"Deleted playground session {session_id}")
-        
+
         return {"message": "Playground session deleted", "session_id": session_id}
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting playground session {session_id}: {str(e)}")
+        logger.error(f"Error deleting playground session {session_id}: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete playground session: {str(e)}"
+            detail=f"Failed to delete playground session: {e!s}",
         )
 
 
-@router.get("/sessions", response_model=List[PlaygroundSessionResponse])
+@router.get("/sessions", response_model=list[PlaygroundSessionResponse])
 async def list_playground_sessions(
     user: User = Depends(get_current_user),
-    status_filter: Optional[str] = Query(default=None, description="Filter by status"),
+    status_filter: str | None = Query(default=None, description="Filter by status"),
     limit: int = Query(default=50, le=100, description="Maximum number of sessions to return"),
 ):
     """
@@ -588,14 +588,14 @@ async def list_playground_sessions(
     """
     try:
         user_sessions = []
-        
+
         for session_id, session in active_sessions.items():
             if session["user_id"] != user.id:
                 continue
-            
+
             if status_filter and session["status"] != status_filter:
                 continue
-            
+
             user_sessions.append(
                 PlaygroundSessionResponse(
                     session_id=session_id,
@@ -609,23 +609,23 @@ async def list_playground_sessions(
                     is_sandbox=session["is_sandbox"],
                 )
             )
-        
+
         # Sort by creation date (newest first) and limit
         user_sessions.sort(key=lambda x: x.created_at, reverse=True)
         return user_sessions[:limit]
-        
+
     except Exception as e:
-        logger.error(f"Error listing playground sessions: {str(e)}")
+        logger.error(f"Error listing playground sessions: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list playground sessions: {str(e)}"
+            detail=f"Failed to list playground sessions: {e!s}",
         )
 
 
 async def _run_playground_session(session_id: str):
     """
     Background task to run a playground session.
-    
+
     This function handles the actual execution of the playground session,
     either running a bot or performing a backtest.
     """
@@ -634,80 +634,93 @@ async def _run_playground_session(session_id: str):
         if not session:
             logger.error(f"Session {session_id} not found during execution")
             return
-        
+
         config = session["configuration"]
-        
+
         # Add initial log
         _add_session_log(session_id, "INFO", "Starting playground session")
-        
+
         session["status"] = "running"
-        
+
         if session["is_backtest"]:
             await _run_backtest_session(session_id, config)
         else:
             await _run_sandbox_session(session_id, config)
-        
+
     except Exception as e:
-        logger.error(f"Error running playground session {session_id}: {str(e)}")
+        logger.error(f"Error running playground session {session_id}: {e!s}")
         session = active_sessions.get(session_id)
         if session:
             session["status"] = "failed"
             session["completed_at"] = datetime.utcnow()
-            _add_session_log(session_id, "ERROR", f"Session failed: {str(e)}")
+            _add_session_log(session_id, "ERROR", f"Session failed: {e!s}")
 
 
-async def _run_backtest_session(session_id: str, config: Dict[str, Any]):
+async def _run_backtest_session(session_id: str, config: dict[str, Any]):
     """Run a backtest session."""
     try:
         session = active_sessions[session_id]
         _add_session_log(session_id, "INFO", "Starting backtest")
-        
+
         # Update metrics
         session["metrics"]["current_step"] = "Initializing backtest"
         session["metrics"]["progress"] = 0.1
-        
+
         # Mock backtest execution (in real implementation, use BacktestEngine)
-        start_date = datetime.fromisoformat(config["start_date"]) if config["start_date"] else datetime.utcnow() - timedelta(days=30)
-        end_date = datetime.fromisoformat(config["end_date"]) if config["end_date"] else datetime.utcnow()
-        
+        start_date = (
+            datetime.fromisoformat(config["start_date"])
+            if config["start_date"]
+            else datetime.utcnow() - timedelta(days=30)
+        )
+        end_date = (
+            datetime.fromisoformat(config["end_date"]) if config["end_date"] else datetime.utcnow()
+        )
+
         # Simulate backtest progress
         total_days = (end_date - start_date).days
         for day in range(total_days):
             current_date = start_date + timedelta(days=day)
             progress = (day + 1) / total_days
-            
+
             session["metrics"]["progress"] = progress
             session["metrics"]["current_step"] = f"Processing {current_date.strftime('%Y-%m-%d')}"
-            
+
             # Simulate some trading activity
             if day % 3 == 0:  # Trade every 3 days
                 session["metrics"]["total_trades"] = session["metrics"].get("total_trades", 0) + 1
                 if day % 6 == 0:  # 50% win rate
-                    session["metrics"]["successful_trades"] = session["metrics"].get("successful_trades", 0) + 1
+                    session["metrics"]["successful_trades"] = (
+                        session["metrics"].get("successful_trades", 0) + 1
+                    )
                     pnl_change = float(config["allocated_capital"]) * 0.02  # 2% gain
                 else:
                     pnl_change = -float(config["allocated_capital"]) * 0.01  # 1% loss
-                
+
                 current_pnl = session["metrics"].get("current_pnl", 0) + pnl_change
                 session["metrics"]["current_pnl"] = current_pnl
-                
+
                 _add_session_log(
-                    session_id, "INFO",
-                    f"Executed trade on {current_date.strftime('%Y-%m-%d')}: {'Profit' if pnl_change > 0 else 'Loss'} ${pnl_change:.2f}"
+                    session_id,
+                    "INFO",
+                    f"Executed trade on {current_date.strftime('%Y-%m-%d')}: {'Profit' if pnl_change > 0 else 'Loss'} ${pnl_change:.2f}",
                 )
-            
+
             # Small delay to simulate processing time
             await asyncio.sleep(0.1)
-        
+
         # Finalize results
         metrics = session["metrics"]
         total_trades = metrics.get("total_trades", 0)
         successful_trades = metrics.get("successful_trades", 0)
         current_pnl = metrics.get("current_pnl", 0)
-        
+
         session["results"] = {
             "final_pnl": current_pnl,
-            "final_pnl_percentage": (current_pnl / float(config["allocated_capital"])) * 100 if float(config["allocated_capital"]) > 0 else 0,
+            "final_pnl_percentage": (
+                (current_pnl / float(config["allocated_capital"])) * 100
+                if float(config["allocated_capital"]) > 0
+                else 0
+            ),
             "total_trades": total_trades,
             "winning_trades": successful_trades,
             "losing_trades": total_trades - successful_trades,
@@ -720,149 +733,158 @@ async def _run_backtest_session(session_id: str, config: Dict[str, Any]):
             "profit_factor": 2.0 if current_pnl > 0 else 0.5,  # Mock value
             "runtime_minutes": (datetime.utcnow() - session["started_at"]).total_seconds() / 60,
         }
-        
+
         session["status"] = "completed"
         session["completed_at"] = datetime.utcnow()
-        
+
         _add_session_log(session_id, "INFO", f"Backtest completed. Final P&L: ${current_pnl:.2f}")
-        
+
     except Exception as e:
-        logger.error(f"Error running backtest session {session_id}: {str(e)}")
+        logger.error(f"Error running backtest session {session_id}: {e!s}")
         session["status"] = "failed"
-        _add_session_log(session_id, "ERROR", f"Backtest failed: {str(e)}")
+        _add_session_log(session_id, "ERROR", f"Backtest failed: {e!s}")
         raise
 
 
-async def _run_sandbox_session(session_id: str, config: Dict[str, Any]):
+async def _run_sandbox_session(session_id: str, config: dict[str, Any]):
     """Run a sandbox session with live bot."""
     try:
         session = active_sessions[session_id]
         _add_session_log(session_id, "INFO", "Starting sandbox bot")
-        
+
         # Update metrics
         session["metrics"]["current_step"] = "Creating sandbox bot"
         session["metrics"]["progress"] = 0.1
-        
+
         # In real implementation, create and start a sandbox bot
         # For now, we'll simulate bot activity
-        
-        bot_id = session["bot_id"]
-        
+
+        session["bot_id"]
+
         # Mock bot running for demonstration
         runtime_minutes = 0
         while runtime_minutes < 60 and session["status"] == "running":  # Run for 1 hour max
             session["metrics"]["current_step"] = f"Bot running for {runtime_minutes:.1f} minutes"
             session["metrics"]["progress"] = min(runtime_minutes / 60, 1.0)
-            
+
             # Simulate occasional trades
             if runtime_minutes > 0 and runtime_minutes % 10 == 0:  # Trade every 10 minutes
                 session["metrics"]["total_trades"] = session["metrics"].get("total_trades", 0) + 1
                 if runtime_minutes % 20 == 0:  # 50% win rate
-                    session["metrics"]["successful_trades"] = session["metrics"].get("successful_trades", 0) + 1
+                    session["metrics"]["successful_trades"] = (
+                        session["metrics"].get("successful_trades", 0) + 1
+                    )
                     pnl_change = float(config["allocated_capital"]) * 0.005  # 0.5% gain
                 else:
                     pnl_change = -float(config["allocated_capital"]) * 0.003  # 0.3% loss
-                
+
                 current_pnl = session["metrics"].get("current_pnl", 0) + pnl_change
                 session["metrics"]["current_pnl"] = current_pnl
-                
+
                 _add_session_log(
-                    session_id, "INFO",
-                    f"Bot executed trade: {'Profit' if pnl_change > 0 else 'Loss'} ${pnl_change:.2f}"
+                    session_id,
+                    "INFO",
+                    f"Bot executed trade: {'Profit' if pnl_change > 0 else 'Loss'} ${pnl_change:.2f}",
                 )
-            
+
             await asyncio.sleep(60)  # Wait 1 minute
             runtime_minutes += 1
-        
+
         # Session completed or stopped
         if session["status"] == "running":
             session["status"] = "completed"
             session["completed_at"] = datetime.utcnow()
             _add_session_log(session_id, "INFO", "Sandbox session completed")
-        
+
     except Exception as e:
-        logger.error(f"Error running sandbox session {session_id}: {str(e)}")
+        logger.error(f"Error running sandbox session {session_id}: {e!s}")
         session["status"] = "failed"
-        _add_session_log(session_id, "ERROR", f"Sandbox session failed: {str(e)}")
+        _add_session_log(session_id, "ERROR", f"Sandbox session failed: {e!s}")
         raise
 
 
-def _add_session_log(session_id: str, level: str, message: str, context: Dict[str, Any] = None):
+def _add_session_log(
+    session_id: str, level: str, message: str, context: dict[str, Any] | None = None
+):
     """Add a log entry to a session."""
     try:
         session = active_sessions.get(session_id)
         if not session:
             return
-        
+
         if "logs" not in session:
             session["logs"] = []
-        
+
         log_entry = {
             "timestamp": datetime.utcnow(),
             "level": level,
             "message": message,
             "context": context or {},
         }
-        
+
         session["logs"].append(log_entry)
-        
+
         # Keep only the last 1000 logs to prevent memory issues
         if len(session["logs"]) > 1000:
             session["logs"] = session["logs"][-1000:]
-            
+
     except Exception as e:
-        logger.error(f"Error adding log to session {session_id}: {str(e)}")
+        logger.error(f"Error adding log to session {session_id}: {e!s}")
 
 
 # Additional playground features for comprehensive functionality
 
+
 class PlaygroundConfigurationModel(BaseModel):
     """Enhanced playground configuration model."""
-    id: Optional[str] = None
+
+    id: str | None = None
     name: str
-    description: Optional[str] = None
-    symbols: List[str]
-    positionSizing: Dict[str, Any]
+    description: str | None = None
+    symbols: list[str]
+    positionSizing: dict[str, Any]
     tradingSide: str
-    riskSettings: Dict[str, Any]
-    portfolioSettings: Dict[str, Any]
-    strategy: Dict[str, Any]
-    model: Optional[Dict[str, Any]] = None
+    riskSettings: dict[str, Any]
+    portfolioSettings: dict[str, Any]
+    strategy: dict[str, Any]
+    model: dict[str, Any] | None = None
     timeframe: str
-    createdAt: Optional[datetime] = None
-    updatedAt: Optional[datetime] = None
+    createdAt: datetime | None = None
+    updatedAt: datetime | None = None
 
 
 class ABTestModel(BaseModel):
     """A/B test model."""
-    id: Optional[str] = None
+
+    id: str | None = None
     name: str
-    configurations: Dict[str, PlaygroundConfigurationModel]
+    configurations: dict[str, PlaygroundConfigurationModel]
     status: str = "setup"
-    results: Optional[Dict[str, Any]] = None
-    createdAt: Optional[datetime] = None
+    results: dict[str, Any] | None = None
+    createdAt: datetime | None = None
 
 
 class BatchOptimizationModel(BaseModel):
     """Batch optimization model."""
-    id: Optional[str] = None
+
+    id: str | None = None
     name: str
-    description: Optional[str] = None
-    configurations: List[PlaygroundConfigurationModel]
+    description: str | None = None
+    configurations: list[PlaygroundConfigurationModel]
     status: str = "pending"
-    settings: Dict[str, Any]
-    results: Optional[Dict[str, Any]] = None
-    startTime: Optional[datetime] = None
-    endTime: Optional[datetime] = None
+    settings: dict[str, Any]
+    results: dict[str, Any] | None = None
+    startTime: datetime | None = None
+    endTime: datetime | None = None
 
 
 # Storage for configurations, A/B tests, and batches
-playground_configurations: Dict[str, PlaygroundConfigurationModel] = {}
-ab_tests: Dict[str, ABTestModel] = {}
-batch_optimizations: Dict[str, BatchOptimizationModel] = {}
+playground_configurations: dict[str, PlaygroundConfigurationModel] = {}
+ab_tests: dict[str, ABTestModel] = {}
+batch_optimizations: dict[str, BatchOptimizationModel] = {}
 
 
-@router.get("/configurations", response_model=List[PlaygroundConfigurationModel])
+@router.get("/configurations", response_model=list[PlaygroundConfigurationModel])
 async def get_configurations(
     user: User = Depends(get_current_user),
     page: int = Query(default=1, ge=1),
@@ -871,17 +893,17 @@ async def get_configurations(
     """Get all playground configurations for the user."""
     try:
         user_configs = [config for config in playground_configurations.values()]
-        
+
         # Simple pagination
         start = (page - 1) * limit
         end = start + limit
-        
+
         return user_configs[start:end]
     except Exception as e:
-        logger.error(f"Error getting configurations: {str(e)}")
+        logger.error(f"Error getting configurations: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get configurations: {str(e)}"
+            detail=f"Failed to get configurations: {e!s}",
         )
 
 
@@ -895,17 +917,17 @@ async def save_configuration(
         if not config.id:
             config.id = str(uuid4())
             config.createdAt = datetime.utcnow()
-        
+
         config.updatedAt = datetime.utcnow()
         playground_configurations[config.id] = config
-        
+
         logger.info(f"Saved playground configuration {config.id} for user {user.username}")
         return config
     except Exception as e:
-        logger.error(f"Error saving configuration: {str(e)}")
+        logger.error(f"Error saving configuration: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to save configuration: {str(e)}"
+            detail=f"Failed to save configuration: {e!s}",
         )
 
 
@@ -918,20 +940,19 @@ async def delete_configuration(
     try:
         if config_id not in playground_configurations:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Configuration not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Configuration not found"
             )
-        
+
         del playground_configurations[config_id]
         logger.info(f"Deleted playground configuration {config_id}")
         return {"message": "Configuration deleted", "id": config_id}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting configuration: {str(e)}")
+        logger.error(f"Error deleting configuration: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete configuration: {str(e)}"
+            detail=f"Failed to delete configuration: {e!s}",
         )
 
 
@@ -951,19 +972,16 @@ async def control_execution(
                 session = sess
                 session_id = sid
                 break
-        
+
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Execution not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Execution not found")
+
         if session["user_id"] != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to control this execution"
+                detail="Not authorized to control this execution",
             )
-        
+
         if action == "pause":
             session["status"] = "paused"
             _add_session_log(session_id, "INFO", "Execution paused")
@@ -979,39 +997,43 @@ async def control_execution(
             session["started_at"] = datetime.utcnow()
             session["metrics"] = {"progress": 0.0}
             _add_session_log(session_id, "INFO", "Execution restarted")
-        
+
         return {"message": f"Execution {action}ed", "execution_id": execution_id}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error controlling execution: {str(e)}")
+        logger.error(f"Error controlling execution: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to control execution: {str(e)}"
+            detail=f"Failed to control execution: {e!s}",
         )
 
 
 @router.get("/executions")
 async def get_executions(
     user: User = Depends(get_current_user),
-    status_filter: Optional[List[str]] = Query(default=None),
-    mode_filter: Optional[List[str]] = Query(default=None),
+    status_filter: list[str] | None = Query(default=None),
+    mode_filter: list[str] | None = Query(default=None),
 ):
     """Get all executions for the user with optional filters."""
     try:
         user_executions = []
-        
+
         for session_id, session in active_sessions.items():
             if session["user_id"] != user.id:
                 continue
-            
+
             if status_filter and session["status"] not in status_filter:
                 continue
-            
-            mode = "historical" if session["is_backtest"] else ("sandbox" if session["is_sandbox"] else "live")
+
+            mode = (
+                "historical"
+                if session["is_backtest"]
+                else ("sandbox" if session["is_sandbox"] else "live")
+            )
             if mode_filter and mode not in mode_filter:
                 continue
-            
+
             execution = {
                 "id": session_id,
                 "configurationId": session.get("configuration", {}).get("id", ""),
@@ -1024,15 +1046,15 @@ async def get_executions(
                 "trades": [],  # Would be populated from actual trade history
                 "logs": session.get("logs", [])[-50:],  # Last 50 logs
             }
-            
+
             user_executions.append(execution)
-        
+
         return user_executions
     except Exception as e:
-        logger.error(f"Error getting executions: {str(e)}")
+        logger.error(f"Error getting executions: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get executions: {str(e)}"
+            detail=f"Failed to get executions: {e!s}",
         )
 
 
@@ -1046,14 +1068,14 @@ async def create_ab_test(
         ab_test.id = str(uuid4())
         ab_test.createdAt = datetime.utcnow()
         ab_tests[ab_test.id] = ab_test
-        
+
         logger.info(f"Created A/B test {ab_test.id} for user {user.username}")
         return ab_test
     except Exception as e:
-        logger.error(f"Error creating A/B test: {str(e)}")
+        logger.error(f"Error creating A/B test: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create A/B test: {str(e)}"
+            detail=f"Failed to create A/B test: {e!s}",
         )
 
 
@@ -1066,25 +1088,22 @@ async def run_ab_test(
     """Run an A/B test."""
     try:
         if ab_test_id not in ab_tests:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="A/B test not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="A/B test not found")
+
         ab_test = ab_tests[ab_test_id]
         ab_test.status = "running"
-        
+
         # Run A/B test in background
         background_tasks.add_task(_run_ab_test, ab_test_id)
-        
+
         return {"message": "A/B test started", "id": ab_test_id}
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error running A/B test: {str(e)}")
+        logger.error(f"Error running A/B test: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to run A/B test: {str(e)}"
+            detail=f"Failed to run A/B test: {e!s}",
         )
 
 
@@ -1100,17 +1119,17 @@ async def start_batch_optimization(
         batch.startTime = datetime.utcnow()
         batch.status = "running"
         batch_optimizations[batch.id] = batch
-        
+
         # Run batch optimization in background
         background_tasks.add_task(_run_batch_optimization, batch.id)
-        
+
         logger.info(f"Started batch optimization {batch.id} for user {user.username}")
         return batch
     except Exception as e:
-        logger.error(f"Error starting batch optimization: {str(e)}")
+        logger.error(f"Error starting batch optimization: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start batch optimization: {str(e)}"
+            detail=f"Failed to start batch optimization: {e!s}",
         )
 
 
@@ -1123,12 +1142,11 @@ async def get_batch_progress(
     try:
         if batch_id not in batch_optimizations:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Batch optimization not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="Batch optimization not found"
             )
-        
+
         batch = batch_optimizations[batch_id]
-        
+
         # Mock progress calculation
         if batch.status == "running":
             runtime_minutes = (datetime.utcnow() - batch.startTime).total_seconds() / 60
@@ -1138,21 +1156,25 @@ async def get_batch_progress(
             progress = 100
         else:
             progress = 0
-        
+
         return {
             "completedConfigurations": int(progress / 100 * len(batch.configurations)),
             "totalConfigurations": len(batch.configurations),
             "progress": progress,
             "currentStage": "Optimizing parameters" if batch.status == "running" else batch.status,
-            "estimatedTimeRemaining": max(0, len(batch.configurations) * 2 - runtime_minutes) if batch.status == "running" else 0
+            "estimatedTimeRemaining": (
+                max(0, len(batch.configurations) * 2 - runtime_minutes)
+                if batch.status == "running"
+                else 0
+            ),
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting batch progress: {str(e)}")
+        logger.error(f"Error getting batch progress: {e!s}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get batch progress: {str(e)}"
+            detail=f"Failed to get batch progress: {e!s}",
         )
 
 
@@ -1162,27 +1184,23 @@ async def _run_ab_test(ab_test_id: str):
         ab_test = ab_tests.get(ab_test_id)
         if not ab_test:
             return
-        
+
         # Simulate A/B test execution
         await asyncio.sleep(30)  # Simulate test duration
-        
+
         # Mock results
         ab_test.results = {
             "significanceLevel": 0.05,
             "pValue": 0.023,
             "confidenceInterval": [1.2, 4.8],
             "winner": "treatment",
-            "effect": {
-                "magnitude": 3.2,
-                "direction": "positive",
-                "metric": "Total Return"
-            }
+            "effect": {"magnitude": 3.2, "direction": "positive", "metric": "Total Return"},
         }
-        
+
         ab_test.status = "completed"
         logger.info(f"A/B test {ab_test_id} completed")
     except Exception as e:
-        logger.error(f"Error running A/B test {ab_test_id}: {str(e)}")
+        logger.error(f"Error running A/B test {ab_test_id}: {e!s}")
         if ab_test_id in ab_tests:
             ab_tests[ab_test_id].status = "failed"
 
@@ -1193,51 +1211,53 @@ async def _run_batch_optimization(batch_id: str):
         batch = batch_optimizations.get(batch_id)
         if not batch:
             return
-        
+
         total_configs = len(batch.configurations)
         results = []
-        
+
         # Simulate processing each configuration
-        for i, config in enumerate(batch.configurations):
+        for i, _config in enumerate(batch.configurations):
             # Mock results for each configuration
             mock_metrics = {
-                "totalReturn": (i - total_configs/2) * 2,  # Varied returns
+                "totalReturn": (i - total_configs / 2) * 2,  # Varied returns
                 "sharpeRatio": 0.5 + i * 0.1,
                 "maxDrawdown": 5 + i * 0.5,
                 "winRate": 45 + i * 2,
                 "totalTrades": 50 + i * 10,
                 "profitFactor": 0.8 + i * 0.1,
             }
-            
-            results.append({
-                "configurationId": f"config_{i}",
-                "metrics": mock_metrics,
-                "rank": i + 1,
-                "parameters": {
-                    "stopLoss": 1 + i * 0.1,
-                    "takeProfit": 2 + i * 0.2,
-                    "positionSize": 1 + i * 0.1,
-                },
-                "overfittingRisk": "Low" if i % 3 == 0 else "Medium" if i % 3 == 1 else "High"
-            })
-            
+
+            results.append(
+                {
+                    "configurationId": f"config_{i}",
+                    "metrics": mock_metrics,
+                    "rank": i + 1,
+                    "parameters": {
+                        "stopLoss": 1 + i * 0.1,
+                        "takeProfit": 2 + i * 0.2,
+                        "positionSize": 1 + i * 0.1,
+                    },
+                    "overfittingRisk": "Low" if i % 3 == 0 else "Medium" if i % 3 == 1 else "High",
+                }
+            )
+
             await asyncio.sleep(2)  # Simulate processing time
-        
+
         # Sort by Sharpe ratio and assign ranks
         results.sort(key=lambda x: x["metrics"]["sharpeRatio"], reverse=True)
         for i, result in enumerate(results):
             result["rank"] = i + 1
-        
+
         batch.results = {
             "bestConfiguration": batch.configurations[0] if batch.configurations else None,
-            "results": results
+            "results": results,
         }
-        
+
         batch.status = "completed"
         batch.endTime = datetime.utcnow()
-        
+
         logger.info(f"Batch optimization {batch_id} completed")
     except Exception as e:
-        logger.error(f"Error running batch optimization {batch_id}: {str(e)}")
+        logger.error(f"Error running batch optimization {batch_id}: {e!s}")
         if batch_id in batch_optimizations:
             batch_optimizations[batch_id].status = "failed"

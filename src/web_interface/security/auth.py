@@ -316,7 +316,9 @@ async def get_trading_user(current_user: User = Depends(get_current_user)) -> Us
     return current_user
 
 
-def create_user(username: str, email: str, password: str, scopes: list[str] = None) -> UserInDB:
+def create_user(
+    username: str, email: str, password: str, scopes: list[str] | None = None
+) -> UserInDB:
     """
     Create a new user (for admin functionality).
 

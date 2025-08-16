@@ -5,7 +5,7 @@ This module provides volatility forecasting models that predict future
 volatility levels for risk management and position sizing.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -135,7 +135,7 @@ class VolatilityForecaster(BaseModel):
 
     @time_execution
     @log_calls
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> dict[str, Any]:
         """
         Train the volatility forecaster.
 
@@ -302,7 +302,7 @@ class VolatilityForecaster(BaseModel):
 
     @time_execution
     @log_calls
-    def evaluate(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
+    def evaluate(self, X: pd.DataFrame, y: pd.Series) -> dict[str, Any]:
         """
         Evaluate the model on test data.
 
@@ -581,7 +581,7 @@ class VolatilityForecaster(BaseModel):
             logger.error(f"Volatility regime accuracy calculation failed: {e}")
             return 0.0
 
-    def get_feature_importance(self) -> Optional[pd.Series]:
+    def get_feature_importance(self) -> pd.Series | None:
         """
         Get feature importance scores.
 
@@ -594,7 +594,7 @@ class VolatilityForecaster(BaseModel):
 
         return self.feature_importance_
 
-    def get_volatility_stats(self) -> Optional[Dict[str, float]]:
+    def get_volatility_stats(self) -> dict[str, float] | None:
         """
         Get volatility statistics from training.
 
@@ -607,7 +607,7 @@ class VolatilityForecaster(BaseModel):
 
         return self.volatility_stats_
 
-    def predict_volatility_regime(self, X: pd.DataFrame) -> List[str]:
+    def predict_volatility_regime(self, X: pd.DataFrame) -> list[str]:
         """
         Predict volatility regime (low, medium, high).
 

@@ -33,7 +33,7 @@ from src.utils.decorators import log_calls
 class BotMonitor:
     """
     Comprehensive bot health and performance monitoring system.
-    
+
     This class provides:
     - Bot status monitoring and health checks
     - Performance metrics collection and analysis
@@ -46,7 +46,7 @@ class BotMonitor:
     def __init__(self, config: Config):
         """
         Initialize bot monitor.
-        
+
         Args:
             config: Application configuration
         """
@@ -76,7 +76,9 @@ class BotMonitor:
         # Configuration
         self.monitoring_interval = config.bot_management.get("monitoring_interval", 30)
         self.health_check_interval = config.bot_management.get("health_check_interval", 60)
-        self.metrics_collection_interval = config.bot_management.get("metrics_collection_interval", 10)
+        self.metrics_collection_interval = config.bot_management.get(
+            "metrics_collection_interval", 10
+        )
         self.alert_retention_hours = config.bot_management.get("alert_retention_hours", 24)
 
         # Performance thresholds
@@ -84,11 +86,13 @@ class BotMonitor:
             "cpu_usage_warning": config.bot_management.get("cpu_usage_warning", 70.0),
             "cpu_usage_critical": config.bot_management.get("cpu_usage_critical", 90.0),
             "memory_usage_warning": config.bot_management.get("memory_usage_warning", 500.0),  # MB
-            "memory_usage_critical": config.bot_management.get("memory_usage_critical", 1000.0),  # MB
+            "memory_usage_critical": config.bot_management.get(
+                "memory_usage_critical", 1000.0
+            ),  # MB
             "error_rate_warning": config.bot_management.get("error_rate_warning", 0.05),  # 5%
             "error_rate_critical": config.bot_management.get("error_rate_critical", 0.15),  # 15%
             "heartbeat_timeout": config.bot_management.get("heartbeat_timeout", 120),  # seconds
-            "win_rate_threshold": config.bot_management.get("win_rate_threshold", 0.30)  # 30%
+            "win_rate_threshold": config.bot_management.get("win_rate_threshold", 0.30),  # 30%
         }
 
         # Monitoring statistics
@@ -98,7 +102,7 @@ class BotMonitor:
             "critical_alerts": 0,
             "warning_alerts": 0,
             "bots_monitored": 0,
-            "last_monitoring_time": None
+            "last_monitoring_time": None,
         }
 
         self.logger.info("Bot monitor initialized")
@@ -107,7 +111,7 @@ class BotMonitor:
     async def start(self) -> None:
         """
         Start the bot monitoring system.
-        
+
         Raises:
             ExecutionError: If startup fails
         """
@@ -137,7 +141,7 @@ class BotMonitor:
     async def stop(self) -> None:
         """
         Stop the bot monitoring system.
-        
+
         Raises:
             ExecutionError: If shutdown fails
         """
@@ -173,10 +177,10 @@ class BotMonitor:
     async def register_bot(self, bot_id: str) -> None:
         """
         Register a bot for monitoring.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Raises:
             ValidationError: If registration is invalid
         """
@@ -192,7 +196,7 @@ class BotMonitor:
                 "last_metrics_collection": None,
                 "consecutive_failures": 0,
                 "total_health_checks": 0,
-                "health_check_failures": 0
+                "health_check_failures": 0,
             }
 
             # Initialize health status
@@ -201,7 +205,7 @@ class BotMonitor:
                 "last_heartbeat": None,
                 "health_score": 0.0,
                 "issues": [],
-                "last_updated": datetime.now(timezone.utc)
+                "last_updated": datetime.now(timezone.utc),
             }
 
             # Initialize performance baseline
@@ -210,7 +214,7 @@ class BotMonitor:
                 "memory_usage": 0.0,
                 "trade_frequency": 0.0,
                 "error_rate": 0.0,
-                "baseline_established": False
+                "baseline_established": False,
             }
 
             # Initialize alert tracking
@@ -228,7 +232,7 @@ class BotMonitor:
     async def unregister_bot(self, bot_id: str) -> None:
         """
         Unregister a bot from monitoring.
-        
+
         Args:
             bot_id: Bot identifier
         """
@@ -254,7 +258,7 @@ class BotMonitor:
     async def update_bot_metrics(self, bot_id: str, metrics: BotMetrics) -> None:
         """
         Update metrics for a monitored bot.
-        
+
         Args:
             bot_id: Bot identifier
             metrics: Current bot metrics
@@ -287,11 +291,11 @@ class BotMonitor:
     async def check_bot_health(self, bot_id: str, bot_status: BotStatus) -> dict[str, Any]:
         """
         Perform comprehensive health check for a bot.
-        
+
         Args:
             bot_id: Bot identifier
             bot_status: Current bot status
-            
+
         Returns:
             dict: Health check results
         """
@@ -314,7 +318,7 @@ class BotMonitor:
                 "health_score": 1.0,
                 "checks": {},
                 "issues": [],
-                "recommendations": []
+                "recommendations": [],
             }
 
             # Status check
@@ -343,7 +347,7 @@ class BotMonitor:
                 heartbeat_healthy.get("score", 0.0),
                 resource_healthy.get("score", 0.0),
                 performance_healthy.get("score", 0.0),
-                error_rate_healthy.get("score", 0.0)
+                error_rate_healthy.get("score", 0.0),
             ]
 
             health_results["health_score"] = sum(check_scores) / len(check_scores)
@@ -357,19 +361,21 @@ class BotMonitor:
                 health_results["overall_health"] = "critical"
 
             # Collect issues and recommendations
-            for check_name, check_result in health_results["checks"].items():
+            for _check_name, check_result in health_results["checks"].items():
                 if check_result.get("issues"):
                     health_results["issues"].extend(check_result["issues"])
                 if check_result.get("recommendations"):
                     health_results["recommendations"].extend(check_result["recommendations"])
 
             # Update bot health status
-            self.bot_health_status[bot_id].update({
-                "status": health_results["overall_health"],
-                "health_score": health_results["health_score"],
-                "issues": health_results["issues"],
-                "last_updated": current_time
-            })
+            self.bot_health_status[bot_id].update(
+                {
+                    "status": health_results["overall_health"],
+                    "health_score": health_results["health_score"],
+                    "issues": health_results["issues"],
+                    "last_updated": current_time,
+                }
+            )
 
             # Generate alerts if needed
             await self._generate_health_alerts(bot_id, health_results)
@@ -386,29 +392,23 @@ class BotMonitor:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "overall_health": "error",
                 "health_score": 0.0,
-                "error": str(e)
+                "error": str(e),
             }
 
     async def get_monitoring_summary(self) -> dict[str, Any]:
         """Get comprehensive monitoring summary for all bots."""
         try:
-            current_time = datetime.now(timezone.utc)
+            datetime.now(timezone.utc)
 
             # Aggregate health statistics
-            health_summary = {
-                "healthy": 0,
-                "warning": 0,
-                "critical": 0,
-                "error": 0,
-                "unknown": 0
-            }
+            health_summary = {"healthy": 0, "warning": 0, "critical": 0, "error": 0, "unknown": 0}
 
             # Aggregate performance statistics
             performance_summary = {
                 "total_cpu_usage": 0.0,
                 "total_memory_usage": 0.0,
                 "average_health_score": 0.0,
-                "bots_with_issues": 0
+                "bots_with_issues": 0,
             }
 
             # Process each monitored bot
@@ -430,7 +430,7 @@ class BotMonitor:
                     "health_score": health_score,
                     "last_updated": health_status["last_updated"].isoformat(),
                     "active_alerts": len(self.active_alerts.get(bot_id, [])),
-                    "issues_count": len(health_status["issues"])
+                    "issues_count": len(health_status["issues"]),
                 }
 
             # Calculate averages
@@ -441,7 +441,8 @@ class BotMonitor:
             # Count active alerts
             total_active_alerts = sum(len(alerts) for alerts in self.active_alerts.values())
             critical_alerts = sum(
-                1 for alerts in self.active_alerts.values()
+                1
+                for alerts in self.active_alerts.values()
                 for alert in alerts
                 if alert.get("severity") == "critical"
             )
@@ -453,7 +454,11 @@ class BotMonitor:
                     "total_checks_performed": self.monitoring_stats["total_checks"],
                     "active_alerts": total_active_alerts,
                     "critical_alerts": critical_alerts,
-                    "last_monitoring_cycle": self.monitoring_stats["last_monitoring_time"].isoformat() if self.monitoring_stats["last_monitoring_time"] else None
+                    "last_monitoring_cycle": (
+                        self.monitoring_stats["last_monitoring_time"].isoformat()
+                        if self.monitoring_stats["last_monitoring_time"]
+                        else None
+                    ),
                 },
                 "health_summary": health_summary,
                 "performance_summary": performance_summary,
@@ -461,8 +466,8 @@ class BotMonitor:
                 "alert_statistics": {
                     "total_alerts_generated": self.monitoring_stats["alerts_generated"],
                     "critical_alerts_total": self.monitoring_stats["critical_alerts"],
-                    "warning_alerts_total": self.monitoring_stats["warning_alerts"]
-                }
+                    "warning_alerts_total": self.monitoring_stats["warning_alerts"],
+                },
             }
 
         except Exception as e:
@@ -472,10 +477,10 @@ class BotMonitor:
     async def get_bot_health_details(self, bot_id: str) -> dict[str, Any] | None:
         """
         Get detailed health information for a specific bot.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             dict: Detailed health information or None if not found
         """
@@ -492,24 +497,42 @@ class BotMonitor:
             "health_status": {
                 "status": health_status["status"],
                 "health_score": health_status["health_score"],
-                "last_heartbeat": health_status["last_heartbeat"].isoformat() if health_status["last_heartbeat"] else None,
+                "last_heartbeat": (
+                    health_status["last_heartbeat"].isoformat()
+                    if health_status["last_heartbeat"]
+                    else None
+                ),
                 "last_updated": health_status["last_updated"].isoformat(),
-                "issues": health_status["issues"]
+                "issues": health_status["issues"],
             },
             "monitoring_statistics": {
-                "registered_at": monitoring_data.get("registered_at").isoformat() if monitoring_data.get("registered_at") else None,
+                "registered_at": (
+                    monitoring_data.get("registered_at").isoformat()
+                    if monitoring_data.get("registered_at")
+                    else None
+                ),
                 "total_health_checks": monitoring_data.get("total_health_checks", 0),
                 "health_check_failures": monitoring_data.get("health_check_failures", 0),
                 "consecutive_failures": monitoring_data.get("consecutive_failures", 0),
-                "last_health_check": monitoring_data.get("last_health_check").isoformat() if monitoring_data.get("last_health_check") else None
+                "last_health_check": (
+                    monitoring_data.get("last_health_check").isoformat()
+                    if monitoring_data.get("last_health_check")
+                    else None
+                ),
             },
             "performance_baseline": baseline_data,
             "active_alerts": active_alerts,
             "alert_history_24h": [
-                alert for alert in self.alert_history
-                if (alert["bot_id"] == bot_id and
-                    (datetime.now(timezone.utc) - datetime.fromisoformat(alert["timestamp"])).total_seconds() < 86400)
-            ]
+                alert
+                for alert in self.alert_history
+                if (
+                    alert["bot_id"] == bot_id
+                    and (
+                        datetime.now(timezone.utc) - datetime.fromisoformat(alert["timestamp"])
+                    ).total_seconds()
+                    < 86400
+                )
+            ],
         }
 
     async def _monitoring_loop(self) -> None:
@@ -630,7 +653,7 @@ class BotMonitor:
         """Store metrics in InfluxDB."""
         try:
             # Prepare metrics data for InfluxDB
-            metrics_data = {
+            {
                 "measurement": "bot_metrics",
                 "tags": {"bot_id": bot_id},
                 "fields": {
@@ -646,14 +669,14 @@ class BotMonitor:
                     "error_count": metrics.error_count,
                     "cpu_usage": metrics.cpu_usage,
                     "memory_usage": metrics.memory_usage,
-                    "api_calls_count": metrics.api_calls_count
+                    "api_calls_count": metrics.api_calls_count,
                 },
-                "timestamp": datetime.now(timezone.utc)
+                "timestamp": datetime.now(timezone.utc),
             }
 
             if self.config.monitoring.get("influxdb_enabled", False):
                 try:
-                    influxdb_client = get_influxdb_client()
+                    get_influxdb_client()
                     # Write metrics to InfluxDB (implementation depends on client interface)
                     # This would need to be implemented based on actual InfluxDB client API
                     pass
@@ -677,35 +700,45 @@ class BotMonitor:
         anomalies = []
 
         # CPU usage anomaly
-        cpu_deviation = abs(metrics.cpu_usage - baseline["cpu_usage"]) / max(baseline["cpu_usage"], 1.0)
+        cpu_deviation = abs(metrics.cpu_usage - baseline["cpu_usage"]) / max(
+            baseline["cpu_usage"], 1.0
+        )
         if cpu_deviation > 0.5:  # 50% deviation
-            anomalies.append({
-                "type": "cpu_anomaly",
-                "current": metrics.cpu_usage,
-                "baseline": baseline["cpu_usage"],
-                "deviation": cpu_deviation
-            })
+            anomalies.append(
+                {
+                    "type": "cpu_anomaly",
+                    "current": metrics.cpu_usage,
+                    "baseline": baseline["cpu_usage"],
+                    "deviation": cpu_deviation,
+                }
+            )
 
         # Memory usage anomaly
-        memory_deviation = abs(metrics.memory_usage - baseline["memory_usage"]) / max(baseline["memory_usage"], 1.0)
+        memory_deviation = abs(metrics.memory_usage - baseline["memory_usage"]) / max(
+            baseline["memory_usage"], 1.0
+        )
         if memory_deviation > 0.5:  # 50% deviation
-            anomalies.append({
-                "type": "memory_anomaly",
-                "current": metrics.memory_usage,
-                "baseline": baseline["memory_usage"],
-                "deviation": memory_deviation
-            })
+            anomalies.append(
+                {
+                    "type": "memory_anomaly",
+                    "current": metrics.memory_usage,
+                    "baseline": baseline["memory_usage"],
+                    "deviation": memory_deviation,
+                }
+            )
 
         # Error rate anomaly
         current_error_rate = metrics.error_count / max(metrics.total_trades, 1)
         error_rate_deviation = abs(current_error_rate - baseline["error_rate"])
         if error_rate_deviation > 0.1:  # 10% absolute deviation
-            anomalies.append({
-                "type": "error_rate_anomaly",
-                "current": current_error_rate,
-                "baseline": baseline["error_rate"],
-                "deviation": error_rate_deviation
-            })
+            anomalies.append(
+                {
+                    "type": "error_rate_anomaly",
+                    "current": current_error_rate,
+                    "baseline": baseline["error_rate"],
+                    "deviation": error_rate_deviation,
+                }
+            )
 
         # Generate alerts for anomalies
         if anomalies:
@@ -721,19 +754,25 @@ class BotMonitor:
 
         if not baseline["baseline_established"]:
             # Initialize baseline
-            baseline.update({
-                "cpu_usage": metrics.cpu_usage,
-                "memory_usage": metrics.memory_usage,
-                "error_rate": metrics.error_count / max(metrics.total_trades, 1),
-                "baseline_established": True
-            })
+            baseline.update(
+                {
+                    "cpu_usage": metrics.cpu_usage,
+                    "memory_usage": metrics.memory_usage,
+                    "error_rate": metrics.error_count / max(metrics.total_trades, 1),
+                    "baseline_established": True,
+                }
+            )
         else:
             # Update with exponential moving average
             baseline["cpu_usage"] = (1 - alpha) * baseline["cpu_usage"] + alpha * metrics.cpu_usage
-            baseline["memory_usage"] = (1 - alpha) * baseline["memory_usage"] + alpha * metrics.memory_usage
+            baseline["memory_usage"] = (1 - alpha) * baseline[
+                "memory_usage"
+            ] + alpha * metrics.memory_usage
 
             current_error_rate = metrics.error_count / max(metrics.total_trades, 1)
-            baseline["error_rate"] = (1 - alpha) * baseline["error_rate"] + alpha * current_error_rate
+            baseline["error_rate"] = (1 - alpha) * baseline[
+                "error_rate"
+            ] + alpha * current_error_rate
 
     async def _check_bot_status(self, bot_id: str, bot_status: BotStatus) -> dict[str, Any]:
         """Check bot status health."""
@@ -764,7 +803,7 @@ class BotMonitor:
             "score": score,
             "status": bot_status.value,
             "issues": issues,
-            "recommendations": recommendations
+            "recommendations": recommendations,
         }
 
     async def _check_bot_heartbeat(self, bot_id: str) -> dict[str, Any]:
@@ -779,7 +818,7 @@ class BotMonitor:
             return {
                 "score": 0.0,
                 "issues": ["No heartbeat received"],
-                "recommendations": ["Check bot connectivity and health monitoring"]
+                "recommendations": ["Check bot connectivity and health monitoring"],
             }
 
         current_time = datetime.now(timezone.utc)
@@ -789,13 +828,13 @@ class BotMonitor:
             return {
                 "score": 0.0,
                 "issues": [f"Heartbeat timeout: {heartbeat_age:.0f}s ago"],
-                "recommendations": ["Check bot connectivity and restart if necessary"]
+                "recommendations": ["Check bot connectivity and restart if necessary"],
             }
         elif heartbeat_age > self.performance_thresholds["heartbeat_timeout"] / 2:
             return {
                 "score": 0.5,
                 "issues": [f"Stale heartbeat: {heartbeat_age:.0f}s ago"],
-                "recommendations": ["Monitor bot connectivity"]
+                "recommendations": ["Monitor bot connectivity"],
             }
         else:
             return {"score": 1.0, "last_heartbeat_age": heartbeat_age}
@@ -838,35 +877,27 @@ class BotMonitor:
                 "cpu_usage": cpu_usage,
                 "memory_usage": memory_usage,
                 "issues": issues,
-                "recommendations": recommendations
+                "recommendations": recommendations,
             }
 
         except Exception as e:
             return {
                 "score": 0.5,
                 "issues": [f"Resource check failed: {e}"],
-                "recommendations": ["Manual resource monitoring required"]
+                "recommendations": ["Manual resource monitoring required"],
             }
 
     async def _check_performance_health(self, bot_id: str) -> dict[str, Any]:
         """Check trading performance health."""
         # This would integrate with actual bot metrics
         # For now, return baseline health check
-        return {
-            "score": 0.8,
-            "issues": [],
-            "recommendations": []
-        }
+        return {"score": 0.8, "issues": [], "recommendations": []}
 
     async def _check_error_rate(self, bot_id: str) -> dict[str, Any]:
         """Check error rate health."""
         # This would integrate with actual error tracking
         # For now, return baseline health check
-        return {
-            "score": 0.9,
-            "issues": [],
-            "recommendations": []
-        }
+        return {"score": 0.9, "issues": [], "recommendations": []}
 
     async def _generate_health_alerts(self, bot_id: str, health_results: dict[str, Any]) -> None:
         """Generate alerts based on health check results."""
@@ -883,7 +914,7 @@ class BotMonitor:
                 "issues": health_results["issues"],
                 "recommendations": health_results["recommendations"],
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "acknowledged": False
+                "acknowledged": False,
             }
 
             # Add to active alerts
@@ -902,7 +933,7 @@ class BotMonitor:
                 bot_id=bot_id,
                 severity=severity,
                 health_score=health_results["health_score"],
-                issues_count=len(health_results["issues"])
+                issues_count=len(health_results["issues"]),
             )
 
     async def _generate_anomaly_alerts(self, bot_id: str, anomalies: list[dict[str, Any]]) -> None:
@@ -916,7 +947,7 @@ class BotMonitor:
                 "message": f"Performance anomaly detected: {anomaly['type']}",
                 "anomaly_data": anomaly,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "acknowledged": False
+                "acknowledged": False,
             }
 
             self.active_alerts[bot_id].append(alert)
@@ -928,7 +959,7 @@ class BotMonitor:
                 "Performance anomaly alert generated",
                 bot_id=bot_id,
                 anomaly_type=anomaly["type"],
-                deviation=anomaly["deviation"]
+                deviation=anomaly["deviation"],
             )
 
     async def _cleanup_old_alerts(self) -> None:
@@ -937,16 +968,20 @@ class BotMonitor:
 
         # Clean up alert history
         self.alert_history = [
-            alert for alert in self.alert_history
+            alert
+            for alert in self.alert_history
             if datetime.fromisoformat(alert["timestamp"]) > cutoff_time
         ]
 
         # Clean up active alerts for acknowledged ones older than retention period
         for bot_id in self.active_alerts:
             self.active_alerts[bot_id] = [
-                alert for alert in self.active_alerts[bot_id]
-                if (not alert.get("acknowledged") or
-                    datetime.fromisoformat(alert["timestamp"]) > cutoff_time)
+                alert
+                for alert in self.active_alerts[bot_id]
+                if (
+                    not alert.get("acknowledged")
+                    or datetime.fromisoformat(alert["timestamp"]) > cutoff_time
+                )
             ]
 
     async def _process_alert_escalations(self) -> None:
@@ -957,14 +992,12 @@ class BotMonitor:
         critical_alerts = []
         for bot_id, alerts in self.active_alerts.items():
             for alert in alerts:
-                if (alert["severity"] == "critical" and
-                    not alert.get("acknowledged")):
+                if alert["severity"] == "critical" and not alert.get("acknowledged"):
                     critical_alerts.append((bot_id, alert))
 
         if critical_alerts:
             self.logger.critical(
-                "Unacknowledged critical alerts requiring attention",
-                count=len(critical_alerts)
+                "Unacknowledged critical alerts requiring attention", count=len(critical_alerts)
             )
 
     async def _update_monitoring_statistics(self) -> None:
@@ -981,7 +1014,7 @@ class BotMonitor:
             disk = psutil.disk_usage("/")
 
             # Store system metrics
-            system_metrics = {
+            {
                 "measurement": "system_metrics",
                 "tags": {"component": "bot_monitor"},
                 "fields": {
@@ -991,14 +1024,14 @@ class BotMonitor:
                     "disk_usage_percent": disk.percent,
                     "disk_free_gb": disk.free / 1024 / 1024 / 1024,
                     "monitored_bots": len(self.monitored_bots),
-                    "active_alerts": sum(len(alerts) for alerts in self.active_alerts.values())
+                    "active_alerts": sum(len(alerts) for alerts in self.active_alerts.values()),
                 },
-                "timestamp": datetime.now(timezone.utc)
+                "timestamp": datetime.now(timezone.utc),
             }
 
             if self.config.monitoring.get("influxdb_enabled", False):
                 try:
-                    influxdb_client = get_influxdb_client()
+                    get_influxdb_client()
                     # Write system metrics to InfluxDB
                     pass
                 except Exception as e:

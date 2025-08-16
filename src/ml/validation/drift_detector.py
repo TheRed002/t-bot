@@ -6,13 +6,11 @@ in data distribution and model performance over time.
 """
 
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
 from scipy import stats
-from sklearn.metrics import mean_squared_error
-from sqlalchemy.orm import Session
 
 from src.core.config import Config
 from src.core.exceptions import ValidationError
@@ -79,8 +77,8 @@ class DriftDetector:
         self,
         reference_data: pd.DataFrame,
         current_data: pd.DataFrame,
-        feature_columns: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        feature_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
         """
         Detect feature drift between reference and current data.
 
@@ -175,7 +173,7 @@ class DriftDetector:
     @log_calls
     def detect_prediction_drift(
         self, reference_predictions: np.ndarray, current_predictions: np.ndarray, model_name: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Detect drift in model predictions.
 
@@ -278,10 +276,10 @@ class DriftDetector:
     @log_calls
     def detect_performance_drift(
         self,
-        reference_performance: Dict[str, float],
-        current_performance: Dict[str, float],
+        reference_performance: dict[str, float],
+        current_performance: dict[str, float],
         model_name: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Detect drift in model performance metrics.
 
@@ -379,7 +377,7 @@ class DriftDetector:
 
     def _detect_single_feature_drift(
         self, reference_feature: pd.Series, current_feature: pd.Series, feature_name: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Detect drift for a single feature."""
         try:
             # Determine feature type
@@ -402,7 +400,7 @@ class DriftDetector:
 
     def _detect_numerical_drift(
         self, reference_data: pd.Series, current_data: pd.Series, feature_name: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Detect drift for numerical features."""
         try:
             # Statistical tests
@@ -447,7 +445,7 @@ class DriftDetector:
 
     def _detect_categorical_drift(
         self, reference_data: pd.Series, current_data: pd.Series, feature_name: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Detect drift for categorical features."""
         try:
             # Get value counts
@@ -491,7 +489,7 @@ class DriftDetector:
             logger.error(f"Categorical drift detection failed: {e}")
             return {"drift_detected": False, "error": str(e)}
 
-    def _calculate_distribution_stats(self, data: pd.Series) -> Dict[str, float]:
+    def _calculate_distribution_stats(self, data: pd.Series) -> dict[str, float]:
         """Calculate distribution statistics."""
         try:
             return {
@@ -562,7 +560,7 @@ class DriftDetector:
             logger.error(f"Jensen-Shannon divergence calculation failed: {e}")
             return 0.0
 
-    def _store_drift_result(self, drift_result: Dict[str, Any]):
+    def _store_drift_result(self, drift_result: dict[str, Any]):
         """Store drift detection result in database."""
         try:
             with get_sync_session() as session:
@@ -591,10 +589,10 @@ class DriftDetector:
 
     def get_drift_history(
         self,
-        model_name: Optional[str] = None,
-        drift_type: Optional[str] = None,
+        model_name: str | None = None,
+        drift_type: str | None = None,
         days_back: int = 30,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Get drift detection history.
 
@@ -681,7 +679,7 @@ class DriftDetector:
             logger.error(f"Failed to set reference data: {e}")
             raise ValidationError(f"Failed to set reference data: {e}") from e
 
-    def get_reference_data(self, data_type: str = "features") -> Optional[pd.DataFrame]:
+    def get_reference_data(self, data_type: str = "features") -> pd.DataFrame | None:
         """
         Get reference data.
 
@@ -693,7 +691,7 @@ class DriftDetector:
         """
         return self.reference_data.get(data_type, {}).get("data")
 
-    def clear_reference_data(self, data_type: Optional[str] = None):
+    def clear_reference_data(self, data_type: str | None = None):
         """
         Clear reference data.
 

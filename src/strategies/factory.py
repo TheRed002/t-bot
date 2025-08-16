@@ -436,9 +436,11 @@ class StrategyFactory:
                 "name": name,
                 "class": strategy.__class__.__name__,
                 "status": strategy.status.value,
-                "type": strategy.config.strategy_type.value
-                if hasattr(strategy.config, "strategy_type")
-                else "unknown",
+                "type": (
+                    strategy.config.strategy_type.value
+                    if hasattr(strategy.config, "strategy_type")
+                    else "unknown"
+                ),
             }
             summary["strategies"][name] = strategy_info
 

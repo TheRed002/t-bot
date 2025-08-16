@@ -30,7 +30,7 @@ from src.core.types import CurrencyExposure, FundFlow
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.exchanges.base import BaseExchange
-from src.utils.decorators import retry, time_execution
+from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
 from src.utils.validators import validate_quantity
 
@@ -112,14 +112,14 @@ class CurrencyManager:
             await self._update_exchange_rates()
 
             # Validate currencies are supported
-            for exchange, exchange_balances in balances.items():
+            for _exchange, exchange_balances in balances.items():
                 for currency, amount in exchange_balances.items():
                     if currency not in self.capital_config.supported_currencies:
                         raise ValidationError(f"Unsupported currency: {currency}")
 
             # Calculate total exposures by currency
             total_exposures = {}
-            for exchange, exchange_balances in balances.items():
+            for _exchange, exchange_balances in balances.items():
                 for currency, amount in exchange_balances.items():
                     if currency not in total_exposures:
                         total_exposures[currency] = Decimal("0")

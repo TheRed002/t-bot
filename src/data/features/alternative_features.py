@@ -193,7 +193,7 @@ class AlternativeFeatureCalculator:
     @time_execution
     @cache_result(ttl_seconds=300)
     async def calculate_news_sentiment(
-        self, symbol: str, lookback_hours: int = None
+        self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:
         """
         Calculate news sentiment features for a symbol.
@@ -314,7 +314,7 @@ class AlternativeFeatureCalculator:
     @time_execution
     @cache_result(ttl_seconds=300)
     async def calculate_social_sentiment(
-        self, symbol: str, lookback_hours: int = None
+        self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:
         """
         Calculate social media sentiment features for a symbol.
@@ -474,7 +474,7 @@ class AlternativeFeatureCalculator:
     @time_execution
     @cache_result(ttl_seconds=1800)
     async def calculate_economic_indicators(
-        self, symbol: str, lookback_hours: int = None
+        self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:
         """
         Calculate economic indicator features.
@@ -624,7 +624,7 @@ class AlternativeFeatureCalculator:
 
     @time_execution
     async def calculate_market_microstructure(
-        self, symbol: str, lookback_hours: int = None
+        self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:
         """
         Calculate market microstructure features.
@@ -695,9 +695,9 @@ class AlternativeFeatureCalculator:
                             symbol
                         )
                     elif feature.upper() == "MARKET_MICROSTRUCTURE":
-                        results[
-                            "MARKET_MICROSTRUCTURE"
-                        ] = await self.calculate_market_microstructure(symbol)
+                        results["MARKET_MICROSTRUCTURE"] = (
+                            await self.calculate_market_microstructure(symbol)
+                        )
                     else:
                         logger.warning(f"Unknown alternative feature: {feature}")
 

@@ -34,9 +34,7 @@ import yaml
 # Import from P-001 core components
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
-from src.utils.decimal_utils import (
-    to_decimal, ZERO
-)
+from src.utils.decimal_utils import ZERO, to_decimal
 
 logger = get_logger(__name__)
 
@@ -473,7 +471,7 @@ def normalize_price(price: float | Decimal, symbol: str) -> Decimal:
     """
     # Convert to Decimal for all operations
     decimal_price = to_decimal(price)
-    
+
     if decimal_price <= ZERO:
         raise ValidationError(f"Price must be positive for {symbol}, got {decimal_price}")
 

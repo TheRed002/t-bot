@@ -317,18 +317,30 @@ class ExchangeStatus(Enum):
 class OrderStatus(Enum):
     """Order status enumeration."""
 
+    NEW = "new"
     PENDING = "pending"
     PARTIALLY_FILLED = "partially_filled"
     FILLED = "filled"
-    CANCELLED = "cancelled"
+    CANCELED = "canceled"
+    CANCELLED = "cancelled"  # Alias for compatibility
     REJECTED = "rejected"
     EXPIRED = "expired"
     UNKNOWN = "unknown"
 
 
+class TimeInForce(Enum):
+    """Time in force enumeration for order execution."""
+
+    GTC = "gtc"  # Good Till Cancel
+    IOC = "ioc"  # Immediate or Cancel
+    FOK = "fok"  # Fill or Kill
+    GTD = "gtd"  # Good Till Date
+    DAY = "day"  # Good for day
+
+
 class TradeState(Enum):
     """Trade lifecycle state enumeration."""
-    
+
     SIGNAL_GENERATED = "signal_generated"
     PRE_TRADE_VALIDATION = "pre_trade_validation"
     ORDER_CREATED = "order_created"
@@ -341,19 +353,52 @@ class TradeState(Enum):
     ATTRIBUTED = "attributed"
 
 
+class Order(BaseModel):
+    """Order execution record."""
+
+    id: str = Field(min_length=1, description="Order ID")
+    client_order_id: str | None = Field(default=None, description="Client order ID")
+    symbol: str = Field(min_length=3, description="Trading symbol")
+    type: OrderType
+    side: OrderSide
+    price: Decimal | None = Field(default=None, gt=0, description="Order price")
+    amount: Decimal = Field(gt=0, description="Order amount")
+    filled: Decimal = Field(ge=0, default=Decimal("0"), description="Filled amount")
+    remaining: Decimal = Field(ge=0, description="Remaining amount")
+    status: OrderStatus
+    timestamp: datetime
+    time_in_force: TimeInForce | None = Field(default=None, description="Time in force")
+
+
+class Balance(BaseModel):
+    """Account balance record."""
+
+    currency: str = Field(min_length=1, description="Currency code")
+    free: Decimal = Field(ge=0, description="Free balance")
+    locked: Decimal = Field(ge=0, default=Decimal("0"), description="Locked balance")
+    total: Decimal = Field(ge=0, description="Total balance")
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Ensure total is sum of free and locked if not provided
+        if "total" not in kwargs:
+            self.total = self.free + self.locked
+
+
 class Trade(BaseModel):
     """Trade execution record."""
 
     id: str = Field(min_length=1, description="Trade ID")
+    order_id: str | None = Field(default=None, description="Associated order ID")
     symbol: str = Field(min_length=3, description="Trading symbol")
     side: OrderSide
-    quantity: Decimal = Field(gt=0, description="Trade quantity (must be positive)")
     price: Decimal = Field(gt=0, description="Trade price (must be positive)")
-    timestamp: datetime
+    amount: Decimal = Field(gt=0, description="Trade amount (must be positive)")
     fee: Decimal = Field(ge=0, default=Decimal("0"), description="Trade fee (must be non-negative)")
     fee_currency: str = Field(
         default="USDT", pattern=r"^[A-Z]{3,10}$", description="Fee currency code"
     )
+    timestamp: datetime
 
 
 # Risk Management Types (P-008)
@@ -862,7 +907,7 @@ class ExecutionResult(BaseModel):
     )
     algorithm: ExecutionAlgorithm = Field(description="Execution algorithm used")
     status: ExecutionStatus = Field(description="Current execution status")
-    
+
     # Execution metrics
     total_filled_quantity: Decimal = Field(
         default=Decimal("0"), ge=0, description="Total quantity filled"
@@ -871,14 +916,14 @@ class ExecutionResult(BaseModel):
         default=None, gt=0, description="Volume-weighted average fill price"
     )
     total_fees: Decimal = Field(default=Decimal("0"), ge=0, description="Total execution fees")
-    
+
     # Timing metrics
     start_time: datetime = Field(description="Execution start time")
     end_time: datetime | None = Field(default=None, description="Execution end time")
     execution_duration: float | None = Field(
         default=None, ge=0, description="Execution duration in seconds"
     )
-    
+
     # Slippage and cost metrics
     expected_price: Decimal | None = Field(
         default=None, gt=0, description="Expected execution price"
@@ -886,31 +931,28 @@ class ExecutionResult(BaseModel):
     price_slippage: Decimal = Field(
         default=Decimal("0"), description="Price slippage (positive = adverse)"
     )
-    market_impact: Decimal = Field(
-        default=Decimal("0"), description="Estimated market impact"
-    )
+    market_impact: Decimal = Field(default=Decimal("0"), description="Estimated market impact")
     implementation_shortfall: Decimal = Field(
         default=Decimal("0"), description="Implementation shortfall cost"
     )
-    
+
     # Execution details
     number_of_trades: int = Field(default=0, ge=0, description="Number of individual trades")
     participation_rate: float | None = Field(
         default=None, ge=0, le=1, description="Market participation rate"
     )
     is_aggressive: bool = Field(default=False, description="Whether execution was aggressive")
-    
+
     # Error handling
     error_message: str | None = Field(default=None, description="Error message if failed")
     retry_count: int = Field(default=0, ge=0, description="Number of retries attempted")
-    
+
     # Metadata
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional execution metadata"
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        description="Result creation timestamp"
+        default_factory=lambda: datetime.now(timezone.utc), description="Result creation timestamp"
     )
 
     @field_validator("total_filled_quantity")
@@ -937,18 +979,18 @@ class SlippageMetrics(BaseModel):
     order_size: Decimal = Field(gt=0, description="Order size")
     market_price: Decimal = Field(gt=0, description="Market price at order time")
     execution_price: Decimal = Field(gt=0, description="Actual execution price")
-    
+
     # Slippage calculations
     price_slippage_bps: Decimal = Field(description="Price slippage in basis points")
     market_impact_bps: Decimal = Field(description="Market impact in basis points")
     timing_cost_bps: Decimal = Field(description="Timing cost in basis points")
     total_cost_bps: Decimal = Field(description="Total transaction cost in basis points")
-    
+
     # Market conditions
     spread_bps: Decimal = Field(description="Bid-ask spread in basis points")
     volume_ratio: float = Field(description="Order size to average daily volume ratio")
     volatility: float = Field(description="Market volatility at execution time")
-    
+
     # Cost breakdown
     explicit_costs: Decimal = Field(
         default=Decimal("0"), description="Explicit costs (fees, commissions)"
@@ -956,7 +998,7 @@ class SlippageMetrics(BaseModel):
     implicit_costs: Decimal = Field(
         default=Decimal("0"), description="Implicit costs (slippage, impact)"
     )
-    
+
     timestamp: datetime = Field(description="Analysis timestamp")
 
     @field_validator("volume_ratio")
@@ -973,7 +1015,7 @@ class ExecutionInstruction(BaseModel):
 
     order: OrderRequest = Field(description="Base order to execute")
     algorithm: ExecutionAlgorithm = Field(description="Execution algorithm to use")
-    
+
     # Algorithm parameters
     time_horizon_minutes: int | None = Field(
         default=None, gt=0, description="Time horizon for execution in minutes"
@@ -981,16 +1023,14 @@ class ExecutionInstruction(BaseModel):
     participation_rate: float | None = Field(
         default=None, gt=0, le=1, description="Target market participation rate"
     )
-    max_slices: int | None = Field(
-        default=None, gt=0, description="Maximum number of order slices"
-    )
+    max_slices: int | None = Field(default=None, gt=0, description="Maximum number of order slices")
     slice_size: Decimal | None = Field(
         default=None, gt=0, description="Fixed slice size for orders"
     )
     display_quantity: Decimal | None = Field(
         default=None, gt=0, description="Visible quantity for iceberg orders"
     )
-    
+
     # Risk controls
     max_slippage_bps: Decimal | None = Field(
         default=None, gt=0, description="Maximum acceptable slippage in basis points"
@@ -998,21 +1038,19 @@ class ExecutionInstruction(BaseModel):
     price_tolerance_pct: float | None = Field(
         default=None, gt=0, le=1, description="Price tolerance percentage"
     )
-    
+
     # Routing preferences
     preferred_exchanges: list[str] = Field(
         default_factory=list, description="Preferred exchanges for routing"
     )
-    avoid_exchanges: list[str] = Field(
-        default_factory=list, description="Exchanges to avoid"
-    )
-    
+    avoid_exchanges: list[str] = Field(default_factory=list, description="Exchanges to avoid")
+
     # Execution options
     is_urgent: bool = Field(default=False, description="Whether execution is urgent")
     allow_partial: bool = Field(default=True, description="Allow partial fills")
     start_time: datetime | None = Field(default=None, description="Scheduled start time")
     end_time: datetime | None = Field(default=None, description="Execution deadline")
-    
+
     # Metadata
     execution_id: str | None = Field(default=None, description="Execution tracking ID")
     strategy_name: str | None = Field(default=None, description="Originating strategy name")
@@ -1039,9 +1077,10 @@ class ExecutionInstruction(BaseModel):
 
 # === Bot Management Types (P-017) ===
 
+
 class BotStatus(Enum):
     """Bot status enumeration for lifecycle management."""
-    
+
     CREATED = "created"
     STARTING = "starting"
     RUNNING = "running"
@@ -1054,17 +1093,17 @@ class BotStatus(Enum):
 
 class BotType(Enum):
     """Bot type enumeration for different bot categories."""
-    
-    STRATEGY = "strategy"       # Single strategy bot
-    ARBITRAGE = "arbitrage"     # Cross-exchange arbitrage bot
+
+    STRATEGY = "strategy"  # Single strategy bot
+    ARBITRAGE = "arbitrage"  # Cross-exchange arbitrage bot
     MARKET_MAKER = "market_maker"  # Market making bot
-    HYBRID = "hybrid"           # Multi-strategy hybrid bot
-    SCANNER = "scanner"         # Opportunity scanner bot
+    HYBRID = "hybrid"  # Multi-strategy hybrid bot
+    SCANNER = "scanner"  # Opportunity scanner bot
 
 
 class ResourceType(Enum):
     """Resource type enumeration for resource management."""
-    
+
     CAPITAL = "capital"
     API_RATE_LIMIT = "api_rate_limit"
     WEBSOCKET_CONNECTIONS = "websocket_connections"
@@ -1075,46 +1114,48 @@ class ResourceType(Enum):
 
 class BotPriority(Enum):
     """Bot priority levels for resource allocation."""
-    
-    CRITICAL = "critical"   # Emergency or high-value bots
-    HIGH = "high"          # Important production bots
-    NORMAL = "normal"      # Standard trading bots
-    LOW = "low"           # Experimental or backup bots
+
+    CRITICAL = "critical"  # Emergency or high-value bots
+    HIGH = "high"  # Important production bots
+    NORMAL = "normal"  # Standard trading bots
+    LOW = "low"  # Experimental or backup bots
 
 
 class BotConfiguration(BaseModel):
     """Bot configuration model with all parameters."""
-    
+
     # Basic identification
     bot_id: str = Field(..., description="Unique bot identifier")
     bot_name: str = Field(..., description="Human-readable bot name")
     bot_type: BotType = Field(..., description="Bot type category")
-    
+
     # Strategy configuration
     strategy_name: str = Field(..., description="Strategy to run")
     strategy_config: dict[str, Any] = Field(
         default_factory=dict, description="Strategy-specific configuration"
     )
-    
+
     # Exchange and symbol configuration
     exchanges: list[str] = Field(..., description="Exchanges to use")
     symbols: list[str] = Field(..., description="Trading symbols")
-    
+
     # Resource allocation
     allocated_capital: Decimal = Field(..., gt=0, description="Allocated capital amount")
     max_position_size: Decimal = Field(..., gt=0, description="Maximum position size")
     risk_percentage: float = Field(..., gt=0, le=1, description="Risk percentage per trade")
-    
+
     # Operational parameters
     priority: BotPriority = Field(default=BotPriority.NORMAL, description="Bot priority")
     auto_start: bool = Field(default=False, description="Auto-start on creation")
     heartbeat_interval: int = Field(default=30, ge=5, description="Heartbeat interval in seconds")
-    
+
     # Trading parameters
     trading_mode: TradingMode = Field(default=TradingMode.PAPER, description="Trading mode")
     max_daily_trades: int | None = Field(default=None, ge=1, description="Maximum daily trades")
-    max_concurrent_positions: int = Field(default=5, ge=1, description="Maximum concurrent positions")
-    
+    max_concurrent_positions: int = Field(
+        default=5, ge=1, description="Maximum concurrent positions"
+    )
+
     # Metadata
     tags: list[str] = Field(default_factory=list, description="Bot tags for categorization")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
@@ -1123,76 +1164,72 @@ class BotConfiguration(BaseModel):
 
 class BotMetrics(BaseModel):
     """Bot performance and operational metrics."""
-    
+
     bot_id: str = Field(..., description="Bot identifier")
-    
+
     # Performance metrics
     total_trades: int = Field(default=0, description="Total number of trades")
     profitable_trades: int = Field(default=0, description="Number of profitable trades")
     losing_trades: int = Field(default=0, description="Number of losing trades")
     total_pnl: Decimal = Field(default=Decimal("0"), description="Total profit/loss")
     unrealized_pnl: Decimal = Field(default=Decimal("0"), description="Unrealized PnL")
-    
+
     # Trading statistics
     win_rate: float = Field(default=0.0, ge=0, le=1, description="Win rate percentage")
     average_trade_pnl: Decimal = Field(default=Decimal("0"), description="Average trade PnL")
     max_drawdown: Decimal = Field(default=Decimal("0"), description="Maximum drawdown")
     sharpe_ratio: float | None = Field(default=None, description="Sharpe ratio")
-    
+
     # Operational metrics
     uptime_percentage: float = Field(default=0.0, ge=0, le=1, description="Uptime percentage")
     error_count: int = Field(default=0, description="Number of errors encountered")
     last_heartbeat: datetime | None = Field(default=None, description="Last heartbeat timestamp")
-    
+
     # Resource usage
     cpu_usage: float = Field(default=0.0, ge=0, description="CPU usage percentage")
     memory_usage: float = Field(default=0.0, ge=0, description="Memory usage in MB")
     api_calls_count: int = Field(default=0, description="API calls made")
-    
+
     # Timestamps
     start_time: datetime | None = Field(default=None, description="Bot start time")
     last_trade_time: datetime | None = Field(default=None, description="Last trade timestamp")
     metrics_updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        description="Metrics last update time"
+        default_factory=lambda: datetime.now(timezone.utc), description="Metrics last update time"
     )
 
 
 class BotState(BaseModel):
     """Bot state information for persistence and recovery."""
-    
+
     bot_id: str = Field(..., description="Bot identifier")
     status: BotStatus = Field(..., description="Current bot status")
-    
+
     # Current positions and orders
     open_positions: list[dict[str, Any]] = Field(
         default_factory=list, description="Current open positions"
     )
-    pending_orders: list[dict[str, Any]] = Field(
-        default_factory=list, description="Pending orders"
-    )
-    
+    pending_orders: list[dict[str, Any]] = Field(default_factory=list, description="Pending orders")
+
     # Strategy state
     strategy_state: dict[str, Any] = Field(
         default_factory=dict, description="Strategy-specific state data"
     )
-    
+
     # Execution state
     last_execution_id: str | None = Field(default=None, description="Last execution ID")
     execution_queue: list[dict[str, Any]] = Field(
         default_factory=list, description="Queued executions"
     )
-    
+
     # Resource usage
     allocated_capital: Decimal = Field(..., description="Currently allocated capital")
     used_capital: Decimal = Field(default=Decimal("0"), description="Capital in use")
     reserved_capital: Decimal = Field(default=Decimal("0"), description="Reserved capital")
-    
+
     # Timestamps and versioning
     state_version: int = Field(default=1, description="State version for conflict resolution")
     last_updated: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        description="Last state update time"
+        default_factory=lambda: datetime.now(timezone.utc), description="Last state update time"
     )
     checkpoint_created: datetime | None = Field(
         default=None, description="Last checkpoint creation time"
@@ -1201,57 +1238,51 @@ class BotState(BaseModel):
 
 class ResourceAllocation(BaseModel):
     """Resource allocation model for bot resource management."""
-    
+
     bot_id: str = Field(..., description="Bot identifier")
     resource_type: ResourceType = Field(..., description="Type of resource")
-    
+
     # Allocation details
     allocated_amount: Decimal = Field(..., ge=0, description="Allocated resource amount")
     used_amount: Decimal = Field(default=Decimal("0"), ge=0, description="Currently used amount")
     reserved_amount: Decimal = Field(default=Decimal("0"), ge=0, description="Reserved amount")
-    
+
     # Limits and constraints
     max_amount: Decimal | None = Field(default=None, description="Maximum allowed amount")
     min_amount: Decimal = Field(default=Decimal("0"), description="Minimum required amount")
-    
+
     # Usage tracking
     peak_usage: Decimal = Field(default=Decimal("0"), description="Peak usage recorded")
     average_usage: Decimal = Field(default=Decimal("0"), description="Average usage")
     last_usage_time: datetime | None = Field(default=None, description="Last usage timestamp")
-    
+
     # Metadata
     allocation_priority: BotPriority = Field(
         default=BotPriority.NORMAL, description="Allocation priority"
     )
     expires_at: datetime | None = Field(default=None, description="Allocation expiry time")
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        description="Allocation creation time"
+        default_factory=lambda: datetime.now(timezone.utc), description="Allocation creation time"
     )
 
 
 class BotEvent(BaseModel):
     """Bot event model for tracking bot lifecycle and actions."""
-    
+
     event_id: str = Field(..., description="Unique event identifier")
     bot_id: str = Field(..., description="Bot identifier")
     event_type: str = Field(..., description="Type of event")
-    
+
     # Event details
-    event_data: dict[str, Any] = Field(
-        default_factory=dict, description="Event-specific data"
-    )
-    severity: ValidationLevel = Field(
-        default=ValidationLevel.MEDIUM, description="Event severity"
-    )
-    
+    event_data: dict[str, Any] = Field(default_factory=dict, description="Event-specific data")
+    severity: ValidationLevel = Field(default=ValidationLevel.MEDIUM, description="Event severity")
+
     # Context
     triggered_by: str | None = Field(default=None, description="Event trigger source")
     correlation_id: str | None = Field(default=None, description="Correlation identifier")
-    
+
     # Timestamps
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        description="Event timestamp"
+        default_factory=lambda: datetime.now(timezone.utc), description="Event timestamp"
     )
     processed_at: datetime | None = Field(default=None, description="Processing timestamp")

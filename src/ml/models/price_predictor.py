@@ -3,6 +3,7 @@ Price Prediction Models for Financial Trading.
 
 This module implements ML models specifically designed for predicting future prices
 in financial markets using various algorithms and architectures.
+GPU acceleration is used when available for improved performance.
 """
 
 from typing import Any
@@ -18,6 +19,27 @@ from src.core.config import Config
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.ml.models.base_model import BaseModel
+from src.utils.gpu_utils import gpu_manager, get_optimal_batch_size
+
+# Try to import GPU-accelerated libraries
+try:
+    import xgboost as xgb
+    XGB_AVAILABLE = True
+except ImportError:
+    XGB_AVAILABLE = False
+
+try:
+    import lightgbm as lgb
+    LGB_AVAILABLE = True
+except ImportError:
+    LGB_AVAILABLE = False
+
+try:
+    from cuml.ensemble import RandomForestRegressor as cuRFRegressor
+    from cuml.linear_model import LinearRegression as cuLinearRegression
+    CUML_AVAILABLE = True
+except ImportError:
+    CUML_AVAILABLE = False
 
 logger = get_logger(__name__)
 
@@ -83,11 +105,19 @@ class PricePredictor(BaseModel):
         return "price_predictor"
 
     def _create_model(self, **kwargs):
-        """Create and return the underlying ML model."""
+        """Create and return the underlying ML model with GPU acceleration if available."""
         # Merge kwargs with stored model_params
         params = {**self.model_params, **kwargs}
+        
+        # Log GPU availability
+        if gpu_manager.gpu_available:
+            logger.info(f"GPU acceleration available for {self.algorithm} model")
 
         if self.algorithm == "linear":
+            # Use GPU-accelerated version if available
+            if CUML_AVAILABLE and gpu_manager.gpu_available:
+                logger.info("Using cuML LinearRegression with GPU acceleration")
+                return cuLinearRegression(**params)
             return LinearRegression(**params)
 
         elif self.algorithm == "random_forest":
@@ -100,44 +130,69 @@ class PricePredictor(BaseModel):
                 "random_state": 42,
             }
             default_params.update(params)
+            
+            # Use GPU-accelerated version if available
+            if CUML_AVAILABLE and gpu_manager.gpu_available:
+                logger.info("Using cuML RandomForestRegressor with GPU acceleration")
+                # Adjust parameters for cuML
+                cuml_params = default_params.copy()
+                cuml_params.pop('min_samples_split', None)
+                cuml_params.pop('min_samples_leaf', None)
+                return cuRFRegressor(**cuml_params)
             return RandomForestRegressor(**default_params)
 
         elif self.algorithm == "xgboost":
-            try:
-                import xgboost as xgb
-
-                default_params = {
-                    "n_estimators": 100,
-                    "max_depth": 6,
-                    "learning_rate": 0.1,
-                    "subsample": 0.8,
-                    "colsample_bytree": 0.8,
-                    "random_state": 42,
-                }
-                default_params.update(params)
-                return xgb.XGBRegressor(**default_params)
-            except ImportError:
-                logger.warning("XGBoost not available, falling back to RandomForest")
-                return RandomForestRegressor(n_estimators=100, random_state=42)
-
+            if not XGB_AVAILABLE:
+                raise ImportError("XGBoost not available. Please install xgboost.")
+            
+            default_params = {
+                "n_estimators": 100,
+                "max_depth": 6,
+                "learning_rate": 0.1,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8,
+                "random_state": 42,
+            }
+            
+            # Add GPU parameters if available
+            if gpu_manager.gpu_available:
+                default_params.update({
+                    "tree_method": "gpu_hist",
+                    "predictor": "gpu_predictor",
+                    "gpu_id": 0
+                })
+                logger.info("Using XGBoost with GPU acceleration")
+            
+            default_params.update(params)
+            return xgb.XGBRegressor(**default_params)
+        
         elif self.algorithm == "lightgbm":
-            try:
-                import lightgbm as lgb
-
-                default_params = {
-                    "n_estimators": 100,
-                    "max_depth": 6,
-                    "learning_rate": 0.1,
-                    "subsample": 0.8,
-                    "colsample_bytree": 0.8,
-                    "random_state": 42,
-                    "verbose": -1,
-                }
-                default_params.update(params)
-                return lgb.LGBMRegressor(**default_params)
-            except ImportError:
-                logger.warning("LightGBM not available, falling back to RandomForest")
-                return RandomForestRegressor(n_estimators=100, random_state=42)
+            if not LGB_AVAILABLE:
+                raise ImportError("LightGBM not available. Please install lightgbm.")
+            
+            default_params = {
+                "n_estimators": 100,
+                "max_depth": 10,
+                "learning_rate": 0.1,
+                "num_leaves": 31,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8,
+                "random_state": 42,
+                "objective": "regression",
+                "metric": "rmse",
+            }
+            
+            # Add GPU parameters if available
+            if gpu_manager.gpu_available:
+                default_params.update({
+                    "device": "gpu",
+                    "gpu_platform_id": 0,
+                    "gpu_device_id": 0
+                })
+                logger.info("Using LightGBM with GPU acceleration")
+            
+            default_params.update(params)
+            return lgb.LGBMRegressor(**default_params)
 
         else:
             raise ValidationError(f"Unknown algorithm: {self.algorithm}")
@@ -296,7 +351,7 @@ class PricePredictor(BaseModel):
         current_features = X.iloc[-1:].copy()
         predictions = []
 
-        for step in range(sequence_length):
+        for _step in range(sequence_length):
             # Make prediction for current step
             pred = self.predict(current_features)[0]
             predictions.append(pred)

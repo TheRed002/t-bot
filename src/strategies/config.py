@@ -346,9 +346,9 @@ class StrategyConfigurationManager:
             config_data.update(
                 {
                     "name": strategy_name,
-                    "strategy_type": strategy_type.value
-                    if hasattr(strategy_type, "value")
-                    else strategy_type,
+                    "strategy_type": (
+                        strategy_type.value if hasattr(strategy_type, "value") else strategy_type
+                    ),
                     "symbols": symbols,
                     **kwargs,
                 }
@@ -364,9 +364,9 @@ class StrategyConfigurationManager:
             logger.info(
                 "Strategy config created",
                 strategy_name=strategy_name,
-                strategy_type=strategy_type.value
-                if hasattr(strategy_type, "value")
-                else strategy_type,
+                strategy_type=(
+                    strategy_type.value if hasattr(strategy_type, "value") else strategy_type
+                ),
             )
 
             return config

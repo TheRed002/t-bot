@@ -1,62 +1,108 @@
 
 services:
-  # PostgreSQL Database
-  postgresql:
-    image: postgres:15-alpine
-    container_name: trading_bot_postgresql
-    environment:
-      POSTGRES_DB: trading_bot
-      POSTGRES_USER: ${DB_USERNAME:-trading_bot}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-trading_bot_password}
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+  # Backend FastAPI service
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+      target: ${DOCKER_TARGET:-development}
+    container_name: tbot-backend-${NODE_ENV:-dev}
     ports:
-      - "5432:5432"
+      - "${API_PORT:-8000}:8000"
+    env_file:
+      - ../.env
+    environment:
+      - DEBUG=${DEBUG:-true}
+      - NODE_ENV=${NODE_ENV:-development}
+      - MOCK_MODE=${MOCK_MODE:-false}
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgresql:5432/${DB_NAME}
+      - REDIS_URL=redis://${REDIS_PASSWORD:+:${REDIS_PASSWORD}@}redis:6379/0
+      - INFLUXDB_URL=${INFLUXDB_URL:-http://influxdb:8086}
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - JWT_EXPIRE_MINUTES=${JWT_EXPIRE_MINUTES:-30}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
     volumes:
-      - postgresql_data:/var/lib/postgresql/data
-      - ./services/postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - ./configs/postgresql.conf:/etc/postgresql/postgresql.conf:ro
-      - ./configs/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
-    command: postgres -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf
+      - ../src:/app/src
+      - ../config:/app/config
+      - ../logs:/app/logs
+      - ../data:/app/data
+      - ../models:/app/models
+      - ../state:/app/state
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+    networks:
+      - tbot-network
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-trading_bot} -d trading_bot"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # PostgreSQL Database
+  postgresql:
+    image: postgres:15-alpine
+    container_name: tbot-postgresql-${NODE_ENV:-dev}
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data
+      - ./services/postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
-      - trading_bot_network
+      - tbot-network
     restart: unless-stopped
 
   # Redis Cache
   redis:
     image: redis:7-alpine
-    container_name: trading_bot_redis
-    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_password} --appendonly yes
+    container_name: tbot-redis-${NODE_ENV:-dev}
+    command: redis-server ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}} --appendonly yes
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 20s
     networks:
-      - trading_bot_network
+      - tbot-network
     restart: unless-stopped
 
   # InfluxDB Time Series Database
   influxdb:
     image: influxdb:2.7-alpine
-    container_name: trading_bot_influxdb
+    container_name: tbot-influxdb-${NODE_ENV:-dev}
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: admin
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_PASSWORD:-influxdb_password}
-      DOCKER_INFLUXDB_INIT_ORG: trading_bot_dev
-      DOCKER_INFLUXDB_INIT_BUCKET: trading_data_dev
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN:-trading_bot_token}
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_ADMIN_USER}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN}
     ports:
       - "8086:8086"
     volumes:
@@ -64,12 +110,12 @@ services:
       - influxdb_config:/etc/influxdb2
     healthcheck:
       test: ["CMD", "influx", "ping"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 40s
+      start_period: 30s
     networks:
-      - trading_bot_network
+      - tbot-network
     restart: unless-stopped
 
 volumes:
@@ -83,7 +129,7 @@ volumes:
     driver: local
 
 networks:
-  trading_bot_network:
+  tbot-network:
     driver: bridge
     ipam:
       config:

@@ -5,22 +5,21 @@ This module provides the main backtesting engine that replays historical market 
 and simulates strategy execution with realistic trading conditions.
 """
 
-import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
-from src.core.exceptions import BacktestError, ValidationError
+from src.core.exceptions import BacktestError
 from src.core.logging import get_logger
-from src.core.types import OrderSide, OrderType, SignalDirection, TradingMode
+from src.core.types import OrderSide, SignalDirection
 from src.database.manager import DatabaseManager
-from src.error_handling.decorators import with_circuit_breaker, with_retry
+from src.error_handling.decorators import with_retry
 from src.risk_management import RiskManager
 from src.strategies.base import BaseStrategy
-from src.utils.decorators import time_execution, validate_input
+from src.utils.decorators import time_execution
 
 logger = get_logger(__name__)
 
@@ -33,24 +32,16 @@ class BacktestConfig(BaseModel):
     initial_capital: Decimal = Field(
         default=Decimal("10000"), description="Initial capital for backtesting"
     )
-    symbols: List[str] = Field(..., description="List of symbols to backtest")
+    symbols: list[str] = Field(..., description="List of symbols to backtest")
     timeframe: str = Field(default="1h", description="Timeframe for backtesting")
-    commission: Decimal = Field(
-        default=Decimal("0.001"), description="Commission rate (0.1%)"
-    )
-    slippage: Decimal = Field(
-        default=Decimal("0.0005"), description="Slippage rate (0.05%)"
-    )
+    commission: Decimal = Field(default=Decimal("0.001"), description="Commission rate (0.1%)")
+    slippage: Decimal = Field(default=Decimal("0.0005"), description="Slippage rate (0.05%)")
     enable_shorting: bool = Field(default=False, description="Enable short selling")
-    max_open_positions: int = Field(
-        default=5, description="Maximum number of open positions"
-    )
+    max_open_positions: int = Field(default=5, description="Maximum number of open positions")
     use_tick_data: bool = Field(
         default=False, description="Use tick data for more accurate simulation"
     )
-    warm_up_period: int = Field(
-        default=100, description="Number of candles for indicator warm-up"
-    )
+    warm_up_period: int = Field(default=100, description="Number of candles for indicator warm-up")
 
     @field_validator("end_date")
     @classmethod
@@ -94,20 +85,16 @@ class BacktestResult(BaseModel):
     cvar_95: Decimal = Field(..., description="Conditional Value at Risk (95%)")
 
     # Additional data
-    equity_curve: List[Dict[str, Any]] = Field(
-        ..., description="Equity curve over time"
-    )
-    trades: List[Dict[str, Any]] = Field(..., description="List of all trades")
-    daily_returns: List[float] = Field(..., description="Daily return series")
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata"
-    )
+    equity_curve: list[dict[str, Any]] = Field(..., description="Equity curve over time")
+    trades: list[dict[str, Any]] = Field(..., description="List of all trades")
+    daily_returns: list[float] = Field(..., description="Daily return series")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
 class BacktestEngine:
     """
     Main backtesting engine for strategy evaluation.
-    
+
     This engine provides realistic market simulation with support for:
     - Historical data replay
     - Commission and slippage modeling
@@ -119,8 +106,8 @@ class BacktestEngine:
         self,
         config: BacktestConfig,
         strategy: BaseStrategy,
-        risk_manager: Optional[RiskManager] = None,
-        db_manager: Optional[DatabaseManager] = None,
+        risk_manager: RiskManager | None = None,
+        db_manager: DatabaseManager | None = None,
     ):
         """
         Initialize backtesting engine.
@@ -138,11 +125,11 @@ class BacktestEngine:
 
         # Internal state
         self._capital = config.initial_capital
-        self._positions: Dict[str, Dict[str, Any]] = {}
-        self._trades: List[Dict[str, Any]] = []
-        self._equity_curve: List[Dict[str, Any]] = []
-        self._current_time: Optional[datetime] = None
-        self._market_data: Dict[str, pd.DataFrame] = {}
+        self._positions: dict[str, dict[str, Any]] = {}
+        self._trades: list[dict[str, Any]] = []
+        self._equity_curve: list[dict[str, Any]] = []
+        self._current_time: datetime | None = None
+        self._market_data: dict[str, pd.DataFrame] = {}
 
         logger.info(
             "BacktestEngine initialized",
@@ -179,7 +166,7 @@ class BacktestEngine:
 
         except Exception as e:
             logger.error("Backtest failed", error=str(e))
-            raise BacktestError(f"Backtest failed: {str(e)}")
+            raise BacktestError(f"Backtest failed: {e!s}")
 
     async def _load_historical_data(self) -> None:
         """Load historical market data for all symbols."""
@@ -289,7 +276,7 @@ class BacktestEngine:
             if self.risk_manager:
                 await self._check_risk_limits()
 
-    def _get_current_market_data(self, timestamp: datetime) -> Dict[str, pd.Series]:
+    def _get_current_market_data(self, timestamp: datetime) -> dict[str, pd.Series]:
         """Get market data for current timestamp."""
         current_data = {}
         for symbol, data in self._market_data.items():
@@ -298,12 +285,12 @@ class BacktestEngine:
         return current_data
 
     async def _generate_signals(
-        self, market_data: Dict[str, pd.Series]
-    ) -> Dict[str, SignalDirection]:
+        self, market_data: dict[str, pd.Series]
+    ) -> dict[str, SignalDirection]:
         """Generate trading signals from strategy."""
         signals = {}
 
-        for symbol, data in market_data.items():
+        for symbol, _data in market_data.items():
             # Get historical data up to current point
             hist_data = self._market_data[symbol].loc[: self._current_time]
 
@@ -315,8 +302,8 @@ class BacktestEngine:
 
     async def _execute_trades(
         self,
-        signals: Dict[str, SignalDirection],
-        market_data: Dict[str, pd.Series],
+        signals: dict[str, SignalDirection],
+        market_data: dict[str, pd.Series],
     ) -> None:
         """Execute trades based on signals."""
         for symbol, signal in signals.items():
@@ -333,9 +320,7 @@ class BacktestEngine:
                 execution_price = price * (1 - float(self.config.slippage))
                 await self._close_position(symbol, execution_price)
 
-    async def _open_position(
-        self, symbol: str, price: float, signal: SignalDirection
-    ) -> None:
+    async def _open_position(self, symbol: str, price: float, signal: SignalDirection) -> None:
         """Open a new position."""
         if symbol in self._positions:
             return  # Position already exists
@@ -368,7 +353,7 @@ class BacktestEngine:
         self._capital -= Decimal(str(position_size))
 
         logger.debug(
-            f"Opened position",
+            "Opened position",
             symbol=symbol,
             price=price,
             size=position_size,
@@ -380,7 +365,7 @@ class BacktestEngine:
             return
 
         position = self._positions[symbol]
-        
+
         # Calculate P&L
         if position["side"] == OrderSide.BUY:
             pnl = (price - position["entry_price"]) * position["size"] / position["entry_price"]
@@ -412,19 +397,19 @@ class BacktestEngine:
         del self._positions[symbol]
 
         logger.debug(
-            f"Closed position",
+            "Closed position",
             symbol=symbol,
             price=price,
             pnl=pnl_after_commission,
         )
 
-    def _update_positions(self, market_data: Dict[str, pd.Series]) -> None:
+    def _update_positions(self, market_data: dict[str, pd.Series]) -> None:
         """Update position values with current prices."""
         for symbol, position in self._positions.items():
             if symbol in market_data:
                 current_price = float(market_data[symbol]["close"])
                 position["current_price"] = current_price
-                
+
                 # Calculate unrealized P&L
                 if position["side"] == OrderSide.BUY:
                     position["unrealized_pnl"] = (
@@ -447,9 +432,7 @@ class BacktestEngine:
         for position in self._positions.values():
             total_equity += position["size"] + position.get("unrealized_pnl", 0)
 
-        self._equity_curve.append(
-            {"timestamp": self._current_time, "equity": total_equity}
-        )
+        self._equity_curve.append({"timestamp": self._current_time, "equity": total_equity})
 
     async def _check_risk_limits(self) -> None:
         """Check and enforce risk limits."""

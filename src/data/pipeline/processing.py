@@ -533,7 +533,7 @@ class DataProcessor:
             logger.error(f"Data filtering failed: {e!s}")
             return data
 
-    async def get_aggregated_data(self, symbol: str, exchange: str = None) -> dict[str, Any]:
+    async def get_aggregated_data(self, symbol: str, exchange: str | None = None) -> dict[str, Any]:
         """
         Get aggregated data for a symbol.
 

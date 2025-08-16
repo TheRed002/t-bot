@@ -112,7 +112,7 @@ class ArtifactStore:
             base_filename = f"{artifact_name}_{timestamp}"
 
             # Determine file extension based on data type
-            if isinstance(artifact_data, (pd.DataFrame, pd.Series)):
+            if isinstance(artifact_data, pd.DataFrame | pd.Series):
                 file_extension = ".parquet"
                 artifact_path = artifact_dir / f"{base_filename}{file_extension}"
                 artifact_data.to_parquet(artifact_path)

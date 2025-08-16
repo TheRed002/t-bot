@@ -28,12 +28,12 @@ logger = get_logger(__name__)
 class CorrelationThresholds:
     """Configuration for correlation-based risk thresholds."""
 
-    warning_threshold: Decimal = Decimal("0.6")     # 60% correlation warning
-    critical_threshold: Decimal = Decimal("0.8")    # 80% correlation critical
-    max_positions_high_corr: int = 3                # Max positions when correlation > warning
-    max_positions_critical_corr: int = 1            # Max positions when correlation > critical
-    lookback_periods: int = 50                      # Periods for correlation calculation
-    min_periods: int = 10                          # Minimum periods required
+    warning_threshold: Decimal = Decimal("0.6")  # 60% correlation warning
+    critical_threshold: Decimal = Decimal("0.8")  # 80% correlation critical
+    max_positions_high_corr: int = 3  # Max positions when correlation > warning
+    max_positions_critical_corr: int = 1  # Max positions when correlation > critical
+    lookback_periods: int = 50  # Periods for correlation calculation
+    min_periods: int = 10  # Minimum periods required
 
 
 @dataclass
@@ -90,7 +90,7 @@ class CorrelationMonitor:
             "Correlation monitor initialized",
             warning_threshold=self.thresholds.warning_threshold,
             critical_threshold=self.thresholds.critical_threshold,
-            lookback_periods=self.thresholds.lookback_periods
+            lookback_periods=self.thresholds.lookback_periods,
         )
 
     async def update_price_data(self, market_data: MarketData) -> None:
@@ -116,18 +116,12 @@ class CorrelationMonitor:
                     self.return_history[symbol].append(return_pct)
 
             # Clear correlation cache for this symbol (invalidate related correlations)
-            keys_to_remove = [
-                key for key in self._correlation_cache.keys()
-                if symbol in key
-            ]
+            keys_to_remove = [key for key in self._correlation_cache.keys() if symbol in key]
             for key in keys_to_remove:
                 del self._correlation_cache[key]
 
     async def calculate_pairwise_correlation(
-        self,
-        symbol1: str,
-        symbol2: str,
-        min_periods: int | None = None
+        self, symbol1: str, symbol2: str, min_periods: int | None = None
     ) -> Decimal | None:
         """
         Calculate correlation between two symbols with caching.
@@ -188,9 +182,9 @@ class CorrelationMonitor:
 
                 n = Decimal(str(len(returns1)))
                 if n > Decimal("1"):
-                    covariance /= (n - Decimal("1"))  # Sample covariance
-                    var1 /= (n - Decimal("1"))        # Sample variance
-                    var2 /= (n - Decimal("1"))        # Sample variance
+                    covariance /= n - Decimal("1")  # Sample covariance
+                    var1 /= n - Decimal("1")  # Sample variance
+                    var2 /= n - Decimal("1")  # Sample variance
 
                 # Calculate correlation coefficient
                 if var1 > 0 and var2 > 0:
@@ -210,16 +204,12 @@ class CorrelationMonitor:
 
             except Exception as e:
                 self.logger.warning(
-                    "Correlation calculation failed",
-                    symbol1=symbol1,
-                    symbol2=symbol2,
-                    error=str(e)
+                    "Correlation calculation failed", symbol1=symbol1, symbol2=symbol2, error=str(e)
                 )
                 return None
 
     async def calculate_portfolio_correlation(
-        self,
-        positions: list[Position]
+        self, positions: list[Position]
     ) -> CorrelationMetrics:
         """
         Calculate comprehensive correlation metrics for portfolio.
@@ -245,7 +235,7 @@ class CorrelationMonitor:
                     correlated_pairs_count=0,
                     portfolio_concentration_risk=Decimal("0.0"),
                     timestamp=datetime.now(),
-                    correlation_matrix={}
+                    correlation_matrix={},
                 )
 
             correlation_matrix = {}
@@ -254,11 +244,13 @@ class CorrelationMonitor:
 
             # Calculate all pairwise correlations
             for i, symbol1 in enumerate(symbols):
-                for _j, symbol2 in enumerate(symbols[i+1:], i+1):
+                for _j, symbol2 in enumerate(symbols[i + 1 :], i + 1):
                     correlation = await self.calculate_pairwise_correlation(symbol1, symbol2)
 
                     if correlation is not None:
-                        key: tuple[str, str] = (symbol1, symbol2) if symbol1 < symbol2 else (symbol2, symbol1)
+                        key: tuple[str, str] = (
+                            (symbol1, symbol2) if symbol1 < symbol2 else (symbol2, symbol1)
+                        )
                         correlation_matrix[key] = correlation
                         correlations.append(abs(correlation))  # Use absolute value
 
@@ -274,14 +266,14 @@ class CorrelationMonitor:
                     correlated_pairs_count=0,
                     portfolio_concentration_risk=Decimal("0.0"),
                     timestamp=datetime.now(),
-                    correlation_matrix=correlation_matrix
+                    correlation_matrix=correlation_matrix,
                 )
 
             # Calculate metrics using Decimal precision
             if correlations:
                 # Calculate average using Decimal arithmetic
-                avg_correlation = (
-                    sum(Decimal(str(c)) for c in correlations) / Decimal(str(len(correlations)))
+                avg_correlation = sum(Decimal(str(c)) for c in correlations) / Decimal(
+                    str(len(correlations))
                 )
                 max_correlation = max(Decimal(str(c)) for c in correlations)
             else:
@@ -290,8 +282,8 @@ class CorrelationMonitor:
 
             # Detect correlation spike
             correlation_spike = (
-                max_correlation > self.thresholds.critical_threshold or
-                avg_correlation > self.thresholds.warning_threshold
+                max_correlation > self.thresholds.critical_threshold
+                or avg_correlation > self.thresholds.warning_threshold
             )
 
             # Calculate concentration risk (weighted by position sizes)
@@ -302,8 +294,12 @@ class CorrelationMonitor:
                 # Weight correlations by position sizes using Decimal precision
                 weighted_correlations = []
                 for i, pos1 in enumerate(positions):
-                    for pos2 in positions[i+1:]:
-                        weight_key: tuple[str, str] = (pos1.symbol, pos2.symbol) if pos1.symbol < pos2.symbol else (pos2.symbol, pos1.symbol)
+                    for pos2 in positions[i + 1 :]:
+                        weight_key: tuple[str, str] = (
+                            (pos1.symbol, pos2.symbol)
+                            if pos1.symbol < pos2.symbol
+                            else (pos2.symbol, pos1.symbol)
+                        )
                         if weight_key in correlation_matrix:
                             # Use Decimal for all weight calculations
                             value1 = abs(pos1.current_price * pos1.quantity)
@@ -324,23 +320,22 @@ class CorrelationMonitor:
                 correlated_pairs_count=high_corr_pairs,
                 portfolio_concentration_risk=concentration_risk,
                 timestamp=datetime.now(),
-                correlation_matrix=correlation_matrix
+                correlation_matrix=correlation_matrix,
             )
 
         except Exception as e:
             self.logger.error(
                 "Portfolio correlation calculation failed",
                 error=str(e),
-                symbol_count=len(positions)
+                symbol_count=len(positions),
             )
             raise RiskManagementError(
                 f"Portfolio correlation calculation failed: {e}",
-                error_code="CORRELATION_CALCULATION_FAILED"
+                error_code="CORRELATION_CALCULATION_FAILED",
             ) from e
 
     async def get_position_limits_for_correlation(
-        self,
-        correlation_metrics: CorrelationMetrics
+        self, correlation_metrics: CorrelationMetrics
     ) -> dict[str, Any]:
         """
         Calculate position limits based on current correlation levels.
@@ -354,21 +349,25 @@ class CorrelationMonitor:
         limits = {
             "max_positions": None,
             "correlation_based_reduction": Decimal("1.0"),  # No reduction
-            "warning_level": "normal"
+            "warning_level": "normal",
         }
 
         if correlation_metrics.max_pairwise_correlation > self.thresholds.critical_threshold:
-            limits.update({
-                "max_positions": self.thresholds.max_positions_critical_corr,
-                "correlation_based_reduction": Decimal("0.3"),  # 70% reduction
-                "warning_level": "critical"
-            })
+            limits.update(
+                {
+                    "max_positions": self.thresholds.max_positions_critical_corr,
+                    "correlation_based_reduction": Decimal("0.3"),  # 70% reduction
+                    "warning_level": "critical",
+                }
+            )
         elif correlation_metrics.max_pairwise_correlation > self.thresholds.warning_threshold:
-            limits.update({
-                "max_positions": self.thresholds.max_positions_high_corr,
-                "correlation_based_reduction": Decimal("0.6"),  # 40% reduction
-                "warning_level": "warning"
-            })
+            limits.update(
+                {
+                    "max_positions": self.thresholds.max_positions_high_corr,
+                    "correlation_based_reduction": Decimal("0.6"),  # 40% reduction
+                    "warning_level": "warning",
+                }
+            )
 
         return limits
 
@@ -404,10 +403,9 @@ class CorrelationMonitor:
             "thresholds": {
                 "warning": str(self.thresholds.warning_threshold),
                 "critical": str(self.thresholds.critical_threshold),
-                "lookback_periods": self.thresholds.lookback_periods
+                "lookback_periods": self.thresholds.lookback_periods,
             },
             "data_points": {
-                symbol: len(history)
-                for symbol, history in self.return_history.items()
-            }
+                symbol: len(history) for symbol, history in self.return_history.items()
+            },
         }

@@ -226,7 +226,7 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             log_data["user_id"] = request.state.user.get("user_id")
 
         # Log level based on exception type
-        if isinstance(exception, (AuthenticationError, ValidationError)):
+        if isinstance(exception, AuthenticationError | ValidationError):
             self.logger.warning("T-Bot client error", **log_data)
         else:
             self.logger.error("T-Bot server error", **log_data)

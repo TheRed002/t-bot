@@ -31,16 +31,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Install TA-Lib from source
+# Install TA-Lib from source (version 0.4.0 is more stable)
 RUN cd /tmp && \
-    wget -q https://github.com/TA-Lib/ta-lib/releases/download/v0.6.4/ta-lib-0.6.4-src.tar.gz && \
-    tar -xzf ta-lib-0.6.4-src.tar.gz && \
-    cd ta-lib-0.6.4/ && \
+    wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
+    tar -xzf ta-lib-0.4.0-src.tar.gz && \
+    cd ta-lib && \
     ./configure --prefix=/usr && \
     make -j$(nproc) && \
     make install && \
     cd / && \
-    rm -rf /tmp/ta-lib-0.6.4*
+    rm -rf /tmp/ta-lib*
 
 # Create non-root user
 RUN groupadd --gid 1001 tbot && \

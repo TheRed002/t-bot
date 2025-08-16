@@ -161,7 +161,7 @@ class RateLimiter:
         logger.info(f"Initialized rate limiter for {exchange_name}")
 
     async def _handle_rate_limit_error(
-        self, error: Exception, operation: str, bucket_name: str = None
+        self, error: Exception, operation: str, bucket_name: str | None = None
     ) -> None:
         """
         Handle rate limit errors using the error handler.

@@ -30,5 +30,5 @@ __all__ = [
     "BotLifecycle",
     "BotMonitor",
     "BotOrchestrator",
-    "ResourceManager"
+    "ResourceManager",
 ]

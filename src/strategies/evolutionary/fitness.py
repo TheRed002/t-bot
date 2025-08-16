@@ -5,10 +5,6 @@ This module provides fitness functions for evaluating trading strategy performan
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional
-
-import numpy as np
-from pydantic import BaseModel, Field
 
 from src.backtesting.engine import BacktestResult
 from src.core.logging import get_logger
@@ -54,7 +50,7 @@ class CompositeFitness(FitnessFunction):
 
     def __init__(
         self,
-        weights: Dict[str, float] = None,
+        weights: dict[str, float] | None = None,
         penalty_drawdown: bool = True,
         min_trades: int = 10,
     ):
@@ -80,52 +76,50 @@ class CompositeFitness(FitnessFunction):
         # Check minimum trades
         if result.total_trades < self.min_trades:
             return -1000.0  # Heavily penalize insufficient trades
-        
+
         # Calculate weighted score
         score = 0.0
-        
+
         # Sharpe ratio component
         if "sharpe_ratio" in self.weights:
             sharpe_component = result.sharpe_ratio * self.weights["sharpe_ratio"]
             score += sharpe_component
-        
+
         # Return component (normalized)
         if "total_return" in self.weights:
-            return_component = (
-                float(result.total_return) / 100 * self.weights["total_return"]
-            )
+            return_component = float(result.total_return) / 100 * self.weights["total_return"]
             score += return_component
-        
+
         # Win rate component
         if "win_rate" in self.weights:
             win_rate_component = result.win_rate / 100 * self.weights["win_rate"]
             score += win_rate_component
-        
+
         # Profit factor component (capped)
         if "profit_factor" in self.weights:
             profit_factor = min(result.profit_factor, 3.0)  # Cap at 3
             pf_component = profit_factor / 3.0 * self.weights["profit_factor"]
             score += pf_component
-        
+
         # Apply drawdown penalty
         if self.penalty_drawdown:
             drawdown_penalty = float(result.max_drawdown) / 100
-            score *= (1 - drawdown_penalty * 0.5)  # Reduce score by up to 50%
-        
+            score *= 1 - drawdown_penalty * 0.5  # Reduce score by up to 50%
+
         return score
 
 
 class FitnessEvaluator:
     """
     Evaluates fitness of trading strategies.
-    
+
     Supports multiple fitness functions and objectives.
     """
 
     def __init__(
         self,
-        fitness_function: Optional[FitnessFunction] = None,
-        objectives: Optional[List[str]] = None,
+        fitness_function: FitnessFunction | None = None,
+        objectives: list[str] | None = None,
     ):
         """
         Initialize fitness evaluator.
@@ -136,7 +130,7 @@ class FitnessEvaluator:
         """
         self.fitness_function = fitness_function or CompositeFitness()
         self.objectives = objectives or ["sharpe_ratio", "total_return"]
-        
+
         logger.info(
             "FitnessEvaluator initialized",
             function=self.fitness_function.__class__.__name__,
@@ -155,19 +149,17 @@ class FitnessEvaluator:
         """
         try:
             fitness = self.fitness_function.calculate(result)
-            
+
             # Apply constraints
             fitness = self._apply_constraints(result, fitness)
-            
+
             return fitness
-            
+
         except Exception as e:
             logger.error("Fitness evaluation failed", error=str(e))
             return -float("inf")
 
-    def evaluate_multi_objective(
-        self, result: BacktestResult
-    ) -> Dict[str, float]:
+    def evaluate_multi_objective(self, result: BacktestResult) -> dict[str, float]:
         """
         Evaluate multiple objectives.
 
@@ -178,7 +170,7 @@ class FitnessEvaluator:
             Dictionary of objective values
         """
         objectives = {}
-        
+
         for objective in self.objectives:
             if objective == "sharpe_ratio":
                 objectives[objective] = result.sharpe_ratio
@@ -197,29 +189,27 @@ class FitnessEvaluator:
             else:
                 logger.warning(f"Unknown objective: {objective}")
                 objectives[objective] = 0.0
-        
+
         return objectives
 
-    def _apply_constraints(
-        self, result: BacktestResult, fitness: float
-    ) -> float:
+    def _apply_constraints(self, result: BacktestResult, fitness: float) -> float:
         """Apply constraints to fitness score."""
         # Constraint: Maximum drawdown
         if float(result.max_drawdown) > 30:  # More than 30% drawdown
             fitness *= 0.5  # Halve fitness
-        
+
         # Constraint: Minimum trades
         if result.total_trades < 10:
             fitness *= 0.1  # Severely penalize
-        
+
         # Constraint: Minimum win rate
         if result.win_rate < 30:  # Less than 30% win rate
             fitness *= 0.7
-        
+
         # Constraint: Negative return
         if float(result.total_return) < 0:
             fitness = min(fitness, 0)  # Cap at 0
-        
+
         return fitness
 
     def compare(self, result1: BacktestResult, result2: BacktestResult) -> int:
@@ -235,7 +225,7 @@ class FitnessEvaluator:
         """
         fitness1 = self.evaluate(result1)
         fitness2 = self.evaluate(result2)
-        
+
         if fitness1 > fitness2:
             return 1
         elif fitness1 < fitness2:
@@ -243,7 +233,7 @@ class FitnessEvaluator:
         else:
             return 0
 
-    def rank(self, results: List[BacktestResult]) -> List[int]:
+    def rank(self, results: list[BacktestResult]) -> list[int]:
         """
         Rank backtest results by fitness.
 
@@ -289,12 +279,10 @@ class AdaptiveFitness(FitnessFunction):
 
     def calculate(self, result: BacktestResult) -> float:
         """Calculate adaptive fitness based on market regime."""
-        weights = self.regime_weights.get(
-            self.market_regime, self.regime_weights["ranging"]
-        )
-        
+        weights = self.regime_weights.get(self.market_regime, self.regime_weights["ranging"])
+
         score = 0.0
-        
+
         for metric, weight in weights.items():
             if metric == "total_return":
                 value = float(result.total_return) / 100
@@ -310,7 +298,7 @@ class AdaptiveFitness(FitnessFunction):
                 value = result.sortino_ratio
             else:
                 value = 0.0
-            
+
             score += value * weight
-        
+
         return score

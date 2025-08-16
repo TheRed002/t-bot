@@ -5,10 +5,11 @@ This module provides comprehensive metrics calculation for backtest results,
 including risk-adjusted returns, drawdown analysis, and trade statistics.
 """
 
+from decimal import Decimal
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from decimal import Decimal
-from typing import Any, Dict, List, Optional
 
 from src.core.logging import get_logger
 from src.utils.decorators import time_execution
@@ -21,7 +22,7 @@ class BacktestMetrics:
 
     def __init__(self):
         """Initialize metrics container."""
-        self.metrics: Dict[str, Any] = {}
+        self.metrics: dict[str, Any] = {}
 
     def add(self, name: str, value: Any) -> None:
         """Add a metric."""
@@ -31,7 +32,7 @@ class BacktestMetrics:
         """Get a metric value."""
         return self.metrics.get(name, default)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return self.metrics.copy()
 
@@ -39,7 +40,7 @@ class BacktestMetrics:
 class MetricsCalculator:
     """
     Calculator for comprehensive backtest metrics.
-    
+
     Provides calculation of:
     - Risk-adjusted returns (Sharpe, Sortino, Calmar)
     - Drawdown metrics
@@ -60,11 +61,11 @@ class MetricsCalculator:
     @time_execution
     def calculate_all(
         self,
-        equity_curve: List[Dict[str, Any]],
-        trades: List[Dict[str, Any]],
-        daily_returns: List[float],
+        equity_curve: list[dict[str, Any]],
+        trades: list[dict[str, Any]],
+        daily_returns: list[float],
         initial_capital: float,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Calculate all metrics from backtest data.
 
@@ -103,8 +104,8 @@ class MetricsCalculator:
         return metrics
 
     def _calculate_return_metrics(
-        self, equity_curve: List[Dict[str, Any]], initial_capital: float
-    ) -> Dict[str, Any]:
+        self, equity_curve: list[dict[str, Any]], initial_capital: float
+    ) -> dict[str, Any]:
         """Calculate return-based metrics."""
         if not equity_curve:
             return {}
@@ -129,22 +130,22 @@ class MetricsCalculator:
             "final_equity": Decimal(str(final_equity)),
         }
 
-    def _calculate_risk_adjusted_metrics(self, daily_returns: List[float]) -> Dict[str, Any]:
+    def _calculate_risk_adjusted_metrics(self, daily_returns: list[float]) -> dict[str, Any]:
         """Calculate risk-adjusted performance metrics."""
         if not daily_returns:
             return {}
 
         returns_array = np.array(daily_returns)
-        
+
         # Remove NaN values
         returns_array = returns_array[~np.isnan(returns_array)]
-        
+
         if len(returns_array) == 0:
             return {}
 
         # Annualize metrics
         annual_factor = np.sqrt(252)  # Trading days per year
-        
+
         # Calculate volatility
         volatility = np.std(returns_array) * annual_factor
 
@@ -172,7 +173,7 @@ class MetricsCalculator:
             "std_daily_return": float(np.std(returns_array) * 100),
         }
 
-    def _calculate_drawdown_metrics(self, equity_curve: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _calculate_drawdown_metrics(self, equity_curve: list[dict[str, Any]]) -> dict[str, Any]:
         """Calculate drawdown-related metrics."""
         if not equity_curve:
             return {}
@@ -208,7 +209,9 @@ class MetricsCalculator:
 
         # Recovery factor (total return / max drawdown)
         if len(equity_curve) > 1:
-            total_return = (equity_curve[-1]["equity"] - equity_curve[0]["equity"]) / equity_curve[0]["equity"]
+            total_return = (equity_curve[-1]["equity"] - equity_curve[0]["equity"]) / equity_curve[
+                0
+            ]["equity"]
             recovery_factor = total_return / max_drawdown if max_drawdown > 0 else 0
         else:
             recovery_factor = 0
@@ -217,10 +220,12 @@ class MetricsCalculator:
             "max_drawdown": Decimal(str(max_drawdown * 100)),
             "max_drawdown_duration_days": max_duration,
             "recovery_factor": float(recovery_factor),
-            "current_drawdown": Decimal(str(abs(drawdown.iloc[-1] * 100)) if not drawdown.empty else "0"),
+            "current_drawdown": Decimal(
+                str(abs(drawdown.iloc[-1] * 100)) if not drawdown.empty else "0"
+            ),
         }
 
-    def _calculate_trade_statistics(self, trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _calculate_trade_statistics(self, trades: list[dict[str, Any]]) -> dict[str, Any]:
         """Calculate trade-related statistics."""
         if not trades:
             return {
@@ -281,22 +286,26 @@ class MetricsCalculator:
             "avg_trade_duration_hours": float(avg_duration),
             "max_consecutive_wins": max_consecutive_wins,
             "max_consecutive_losses": max_consecutive_losses,
-            "largest_win": Decimal(str(max([t["pnl"] for t in trades]))) if trades else Decimal("0"),
-            "largest_loss": Decimal(str(abs(min([t["pnl"] for t in trades])))) if trades else Decimal("0"),
+            "largest_win": (
+                Decimal(str(max([t["pnl"] for t in trades]))) if trades else Decimal("0")
+            ),
+            "largest_loss": (
+                Decimal(str(abs(min([t["pnl"] for t in trades])))) if trades else Decimal("0")
+            ),
         }
 
     def _calculate_risk_metrics(
-        self, daily_returns: List[float], initial_capital: float
-    ) -> Dict[str, Any]:
+        self, daily_returns: list[float], initial_capital: float
+    ) -> dict[str, Any]:
         """Calculate risk metrics (VaR, CVaR, etc.)."""
         if not daily_returns:
             return {}
 
         returns_array = np.array(daily_returns)
-        
+
         # Remove NaN values
         returns_array = returns_array[~np.isnan(returns_array)]
-        
+
         if len(returns_array) == 0:
             return {}
 
@@ -312,6 +321,7 @@ class MetricsCalculator:
 
         # Skewness and Kurtosis
         from scipy import stats
+
         skewness = stats.skew(returns_array)
         kurtosis = stats.kurtosis(returns_array)
 
@@ -319,7 +329,7 @@ class MetricsCalculator:
         threshold_return = 0
         gains = returns_array[returns_array > threshold_return] - threshold_return
         losses = threshold_return - returns_array[returns_array <= threshold_return]
-        
+
         if len(losses) > 0 and np.sum(losses) > 0:
             omega_ratio = np.sum(gains) / np.sum(losses)
         else:
@@ -336,7 +346,7 @@ class MetricsCalculator:
 
     def calculate_rolling_metrics(
         self,
-        equity_curve: List[Dict[str, Any]],
+        equity_curve: list[dict[str, Any]],
         window: int = 30,
     ) -> pd.DataFrame:
         """
@@ -362,9 +372,9 @@ class MetricsCalculator:
         # Rolling metrics
         df["rolling_return"] = df["returns"].rolling(window).mean() * 252
         df["rolling_volatility"] = df["returns"].rolling(window).std() * np.sqrt(252)
-        df["rolling_sharpe"] = (
-            df["rolling_return"] - self.risk_free_rate
-        ) / df["rolling_volatility"]
+        df["rolling_sharpe"] = (df["rolling_return"] - self.risk_free_rate) / df[
+            "rolling_volatility"
+        ]
 
         # Rolling drawdown
         rolling_max = df["equity"].rolling(window, min_periods=1).max()

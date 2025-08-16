@@ -295,7 +295,7 @@ class TestTrade:
             id="trade_123",
             symbol="BTC/USDT",
             side=OrderSide.BUY,
-            quantity=Decimal("1.0"),
+            amount=Decimal("1.0"),
             price=Decimal("50000.00"),
             timestamp=datetime.now(timezone.utc),
             fee=Decimal("25.00"),
@@ -305,7 +305,7 @@ class TestTrade:
         assert trade.id == "trade_123"
         assert trade.symbol == "BTC/USDT"
         assert trade.side == OrderSide.BUY
-        assert trade.quantity == Decimal("1.0")
+        assert trade.amount == Decimal("1.0")
         assert trade.price == Decimal("50000.00")
         assert trade.fee == Decimal("25.00")
         assert trade.fee_currency == "USDT"

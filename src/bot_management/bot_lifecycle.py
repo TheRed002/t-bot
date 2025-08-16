@@ -31,7 +31,7 @@ from src.utils.decorators import log_calls, time_execution
 class BotLifecycle:
     """
     Comprehensive bot lifecycle management system.
-    
+
     This class provides:
     - Bot template management and configuration
     - Deployment strategy implementation
@@ -44,7 +44,7 @@ class BotLifecycle:
     def __init__(self, config: Config):
         """
         Initialize bot lifecycle manager.
-        
+
         Args:
             config: Application configuration
         """
@@ -63,10 +63,14 @@ class BotLifecycle:
 
         # Event tracking
         self.lifecycle_events: list[dict[str, Any]] = []
-        self.event_retention_hours = config.bot_management.get("event_retention_hours", 168)  # 7 days
+        self.event_retention_hours = config.bot_management.get(
+            "event_retention_hours", 168
+        )  # 7 days
 
         # Configuration
-        self.graceful_shutdown_timeout = config.bot_management.get("graceful_shutdown_timeout", 300)  # 5 minutes
+        self.graceful_shutdown_timeout = config.bot_management.get(
+            "graceful_shutdown_timeout", 300
+        )  # 5 minutes
         self.restart_max_attempts = config.bot_management.get("restart_max_attempts", 3)
         self.restart_delay_seconds = config.bot_management.get("restart_delay_seconds", 60)
 
@@ -82,7 +86,7 @@ class BotLifecycle:
             "failed_deployments": 0,
             "successful_restarts": 0,
             "failed_restarts": 0,
-            "last_lifecycle_action": None
+            "last_lifecycle_action": None,
         }
 
         self.logger.info("Bot lifecycle manager initialized")
@@ -99,12 +103,11 @@ class BotLifecycle:
                     "max_concurrent_positions": 3,
                     "risk_percentage": 0.02,
                     "heartbeat_interval": 30,
-                    "auto_start": True
+                    "auto_start": True,
                 },
                 "required_fields": ["strategy_name", "exchanges", "symbols", "allocated_capital"],
-                "optional_fields": ["trading_mode", "max_daily_trades"]
+                "optional_fields": ["trading_mode", "max_daily_trades"],
             },
-
             "arbitrage_bot": {
                 "name": "Arbitrage Trading Bot",
                 "description": "Cross-exchange arbitrage opportunities scanner and executor",
@@ -114,12 +117,11 @@ class BotLifecycle:
                     "max_concurrent_positions": 10,
                     "risk_percentage": 0.01,
                     "heartbeat_interval": 15,
-                    "auto_start": True
+                    "auto_start": True,
                 },
                 "required_fields": ["exchanges", "symbols", "allocated_capital"],
-                "optional_fields": ["min_arbitrage_profit_bps", "max_position_hold_time"]
+                "optional_fields": ["min_arbitrage_profit_bps", "max_position_hold_time"],
             },
-
             "market_maker_bot": {
                 "name": "Market Making Bot",
                 "description": "Automated market making with spread management",
@@ -129,12 +131,11 @@ class BotLifecycle:
                     "max_concurrent_positions": 20,
                     "risk_percentage": 0.005,
                     "heartbeat_interval": 10,
-                    "auto_start": True
+                    "auto_start": True,
                 },
                 "required_fields": ["exchanges", "symbols", "allocated_capital"],
-                "optional_fields": ["spread_percentage", "inventory_target", "quote_size"]
+                "optional_fields": ["spread_percentage", "inventory_target", "quote_size"],
             },
-
             "hybrid_strategy_bot": {
                 "name": "Hybrid Multi-Strategy Bot",
                 "description": "Advanced bot running multiple coordinated strategies",
@@ -144,12 +145,11 @@ class BotLifecycle:
                     "max_concurrent_positions": 15,
                     "risk_percentage": 0.03,
                     "heartbeat_interval": 20,
-                    "auto_start": False  # Requires manual review
+                    "auto_start": False,  # Requires manual review
                 },
                 "required_fields": ["strategy_names", "exchanges", "symbols", "allocated_capital"],
-                "optional_fields": ["strategy_weights", "rebalancing_frequency"]
+                "optional_fields": ["strategy_weights", "rebalancing_frequency"],
             },
-
             "scanner_bot": {
                 "name": "Opportunity Scanner Bot",
                 "description": "Market opportunity scanner with signal generation",
@@ -159,11 +159,11 @@ class BotLifecycle:
                     "max_concurrent_positions": 1,  # Minimal trading
                     "risk_percentage": 0.001,
                     "heartbeat_interval": 60,
-                    "auto_start": True
+                    "auto_start": True,
                 },
                 "required_fields": ["exchanges", "symbols"],
-                "optional_fields": ["scan_intervals", "signal_threshold", "notification_targets"]
-            }
+                "optional_fields": ["scan_intervals", "signal_threshold", "notification_targets"],
+            },
         }
 
     def _initialize_deployment_strategies(self) -> None:
@@ -173,14 +173,14 @@ class BotLifecycle:
             "staged": self._deploy_staged,
             "blue_green": self._deploy_blue_green,
             "canary": self._deploy_canary,
-            "rolling": self._deploy_rolling
+            "rolling": self._deploy_rolling,
         }
 
     @log_calls
     async def start(self) -> None:
         """
         Start the bot lifecycle manager.
-        
+
         Raises:
             ExecutionError: If startup fails
         """
@@ -205,7 +205,7 @@ class BotLifecycle:
     async def stop(self) -> None:
         """
         Stop the bot lifecycle manager.
-        
+
         Raises:
             ExecutionError: If shutdown fails
         """
@@ -237,20 +237,20 @@ class BotLifecycle:
         template_name: str,
         bot_name: str,
         custom_config: dict[str, Any],
-        deployment_strategy: str = "immediate"
+        deployment_strategy: str = "immediate",
     ) -> BotConfiguration:
         """
         Create a bot configuration from a template.
-        
+
         Args:
             template_name: Name of the template to use
             bot_name: Name for the new bot
             custom_config: Custom configuration overrides
             deployment_strategy: Deployment strategy to use
-            
+
         Returns:
             BotConfiguration: Created bot configuration
-            
+
         Raises:
             ValidationError: If template or configuration is invalid
             ExecutionError: If creation fails
@@ -275,7 +275,7 @@ class BotLifecycle:
                 **template["default_config"],
                 **custom_config,
                 "bot_id": bot_id,
-                "bot_name": bot_name
+                "bot_name": bot_name,
             }
 
             # Create bot configuration
@@ -297,7 +297,7 @@ class BotLifecycle:
                 bot_id=bot_id,
                 template=template_name,
                 bot_name=bot_name,
-                deployment_strategy=deployment_strategy
+                deployment_strategy=deployment_strategy,
             )
 
             return bot_config
@@ -311,19 +311,19 @@ class BotLifecycle:
         self,
         bot_config: BotConfiguration,
         orchestrator,
-        deployment_options: dict[str, Any] | None = None
+        deployment_options: dict[str, Any] | None = None,
     ) -> bool:
         """
         Deploy a bot using the configured deployment strategy.
-        
+
         Args:
             bot_config: Bot configuration to deploy
             orchestrator: Bot orchestrator instance
             deployment_options: Optional deployment parameters
-            
+
         Returns:
             bool: True if deployment successful
-            
+
         Raises:
             ExecutionError: If deployment fails
         """
@@ -340,7 +340,7 @@ class BotLifecycle:
                 "Starting bot deployment",
                 bot_id=bot_id,
                 strategy=strategy,
-                bot_type=bot_config.bot_type.value
+                bot_type=bot_config.bot_type.value,
             )
 
             # Update lifecycle state
@@ -371,10 +371,7 @@ class BotLifecycle:
             self.lifecycle_stats["last_lifecycle_action"] = datetime.now(timezone.utc)
 
             self.logger.info(
-                "Bot deployment completed",
-                bot_id=bot_id,
-                success=success,
-                strategy=strategy
+                "Bot deployment completed", bot_id=bot_id, success=success, strategy=strategy
             )
 
             return success
@@ -390,33 +387,26 @@ class BotLifecycle:
 
     @log_calls
     async def terminate_bot(
-        self,
-        bot_id: str,
-        orchestrator,
-        graceful: bool = True,
-        reason: str = "user_request"
+        self, bot_id: str, orchestrator, graceful: bool = True, reason: str = "user_request"
     ) -> bool:
         """
         Terminate a bot instance with optional graceful shutdown.
-        
+
         Args:
             bot_id: Bot identifier
             orchestrator: Bot orchestrator instance
             graceful: Whether to perform graceful shutdown
             reason: Reason for termination
-            
+
         Returns:
             bool: True if termination successful
-            
+
         Raises:
             ExecutionError: If termination fails
         """
         try:
             self.logger.info(
-                "Starting bot termination",
-                bot_id=bot_id,
-                graceful=graceful,
-                reason=reason
+                "Starting bot termination", bot_id=bot_id, graceful=graceful, reason=reason
             )
 
             # Update lifecycle state
@@ -460,10 +450,7 @@ class BotLifecycle:
             self.lifecycle_stats["last_lifecycle_action"] = datetime.now(timezone.utc)
 
             self.logger.info(
-                "Bot termination completed",
-                bot_id=bot_id,
-                success=success,
-                graceful=graceful
+                "Bot termination completed", bot_id=bot_id, success=success, graceful=graceful
             )
 
             return success
@@ -477,50 +464,40 @@ class BotLifecycle:
             raise ExecutionError(f"Bot termination failed: {e}")
 
     @log_calls
-    async def restart_bot(
-        self,
-        bot_id: str,
-        orchestrator,
-        reason: str = "manual_restart"
-    ) -> bool:
+    async def restart_bot(self, bot_id: str, orchestrator, reason: str = "manual_restart") -> bool:
         """
         Restart a bot instance with automatic recovery attempts.
-        
+
         Args:
             bot_id: Bot identifier
             orchestrator: Bot orchestrator instance
             reason: Reason for restart
-            
+
         Returns:
             bool: True if restart successful
-            
+
         Raises:
             ExecutionError: If restart fails
         """
         try:
-            self.logger.info(
-                "Starting bot restart",
-                bot_id=bot_id,
-                reason=reason
-            )
+            self.logger.info("Starting bot restart", bot_id=bot_id, reason=reason)
 
             # Record restart event
-            await self._record_lifecycle_event(
-                bot_id, "restart_started", {"reason": reason}
-            )
+            await self._record_lifecycle_event(bot_id, "restart_started", {"reason": reason})
 
             # Attempt restart with retries
             for attempt in range(1, self.restart_max_attempts + 1):
                 try:
                     self.logger.info(
-                        f"Bot restart attempt {attempt}/{self.restart_max_attempts}",
-                        bot_id=bot_id
+                        f"Bot restart attempt {attempt}/{self.restart_max_attempts}", bot_id=bot_id
                     )
 
                     # Stop bot gracefully
                     stop_success = await orchestrator.stop_bot(bot_id)
                     if not stop_success:
-                        self.logger.warning(f"Failed to stop bot on restart attempt {attempt}", bot_id=bot_id)
+                        self.logger.warning(
+                            f"Failed to stop bot on restart attempt {attempt}", bot_id=bot_id
+                        )
 
                     # Wait before restart
                     await asyncio.sleep(self.restart_delay_seconds)
@@ -536,20 +513,18 @@ class BotLifecycle:
                         )
 
                         self.logger.info(
-                            f"Bot restart successful on attempt {attempt}",
-                            bot_id=bot_id
+                            f"Bot restart successful on attempt {attempt}", bot_id=bot_id
                         )
 
                         return True
 
                 except Exception as e:
-                    self.logger.warning(
-                        f"Bot restart attempt {attempt} failed: {e}",
-                        bot_id=bot_id
-                    )
+                    self.logger.warning(f"Bot restart attempt {attempt} failed: {e}", bot_id=bot_id)
 
                     if attempt < self.restart_max_attempts:
-                        await asyncio.sleep(self.restart_delay_seconds * attempt)  # Exponential backoff
+                        await asyncio.sleep(
+                            self.restart_delay_seconds * attempt
+                        )  # Exponential backoff
 
             # All restart attempts failed
             self.lifecycle_stats["failed_restarts"] += 1
@@ -559,8 +534,7 @@ class BotLifecycle:
             )
 
             self.logger.error(
-                f"Bot restart failed after {self.restart_max_attempts} attempts",
-                bot_id=bot_id
+                f"Bot restart failed after {self.restart_max_attempts} attempts", bot_id=bot_id
             )
 
             return False
@@ -574,11 +548,10 @@ class BotLifecycle:
         """Get comprehensive lifecycle management summary."""
         try:
             # Aggregate lifecycle states
-            state_counts = {}
             deployment_states = {}
             termination_states = {}
 
-            for bot_id, lifecycle in self.bot_lifecycles.items():
+            for _bot_id, lifecycle in self.bot_lifecycles.items():
                 # Count by deployment state
                 deploy_state = lifecycle.get("deployment_state", "unknown")
                 deployment_states[deploy_state] = deployment_states.get(deploy_state, 0) + 1
@@ -590,7 +563,8 @@ class BotLifecycle:
             # Recent events (last 24 hours)
             recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
             recent_events = [
-                event for event in self.lifecycle_events
+                event
+                for event in self.lifecycle_events
                 if datetime.fromisoformat(event["timestamp"]) > recent_cutoff
             ]
 
@@ -605,26 +579,30 @@ class BotLifecycle:
                     "is_running": self.is_running,
                     "managed_bots": len(self.bot_lifecycles),
                     "available_templates": len(self.bot_templates),
-                    "deployment_strategies": list(self.deployment_strategies.keys())
+                    "deployment_strategies": list(self.deployment_strategies.keys()),
                 },
                 "deployment_states": deployment_states,
                 "termination_states": termination_states,
                 "lifecycle_statistics": {
                     **self.lifecycle_stats,
-                    "last_lifecycle_action": self.lifecycle_stats["last_lifecycle_action"].isoformat() if self.lifecycle_stats["last_lifecycle_action"] else None
+                    "last_lifecycle_action": (
+                        self.lifecycle_stats["last_lifecycle_action"].isoformat()
+                        if self.lifecycle_stats["last_lifecycle_action"]
+                        else None
+                    ),
                 },
                 "recent_events_24h": {
                     "total_events": len(recent_events),
-                    "event_types": event_type_counts
+                    "event_types": event_type_counts,
                 },
                 "templates": {
                     name: {
                         "name": template["name"],
                         "description": template["description"],
-                        "bot_type": template["default_config"]["bot_type"].value
+                        "bot_type": template["default_config"]["bot_type"].value,
                     }
                     for name, template in self.bot_templates.items()
-                }
+                },
             }
 
         except Exception as e:
@@ -634,10 +612,10 @@ class BotLifecycle:
     async def get_bot_lifecycle_details(self, bot_id: str) -> dict[str, Any] | None:
         """
         Get detailed lifecycle information for a specific bot.
-        
+
         Args:
             bot_id: Bot identifier
-            
+
         Returns:
             dict: Detailed lifecycle information or None if not found
         """
@@ -647,30 +625,42 @@ class BotLifecycle:
         lifecycle = self.bot_lifecycles[bot_id]
 
         # Get events for this bot
-        bot_events = [
-            event for event in self.lifecycle_events
-            if event["bot_id"] == bot_id
-        ]
+        bot_events = [event for event in self.lifecycle_events if event["bot_id"] == bot_id]
 
         return {
             "bot_id": bot_id,
             "lifecycle_data": {
                 **lifecycle,
-                "created": lifecycle.get("created").isoformat() if lifecycle.get("created") else None,
-                "deployment_started": lifecycle.get("deployment_started").isoformat() if lifecycle.get("deployment_started") else None,
-                "deployment_completed": lifecycle.get("deployment_completed").isoformat() if lifecycle.get("deployment_completed") else None,
-                "termination_started": lifecycle.get("termination_started").isoformat() if lifecycle.get("termination_started") else None,
-                "termination_completed": lifecycle.get("termination_completed").isoformat() if lifecycle.get("termination_completed") else None
+                "created": (
+                    lifecycle.get("created").isoformat() if lifecycle.get("created") else None
+                ),
+                "deployment_started": (
+                    lifecycle.get("deployment_started").isoformat()
+                    if lifecycle.get("deployment_started")
+                    else None
+                ),
+                "deployment_completed": (
+                    lifecycle.get("deployment_completed").isoformat()
+                    if lifecycle.get("deployment_completed")
+                    else None
+                ),
+                "termination_started": (
+                    lifecycle.get("termination_started").isoformat()
+                    if lifecycle.get("termination_started")
+                    else None
+                ),
+                "termination_completed": (
+                    lifecycle.get("termination_completed").isoformat()
+                    if lifecycle.get("termination_completed")
+                    else None
+                ),
             },
             "events": bot_events,
-            "event_count": len(bot_events)
+            "event_count": len(bot_events),
         }
 
     async def _initialize_bot_lifecycle(
-        self,
-        bot_id: str,
-        template_name: str,
-        deployment_strategy: str
+        self, bot_id: str, template_name: str, deployment_strategy: str
     ) -> None:
         """Initialize lifecycle tracking for a bot."""
         self.bot_lifecycles[bot_id] = {
@@ -681,14 +671,11 @@ class BotLifecycle:
             "termination_state": "active",
             "restart_count": 0,
             "last_restart": None,
-            "lifecycle_version": 1
+            "lifecycle_version": 1,
         }
 
     async def _record_lifecycle_event(
-        self,
-        bot_id: str,
-        event_type: str,
-        event_data: dict[str, Any]
+        self, bot_id: str, event_type: str, event_data: dict[str, Any]
     ) -> None:
         """Record a lifecycle event."""
         event = {
@@ -696,7 +683,7 @@ class BotLifecycle:
             "bot_id": bot_id,
             "event_type": event_type,
             "event_data": event_data,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         self.lifecycle_events.append(event)
@@ -704,15 +691,11 @@ class BotLifecycle:
         # Keep only recent events
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=self.event_retention_hours)
         self.lifecycle_events = [
-            e for e in self.lifecycle_events
-            if datetime.fromisoformat(e["timestamp"]) > cutoff_time
+            e for e in self.lifecycle_events if datetime.fromisoformat(e["timestamp"]) > cutoff_time
         ]
 
     async def _deploy_immediate(
-        self,
-        bot_config: BotConfiguration,
-        orchestrator,
-        options: dict[str, Any]
+        self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]
     ) -> bool:
         """Immediate deployment strategy."""
         try:
@@ -730,10 +713,7 @@ class BotLifecycle:
             return False
 
     async def _deploy_staged(
-        self,
-        bot_config: BotConfiguration,
-        orchestrator,
-        options: dict[str, Any]
+        self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]
     ) -> bool:
         """Staged deployment strategy with validation phases."""
         try:
@@ -754,10 +734,7 @@ class BotLifecycle:
             return False
 
     async def _deploy_blue_green(
-        self,
-        bot_config: BotConfiguration,
-        orchestrator,
-        options: dict[str, Any]
+        self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]
     ) -> bool:
         """Blue-green deployment strategy."""
         # Simplified blue-green deployment
@@ -765,10 +742,7 @@ class BotLifecycle:
         return await self._deploy_immediate(bot_config, orchestrator, options)
 
     async def _deploy_canary(
-        self,
-        bot_config: BotConfiguration,
-        orchestrator,
-        options: dict[str, Any]
+        self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]
     ) -> bool:
         """Canary deployment strategy."""
         # Simplified canary deployment
@@ -776,10 +750,7 @@ class BotLifecycle:
         return await self._deploy_staged(bot_config, orchestrator, options)
 
     async def _deploy_rolling(
-        self,
-        bot_config: BotConfiguration,
-        orchestrator,
-        options: dict[str, Any]
+        self, bot_config: BotConfiguration, orchestrator, options: dict[str, Any]
     ) -> bool:
         """Rolling deployment strategy."""
         # Simplified rolling deployment
@@ -792,7 +763,9 @@ class BotLifecycle:
             # Phase 1: Pause new trading
             pause_success = await orchestrator.pause_bot(bot_id)
             if not pause_success:
-                self.logger.warning("Failed to pause bot during graceful termination", bot_id=bot_id)
+                self.logger.warning(
+                    "Failed to pause bot during graceful termination", bot_id=bot_id
+                )
 
             # Phase 2: Wait for position closure (simulate)
             await asyncio.sleep(10)  # Allow time for positions to close
@@ -856,7 +829,8 @@ class BotLifecycle:
 
         initial_count = len(self.lifecycle_events)
         self.lifecycle_events = [
-            event for event in self.lifecycle_events
+            event
+            for event in self.lifecycle_events
             if datetime.fromisoformat(event["timestamp"]) > cutoff_time
         ]
 
@@ -878,7 +852,7 @@ class BotLifecycle:
                         self.logger.warning(
                             "Long-running deployment detected",
                             bot_id=bot_id,
-                            deployment_age_seconds=deployment_age
+                            deployment_age_seconds=deployment_age,
                         )
 
     async def _update_lifecycle_statistics(self) -> None:

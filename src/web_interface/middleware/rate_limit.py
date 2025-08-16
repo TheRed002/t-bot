@@ -326,7 +326,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         active_keys = 0
         total_recent_requests = 0
 
-        for key, request_times in self.request_counts.items():
+        for _key, request_times in self.request_counts.items():
             recent_requests = sum(1 for t in request_times if t >= window_start)
             if recent_requests > 0:
                 active_keys += 1

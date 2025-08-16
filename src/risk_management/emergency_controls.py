@@ -282,9 +282,11 @@ class EmergencyControls:
                             # Create market order to close position
                             close_order = OrderRequest(
                                 symbol=position.symbol,
-                                side=OrderSide.SELL
-                                if position.side == OrderSide.BUY
-                                else OrderSide.BUY,
+                                side=(
+                                    OrderSide.SELL
+                                    if position.side == OrderSide.BUY
+                                    else OrderSide.BUY
+                                ),
                                 order_type=OrderType.MARKET,
                                 quantity=abs(position.quantity),
                                 client_order_id=(
@@ -571,14 +573,14 @@ class EmergencyControls:
         """Get current emergency controls status."""
         return {
             "state": self.state.value,
-            "emergency_start_time": self.emergency_start_time.isoformat()
-            if self.emergency_start_time
-            else None,
+            "emergency_start_time": (
+                self.emergency_start_time.isoformat() if self.emergency_start_time else None
+            ),
             "emergency_reason": self.emergency_reason,
             "manual_override_user": self.manual_override_user,
-            "manual_override_time": self.manual_override_time.isoformat()
-            if self.manual_override_time
-            else None,
+            "manual_override_time": (
+                self.manual_override_time.isoformat() if self.manual_override_time else None
+            ),
             "events_count": len(self.emergency_events),
             "trading_allowed": self.state
             in [EmergencyState.NORMAL, EmergencyState.MANUAL_OVERRIDE],

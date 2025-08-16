@@ -461,7 +461,7 @@ class InferenceEngine:
 
                 # Process batch if we have requests
                 if batch:
-                    responses = self.predict_batch(batch)
+                    self.predict_batch(batch)
 
                     # Here you would typically send responses back
                     # This is a simplified implementation
@@ -495,7 +495,7 @@ class InferenceEngine:
         for model_id in model_ids:
             try:
                 # Load model into cache
-                model = self._get_model(model_id, use_cache=True)
+                self._get_model(model_id, use_cache=True)
                 warmup_results[model_id] = True
 
                 logger.debug(f"Model {model_id} warmed up successfully")

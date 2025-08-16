@@ -5,7 +5,7 @@ This module provides direction classification models that predict whether
 prices will move up, down, or remain stable in the next period.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -147,7 +147,7 @@ class DirectionClassifier(BaseModel):
 
     @time_execution
     @log_calls
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> dict[str, Any]:
         """
         Train the direction classifier.
 
@@ -308,7 +308,7 @@ class DirectionClassifier(BaseModel):
 
     @time_execution
     @log_calls
-    def evaluate(self, X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
+    def evaluate(self, X: pd.DataFrame, y: pd.Series) -> dict[str, Any]:
         """
         Evaluate the model on test data.
 
@@ -334,7 +334,7 @@ class DirectionClassifier(BaseModel):
 
             # Make predictions
             y_pred = self.predict(X)
-            y_proba = self.predict_proba(X)
+            self.predict_proba(X)
 
             # Calculate metrics
             accuracy = accuracy_score(y_true, y_pred)
@@ -437,7 +437,7 @@ class DirectionClassifier(BaseModel):
             logger.error(f"Failed to calculate directional accuracy: {e}")
             return 0.0
 
-    def get_feature_importance(self) -> Optional[pd.Series]:
+    def get_feature_importance(self) -> pd.Series | None:
         """
         Get feature importance scores.
 
@@ -450,7 +450,7 @@ class DirectionClassifier(BaseModel):
 
         return self.feature_importance_
 
-    def get_class_distribution(self) -> Optional[Dict[str, int]]:
+    def get_class_distribution(self) -> dict[str, int] | None:
         """
         Get training class distribution.
 
@@ -463,7 +463,7 @@ class DirectionClassifier(BaseModel):
 
         return self.class_distribution_
 
-    def predict_direction_labels(self, X: pd.DataFrame) -> List[str]:
+    def predict_direction_labels(self, X: pd.DataFrame) -> list[str]:
         """
         Predict direction as string labels.
 

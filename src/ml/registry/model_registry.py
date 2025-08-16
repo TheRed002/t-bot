@@ -208,7 +208,7 @@ class ModelRegistry:
                         query = query.filter(MLModel.version == version)
 
                     # Get the latest version if no specific version requested
-                    query = query.filter(MLModel.is_active == True)
+                    query = query.filter(MLModel.is_active)
                     db_model = query.order_by(desc(MLModel.created_at)).first()
 
                 if not db_model:
@@ -264,7 +264,7 @@ class ModelRegistry:
                 if model_type:
                     query = query.filter(MLModel.model_type == model_type)
                 if active_only:
-                    query = query.filter(MLModel.is_active == True)
+                    query = query.filter(MLModel.is_active)
 
                 models = query.order_by(desc(MLModel.created_at)).all()
 
@@ -529,7 +529,7 @@ class ModelRegistry:
         try:
             with get_sync_session() as session:
                 # Group by model name and type
-                models = session.query(MLModel).filter(MLModel.is_active == True).all()
+                models = session.query(MLModel).filter(MLModel.is_active).all()
                 model_groups = {}
 
                 for model in models:
@@ -539,7 +539,7 @@ class ModelRegistry:
                     model_groups[key].append(model)
 
                 # For each group, keep only the most recent versions
-                for (name, model_type), model_list in model_groups.items():
+                for (_name, _model_type), model_list in model_groups.items():
                     model_list.sort(key=lambda x: x.created_at, reverse=True)
 
                     if len(model_list) > keep_versions:

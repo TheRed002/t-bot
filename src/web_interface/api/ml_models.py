@@ -513,22 +513,22 @@ async def get_training_jobs(
                 model_id=model_id,
                 model_name="btc_price_predictor_v2",
                 status=status,
-                progress=100.0
-                if status == "completed"
-                else (50.0 if status == "running" else 85.0),
+                progress=(
+                    100.0 if status == "completed" else (50.0 if status == "running" else 85.0)
+                ),
                 started_at=start_time,
-                estimated_completion=start_time + timedelta(hours=2)
-                if status == "running"
-                else None,
+                estimated_completion=(
+                    start_time + timedelta(hours=2) if status == "running" else None
+                ),
                 completed_at=completion_time,
                 training_samples=50000,
                 validation_samples=10000,
                 current_epoch=100 if status == "completed" else (50 if status == "running" else 85),
                 total_epochs=100,
                 current_loss=0.025 if status != "failed" else None,
-                best_accuracy=0.78
-                if status == "completed"
-                else (0.72 if status == "running" else None),
+                best_accuracy=(
+                    0.78 if status == "completed" else (0.72 if status == "running" else None)
+                ),
                 error_message="CUDA out of memory" if status == "failed" else None,
             )
             mock_jobs.append(mock_job)

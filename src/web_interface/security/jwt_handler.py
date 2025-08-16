@@ -117,7 +117,7 @@ class JWTHandler:
         self,
         user_id: str,
         username: str,
-        scopes: list[str] = None,
+        scopes: list[str] | None = None,
         expires_delta: timedelta | None = None,
     ) -> str:
         """

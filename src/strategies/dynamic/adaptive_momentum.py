@@ -249,7 +249,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             # Use utils for additional calculations
             price_changes = np.diff(prices[-self.momentum_lookback :])
             volatility = calculate_volatility(price_changes.tolist())
-            z_score = calculate_zscore(prices.tolist(), self.momentum_lookback)
+            calculate_zscore(prices.tolist(), self.momentum_lookback)
 
             # Combine momentum scores with volatility adjustment
             momentum_score = (price_momentum + ma_momentum) / 2

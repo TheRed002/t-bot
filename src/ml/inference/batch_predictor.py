@@ -5,15 +5,12 @@ This module provides efficient batch prediction capabilities for processing
 large datasets with optimized memory usage and parallel processing.
 """
 
-import asyncio
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 import pandas as pd
-from sqlalchemy.orm import Session
 
 from src.core.config import Config
 from src.core.exceptions import ValidationError
@@ -85,9 +82,9 @@ class BatchPredictor:
         model_name: str,
         data: pd.DataFrame,
         symbol: str,
-        feature_types: Optional[List[str]] = None,
+        feature_types: list[str] | None = None,
         save_to_db: bool = True,
-        output_file: Optional[str] = None,
+        output_file: str | None = None,
     ) -> pd.DataFrame:
         """
         Perform batch predictions on a large dataset.
@@ -191,10 +188,10 @@ class BatchPredictor:
     async def predict_multiple_symbols(
         self,
         model_name: str,
-        data_dict: Dict[str, pd.DataFrame],
-        feature_types: Optional[List[str]] = None,
+        data_dict: dict[str, pd.DataFrame],
+        feature_types: list[str] | None = None,
         parallel: bool = True,
-    ) -> Dict[str, pd.DataFrame]:
+    ) -> dict[str, pd.DataFrame]:
         """
         Perform batch predictions for multiple symbols.
 
@@ -519,7 +516,7 @@ class BatchPredictor:
             logger.error("Failed to load historical data", symbol=symbol, error=str(e))
             raise ValidationError(f"Historical data loading failed: {e}") from e
 
-    def get_performance_stats(self) -> Dict[str, Any]:
+    def get_performance_stats(self) -> dict[str, Any]:
         """Get performance statistics for the batch predictor."""
         avg_processing_time = (
             self.total_processing_time / self.prediction_count if self.prediction_count > 0 else 0

@@ -16,10 +16,6 @@ from typing import Any
 from src.core.config import Config
 from src.core.exceptions import PositionLimitError, RiskManagementError, ValidationError
 from src.core.logging import get_logger
-from src.utils.decimal_utils import (
-    to_decimal, format_decimal, safe_divide,
-    ZERO, ONE, validate_positive
-)
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -31,6 +27,12 @@ from src.core.types import (
     RiskLevel,
     RiskMetrics,
     Signal,
+)
+from src.utils.decimal_utils import (
+    ZERO,
+    format_decimal,
+    safe_divide,
+    to_decimal,
 )
 
 # MANDATORY: Import from P-002A
@@ -359,9 +361,7 @@ class RiskManager(BaseRiskManager):
             stop_loss_pct = self.risk_config.max_daily_loss_pct
             if position.unrealized_pnl < ZERO:
                 loss_pct = safe_divide(
-                    abs(position.unrealized_pnl),
-                    position.quantity * position.entry_price,
-                    ZERO
+                    abs(position.unrealized_pnl), position.quantity * position.entry_price, ZERO
                 )
                 if loss_pct >= stop_loss_pct:
                     self.logger.warning(
@@ -420,9 +420,7 @@ class RiskManager(BaseRiskManager):
 
         # Update position sizer with current prices
         for position in positions:
-            await self.position_sizer.update_price_history(
-                position.symbol, position.current_price
-            )
+            await self.position_sizer.update_price_history(position.symbol, position.current_price)
             await self.portfolio_limits.update_return_history(
                 position.symbol, position.current_price
             )

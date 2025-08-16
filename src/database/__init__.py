@@ -50,8 +50,8 @@ __all__ = [
     "FeatureRecord",
     "FundFlowDB",
     "InfluxDBClient",
-    "MarketDataRecord",
     "MLModel",
+    "MarketDataRecord",
     "PerformanceMetrics",
     "Position",
     # Clients

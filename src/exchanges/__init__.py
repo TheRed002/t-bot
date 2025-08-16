@@ -117,6 +117,15 @@ except ImportError as e:
     logger.warning(f"Coinbase order manager not available: {e}")
     COINBASE_ORDERS_AVAILABLE = False
 
+# Import Mock exchange for development
+try:
+    from .mock_exchange import MockExchange
+
+    MOCK_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Mock exchange not available: {e}")
+    MOCK_AVAILABLE = False
+
 
 def register_exchanges(factory: ExchangeFactory) -> None:
     """
@@ -125,26 +134,43 @@ def register_exchanges(factory: ExchangeFactory) -> None:
     Args:
         factory: Exchange factory instance
     """
-    # Register Binance exchange (P-004)
-    if BINANCE_AVAILABLE:
-        factory.register_exchange("binance", BinanceExchange)
-        logger.info("Registered Binance exchange")
-    else:
-        logger.warning("Binance exchange not registered - dependencies missing")
+    import os
 
-    # Register OKX exchange (P-005)
-    if OKX_AVAILABLE:
-        factory.register_exchange("okx", OKXExchange)
-        logger.info("Registered OKX exchange")
-    else:
-        logger.warning("OKX exchange not registered - dependencies missing")
+    # Check for mock mode
+    mock_mode = os.getenv("MOCK_MODE", "false").lower() == "true"
 
-    # Register Coinbase exchange (P-006)
-    if COINBASE_AVAILABLE:
-        factory.register_exchange("coinbase", CoinbaseExchange)
-        logger.info("Registered Coinbase exchange")
+    if mock_mode:
+        # In mock mode, only register mock exchange
+        if MOCK_AVAILABLE:
+            factory.register_exchange("mock", MockExchange)
+            factory.register_exchange("binance", MockExchange)  # Alias for compatibility
+            factory.register_exchange("okx", MockExchange)  # Alias for compatibility
+            factory.register_exchange("coinbase", MockExchange)  # Alias for compatibility
+            logger.info("Registered Mock exchange for all providers (MOCK_MODE enabled)")
+        else:
+            logger.error("Mock exchange not available - cannot run in MOCK_MODE")
     else:
-        logger.warning("Coinbase exchange not registered - dependencies missing")
+        # Register real exchanges
+        # Register Binance exchange (P-004)
+        if BINANCE_AVAILABLE:
+            factory.register_exchange("binance", BinanceExchange)
+            logger.info("Registered Binance exchange")
+        else:
+            logger.warning("Binance exchange not registered - dependencies missing")
+
+        # Register OKX exchange (P-005)
+        if OKX_AVAILABLE:
+            factory.register_exchange("okx", OKXExchange)
+            logger.info("Registered OKX exchange")
+        else:
+            logger.warning("OKX exchange not registered - dependencies missing")
+
+        # Register Coinbase exchange (P-006)
+        if COINBASE_AVAILABLE:
+            factory.register_exchange("coinbase", CoinbaseExchange)
+            logger.info("Registered Coinbase exchange")
+        else:
+            logger.warning("Coinbase exchange not registered - dependencies missing")
 
     # TODO: Register other exchanges as they are implemented
 
@@ -155,30 +181,32 @@ def register_exchanges(factory: ExchangeFactory) -> None:
 __all__ = [
     # Base classes
     "BaseExchange",
-    "ExchangeFactory",
-    "RateLimiter",
-    "ConnectionManager",
-    # Types
-    "ExchangeInfo",
-    "Ticker",
-    "OrderBook",
-    "Trade",
-    "OrderStatus",
-    "ExchangeCapability",
-    "ExchangeTradingPair",
-    "ExchangeRateLimit",
     # Binance implementation (P-004)
     "BinanceExchange",
-    "BinanceWebSocketHandler",
     "BinanceOrderManager",
-    # OKX implementation (P-005)
-    "OKXExchange",
-    "OKXWebSocketManager",
-    "OKXOrderManager",
+    "BinanceWebSocketHandler",
     # Coinbase implementation (P-006)
     "CoinbaseExchange",
-    "CoinbaseWebSocketHandler",
     "CoinbaseOrderManager",
+    "CoinbaseWebSocketHandler",
+    "ConnectionManager",
+    "ExchangeCapability",
+    "ExchangeFactory",
+    # Types
+    "ExchangeInfo",
+    "ExchangeRateLimit",
+    "ExchangeTradingPair",
+    # Mock implementation
+    "MockExchange",
+    # OKX implementation (P-005)
+    "OKXExchange",
+    "OKXOrderManager",
+    "OKXWebSocketManager",
+    "OrderBook",
+    "OrderStatus",
+    "RateLimiter",
+    "Ticker",
+    "Trade",
     # Utility function
     "register_exchanges",
 ]

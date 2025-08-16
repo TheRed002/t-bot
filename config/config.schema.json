@@ -243,21 +243,21 @@
           "type": "string"
         },
         "postgresql_username": {
-          "default": "trading_bot",
+          "default": "tbot",
           "description": "PostgreSQL username",
           "pattern": "^[a-zA-Z0-9_-]+$",
           "title": "Postgresql Username",
           "type": "string"
         },
         "postgresql_password": {
-          "default": "trading_bot_password",
+          "default": "changeme_secure_password_123!",
           "description": "PostgreSQL password",
           "minLength": 8,
           "title": "Postgresql Password",
           "type": "string"
         },
         "postgresql_pool_size": {
-          "default": 10,
+          "default": 20,
           "description": "PostgreSQL connection pool size",
           "title": "Postgresql Pool Size",
           "type": "integer"
@@ -283,7 +283,7 @@
               "type": "null"
             }
           ],
-          "default": null,
+          "default": "redis_secure_password",
           "description": "Redis password",
           "title": "Redis Password"
         },
@@ -306,19 +306,19 @@
           "type": "integer"
         },
         "influxdb_token": {
-          "default": "test-token",
+          "default": "changeme_influxdb_token",
           "description": "InfluxDB token",
           "title": "Influxdb Token",
           "type": "string"
         },
         "influxdb_org": {
-          "default": "test-org",
+          "default": "tbot_production",
           "description": "InfluxDB organization",
           "title": "Influxdb Org",
           "type": "string"
         },
         "influxdb_bucket": {
-          "default": "trading-data",
+          "default": "trading_data_production",
           "description": "InfluxDB bucket",
           "title": "Influxdb Bucket",
           "type": "string"
@@ -988,7 +988,7 @@
       "description": "Security configuration for authentication and encryption.",
       "properties": {
         "secret_key": {
-          "default": "test-secret-key-32-chars-long-for-testing",
+          "default": "changeme_very_secure_jwt_secret_key_at_least_32_chars",
           "description": "Secret key for JWT",
           "title": "Secret Key",
           "type": "string"
@@ -1007,7 +1007,7 @@
           "type": "integer"
         },
         "encryption_key": {
-          "default": "test-encryption-key-32-chars-long-for-testing",
+          "default": "changeme_secure_encryption_key_at_least_32_characters",
           "description": "Encryption key",
           "title": "Encryption Key",
           "type": "string"
@@ -1146,14 +1146,14 @@
         "postgresql_host": "localhost",
         "postgresql_port": 5432,
         "postgresql_database": "trading_bot",
-        "postgresql_username": "trading_bot",
-        "postgresql_password": "trading_bot_password",
-        "postgresql_pool_size": 10,
+        "postgresql_username": "tbot",
+        "postgresql_password": "changeme_secure_password_123!",
+        "postgresql_pool_size": 20,
         "redis_host": "redis",
         "redis_port": 6379,
         "redis_password": "redis_dev_password",
         "redis_db": 0,
-        "influxdb_host": "172.27.176.1",
+        "influxdb_host": "localhost",
         "influxdb_port": 8086,
         "influxdb_token": "tbot_dev_token",
         "influxdb_org": "tbot_dev",
@@ -1163,10 +1163,10 @@
     "security": {
       "$ref": "#/$defs/SecurityConfig",
       "default": {
-        "secret_key": "your-super-secret-key-32-chars-long-for-production",
+        "secret_key": "changeme_very_secure_jwt_secret_key_at_least_32_chars",
         "jwt_algorithm": "HS256",
         "jwt_expire_minutes": 60,
-        "encryption_key": "your-encryption-key-32-chars-long-for-production"
+        "encryption_key": "changeme_secure_encryption_key_at_least_32_characters"
       }
     },
     "error_handling": {

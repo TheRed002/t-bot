@@ -581,7 +581,7 @@ class WebSocketConnectionPool:
             removed_count = 0
             now = datetime.now()
 
-            for connection_type, connections in self.connection_pools.items():
+            for _connection_type, connections in self.connection_pools.items():
                 # Copy list to avoid modification during iteration
                 for connection in connections[:]:
                     # Check if connection is too old
@@ -622,7 +622,7 @@ class WebSocketConnectionPool:
     async def close_all_connections(self) -> None:
         """Close all connections in the pool."""
         try:
-            for connection_type, connections in self.connection_pools.items():
+            for _connection_type, connections in self.connection_pools.items():
                 for connection in connections[:]:
                     await self._remove_connection(connection)
 

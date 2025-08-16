@@ -20,18 +20,18 @@ from .trend_following import TrendFollowingStrategy
 from .triangular_arbitrage import TriangularArbitrageStrategy
 
 __all__ = [
-    # Static strategies (implemented in P-012)
-    "MeanReversionStrategy",
-    "TrendFollowingStrategy",
+    "ArbitrageOpportunity",
     "BreakoutStrategy",
     # Arbitrage strategies (implemented in P-013A)
     "CrossExchangeArbitrageStrategy",
-    "TriangularArbitrageStrategy",
-    "ArbitrageOpportunity",
+    "InventoryManager",
     # Market making strategies (implemented in P-013B)
     "MarketMakingStrategy",
-    "InventoryManager",
+    # Static strategies (implemented in P-012)
+    "MeanReversionStrategy",
     "SpreadOptimizer",
+    "TrendFollowingStrategy",
+    "TriangularArbitrageStrategy",
 ]
 
 # Version information

@@ -249,7 +249,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             validate_price(sell_price, "sell_price")
 
             # Get fee structure from constants and convert to Decimal
-            base_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("maker_fee", 0.001)))  # 0.1%
+            Decimal(str(GLOBAL_FEE_STRUCTURE.get("maker_fee", 0.001)))  # 0.1%
             taker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
 
             # Calculate fees using proper rounding

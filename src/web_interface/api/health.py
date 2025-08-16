@@ -26,6 +26,7 @@ router = APIRouter()
 
 class HealthStatus(BaseModel):
     """Health check response model."""
+
     status: str  # "healthy", "degraded", "unhealthy"
     timestamp: datetime
     service: str
@@ -36,6 +37,7 @@ class HealthStatus(BaseModel):
 
 class ComponentHealth(BaseModel):
     """Individual component health model."""
+
     status: str
     message: str
     response_time_ms: float | None = None
@@ -82,8 +84,8 @@ async def check_database_health(config: Config) -> ComponentHealth:
             metadata={
                 "pool_size": pool_status.get("size", 0),
                 "pool_used": pool_status.get("used", 0),
-                "pool_free": pool_status.get("free", 0)
-            }
+                "pool_free": pool_status.get("free", 0),
+            },
         )
 
     except Exception as e:
@@ -94,7 +96,7 @@ async def check_database_health(config: Config) -> ComponentHealth:
             status="unhealthy",
             message=f"Database connection failed: {e!s}",
             response_time_ms=response_time,
-            last_check=datetime.now(timezone.utc)
+            last_check=datetime.now(timezone.utc),
         )
 
 
@@ -139,8 +141,8 @@ async def check_redis_health(config: Config) -> ComponentHealth:
             metadata={
                 "memory_used": info.get("used_memory_human", "unknown"),
                 "connected_clients": info.get("connected_clients", 0),
-                "uptime_days": info.get("uptime_in_days", 0)
-            }
+                "uptime_days": info.get("uptime_in_days", 0),
+            },
         )
 
     except Exception as e:
@@ -151,7 +153,7 @@ async def check_redis_health(config: Config) -> ComponentHealth:
             status="unhealthy",
             message=f"Redis connection failed: {e!s}",
             response_time_ms=response_time,
-            last_check=datetime.now(timezone.utc)
+            last_check=datetime.now(timezone.utc),
         )
 
 
@@ -178,7 +180,7 @@ async def check_exchanges_health(config: Config) -> ComponentHealth:
                 status="degraded",
                 message="No exchanges configured",
                 response_time_ms=(time.time() - start_time) * 1000,
-                last_check=datetime.now(timezone.utc)
+                last_check=datetime.now(timezone.utc),
             )
 
         exchange_status = {}
@@ -193,20 +195,17 @@ async def check_exchanges_health(config: Config) -> ComponentHealth:
                     exchange_status[exchange_name] = {
                         "status": "healthy",
                         "latency_ms": 0,
-                        "rate_limit_remaining": 1000
+                        "rate_limit_remaining": 1000,
                     }
                     healthy_count += 1
                 else:
                     exchange_status[exchange_name] = {
                         "status": "unhealthy",
-                        "error": "Failed to create exchange instance"
+                        "error": "Failed to create exchange instance",
                     }
 
             except Exception as e:
-                exchange_status[exchange_name] = {
-                    "status": "unhealthy",
-                    "error": f"{e!s}"
-                }
+                exchange_status[exchange_name] = {"status": "unhealthy", "error": f"{e!s}"}
 
         response_time = (time.time() - start_time) * 1000
 
@@ -229,8 +228,8 @@ async def check_exchanges_health(config: Config) -> ComponentHealth:
             metadata={
                 "exchanges": exchange_status,
                 "total_exchanges": len(available_exchanges),
-                "healthy_exchanges": healthy_count
-            }
+                "healthy_exchanges": healthy_count,
+            },
         )
 
     except Exception as e:
@@ -241,7 +240,7 @@ async def check_exchanges_health(config: Config) -> ComponentHealth:
             status="unhealthy",
             message=f"Exchange health check failed: {e!s}",
             response_time_ms=response_time,
-            last_check=datetime.now(timezone.utc)
+            last_check=datetime.now(timezone.utc),
         )
 
 
@@ -267,10 +266,7 @@ async def check_ml_models_health(config: Config) -> ComponentHealth:
             message="ML models service available",
             response_time_ms=response_time,
             last_check=datetime.now(timezone.utc),
-            metadata={
-                "models_loaded": 0,  # Would be actual count
-                "inference_ready": True
-            }
+            metadata={"models_loaded": 0, "inference_ready": True},  # Would be actual count
         )
 
     except Exception as e:
@@ -281,7 +277,7 @@ async def check_ml_models_health(config: Config) -> ComponentHealth:
             status="unhealthy",
             message=f"ML models health check failed: {e!s}",
             response_time_ms=response_time,
-            last_check=datetime.now(timezone.utc)
+            last_check=datetime.now(timezone.utc),
         )
 
 
@@ -300,7 +296,7 @@ async def basic_health_check():
         service="t-bot-api",
         version="1.0.0",
         uptime_seconds=uptime,
-        checks={}
+        checks={},
     )
 
 
@@ -314,6 +310,7 @@ async def detailed_health_check(config: Config = None):
     if config is None:
         # Fallback config for testing
         from src.core.config import load_config
+
         config = load_config()
 
     start_time = time.time()
@@ -325,7 +322,7 @@ async def detailed_health_check(config: Config = None):
         check_redis_health(config),
         check_exchanges_health(config),
         check_ml_models_health(config),
-        return_exceptions=True
+        return_exceptions=True,
     )
 
     checks = {}
@@ -340,7 +337,7 @@ async def detailed_health_check(config: Config = None):
         checks["database"] = {
             "status": "unhealthy",
             "message": f"Health check failed: {health_checks[0]}",
-            "last_check": datetime.now(timezone.utc).isoformat()
+            "last_check": datetime.now(timezone.utc).isoformat(),
         }
         overall_status = "unhealthy"
 
@@ -353,7 +350,7 @@ async def detailed_health_check(config: Config = None):
         checks["redis"] = {
             "status": "unhealthy",
             "message": f"Health check failed: {health_checks[1]}",
-            "last_check": datetime.now(timezone.utc).isoformat()
+            "last_check": datetime.now(timezone.utc).isoformat(),
         }
         overall_status = "unhealthy"
 
@@ -366,7 +363,7 @@ async def detailed_health_check(config: Config = None):
         checks["exchanges"] = {
             "status": "unhealthy",
             "message": f"Health check failed: {health_checks[2]}",
-            "last_check": datetime.now(timezone.utc).isoformat()
+            "last_check": datetime.now(timezone.utc).isoformat(),
         }
         # Exchange failures are not critical for API health
 
@@ -380,7 +377,7 @@ async def detailed_health_check(config: Config = None):
         checks["ml_models"] = {
             "status": "unhealthy",
             "message": f"Health check failed: {health_checks[3]}",
-            "last_check": datetime.now(timezone.utc).isoformat()
+            "last_check": datetime.now(timezone.utc).isoformat(),
         }
 
     return HealthStatus(
@@ -389,7 +386,7 @@ async def detailed_health_check(config: Config = None):
         service="t-bot-api",
         version="1.0.0",
         uptime_seconds=uptime,
-        checks=checks
+        checks=checks,
     )
 
 
@@ -427,8 +424,7 @@ async def startup_check():
 
     if not startup_complete:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service still starting up"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service still starting up"
         )
 
     return {"started": True, "uptime_seconds": uptime}

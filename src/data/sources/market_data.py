@@ -215,7 +215,7 @@ class MarketDataSource:
             if exchange_name not in self.exchanges:
                 raise DataSourceError(f"Exchange {exchange_name} not available")
 
-            exchange = self.exchanges[exchange_name]
+            self.exchanges[exchange_name]
 
             # Get historical data from exchange
             # Implementation would depend on specific exchange API

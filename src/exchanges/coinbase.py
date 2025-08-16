@@ -159,8 +159,7 @@ class CoinbaseExchange(BaseExchange):
             # Initialize Redis client
             await self._initialize_redis()
 
-            # Initialize data module
-            await self._initialize_data_module()
+            # Data module initialization removed to avoid circular dependency
 
             self.connected = True
             self.status = "connected"
@@ -493,7 +492,7 @@ class CoinbaseExchange(BaseExchange):
                     id=trade_data["trade_id"],
                     symbol=symbol,
                     side=OrderSide.BUY if trade_data["side"] == "buy" else OrderSide.SELL,
-                    quantity=Decimal(str(trade_data["size"])),
+                    amount=Decimal(str(trade_data["size"])),
                     price=Decimal(str(trade_data["price"])),
                     timestamp=datetime.fromisoformat(trade_data["time"].replace("Z", "+00:00")),
                     fee=Decimal("0"),
@@ -653,14 +652,16 @@ class CoinbaseExchange(BaseExchange):
             "product_id": order.symbol,
             "side": order.side.value,
             "order_configuration": {
-                "market_market_ioc": {"quote_size": str(order.quantity)}
-                if order.order_type == OrderType.MARKET
-                else {
-                    "limit_limit_gtc": {
-                        "base_size": str(order.quantity),
-                        "limit_price": str(order.price),
+                "market_market_ioc": (
+                    {"quote_size": str(order.quantity)}
+                    if order.order_type == OrderType.MARKET
+                    else {
+                        "limit_limit_gtc": {
+                            "base_size": str(order.quantity),
+                            "limit_price": str(order.price),
+                        }
                     }
-                }
+                )
             },
         }
 
@@ -676,13 +677,15 @@ class CoinbaseExchange(BaseExchange):
             client_order_id=result.get("client_order_id"),
             symbol=result["product_id"],
             side=OrderSide.BUY if result["side"] == "BUY" else OrderSide.SELL,
-            order_type=OrderType.MARKET
-            if result["order_configuration"].get("market_market_ioc")
-            else OrderType.LIMIT,
+            order_type=(
+                OrderType.MARKET
+                if result["order_configuration"].get("market_market_ioc")
+                else OrderType.LIMIT
+            ),
             quantity=Decimal(str(result.get("filled_size", "0"))),
-            price=Decimal(str(result.get("limit_price", "0")))
-            if result.get("limit_price")
-            else None,
+            price=(
+                Decimal(str(result.get("limit_price", "0"))) if result.get("limit_price") else None
+            ),
             filled_quantity=Decimal(str(result.get("filled_size", "0"))),
             status=result["status"],
             timestamp=datetime.fromisoformat(result["created_time"].replace("Z", "+00:00")),

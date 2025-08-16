@@ -19,10 +19,6 @@ from binance.exceptions import BinanceAPIException, BinanceOrderException
 from src.core.config import Config
 from src.core.exceptions import ExchangeError, ExecutionError, OrderRejectionError, ValidationError
 from src.core.logging import get_logger
-from src.utils.decimal_utils import (
-    to_decimal, format_decimal, round_quantity, round_price,
-    ZERO, ONE
-)
 
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
@@ -31,7 +27,10 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import OrderRejectionRecovery
 from src.utils.constants import FEE_STRUCTURES, PRECISION_LEVELS
-from src.utils.helpers import normalize_price, round_to_precision, round_to_precision_decimal
+from src.utils.decimal_utils import (
+    to_decimal,
+)
+from src.utils.helpers import normalize_price, round_to_precision_decimal
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.validators import validate_price, validate_quantity
@@ -110,7 +109,7 @@ class BinanceOrderManager:
             # Determine recovery scenario
             if isinstance(error, OrderRejectionError):
                 recovery_scenario = OrderRejectionRecovery(self.config)
-            elif isinstance(error, (ValidationError, ExecutionError)):
+            elif isinstance(error, ValidationError | ExecutionError):
                 recovery_scenario = None
             else:
                 recovery_scenario = None
@@ -486,7 +485,7 @@ class BinanceOrderManager:
         if not validate_quantity(order.quantity, order.symbol):
             raise ValidationError("Limit order must have valid quantity")
 
-        if not validate_price(order.price):
+        if not validate_price(order.price, order.symbol):
             raise ValidationError("Limit order must have valid price")
 
     def _validate_stop_loss_order(self, order: OrderRequest) -> None:
@@ -497,7 +496,7 @@ class BinanceOrderManager:
         if not validate_quantity(order.quantity, order.symbol):
             raise ValidationError("Stop-loss order must have valid quantity")
 
-        if not validate_price(order.stop_price):
+        if not validate_price(order.stop_price, order.symbol):
             raise ValidationError("Stop-loss order must have valid stop price")
 
     def _validate_oco_order(self, order: OrderRequest) -> None:
@@ -508,10 +507,10 @@ class BinanceOrderManager:
         if not validate_quantity(order.quantity, order.symbol):
             raise ValidationError("OCO order must have valid quantity")
 
-        if not validate_price(order.price):
+        if not validate_price(order.price, order.symbol):
             raise ValidationError("OCO order must have valid limit price")
 
-        if not validate_price(order.stop_price):
+        if not validate_price(order.stop_price, order.symbol):
             raise ValidationError("OCO order must have valid stop price")
 
     # Conversion methods

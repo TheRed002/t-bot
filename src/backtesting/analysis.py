@@ -5,19 +5,17 @@ This module provides Monte Carlo simulations and Walk-Forward analysis
 for robust strategy evaluation and parameter optimization.
 """
 
-import asyncio
+from datetime import datetime
+from typing import Any
+
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
 
 from src.core.exceptions import BacktestError
 from src.core.logging import get_logger
-from src.database.manager import DatabaseManager
 from src.utils.decorators import time_execution
-from .engine import BacktestConfig, BacktestEngine, BacktestResult
-from .metrics import MetricsCalculator
+
+from .engine import BacktestConfig, BacktestEngine
 
 logger = get_logger(__name__)
 
@@ -25,7 +23,7 @@ logger = get_logger(__name__)
 class MonteCarloAnalyzer:
     """
     Monte Carlo simulation for backtesting robustness analysis.
-    
+
     Provides:
     - Random trade sequence permutation
     - Bootstrap resampling
@@ -37,7 +35,7 @@ class MonteCarloAnalyzer:
         self,
         num_simulations: int = 1000,
         confidence_level: float = 0.95,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ):
         """
         Initialize Monte Carlo analyzer.
@@ -50,10 +48,10 @@ class MonteCarloAnalyzer:
         self.num_simulations = num_simulations
         self.confidence_level = confidence_level
         self.seed = seed
-        
+
         if seed:
             np.random.seed(seed)
-            
+
         logger.info(
             "MonteCarloAnalyzer initialized",
             simulations=num_simulations,
@@ -62,8 +60,8 @@ class MonteCarloAnalyzer:
 
     @time_execution
     async def analyze_trades(
-        self, trades: List[Dict[str, Any]], initial_capital: float
-    ) -> Dict[str, Any]:
+        self, trades: list[dict[str, Any]], initial_capital: float
+    ) -> dict[str, Any]:
         """
         Perform Monte Carlo analysis on trade sequences.
 
@@ -84,34 +82,32 @@ class MonteCarloAnalyzer:
 
         # Run simulations
         simulation_results = []
-        
-        for i in range(self.num_simulations):
+
+        for _i in range(self.num_simulations):
             # Resample trades with replacement
             resampled_indices = np.random.choice(
                 len(trade_returns), size=len(trade_returns), replace=True
             )
             resampled_returns = [trade_returns[idx] for idx in resampled_indices]
-            
+
             # Calculate cumulative return
             cumulative_return = np.prod([1 + r for r in resampled_returns]) - 1
-            
+
             # Calculate metrics for this simulation
-            sim_metrics = self._calculate_simulation_metrics(
-                resampled_returns, initial_capital
-            )
+            sim_metrics = self._calculate_simulation_metrics(resampled_returns, initial_capital)
             sim_metrics["cumulative_return"] = cumulative_return
             simulation_results.append(sim_metrics)
 
         # Analyze results
         analysis = self._analyze_simulation_results(simulation_results)
-        
+
         logger.info("Monte Carlo analysis completed", simulations_run=len(simulation_results))
         return analysis
 
     @time_execution
     async def analyze_returns(
-        self, daily_returns: List[float], num_days: int = 252
-    ) -> Dict[str, Any]:
+        self, daily_returns: list[float], num_days: int = 252
+    ) -> dict[str, Any]:
         """
         Perform Monte Carlo simulation on return paths.
 
@@ -137,11 +133,11 @@ class MonteCarloAnalyzer:
 
         # Generate random return paths
         paths = []
-        
+
         for _ in range(self.num_simulations):
             # Generate random returns using historical parameters
             simulated_returns = np.random.normal(mean_return, std_return, num_days)
-            
+
             # Calculate cumulative path
             path = np.cumprod(1 + simulated_returns)
             paths.append(path)
@@ -150,11 +146,11 @@ class MonteCarloAnalyzer:
 
         # Calculate statistics
         final_values = paths_array[:, -1]
-        
+
         # Percentiles
         lower_percentile = (1 - self.confidence_level) / 2 * 100
         upper_percentile = (1 + self.confidence_level) / 2 * 100
-        
+
         results = {
             "expected_return": float(np.mean(final_values) - 1),
             "median_return": float(np.median(final_values) - 1),
@@ -177,8 +173,8 @@ class MonteCarloAnalyzer:
         return results
 
     def _calculate_simulation_metrics(
-        self, returns: List[float], initial_capital: float
-    ) -> Dict[str, Any]:
+        self, returns: list[float], initial_capital: float
+    ) -> dict[str, Any]:
         """Calculate metrics for a single simulation."""
         if not returns:
             return {}
@@ -186,15 +182,15 @@ class MonteCarloAnalyzer:
         # Calculate equity curve
         equity = initial_capital
         equity_curve = [equity]
-        
+
         for ret in returns:
-            equity *= (1 + ret)
+            equity *= 1 + ret
             equity_curve.append(equity)
 
         # Calculate drawdown
         peak = initial_capital
         max_dd = 0
-        
+
         for value in equity_curve:
             if value > peak:
                 peak = value
@@ -215,15 +211,13 @@ class MonteCarloAnalyzer:
             "volatility": np.std(returns_array) if len(returns_array) > 1 else 0,
         }
 
-    def _analyze_simulation_results(
-        self, results: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def _analyze_simulation_results(self, results: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze aggregated simulation results."""
         # Extract metrics
         returns = [r["cumulative_return"] for r in results]
         drawdowns = [r["max_drawdown"] for r in results]
         sharpes = [r["sharpe_ratio"] for r in results]
-        
+
         # Calculate percentiles
         lower_percentile = (1 - self.confidence_level) / 2 * 100
         upper_percentile = (1 + self.confidence_level) / 2 * 100
@@ -262,7 +256,8 @@ class MonteCarloAnalyzer:
                 ),
                 "tail_ratio": float(
                     np.percentile(returns, 95) / abs(np.percentile(returns, 5))
-                    if np.percentile(returns, 5) != 0 else 0
+                    if np.percentile(returns, 5) != 0
+                    else 0
                 ),
             },
         }
@@ -273,7 +268,7 @@ class MonteCarloAnalyzer:
 class WalkForwardAnalyzer:
     """
     Walk-Forward Analysis for robust parameter optimization.
-    
+
     Provides:
     - Out-of-sample testing
     - Rolling window optimization
@@ -285,7 +280,7 @@ class WalkForwardAnalyzer:
         self,
         optimization_window: int = 252,  # Trading days
         test_window: int = 63,  # Trading days
-        step_size: Optional[int] = None,  # If None, equals test_window
+        step_size: int | None = None,  # If None, equals test_window
     ):
         """
         Initialize walk-forward analyzer.
@@ -298,7 +293,7 @@ class WalkForwardAnalyzer:
         self.optimization_window = optimization_window
         self.test_window = test_window
         self.step_size = step_size or test_window
-        
+
         logger.info(
             "WalkForwardAnalyzer initialized",
             opt_window=optimization_window,
@@ -310,10 +305,10 @@ class WalkForwardAnalyzer:
     async def analyze(
         self,
         strategy_class: type,
-        parameter_ranges: Dict[str, List[Any]],
+        parameter_ranges: dict[str, list[Any]],
         market_data: pd.DataFrame,
         optimization_metric: str = "sharpe_ratio",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Perform walk-forward analysis.
 
@@ -334,65 +329,63 @@ class WalkForwardAnalyzer:
 
         # Generate windows
         windows = self._generate_windows(market_data)
-        
+
         if not windows:
             raise BacktestError("Insufficient data for walk-forward analysis")
 
         # Run analysis for each window
         window_results = []
-        
+
         for i, (opt_start, opt_end, test_start, test_end) in enumerate(windows):
             logger.info(f"Processing window {i+1}/{len(windows)}")
-            
+
             # Optimize on in-sample data
             opt_data = market_data[opt_start:opt_end]
             best_params = await self._optimize_parameters(
                 strategy_class, parameter_ranges, opt_data, optimization_metric
             )
-            
+
             # Test on out-of-sample data
             test_data = market_data[test_start:test_end]
-            test_result = await self._test_parameters(
-                strategy_class, best_params, test_data
+            test_result = await self._test_parameters(strategy_class, best_params, test_data)
+
+            window_results.append(
+                {
+                    "window": i,
+                    "optimization_period": (opt_start, opt_end),
+                    "test_period": (test_start, test_end),
+                    "best_parameters": best_params,
+                    "in_sample_performance": best_params.get("performance", {}),
+                    "out_of_sample_performance": test_result,
+                }
             )
-            
-            window_results.append({
-                "window": i,
-                "optimization_period": (opt_start, opt_end),
-                "test_period": (test_start, test_end),
-                "best_parameters": best_params,
-                "in_sample_performance": best_params.get("performance", {}),
-                "out_of_sample_performance": test_result,
-            })
 
         # Analyze results
         analysis = self._analyze_results(window_results, optimization_metric)
-        
+
         logger.info("Walk-forward analysis completed", windows_analyzed=len(windows))
         return analysis
 
     def _generate_windows(
         self, data: pd.DataFrame
-    ) -> List[Tuple[datetime, datetime, datetime, datetime]]:
+    ) -> list[tuple[datetime, datetime, datetime, datetime]]:
         """Generate optimization and test windows."""
         windows = []
-        
+
         total_days = len(data)
         min_required = self.optimization_window + self.test_window
-        
+
         if total_days < min_required:
             return windows
 
         current_pos = 0
-        
+
         while current_pos + min_required <= total_days:
             opt_start = data.index[current_pos]
             opt_end = data.index[current_pos + self.optimization_window - 1]
             test_start = data.index[current_pos + self.optimization_window]
-            test_end = data.index[
-                min(current_pos + min_required - 1, total_days - 1)
-            ]
-            
+            test_end = data.index[min(current_pos + min_required - 1, total_days - 1)]
+
             windows.append((opt_start, opt_end, test_start, test_end))
             current_pos += self.step_size
 
@@ -401,23 +394,23 @@ class WalkForwardAnalyzer:
     async def _optimize_parameters(
         self,
         strategy_class: type,
-        parameter_ranges: Dict[str, List[Any]],
+        parameter_ranges: dict[str, list[Any]],
         data: pd.DataFrame,
         metric: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Optimize parameters on given data."""
         best_params = None
         best_score = -float("inf")
-        
+
         # Generate parameter combinations
         from itertools import product
-        
+
         param_names = list(parameter_ranges.keys())
         param_values = list(parameter_ranges.values())
-        
+
         for combination in product(*param_values):
-            params = dict(zip(param_names, combination))
-            
+            params = dict(zip(param_names, combination, strict=False))
+
             # Run backtest with these parameters
             strategy = strategy_class(**params)
             config = BacktestConfig(
@@ -425,13 +418,13 @@ class WalkForwardAnalyzer:
                 end_date=data.index[-1],
                 symbols=["TEST"],  # Placeholder
             )
-            
+
             engine = BacktestEngine(config, strategy)
             result = await engine.run()
-            
+
             # Get optimization metric
             score = getattr(result, metric, 0)
-            
+
             if score > best_score:
                 best_score = score
                 best_params = params.copy()
@@ -444,12 +437,12 @@ class WalkForwardAnalyzer:
         return best_params
 
     async def _test_parameters(
-        self, strategy_class: type, parameters: Dict[str, Any], data: pd.DataFrame
-    ) -> Dict[str, Any]:
+        self, strategy_class: type, parameters: dict[str, Any], data: pd.DataFrame
+    ) -> dict[str, Any]:
         """Test parameters on out-of-sample data."""
         # Remove performance data from parameters
         params = {k: v for k, v in parameters.items() if k != "performance"}
-        
+
         # Run backtest
         strategy = strategy_class(**params)
         config = BacktestConfig(
@@ -457,10 +450,10 @@ class WalkForwardAnalyzer:
             end_date=data.index[-1],
             symbols=["TEST"],
         )
-        
+
         engine = BacktestEngine(config, strategy)
         result = await engine.run()
-        
+
         return {
             "total_return": float(result.total_return),
             "sharpe_ratio": result.sharpe_ratio,
@@ -469,28 +462,29 @@ class WalkForwardAnalyzer:
         }
 
     def _analyze_results(
-        self, window_results: List[Dict[str, Any]], optimization_metric: str
-    ) -> Dict[str, Any]:
+        self, window_results: list[dict[str, Any]], optimization_metric: str
+    ) -> dict[str, Any]:
         """Analyze walk-forward results."""
         # Extract performance metrics
         in_sample_scores = [
-            w["in_sample_performance"].get(optimization_metric, 0)
-            for w in window_results
+            w["in_sample_performance"].get(optimization_metric, 0) for w in window_results
         ]
         out_sample_scores = [
-            w["out_of_sample_performance"].get(optimization_metric.replace("_", " ").title().replace(" ", "_").lower(), 0)
+            w["out_of_sample_performance"].get(
+                optimization_metric.replace("_", " ").title().replace(" ", "_").lower(), 0
+            )
             for w in window_results
         ]
-        
+
         # Calculate efficiency ratio
         if in_sample_scores and out_sample_scores:
             efficiency_ratio = np.mean(out_sample_scores) / np.mean(in_sample_scores)
         else:
             efficiency_ratio = 0
-        
+
         # Parameter stability analysis
         parameter_stability = self._analyze_parameter_stability(window_results)
-        
+
         return {
             "summary": {
                 "windows_analyzed": len(window_results),
@@ -499,59 +493,61 @@ class WalkForwardAnalyzer:
                 "efficiency_ratio": float(efficiency_ratio),
                 "performance_degradation": float(
                     (np.mean(in_sample_scores) - np.mean(out_sample_scores))
-                    / np.mean(in_sample_scores) * 100
-                    if np.mean(in_sample_scores) > 0 else 0
+                    / np.mean(in_sample_scores)
+                    * 100
+                    if np.mean(in_sample_scores) > 0
+                    else 0
                 ),
             },
             "parameter_stability": parameter_stability,
             "window_details": window_results,
         }
 
-    def _analyze_parameter_stability(
-        self, window_results: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+    def _analyze_parameter_stability(self, window_results: list[dict[str, Any]]) -> dict[str, Any]:
         """Analyze how stable parameters are across windows."""
         if not window_results:
             return {}
-        
+
         # Extract all parameter names
         all_params = set()
         for w in window_results:
             if "best_parameters" in w:
                 all_params.update(w["best_parameters"].keys())
-        
+
         all_params.discard("performance")  # Remove non-parameter key
-        
+
         stability = {}
-        
+
         for param in all_params:
             values = [
                 w["best_parameters"].get(param)
                 for w in window_results
                 if param in w.get("best_parameters", {})
             ]
-            
+
             if values:
                 # Calculate stability metrics
                 unique_values = list(set(values))
-                
-                if all(isinstance(v, (int, float)) for v in values):
+
+                if all(isinstance(v, int | float) for v in values):
                     stability[param] = {
                         "mean": float(np.mean(values)),
                         "std": float(np.std(values)),
-                        "cv": float(np.std(values) / np.mean(values))
-                        if np.mean(values) != 0 else 0,
+                        "cv": (
+                            float(np.std(values) / np.mean(values)) if np.mean(values) != 0 else 0
+                        ),
                     }
                 else:
                     # For non-numeric parameters
                     from collections import Counter
+
                     counts = Counter(values)
                     most_common = counts.most_common(1)[0]
-                    
+
                     stability[param] = {
                         "most_common": most_common[0],
                         "frequency": most_common[1] / len(values),
                         "unique_values": len(unique_values),
                     }
-        
+
         return stability

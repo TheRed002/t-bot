@@ -8,6 +8,8 @@ This module provides 50+ technical indicators using TA-Lib:
 - Volatility: ATR, Historical Volatility, GARCH estimates
 - Market Structure: Support/Resistance, Fibonacci levels
 
+GPU acceleration is used when available for improved performance.
+
 Dependencies:
 - P-001: Core types, exceptions, logging
 - P-002A: Error handling framework
@@ -37,6 +39,7 @@ from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 
 # Import from P-007A utilities
 from src.utils.decorators import cache_result, time_execution
+from src.utils.gpu_utils import gpu_manager, gpu_accelerated_rolling_window, parallel_apply
 
 logger = get_logger(__name__)
 
@@ -180,7 +183,7 @@ class TechnicalIndicatorCalculator:
     @time_execution
     @cache_result(ttl_seconds=300)
     async def calculate_sma(
-        self, symbol: str, period: int = None, field: str = "close"
+        self, symbol: str, period: int | None = None, field: str = "close"
     ) -> IndicatorResult:
         """
         Calculate Simple Moving Average.
@@ -256,7 +259,7 @@ class TechnicalIndicatorCalculator:
     @time_execution
     @cache_result(ttl_seconds=300)
     async def calculate_ema(
-        self, symbol: str, period: int = None, field: str = "close"
+        self, symbol: str, period: int | None = None, field: str = "close"
     ) -> IndicatorResult:
         """
         Calculate Exponential Moving Average.
@@ -330,7 +333,7 @@ class TechnicalIndicatorCalculator:
 
     @time_execution
     @cache_result(ttl_seconds=300)
-    async def calculate_rsi(self, symbol: str, period: int = None) -> IndicatorResult:
+    async def calculate_rsi(self, symbol: str, period: int | None = None) -> IndicatorResult:
         """
         Calculate Relative Strength Index.
 
@@ -414,9 +417,9 @@ class TechnicalIndicatorCalculator:
     async def calculate_macd(
         self,
         symbol: str,
-        fast_period: int = None,
-        slow_period: int = None,
-        signal_period: int = None,
+        fast_period: int | None = None,
+        slow_period: int | None = None,
+        signal_period: int | None = None,
     ) -> IndicatorResult:
         """
         Calculate MACD (Moving Average Convergence Divergence).
@@ -530,7 +533,7 @@ class TechnicalIndicatorCalculator:
     @time_execution
     @cache_result(ttl_seconds=300)
     async def calculate_bollinger_bands(
-        self, symbol: str, period: int = None, std_dev: float = 2.0
+        self, symbol: str, period: int | None = None, std_dev: float = 2.0
     ) -> IndicatorResult:
         """
         Calculate Bollinger Bands.
@@ -637,7 +640,7 @@ class TechnicalIndicatorCalculator:
 
     @time_execution
     @cache_result(ttl_seconds=300)
-    async def calculate_atr(self, symbol: str, period: int = None) -> IndicatorResult:
+    async def calculate_atr(self, symbol: str, period: int | None = None) -> IndicatorResult:
         """
         Calculate Average True Range (ATR).
 
@@ -749,7 +752,11 @@ class TechnicalIndicatorCalculator:
                     symbol=symbol,
                     timestamp=datetime.now(timezone.utc),
                     value=None,
-                    metadata={"k_period": k_period, "d_period": d_period, "reason": "insufficient_data"},
+                    metadata={
+                        "k_period": k_period,
+                        "d_period": d_period,
+                        "reason": "insufficient_data",
+                    },
                     calculation_time=(datetime.now() - start_time).total_seconds(),
                 )
 
@@ -822,9 +829,7 @@ class TechnicalIndicatorCalculator:
 
     @time_execution
     @cache_result(ttl_seconds=300)
-    async def calculate_williams_r(
-        self, symbol: str, period: int = 14
-    ) -> IndicatorResult:
+    async def calculate_williams_r(self, symbol: str, period: int = 14) -> IndicatorResult:
         """
         Calculate Williams %R.
 
@@ -903,9 +908,7 @@ class TechnicalIndicatorCalculator:
 
     @time_execution
     @cache_result(ttl_seconds=300)
-    async def calculate_cci(
-        self, symbol: str, period: int = 20
-    ) -> IndicatorResult:
+    async def calculate_cci(self, symbol: str, period: int = 20) -> IndicatorResult:
         """
         Calculate Commodity Channel Index (CCI).
 
@@ -984,9 +987,7 @@ class TechnicalIndicatorCalculator:
 
     @time_execution
     @cache_result(ttl_seconds=300)
-    async def calculate_mfi(
-        self, symbol: str, period: int = 14
-    ) -> IndicatorResult:
+    async def calculate_mfi(self, symbol: str, period: int = 14) -> IndicatorResult:
         """
         Calculate Money Flow Index (MFI).
 
@@ -1017,8 +1018,11 @@ class TechnicalIndicatorCalculator:
 
             # Calculate MFI using TA-Lib
             mfi_values = talib.MFI(
-                df["high"].values, df["low"].values, df["close"].values, 
-                df["volume"].values, timeperiod=period
+                df["high"].values,
+                df["low"].values,
+                df["close"].values,
+                df["volume"].values,
+                timeperiod=period,
             )
 
             latest_value = mfi_values[-1] if not np.isnan(mfi_values[-1]) else None
@@ -1066,9 +1070,7 @@ class TechnicalIndicatorCalculator:
 
     @time_execution
     @cache_result(ttl_seconds=300)
-    async def calculate_ad_line(
-        self, symbol: str
-    ) -> IndicatorResult:
+    async def calculate_ad_line(self, symbol: str) -> IndicatorResult:
         """
         Calculate Accumulation/Distribution (A/D) Line.
 
