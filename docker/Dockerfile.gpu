@@ -85,16 +85,11 @@ RUN pip install --upgrade \
 # Install TensorFlow with CUDA support
 RUN pip install --upgrade tensorflow[and-cuda]==2.15.0
 
-# Install RAPIDS AI suite for GPU-accelerated data science
-RUN pip install --upgrade \
-    cupy-cuda12x \
-    cudf-cu12 \
-    cuml-cu12 \
-    cugraph-cu12 \
-    cuspatial-cu12 \
-    cuxfilter-cu12 \
-    cucim-cu12 \
-    --extra-index-url=https://pypi.nvidia.com
+# Install CuPy for GPU-accelerated arrays
+RUN pip install --upgrade cupy-cuda12x
+
+# Note: RAPIDS installation requires conda or special NVIDIA channels
+# For production, consider using NVIDIA's official Docker images with RAPIDS pre-installed
 
 # Install other requirements
 RUN pip install -r requirements.txt

@@ -134,83 +134,27 @@ wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/a
 
 
 Current Task:
-everything seems all mixed up when I run make setup command. Why following error? 
-"make[1]: Entering directory '/mnt/e/Work/P-41 Trading/code/t-bot'"
-
-(.venv) bbc@DESKTOP-G4N9FG8:/mnt/e/Work/P-41 Trading/code/t-bot$ make setup
-🔧 Complete T-Bot Setup...
-📋 Running pre-installation checks...
-[INFO] Running pre-installation checks...
-[INFO] Running on WSL
-[INFO] Checking Python installation...
-[SUCCESS] Python 3.10.12 found
-[SUCCESS] Python 3.10 detected (recommended)
-[SUCCESS] Virtual environment active: /home/bbc/.venv
-[INFO] Checking system dependencies...
-[SUCCESS] All build tools are installed
-[INFO] Setting up TA-Lib directories...
-[WARNING] /usr/local is not writable, will need sudo for installation
-[SUCCESS] Directories prepared
-[SUCCESS] Pre-installation checks completed!
-[INFO] You can now proceed with: make setup
-make[1]: Entering directory '/mnt/e/Work/P-41 Trading/code/t-bot'
-🐍 Setting up Python virtual environment...
-✅ Virtual environment created at ~/.venv
-Requirement already satisfied: pip in /home/bbc/.venv/lib/python3.10/site-packages (25.2)
-Requirement already satisfied: setuptools in /home/bbc/.venv/lib/python3.10/site-packages (80.9.0)
-Requirement already satisfied: wheel in /home/bbc/.venv/lib/python3.10/site-packages (0.45.1)
-✅ Virtual environment ready!
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in /home/bbc/.venv/lib/python3.10/site-packages (from rich->keras>=3.10.0->tensorflow[and-cuda]) (2.19.2)
+Requirement already satisfied: mdurl~=0.1 in /home/bbc/.venv/lib/python3.10/site-packages (from markdown-it-py>=2.2.0->rich->keras>=3.10.0->tensorflow[and-cuda]) (0.1.2)
+Downloading tensorflow-2.20.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (620.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 620.4/620.4 MB 5.7 MB/s  0:01:13
+Downloading tensorboard-2.20.0-py3-none-any.whl (5.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.5/5.5 MB 8.1 MB/s  0:00:00
+Installing collected packages: tensorboard, tensorflow
+  Attempting uninstall: tensorboard
+    Found existing installation: tensorboard 2.19.0
+    Uninstalling tensorboard-2.19.0:
+      Successfully uninstalled tensorboard-2.19.0
+  Attempting uninstall: tensorflow
+    Found existing installation: tensorflow 2.19.0
+    Uninstalling tensorflow-2.19.0:
+      Successfully uninstalled tensorflow-2.19.0
+Successfully installed tensorboard-2.20.0 tensorflow-2.20.0
+Requirement already satisfied: cupy-cuda12x in /home/bbc/.venv/lib/python3.10/site-packages (13.5.1)
+Requirement already satisfied: numpy<2.6,>=1.22 in /home/bbc/.venv/lib/python3.10/site-packages (from cupy-cuda12x) (2.1.3)
+Requirement already satisfied: fastrlock>=0.5 in /home/bbc/.venv/lib/python3.10/site-packages (from cupy-cuda12x) (0.8.3)
+ERROR: Could not find a version that satisfies the requirement rapids-cuda12 (from versions: none)
+ERROR: No matching distribution found for rapids-cuda12
+make[1]: *** [Makefile:138: install-gpu-deps] Error 1
 make[1]: Leaving directory '/mnt/e/Work/P-41 Trading/code/t-bot'
-make[1]: Entering directory '/mnt/e/Work/P-41 Trading/code/t-bot'
-📦 Installing external libraries...
-[INFO] Setting up environment for all external libraries...
-[SUCCESS] Master environment setup completed
-[INFO] Installing all external libraries...
-[INFO] Installing talib...
-[SUCCESS] talib is already properly installed - skipping
-[INFO] Installing cuda...
-[SUCCESS] cuda is already properly installed - skipping
-[INFO] Installing cudnn...
-[SUCCESS] cudnn is already properly installed - skipping
-[INFO] Installing lightgbm...
-[SUCCESS] lightgbm is already properly installed - skipping
-[SUCCESS] All external libraries are ready (4 already installed, 4 total)
-✅ External libraries installed!
-make[1]: Leaving directory '/mnt/e/Work/P-41 Trading/code/t-bot'
-make[1]: Entering directory '/mnt/e/Work/P-41 Trading/code/t-bot'
-📦 Installing Python dependencies...
-[INFO] Starting T-Bot requirements installation...
-[SUCCESS] Virtual environment is active: /home/bbc/.venv
-[INFO] Checking TA-Lib C library...
-[WARNING] TA-Lib C library not found, installing...
-[INFO] Installing TA-Lib 0.6.4...
-[INFO] Setting up environment for TA-Lib...
-[SUCCESS] TA-Lib environment setup completed
-[INFO] Checking TA-Lib installation...
-[SUCCESS] TA-Lib is installed and working
-[SUCCESS] TA-Lib is already installed and working
-[SUCCESS] TA-Lib C library installed successfully
-[WARNING] TA-Lib C library installed but not in ldconfig cache
-ℹ You may need to run: sudo ldconfig
-[INFO] Installing Python requirements...
-[INFO] Upgrading pip, setuptools, and wheel...
-Requirement already satisfied: pip in /home/bbc/.venv/lib/python3.10/site-packages (25.2)
-Requirement already satisfied: setuptools in /home/bbc/.venv/lib/python3.10/site-packages (80.9.0)
-Requirement already satisfied: wheel in /home/bbc/.venv/lib/python3.10/site-packages (0.45.1)
-[INFO] Installing numpy (required for TA-Lib)...
-Requirement already satisfied: numpy>=1.26.4 in /home/bbc/.venv/lib/python3.10/site-packages (2.1.3)
-[INFO] Installing TA-Lib Python package...
-Requirement already satisfied: TA-Lib in /home/bbc/.venv/lib/python3.10/site-packages (0.6.5)
-Requirement already satisfied: build in /home/bbc/.venv/lib/python3.10/site-packages (from TA-Lib) (1.3.0)
-Requirement already satisfied: numpy in /home/bbc/.venv/lib/python3.10/site-packages (from TA-Lib) (2.1.3)
-Requirement already satisfied: pip in /home/bbc/.venv/lib/python3.10/site-packages (from TA-Lib) (25.2)
-Requirement already satisfied: packaging>=19.1 in /home/bbc/.venv/lib/python3.10/site-packages (from build->TA-Lib) (25.0)
-Requirement already satisfied: pyproject_hooks in /home/bbc/.venv/lib/python3.10/site-packages (from build->TA-Lib) (1.2.0)
-Requirement already satisfied: tomli>=1.1.0 in /home/bbc/.venv/lib/python3.10/site-packages (from build->TA-Lib) (2.2.1)
-[SUCCESS] TA-Lib Python package installed successfully
-[INFO] Installing remaining requirements...
-ERROR: Could not open requirements file: [Errno 2] No such file or directory: '../../requirements.txt'
-[SUCCESS] All Python requirements installed
-[INFO] Verifying installation...
-TA-Lib version: 0.6.5
-[SUCCESS] TA-Lib Python package is working
+make: *** [Makefile:98: setup] Error 2

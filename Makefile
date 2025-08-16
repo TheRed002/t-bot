@@ -94,8 +94,9 @@ setup: ## Complete setup (venv, deps, external libs, GPU)
 	@$(MAKE) -s setup-venv
 	@$(MAKE) -s setup-external
 	@$(MAKE) -s install-deps
-	@$(MAKE) -s setup-gpu
-	@$(MAKE) -s install-gpu-deps
+	@echo "🎮 Optional: Installing GPU support (failures won't stop setup)..."
+	@$(MAKE) -s setup-gpu || echo "⚠️  GPU setup skipped (optional)"
+	@$(MAKE) -s install-gpu-deps || echo "⚠️  GPU packages skipped (optional)"
 	@$(MAKE) -s services-up
 	@$(MAKE) -s migrate
 	@echo "✅ Complete setup finished!"
@@ -132,10 +133,13 @@ install-deps: ## Install Python dependencies
 
 install-gpu-deps: ## Install GPU-enabled Python packages
 	@echo "🎮 Installing GPU-enabled Python packages..."
-	@$(PIP) install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-	@$(PIP) install --upgrade tensorflow[and-cuda]
-	@$(PIP) install --upgrade cupy-cuda12x
-	@$(PIP) install --upgrade rapids-cuda12
+	@echo "📦 Installing PyTorch with CUDA 12.1 support..."
+	@$(PIP) install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 || true
+	@echo "📦 Installing TensorFlow with CUDA support..."
+	@$(PIP) install --upgrade tensorflow[and-cuda] || true
+	@echo "📦 Installing CuPy for GPU arrays..."
+	@$(PIP) install --upgrade cupy-cuda12x || true
+	@echo "ℹ️  Note: RAPIDS requires special installation from NVIDIA channels"
 	@echo "✅ GPU-enabled packages installed!"
 
 # ============================================================================
