@@ -62,19 +62,33 @@ class DataValidator:
     ensuring data quality for ML models and trading strategies.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config):
         """
         Initialize the data validator with configuration.
 
         Args:
-            config: Application configuration
+            config: Application configuration or config dict
         """
-        self.config = config
 
-        # Initialize error handling components
-        self.error_handler = ErrorHandler(config)
-        self.recovery_scenario = DataFeedInterruptionRecovery(config)
-        self.pattern_analytics = ErrorPatternAnalytics(config)
+        # Handle both Config object and dict
+        if isinstance(config, dict):
+            # Create a minimal Config object for testing
+            self.config = type("Config", (), config)()
+            for key, value in config.items():
+                setattr(self.config, key, value)
+        else:
+            self.config = config
+
+        # Initialize error handling components only if config is a Config object
+        if isinstance(config, Config):
+            self.error_handler = ErrorHandler(config)
+            self.recovery_scenario = DataFeedInterruptionRecovery(config)
+            self.pattern_analytics = ErrorPatternAnalytics(config)
+        else:
+            # For testing with dict config, skip error handling components
+            self.error_handler = None
+            self.recovery_scenario = None
+            self.pattern_analytics = None
 
         # Validation thresholds
         self.price_change_threshold = getattr(
@@ -175,19 +189,21 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="validate_market_data",
-                symbol=data.symbol if data and data.symbol else "unknown",
-                details={"data_type": "market_data", "validation_stage": "main_validation"},
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="validate_market_data",
+                    symbol=data.symbol if data and data.symbol else "unknown",
+                    details={"data_type": "market_data", "validation_stage": "main_validation"},
+                )
 
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
+                # Handle the error through the error handling framework
+                self.error_handler.handle_error(error_context)
 
             # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+            if self.pattern_analytics and self.error_handler:
+                self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Create validation issue for the error
             issue = ValidationIssue(
@@ -303,19 +319,21 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="validate_signal",
-                symbol=signal.symbol if signal else "unknown",
-                details={"data_type": "signal", "validation_stage": "signal_validation"},
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="validate_signal",
+                    symbol=signal.symbol if signal else "unknown",
+                    details={"data_type": "signal", "validation_stage": "signal_validation"},
+                )
 
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
+                # Handle the error through the error handling framework
+                self.error_handler.handle_error(error_context)
 
             # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+            if self.pattern_analytics and self.error_handler:
+                self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Create validation issue for the error
             issue = ValidationIssue(
@@ -403,16 +421,18 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for schema validation errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="validate_schema",
-                symbol=data.symbol if data and data.symbol else "unknown",
-                details={"validation_stage": "schema_validation", "data_type": "market_data"},
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="validate_schema",
+                    symbol=data.symbol if data and data.symbol else "unknown",
+                    details={"validation_stage": "schema_validation", "data_type": "market_data"},
+                )
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+                self.error_handler.handle_error(error_context)
+                if self.pattern_analytics:
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for schema validation failure
             return [
@@ -517,16 +537,18 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for range validation errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="validate_ranges",
-                symbol=data.symbol if data and data.symbol else "unknown",
-                details={"validation_stage": "range_validation", "data_type": "market_data"},
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="validate_ranges",
+                    symbol=data.symbol if data and data.symbol else "unknown",
+                    details={"validation_stage": "range_validation", "data_type": "market_data"},
+                )
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+                self.error_handler.handle_error(error_context)
+                if self.pattern_analytics:
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for range validation failure
             return [
@@ -596,23 +618,62 @@ class DataValidator:
                     )
                 )
 
+            # Bid/Ask spread validation
+            if (
+                hasattr(data, "bid")
+                and hasattr(data, "ask")
+                and data.bid is not None
+                and data.ask is not None
+            ):
+                if data.bid >= data.ask:
+                    issues.append(
+                        ValidationIssue(
+                            field="bid_ask_spread",
+                            value={"bid": float(data.bid), "ask": float(data.ask)},
+                            expected="bid < ask",
+                            message=f"Invalid bid/ask spread: bid ({data.bid}) >= ask ({data.ask})",
+                            level=ValidationLevel.CRITICAL,
+                            timestamp=datetime.now(timezone.utc),
+                            source="DataValidator",
+                            metadata={"bid": float(data.bid), "ask": float(data.ask)},
+                        )
+                    )
+
+                # Check for extremely wide spreads (>5%)
+                spread_pct = ((data.ask - data.bid) / data.ask) * 100
+                if spread_pct > 5.0:
+                    issues.append(
+                        ValidationIssue(
+                            field="bid_ask_spread",
+                            value={"spread_percentage": float(spread_pct)},
+                            expected="spread < 5%",
+                            message=f"Abnormally wide bid/ask spread: {spread_pct:.2f}%",
+                            level=ValidationLevel.HIGH,
+                            timestamp=datetime.now(timezone.utc),
+                            source="DataValidator",
+                            metadata={"spread_percentage": float(spread_pct)},
+                        )
+                    )
+
             return issues
 
         except Exception as e:
             # Use ErrorHandler for business rule validation errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="validate_business_rules",
-                symbol=data.symbol if data and data.symbol else "unknown",
-                details={
-                    "validation_stage": "business_rules_validation",
-                    "data_type": "market_data",
-                },
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="validate_business_rules",
+                    symbol=data.symbol if data and data.symbol else "unknown",
+                    details={
+                        "validation_stage": "business_rules_validation",
+                        "data_type": "market_data",
+                    },
+                )
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+                self.error_handler.handle_error(error_context)
+                if self.pattern_analytics:
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for business rule validation failure
             return [
@@ -703,16 +764,18 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for outlier detection errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="detect_outliers",
-                symbol=data.symbol if data and data.symbol else "unknown",
-                details={"validation_stage": "outlier_detection", "data_type": "market_data"},
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="detect_outliers",
+                    symbol=data.symbol if data and data.symbol else "unknown",
+                    details={"validation_stage": "outlier_detection", "data_type": "market_data"},
+                )
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+                self.error_handler.handle_error(error_context)
+                if self.pattern_analytics:
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for outlier detection failure
             return [
@@ -782,16 +845,21 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for freshness validation errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="validate_freshness",
-                symbol=data.symbol if data and data.symbol else "unknown",
-                details={"validation_stage": "freshness_validation", "data_type": "market_data"},
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="validate_freshness",
+                    symbol=data.symbol if data and data.symbol else "unknown",
+                    details={
+                        "validation_stage": "freshness_validation",
+                        "data_type": "market_data",
+                    },
+                )
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+                self.error_handler.handle_error(error_context)
+                if self.pattern_analytics:
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for freshness validation failure
             return [
@@ -840,16 +908,18 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for statistics update errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="update_statistics",
-                symbol=data.symbol if data and data.symbol else "unknown",
-                details={"operation": "statistics_update", "data_type": "market_data"},
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="update_statistics",
+                    symbol=data.symbol if data and data.symbol else "unknown",
+                    details={"operation": "statistics_update", "data_type": "market_data"},
+                )
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+                self.error_handler.handle_error(error_context)
+                if self.pattern_analytics:
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
             logger.error(f"Failed to update statistics for {data.symbol}: {e!s}")
 
@@ -923,19 +993,23 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for cross-source validation errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="validate_cross_source_consistency",
-                symbol=primary_data.symbol if primary_data and primary_data.symbol else "unknown",
-                details={
-                    "validation_stage": "cross_source_consistency",
-                    "data_type": "market_data",
-                },
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="validate_cross_source_consistency",
+                    symbol=primary_data.symbol
+                    if primary_data and primary_data.symbol
+                    else "unknown",
+                    details={
+                        "validation_stage": "cross_source_consistency",
+                        "data_type": "market_data",
+                    },
+                )
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+                self.error_handler.handle_error(error_context)
+                if self.pattern_analytics:
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
             issue = ValidationIssue(
                 field="cross_source_validation",
@@ -957,12 +1031,20 @@ class DataValidator:
         """Get validation statistics and summary"""
         try:
             # Get error pattern summary from analytics
-            pattern_summary = self.pattern_analytics.get_pattern_summary()
-            correlation_summary = self.pattern_analytics.get_correlation_summary()
-            trend_summary = self.pattern_analytics.get_trend_summary()
+            pattern_summary = (
+                self.pattern_analytics.get_pattern_summary() if self.pattern_analytics else {}
+            )
+            correlation_summary = (
+                self.pattern_analytics.get_correlation_summary() if self.pattern_analytics else {}
+            )
+            trend_summary = (
+                self.pattern_analytics.get_trend_summary() if self.pattern_analytics else {}
+            )
 
             # Get circuit breaker status
-            circuit_breaker_status = self.error_handler.get_circuit_breaker_status()
+            circuit_breaker_status = (
+                self.error_handler.get_circuit_breaker_status() if self.error_handler else {}
+            )
 
             return {
                 "validation_stats": {
@@ -983,15 +1065,17 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for summary generation errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="get_validation_summary",
-                details={"operation": "summary_generation"},
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="get_validation_summary",
+                    details={"operation": "summary_generation"},
+                )
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+                self.error_handler.handle_error(error_context)
+                if self.pattern_analytics:
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
             logger.error(f"Failed to generate validation summary: {e!s}")
             return {
@@ -1012,14 +1096,16 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for cleanup errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="DataValidator",
-                operation="cleanup",
-                details={"operation": "cleanup"},
-            )
+            if self.error_handler:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="DataValidator",
+                    operation="cleanup",
+                    details={"operation": "cleanup"},
+                )
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
+                self.error_handler.handle_error(error_context)
+                if self.pattern_analytics:
+                    self.pattern_analytics.add_error_event(error_context.__dict__)
 
             logger.error(f"Error during DataValidator cleanup: {e!s}")

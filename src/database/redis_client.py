@@ -27,8 +27,15 @@ logger = get_logger(__name__)
 class RedisClient:
     """Async Redis client with utilities for trading bot data."""
 
-    def __init__(self, redis_url: str, *, auto_close: bool = True):
-        self.redis_url = redis_url
+    def __init__(self, config_or_url, *, auto_close: bool = True):
+        # Accept both config object and direct URL
+        if hasattr(config_or_url, "redis"):
+            self.redis_url = config_or_url.redis.get("url", "redis://localhost:6379/0")
+        elif isinstance(config_or_url, str):
+            self.redis_url = config_or_url
+        else:
+            self.redis_url = "redis://localhost:6379/0"
+
         self.client: redis.Redis | None = None
         # Use utils constants for default TTL
         self._default_ttl = getattr(TIMEOUTS, "REDIS_DEFAULT_TTL", 3600)
@@ -405,11 +412,35 @@ class RedisClient:
         """Get cached data."""
         return await self.get(key, "cache")
 
-    # Health check
+    # Health check and basic operations
+    async def ping(self) -> bool:
+        """Ping Redis server."""
+        try:
+            await self._ensure_connected()
+            result = await self.client.ping()
+            return result
+        except Exception as e:
+            logger.error("Redis ping failed", error=str(e))
+            raise DataError(f"Redis ping failed: {e!s}") from e
+        finally:
+            await self._maybe_autoclose()
+
+    async def info(self) -> dict[str, Any]:
+        """Get Redis info."""
+        try:
+            await self._ensure_connected()
+            info = await self.client.info()
+            return info
+        except Exception as e:
+            logger.error("Redis info failed", error=str(e))
+            raise DataError(f"Redis info failed: {e!s}") from e
+        finally:
+            await self._maybe_autoclose()
+
     async def health_check(self) -> bool:
         """Check Redis health."""
         try:
-            await self.client.ping()
+            await self.ping()
             return True
         except Exception as e:
             logger.error("Redis health check failed", error=str(e))

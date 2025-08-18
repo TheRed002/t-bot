@@ -282,7 +282,7 @@ class Trainer:
 
         for i, model in enumerate(models):
             try:
-                logger.info(f"Training model {i+1}/{len(models)}", model_name=model.model_name)
+                logger.info(f"Training model {i + 1}/{len(models)}", model_name=model.model_name)
 
                 result = self.train_model(model, market_data, target_column, symbol, **kwargs)
                 results.append(result)

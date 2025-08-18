@@ -728,7 +728,6 @@ class BayesianOptimizer(OptimizationEngine):
                 self.current_iteration < self.bayesian_config.n_calls
                 and not self._check_convergence()
             ):
-
                 await self._optimization_iteration(objective_function)
                 self.current_iteration += 1
 
@@ -898,7 +897,6 @@ class BayesianOptimizer(OptimizationEngine):
             best_point.objective_value is not None
             and best_point.objective_value > self.best_point.objective_value
         ):
-
             previous_best = self.best_point.objective_value if self.best_point else None
             self.best_point = best_point
 

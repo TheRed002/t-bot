@@ -81,11 +81,18 @@ class PartialFillRecovery(RecoveryScenario):
 
     async def _cancel_order(self, order_id: str) -> None:
         """Cancel the remaining order."""
+        from src.execution.order_manager import OrderManager
+
+        logger.info("Cancelling order", order_id=order_id)
+
         try:
-            # TODO: Implement actual order cancellation
-            # This will be implemented in P-020 (Order Management and Execution
-            # Engine)
-            logger.info("Cancelling order", order_id=order_id)
+            order_manager = OrderManager(self.config)
+            result = await order_manager.cancel_order(order_id)
+
+            if result:
+                logger.info("Successfully cancelled order", order_id=order_id)
+            else:
+                logger.warning("Could not cancel order", order_id=order_id)
         except Exception as e:
             logger.error("Failed to cancel order", order_id=order_id, error=str(e))
 
@@ -102,21 +109,107 @@ class PartialFillRecovery(RecoveryScenario):
 
     async def _reevaluate_signal(self, signal: dict[str, Any]) -> None:
         """Re-evaluate the original trading signal."""
+        from src.strategies.factory import StrategyFactory
+
+        logger.info("Re-evaluating signal", signal_id=signal.get("id"))
+
         try:
-            # TODO: Implement signal re-evaluation
-            # This will be implemented in P-011+ (Strategy Framework)
-            logger.info("Re-evaluating signal", signal_id=signal.get("id"))
+            strategy_name = signal.get("strategy", "")
+            if strategy_name:
+                strategy = StrategyFactory.create(strategy_name, self.config)
+
+                # Re-evaluate current market conditions
+                market_data = signal.get("market_data", {})
+                new_signal = await strategy.generate_signal(market_data)
+
+                # Compare with original signal
+                if new_signal and new_signal.get("direction") != signal.get("direction"):
+                    logger.warning(
+                        "Signal direction changed",
+                        signal_id=signal.get("id"),
+                        original=signal.get("direction"),
+                        new=new_signal.get("direction"),
+                    )
+                    # Update signal in database
+                    signal["reevaluated"] = True
+                    signal["reevaluation_result"] = new_signal
+                else:
+                    logger.info(
+                        "Signal still valid",
+                        signal_id=signal.get("id"),
+                        direction=signal.get("direction"),
+                    )
+            else:
+                logger.warning("No strategy specified for signal", signal_id=signal.get("id"))
         except Exception as e:
             logger.error("Failed to re-evaluate signal", signal_id=signal.get("id"), error=str(e))
 
     async def _update_position(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
         """Update position tracking with partial fill."""
+        from src.database.manager import DatabaseManager
+        from src.risk_management.risk_manager import RiskManager
+
+        logger.info(
+            "Updating position with partial fill",
+            order_id=order.get("id"),
+            filled_quantity=filled_quantity,
+        )
+
         try:
-            # TODO: Implement position update
-            # This will be implemented in P-020 (Order Management and Execution
-            # Engine)
+            db_manager = DatabaseManager(self.config)
+            risk_manager = RiskManager(self.config)
+
+            # Update position in database
+            async with db_manager.get_session() as session:
+                # Find existing position
+                result = await session.execute(
+                    """SELECT position_id, quantity FROM positions 
+                       WHERE symbol = :symbol AND side = :side AND status = 'open'
+                       AND exchange = :exchange""",
+                    {
+                        "symbol": order.get("symbol"),
+                        "side": order.get("side"),
+                        "exchange": order.get("exchange"),
+                    },
+                )
+                position = result.first()
+
+                if position:
+                    # Update existing position
+                    new_quantity = Decimal(str(position.quantity)) + filled_quantity
+                    await session.execute(
+                        """UPDATE positions 
+                           SET quantity = :quantity, updated_at = NOW() 
+                           WHERE position_id = :position_id""",
+                        {"quantity": float(new_quantity), "position_id": position.position_id},
+                    )
+                else:
+                    # Create new position
+                    await session.execute(
+                        """INSERT INTO positions 
+                           (symbol, side, quantity, entry_price, exchange, status, created_at)
+                           VALUES (:symbol, :side, :quantity, :price, :exchange, 'open', NOW())""",
+                        {
+                            "symbol": order.get("symbol"),
+                            "side": order.get("side"),
+                            "quantity": float(filled_quantity),
+                            "price": order.get("price"),
+                            "exchange": order.get("exchange"),
+                        },
+                    )
+
+                await session.commit()
+
+            # Update risk manager
+            await risk_manager.update_position(
+                symbol=order.get("symbol"),
+                quantity=filled_quantity,
+                side=order.get("side"),
+                exchange=order.get("exchange"),
+            )
+
             logger.info(
-                "Updating position with partial fill",
+                "Position updated with partial fill",
                 order_id=order.get("id"),
                 filled_quantity=filled_quantity,
             )
@@ -125,14 +218,85 @@ class PartialFillRecovery(RecoveryScenario):
 
     async def _adjust_stop_loss(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
         """Adjust stop loss based on partial fill."""
+        from src.database.manager import DatabaseManager
+        from src.risk_management.risk_manager import RiskManager
+
+        logger.info(
+            "Adjusting stop loss for partial fill",
+            order_id=order.get("id"),
+            filled_quantity=filled_quantity,
+        )
+
         try:
-            # TODO: Implement stop loss adjustment
-            # This will be implemented in P-008+ (Risk Management)
-            logger.info(
-                "Adjusting stop loss for partial fill",
-                order_id=order.get("id"),
-                filled_quantity=filled_quantity,
+            risk_manager = RiskManager(self.config)
+            db_manager = DatabaseManager(self.config)
+
+            # Calculate new stop loss based on partial fill
+            original_quantity = Decimal(str(order.get("quantity", 0)))
+            fill_ratio = (
+                filled_quantity / original_quantity if original_quantity > 0 else Decimal("0")
             )
+
+            # Get current position
+            async with db_manager.get_session() as session:
+                result = await session.execute(
+                    """SELECT position_id, stop_loss_price, entry_price 
+                       FROM positions 
+                       WHERE symbol = :symbol AND side = :side AND status = 'open'
+                       AND exchange = :exchange""",
+                    {
+                        "symbol": order.get("symbol"),
+                        "side": order.get("side"),
+                        "exchange": order.get("exchange"),
+                    },
+                )
+                position = result.first()
+
+                if position and position.stop_loss_price:
+                    # Adjust stop loss proportionally
+                    entry_price = Decimal(str(position.entry_price))
+                    current_stop = Decimal(str(position.stop_loss_price))
+
+                    # For partial fills, tighten stop loss
+                    if fill_ratio < Decimal("0.5"):
+                        # Less than 50% filled - tighten stop
+                        stop_distance = abs(entry_price - current_stop)
+                        new_stop_distance = stop_distance * Decimal("0.8")  # Tighten by 20%
+
+                        if order.get("side") == "buy":
+                            new_stop = entry_price - new_stop_distance
+                        else:
+                            new_stop = entry_price + new_stop_distance
+                    else:
+                        # More than 50% filled - keep original stop
+                        new_stop = current_stop
+
+                    # Update stop loss
+                    await session.execute(
+                        """UPDATE positions 
+                           SET stop_loss_price = :stop_loss 
+                           WHERE position_id = :position_id""",
+                        {"stop_loss": float(new_stop), "position_id": position.position_id},
+                    )
+                    await session.commit()
+
+                    # Update risk manager
+                    await risk_manager.update_stop_loss(
+                        symbol=order.get("symbol"),
+                        stop_loss_price=new_stop,
+                        exchange=order.get("exchange"),
+                    )
+
+                    logger.info(
+                        "Stop loss adjusted for partial fill",
+                        order_id=order.get("id"),
+                        filled_quantity=filled_quantity,
+                        new_stop_loss=float(new_stop),
+                    )
+                else:
+                    logger.warning(
+                        "No position or stop loss found to adjust", order_id=order.get("id")
+                    )
         except Exception as e:
             logger.error("Failed to adjust stop loss", order_id=order.get("id"), error=str(e))
 
@@ -184,32 +348,111 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
 
     async def _switch_to_offline_mode(self, component: str) -> None:
         """Switch component to offline mode."""
+        from src.bot_management.bot_coordinator import BotCoordinator
+        from src.database.redis_client import RedisClient
+
+        logger.info("Switching to offline mode", component=component)
+
         try:
-            # TODO: Implement offline mode switching
-            # This will be implemented in P-021+ (Bot Instance Management)
-            logger.info("Switching to offline mode", component=component)
+            redis_client = RedisClient(self.config)
+            bot_coordinator = BotCoordinator(self.config)
+
+            # Set offline flag in Redis
+            await redis_client.set(
+                f"component:status:{component}",
+                {
+                    "status": "offline",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "reason": "network_disconnection",
+                },
+                expiry=3600,  # 1 hour
+            )
+
+            # Pause bot operations
+            if hasattr(bot_coordinator, "pause_bot"):
+                await bot_coordinator.pause_bot(component)
+
+            logger.info("Switched to offline mode", component=component)
         except Exception as e:
             logger.error("Failed to switch to offline mode", component=component, error=str(e))
 
     async def _persist_pending_operations(self, component: str) -> None:
         """Persist any pending operations to prevent data loss."""
+        from src.database.redis_client import RedisClient
+        from src.state.checkpoint_manager import CheckpointManager
+
+        logger.info("Persisting pending operations", component=component)
+
         try:
-            # TODO: Implement operation persistence
-            # This will be implemented in P-024 (State Persistence and
-            # Recovery)
-            logger.info("Persisting pending operations", component=component)
+            checkpoint_manager = CheckpointManager(self.config)
+            redis_client = RedisClient(self.config)
+
+            # Get pending operations from memory/cache
+            pending_orders = await redis_client.get(f"pending_orders:{component}")
+            pending_trades = await redis_client.get(f"pending_trades:{component}")
+
+            # Create checkpoint
+            checkpoint_data = {
+                "component": component,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "pending_orders": pending_orders or [],
+                "pending_trades": pending_trades or [],
+                "reason": "network_disconnection",
+            }
+
+            # Save checkpoint
+            checkpoint_id = await checkpoint_manager.create_checkpoint(
+                component_name=component, state_data=checkpoint_data
+            )
+
+            logger.info(
+                "Persisted pending operations",
+                component=component,
+                checkpoint_id=checkpoint_id,
+                orders_count=len(pending_orders or []),
+                trades_count=len(pending_trades or []),
+            )
         except Exception as e:
             logger.error("Failed to persist operations", component=component, error=str(e))
 
     async def _try_reconnect(self, component: str) -> bool:
         """Attempt to reconnect to the service."""
+        from src.error_handling.connection_manager import ConnectionManager
+        from src.exchanges.factory import ExchangeFactory
+
         try:
-            # TODO: Implement actual reconnection logic
-            # This will be implemented in P-003+ (Exchange Integrations)
             logger.info("Attempting reconnection", component=component)
-            # Simulate reconnection attempt
-            await asyncio.sleep(1)
-            return True  # Simulate successful reconnection
+
+            # Import ConnectionManager locally to avoid circular dependencies
+            from src.error_handling.connection_manager import ConnectionManager
+
+            # Initialize ConnectionManager if not already done
+            connection_manager = ConnectionManager(self.config)
+
+            # Try to identify if component is an exchange
+            supported_exchanges = getattr(self.config.exchanges, "supported_exchanges", [])
+            if component in supported_exchanges:
+                exchange = ExchangeFactory.create(component, self.config)
+
+                # Test connection with a simple API call
+                try:
+                    await exchange.get_server_time()
+                    logger.info("Exchange reconnection successful", component=component)
+                    return True
+                except Exception as e:
+                    logger.warning(f"Exchange reconnection failed: {e}", component=component)
+                    # Try using ConnectionManager's reconnect method as fallback
+                    return await connection_manager.reconnect_connection(component)
+            else:
+                # Use ConnectionManager for other components
+                # This provides proper reconnection with exponential backoff
+                success = await connection_manager.reconnect_connection(component)
+                if success:
+                    logger.info("ConnectionManager reconnection successful", component=component)
+                else:
+                    logger.warning("ConnectionManager reconnection failed", component=component)
+                return success
+
         except Exception as e:
             logger.error("Reconnection attempt failed", component=component, error=str(e))
             return False
@@ -314,10 +557,41 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
 
     async def _switch_to_online_mode(self, component: str) -> None:
         """Switch component back to online mode."""
+        from src.bot_management.bot_coordinator import BotCoordinator
+        from src.database.redis_client import RedisClient
+        from src.state.checkpoint_manager import CheckpointManager
+
+        logger.info("Switching to online mode", component=component)
+
         try:
-            # TODO: Implement online mode switching
-            # This will be implemented in P-021+ (Bot Instance Management)
-            logger.info("Switching to online mode", component=component)
+            redis_client = RedisClient(self.config)
+            bot_coordinator = BotCoordinator(self.config)
+            checkpoint_manager = CheckpointManager(self.config)
+
+            # Restore from checkpoint if available
+            latest_checkpoint = await checkpoint_manager.get_latest_checkpoint(component)
+            if latest_checkpoint:
+                await checkpoint_manager.restore_checkpoint(
+                    checkpoint_id=latest_checkpoint["id"], component_name=component
+                )
+                logger.info("Restored from checkpoint", component=component)
+
+            # Update status in Redis
+            await redis_client.set(
+                f"component:status:{component}",
+                {
+                    "status": "online",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "reconnected_at": datetime.now(timezone.utc).isoformat(),
+                },
+                expiry=3600,
+            )
+
+            # Resume bot operations
+            if hasattr(bot_coordinator, "resume_bot"):
+                await bot_coordinator.resume_bot(component)
+
+            logger.info("Switched to online mode", component=component)
         except Exception as e:
             logger.error("Failed to switch to online mode", component=component, error=str(e))
 

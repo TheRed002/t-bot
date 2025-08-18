@@ -234,7 +234,8 @@ class HyperparameterOptimizer:
         for i, model_class in enumerate(model_classes):
             try:
                 logger.info(
-                    f"Optimizing model {i+1}/{len(model_classes)}", model_class=model_class.__name__
+                    f"Optimizing model {i + 1}/{len(model_classes)}",
+                    model_class=model_class.__name__,
                 )
 
                 # Get parameter space for this model

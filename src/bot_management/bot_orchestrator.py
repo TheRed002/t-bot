@@ -71,6 +71,15 @@ class BotOrchestrator:
         self.orchestrator_task = None
         self.emergency_shutdown = False
 
+        # Bot management
+        self.bots: dict[str, Any] = {}  # Bot instances keyed by bot_id
+        self.orchestration_statistics = {
+            "total_bots_created": 0,
+            "total_bots_started": 0,
+            "total_bots_stopped": 0,
+            "total_errors": 0,
+        }
+
         # Performance aggregation
         self.global_metrics = {
             "total_bots": 0,

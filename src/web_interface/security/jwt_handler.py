@@ -5,6 +5,7 @@ This module provides comprehensive JWT token management including creation,
 validation, refresh, and revocation capabilities with security best practices.
 """
 
+import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -52,18 +53,18 @@ class JWTHandler:
         self.config = config
         self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
 
+        # JWT Configuration - prioritize environment variables
+        self.secret_key = self._get_secret_key(config)
+
         # JWT Configuration - handle missing web_interface config
         if hasattr(config, "web_interface"):
             jwt_config = config.web_interface.get("jwt", {})
         else:
             # Fall back to security config
             jwt_config = {
-                "secret_key": config.security.secret_key,
-                "algorithm": config.security.jwt_algorithm,
-                "access_token_expire_minutes": config.security.jwt_expire_minutes,
+                "algorithm": getattr(config.security, "jwt_algorithm", "HS256"),
+                "access_token_expire_minutes": getattr(config.security, "jwt_expire_minutes", 30),
             }
-
-        self.secret_key = jwt_config.get("secret_key", self._generate_secret_key())
         self.algorithm = jwt_config.get("algorithm", "HS256")
         self.access_token_expire_minutes = jwt_config.get("access_token_expire_minutes", 30)
         self.refresh_token_expire_days = jwt_config.get("refresh_token_expire_days", 7)
@@ -79,6 +80,44 @@ class JWTHandler:
         self.max_token_age_hours = jwt_config.get("max_token_age_hours", 24)
 
         self.logger.info("JWT handler initialized")
+
+    def _get_secret_key(self, config: Config) -> str:
+        """
+        Get JWT secret key from environment variable or config.
+
+        Priority order:
+        1. JWT_SECRET_KEY environment variable
+        2. JWT_SECRET environment variable
+        3. Config security secret key
+        4. Generate temporary key (development only)
+        """
+        # Check environment variables first
+        secret_key = os.getenv("JWT_SECRET_KEY") or os.getenv("JWT_SECRET")
+
+        if secret_key:
+            self.logger.info("Using JWT secret key from environment variable")
+            return secret_key
+
+        # Check config
+        if hasattr(config, "security") and hasattr(config.security, "secret_key"):
+            secret_key = config.security.secret_key
+            if secret_key and secret_key != "your-secret-key-here":
+                self.logger.info("Using JWT secret key from configuration")
+                return secret_key
+
+        # Generate temporary key for development
+        if getattr(config, "environment", "development") == "development":
+            secret_key = secrets.token_urlsafe(32)
+            self.logger.warning(
+                "Generated temporary JWT secret key for development. "
+                "Set JWT_SECRET_KEY environment variable for production!"
+            )
+            return secret_key
+        else:
+            # Production environment must have a secret key
+            raise ValueError(
+                "JWT secret key is required in production. Set JWT_SECRET_KEY environment variable."
+            )
 
     def _generate_secret_key(self) -> str:
         """Generate a secure secret key if none provided."""

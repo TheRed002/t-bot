@@ -12,12 +12,13 @@ lifecycle management capabilities for bot instances.
 import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
 from src.core.logging import get_logger
-from src.core.types import BotConfiguration, BotPriority, BotType
+from src.core.types import BotConfiguration, BotPriority, BotType, TradingMode
 
 # MANDATORY: Import from P-002A (error handling)
 from src.error_handling.error_handler import ErrorHandler
@@ -104,6 +105,8 @@ class BotLifecycle:
                     "risk_percentage": 0.02,
                     "heartbeat_interval": 30,
                     "auto_start": True,
+                    "max_position_size": Decimal("1000"),
+                    "trading_mode": TradingMode.PAPER,
                 },
                 "required_fields": ["strategy_name", "exchanges", "symbols", "allocated_capital"],
                 "optional_fields": ["trading_mode", "max_daily_trades"],
@@ -118,6 +121,9 @@ class BotLifecycle:
                     "risk_percentage": 0.01,
                     "heartbeat_interval": 15,
                     "auto_start": True,
+                    "max_position_size": Decimal("5000"),
+                    "trading_mode": TradingMode.PAPER,
+                    "strategy_name": "arbitrage_strategy",
                 },
                 "required_fields": ["exchanges", "symbols", "allocated_capital"],
                 "optional_fields": ["min_arbitrage_profit_bps", "max_position_hold_time"],
@@ -132,6 +138,9 @@ class BotLifecycle:
                     "risk_percentage": 0.005,
                     "heartbeat_interval": 10,
                     "auto_start": True,
+                    "max_position_size": Decimal("2000"),
+                    "trading_mode": TradingMode.PAPER,
+                    "strategy_name": "market_maker_strategy",
                 },
                 "required_fields": ["exchanges", "symbols", "allocated_capital"],
                 "optional_fields": ["spread_percentage", "inventory_target", "quote_size"],
@@ -146,6 +155,9 @@ class BotLifecycle:
                     "risk_percentage": 0.03,
                     "heartbeat_interval": 20,
                     "auto_start": False,  # Requires manual review
+                    "max_position_size": Decimal("3000"),
+                    "trading_mode": TradingMode.PAPER,
+                    "strategy_name": "hybrid_strategy",
                 },
                 "required_fields": ["strategy_names", "exchanges", "symbols", "allocated_capital"],
                 "optional_fields": ["strategy_weights", "rebalancing_frequency"],
@@ -160,6 +172,10 @@ class BotLifecycle:
                     "risk_percentage": 0.001,
                     "heartbeat_interval": 60,
                     "auto_start": True,
+                    "max_position_size": Decimal("100"),
+                    "trading_mode": TradingMode.PAPER,
+                    "strategy_name": "scanner_strategy",
+                    "allocated_capital": Decimal("1000"),
                 },
                 "required_fields": ["exchanges", "symbols"],
                 "optional_fields": ["scan_intervals", "signal_threshold", "notification_targets"],

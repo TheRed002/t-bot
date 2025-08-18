@@ -37,6 +37,7 @@ try:
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import Span, TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+    from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
     from opentelemetry.semconv.trace import SpanAttributes
     from opentelemetry.trace.status import Status, StatusCode
     from opentelemetry.util.http import get_excluded_urls
@@ -114,11 +115,11 @@ class OpenTelemetryConfig:
     sampling_rate: float = 1.0  # 100% for development, reduce for production
 
     # Exporters
-    jaeger_enabled: bool = True
+    jaeger_enabled: bool = False  # Disabled by default - requires Jaeger server
     jaeger_endpoint: str = "http://localhost:14268/api/traces"
     otlp_enabled: bool = False
     otlp_endpoint: str = "http://localhost:4317"
-    console_enabled: bool = False
+    console_enabled: bool = False  # Disabled by default to prevent log pollution
 
     # Instrumentation
     instrument_fastapi: bool = True
@@ -321,7 +322,7 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
         # Setup tracing
         if config.tracing_enabled:
             tracer_provider = TracerProvider(
-                resource=resource, sampler=trace.TraceIdRatioBased(config.sampling_rate)
+                resource=resource, sampler=TraceIdRatioBased(config.sampling_rate)
             )
 
             # Add span processors/exporters
@@ -395,9 +396,18 @@ def _setup_auto_instrumentation(config: OpenTelemetryConfig) -> None:
     try:
         # FastAPI instrumentation
         if config.instrument_fastapi:
-            FastAPIInstrumentor().instrument(
-                excluded_urls=get_excluded_urls("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS")
-            )
+            # Get excluded URLs safely
+            try:
+                excluded_urls = get_excluded_urls("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") or ""
+                if hasattr(excluded_urls, "split"):
+                    excluded_urls_param = excluded_urls
+                else:
+                    # Convert ExcludeList or other objects to string
+                    excluded_urls_param = str(excluded_urls) if excluded_urls else ""
+            except Exception:
+                excluded_urls_param = ""
+
+            FastAPIInstrumentor().instrument(excluded_urls=excluded_urls_param)
             logger.debug("FastAPI instrumentation enabled")
 
         # HTTP client instrumentation
@@ -458,9 +468,20 @@ def instrument_fastapi(app, config: OpenTelemetryConfig):
     """
     try:
         if config.instrument_fastapi:
+            # Get excluded URLs safely
+            try:
+                excluded_urls = get_excluded_urls("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") or ""
+                if hasattr(excluded_urls, "split"):
+                    excluded_urls_param = excluded_urls
+                else:
+                    # Convert ExcludeList or other objects to string
+                    excluded_urls_param = str(excluded_urls) if excluded_urls else ""
+            except Exception:
+                excluded_urls_param = ""
+
             FastAPIInstrumentor.instrument_app(
                 app,
-                excluded_urls=get_excluded_urls("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS"),
+                excluded_urls=excluded_urls_param,
                 tracer_provider=trace.get_tracer_provider(),
             )
             logger.info("FastAPI application instrumented with OpenTelemetry")

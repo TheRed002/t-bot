@@ -397,6 +397,27 @@ class DatabaseConnectionManager:
         """Check if all database connections are healthy."""
         return self._connection_healthy
 
+    @asynccontextmanager
+    async def get_connection(self):
+        """Get a database connection for health checks."""
+        if not self.async_engine:
+            raise DataSourceError("Database not initialized")
+
+        async with self.async_engine.begin() as conn:
+            yield conn
+
+    async def get_pool_status(self) -> dict[str, int]:
+        """Get connection pool status."""
+        if not self.async_engine:
+            return {"size": 0, "used": 0, "free": 0}
+
+        pool = self.async_engine.pool
+        return {
+            "size": pool.size(),
+            "used": pool.checkedin(),
+            "free": pool.size() - pool.checkedin(),
+        }
+
 
 # Global connection manager instance
 _connection_manager: DatabaseConnectionManager | None = None
@@ -407,6 +428,11 @@ async def initialize_database(config: Config) -> None:
     global _connection_manager
     _connection_manager = DatabaseConnectionManager(config)
     await _connection_manager.initialize()
+
+
+async def init_database(config: Config) -> None:
+    """Initialize the database connection - alias for initialize_database."""
+    await initialize_database(config)
 
 
 async def close_database() -> None:
@@ -423,6 +449,13 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
         raise DataSourceError("Database not initialized")
 
     async with _connection_manager.get_async_session() as session:
+        yield session
+
+
+@asynccontextmanager
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Async context manager for database sessions - alias for get_async_session."""
+    async with get_async_session() as session:
         yield session
 
 

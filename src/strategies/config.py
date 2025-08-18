@@ -51,7 +51,7 @@ class StrategyConfigurationManager:
         return {
             "mean_reversion": {
                 "name": "mean_reversion",
-                "strategy_type": StrategyType.STATIC,
+                "strategy_type": "static",
                 "enabled": True,
                 "symbols": ["BTCUSDT", "ETHUSDT"],
                 "timeframe": "5m",
@@ -69,7 +69,7 @@ class StrategyConfigurationManager:
             },
             "trend_following": {
                 "name": "trend_following",
-                "strategy_type": StrategyType.STATIC,
+                "strategy_type": "static",
                 "enabled": True,
                 "symbols": ["BTCUSDT", "ETHUSDT"],
                 "timeframe": "1h",
@@ -88,7 +88,7 @@ class StrategyConfigurationManager:
             },
             "breakout": {
                 "name": "breakout",
-                "strategy_type": StrategyType.STATIC,
+                "strategy_type": "static",
                 "enabled": True,
                 "symbols": ["BTCUSDT", "ETHUSDT"],
                 "timeframe": "1h",
@@ -159,9 +159,16 @@ class StrategyConfigurationManager:
         """
         with open(config_file) as f:
             if config_file.suffix == ".yaml" or config_file.suffix == ".yml":
-                return yaml.safe_load(f)
+                data = yaml.safe_load(f)
+                # Handle nested strategy configuration
+                if isinstance(data, dict) and "strategy" in data:
+                    return data["strategy"]
+                return data
             elif config_file.suffix == ".json":
-                return json.load(f)
+                data = json.load(f)
+                if isinstance(data, dict) and "strategy" in data:
+                    return data["strategy"]
+                return data
             else:
                 raise ConfigurationError(f"Unsupported config file format: {config_file.suffix}")
 

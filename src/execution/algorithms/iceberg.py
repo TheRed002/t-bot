@@ -110,11 +110,11 @@ class IcebergAlgorithm(BaseAlgorithm):
             display_pct = float(instruction.display_quantity / instruction.order.quantity)
             if display_pct < self.min_display_quantity_pct:
                 raise ValidationError(
-                    f"Display quantity too small (minimum {self.min_display_quantity_pct*100}%)"
+                    f"Display quantity too small (minimum {self.min_display_quantity_pct * 100}%)"
                 )
             if display_pct > self.max_display_quantity_pct:
                 raise ValidationError(
-                    f"Display quantity too large (maximum {self.max_display_quantity_pct*100}%)"
+                    f"Display quantity too large (maximum {self.max_display_quantity_pct * 100}%)"
                 )
 
         # Iceberg works best with limit orders
@@ -333,7 +333,6 @@ class IcebergAlgorithm(BaseAlgorithm):
                     and (datetime.now(timezone.utc) - last_price_update).total_seconds()
                     > self.price_staleness_seconds
                 ):
-
                     current_price = await self._get_improved_price(
                         instruction.order.symbol, instruction.order.side, exchange
                     )

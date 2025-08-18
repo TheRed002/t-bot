@@ -10,6 +10,7 @@ and P-007A (utils) components.
 """
 
 import asyncio
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 

@@ -586,7 +586,7 @@ Alert: {alert.rule_name}
 Severity: {alert.severity.value.upper()}
 Status: {alert.status.value}
 Message: {alert.message}
-Started: {alert.starts_at.strftime('%Y-%m-%d %H:%M:%S UTC')}
+Started: {alert.starts_at.strftime("%Y-%m-%d %H:%M:%S UTC")}
 
 Labels:
 {chr(10).join(f"  {k}: {v}" for k, v in alert.labels.items())}
@@ -631,12 +631,12 @@ Fingerprint: {alert.fingerprint}
         body = f"""
 Alert RESOLVED: {alert.rule_name}
 Duration: {duration}
-Resolved: {alert.ends_at.strftime('%Y-%m-%d %H:%M:%S UTC') if alert.ends_at else 'N/A'}
+Resolved: {alert.ends_at.strftime("%Y-%m-%d %H:%M:%S UTC") if alert.ends_at else "N/A"}
 
 Original Alert:
 Severity: {alert.severity.value.upper()}
 Message: {alert.message}
-Started: {alert.starts_at.strftime('%Y-%m-%d %H:%M:%S UTC')}
+Started: {alert.starts_at.strftime("%Y-%m-%d %H:%M:%S UTC")}
 
 Fingerprint: {alert.fingerprint}
         """

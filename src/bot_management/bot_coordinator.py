@@ -342,7 +342,8 @@ class BotCoordinator:
             # Update metrics
             self.coordination_metrics["signals_distributed"] += 1
 
-            target_count = len(signal_entry["target_bots"]) - 1  # Exclude source bot
+            # Count actual target recipients (exclude source bot if present)
+            target_count = len([bot for bot in signal_entry["target_bots"] if bot != bot_id])
 
             self.logger.info(
                 "Signal shared with coordination network",
@@ -470,7 +471,6 @@ class BotCoordinator:
                         and position["side"] != side.value
                         and position["quantity"] > quantity * Decimal("0.5")
                     ):  # Significant opposing position
-
                         conflicting_bots.append(
                             {
                                 "bot_id": other_bot_id,
@@ -660,7 +660,6 @@ class BotCoordinator:
 
             for _pos_key, position in positions.items():
                 if position["symbol"] == symbol and position["side"] != side.value:
-
                     # Calculate conflict severity
                     conflict_value = min(quantity * price, position["quantity"] * position["price"])
 
@@ -873,7 +872,9 @@ class BotCoordinator:
         # Simple conflict detection - opposing sides
         for i, pos1 in enumerate(positions):
             for pos2 in positions[i + 1 :]:
-                if pos1["position"].get("side") == "buy" and pos2["position"].get("side") == "sell":
+                side1 = str(pos1["position"].get("side", "")).lower()
+                side2 = str(pos2["position"].get("side", "")).lower()
+                if (side1 == "buy" and side2 == "sell") or (side1 == "sell" and side2 == "buy"):
                     conflicts.append(
                         {
                             "type": "opposing_positions",

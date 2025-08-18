@@ -431,7 +431,7 @@ class PerformanceAttributor:
                 if symbol != "_summary":
                     report.append(f"  {symbol}:")
                     report.append(f"    Return: {metrics['return_pct']:.2f}%")
-                    report.append(f"    Win Rate: {metrics['win_rate']*100:.1f}%")
+                    report.append(f"    Win Rate: {metrics['win_rate'] * 100:.1f}%")
                     report.append(f"    Contribution: {metrics['contribution_pct']:.1f}%")
 
         # Timing Attribution

@@ -7,11 +7,12 @@ middleware, routes, and dependencies for the trading system web interface.
 
 from contextlib import asynccontextmanager
 
+import socketio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.core.config import Config
-from src.core.logging import get_logger
+from src.core.logging import correlation_context, get_logger
 from src.monitoring.alerting import AlertManager, NotificationConfig, set_global_alert_manager
 from src.monitoring.metrics import MetricsCollector
 from src.monitoring.performance import PerformanceProfiler, set_global_profiler
@@ -33,6 +34,7 @@ app_config: Config = None
 bot_orchestrator = None
 execution_engine = None
 model_manager = None
+_monitoring_setup_done = False
 
 
 @asynccontextmanager
@@ -43,42 +45,78 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown of the trading system components.
     """
     # Startup
-    logger.info("Starting T-Bot web interface")
+    # Generate correlation ID for startup sequence
+    startup_correlation_id = correlation_context.generate_correlation_id()
+    with correlation_context.correlation_context(startup_correlation_id):
+        logger.info("Starting T-Bot web interface")
 
     try:
         # Initialize authentication system
         init_auth(app_config)
 
+        # Start Socket.IO background tasks
+        try:
+            from src.web_interface.socketio_manager import socketio_manager
+
+            await socketio_manager.start_background_tasks()
+            with correlation_context.correlation_context(startup_correlation_id):
+                logger.info("Socket.IO background tasks started")
+        except Exception as e:
+            with correlation_context.correlation_context(startup_correlation_id):
+                logger.error(f"Failed to start Socket.IO background tasks: {e}")
+
         # Initialize trading system components
         if bot_orchestrator:
             await bot_orchestrator.start()
-            logger.info("Bot orchestrator started")
+            with correlation_context.correlation_context(startup_correlation_id):
+                logger.info("Bot orchestrator started")
 
         if execution_engine:
             await execution_engine.start()
-            logger.info("Execution engine started")
+            with correlation_context.correlation_context(startup_correlation_id):
+                logger.info("Execution engine started")
 
-        logger.info("T-Bot web interface startup completed")
+        with correlation_context.correlation_context(startup_correlation_id):
+            logger.info("T-Bot web interface startup completed")
 
         yield
 
     finally:
         # Shutdown
-        logger.info("Shutting down T-Bot web interface")
+        # Generate correlation ID for shutdown sequence
+        shutdown_correlation_id = correlation_context.generate_correlation_id()
+        with correlation_context.correlation_context(shutdown_correlation_id):
+            logger.info("Shutting down T-Bot web interface")
 
         try:
+            # Stop trading system components
             if execution_engine:
                 await execution_engine.stop()
-                logger.info("Execution engine stopped")
+                with correlation_context.correlation_context(shutdown_correlation_id):
+                    logger.info("Execution engine stopped")
 
             if bot_orchestrator:
                 await bot_orchestrator.stop()
-                logger.info("Bot orchestrator stopped")
+                with correlation_context.correlation_context(shutdown_correlation_id):
+                    logger.info("Bot orchestrator stopped")
 
-            logger.info("T-Bot web interface shutdown completed")
+            # Stop Socket.IO background tasks
+            try:
+                from src.web_interface.socketio_manager import socketio_manager
+
+                await socketio_manager.stop_background_tasks()
+                with correlation_context.correlation_context(shutdown_correlation_id):
+                    logger.info("Socket.IO background tasks stopped")
+            except Exception as e:
+                with correlation_context.correlation_context(shutdown_correlation_id):
+                    logger.error(f"Failed to stop Socket.IO background tasks: {e}")
+
+            with correlation_context.correlation_context(shutdown_correlation_id):
+                logger.info("T-Bot web interface shutdown completed")
 
         except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
+            with correlation_context.correlation_context(shutdown_correlation_id):
+                logger.error(f"Error during shutdown: {e}")
 
 
 def create_app(
@@ -86,9 +124,9 @@ def create_app(
     bot_orchestrator_instance=None,
     execution_engine_instance=None,
     model_manager_instance=None,
-) -> FastAPI:
+):
     """
-    Create and configure FastAPI application.
+    Create and configure FastAPI application with Socket.IO.
 
     Args:
         config: Application configuration
@@ -97,7 +135,7 @@ def create_app(
         model_manager_instance: Model manager instance
 
     Returns:
-        FastAPI: Configured FastAPI application
+        Combined ASGI app with FastAPI and Socket.IO
     """
     global app_config, bot_orchestrator, execution_engine, model_manager
 
@@ -129,7 +167,7 @@ def create_app(
         },
     )
 
-    app = FastAPI(
+    fastapi_app = FastAPI(
         title="T-Bot Trading System API",
         description="Advanced cryptocurrency trading bot with ML-powered strategies",
         version="1.0.0",
@@ -142,7 +180,7 @@ def create_app(
 
     # Configure CORS
     cors_config = web_config.get("cors", {})
-    app.add_middleware(
+    fastapi_app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_config.get("allow_origins", ["http://localhost:3000"]),
         allow_credentials=cors_config.get("allow_credentials", True),
@@ -156,12 +194,17 @@ def create_app(
 
     # Add custom middleware (order matters!)
     # 1. Error handling (outermost)
-    app.add_middleware(ErrorHandlerMiddleware, debug=web_config.get("debug", False))
+    fastapi_app.add_middleware(ErrorHandlerMiddleware, debug=web_config.get("debug", False))
 
-    # 1.5. Security middleware
+    # 1.5. Correlation ID middleware for request tracking
+    from src.web_interface.middleware.correlation import CorrelationMiddleware
+
+    fastapi_app.add_middleware(CorrelationMiddleware)
+
+    # 2. Security middleware
     from src.web_interface.middleware.security import SecurityMiddleware
 
-    app.add_middleware(SecurityMiddleware, enable_csp=True, enable_input_validation=True)
+    fastapi_app.add_middleware(SecurityMiddleware, enable_csp=True, enable_input_validation=True)
 
     # 2. Connection pooling for performance
     from src.web_interface.middleware.connection_pool import (
@@ -169,8 +212,8 @@ def create_app(
         set_global_pool_manager,
     )
 
-    connection_pool_middleware = ConnectionPoolMiddleware(app, config)
-    app.add_middleware(ConnectionPoolMiddleware, config=config)
+    connection_pool_middleware = ConnectionPoolMiddleware(fastapi_app, config)
+    fastapi_app.add_middleware(ConnectionPoolMiddleware, config=config)
     set_global_pool_manager(connection_pool_middleware.pool_manager)
 
     # 3. Decimal precision middleware for financial data integrity
@@ -179,29 +222,44 @@ def create_app(
         DecimalValidationMiddleware,
     )
 
-    app.add_middleware(DecimalValidationMiddleware)
-    app.add_middleware(DecimalPrecisionMiddleware)
+    fastapi_app.add_middleware(DecimalValidationMiddleware)
+    fastapi_app.add_middleware(DecimalPrecisionMiddleware)
 
     # 4. Rate limiting
-    app.add_middleware(RateLimitMiddleware, config=config)
+    fastapi_app.add_middleware(RateLimitMiddleware, config=config)
 
     # 5. Authentication (innermost)
     from src.web_interface.security.jwt_handler import JWTHandler
 
     jwt_handler = JWTHandler(config)
-    app.add_middleware(AuthMiddleware, jwt_handler=jwt_handler)
+    fastapi_app.add_middleware(AuthMiddleware, jwt_handler=jwt_handler)
 
     # Add routes
-    _register_routes(app)
+    _register_routes(fastapi_app)
 
     # Add startup and shutdown events (additional to lifespan)
-    _register_events(app)
+    # Events are now handled in the lifespan context manager
 
     # Setup monitoring infrastructure
-    _setup_monitoring(app, config)
+    _setup_monitoring(fastapi_app, config)
 
-    logger.info("FastAPI application created and configured")
-    return app
+    # Create Socket.IO server and wrap FastAPI app
+    from src.web_interface.socketio_manager import socketio_manager
+
+    # Create Socket.IO server with CORS configuration
+    cors_origins = cors_config.get("allow_origins", ["http://localhost:3000"])
+    socketio_manager.create_server(cors_allowed_origins=cors_origins)
+
+    # Wrap FastAPI app with Socket.IO
+    combined_app = socketio.ASGIApp(
+        socketio_manager.sio, other_asgi_app=fastapi_app, socketio_path="/socket.io/"
+    )
+
+    # Generate correlation ID for app creation completion
+    app_creation_correlation_id = correlation_context.generate_correlation_id()
+    with correlation_context.correlation_context(app_creation_correlation_id):
+        logger.info("FastAPI application with Socket.IO created and configured")
+    return combined_app
 
 
 def _register_routes(app: FastAPI) -> None:
@@ -310,26 +368,8 @@ def _register_routes(app: FastAPI) -> None:
     except ImportError as e:
         logger.warning(f"Failed to import optimization router: {e}")
 
-    # WebSocket routes (will be implemented next)
-    try:
-        from src.web_interface.websockets.bot_status import router as bot_ws_router
-        from src.web_interface.websockets.market_data import router as market_ws_router
-        from src.web_interface.websockets.portfolio import router as portfolio_ws_router
-
-        app.include_router(market_ws_router, prefix="/ws")
-        app.include_router(bot_ws_router, prefix="/ws")
-        app.include_router(portfolio_ws_router, prefix="/ws")
-    except ImportError as e:
-        logger.warning(f"Failed to import WebSocket routers: {e}")
-
-
-def _register_events(app: FastAPI) -> None:
-    """
-    Register additional startup and shutdown events.
-
-    Args:
-        app: FastAPI application
-    """
+    # Don't add Socket.IO here - it will be wrapped around the entire app
+    pass
 
     @app.middleware("http")
     async def add_process_time_header(request: Request, call_next):
@@ -343,16 +383,25 @@ def _register_events(app: FastAPI) -> None:
         return response
 
 
-def _setup_monitoring(app: FastAPI, config: Config) -> None:
+def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
     """
     Setup monitoring infrastructure for the application.
 
     Args:
-        app: FastAPI application
+        fastapi_app: FastAPI application
         config: Application configuration
     """
+    global _monitoring_setup_done
+
+    if _monitoring_setup_done:
+        logger.debug("Monitoring infrastructure already setup, skipping")
+        return
+
     try:
-        logger.info("Setting up monitoring infrastructure")
+        # Generate correlation ID for monitoring setup
+        monitoring_correlation_id = correlation_context.generate_correlation_id()
+        with correlation_context.correlation_context(monitoring_correlation_id):
+            logger.info("Setting up monitoring infrastructure")
 
         # Setup OpenTelemetry tracing
         try:
@@ -360,15 +409,17 @@ def _setup_monitoring(app: FastAPI, config: Config) -> None:
                 service_name="tbot-trading-system",
                 service_version="1.0.0",
                 environment=getattr(config, "environment", "development"),
-                jaeger_enabled=True,
-                console_enabled=getattr(config, "debug", False),
+                jaeger_enabled=False,  # Disabled by default - enable when Jaeger server is available
+                console_enabled=False,  # Explicitly disable console exporter to prevent log pollution
             )
             trading_tracer = setup_telemetry(telemetry_config)
             set_global_trading_tracer(trading_tracer)
-            instrument_fastapi(app, telemetry_config)
-            logger.info("OpenTelemetry tracing configured")
+            instrument_fastapi(fastapi_app, telemetry_config)
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.info("OpenTelemetry tracing configured")
         except Exception as e:
-            logger.warning(f"Failed to setup OpenTelemetry: {e}")
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.warning(f"Failed to setup OpenTelemetry: {e}")
 
         # Setup metrics collection
         try:
@@ -377,17 +428,21 @@ def _setup_monitoring(app: FastAPI, config: Config) -> None:
             import src.monitoring.metrics
 
             src.monitoring.metrics._global_collector = metrics_collector
-            logger.info("Prometheus metrics collector configured")
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.info("Prometheus metrics collector configured")
         except Exception as e:
-            logger.warning(f"Failed to setup metrics collector: {e}")
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.warning(f"Failed to setup metrics collector: {e}")
 
         # Setup performance profiler
         try:
             profiler = PerformanceProfiler(enable_memory_tracking=True, enable_cpu_profiling=True)
             set_global_profiler(profiler)
-            logger.info("Performance profiler configured")
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.info("Performance profiler configured")
         except Exception as e:
-            logger.warning(f"Failed to setup performance profiler: {e}")
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.warning(f"Failed to setup performance profiler: {e}")
 
         # Setup alert manager
         try:
@@ -399,14 +454,19 @@ def _setup_monitoring(app: FastAPI, config: Config) -> None:
             )
             alert_manager = AlertManager(notification_config)
             set_global_alert_manager(alert_manager)
-            logger.info("Alert manager configured")
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.info("Alert manager configured")
         except Exception as e:
-            logger.warning(f"Failed to setup alert manager: {e}")
+            with correlation_context.correlation_context(monitoring_correlation_id):
+                logger.warning(f"Failed to setup alert manager: {e}")
 
-        logger.info("Monitoring infrastructure setup completed")
+        with correlation_context.correlation_context(monitoring_correlation_id):
+            logger.info("Monitoring infrastructure setup completed")
+        _monitoring_setup_done = True
 
     except Exception as e:
-        logger.error(f"Error setting up monitoring infrastructure: {e}")
+        with correlation_context.correlation_context(monitoring_correlation_id):
+            logger.error(f"Error setting up monitoring infrastructure: {e}")
 
 
 # API route placeholders (will be implemented in the next steps)
@@ -513,14 +573,78 @@ ROUTER_CREATORS = {
 }
 
 
-# Create app instance for Docker/production use
-# This will use default config and environment variables
-try:
-    app_config = Config()
-    app = create_app(app_config)
-    logger.info("Module-level FastAPI app created successfully")
-except Exception as e:
-    logger.error(f"Failed to create module-level app: {e}")
-    # Create a minimal app as fallback
-    app = FastAPI(title="T-Bot Trading System API (Fallback)")
-    logger.warning("Created fallback FastAPI app")
+# Module-level app instance variables - DO NOT CREATE APP HERE
+_app_instance = None
+_app_config_instance = None
+_app_creation_in_progress = False
+
+
+def get_app():
+    """Get or create the FastAPI app instance."""
+    global _app_instance, _app_config_instance, _app_creation_in_progress
+
+    # Prevent multiple simultaneous app creation
+    if _app_creation_in_progress:
+        logger.warning("App creation already in progress, returning None to prevent duplication")
+        return None
+
+    if _app_instance is None:
+        _app_creation_in_progress = True
+        try:
+            # Generate correlation ID for app creation
+            app_creation_correlation_id = correlation_context.generate_correlation_id()
+            with correlation_context.correlation_context(app_creation_correlation_id):
+                logger.info("Creating single application instance")
+            _app_config_instance = Config()
+            _app_instance = create_app(_app_config_instance)
+            with correlation_context.correlation_context(app_creation_correlation_id):
+                logger.info("Module-level combined FastAPI+Socket.IO app created successfully")
+        except Exception as e:
+            app_error_correlation_id = correlation_context.generate_correlation_id()
+            with correlation_context.correlation_context(app_error_correlation_id):
+                logger.error(f"Failed to create module-level app: {e}")
+                # Create a minimal app as fallback
+                _app_instance = FastAPI(title="T-Bot Trading System API (Fallback)")
+                logger.warning("Created fallback FastAPI app")
+        finally:
+            _app_creation_in_progress = False
+
+    return _app_instance
+
+
+# Export app for ASGI servers - but delay creation until first access
+def _get_app_lazy():
+    """Lazy app getter that only creates app when needed."""
+    return get_app()
+
+
+# Create a property-like access for the app
+class AppProxy:
+    def __getattr__(self, name):
+        app_instance = get_app()
+        if app_instance is None:
+            raise RuntimeError("Application instance is not available")
+        return getattr(app_instance, name)
+
+
+app = AppProxy()
+
+
+# Run the server when executed directly
+if __name__ == "__main__":
+    import uvicorn
+
+    # Get port from config or use default
+    try:
+        port = (
+            _app_config_instance.api.port
+            if _app_config_instance and hasattr(_app_config_instance, "api")
+            else 8000
+        )
+    except:
+        port = 8000
+    host = "0.0.0.0"
+
+    logger.info(f"Starting web server on {host}:{port}")
+
+    uvicorn.run("src.web_interface.app:app", host=host, port=port, reload=True, log_level="info")

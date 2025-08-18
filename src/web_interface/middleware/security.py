@@ -57,7 +57,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             "X-XSS-Protection": "1; mode=block",
             "Referrer-Policy": "strict-origin-when-cross-origin",
             "Permissions-Policy": (
-                "geolocation=(), microphone=(), camera=(), " "fullscreen=(self), payment=()"
+                "geolocation=(), microphone=(), camera=(), fullscreen=(self), payment=()"
             ),
         }
 
@@ -67,9 +67,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 "default-src 'self'; "
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
                 "https://cdn.jsdelivr.net https://unpkg.com; "
-                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-                "font-src 'self' https://fonts.gstatic.com; "
-                "img-src 'self' data: https:; "
+                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+                "font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; "
+                "img-src 'self' data: https: https://fastapi.tiangolo.com; "
                 "connect-src 'self' ws: wss: https://api.coingecko.com; "
                 "frame-ancestors 'none'; "
                 "base-uri 'self'; "

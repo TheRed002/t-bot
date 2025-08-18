@@ -208,6 +208,12 @@ class AdaptiveRiskManager:
             if not signal.symbol or signal.symbol.strip() == "":
                 raise RiskManagementError("Invalid signal: symbol cannot be empty")
 
+            # Validate entry price
+            if entry_price <= 0:
+                raise RiskManagementError(
+                    f"Invalid entry price: {entry_price}. Price must be positive"
+                )
+
             # Get base stop loss percentage
             base_stop_loss_pct = self.base_stop_loss_pct
 

@@ -77,7 +77,6 @@ def validate_price(price: float | Decimal, symbol: str, exchange: str = "binance
         raise ValidationError(f"Price {decimal_price} for {symbol} exceeds maximum allowed")
 
     try:
-
         # Get precision from exchange-specific rules
         precision = get_price_precision(symbol, exchange)
 
@@ -155,7 +154,6 @@ def validate_quantity(
             )
 
     try:
-
         # Determine precision based on symbol
         if "BTC" in symbol.upper():
             precision = 8
@@ -433,9 +431,21 @@ def validate_strategy_config(config: dict[str, Any] | Any) -> bool:
     validate_config(config, required_fields)
 
     # Validate strategy type
-    valid_types = ["static", "dynamic", "arbitrage", "market_making", "ai_ml"]
-    if config["strategy_type"] not in valid_types:
-        raise ValidationError(f"Invalid strategy type: {config['strategy_type']}")
+    valid_types = [
+        "static",
+        "dynamic",
+        "arbitrage",
+        "market_making",
+        "evolutionary",
+        "hybrid",
+        "ai_ml",
+    ]
+    # Handle both string and enum values
+    strategy_type = config["strategy_type"]
+    if hasattr(strategy_type, "value"):
+        strategy_type = strategy_type.value
+    if strategy_type not in valid_types:
+        raise ValidationError(f"Invalid strategy type: {strategy_type}")
 
     # Validate symbols
     if not isinstance(config["symbols"], list) or not config["symbols"]:

@@ -685,7 +685,9 @@ class StateSyncManager:
             }
 
             await self.redis_client.setex(
-                redis_key, 3600, json.dumps(redis_data, default=str)  # 1 hour TTL
+                redis_key,
+                3600,
+                json.dumps(redis_data, default=str),  # 1 hour TTL
             )
 
             return True

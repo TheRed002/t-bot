@@ -175,7 +175,6 @@ class CacheMiddleware(BaseHTTPMiddleware):
             and response.status_code == 200
             and self._should_cache_response(request, response)
         ):
-
             await self._cache_response(cache_key, request, response)
 
         # Handle cache invalidation for modifying operations

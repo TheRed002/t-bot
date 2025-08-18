@@ -337,7 +337,7 @@ class WalkForwardAnalyzer:
         window_results = []
 
         for i, (opt_start, opt_end, test_start, test_end) in enumerate(windows):
-            logger.info(f"Processing window {i+1}/{len(windows)}")
+            logger.info(f"Processing window {i + 1}/{len(windows)}")
 
             # Optimize on in-sample data
             opt_data = market_data[opt_start:opt_end]

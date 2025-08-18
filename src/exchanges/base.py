@@ -50,7 +50,7 @@ from src.error_handling.recovery_scenarios import (
 )
 
 # MANDATORY: Import from P-007 (advanced rate limiting)
-from src.exchanges.advanced_rate_limiter import AdvancedRateLimiter
+from src.exchanges.advanced_rate_limiter import get_global_rate_limiter
 from src.exchanges.connection_manager import ConnectionManager
 
 # MANDATORY: Import from P-007A (utils)
@@ -89,7 +89,7 @@ class BaseExchange(ABC):
         self.error_connection_manager = ErrorConnectionManager(config.error_handling)
 
         # P-007: Advanced rate limiting and connection management integration
-        self.advanced_rate_limiter = AdvancedRateLimiter(config)
+        self.advanced_rate_limiter = get_global_rate_limiter(config)
         self.connection_manager = ConnectionManager(config, exchange_name)
 
         # Initialize rate limiter and connection manager

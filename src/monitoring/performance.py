@@ -749,7 +749,7 @@ class CacheOptimizer:
 
             if stats["avg_time"] > 0.01:  # 10ms
                 recommendations.append(
-                    f"{cache_name}: High average access time ({stats['avg_time']*1000:.1f}ms), "
+                    f"{cache_name}: High average access time ({stats['avg_time'] * 1000:.1f}ms), "
                     "consider cache optimization"
                 )
 

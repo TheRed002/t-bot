@@ -82,6 +82,24 @@ class ExchangeFactory:
         """
         return list(self._exchange_registry.keys())
 
+    def get_available_exchanges(self) -> list[str]:
+        """
+        Get list of available exchanges from configuration.
+
+        Returns:
+            List[str]: List of configured exchange names
+        """
+        available = []
+        if hasattr(self.config, "exchanges") and self.config.exchanges:
+            # Check which exchanges have API keys configured
+            if self.config.exchanges.binance_api_key:
+                available.append("binance")
+            if self.config.exchanges.okx_api_key:
+                available.append("okx")
+            if self.config.exchanges.coinbase_api_key:
+                available.append("coinbase")
+        return available
+
     def is_exchange_supported(self, exchange_name: str) -> bool:
         """
         Check if an exchange is supported.

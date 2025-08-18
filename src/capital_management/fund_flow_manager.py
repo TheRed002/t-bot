@@ -84,8 +84,8 @@ class FundFlowManager:
         self.locked_profit = Decimal("0")
 
         # Capital management integration
-        self.capital_allocator = None  # TODO: Will be set by external integration
-        # TODO: Will be updated from actual balances
+        self.capital_allocator = None  # Will be set by CapitalAllocator integration
+        # Total capital will be updated from actual account balances
         self.total_capital = Decimal("0")
 
         # Auto-compounding tracking
@@ -922,3 +922,13 @@ class FundFlowManager:
         except Exception as e:
             logger.error("Failed to get performance summary", error=str(e))
             raise
+
+    def set_capital_allocator(self, capital_allocator) -> None:
+        """
+        Set the capital allocator for integration.
+
+        Args:
+            capital_allocator: CapitalAllocator instance
+        """
+        self.capital_allocator = capital_allocator
+        logger.info("Capital allocator integration established")

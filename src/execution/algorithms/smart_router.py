@@ -106,8 +106,7 @@ class SmartOrderRouter(BaseAlgorithm):
             for exchange in instruction.preferred_exchanges:
                 if exchange not in self.supported_exchanges:
                     raise ValidationError(
-                        f"Unsupported exchange: {exchange}. "
-                        f"Supported: {self.supported_exchanges}"
+                        f"Unsupported exchange: {exchange}. Supported: {self.supported_exchanges}"
                     )
 
         # Validate exchange restrictions

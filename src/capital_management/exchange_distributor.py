@@ -82,14 +82,11 @@ class ExchangeDistributor:
         # Recovery scenarios
         self.partial_fill_recovery = PartialFillRecovery(config)
 
-        # TODO: Remove this in production - This is a placeholder implementation
         # Initialize exchange allocations
-        # The Real Solution:
-        # The total_capital should be initialized by a service that:
-        # 1. Queries Exchange Balances: Uses the exchange integrations (P-003+) to get real balances
-        # 2. Currency Conversion: Uses the CurrencyManager to convert all balances to base currency
-        # 3. Updates Capital Components: Calls update_total_capital() on all
-        # capital management components
+        # Capital will be updated by external service that:
+        # 1. Queries Exchange Balances via exchange integrations
+        # 2. Currency Conversion via CurrencyManager
+        # 3. Updates capital components with real balances
 
         logger.info(
             "Exchange distributor initialized",

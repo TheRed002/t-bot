@@ -646,7 +646,6 @@ class EnsembleStrategy(BaseStrategy):
             if self.last_rebalance is None or current_time - self.last_rebalance > timedelta(
                 hours=self.rebalance_frequency
             ):
-
                 await self._rebalance_strategies()
                 self.last_rebalance = current_time
 

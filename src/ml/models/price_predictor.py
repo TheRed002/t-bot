@@ -19,17 +19,19 @@ from src.core.config import Config
 from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.ml.models.base_model import BaseModel
-from src.utils.gpu_utils import gpu_manager, get_optimal_batch_size
+from src.utils.gpu_utils import gpu_manager
 
 # Try to import GPU-accelerated libraries
 try:
     import xgboost as xgb
+
     XGB_AVAILABLE = True
 except ImportError:
     XGB_AVAILABLE = False
 
 try:
     import lightgbm as lgb
+
     LGB_AVAILABLE = True
 except ImportError:
     LGB_AVAILABLE = False
@@ -37,6 +39,7 @@ except ImportError:
 try:
     from cuml.ensemble import RandomForestRegressor as cuRFRegressor
     from cuml.linear_model import LinearRegression as cuLinearRegression
+
     CUML_AVAILABLE = True
 except ImportError:
     CUML_AVAILABLE = False
@@ -108,7 +111,7 @@ class PricePredictor(BaseModel):
         """Create and return the underlying ML model with GPU acceleration if available."""
         # Merge kwargs with stored model_params
         params = {**self.model_params, **kwargs}
-        
+
         # Log GPU availability
         if gpu_manager.gpu_available:
             logger.info(f"GPU acceleration available for {self.algorithm} model")
@@ -130,21 +133,21 @@ class PricePredictor(BaseModel):
                 "random_state": 42,
             }
             default_params.update(params)
-            
+
             # Use GPU-accelerated version if available
             if CUML_AVAILABLE and gpu_manager.gpu_available:
                 logger.info("Using cuML RandomForestRegressor with GPU acceleration")
                 # Adjust parameters for cuML
                 cuml_params = default_params.copy()
-                cuml_params.pop('min_samples_split', None)
-                cuml_params.pop('min_samples_leaf', None)
+                cuml_params.pop("min_samples_split", None)
+                cuml_params.pop("min_samples_leaf", None)
                 return cuRFRegressor(**cuml_params)
             return RandomForestRegressor(**default_params)
 
         elif self.algorithm == "xgboost":
             if not XGB_AVAILABLE:
                 raise ImportError("XGBoost not available. Please install xgboost.")
-            
+
             default_params = {
                 "n_estimators": 100,
                 "max_depth": 6,
@@ -153,23 +156,21 @@ class PricePredictor(BaseModel):
                 "colsample_bytree": 0.8,
                 "random_state": 42,
             }
-            
+
             # Add GPU parameters if available
             if gpu_manager.gpu_available:
-                default_params.update({
-                    "tree_method": "gpu_hist",
-                    "predictor": "gpu_predictor",
-                    "gpu_id": 0
-                })
+                default_params.update(
+                    {"tree_method": "gpu_hist", "predictor": "gpu_predictor", "gpu_id": 0}
+                )
                 logger.info("Using XGBoost with GPU acceleration")
-            
+
             default_params.update(params)
             return xgb.XGBRegressor(**default_params)
-        
+
         elif self.algorithm == "lightgbm":
             if not LGB_AVAILABLE:
                 raise ImportError("LightGBM not available. Please install lightgbm.")
-            
+
             default_params = {
                 "n_estimators": 100,
                 "max_depth": 10,
@@ -181,16 +182,12 @@ class PricePredictor(BaseModel):
                 "objective": "regression",
                 "metric": "rmse",
             }
-            
+
             # Add GPU parameters if available
             if gpu_manager.gpu_available:
-                default_params.update({
-                    "device": "gpu",
-                    "gpu_platform_id": 0,
-                    "gpu_device_id": 0
-                })
+                default_params.update({"device": "gpu", "gpu_platform_id": 0, "gpu_device_id": 0})
                 logger.info("Using LightGBM with GPU acceleration")
-            
+
             default_params.update(params)
             return lgb.LGBMRegressor(**default_params)
 

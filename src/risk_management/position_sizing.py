@@ -217,8 +217,10 @@ class PositionSizer:
                 )
                 return await self._fixed_percentage_sizing(signal, portfolio_value)
 
-            # All returns are already Decimal, just slice them
-            returns_decimal = returns[-self.risk_config.kelly_lookback_days :]
+            # Convert returns to Decimal and slice them
+            returns_decimal = [
+                to_decimal(r) for r in returns[-self.risk_config.kelly_lookback_days :]
+            ]
 
             # Calculate win probability and win/loss ratio
             winning_returns = [r for r in returns_decimal if r > 0]
@@ -239,8 +241,8 @@ class PositionSizer:
             loss_probability = ONE - win_probability
 
             # Calculate average win and loss magnitudes
-            avg_win = sum(winning_returns) / to_decimal(len(winning_returns))
-            avg_loss = abs(sum(losing_returns) / to_decimal(len(losing_returns)))
+            avg_win = sum(winning_returns, ZERO) / to_decimal(len(winning_returns))
+            avg_loss = abs(sum(losing_returns, ZERO) / to_decimal(len(losing_returns)))
 
             # Prevent division by zero
             if avg_loss <= to_decimal("0.0001"):

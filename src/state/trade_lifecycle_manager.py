@@ -540,7 +540,6 @@ class TradeLifecycleManager:
                 and trade_context.average_fill_price > 0
                 and trade_context.order_type == OrderType.MARKET
             ):
-
                 if trade_context.side == OrderSide.BUY:
                     slippage = (
                         trade_context.average_fill_price - trade_context.requested_price

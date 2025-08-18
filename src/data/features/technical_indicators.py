@@ -39,7 +39,6 @@ from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 
 # Import from P-007A utilities
 from src.utils.decorators import cache_result, time_execution
-from src.utils.gpu_utils import gpu_manager, gpu_accelerated_rolling_window, parallel_apply
 
 logger = get_logger(__name__)
 

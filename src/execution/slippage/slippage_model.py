@@ -339,7 +339,9 @@ class SlippageModel:
             self.logger.warning(f"Spread cost calculation failed: {e}")
             return Decimal("15")  # Default 15 bps
 
-    async def _calculate_volatility_adjustment(self, symbol: str, market_data: MarketData) -> float:
+    async def _calculate_volatility_adjustment(
+        self, symbol: str, market_data: MarketData
+    ) -> Decimal:
         """
         Calculate volatility-based adjustment factor.
 
@@ -348,7 +350,7 @@ class SlippageModel:
             market_data: Market data
 
         Returns:
-            float: Volatility adjustment multiplier
+            Decimal: Volatility adjustment multiplier
         """
         try:
             # Estimate current volatility
@@ -371,14 +373,14 @@ class SlippageModel:
                         adjustment_factor=adjustment_factor,
                     )
 
-                    return adjustment_factor
+                    return Decimal(str(adjustment_factor))
 
             # Fallback to extreme regime
-            return self.volatility_regimes["extreme"]["multiplier"]
+            return Decimal(str(self.volatility_regimes["extreme"]["multiplier"]))
 
         except Exception as e:
             self.logger.warning(f"Volatility adjustment calculation failed: {e}")
-            return 1.0  # No adjustment
+            return Decimal("1.0")  # No adjustment
 
     async def _calculate_expected_execution_price(
         self, order: OrderRequest, market_data: MarketData, slippage_bps: Decimal
@@ -567,7 +569,15 @@ class SlippageModel:
                     errors.append(float(error))
 
                 # Calculate standard error
-                std_error = Decimal(str(np.std(errors))) if errors else Decimal("10")
+                if errors:
+                    std_val = np.std(errors)
+                    if not np.isnan(std_val) and std_val > 0:
+                        std_error = Decimal(str(std_val))
+                    else:
+                        # If all errors are the same (zero variance), use a minimum error
+                        std_error = max(Decimal("1"), base_slippage * Decimal("0.1"))
+                else:
+                    std_error = Decimal("10")
             else:
                 # Default uncertainty estimate
                 std_error = base_slippage * Decimal("0.2")  # 20% uncertainty

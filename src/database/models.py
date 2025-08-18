@@ -9,7 +9,7 @@ all subsequent prompts for data persistence.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -669,6 +669,17 @@ class MarketDataRecord(Base):
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
 
+    def __init__(self, **kwargs):
+        # Set default id if not provided
+        if "id" not in kwargs:
+            kwargs["id"] = str(uuid.uuid4())
+        # Set default timestamps if not provided
+        if "created_at" not in kwargs:
+            kwargs["created_at"] = datetime.now(timezone.utc)
+        if "updated_at" not in kwargs:
+            kwargs["updated_at"] = datetime.now(timezone.utc)
+        super().__init__(**kwargs)
+
     # Market data fields
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     exchange: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
@@ -711,10 +722,17 @@ class MarketDataRecord(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     # Constraints
@@ -735,6 +753,18 @@ class FeatureRecord(Base):
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
+
+    def __init__(self, **kwargs):
+        # Set default id if not provided
+        if "id" not in kwargs:
+            kwargs["id"] = str(uuid.uuid4())
+        # Set default timestamps if not provided (FeatureRecord only has created_at)
+        if "created_at" not in kwargs:
+            kwargs["created_at"] = datetime.now(timezone.utc)
+        # Set default calculation_method if not provided
+        if "calculation_method" not in kwargs:
+            kwargs["calculation_method"] = "standard"
+        super().__init__(**kwargs)
 
     # Feature identification
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
@@ -788,6 +818,15 @@ class DataQualityRecord(Base):
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
 
+    def __init__(self, **kwargs):
+        # Set default id if not provided
+        if "id" not in kwargs:
+            kwargs["id"] = str(uuid.uuid4())
+        # Set default timestamps if not provided (DataQualityRecord only has created_at)
+        if "created_at" not in kwargs:
+            kwargs["created_at"] = datetime.now(timezone.utc)
+        super().__init__(**kwargs)
+
     # Quality identification
     symbol: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     data_source: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -837,6 +876,17 @@ class DataPipelineRecord(Base):
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
+
+    def __init__(self, **kwargs):
+        # Set default id if not provided
+        if "id" not in kwargs:
+            kwargs["id"] = str(uuid.uuid4())
+        # Set default timestamps if not provided
+        if "created_at" not in kwargs:
+            kwargs["created_at"] = datetime.now(timezone.utc)
+        if "updated_at" not in kwargs:
+            kwargs["updated_at"] = datetime.now(timezone.utc)
+        super().__init__(**kwargs)
 
     # Pipeline identification
     pipeline_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)

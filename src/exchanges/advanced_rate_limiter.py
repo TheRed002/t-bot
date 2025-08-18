@@ -32,6 +32,9 @@ from src.utils.decorators import log_calls, time_execution
 
 logger = get_logger(__name__)
 
+# Global rate limiter instance to avoid duplication
+_global_rate_limiter = None
+
 
 class AdvancedRateLimiter:
     """
@@ -56,7 +59,6 @@ class AdvancedRateLimiter:
         # Initialize exchange-specific limiters
         self._initialize_exchange_limiters()
 
-        # TODO: Remove in production
         logger.debug(
             f"AdvancedRateLimiter initialized with {len(self.exchange_limiters)} exchanges"
         )
@@ -780,3 +782,26 @@ class CoinbaseRateLimiter:
             return False
 
         return True
+
+
+def get_global_rate_limiter(config: Config = None) -> AdvancedRateLimiter:
+    """
+    Get or create the global rate limiter instance.
+
+    This prevents duplicate initialization of rate limiters across exchanges.
+
+    Args:
+        config: Application configuration (required for first call)
+
+    Returns:
+        AdvancedRateLimiter: Global rate limiter instance
+    """
+    global _global_rate_limiter
+
+    if _global_rate_limiter is None:
+        if config is None:
+            raise ValueError("Config required for first rate limiter initialization")
+        _global_rate_limiter = AdvancedRateLimiter(config)
+        logger.info("Global rate limiter instance created")
+
+    return _global_rate_limiter

@@ -363,15 +363,16 @@ class OrderManager:
                 raise ExecutionError("Maximum concurrent orders reached")
 
             # Get or create idempotency key
-            client_order_id, is_duplicate = (
-                await self.idempotency_manager.get_or_create_idempotency_key(
-                    order_request,
-                    metadata={
-                        "execution_id": execution_id,
-                        "exchange": exchange.exchange_name,
-                        "created_by": "order_manager",
-                    },
-                )
+            (
+                client_order_id,
+                is_duplicate,
+            ) = await self.idempotency_manager.get_or_create_idempotency_key(
+                order_request,
+                metadata={
+                    "execution_id": execution_id,
+                    "exchange": exchange.exchange_name,
+                    "created_by": "order_manager",
+                },
             )
 
             # Set client_order_id on the order request

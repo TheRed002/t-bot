@@ -491,7 +491,6 @@ class VWAPAlgorithm(BaseAlgorithm):
             risk_manager: Risk manager for validation
         """
         try:
-
             for slice_info in execution_plan["slices"]:
                 # Check if execution was cancelled
                 if execution_result.status == ExecutionStatus.CANCELLED:

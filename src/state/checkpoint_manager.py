@@ -416,7 +416,7 @@ class CheckpointManager:
 
             for i, step in enumerate(plan.steps):
                 step_name = step["step"]
-                self.logger.info(f"Executing recovery step {i+1}/{len(plan.steps)}: {step_name}")
+                self.logger.info(f"Executing recovery step {i + 1}/{len(plan.steps)}: {step_name}")
 
                 if step_name == "validate_checkpoint":
                     metadata = self.checkpoints.get(step["checkpoint_id"])

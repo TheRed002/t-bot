@@ -5,6 +5,7 @@ This module provides trading operations including order placement, cancellation,
 order history, and trade analysis functionality.
 """
 
+import random
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any

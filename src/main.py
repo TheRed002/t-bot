@@ -40,6 +40,14 @@ class Application:
             # Setup logging first
             self._setup_logging()
 
+            # Set a correlation ID for this initialization
+            from src.core.logging import correlation_context
+
+            correlation_id = correlation_context.generate_correlation_id()
+            correlation_context.set_correlation_id(correlation_id)
+
+            self.logger.info("Starting application initialization", correlation_id=correlation_id)
+
             # Load and validate configuration
             await self._load_configuration()
 
@@ -69,17 +77,18 @@ class Application:
 
     def _setup_logging(self) -> None:
         """Setup logging configuration."""
-        # TODO: Remove in production - Debug logging setup
-        if self.config and self.config.debug:
-            from src.core.logging import setup_debug_logging
-
-            setup_debug_logging()
-
         # Setup logging based on environment
         environment = (
             getattr(self.config, "environment", "development") if self.config else "development"
         )
         setup_logging(environment=environment)
+
+        # Enable debug logging only in development mode
+        if self.config and self.config.debug and environment == "development":
+            from src.core.logging import setup_debug_logging
+
+            setup_debug_logging()
+            self.logger.debug("Debug logging enabled for development environment")
 
         self.logger.info("Logging system initialized")
 
@@ -133,10 +142,43 @@ class Application:
             raise
 
     async def _initialize_database(self) -> None:
-        """Initialize database connections."""
-        # Placeholder for P-002 database implementation
-        self.logger.info("Database initialization placeholder - will be implemented in P-002")
-        self.health_status["components"]["database"] = "initialized"
+        """Initialize database connections and seed data in development."""
+        # Skip database in development/mock mode for now
+        import os
+
+        if os.getenv("MOCK_MODE") or self.config.environment == "development":
+            self.logger.info("Skipping database initialization in development/mock mode")
+            self.health_status["components"]["database"] = "mock"
+            return
+
+        try:
+            # Initialize database connection
+            from src.database.connection import init_database
+
+            await init_database(self.config)
+            self.logger.info("Database connection initialized")
+
+            # Run database seeding in development mode
+            if self.config.environment == "development":
+                self.logger.info("Running database seeding for development environment...")
+                try:
+                    from src.database.seed_data import DatabaseSeeder
+
+                    seeder = DatabaseSeeder(self.config)
+                    await seeder.seed_all()
+                    self.logger.info("Database seeding completed")
+                except Exception as e:
+                    # Don't fail if seeding fails, just log the error
+                    self.logger.warning(f"Database seeding failed (non-critical): {e}")
+
+            self.health_status["components"]["database"] = "initialized"
+
+        except Exception as e:
+            self.logger.error(f"Database initialization failed: {e}")
+            self.health_status["components"]["database"] = "error"
+            # Continue without database for now in development
+            if self.config.environment != "development":
+                raise
 
     async def _initialize_exchanges(self) -> None:
         """Initialize exchange connections."""
@@ -207,7 +249,7 @@ class Application:
 
             if "exchange_factory" in self.components:
                 # Get first available exchange for strategies
-                exchanges = self.components["exchange_factory"].get_all_exchanges()
+                exchanges = await self.components["exchange_factory"].get_all_active_exchanges()
                 if exchanges:
                     first_exchange = next(iter(exchanges.values()))
                     self.components["strategy_factory"].set_exchange(first_exchange)
@@ -225,7 +267,7 @@ class Application:
 
                     # Create strategy instance
                     self.components["strategy_factory"].create_strategy(
-                        strategy_name, config.dict()
+                        strategy_name, config.model_dump()
                     )
 
                     self.logger.info(f"Initialized strategy: {strategy_name}")
@@ -350,17 +392,59 @@ class Application:
         """Get current application health status."""
         return self.health_status.copy()
 
+    async def _perform_health_checks(self) -> None:
+        """Perform periodic health checks on application components."""
+        try:
+            # Check component health status
+            unhealthy_components = []
+            for component, status in self.health_status.get("components", {}).items():
+                if status == "error":
+                    unhealthy_components.append(component)
+
+            if unhealthy_components:
+                self.logger.warning(
+                    f"Unhealthy components detected: {', '.join(unhealthy_components)}"
+                )
+
+            # Update overall status
+            if unhealthy_components:
+                self.health_status["status"] = "degraded"
+            elif self.health_status["status"] == "running":
+                self.health_status["status"] = "healthy"
+
+            # Log periodic status
+            component_count = len(self.health_status.get("components", {}))
+            self.logger.debug(
+                f"Health check completed: {component_count} components, status: {self.health_status['status']}"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Health check failed: {e}")
+
     async def run(self) -> None:
         """Run the main application loop."""
         try:
             # Initialize application
             await self.initialize()
 
-            # Main application loop
+            # Main application loop - monitor components and handle events
+            loop_count = 0
             while not self.shutdown_event.is_set():
-                # TODO: Remove in production - Main loop placeholder
-                self.logger.debug("Main application loop iteration")
-                await asyncio.sleep(1)
+                try:
+                    # Perform periodic health checks and maintenance
+                    if loop_count % 60 == 0:  # Every 60 seconds
+                        await self._perform_health_checks()
+
+                    # Yield control and wait for shutdown event
+                    await asyncio.sleep(1)
+                    loop_count += 1
+
+                except asyncio.CancelledError:
+                    self.logger.info("Main loop cancelled, initiating shutdown")
+                    break
+                except Exception as e:
+                    self.logger.error(f"Error in main loop: {e}")
+                    await asyncio.sleep(5)  # Prevent tight error loops
 
         except Exception as e:
             self.logger.error(

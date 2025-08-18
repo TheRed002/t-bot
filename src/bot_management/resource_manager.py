@@ -115,8 +115,7 @@ class ResourceManager:
 
             self.logger.info("Starting resource manager")
 
-            # Initialize capital allocator
-            await self.capital_allocator.initialize()
+            # Capital allocator is already initialized in __init__
 
             # Start monitoring task
             self.monitoring_task = asyncio.create_task(self._monitoring_loop())

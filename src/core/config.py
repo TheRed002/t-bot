@@ -29,40 +29,58 @@ class BaseConfig(BaseSettings):
         "case_sensitive": False,
         "validate_assignment": True,
         "extra": "ignore",
+        "populate_by_name": True,  # Allow both field names and aliases
     }
 
 
 class DatabaseConfig(BaseConfig):
     """Database configuration for PostgreSQL, Redis, and InfluxDB."""
 
-    # PostgreSQL
-    postgresql_host: str = Field(default="localhost", description="PostgreSQL host")
-    postgresql_port: int = Field(default=5432, description="PostgreSQL port")
+    # PostgreSQL - Using environment variable names from .env
+    postgresql_host: str = Field(
+        default="localhost", description="PostgreSQL host", alias="DB_HOST"
+    )
+    postgresql_port: int = Field(default=5432, description="PostgreSQL port", alias="DB_PORT")
     postgresql_database: str = Field(
-        default="trading_bot", pattern=r"^[a-zA-Z0-9_-]+$", description="PostgreSQL database name"
+        default="tbot_dev",
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="PostgreSQL database name",
+        alias="DB_NAME",
     )
     postgresql_username: str = Field(
-        default="tbot", pattern=r"^[a-zA-Z0-9_-]+$", description="PostgreSQL username"
+        default="tbot",
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="PostgreSQL username",
+        alias="DB_USER",
     )
     postgresql_password: str = Field(
-        default="changeme_secure_password_123!", min_length=8, description="PostgreSQL password"
+        default="tbot_password",
+        min_length=8,
+        description="PostgreSQL password",
+        alias="DB_PASSWORD",
     )
     postgresql_pool_size: int = Field(default=20, description="PostgreSQL connection pool size")
 
-    # Redis
-    redis_host: str = Field(default="localhost", description="Redis host")
-    redis_port: int = Field(default=6379, description="Redis port")
+    # Redis - Using environment variable names from .env
+    redis_host: str = Field(default="localhost", description="Redis host", alias="REDIS_HOST")
+    redis_port: int = Field(default=6379, description="Redis port", alias="REDIS_PORT")
     redis_password: str | None = Field(
-        default="redis_secure_password", description="Redis password"
+        default=None, description="Redis password", alias="REDIS_PASSWORD"
     )
-    redis_db: int = Field(default=0, description="Redis database number")
+    redis_db: int = Field(default=0, description="Redis database number", alias="REDIS_DB")
 
-    # InfluxDB
-    influxdb_host: str = Field(default="localhost", description="InfluxDB host")
-    influxdb_port: int = Field(default=8086, description="InfluxDB port")
-    influxdb_token: str = Field(default="changeme_influxdb_token", description="InfluxDB token")
-    influxdb_org: str = Field(default="tbot_production", description="InfluxDB organization")
-    influxdb_bucket: str = Field(default="trading_data_production", description="InfluxDB bucket")
+    # InfluxDB - Using environment variable names from .env
+    influxdb_host: str = Field(
+        default="localhost", description="InfluxDB host", alias="INFLUXDB_HOST"
+    )
+    influxdb_port: int = Field(default=8086, description="InfluxDB port", alias="INFLUXDB_PORT")
+    influxdb_token: str = Field(default="", description="InfluxDB token", alias="INFLUXDB_TOKEN")
+    influxdb_org: str = Field(
+        default="tbot", description="InfluxDB organization", alias="INFLUXDB_ORG"
+    )
+    influxdb_bucket: str = Field(
+        default="trading_data", description="InfluxDB bucket", alias="INFLUXDB_BUCKET"
+    )
 
     @field_validator("postgresql_port", "redis_port", "influxdb_port")
     @classmethod

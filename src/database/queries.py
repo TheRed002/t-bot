@@ -827,7 +827,7 @@ class DatabaseQueries:
 
         if old_records:
             for record in old_records:
-                await self.session.delete(record)
+                self.session.delete(record)
             await self.session.commit()
             return len(old_records)
 

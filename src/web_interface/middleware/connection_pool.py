@@ -116,15 +116,23 @@ class ConnectionPoolManager:
             }
 
             # Create Redis connection pool
+            # Build connection kwargs without ssl if False
+            connection_kwargs = {
+                "password": redis_config["password"],
+                "encoding": redis_config["encoding"],
+                "decode_responses": redis_config["decode_responses"],
+                "max_connections": redis_config["max_connections"],
+                "retry_on_timeout": redis_config["retry_on_timeout"],
+                "health_check_interval": redis_config["health_check_interval"],
+            }
+
+            # Only add ssl if it's True (aioredis doesn't accept ssl=False)
+            if redis_config.get("ssl", False):
+                connection_kwargs["ssl"] = redis_config["ssl"]
+
             self.redis_pool = aioredis.ConnectionPool.from_url(
                 f"redis://{redis_config['host']}:{redis_config['port']}/{redis_config['db']}",
-                password=redis_config["password"],
-                ssl=redis_config["ssl"],
-                encoding=redis_config["encoding"],
-                decode_responses=redis_config["decode_responses"],
-                max_connections=redis_config["max_connections"],
-                retry_on_timeout=redis_config["retry_on_timeout"],
-                health_check_interval=redis_config["health_check_interval"],
+                **connection_kwargs,
             )
 
             # Test Redis connection

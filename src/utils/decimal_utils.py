@@ -462,8 +462,8 @@ class FloatDeprecationWarning:
         )
 
 
-# Module initialization
-logger.info(
+# Module initialization - Only log in debug mode to avoid spam
+logger.debug(
     "Decimal utilities initialized",
     precision=FINANCIAL_CONTEXT.prec,
     rounding=FINANCIAL_CONTEXT.rounding,

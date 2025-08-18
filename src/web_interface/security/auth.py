@@ -69,22 +69,29 @@ fake_users_db = {
         user_id="admin-001",
         username="admin",
         email="admin@tbot.com",
-        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",  # "secret"
+        hashed_password="$2b$12$diZlgLA2DcrQ2Cp.Lz1kguQCUQhBAT5mSz0vA6K6MbDXN53xh9znO",  # "admin123"
         scopes=["admin", "read", "write", "trade", "manage"],
     ),
-    "trader": UserInDB(
+    "trader1": UserInDB(
         user_id="trader-001",
-        username="trader",
-        email="trader@tbot.com",
-        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",  # "secret"
+        username="trader1",
+        email="trader1@tbot.com",
+        hashed_password="$2b$12$7QoizNw7ijo8jEGoj.8yWufWwk3TiZ3pphr4pT3crSwveLtqFhOra",  # "trader123"
         scopes=["read", "write", "trade"],
     ),
     "viewer": UserInDB(
         user_id="viewer-001",
         username="viewer",
         email="viewer@tbot.com",
-        hashed_password="$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",  # "secret"
+        hashed_password="$2b$12$lpTFplMihx..tSMw1mvxFeOHYt5tETNiZw78O4jAnK5BrhJOf7zYG",  # "viewer123"
         scopes=["read"],
+    ),
+    "demo": UserInDB(
+        user_id="demo-001",
+        username="demo",
+        email="demo@tbot.com",
+        hashed_password="$2b$12$0VeXXrvNNvs6Ykjw3v9UtePRPY88fJZb2IPuHcaNHnH3LPAbCOFXa",  # "demo123"
+        scopes=["read", "write"],
     ),
 }
 
@@ -385,3 +392,46 @@ def get_auth_summary() -> dict:
             "token_revocation",
         ],
     }
+
+
+def require_permissions(required_permissions: list[str]):
+    """
+    Create a dependency that requires specific permissions.
+
+    Args:
+        required_permissions: List of required permission strings
+
+    Returns:
+        Dependency function that checks permissions
+    """
+
+    def check_permissions(current_user: User = Depends(get_current_user)) -> User:
+        """
+        Check if user has required permissions.
+
+        Args:
+            current_user: Current authenticated user
+
+        Returns:
+            Current user (if authorized)
+
+        Raises:
+            HTTPException: If user lacks required permissions
+        """
+        user_permissions = set(current_user.scopes)
+        required_perms = set(required_permissions)
+
+        # Admin users have all permissions
+        if "admin" in user_permissions:
+            return current_user
+
+        # Check if user has at least one of the required permissions
+        if not required_perms.intersection(user_permissions):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Required permissions: {', '.join(required_permissions)}",
+            )
+
+        return current_user
+
+    return check_permissions

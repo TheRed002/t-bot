@@ -25,6 +25,7 @@ from src.risk_management.base import BaseRiskManager
 from src.strategies.base import BaseStrategy
 from src.strategies.dynamic.adaptive_momentum import AdaptiveMomentumStrategy
 from src.strategies.dynamic.volatility_breakout import VolatilityBreakoutStrategy
+from src.strategies.static.arbitrage_scanner import ArbitrageOpportunity
 from src.strategies.static.breakout import BreakoutStrategy
 
 # MANDATORY: Import from P-013 - Dynamic strategies
@@ -59,12 +60,13 @@ class StrategyFactory:
         self._register_strategy_class("mean_reversion", MeanReversionStrategy)
         self._register_strategy_class("trend_following", TrendFollowingStrategy)
         self._register_strategy_class("breakout", BreakoutStrategy)
+        self._register_strategy_class("arbitrage", ArbitrageOpportunity)
 
         # Dynamic strategies (P-013)
         self._register_strategy_class("adaptive_momentum", AdaptiveMomentumStrategy)
         self._register_strategy_class("volatility_breakout", VolatilityBreakoutStrategy)
 
-        logger.info("Built-in strategies registered", static_count=3, dynamic_count=2)
+        logger.info("Built-in strategies registered", static_count=4, dynamic_count=2)
 
     def _register_strategy_class(self, name: str, strategy_class: type[BaseStrategy]) -> None:
         """Register a strategy class.

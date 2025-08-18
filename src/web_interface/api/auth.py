@@ -335,6 +335,44 @@ async def list_users(admin_user: User = Depends(get_admin_user)):
         )
 
 
+@router.get("/demo-credentials")
+async def get_demo_credentials():
+    """
+    Get demo credentials for development environment.
+
+    Returns:
+        dict: Demo credentials (only in development mode)
+    """
+    import os
+
+    # Only return demo credentials in development mode
+    environment = os.getenv("ENVIRONMENT", "development")
+    if environment != "development":
+        return {
+            "available": False,
+            "message": "Demo credentials only available in development mode",
+        }
+
+    return {
+        "available": True,
+        "credentials": [
+            {
+                "username": "admin",
+                "password": "admin123",
+                "description": "Admin user with full access",
+            },
+            {
+                "username": "trader1",
+                "password": "trader123",
+                "description": "Trader with trading permissions",
+            },
+            {"username": "viewer", "password": "viewer123", "description": "Read-only viewer"},
+            {"username": "demo", "password": "demo123", "description": "Demo user for testing"},
+        ],
+        "message": "Use these credentials to login in development mode",
+    }
+
+
 @router.get("/status")
 async def get_auth_status():
     """

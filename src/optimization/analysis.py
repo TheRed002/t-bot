@@ -1073,7 +1073,6 @@ class ResultsAnalyzer:
                     and len(parameter_data[param1]) == len(parameter_data[param2])
                     and len(parameter_data[param1]) > 1
                 ):
-
                     try:
                         corr, _ = pearsonr(parameter_data[param1], parameter_data[param2])
                         correlation_matrix[param1][param2] = corr if not math.isnan(corr) else 0.0

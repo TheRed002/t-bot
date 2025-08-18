@@ -576,7 +576,9 @@ class CostAnalyzer:
                 "cost_efficiency": (
                     "high"
                     if total_cost_bps <= self.good_threshold_bps
-                    else "medium" if total_cost_bps <= self.acceptable_threshold_bps else "low"
+                    else "medium"
+                    if total_cost_bps <= self.acceptable_threshold_bps
+                    else "low"
                 ),
             }
 
@@ -623,7 +625,9 @@ class CostAnalyzer:
                 "cost_effectiveness": (
                     "good"
                     if total_cost_bps <= 20
-                    else "average" if total_cost_bps <= 40 else "poor"
+                    else "average"
+                    if total_cost_bps <= 40
+                    else "poor"
                 ),
                 "execution_speed": (
                     "fast"
@@ -650,12 +654,16 @@ class CostAnalyzer:
                 "market_impact_severity": (
                     "low"
                     if market_impact_bps <= 10
-                    else "medium" if market_impact_bps <= 25 else "high"
+                    else "medium"
+                    if market_impact_bps <= 25
+                    else "high"
                 ),
                 "timing_impact": (
                     "favorable"
                     if timing_cost_bps <= 5
-                    else "neutral" if timing_cost_bps <= 15 else "adverse"
+                    else "neutral"
+                    if timing_cost_bps <= 15
+                    else "adverse"
                 ),
                 "market_volatility_effect": "low",  # Simplified
             }

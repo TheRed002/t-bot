@@ -958,9 +958,11 @@ class ValidationEngine:
 
         # 5. Statistical significance testing
         optimization_scores = [out_of_sample_score, *validation_scores, *walk_forward_scores]
-        p_value, confidence_interval, is_significant = (
-            await self.statistical_tester.test_significance(optimization_scores)
-        )
+        (
+            p_value,
+            confidence_interval,
+            is_significant,
+        ) = await self.statistical_tester.test_significance(optimization_scores)
 
         # 6. Robustness analysis
         robustness_score, robustness_details = await self.robustness_analyzer.analyze_robustness(
