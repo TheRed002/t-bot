@@ -606,10 +606,17 @@ def validate_decimal(
         ValidationError: If value is invalid
     """
     try:
+        if value is None:
+            raise ValidationError("Cannot convert None to Decimal")
+            
         if isinstance(value, Decimal):
             decimal_value = value
         else:
             decimal_value = Decimal(str(value))
+        
+        # Check for NaN which indicates invalid conversion
+        if decimal_value != decimal_value:  # NaN check (NaN != NaN is True)
+            raise ValidationError(f"Cannot convert to Decimal: invalid value '{value}'")
 
         if min_value is not None and decimal_value < min_value:
             raise ValidationError(f"Value {decimal_value} below minimum {min_value}")

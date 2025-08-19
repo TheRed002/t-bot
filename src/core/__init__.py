@@ -6,7 +6,7 @@ exceptions, and logging systems.
 """
 
 # Core framework exports
-from .config import Config, DatabaseConfig, SecurityConfig
+from .config import Config, DatabaseConfig
 from .exceptions import (
     DataError,
     ExchangeError,
@@ -74,7 +74,6 @@ __all__ = [
     "ProcessingStep",
     "QualityLevel",
     "RiskManagementError",
-    "SecurityConfig",
     "SecurityError",
     "Signal",
     "SignalDirection",

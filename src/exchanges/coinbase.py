@@ -714,3 +714,146 @@ class CoinbaseExchange(BaseExchange):
             "1d": "ONE_DAY",
         }
         return mapping.get(timeframe, "ONE_MINUTE")
+
+    async def _get_market_data_from_exchange(
+        self, symbol: str, timeframe: str = "1m"
+    ) -> MarketData:
+        """
+        Get market data directly from Coinbase exchange API.
+
+        Args:
+            symbol: Trading symbol (e.g., 'BTC-USD')
+            timeframe: Timeframe for the data (e.g., '1m', '1h', '1d')
+
+        Returns:
+            MarketData: Market data from Coinbase
+
+        Raises:
+            ExchangeConnectionError: If not connected to exchange
+            ExchangeError: If API request fails
+        """
+        if not self.connected:
+            raise ExchangeConnectionError("Not connected to Coinbase exchange")
+
+        try:
+            # Convert symbol to Coinbase format if needed
+            coinbase_symbol = self._convert_symbol_to_coinbase_format(symbol)
+            
+            # Get current ticker data
+            ticker_data = self.rest_client.get_product_ticker(coinbase_symbol)
+            
+            if not ticker_data:
+                raise ExchangeError("Invalid ticker data received from Coinbase")
+            
+            # Get OHLCV data for additional information
+            granularity = self._convert_timeframe_to_granularity(timeframe)
+            candles = self.rest_client.get_product_candles(
+                coinbase_symbol, 
+                granularity=granularity, 
+                limit=1
+            )
+            
+            candle = None
+            if candles and len(candles) > 0:
+                candle = candles[0]
+            
+            # Create MarketData object
+            return MarketData(
+                symbol=symbol,
+                price=Decimal(str(ticker_data.get("price", "0"))),
+                volume=Decimal(str(ticker_data.get("volume", "0"))),
+                timestamp=datetime.now(timezone.utc),
+                bid=Decimal(str(ticker_data.get("bid", "0"))) if ticker_data.get("bid") else None,
+                ask=Decimal(str(ticker_data.get("ask", "0"))) if ticker_data.get("ask") else None,
+                open_price=Decimal(str(candle["open"])) if candle and "open" in candle else None,
+                high_price=Decimal(str(candle["high"])) if candle and "high" in candle else None,
+                low_price=Decimal(str(candle["low"])) if candle and "low" in candle else None,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get market data from Coinbase for {symbol}: {e!s}")
+            raise ExchangeError(f"Market data request failed: {e!s}")
+
+    async def _get_trade_history_from_exchange(self, symbol: str, limit: int = 100) -> list[Trade]:
+        """
+        Get trade history directly from Coinbase exchange API.
+
+        Args:
+            symbol: Trading symbol
+            limit: Maximum number of trades to retrieve
+
+        Returns:
+            List[Trade]: List of trades from Coinbase
+
+        Raises:
+            ExchangeConnectionError: If not connected to exchange
+            ExchangeError: If API request fails
+        """
+        if not self.connected:
+            raise ExchangeConnectionError("Not connected to Coinbase exchange")
+
+        try:
+            # Convert symbol to Coinbase format if needed
+            coinbase_symbol = self._convert_symbol_to_coinbase_format(symbol)
+            
+            # Get trade history from account API
+            # Note: This gets account trade fills, not market trade history
+            fills = self.rest_client.list_fills(product_id=coinbase_symbol, limit=limit)
+            
+            if not fills:
+                return []
+            
+            trades = []
+            for fill in fills:
+                try:
+                    trade = Trade(
+                        id=fill.get("trade_id", ""),
+                        order_id=fill.get("order_id"),
+                        symbol=symbol,
+                        side=OrderSide.BUY if fill.get("side") == "BUY" else OrderSide.SELL,
+                        amount=Decimal(str(fill.get("size", "0"))),
+                        price=Decimal(str(fill.get("price", "0"))),
+                        fee=Decimal(str(fill.get("fee", "0"))),
+                        fee_currency=fill.get("fee_currency", "USD"),
+                        timestamp=datetime.fromisoformat(
+                            fill.get("created_at", "").replace("Z", "+00:00")
+                        ),
+                    )
+                    trades.append(trade)
+                except Exception as trade_error:
+                    logger.warning(f"Failed to parse trade data: {trade_error}")
+                    continue
+                    
+            return trades
+
+        except Exception as e:
+            logger.error(f"Failed to get trade history from Coinbase for {symbol}: {e!s}")
+            return []  # Return empty list on error rather than raising exception
+
+    def _convert_symbol_to_coinbase_format(self, symbol: str) -> str:
+        """
+        Convert symbol to Coinbase format.
+        
+        Args:
+            symbol: Symbol in standard format (e.g., 'BTCUSDT')
+            
+        Returns:
+            str: Symbol in Coinbase format (e.g., 'BTC-USD')
+        """
+        # Coinbase uses dash-separated format and USD instead of USDT
+        if "-" not in symbol and len(symbol) >= 6:
+            # Assume format is like BTCUSDT, need to convert to BTC-USD
+            if symbol.endswith("USDT"):
+                base = symbol[:-4]
+                return f"{base}-USD"
+            elif symbol.endswith("USD"):
+                base = symbol[:-3]
+                return f"{base}-USD"
+            elif symbol.endswith("BTC"):
+                base = symbol[:-3]
+                return f"{base}-BTC"
+            elif symbol.endswith("ETH"):
+                base = symbol[:-3]
+                return f"{base}-ETH"
+        
+        return symbol  # Return as-is if already in correct format or can't parse

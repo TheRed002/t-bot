@@ -60,7 +60,7 @@ class DatabaseConnectionManager:
     @time_execution
     @retry(max_attempts=3)
     @circuit_breaker(failure_threshold=3, recovery_timeout=30)
-    @timeout(seconds=60)
+    @timeout(60)
     async def initialize(self) -> None:
         """Initialize all database connections."""
         with PerformanceMonitor("database_initialization"):
@@ -147,7 +147,7 @@ class DatabaseConnectionManager:
 
     @time_execution
     @circuit_breaker(failure_threshold=2, recovery_timeout=15)
-    @timeout(seconds=30)
+    @timeout(30)
     async def _setup_postgresql(self) -> None:
         """Setup PostgreSQL connections with async support."""
         try:
@@ -234,7 +234,7 @@ class DatabaseConnectionManager:
 
     @time_execution
     @circuit_breaker(failure_threshold=2, recovery_timeout=15)
-    @timeout(seconds=20)
+    @timeout(20)
     async def _setup_redis(self) -> None:
         """Setup Redis connection with async support."""
         try:
@@ -271,7 +271,7 @@ class DatabaseConnectionManager:
 
     @time_execution
     @circuit_breaker(failure_threshold=2, recovery_timeout=15)
-    @timeout(seconds=25)
+    @timeout(25)
     async def _setup_influxdb(self) -> None:
         """Setup InfluxDB connection."""
         try:

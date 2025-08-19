@@ -1,0 +1,241 @@
+"""Main configuration aggregator for the T-Bot trading system."""
+
+import os
+from pathlib import Path
+from typing import Any, Dict, Optional
+import json
+import yaml
+
+from .base import BaseConfig
+from .database import DatabaseConfig
+from .exchange import ExchangeConfig
+from .strategy import StrategyConfig
+from .risk import RiskConfig
+
+
+class Config:
+    """
+    Main configuration aggregator that maintains backward compatibility.
+    
+    This class aggregates all domain-specific configurations and provides
+    a unified interface for accessing configuration values.
+    """
+    
+    def __init__(self, config_file: Optional[str] = None, env_file: Optional[str] = ".env"):
+        """
+        Initialize configuration from environment and optional config file.
+        
+        Args:
+            config_file: Optional path to YAML/JSON config file
+            env_file: Path to .env file (default: ".env")
+        """
+        # Set env file for all configs
+        if env_file and os.path.exists(env_file):
+            os.environ["ENV_FILE"] = env_file
+        
+        # Initialize domain configs
+        self.database = DatabaseConfig()
+        self.exchange = ExchangeConfig()
+        self.strategy = StrategyConfig()
+        self.risk = RiskConfig()
+        
+        # Load from config file if provided
+        if config_file:
+            self.load_from_file(config_file)
+        
+        # App-level configuration (not domain-specific)
+        self.app_name = os.getenv("APP_NAME", "T-Bot Trading System")
+        self.environment = os.getenv("ENVIRONMENT", "development")
+        self.debug = os.getenv("DEBUG", "false").lower() == "true"
+        self.log_level = os.getenv("LOG_LEVEL", "INFO")
+        self.data_dir = Path(os.getenv("DATA_DIR", "./data"))
+        self.logs_dir = Path(os.getenv("LOGS_DIR", "./logs"))
+        
+        # Ensure directories exist
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+    
+    def load_from_file(self, config_file: str) -> None:
+        """Load configuration from YAML or JSON file."""
+        config_path = Path(config_file)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_file}")
+        
+        with open(config_path, 'r') as f:
+            if config_path.suffix in ['.yaml', '.yml']:
+                config_data = yaml.safe_load(f)
+            elif config_path.suffix == '.json':
+                config_data = json.load(f)
+            else:
+                raise ValueError(f"Unsupported config file format: {config_path.suffix}")
+        
+        # Update domain configs with file data
+        if 'database' in config_data:
+            for key, value in config_data['database'].items():
+                if hasattr(self.database, key):
+                    setattr(self.database, key, value)
+        
+        if 'exchange' in config_data:
+            for key, value in config_data['exchange'].items():
+                if hasattr(self.exchange, key):
+                    setattr(self.exchange, key, value)
+        
+        if 'strategy' in config_data:
+            for key, value in config_data['strategy'].items():
+                if hasattr(self.strategy, key):
+                    setattr(self.strategy, key, value)
+        
+        if 'risk' in config_data:
+            for key, value in config_data['risk'].items():
+                if hasattr(self.risk, key):
+                    setattr(self.risk, key, value)
+    
+    def save_to_file(self, config_file: str) -> None:
+        """Save current configuration to YAML or JSON file."""
+        config_path = Path(config_file)
+        
+        config_data = {
+            'app': {
+                'name': self.app_name,
+                'environment': self.environment,
+                'debug': self.debug,
+                'log_level': self.log_level,
+                'data_dir': str(self.data_dir),
+                'logs_dir': str(self.logs_dir)
+            },
+            'database': self.database.model_dump(),
+            'exchange': self.exchange.model_dump(),
+            'strategy': self.strategy.model_dump(),
+            'risk': self.risk.model_dump()
+        }
+        
+        with open(config_path, 'w') as f:
+            if config_path.suffix in ['.yaml', '.yml']:
+                yaml.dump(config_data, f, default_flow_style=False)
+            elif config_path.suffix == '.json':
+                json.dump(config_data, f, indent=2)
+            else:
+                raise ValueError(f"Unsupported config file format: {config_path.suffix}")
+    
+    def validate(self) -> None:
+        """Validate all configurations."""
+        self.database.validate()
+        self.exchange.validate()
+        self.strategy.validate()
+        self.risk.validate()
+    
+    # Backward compatibility properties
+    @property
+    def db_url(self) -> str:
+        """Backward compatibility for database URL."""
+        return self.database.postgresql_url
+    
+    @property
+    def redis_url(self) -> str:
+        """Backward compatibility for Redis URL."""
+        return self.database.redis_url
+    
+    @property
+    def postgresql_host(self) -> str:
+        """Backward compatibility."""
+        return self.database.postgresql_host
+    
+    @property
+    def postgresql_port(self) -> int:
+        """Backward compatibility."""
+        return self.database.postgresql_port
+    
+    @property
+    def postgresql_database(self) -> str:
+        """Backward compatibility."""
+        return self.database.postgresql_database
+    
+    @property
+    def postgresql_username(self) -> str:
+        """Backward compatibility."""
+        return self.database.postgresql_username
+    
+    @property
+    def postgresql_password(self) -> str:
+        """Backward compatibility."""
+        return self.database.postgresql_password
+    
+    @property
+    def redis_host(self) -> str:
+        """Backward compatibility."""
+        return self.database.redis_host
+    
+    @property
+    def redis_port(self) -> int:
+        """Backward compatibility."""
+        return self.database.redis_port
+    
+    @property
+    def binance_api_key(self) -> str:
+        """Backward compatibility."""
+        return self.exchange.binance_api_key
+    
+    @property
+    def binance_api_secret(self) -> str:
+        """Backward compatibility."""
+        return self.exchange.binance_api_secret
+    
+    @property
+    def max_position_size(self) -> Any:
+        """Backward compatibility."""
+        return self.risk.max_position_size
+    
+    @property
+    def risk_per_trade(self) -> float:
+        """Backward compatibility."""
+        return self.risk.risk_per_trade
+    
+    def get_exchange_config(self, exchange: str) -> Dict[str, Any]:
+        """Get configuration for a specific exchange."""
+        return self.exchange.get_exchange_credentials(exchange)
+    
+    def get_strategy_config(self, strategy_type: str) -> Dict[str, Any]:
+        """Get configuration for a specific strategy."""
+        return self.strategy.get_strategy_params(strategy_type)
+    
+    def get_risk_config(self) -> Dict[str, Any]:
+        """Get risk management configuration."""
+        return self.risk.get_position_size_params()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert configuration to dictionary."""
+        return {
+            'app': {
+                'name': self.app_name,
+                'environment': self.environment,
+                'debug': self.debug,
+                'log_level': self.log_level
+            },
+            'database': self.database.model_dump(),
+            'exchange': self.exchange.model_dump(),
+            'strategy': self.strategy.model_dump(),
+            'risk': self.risk.model_dump()
+        }
+
+
+# Global config instance (singleton pattern)
+_config_instance: Optional[Config] = None
+
+
+def get_config(config_file: Optional[str] = None, reload: bool = False) -> Config:
+    """
+    Get or create the global configuration instance.
+    
+    Args:
+        config_file: Optional path to config file
+        reload: Force reload of configuration
+    
+    Returns:
+        Global Config instance
+    """
+    global _config_instance
+    
+    if _config_instance is None or reload:
+        _config_instance = Config(config_file=config_file)
+    
+    return _config_instance

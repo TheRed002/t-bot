@@ -47,24 +47,30 @@ from .constants import (
     TRADING_PAIRS,
 )
 from .decorators import (
-    api_throttle,
-    cache_result,
-    circuit_breaker,
-    cpu_usage,
-    log_calls,
-    log_errors,
-    log_performance,
-    memory_usage,
-    rate_limit,
-    redis_cache,
-    retry,
-    time_execution,
-    timeout,
-    ttl_cache,
-    type_check,
-    validate_input,
-    validate_output,
+    UnifiedDecorator,
+    dec,
+    Decorators,
+    decorators,
 )
+
+# Backward compatibility for old decorator names
+retry = decorators.retry_on_failure
+cache_result = decorators.cached
+validate_input = decorators.validated
+log_calls = decorators.logged
+log_errors = decorators.logged
+log_performance = decorators.monitored
+api_throttle = decorators.api_call
+circuit_breaker = decorators.robust
+rate_limit = decorators.api_call
+redis_cache = decorators.cached
+time_execution = decorators.monitored
+timeout = lambda t: dec.enhance(timeout=t)
+ttl_cache = decorators.cached
+type_check = decorators.validated
+validate_output = decorators.validated
+cpu_usage = decorators.monitored
+memory_usage = decorators.monitored
 from .formatters import (
     # API response formatting
     format_api_response,

@@ -320,7 +320,7 @@ class DatabaseQueries:
     @time_execution
     @cache_result(ttl_seconds=60)  # Cache for 1 minute for frequent queries
     @log_performance
-    @timeout(seconds=30)
+    @timeout(30)
     async def get_trades_by_bot(
         self, bot_id: str, limit: int | None = None, offset: int = 0
     ) -> list[Trade]:
@@ -403,7 +403,7 @@ class DatabaseQueries:
     # Cache for 30 seconds for real-time balance queries
     @cache_result(ttl_seconds=30)
     @log_performance
-    @timeout(seconds=15)
+    @timeout(15)
     async def get_latest_balance_snapshot(
         self, user_id: str, exchange: str, currency: str
     ) -> BalanceSnapshot | None:
@@ -495,7 +495,7 @@ class DatabaseQueries:
     @time_execution
     @cache_result(ttl_seconds=120)  # Cache for 2 minutes for PnL calculations
     @log_performance
-    @timeout(seconds=45)
+    @timeout(45)
     async def get_total_pnl_by_bot(
         self, bot_id: str, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> Decimal:

@@ -665,8 +665,13 @@ class StatisticalFeatureCalculator:
                 "dominant_frequency": dominant_frequency,
                 "dominant_period_days": dominant_period,
                 "strongest_pattern": max(
-                    ["hourly", "daily", "monthly"], key=lambda x: eval(f"{x}_variance")
-                ),
+                    [
+                        ("hourly", hourly_variance),
+                        ("daily", daily_variance),
+                        ("monthly", monthly_variance),
+                    ],
+                    key=lambda x: x[1],
+                )[0],
             }
 
             self.calculation_stats["successful_calculations"] += 1

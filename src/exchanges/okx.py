@@ -895,3 +895,140 @@ class OKXExchange(BaseExchange):
             Dict[str, int]: Rate limits for OKX
         """
         return {"requests_per_minute": 600, "orders_per_second": 20, "websocket_connections": 3}
+
+    async def _get_market_data_from_exchange(
+        self, symbol: str, timeframe: str = "1m"
+    ) -> MarketData:
+        """
+        Get market data directly from OKX exchange API.
+
+        Args:
+            symbol: Trading symbol (e.g., 'BTC-USDT')
+            timeframe: Timeframe for the data (e.g., '1m', '1h', '1d')
+
+        Returns:
+            MarketData: Market data from OKX
+
+        Raises:
+            ExchangeConnectionError: If not connected to exchange
+            ExchangeError: If API request fails
+        """
+        if not self.connected:
+            raise ExchangeConnectionError("Not connected to OKX exchange")
+
+        try:
+            # Convert symbol to OKX format if needed
+            okx_symbol = self._convert_symbol_to_okx_format(symbol)
+            
+            # Get current ticker data
+            ticker_data = self.public_client.get_ticker(okx_symbol)
+            
+            if not ticker_data or "data" not in ticker_data:
+                raise ExchangeError("Invalid ticker data received from OKX")
+            
+            ticker = ticker_data["data"][0] if ticker_data["data"] else {}
+            
+            # Get OHLCV data for additional information
+            kline_data = self.public_client.get_candlesticks(okx_symbol, bar=timeframe, limit=1)
+            kline = None
+            if kline_data and "data" in kline_data and kline_data["data"]:
+                kline = kline_data["data"][0]
+            
+            # Create MarketData object
+            return MarketData(
+                symbol=symbol,
+                price=Decimal(ticker.get("last", "0")),
+                volume=Decimal(ticker.get("vol24h", "0")),
+                timestamp=datetime.now(timezone.utc),
+                bid=Decimal(ticker.get("bidPx", "0")) if ticker.get("bidPx") else None,
+                ask=Decimal(ticker.get("askPx", "0")) if ticker.get("askPx") else None,
+                open_price=Decimal(kline[1]) if kline and len(kline) > 1 else None,
+                high_price=Decimal(kline[2]) if kline and len(kline) > 2 else None,
+                low_price=Decimal(kline[3]) if kline and len(kline) > 3 else None,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get market data from OKX for {symbol}: {e!s}")
+            raise ExchangeError(f"Market data request failed: {e!s}")
+
+    async def _get_trade_history_from_exchange(self, symbol: str, limit: int = 100) -> list[Trade]:
+        """
+        Get trade history directly from OKX exchange API.
+
+        Args:
+            symbol: Trading symbol
+            limit: Maximum number of trades to retrieve
+
+        Returns:
+            List[Trade]: List of trades from OKX
+
+        Raises:
+            ExchangeConnectionError: If not connected to exchange
+            ExchangeError: If API request fails
+        """
+        if not self.connected:
+            raise ExchangeConnectionError("Not connected to OKX exchange")
+
+        try:
+            # Convert symbol to OKX format if needed
+            okx_symbol = self._convert_symbol_to_okx_format(symbol)
+            
+            # Get trade history from account API
+            # Note: This gets account trade history, not market trade history
+            trades_data = self.trade_client.get_fills(instId=okx_symbol, limit=str(limit))
+            
+            if not trades_data or "data" not in trades_data:
+                return []
+            
+            trades = []
+            for trade_data in trades_data["data"]:
+                try:
+                    trade = Trade(
+                        id=trade_data.get("tradeId", ""),
+                        order_id=trade_data.get("ordId"),
+                        symbol=symbol,
+                        side=OrderSide.BUY if trade_data.get("side") == "buy" else OrderSide.SELL,
+                        amount=Decimal(trade_data.get("fillSz", "0")),
+                        price=Decimal(trade_data.get("fillPx", "0")),
+                        fee=Decimal(trade_data.get("fee", "0")),
+                        fee_currency=trade_data.get("feeCcy", "USDT"),
+                        timestamp=datetime.fromtimestamp(
+                            int(trade_data.get("ts", "0")) / 1000, tz=timezone.utc
+                        ),
+                    )
+                    trades.append(trade)
+                except Exception as trade_error:
+                    logger.warning(f"Failed to parse trade data: {trade_error}")
+                    continue
+                    
+            return trades
+
+        except Exception as e:
+            logger.error(f"Failed to get trade history from OKX for {symbol}: {e!s}")
+            return []  # Return empty list on error rather than raising exception
+
+    def _convert_symbol_to_okx_format(self, symbol: str) -> str:
+        """
+        Convert symbol to OKX format.
+        
+        Args:
+            symbol: Symbol in standard format (e.g., 'BTCUSDT')
+            
+        Returns:
+            str: Symbol in OKX format (e.g., 'BTC-USDT')
+        """
+        # OKX uses dash-separated format
+        if "-" not in symbol and len(symbol) >= 6:
+            # Assume format is like BTCUSDT, need to convert to BTC-USDT
+            # This is a simple heuristic - in practice, you'd want a mapping table
+            if symbol.endswith("USDT"):
+                base = symbol[:-4]
+                return f"{base}-USDT"
+            elif symbol.endswith("BTC"):
+                base = symbol[:-3]
+                return f"{base}-BTC"
+            elif symbol.endswith("ETH"):
+                base = symbol[:-3]
+                return f"{base}-ETH"
+        
+        return symbol  # Return as-is if already in correct format or can't parse

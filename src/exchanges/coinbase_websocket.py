@@ -377,7 +377,7 @@ class CoinbaseWebSocketHandler:
                 symbol=message.get("product_id", ""),
                 # Convert to lowercase for consistency
                 side=message.get("side", "buy").lower(),
-                quantity=Decimal(str(message.get("size", "0"))),
+                amount=Decimal(str(message.get("size", "0"))),
                 price=Decimal(str(message.get("price", "0"))),
                 timestamp=datetime.fromisoformat(message.get("time", "").replace("Z", "+00:00")),
                 fee=Decimal("0"),  # Coinbase doesn't provide fee in trade data

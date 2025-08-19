@@ -189,6 +189,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for comprehensive error management
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
@@ -202,10 +203,17 @@ class DataValidator:
                 self.error_handler.handle_error(error_context)
 
             # Add error event to pattern analytics
-            if self.pattern_analytics and self.error_handler:
+            if self.pattern_analytics and error_context:
                 self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Create validation issue for the error
+            metadata = {
+                "error_type": type(e).__name__,
+            }
+            if error_context:
+                metadata["error_id"] = error_context.error_id
+                metadata["severity"] = error_context.severity.value
+
             issue = ValidationIssue(
                 field="validation_system",
                 value="exception",
@@ -214,11 +222,7 @@ class DataValidator:
                 level=ValidationLevel.CRITICAL,
                 timestamp=datetime.now(timezone.utc),
                 source="DataValidator",
-                metadata={
-                    "error_type": type(e).__name__,
-                    "error_id": error_context.error_id,
-                    "severity": error_context.severity.value,
-                },
+                metadata=metadata,
             )
             return False, [issue]
 
@@ -319,6 +323,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for comprehensive error management
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
@@ -332,10 +337,17 @@ class DataValidator:
                 self.error_handler.handle_error(error_context)
 
             # Add error event to pattern analytics
-            if self.pattern_analytics and self.error_handler:
+            if self.pattern_analytics and error_context:
                 self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Create validation issue for the error
+            metadata = {
+                "error_type": type(e).__name__,
+            }
+            if error_context:
+                metadata["error_id"] = error_context.error_id
+                metadata["severity"] = error_context.severity.value
+
             issue = ValidationIssue(
                 field="validation_system",
                 value="exception",
@@ -344,13 +356,24 @@ class DataValidator:
                 level=ValidationLevel.CRITICAL,
                 timestamp=datetime.now(timezone.utc),
                 source="DataValidator",
-                metadata={
-                    "error_type": type(e).__name__,
-                    "error_id": error_context.error_id,
-                    "severity": error_context.severity.value,
-                },
+                metadata=metadata,
             )
             return False, [issue]
+
+    async def validate_cross_source_consistency(
+        self, primary_data: MarketData, secondary_data: MarketData
+    ) -> tuple[bool, list[ValidationIssue]]:
+        """
+        Public method to validate consistency between different data sources.
+
+        Args:
+            primary_data: Primary source market data
+            secondary_data: Secondary source market data
+
+        Returns:
+            Tuple of (is_consistent, validation_issues)
+        """
+        return await self._validate_cross_source_consistency(primary_data, secondary_data)
 
     async def _validate_schema(self, data: MarketData) -> list[ValidationIssue]:
         """Validate data schema and structure"""
@@ -421,6 +444,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for schema validation errors
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
@@ -435,6 +459,13 @@ class DataValidator:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for schema validation failure
+            metadata = {
+                "error_type": type(e).__name__,
+            }
+            if error_context:
+                metadata["error_id"] = error_context.error_id
+                metadata["severity"] = error_context.severity.value
+
             return [
                 ValidationIssue(
                     field="schema_validation",
@@ -444,11 +475,7 @@ class DataValidator:
                     level=ValidationLevel.CRITICAL,
                     timestamp=datetime.now(timezone.utc),
                     source="DataValidator",
-                    metadata={
-                        "error_type": type(e).__name__,
-                        "error_id": error_context.error_id,
-                        "severity": error_context.severity.value,
-                    },
+                    metadata=metadata,
                 )
             ]
 
@@ -489,7 +516,7 @@ class DataValidator:
 
             # Price change validation (if previous price exists)
             if data.symbol in self.price_history and len(self.price_history[data.symbol]) > 0:
-                prev_price = self.price_history[data.symbol][-1]
+                prev_price = Decimal(str(self.price_history[data.symbol][-1]))
                 price_change = abs(data.price - prev_price) / prev_price
 
                 if price_change > self.price_change_threshold:
@@ -512,7 +539,7 @@ class DataValidator:
 
             # Volume change validation (if previous volume exists)
             if data.symbol in self.volume_history and len(self.volume_history[data.symbol]) > 0:
-                prev_volume = self.volume_history[data.symbol][-1]
+                prev_volume = Decimal(str(self.volume_history[data.symbol][-1]))
                 volume_change = abs(data.volume - prev_volume) / prev_volume
 
                 if volume_change > self.volume_change_threshold:
@@ -537,6 +564,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for range validation errors
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
@@ -551,6 +579,13 @@ class DataValidator:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for range validation failure
+            metadata = {
+                "error_type": type(e).__name__,
+            }
+            if error_context:
+                metadata["error_id"] = error_context.error_id
+                metadata["severity"] = error_context.severity.value
+
             return [
                 ValidationIssue(
                     field="range_validation",
@@ -560,11 +595,7 @@ class DataValidator:
                     level=ValidationLevel.CRITICAL,
                     timestamp=datetime.now(timezone.utc),
                     source="DataValidator",
-                    metadata={
-                        "error_type": type(e).__name__,
-                        "error_id": error_context.error_id,
-                        "severity": error_context.severity.value,
-                    },
+                    metadata=metadata,
                 )
             ]
 
@@ -589,7 +620,7 @@ class DataValidator:
                 )
 
             # Price precision validation (basic check)
-            if data.price and data.price.as_tuple().exponent < -8:
+            if data.price and len(str(data.price).split(".")[-1]) > 8:
                 issues.append(
                     ValidationIssue(
                         field="price",
@@ -604,7 +635,7 @@ class DataValidator:
                 )
 
             # Volume precision validation
-            if data.volume and data.volume.as_tuple().exponent < -8:
+            if data.volume and len(str(data.volume).split(".")[-1]) > 8:
                 issues.append(
                     ValidationIssue(
                         field="volume",
@@ -659,6 +690,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for business rule validation errors
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
@@ -676,6 +708,13 @@ class DataValidator:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for business rule validation failure
+            metadata = {
+                "error_type": type(e).__name__,
+            }
+            if error_context:
+                metadata["error_id"] = error_context.error_id
+                metadata["severity"] = error_context.severity.value
+
             return [
                 ValidationIssue(
                     field="business_rules_validation",
@@ -685,17 +724,13 @@ class DataValidator:
                     level=ValidationLevel.CRITICAL,
                     timestamp=datetime.now(timezone.utc),
                     source="DataValidator",
-                    metadata={
-                        "error_type": type(e).__name__,
-                        "error_id": error_context.error_id,
-                        "severity": error_context.severity.value,
-                    },
+                    metadata=metadata,
                 )
             ]
 
     async def _detect_outliers(self, data: MarketData) -> list[ValidationIssue]:
         """Detect statistical outliers in the data"""
-        issues = []
+        issues: list[ValidationIssue] = []
 
         try:
             if data.symbol not in self.price_history or len(self.price_history[data.symbol]) < 10:
@@ -714,7 +749,7 @@ class DataValidator:
                 if z_score > self.outlier_std_threshold:
                     issues.append(
                         ValidationIssue(
-                            field="price",
+                            field="price_outlier",
                             value=current_price,
                             expected=f"within_{self.outlier_std_threshold}σ",
                             message=f"Price {current_price} is an outlier (z-score: {z_score:.2f})",
@@ -764,6 +799,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for outlier detection errors
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
@@ -778,6 +814,13 @@ class DataValidator:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for outlier detection failure
+            metadata = {
+                "error_type": type(e).__name__,
+            }
+            if error_context:
+                metadata["error_id"] = error_context.error_id
+                metadata["severity"] = error_context.severity.value
+
             return [
                 ValidationIssue(
                     field="outlier_detection",
@@ -787,11 +830,7 @@ class DataValidator:
                     level=ValidationLevel.CRITICAL,
                     timestamp=datetime.now(timezone.utc),
                     source="DataValidator",
-                    metadata={
-                        "error_type": type(e).__name__,
-                        "error_id": error_context.error_id,
-                        "severity": error_context.severity.value,
-                    },
+                    metadata=metadata,
                 )
             ]
 
@@ -806,7 +845,7 @@ class DataValidator:
             if data_age > self.max_data_age_seconds:
                 issues.append(
                     ValidationIssue(
-                        field="timestamp",
+                        field="data_freshness",
                         value=data.timestamp,
                         expected=f"within_{self.max_data_age_seconds}s",
                         message=f"Data is {data_age:.1f}s old, exceeds {self.max_data_age_seconds}s threshold",
@@ -826,7 +865,7 @@ class DataValidator:
             if data.timestamp > current_time + timedelta(seconds=5):
                 issues.append(
                     ValidationIssue(
-                        field="timestamp",
+                        field="future_timestamp",
                         value=data.timestamp,
                         expected="current_or_past_time",
                         message="Data timestamp is in the future",
@@ -845,6 +884,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for freshness validation errors
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
@@ -862,6 +902,13 @@ class DataValidator:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
             # Return critical issue for freshness validation failure
+            metadata = {
+                "error_type": type(e).__name__,
+            }
+            if error_context:
+                metadata["error_id"] = error_context.error_id
+                metadata["severity"] = error_context.severity.value
+
             return [
                 ValidationIssue(
                     field="freshness_validation",
@@ -871,11 +918,7 @@ class DataValidator:
                     level=ValidationLevel.CRITICAL,
                     timestamp=datetime.now(timezone.utc),
                     source="DataValidator",
-                    metadata={
-                        "error_type": type(e).__name__,
-                        "error_id": error_context.error_id,
-                        "severity": error_context.severity.value,
-                    },
+                    metadata=metadata,
                 )
             ]
 
@@ -908,6 +951,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for statistics update errors
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
@@ -927,11 +971,29 @@ class DataValidator:
         self, primary_data: MarketData, secondary_data: MarketData
     ) -> tuple[bool, list[ValidationIssue]]:
         """Validate consistency between different data sources"""
-        issues = []
+        issues: list[ValidationIssue] = []
 
         try:
             if not primary_data or not secondary_data:
                 return True, issues
+
+            # Symbol mismatch check
+            if primary_data.symbol != secondary_data.symbol:
+                issues.append(
+                    ValidationIssue(
+                        field="symbol_mismatch",
+                        value={"primary": primary_data.symbol, "secondary": secondary_data.symbol},
+                        expected="matching_symbols",
+                        message=f"Symbol mismatch: primary ({primary_data.symbol}) != secondary ({secondary_data.symbol})",
+                        level=ValidationLevel.CRITICAL,
+                        timestamp=datetime.now(timezone.utc),
+                        source="DataValidator",
+                        metadata={
+                            "primary_symbol": primary_data.symbol,
+                            "secondary_symbol": secondary_data.symbol,
+                        },
+                    )
+                )
 
             # Price consistency check
             price_diff = abs(primary_data.price - secondary_data.price) / primary_data.price
@@ -993,14 +1055,15 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for cross-source validation errors
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
                     component="DataValidator",
                     operation="validate_cross_source_consistency",
-                    symbol=primary_data.symbol
-                    if primary_data and primary_data.symbol
-                    else "unknown",
+                    symbol=(
+                        primary_data.symbol if primary_data and primary_data.symbol else "unknown"
+                    ),
                     details={
                         "validation_stage": "cross_source_consistency",
                         "data_type": "market_data",
@@ -1011,6 +1074,13 @@ class DataValidator:
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
+            metadata = {
+                "error_type": type(e).__name__,
+            }
+            if error_context:
+                metadata["error_id"] = error_context.error_id
+                metadata["severity"] = error_context.severity.value
+
             issue = ValidationIssue(
                 field="cross_source_validation",
                 value="exception",
@@ -1019,11 +1089,7 @@ class DataValidator:
                 level=ValidationLevel.CRITICAL,
                 timestamp=datetime.now(timezone.utc),
                 source="DataValidator",
-                metadata={
-                    "error_type": type(e).__name__,
-                    "error_id": error_context.error_id,
-                    "severity": error_context.severity.value,
-                },
+                metadata=metadata,
             )
             return False, [issue]
 
@@ -1047,6 +1113,19 @@ class DataValidator:
             )
 
             return {
+                "price_history_size": sum(len(history) for history in self.price_history.values()),
+                "volume_history_size": sum(
+                    len(history) for history in self.volume_history.values()
+                ),
+                "validation_config": {
+                    "symbols_tracked": len(self.price_history),
+                    "max_history_size": self.max_history_size,
+                    "price_change_threshold": self.price_change_threshold,
+                    "volume_change_threshold": self.volume_change_threshold,
+                    "outlier_std_threshold": self.outlier_std_threshold,
+                    "max_data_age_seconds": self.max_data_age_seconds,
+                    "consistency_threshold": self.consistency_threshold,
+                },
                 "validation_stats": {
                     "symbols_tracked": len(self.price_history),
                     "max_history_size": self.max_history_size,
@@ -1065,6 +1144,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for summary generation errors
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,
@@ -1078,11 +1158,45 @@ class DataValidator:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
             logger.error(f"Failed to generate validation summary: {e!s}")
-            return {
+            result = {
                 "error": str(e),
-                "error_id": error_context.error_id,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
+            if error_context:
+                result["error_id"] = error_context.error_id
+            return result
+
+    def _is_valid_symbol_format(self, symbol: str) -> bool:
+        """
+        Validate symbol format according to common trading conventions.
+
+        Args:
+            symbol: Trading symbol to validate
+
+        Returns:
+            True if symbol format is valid, False otherwise
+        """
+        if not symbol or not isinstance(symbol, str):
+            return False
+
+        # Must be at least 6 characters for trading pairs (e.g., BTCUSD)
+        if len(symbol) < 6:
+            return False
+
+        # Must contain only alphanumeric characters and allowed separators
+        allowed_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
+        if not all(c in allowed_chars for c in symbol.upper()):
+            return False
+
+        # Must not start or end with separator
+        if symbol.startswith("-") or symbol.endswith("-"):
+            return False
+
+        # Must not have consecutive separators
+        if "--" in symbol:
+            return False
+
+        return True
 
     async def cleanup(self) -> None:
         """Cleanup validation resources"""
@@ -1096,6 +1210,7 @@ class DataValidator:
 
         except Exception as e:
             # Use ErrorHandler for cleanup errors
+            error_context = None
             if self.error_handler:
                 error_context = self.error_handler.create_error_context(
                     error=e,

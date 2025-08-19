@@ -421,7 +421,7 @@ class BinanceWebSocketHandler:
             symbol=msg["s"],
             # m=True means maker is seller
             side=OrderSide.BUY if msg["m"] else OrderSide.SELL,
-            quantity=Decimal(str(msg["q"])),
+            amount=Decimal(str(msg["q"])),
             price=Decimal(str(msg["p"])),
             timestamp=datetime.fromtimestamp(msg["T"] / 1000, tz=timezone.utc),
             fee=Decimal("0"),  # Fee not available in trade stream

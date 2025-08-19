@@ -223,12 +223,16 @@ class StateMonitor:
                 if db_val["total"] > 0 or cache_val["total"] > 0 or exchange_val["total"] > 0:
                     max_diff = max(
                         abs(db_val["total"] - cache_val["total"]),
-                        abs(db_val["total"] - exchange_val["total"])
-                        if exchange_val["total"] > 0
-                        else Decimal("0"),
-                        abs(cache_val["total"] - exchange_val["total"])
-                        if exchange_val["total"] > 0
-                        else Decimal("0"),
+                        (
+                            abs(db_val["total"] - exchange_val["total"])
+                            if exchange_val["total"] > 0
+                            else Decimal("0")
+                        ),
+                        (
+                            abs(cache_val["total"] - exchange_val["total"])
+                            if exchange_val["total"] > 0
+                            else Decimal("0")
+                        ),
                     )
 
                     if max_diff > tolerance:
@@ -237,9 +241,9 @@ class StateMonitor:
                             "key": key,
                             "db_balance": str(db_val["total"]),
                             "cache_balance": str(cache_val["total"]),
-                            "exchange_balance": str(exchange_val["total"])
-                            if exchange_val["total"] > 0
-                            else "N/A",
+                            "exchange_balance": (
+                                str(exchange_val["total"]) if exchange_val["total"] > 0 else "N/A"
+                            ),
                             "max_difference": str(max_diff),
                         }
                         discrepancies.append(discrepancy)
@@ -366,9 +370,11 @@ class StateMonitor:
                 quantities = [
                     db_pos["quantity"],
                     cache_pos["quantity"],
-                    exchange_pos["quantity"]
-                    if exchange_pos["quantity"] > 0
-                    else db_pos["quantity"],
+                    (
+                        exchange_pos["quantity"]
+                        if exchange_pos["quantity"] > 0
+                        else db_pos["quantity"]
+                    ),
                     risk_pos["quantity"] if risk_pos["quantity"] > 0 else db_pos["quantity"],
                 ]
 
@@ -388,12 +394,12 @@ class StateMonitor:
                         "key": key,
                         "db_quantity": str(db_pos["quantity"]),
                         "cache_quantity": str(cache_pos["quantity"]),
-                        "exchange_quantity": str(exchange_pos["quantity"])
-                        if exchange_pos["quantity"] > 0
-                        else "N/A",
-                        "risk_quantity": str(risk_pos["quantity"])
-                        if risk_pos["quantity"] > 0
-                        else "N/A",
+                        "exchange_quantity": (
+                            str(exchange_pos["quantity"]) if exchange_pos["quantity"] > 0 else "N/A"
+                        ),
+                        "risk_quantity": (
+                            str(risk_pos["quantity"]) if risk_pos["quantity"] > 0 else "N/A"
+                        ),
                         "max_difference": str(qty_diff),
                     }
                     discrepancies.append(discrepancy)

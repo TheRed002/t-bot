@@ -103,7 +103,13 @@ class BaseExchange(ABC):
         # Initialize Redis client for real-time data
         self.redis_client = None
 
-        # Note: Data module components removed to avoid circular dependency
+        # Data module components (initialized to None to avoid circular dependency)
+        self.market_data_source = None
+        self.data_processor = None
+        self.technical_indicators = None
+        self.statistical_features = None
+        self.data_validator = None
+        self.quality_monitor = None
 
         # TODO: Remove in production
         logger.debug(f"BaseExchange initialized with P-007 components for {exchange_name}")
@@ -682,16 +688,12 @@ class BaseExchange(ABC):
             # Create trade record
             trade = Trade(
                 id=order_response.id,
-                bot_id=f"{self.exchange_name}_bot",  # Placeholder bot ID
+                order_id=order_response.id,
                 symbol=order_response.symbol,
-                side=order_response.side.value,
-                order_type=order_response.order_type.value,
-                quantity=order_response.filled_quantity,
+                side=order_response.side,
+                amount=order_response.filled_quantity,
                 price=order_response.price or Decimal("0"),
-                executed_price=order_response.price or Decimal("0"),
                 fee=Decimal("0"),  # Will be calculated separately
-                pnl=Decimal("0"),  # Will be calculated separately
-                status=order_response.status,
                 timestamp=order_response.timestamp,
             )
 

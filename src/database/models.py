@@ -678,6 +678,11 @@ class MarketDataRecord(Base):
             kwargs["created_at"] = datetime.now(timezone.utc)
         if "updated_at" not in kwargs:
             kwargs["updated_at"] = datetime.now(timezone.utc)
+        # Set default values for Python object creation
+        if "data_source" not in kwargs:
+            kwargs["data_source"] = "exchange"
+        if "validation_status" not in kwargs:
+            kwargs["validation_status"] = "valid"
         super().__init__(**kwargs)
 
     # Market data fields
@@ -825,6 +830,15 @@ class DataQualityRecord(Base):
         # Set default timestamps if not provided (DataQualityRecord only has created_at)
         if "created_at" not in kwargs:
             kwargs["created_at"] = datetime.now(timezone.utc)
+        # Set default values for Python object creation
+        if "missing_data_count" not in kwargs:
+            kwargs["missing_data_count"] = 0
+        if "outlier_count" not in kwargs:
+            kwargs["outlier_count"] = 0
+        if "duplicate_count" not in kwargs:
+            kwargs["duplicate_count"] = 0
+        if "check_type" not in kwargs:
+            kwargs["check_type"] = "comprehensive"
         super().__init__(**kwargs)
 
     # Quality identification
@@ -886,6 +900,21 @@ class DataPipelineRecord(Base):
             kwargs["created_at"] = datetime.now(timezone.utc)
         if "updated_at" not in kwargs:
             kwargs["updated_at"] = datetime.now(timezone.utc)
+        if "started_at" not in kwargs:
+            kwargs["started_at"] = datetime.now(timezone.utc)
+        # Set default values for Python object creation
+        if "status" not in kwargs:
+            kwargs["status"] = "running"
+        if "stage" not in kwargs:
+            kwargs["stage"] = "started"
+        if "records_processed" not in kwargs:
+            kwargs["records_processed"] = 0
+        if "records_successful" not in kwargs:
+            kwargs["records_successful"] = 0
+        if "records_failed" not in kwargs:
+            kwargs["records_failed"] = 0
+        if "error_count" not in kwargs:
+            kwargs["error_count"] = 0
         super().__init__(**kwargs)
 
     # Pipeline identification

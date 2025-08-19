@@ -1,0 +1,328 @@
+"""Adapter to standardize different data source interfaces."""
+
+from typing import Any, Dict, List, Optional, AsyncIterator
+import re
+
+from src.data.interfaces import DataSourceInterface
+from src.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class DataSourceAdapter:
+    """
+    Adapter to standardize different data source interfaces.
+    
+    This class provides a unified interface for different data sources,
+    handling the conversion of parameters and responses to a standard format.
+    """
+    
+    def __init__(self, source_type: str, **config):
+        """
+        Initialize data source adapter.
+        
+        Args:
+            source_type: Type of data source ('binance', 'coinbase', 'okx', etc.)
+            **config: Source-specific configuration
+        """
+        self.source_type = source_type.lower()
+        self.config = config
+        self.source = self._create_source()
+        self._logger = get_logger(__name__)
+    
+    def _create_source(self) -> DataSourceInterface:
+        """
+        Create the appropriate data source instance.
+        
+        Returns:
+            Data source instance
+            
+        Raises:
+            ValueError: If source type is not supported
+        """
+        # Import here to avoid circular dependencies
+        if self.source_type == 'binance':
+            from src.data.sources.binance import BinanceDataSource
+            return BinanceDataSource(**self.config)
+        elif self.source_type == 'coinbase':
+            from src.data.sources.coinbase import CoinbaseDataSource
+            return CoinbaseDataSource(**self.config)
+        elif self.source_type == 'okx':
+            from src.data.sources.okx import OKXDataSource
+            return OKXDataSource(**self.config)
+        else:
+            raise ValueError(f"Unsupported data source type: {self.source_type}")
+    
+    async def fetch_market_data(
+        self,
+        symbol: str,
+        timeframe: str = '1h',
+        limit: int = 100,
+        **kwargs
+    ) -> List[Dict[str, Any]]:
+        """
+        Unified interface for fetching market data.
+        
+        Args:
+            symbol: Trading symbol (e.g., 'BTC/USDT')
+            timeframe: Timeframe (e.g., '1h', '5m', '1d')
+            limit: Number of records to fetch
+            **kwargs: Additional parameters
+            
+        Returns:
+            Standardized list of market data records
+        """
+        # Convert parameters for specific sources
+        adapted_params = self._adapt_fetch_params(symbol, timeframe, limit, **kwargs)
+        
+        # Fetch data from source
+        raw_data = await self.source.fetch(**adapted_params)
+        
+        # Standardize response
+        standardized_data = self._standardize_response(raw_data)
+        
+        return standardized_data
+    
+    async def stream_market_data(
+        self,
+        symbol: str,
+        **kwargs
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Unified interface for streaming market data.
+        
+        Args:
+            symbol: Trading symbol
+            **kwargs: Additional parameters
+            
+        Yields:
+            Standardized market data records
+        """
+        # Convert parameters
+        adapted_params = self._adapt_stream_params(symbol, **kwargs)
+        
+        # Stream from source
+        async for raw_record in self.source.stream(**adapted_params):
+            # Standardize each record
+            standardized = self._standardize_record(raw_record)
+            yield standardized
+    
+    def _adapt_fetch_params(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Adapt parameters for specific data source.
+        
+        Args:
+            symbol: Trading symbol
+            timeframe: Timeframe
+            limit: Record limit
+            **kwargs: Additional parameters
+            
+        Returns:
+            Adapted parameters dictionary
+        """
+        if self.source_type == 'binance':
+            # Binance uses 'interval' instead of 'timeframe'
+            return {
+                'symbol': self._symbol_to_binance(symbol),
+                'interval': self._timeframe_to_binance_interval(timeframe),
+                'limit': limit,
+                **kwargs
+            }
+        
+        elif self.source_type == 'coinbase':
+            # Coinbase uses different parameter names
+            return {
+                'product_id': self._symbol_to_coinbase_pair(symbol),
+                'granularity': self._timeframe_to_coinbase_granularity(timeframe),
+                'limit': limit,
+                **kwargs
+            }
+        
+        elif self.source_type == 'okx':
+            # OKX format
+            return {
+                'instId': self._symbol_to_okx_inst(symbol),
+                'bar': self._timeframe_to_okx_bar(timeframe),
+                'limit': str(limit),  # OKX expects string
+                **kwargs
+            }
+        
+        # Default: pass through as-is
+        return {
+            'symbol': symbol,
+            'timeframe': timeframe,
+            'limit': limit,
+            **kwargs
+        }
+    
+    def _adapt_stream_params(self, symbol: str, **kwargs) -> Dict[str, Any]:
+        """Adapt streaming parameters for specific source."""
+        if self.source_type == 'binance':
+            return {
+                'symbol': self._symbol_to_binance(symbol),
+                **kwargs
+            }
+        elif self.source_type == 'coinbase':
+            return {
+                'product_ids': [self._symbol_to_coinbase_pair(symbol)],
+                **kwargs
+            }
+        elif self.source_type == 'okx':
+            return {
+                'instId': self._symbol_to_okx_inst(symbol),
+                **kwargs
+            }
+        
+        return {'symbol': symbol, **kwargs}
+    
+    def _standardize_response(self, raw_data: List[Dict]) -> List[Dict[str, Any]]:
+        """
+        Standardize response from different sources.
+        
+        Args:
+            raw_data: Raw data from source
+            
+        Returns:
+            Standardized data
+        """
+        standardized = []
+        for record in raw_data:
+            standardized.append(self._standardize_record(record))
+        return standardized
+    
+    def _standardize_record(self, record: Dict) -> Dict[str, Any]:
+        """
+        Standardize a single data record.
+        
+        Args:
+            record: Raw record from source
+            
+        Returns:
+            Standardized record with common fields
+        """
+        # Define standard fields
+        standard_record = {}
+        
+        if self.source_type == 'binance':
+            # Binance kline format: [timestamp, open, high, low, close, volume, ...]
+            if isinstance(record, list):
+                standard_record = {
+                    'timestamp': record[0],
+                    'open': float(record[1]),
+                    'high': float(record[2]),
+                    'low': float(record[3]),
+                    'close': float(record[4]),
+                    'volume': float(record[5]),
+                    'source': 'binance'
+                }
+            else:
+                # Dictionary format
+                standard_record = {
+                    'timestamp': record.get('openTime', record.get('t')),
+                    'open': float(record.get('open', record.get('o', 0))),
+                    'high': float(record.get('high', record.get('h', 0))),
+                    'low': float(record.get('low', record.get('l', 0))),
+                    'close': float(record.get('close', record.get('c', 0))),
+                    'volume': float(record.get('volume', record.get('v', 0))),
+                    'source': 'binance'
+                }
+        
+        elif self.source_type == 'coinbase':
+            # Coinbase format
+            standard_record = {
+                'timestamp': record.get('time'),
+                'open': float(record.get('open', 0)),
+                'high': float(record.get('high', 0)),
+                'low': float(record.get('low', 0)),
+                'close': float(record.get('close', 0)),
+                'volume': float(record.get('volume', 0)),
+                'source': 'coinbase'
+            }
+        
+        elif self.source_type == 'okx':
+            # OKX format
+            if isinstance(record, list):
+                # OKX returns arrays: [timestamp, open, high, low, close, volume, ...]
+                standard_record = {
+                    'timestamp': int(record[0]),
+                    'open': float(record[1]),
+                    'high': float(record[2]),
+                    'low': float(record[3]),
+                    'close': float(record[4]),
+                    'volume': float(record[5]) if len(record) > 5 else 0,
+                    'source': 'okx'
+                }
+            else:
+                standard_record = record  # Assume already in correct format
+                standard_record['source'] = 'okx'
+        
+        else:
+            # Unknown source, pass through
+            standard_record = record
+            standard_record['source'] = self.source_type
+        
+        return standard_record
+    
+    # Symbol conversion methods
+    def _symbol_to_binance(self, symbol: str) -> str:
+        """Convert symbol to Binance format (BTCUSDT)."""
+        # Remove common separators
+        return symbol.upper().replace('/', '').replace('-', '').replace('_', '')
+    
+    def _symbol_to_coinbase_pair(self, symbol: str) -> str:
+        """Convert symbol to Coinbase format (BTC-USD)."""
+        # Split and rejoin with hyphen
+        parts = re.split(r'[/_]', symbol.upper())
+        if len(parts) == 2:
+            return f"{parts[0]}-{parts[1]}"
+        return symbol.upper().replace('/', '-')
+    
+    def _symbol_to_okx_inst(self, symbol: str) -> str:
+        """Convert symbol to OKX format (BTC-USDT)."""
+        return self._symbol_to_coinbase_pair(symbol)  # Same format as Coinbase
+    
+    # Timeframe conversion methods
+    def _timeframe_to_binance_interval(self, timeframe: str) -> str:
+        """Convert timeframe to Binance interval format."""
+        mapping = {
+            '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
+            '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h',
+            '12h': '12h', '1d': '1d', '3d': '3d', '1w': '1w',
+            '1M': '1M'
+        }
+        return mapping.get(timeframe, '1h')
+    
+    def _timeframe_to_coinbase_granularity(self, timeframe: str) -> int:
+        """Convert timeframe to Coinbase granularity (seconds)."""
+        mapping = {
+            '1m': 60, '5m': 300, '15m': 900, '30m': 1800,
+            '1h': 3600, '2h': 7200, '4h': 14400, '6h': 21600,
+            '1d': 86400
+        }
+        return mapping.get(timeframe, 3600)
+    
+    def _timeframe_to_okx_bar(self, timeframe: str) -> str:
+        """Convert timeframe to OKX bar format."""
+        # OKX uses same format as input mostly
+        return timeframe
+    
+    # Connection management
+    async def connect(self) -> None:
+        """Connect to data source."""
+        await self.source.connect()
+        self._logger.info(f"Connected to {self.source_type} data source")
+    
+    async def disconnect(self) -> None:
+        """Disconnect from data source."""
+        await self.source.disconnect()
+        self._logger.info(f"Disconnected from {self.source_type} data source")
+    
+    def is_connected(self) -> bool:
+        """Check if connected to data source."""
+        return self.source.is_connected()
