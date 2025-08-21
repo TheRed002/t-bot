@@ -3,7 +3,7 @@
 from .financial import FinancialCalculator, calc
 
 # Export singleton instance and class
-__all__ = ['FinancialCalculator', 'calc']
+__all__ = ["FinancialCalculator", "calc"]
 
 # Convenience exports for common calculations
 sharpe_ratio = calc.sharpe_ratio

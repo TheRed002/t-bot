@@ -5,11 +5,25 @@ This module provides comprehensive utility functions, decorators, validators, an
 that are used across all components of the trading bot system.
 
 Key Components:
+- Services: ConfigService, ValidationService (modern dependency injection approach)
 - Decorators: Performance monitoring, error handling, caching, logging, validation
 - Helpers: Mathematical utilities, date/time handling, data conversion, file operations
 - Validators: Financial data validation, configuration validation, API input validation
 - Formatters: Financial formatting, API response formatting, log formatting
 - Constants: System-wide constants and enumerations
+
+Modern Usage (Recommended):
+    ```python
+    # Use service-based approach with dependency injection
+    def __init__(self, validation_service: ValidationService):
+        self.validation_service = validation_service
+    ```
+
+Legacy Usage (Backward Compatibility):
+    ```python
+    # Direct imports still work
+    from src.utils import validate_order
+    ```
 
 Dependencies:
 - P-001: Core types, exceptions, config, logging
@@ -48,29 +62,30 @@ from .constants import (
 )
 from .decorators import (
     UnifiedDecorator,
+    api_throttle,
+    # Backward compatibility imports
+    cache_result,
+    cached,
+    circuit_breaker,
+    cpu_usage,
     dec,
-    Decorators,
-    decorators,
+    log_calls,
+    log_errors,
+    log_performance,
+    logged,
+    memory_usage,
+    monitored,
+    rate_limit,
+    redis_cache,
+    retry,
+    time_execution,
+    timeout,
+    ttl_cache,
+    type_check,
+    validate_input,
+    validate_output,
+    validated,
 )
-
-# Backward compatibility for old decorator names
-retry = decorators.retry_on_failure
-cache_result = decorators.cached
-validate_input = decorators.validated
-log_calls = decorators.logged
-log_errors = decorators.logged
-log_performance = decorators.monitored
-api_throttle = decorators.api_call
-circuit_breaker = decorators.robust
-rate_limit = decorators.api_call
-redis_cache = decorators.cached
-time_execution = decorators.monitored
-timeout = lambda t: dec.enhance(timeout=t)
-ttl_cache = decorators.cached
-type_check = decorators.validated
-validate_output = decorators.validated
-cpu_usage = decorators.monitored
-memory_usage = decorators.monitored
 from .formatters import (
     # API response formatting
     format_api_response,
@@ -128,37 +143,21 @@ from .helpers import (
     # Network utilities
     test_connection,
 )
-from .validators import (
-    sanitize_user_input,
-    # API input validation
-    validate_api_request,
-    validate_balance_data,
-    # Configuration validation
-    validate_config,
-    # Data type validation
-    validate_decimal,
-    validate_market_data,
+from .validation import (
+    # Core validation exports
     validate_order,
-    validate_order_request,
-    # Exchange data validation
-    validate_order_response,
-    validate_percentage,
-    # Additional validation functions
-    validate_position,
-    validate_position_limits,
-    validate_positive_number,
-    # Financial data validation
     validate_price,
     validate_quantity,
-    validate_risk_limits,
-    validate_risk_parameters,
-    validate_signal,
-    validate_strategy_config,
     validate_symbol,
-    validate_trade_data,
-    # Business rule validation
-    validate_trading_rules,
-    validate_webhook_payload,
+    validate_exchange_credentials,
+    validate_risk_parameters,
+    validate_strategy_params,
+    validate_timeframe,
+    validate_batch,
+    # Framework and service exports
+    ValidationFramework,
+    ValidationService,
+    validator,
 )
 
 __all__ = [
@@ -235,38 +234,28 @@ __all__ = [
     "safe_read_file",
     "safe_write_file",
     "sanitize_symbol",
-    "sanitize_user_input",
     "test_connection",
     # Decorators
     "time_execution",
     "timeout",
     "ttl_cache",
     "type_check",
-    "validate_api_request",
-    "validate_balance_data",
-    "validate_config",
-    "validate_decimal",
     "validate_input",
-    "validate_market_data",
-    "validate_order",
-    "validate_order_request",
-    "validate_order_response",
     "validate_output",
-    "validate_percentage",
-    "validate_position",
-    "validate_position_limits",
-    "validate_positive_number",
-    # Validators
+    # Validators - core validation exports
+    "validate_order",
     "validate_price",
     "validate_quantity",
-    "validate_risk_limits",
-    "validate_risk_parameters",
-    "validate_signal",
-    "validate_strategy_config",
     "validate_symbol",
-    "validate_trade_data",
-    "validate_trading_rules",
-    "validate_webhook_payload",
+    "validate_exchange_credentials",
+    "validate_risk_parameters",
+    "validate_strategy_params",
+    "validate_timeframe",
+    "validate_batch",
+    # Validation framework
+    "ValidationFramework",
+    "ValidationService",
+    "validator",
 ]
 
 __version__ = "1.0.0"

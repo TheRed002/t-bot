@@ -9,14 +9,28 @@ must use Decimal to prevent floating-point errors that could lead
 to financial losses.
 """
 
+import logging
 import warnings
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, setcontext
 from typing import Any
 
+from src.base import BaseComponent
 from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
 
-logger = get_logger(__name__)
+# Module level logger for static methods
+
+
+def safe_decimal(value: Any) -> Decimal:
+    """Safely convert a value to Decimal."""
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal("0")
+
+
+logger = logging.getLogger(__name__)
 
 # Set global decimal context for financial precision
 # 28 significant digits should be sufficient for all cryptocurrency calculations
@@ -407,7 +421,7 @@ def float_to_decimal(value: float) -> Decimal:
     return to_decimal(value)
 
 
-class DecimalEncoder:
+class DecimalEncoder(BaseComponent):
     """JSON encoder that handles Decimal values."""
 
     @staticmethod
@@ -463,8 +477,8 @@ class FloatDeprecationWarning:
 
 
 # Module initialization - Only log in debug mode to avoid spam
-logger.debug(
-    "Decimal utilities initialized",
-    precision=FINANCIAL_CONTEXT.prec,
-    rounding=FINANCIAL_CONTEXT.rounding,
-)
+# logger.debug(
+#     "Decimal utilities initialized",
+#     precision=FINANCIAL_CONTEXT.prec,
+#     rounding=FINANCIAL_CONTEXT.rounding,
+# )
