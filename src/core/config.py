@@ -4,7 +4,8 @@ Configuration management for the trading bot framework.
 This module provides comprehensive Pydantic-based configuration system that will be
 extended by ALL subsequent prompts. Use exact patterns from @COMMON_PATTERNS.md.
 
-CRITICAL: This file will be extended by ALL subsequent prompts. Use exact patterns from @COMMON_PATTERNS.md.
+CRITICAL: This file will be extended by ALL subsequent prompts. Use exact patterns from
+@COMMON_PATTERNS.md.
 """
 
 import json
@@ -98,13 +99,29 @@ class DatabaseConfig(BaseConfig):
             raise ValueError(f"Pool size must be between 1 and 100, got {v}")
         return v
 
+    @property
+    def postgresql_url(self) -> str:
+        """Generate PostgreSQL connection URL."""
+        return (
+            f"postgresql://{self.postgresql_username}:{self.postgresql_password}"
+            f"@{self.postgresql_host}:{self.postgresql_port}/{self.postgresql_database}"
+        )
+
+    @property
+    def redis_url(self) -> str:
+        """Generate Redis connection URL."""
+        if self.redis_password:
+            return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
 
 class SecurityConfig(BaseConfig):
     """Security configuration for authentication and encryption."""
 
     secret_key: str = Field(
-        default="changeme_very_secure_jwt_secret_key_at_least_32_chars",
-        description="Secret key for JWT",
+        default="",
+        description="Secret key for JWT (set via SECRET_KEY env var)",
+        alias="SECRET_KEY",
     )
     jwt_algorithm: str = Field(
         default="HS256",
@@ -113,8 +130,9 @@ class SecurityConfig(BaseConfig):
     )
     jwt_expire_minutes: int = Field(default=30, description="JWT expiration time in minutes")
     encryption_key: str = Field(
-        default="changeme_secure_encryption_key_at_least_32_characters",
-        description="Encryption key",
+        default="",
+        description="Encryption key (set via ENCRYPTION_KEY env var)",
+        alias="ENCRYPTION_KEY",
     )
 
     @field_validator("jwt_expire_minutes")
@@ -129,6 +147,8 @@ class SecurityConfig(BaseConfig):
     @classmethod
     def validate_key_length(cls, v):
         """Validate key lengths for security."""
+        if not v:
+            raise ValueError("Key must be set via environment variable")
         if len(v) < 32:
             raise ValueError(f"Key must be at least 32 characters long, got {len(v)}")
         return v
@@ -276,6 +296,76 @@ class ExchangeConfig(BaseConfig):
         if env in ("production", "staging") and v and len(v) < 16:
             raise ValueError(f"API credential must be at least 16 characters long, got {len(v)}")
         return v
+
+    @property
+    def default_exchange(self) -> str:
+        """Get default exchange."""
+        return self.supported_exchanges[0] if self.supported_exchanges else "binance"
+
+    @property
+    def testnet_mode(self) -> bool:
+        """Get testnet mode for default exchange."""
+        default = self.default_exchange
+        if default == "binance":
+            return self.binance_testnet
+        elif default == "okx":
+            return self.okx_sandbox
+        elif default == "coinbase":
+            return self.coinbase_sandbox
+        return True  # Default to testnet for safety
+
+    @property
+    def rate_limit_per_second(self) -> int:
+        """Get rate limit per second for default exchange."""
+        default = self.default_exchange
+        return self.rate_limits.get(default, {}).get("orders_per_second", 10)
+
+    def get_exchange_credentials(self, exchange: str) -> dict[str, Any]:
+        """Get credentials for specified exchange."""
+        if exchange == "binance":
+            return {
+                "api_key": self.binance_api_key,
+                "api_secret": self.binance_api_secret,
+                "testnet": self.binance_testnet,
+            }
+        elif exchange == "okx":
+            return {
+                "api_key": self.okx_api_key,
+                "api_secret": self.okx_api_secret,
+                "passphrase": self.okx_passphrase,
+                "sandbox": self.okx_sandbox,
+            }
+        elif exchange == "coinbase":
+            return {
+                "api_key": self.coinbase_api_key,
+                "api_secret": self.coinbase_api_secret,
+                "sandbox": self.coinbase_sandbox,
+            }
+        else:
+            raise ValueError(f"Unsupported exchange: {exchange}")
+
+    def get_websocket_config(self, exchange: str) -> dict[str, Any]:
+        """Get WebSocket configuration for specified exchange."""
+        base_config = {
+            "reconnect_attempts": 5,
+            "ping_interval": 30,
+            "timeout": 30,
+        }
+
+        if exchange == "binance":
+            base_config["url"] = "wss://stream.binance.com:9443/ws/"
+            if self.binance_testnet:
+                base_config["url"] = "wss://testnet.binance.vision/ws/"
+        elif exchange == "okx":
+            base_config["url"] = "wss://ws.okx.com:8443/ws/v5/public"
+            if self.okx_sandbox:
+                base_config["url"] = "wss://wspap.okx.com:8443/ws/v5/public"
+        elif exchange == "coinbase":
+            base_config["url"] = "wss://ws-feed.pro.coinbase.com"
+            if self.coinbase_sandbox:
+                base_config["url"] = "wss://ws-feed-public.sandbox.pro.coinbase.com"
+
+        return base_config
 
 
 class RiskConfig(BaseConfig):

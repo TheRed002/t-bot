@@ -1,8 +1,8 @@
 """Base configuration class for the T-Bot trading system."""
 
-from pydantic import Field
+from collections.abc import Callable
+
 from pydantic_settings import BaseSettings
-from typing import List, Callable
 
 
 class BaseConfig(BaseSettings):
@@ -19,17 +19,17 @@ class BaseConfig(BaseSettings):
         "extra": "ignore",
         "populate_by_name": True,  # Allow both field names and aliases
     }
-    
+
     def __init__(self, **kwargs):
         """Initialize with validators list for extensibility."""
         super().__init__(**kwargs)
-        self._validators: List[Callable] = []
-    
-    def validate(self) -> None:
+        self._validators: list[Callable] = []
+
+    def run_validators(self) -> None:
         """Run all registered validators."""
         for validator in self._validators:
             validator(self)
-    
+
     def add_validator(self, validator: Callable) -> None:
         """Add a custom validator."""
         self._validators.append(validator)

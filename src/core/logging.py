@@ -376,14 +376,6 @@ def get_secure_logger(name: str) -> SecureLogger:
     return SecureLogger(logger)
 
 
-# TODO: Remove in production - Debug logging configuration
-def setup_debug_logging() -> None:
-    """Setup debug logging for development."""
-    setup_development_logging()
-    logger = get_logger(__name__)
-    logger.info("Debug logging enabled")
-
-
 # Performance monitoring utilities
 class PerformanceMonitor:
     """Performance monitoring utility for tracking operation metrics."""
@@ -483,5 +475,4 @@ def setup_development_logging() -> None:
     )
 
 
-# Initialize default logging configuration
-setup_logging()
+# Note: Logging must be initialized explicitly by calling setup_logging()

@@ -1,10 +1,9 @@
 """Market data types for the T-Bot trading system."""
 
-from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -28,11 +27,11 @@ class MarketData(BaseModel):
     low: Decimal
     close: Decimal
     volume: Decimal
-    quote_volume: Optional[Decimal] = None
-    trades_count: Optional[int] = None
-    vwap: Optional[Decimal] = None
+    quote_volume: Decimal | None = None
+    trades_count: int | None = None
+    vwap: Decimal | None = None
     exchange: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Ticker(BaseModel):
@@ -44,16 +43,16 @@ class Ticker(BaseModel):
     ask_price: Decimal
     ask_quantity: Decimal
     last_price: Decimal
-    last_quantity: Optional[Decimal] = None
+    last_quantity: Decimal | None = None
     open_price: Decimal
     high_price: Decimal
     low_price: Decimal
     volume: Decimal
-    quote_volume: Optional[Decimal] = None
+    quote_volume: Decimal | None = None
     timestamp: datetime
     exchange: str
-    price_change: Optional[Decimal] = None
-    price_change_percent: Optional[float] = None
+    price_change: Decimal | None = None
+    price_change_percent: float | None = None
 
     @property
     def spread(self) -> Decimal:
@@ -74,32 +73,32 @@ class OrderBookLevel(BaseModel):
 
     price: Decimal
     quantity: Decimal
-    order_count: Optional[int] = None
+    order_count: int | None = None
 
 
 class OrderBook(BaseModel):
     """Order book snapshot."""
 
     symbol: str
-    bids: List[OrderBookLevel]
-    asks: List[OrderBookLevel]
+    bids: list[OrderBookLevel]
+    asks: list[OrderBookLevel]
     timestamp: datetime
     exchange: str
-    sequence: Optional[int] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    sequence: int | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
-    def best_bid(self) -> Optional[OrderBookLevel]:
+    def best_bid(self) -> OrderBookLevel | None:
         """Get best bid (highest price)."""
         return self.bids[0] if self.bids else None
 
     @property
-    def best_ask(self) -> Optional[OrderBookLevel]:
+    def best_ask(self) -> OrderBookLevel | None:
         """Get best ask (lowest price)."""
         return self.asks[0] if self.asks else None
 
     @property
-    def spread(self) -> Optional[Decimal]:
+    def spread(self) -> Decimal | None:
         """Calculate spread between best bid and ask."""
         if self.best_bid and self.best_ask:
             return self.best_ask.price - self.best_bid.price
@@ -108,7 +107,8 @@ class OrderBook(BaseModel):
     def get_depth(self, side: str, levels: int = 5) -> Decimal:
         """Calculate cumulative depth for given number of levels."""
         book_side = self.bids if side.lower() == "bid" else self.asks
-        return sum(level.quantity for level in book_side[:levels])
+        total = sum(level.quantity for level in book_side[:levels])
+        return total if total else Decimal("0")
 
 
 class ExchangeInfo(BaseModel):
@@ -124,10 +124,10 @@ class ExchangeInfo(BaseModel):
     min_quantity: Decimal
     max_quantity: Decimal
     step_size: Decimal
-    min_notional: Optional[Decimal] = None
+    min_notional: Decimal | None = None
     exchange: str
     is_trading: bool = True
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def round_price(self, price: Decimal) -> Decimal:
         """Round price to valid tick size."""

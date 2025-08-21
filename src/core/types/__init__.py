@@ -7,191 +7,191 @@ Types are now organized into domain-specific modules for better maintainability.
 
 # Base types and common enums
 from .base import (
-    TradingMode,
-    ExchangeType,
-    RequestType,
     ConnectionType,
+    ExchangeType,
+    MarketType,
+    RequestType,
+    TradingMode,
     ValidationLevel,
-    ValidationResult
+    ValidationResult,
 )
 
-# Trading types
-from .trading import (
-    SignalDirection,
-    OrderSide,
-    OrderType,
-    OrderStatus,
-    TimeInForce,
-    TradeState,
-    Signal,
-    OrderRequest,
-    OrderResponse,
-    Order,
-    Position,
-    Trade,
-    Balance
+# Bot management types
+from .bot import (
+    BotConfiguration,
+    BotEvent,
+    BotMetrics,
+    BotPriority,
+    BotState,
+    BotStatus,
+    BotType,
+    ResourceAllocation,
+    ResourceType,
 )
 
-# Market data types
-from .market import (
-    ExchangeStatus,
-    MarketData,
-    Ticker,
-    OrderBookLevel,
-    OrderBook,
-    ExchangeInfo
-)
-
-# Strategy types
-from .strategy import (
-    StrategyType,
-    StrategyStatus,
-    MarketRegime,
-    NewsSentiment,
-    SocialSentiment,
-    StrategyConfig,
-    StrategyMetrics,
-    RegimeChangeEvent
-)
-
-# Risk management types
-from .risk import (
-    RiskLevel,
-    PositionSizeMethod,
-    CircuitBreakerStatus,
-    CircuitBreakerType,
-    AllocationStrategy,
-    RiskMetrics,
-    PositionLimits,
-    CircuitBreakerEvent,
-    CapitalAllocation,
-    FundFlow,
-    CapitalMetrics,
-    CurrencyExposure,
-    ExchangeAllocation,
-    WithdrawalRule,
-    CapitalProtection
+# Data pipeline types
+from .data import (
+    DriftType,
+    ErrorPattern,
+    FeatureSet,
+    IngestionMode,
+    MLMarketData,
+    PipelineStatus,
+    PredictionResult,
+    ProcessingStep,
+    QualityLevel,
+    StorageMode,
 )
 
 # Execution types
 from .execution import (
     ExecutionAlgorithm,
-    ExecutionStatus,
-    SlippageType,
     ExecutionInstruction,
     ExecutionResult,
-    SlippageMetrics
+    ExecutionStatus,
+    SlippageMetrics,
+    SlippageType,
 )
 
-# Bot management types
-from .bot import (
-    BotStatus,
-    BotType,
-    BotPriority,
-    ResourceType,
-    BotConfiguration,
-    BotMetrics,
-    BotState,
-    ResourceAllocation,
-    BotEvent
+# Market data types
+from .market import ExchangeInfo, ExchangeStatus, MarketData, OrderBook, OrderBookLevel, Ticker
+
+# Risk management types
+from .risk import (
+    AllocationStrategy,
+    CapitalAllocation,
+    CapitalMetrics,
+    CapitalProtection,
+    CircuitBreakerEvent,
+    CircuitBreakerStatus,
+    CircuitBreakerType,
+    CurrencyExposure,
+    EmergencyAction,
+    ExchangeAllocation,
+    FundFlow,
+    PortfolioState,
+    PositionLimits,
+    PositionSizeMethod,
+    RiskLevel,
+    RiskMetrics,
+    WithdrawalRule,
 )
 
-# Data pipeline types
-from .data import (
-    QualityLevel,
-    DriftType,
-    IngestionMode,
-    PipelineStatus,
-    ProcessingStep,
-    StorageMode,
-    ErrorPattern
+# Strategy types
+from .strategy import (
+    MarketRegime,
+    NewsSentiment,
+    RegimeChangeEvent,
+    SocialSentiment,
+    StrategyConfig,
+    StrategyMetrics,
+    StrategyStatus,
+    StrategyType,
+)
+
+# Trading types
+from .trading import (
+    ArbitrageOpportunity,
+    Balance,
+    Order,
+    OrderRequest,
+    OrderResponse,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    Position,
+    Signal,
+    SignalDirection,
+    TimeInForce,
+    Trade,
+    TradeState,
 )
 
 # Export all for convenience
 __all__ = [
-    # Base
-    'TradingMode',
-    'ExchangeType',
-    'RequestType',
-    'ConnectionType',
-    'ValidationLevel',
-    'ValidationResult',
-    
-    # Trading
-    'SignalDirection',
-    'OrderSide',
-    'OrderType',
-    'OrderStatus',
-    'TimeInForce',
-    'TradeState',
-    'Signal',
-    'OrderRequest',
-    'OrderResponse',
-    'Order',
-    'Position',
-    'Trade',
-    'Balance',
-    
-    # Market
-    'ExchangeStatus',
-    'MarketData',
-    'Ticker',
-    'OrderBookLevel',
-    'OrderBook',
-    'ExchangeInfo',
-    
-    # Strategy
-    'StrategyType',
-    'StrategyStatus',
-    'MarketRegime',
-    'NewsSentiment',
-    'SocialSentiment',
-    'StrategyConfig',
-    'StrategyMetrics',
-    'RegimeChangeEvent',
-    
-    # Risk
-    'RiskLevel',
-    'PositionSizeMethod',
-    'CircuitBreakerStatus',
-    'CircuitBreakerType',
-    'AllocationStrategy',
-    'RiskMetrics',
-    'PositionLimits',
-    'CircuitBreakerEvent',
-    'CapitalAllocation',
-    'FundFlow',
-    'CapitalMetrics',
-    'CurrencyExposure',
-    'ExchangeAllocation',
-    'WithdrawalRule',
-    'CapitalProtection',
-    
-    # Execution
-    'ExecutionAlgorithm',
-    'ExecutionStatus',
-    'SlippageType',
-    'ExecutionInstruction',
-    'ExecutionResult',
-    'SlippageMetrics',
-    
+    "AllocationStrategy",
+    "ArbitrageOpportunity",
+    "Balance",
+    "BotConfiguration",
+    "BotEvent",
+    "BotMetrics",
+    "BotPriority",
+    "BotState",
     # Bot
-    'BotStatus',
-    'BotType',
-    'BotPriority',
-    'ResourceType',
-    'BotConfiguration',
-    'BotMetrics',
-    'BotState',
-    'ResourceAllocation',
-    'BotEvent',
-    
+    "BotStatus",
+    "BotType",
+    "CapitalAllocation",
+    "CapitalMetrics",
+    "CapitalProtection",
+    "CircuitBreakerEvent",
+    "CircuitBreakerStatus",
+    "CircuitBreakerType",
+    "ConnectionType",
+    "CurrencyExposure",
+    "DriftType",
+    "EmergencyAction",
+    "ErrorPattern",
+    "ExchangeAllocation",
+    "ExchangeInfo",
+    # Market
+    "ExchangeStatus",
+    "ExchangeType",
+    # Execution
+    "ExecutionAlgorithm",
+    "ExecutionInstruction",
+    "ExecutionResult",
+    "ExecutionStatus",
+    "FeatureSet",
+    "FundFlow",
+    "IngestionMode",
+    "MLMarketData",
+    "MarketData",
+    "MarketRegime",
+    "MarketType",
+    "NewsSentiment",
+    "Order",
+    "OrderBook",
+    "OrderBookLevel",
+    "OrderRequest",
+    "OrderResponse",
+    "OrderSide",
+    "OrderStatus",
+    "OrderType",
+    "PipelineStatus",
+    "PortfolioState",
+    "Position",
+    "PositionLimits",
+    "PositionSizeMethod",
+    "PredictionResult",
+    "ProcessingStep",
     # Data
-    'QualityLevel',
-    'DriftType',
-    'IngestionMode',
-    'PipelineStatus',
-    'ProcessingStep',
-    'StorageMode',
-    'ErrorPattern'
+    "QualityLevel",
+    "RegimeChangeEvent",
+    "RequestType",
+    "ResourceAllocation",
+    "ResourceType",
+    # Risk
+    "RiskLevel",
+    "RiskMetrics",
+    "Signal",
+    # Trading
+    "SignalDirection",
+    "SlippageMetrics",
+    "SlippageType",
+    "SocialSentiment",
+    "StorageMode",
+    "StrategyConfig",
+    "StrategyMetrics",
+    "StrategyStatus",
+    # Strategy
+    "StrategyType",
+    "Ticker",
+    "TimeInForce",
+    "Trade",
+    "TradeState",
+    # Base
+    "TradingMode",
+    "ValidationLevel",
+    "ValidationResult",
+    "WithdrawalRule",
 ]

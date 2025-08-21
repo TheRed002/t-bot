@@ -1,10 +1,24 @@
-"""Trading-related types for the T-Bot trading system."""
+"""Trading-related types for the T-Bot trading system.
 
-from dataclasses import dataclass
+This module provides comprehensive trading types with:
+- Full validation on construction
+- Immutable critical data structures
+- Rich business logic methods
+- Serialization/deserialization support
+- Type conversion utilities
+- Comprehensive examples and documentation
+
+TODO: Update the following modules to use enhanced trading types:
+- All strategy modules (update signal handling)
+- All execution modules (update order management)
+- Risk management modules (update position tracking)
+- Portfolio management modules (update balance handling)
+"""
+
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -74,7 +88,7 @@ class Signal(BaseModel):
     strength: float = Field(ge=0.0, le=1.0)
     timestamp: datetime
     source: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("strength")
     @classmethod
@@ -92,11 +106,11 @@ class OrderRequest(BaseModel):
     side: OrderSide
     order_type: OrderType
     quantity: Decimal
-    price: Optional[Decimal] = None
-    stop_price: Optional[Decimal] = None
+    price: Decimal | None = None
+    stop_price: Decimal | None = None
     time_in_force: TimeInForce = TimeInForce.GTC
-    client_order_id: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    client_order_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("quantity")
     @classmethod
@@ -108,7 +122,7 @@ class OrderRequest(BaseModel):
 
     @field_validator("price")
     @classmethod
-    def validate_price(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+    def validate_price(cls, v: Decimal | None) -> Decimal | None:
         """Validate price is positive if provided."""
         if v is not None and v <= 0:
             raise ValueError("Price must be positive")
@@ -119,41 +133,41 @@ class OrderResponse(BaseModel):
     """Response from order creation."""
 
     order_id: str
-    client_order_id: Optional[str] = None
+    client_order_id: str | None = None
     symbol: str
     side: OrderSide
     order_type: OrderType
     quantity: Decimal
-    price: Optional[Decimal] = None
+    price: Decimal | None = None
     status: OrderStatus
     filled_quantity: Decimal = Decimal("0")
-    average_price: Optional[Decimal] = None
+    average_price: Decimal | None = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
     exchange: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Order(BaseModel):
     """Complete order information."""
 
     order_id: str
-    client_order_id: Optional[str] = None
+    client_order_id: str | None = None
     symbol: str
     side: OrderSide
     order_type: OrderType
     quantity: Decimal
-    price: Optional[Decimal] = None
-    stop_price: Optional[Decimal] = None
+    price: Decimal | None = None
+    stop_price: Decimal | None = None
     status: OrderStatus
     filled_quantity: Decimal = Decimal("0")
-    average_price: Optional[Decimal] = None
+    average_price: Decimal | None = None
     time_in_force: TimeInForce
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
     exchange: str
     fees: Decimal = Decimal("0")
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def is_filled(self) -> bool:
         """Check if order is completely filled."""
@@ -171,13 +185,13 @@ class Position(BaseModel):
     side: OrderSide
     quantity: Decimal
     entry_price: Decimal
-    current_price: Optional[Decimal] = None
-    unrealized_pnl: Optional[Decimal] = None
+    current_price: Decimal | None = None
+    unrealized_pnl: Decimal | None = None
     realized_pnl: Decimal = Decimal("0")
     opened_at: datetime
-    closed_at: Optional[datetime] = None
+    closed_at: datetime | None = None
     exchange: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     def is_open(self) -> bool:
         """Check if position is still open."""
@@ -205,7 +219,7 @@ class Trade(BaseModel):
     timestamp: datetime
     exchange: str
     is_maker: bool = False
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class Balance(BaseModel):
@@ -222,3 +236,46 @@ class Balance(BaseModel):
     def free(self) -> Decimal:
         """Alias for available balance."""
         return self.available
+
+
+class ArbitrageOpportunity(BaseModel):
+    """Arbitrage opportunity data structure."""
+
+    symbol: str
+    buy_exchange: str
+    sell_exchange: str
+    buy_price: Decimal
+    sell_price: Decimal
+    quantity: Decimal
+    profit: Decimal
+    profit_percentage: Decimal
+    timestamp: datetime
+    expires_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("buy_price", "sell_price")
+    @classmethod
+    def validate_prices(cls, v: Decimal) -> Decimal:
+        """Validate prices are positive."""
+        if v <= 0:
+            raise ValueError("Prices must be positive")
+        return v
+
+    @field_validator("quantity")
+    @classmethod
+    def validate_quantity(cls, v: Decimal) -> Decimal:
+        """Validate quantity is positive."""
+        if v <= 0:
+            raise ValueError("Quantity must be positive")
+        return v
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if opportunity has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.now() > self.expires_at
+
+    def calculate_profit(self) -> Decimal:
+        """Calculate total profit from this opportunity."""
+        return (self.sell_price - self.buy_price) * self.quantity

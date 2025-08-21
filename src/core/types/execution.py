@@ -1,10 +1,9 @@
 """Execution-related types for the T-Bot trading system."""
 
-from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +18,7 @@ class ExecutionAlgorithm(Enum):
     ICEBERG = "iceberg"
     SNIPER = "sniper"
     SMART = "smart"
+    SMART_ROUTER = "smart_router"
 
 
 class ExecutionStatus(Enum):
@@ -50,33 +50,33 @@ class ExecutionInstruction(BaseModel):
     side: str  # "buy" or "sell"
     target_quantity: Decimal
     algorithm: ExecutionAlgorithm
-    
+
     # Algorithm parameters
     urgency: float = Field(ge=0.0, le=1.0, default=0.5)
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
     # TWAP/VWAP specific
-    slice_count: Optional[int] = None
-    slice_interval: Optional[int] = None  # seconds
-    
+    slice_count: int | None = None
+    slice_interval: int | None = None  # seconds
+
     # Iceberg specific
-    visible_quantity: Optional[Decimal] = None
-    
+    visible_quantity: Decimal | None = None
+
     # Limit order specific
-    limit_price: Optional[Decimal] = None
+    limit_price: Decimal | None = None
     post_only: bool = False
-    
+
     # Smart routing
-    preferred_venues: List[str] = Field(default_factory=list)
-    avoid_venues: List[str] = Field(default_factory=list)
-    
+    preferred_venues: list[str] = Field(default_factory=list)
+    avoid_venues: list[str] = Field(default_factory=list)
+
     # Risk controls
     max_slippage_pct: float = 0.01
     max_spread_pct: float = 0.002
     cancel_on_disconnect: bool = True
-    
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ExecutionResult(BaseModel):
@@ -85,43 +85,43 @@ class ExecutionResult(BaseModel):
     instruction_id: str
     symbol: str
     status: ExecutionStatus
-    
+
     # Execution details
     target_quantity: Decimal
     filled_quantity: Decimal
     remaining_quantity: Decimal
-    
+
     # Pricing
-    target_price: Optional[Decimal] = None
+    target_price: Decimal | None = None
     average_price: Decimal
     worst_price: Decimal
     best_price: Decimal
-    
+
     # Slippage analysis
     expected_cost: Decimal
     actual_cost: Decimal
     slippage_bps: float  # basis points
     slippage_amount: Decimal
-    
+
     # Execution quality
     fill_rate: float
     execution_time: int  # seconds
     num_fills: int
     num_orders: int
-    
+
     # Fees
     total_fees: Decimal
     maker_fees: Decimal
     taker_fees: Decimal
-    
+
     # Timestamps
     started_at: datetime
-    completed_at: Optional[datetime] = None
-    
+    completed_at: datetime | None = None
+
     # Detailed fills
-    fills: List[Dict[str, Any]] = Field(default_factory=list)
-    
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    fills: list[dict[str, Any]] = Field(default_factory=list)
+
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def fill_percentage(self) -> float:
@@ -133,7 +133,11 @@ class ExecutionResult(BaseModel):
     @property
     def is_complete(self) -> bool:
         """Check if execution is complete."""
-        return self.status in [ExecutionStatus.COMPLETED, ExecutionStatus.CANCELLED, ExecutionStatus.FAILED]
+        return self.status in [
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.FAILED,
+        ]
 
 
 class SlippageMetrics(BaseModel):
@@ -141,43 +145,43 @@ class SlippageMetrics(BaseModel):
 
     symbol: str
     timeframe: str  # "1h", "1d", "1w", "1m"
-    
+
     # Aggregate metrics
     total_trades: int
     total_volume: Decimal
-    
+
     # Slippage by type
     market_impact_bps: float
     timing_cost_bps: float
     spread_cost_bps: float
     total_slippage_bps: float
-    
+
     # Slippage by size
     small_order_slippage: float  # < 10% ADV
     medium_order_slippage: float  # 10-50% ADV
     large_order_slippage: float  # > 50% ADV
-    
+
     # Slippage by time
     market_open_slippage: float
     market_close_slippage: float
     intraday_slippage: float
-    
+
     # Slippage by market condition
     high_volatility_slippage: float
     low_volatility_slippage: float
     trending_slippage: float
     ranging_slippage: float
-    
+
     # Cost analysis
     total_slippage_cost: Decimal
     avg_slippage_per_trade: Decimal
-    
+
     # Improvement metrics
     price_improvement_count: int
     price_improvement_amount: Decimal
-    
+
     period_start: datetime
     period_end: datetime
     updated_at: datetime
-    
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    metadata: dict[str, Any] = Field(default_factory=dict)

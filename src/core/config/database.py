@@ -1,6 +1,7 @@
 """Database configuration for the T-Bot trading system."""
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
+
 from .base import BaseConfig
 
 
@@ -9,11 +10,11 @@ class DatabaseConfig(BaseConfig):
 
     # PostgreSQL - Using environment variable names from .env
     postgresql_host: str = Field(
-        default="localhost", description="PostgreSQL host", alias="DB_HOST"
+        default="localhost",
+        description="PostgreSQL host",
+        validation_alias=AliasChoices("DB_HOST", "POSTGRESQL_HOST"),
     )
-    postgresql_port: int = Field(
-        default=5432, description="PostgreSQL port", alias="DB_PORT"
-    )
+    postgresql_port: int = Field(default=5432, description="PostgreSQL port", alias="DB_PORT")
     postgresql_database: str = Field(
         default="tbot_dev",
         pattern=r"^[a-zA-Z0-9_-]+$",
@@ -32,9 +33,7 @@ class DatabaseConfig(BaseConfig):
         description="PostgreSQL password",
         alias="DB_PASSWORD",
     )
-    postgresql_pool_size: int = Field(
-        default=20, description="PostgreSQL connection pool size"
-    )
+    postgresql_pool_size: int = Field(default=20, description="PostgreSQL connection pool size")
     postgresql_max_overflow: int = Field(
         default=40, description="PostgreSQL max overflow connections"
     )
@@ -43,44 +42,28 @@ class DatabaseConfig(BaseConfig):
     )
 
     # Redis - Using environment variable names from .env
-    redis_host: str = Field(
-        default="localhost", description="Redis host", alias="REDIS_HOST"
-    )
-    redis_port: int = Field(
-        default=6379, description="Redis port", alias="REDIS_PORT"
-    )
+    redis_host: str = Field(default="localhost", description="Redis host", alias="REDIS_HOST")
+    redis_port: int = Field(default=6379, description="Redis port", alias="REDIS_PORT")
     redis_password: str | None = Field(
         default=None, description="Redis password", alias="REDIS_PASSWORD"
     )
-    redis_db: int = Field(
-        default=0, description="Redis database number", alias="REDIS_DB"
-    )
-    redis_max_connections: int = Field(
-        default=50, description="Redis max connections in pool"
-    )
-    redis_socket_timeout: int = Field(
-        default=5, description="Redis socket timeout in seconds"
-    )
+    redis_db: int = Field(default=0, description="Redis database number", alias="REDIS_DB")
+    redis_max_connections: int = Field(default=50, description="Redis max connections in pool")
+    redis_socket_timeout: int = Field(default=5, description="Redis socket timeout in seconds")
 
     # InfluxDB - Using environment variable names from .env
     influxdb_host: str = Field(
         default="localhost", description="InfluxDB host", alias="INFLUXDB_HOST"
     )
-    influxdb_port: int = Field(
-        default=8086, description="InfluxDB port", alias="INFLUXDB_PORT"
-    )
-    influxdb_token: str = Field(
-        default="", description="InfluxDB token", alias="INFLUXDB_TOKEN"
-    )
+    influxdb_port: int = Field(default=8086, description="InfluxDB port", alias="INFLUXDB_PORT")
+    influxdb_token: str = Field(default="", description="InfluxDB token", alias="INFLUXDB_TOKEN")
     influxdb_org: str = Field(
         default="tbot", description="InfluxDB organization", alias="INFLUXDB_ORG"
     )
     influxdb_bucket: str = Field(
         default="trading_data", description="InfluxDB bucket", alias="INFLUXDB_BUCKET"
     )
-    influxdb_timeout: int = Field(
-        default=10000, description="InfluxDB timeout in milliseconds"
-    )
+    influxdb_timeout: int = Field(default=10000, description="InfluxDB timeout in milliseconds")
 
     @field_validator("postgresql_port", "redis_port", "influxdb_port")
     @classmethod
@@ -97,7 +80,7 @@ class DatabaseConfig(BaseConfig):
         if not 1 <= v <= 100:
             raise ValueError(f"Pool size must be between 1 and 100, got {v}")
         return v
-    
+
     @field_validator("redis_db")
     @classmethod
     def validate_redis_db(cls, v: int) -> int:
@@ -105,15 +88,15 @@ class DatabaseConfig(BaseConfig):
         if not 0 <= v <= 15:
             raise ValueError(f"Redis DB must be between 0 and 15, got {v}")
         return v
-    
+
     @property
     def postgresql_url(self) -> str:
         """Build PostgreSQL connection URL."""
         return (
-            f"postgresql+asyncpg://{self.postgresql_username}:{self.postgresql_password}"
+            f"postgresql://{self.postgresql_username}:{self.postgresql_password}"
             f"@{self.postgresql_host}:{self.postgresql_port}/{self.postgresql_database}"
         )
-    
+
     @property
     def redis_url(self) -> str:
         """Build Redis connection URL."""

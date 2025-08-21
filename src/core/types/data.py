@@ -1,9 +1,9 @@
 """Data pipeline and quality types for the T-Bot trading system."""
 
-from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -67,12 +67,14 @@ class StorageMode(Enum):
     HOT = "hot"  # Frequently accessed
     WARM = "warm"  # Occasionally accessed
     COLD = "cold"  # Rarely accessed
+    BATCH = "batch"  # Batch processing mode
+    STREAM = "stream"  # Stream processing mode
     ARCHIVE = "archive"  # Long-term storage
 
 
 class ErrorPattern:
     """Common error patterns in data processing."""
-    
+
     MISSING_REQUIRED_FIELD = "missing_required_field"
     INVALID_DATA_TYPE = "invalid_data_type"
     OUT_OF_RANGE = "out_of_range"
@@ -81,3 +83,43 @@ class ErrorPattern:
     TIMESTAMP_ERROR = "timestamp_error"
     ENCODING_ERROR = "encoding_error"
     PARSING_ERROR = "parsing_error"
+
+
+# ML-specific data types
+class MLMarketData(BaseModel):
+    """Market data structure for ML processing."""
+
+    symbol: str
+    timestamp: datetime
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Decimal
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PredictionResult(BaseModel):
+    """ML prediction result structure."""
+
+    request_id: str
+    model_id: str
+    predictions: list[float]
+    probabilities: list[list[float]] | None = None
+    confidence_scores: list[float] | None = None
+    processing_time_ms: float
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    error: str | None = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class FeatureSet(BaseModel):
+    """Feature set for ML models."""
+
+    feature_set_id: str
+    symbol: str
+    features: dict[str, Any]
+    feature_names: list[str]
+    computation_time_ms: float
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    metadata: dict[str, Any] = Field(default_factory=dict)
