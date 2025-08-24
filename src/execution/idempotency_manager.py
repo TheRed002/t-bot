@@ -17,20 +17,15 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
+from src.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderResponse
 
-# MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
-
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
-
-logger = get_logger(__name__)
+from src.utils import log_calls, time_execution
 
 
 class IdempotencyKey:
@@ -105,7 +100,7 @@ class IdempotencyKey:
         }
 
 
-class OrderIdempotencyManager:
+class OrderIdempotencyManager(BaseComponent):
     """
     Centralized idempotency manager for preventing duplicate orders.
 
@@ -126,15 +121,17 @@ class OrderIdempotencyManager:
             config: Application configuration
             redis_client: Optional Redis client for persistent storage
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.redis_client = redis_client
-        self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
-        self.error_handler = ErrorHandler(config.error_handling)
 
         # In-memory cache with thread safety
         self._cache_lock = RLock()
         self._in_memory_cache: dict[str, IdempotencyKey] = {}
         self._order_hash_to_key: dict[str, str] = {}  # order_hash -> key mapping
+        self._client_order_id_to_key: dict[
+            str, str
+        ] = {}  # client_order_id -> key mapping for O(1) lookup
 
         # Configuration
         self.default_expiration_hours = 24
@@ -335,7 +332,7 @@ class OrderIdempotencyManager:
         except Exception as e:
             self.stats["failed_operations"] += 1
             self.logger.error(f"Failed to get/create idempotency key: {e}")
-            raise ExecutionError(f"Idempotency key operation failed: {e}") from e
+            raise ExecutionError(f"Idempotency key operation failed: {e}")
 
     @log_calls
     async def mark_order_completed(
@@ -493,6 +490,7 @@ class OrderIdempotencyManager:
                         with self._cache_lock:
                             self._in_memory_cache[key] = idempotency_key
                             self._order_hash_to_key[idempotency_key.order_hash] = key
+                            self._client_order_id_to_key[idempotency_key.client_order_id] = key
 
                         return idempotency_key
                 except Exception as e:
@@ -513,6 +511,7 @@ class OrderIdempotencyManager:
             with self._cache_lock:
                 self._in_memory_cache[key] = idempotency_key
                 self._order_hash_to_key[idempotency_key.order_hash] = key
+                self._client_order_id_to_key[idempotency_key.client_order_id] = key
 
             # Store in Redis if available
             if self.use_redis and self.redis_client:
@@ -542,6 +541,7 @@ class OrderIdempotencyManager:
                 idempotency_key = self._in_memory_cache.pop(key, None)
                 if idempotency_key:
                     self._order_hash_to_key.pop(idempotency_key.order_hash, None)
+                    self._client_order_id_to_key.pop(idempotency_key.client_order_id, None)
 
             # Remove from Redis if available
             if self.use_redis and self.redis_client:
@@ -560,11 +560,11 @@ class OrderIdempotencyManager:
     async def _find_key_by_client_order_id(self, client_order_id: str) -> IdempotencyKey | None:
         """Find idempotency key by client_order_id."""
         try:
-            # Search in memory cache first
+            # O(1) lookup using client_order_id index
             with self._cache_lock:
-                for idempotency_key in self._in_memory_cache.values():
-                    if idempotency_key.client_order_id == client_order_id:
-                        return idempotency_key
+                key = self._client_order_id_to_key.get(client_order_id)
+                if key:
+                    return self._in_memory_cache.get(key)
 
             # If Redis is available, we'd need a reverse index
             # For now, this is a limitation - we rely on in-memory cache
@@ -592,6 +592,7 @@ class OrderIdempotencyManager:
                     idempotency_key = self._in_memory_cache.pop(key, None)
                     if idempotency_key:
                         self._order_hash_to_key.pop(idempotency_key.order_hash, None)
+                        self._client_order_id_to_key.pop(idempotency_key.client_order_id, None)
                         expired_count += 1
 
             # Redis keys will expire automatically with TTL
@@ -693,6 +694,7 @@ class OrderIdempotencyManager:
             with self._cache_lock:
                 self._in_memory_cache.clear()
                 self._order_hash_to_key.clear()
+                self._client_order_id_to_key.clear()
 
             self.logger.info("Idempotency manager shutdown completed")
 

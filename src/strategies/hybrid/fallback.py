@@ -23,7 +23,6 @@ from typing import Any
 import numpy as np
 
 from src.core.logging import get_logger
-
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
 
@@ -35,8 +34,6 @@ from src.strategies.base import BaseStrategy
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
 
 
 class FallbackMode(Enum):
@@ -279,6 +276,7 @@ class SafeModeStrategy:
         self.position_limit = config.get("safe_mode_position_limit", 0.01)  # 1% max position
         self.confidence_threshold = config.get("safe_mode_confidence_threshold", 0.8)
         self.max_positions = config.get("safe_mode_max_positions", 1)
+        self.logger = get_logger(__name__)
 
     async def generate_signal(self, data: MarketData, price_history: list[float]) -> Signal | None:
         """Generate conservative signals in safe mode."""
@@ -333,7 +331,7 @@ class SafeModeStrategy:
             return None
 
         except Exception as e:
-            logger.error("Error in safe mode signal generation", error=str(e))
+            self.logger.error("Error in safe mode signal generation", error=str(e))
             return None
 
 
@@ -345,6 +343,7 @@ class DegradedModeStrategy:
         self.config = config
         self.position_limit = config.get("degraded_mode_position_limit", 0.02)  # 2% max position
         self.confidence_threshold = config.get("degraded_mode_confidence_threshold", 0.6)
+        self.logger = get_logger(__name__)
 
     async def generate_signal(self, data: MarketData, price_history: list[float]) -> Signal | None:
         """Generate simplified signals in degraded mode."""
@@ -418,7 +417,7 @@ class DegradedModeStrategy:
             return None
 
         except Exception as e:
-            logger.error("Error in degraded mode signal generation", error=str(e))
+            self.logger.error("Error in degraded mode signal generation", error=str(e))
             return None
 
 
@@ -467,7 +466,7 @@ class FallbackStrategy(BaseStrategy):
         self.price_history: dict[str, list[float]] = {}
         self.market_data_history: list[MarketData] = []
 
-        logger.info(
+        self.logger.info(
             "Fallback strategy initialized",
             max_failure_count=self.max_failure_count,
             recovery_test_duration=self.recovery_test_duration.total_seconds(),
@@ -476,7 +475,7 @@ class FallbackStrategy(BaseStrategy):
     def set_primary_strategy(self, strategy: BaseStrategy) -> None:
         """Set the primary strategy to monitor and fallback from."""
         self.primary_strategy = strategy
-        logger.info("Primary strategy set", strategy=strategy.name)
+        self.logger.info("Primary strategy set", strategy=strategy.name)
 
     @time_execution
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
@@ -521,7 +520,9 @@ class FallbackStrategy(BaseStrategy):
             return []
 
         except Exception as e:
-            logger.error("Error in fallback signal generation", symbol=data.symbol, error=str(e))
+            self.logger.error(
+                "Error in fallback signal generation", symbol=data.symbol, error=str(e)
+            )
             # Record error for failure detection
             self.failure_detector.add_error("signal_generation", datetime.now())
             return []
@@ -575,7 +576,7 @@ class FallbackStrategy(BaseStrategy):
                 await self._check_recovery_conditions()
 
         except Exception as e:
-            logger.error("Error checking fallback conditions", error=str(e))
+            self.logger.error("Error checking fallback conditions", error=str(e))
 
     async def _handle_failure(self, failure_info: dict[str, Any]) -> None:
         """Handle detected failure and switch modes."""
@@ -583,7 +584,7 @@ class FallbackStrategy(BaseStrategy):
             self.failure_count += 1
             failure_type = failure_info.get("failure_type")
 
-            logger.warning(
+            self.logger.warning(
                 "Failure detected, initiating fallback",
                 failure_type=failure_type.value if failure_type else "unknown",
                 failure_info=failure_info,
@@ -598,7 +599,7 @@ class FallbackStrategy(BaseStrategy):
                 await self._switch_mode(new_mode, failure_info)
 
         except Exception as e:
-            logger.error("Error handling failure", error=str(e))
+            self.logger.error("Error handling failure", error=str(e))
 
     def _determine_fallback_mode(self, failure_info: dict[str, Any]) -> FallbackMode:
         """Determine appropriate fallback mode based on failure type."""
@@ -657,7 +658,7 @@ class FallbackStrategy(BaseStrategy):
             if len(self.mode_history) > 100:
                 self.mode_history = self.mode_history[-100:]
 
-            logger.warning(
+            self.logger.warning(
                 "Fallback mode switched",
                 from_mode=old_mode.value,
                 to_mode=new_mode.value,
@@ -675,7 +676,7 @@ class FallbackStrategy(BaseStrategy):
                     await self.primary_strategy.pause()
 
         except Exception as e:
-            logger.error("Error switching fallback mode", error=str(e))
+            self.logger.error("Error switching fallback mode", error=str(e))
 
     async def _check_recovery_conditions(self) -> None:
         """Check if conditions are suitable for recovery to primary strategy."""
@@ -721,7 +722,7 @@ class FallbackStrategy(BaseStrategy):
                 await self._switch_mode(FallbackMode.RECOVERY, {"reason": "attempting_recovery"})
 
         except Exception as e:
-            logger.error("Error checking recovery conditions", error=str(e))
+            self.logger.error("Error checking recovery conditions", error=str(e))
 
     async def _evaluate_recovery_performance(self) -> bool:
         """Evaluate if recovery attempt was successful."""
@@ -753,7 +754,7 @@ class FallbackStrategy(BaseStrategy):
             return False
 
         except Exception as e:
-            logger.error("Error evaluating recovery performance", error=str(e))
+            self.logger.error("Error evaluating recovery performance", error=str(e))
             return False
 
     async def _generate_signal_for_current_mode(self, data: MarketData) -> Signal | None:
@@ -796,7 +797,7 @@ class FallbackStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Error generating signal for current mode",
                 mode=self.current_mode.value,
                 error=str(e),
@@ -850,7 +851,7 @@ class FallbackStrategy(BaseStrategy):
                 return signal.confidence >= self.config.min_confidence
 
         except Exception as e:
-            logger.error("Error validating fallback signal", error=str(e))
+            self.logger.error("Error validating fallback signal", error=str(e))
             return False
 
     def get_position_size(self, signal: Signal) -> Decimal:
@@ -891,7 +892,7 @@ class FallbackStrategy(BaseStrategy):
             return max(min_size, min(max_size, final_size))
 
         except Exception as e:
-            logger.error("Error calculating fallback position size", error=str(e))
+            self.logger.error("Error calculating fallback position size", error=str(e))
             return Decimal("0.005")  # Conservative default
 
     def should_exit(self, position: Position, data: MarketData) -> bool:
@@ -922,26 +923,28 @@ class FallbackStrategy(BaseStrategy):
 
             # Check stops
             if pnl_pct <= -stop_loss:
-                logger.info(
+                self.logger.info(
                     "Stop loss triggered", symbol=position.symbol, mode=self.current_mode.value
                 )
                 return True
 
             if pnl_pct >= take_profit:
-                logger.info(
+                self.logger.info(
                     "Take profit triggered", symbol=position.symbol, mode=self.current_mode.value
                 )
                 return True
 
             # Emergency exit in safe mode if any loss
             if self.current_mode == FallbackMode.SAFE_MODE and pnl_pct < -0.005:  # 0.5% loss
-                logger.info("Emergency exit in safe mode", symbol=position.symbol)
+                self.logger.info("Emergency exit in safe mode", symbol=position.symbol)
                 return True
 
             return False
 
         except Exception as e:
-            logger.error("Error in fallback exit decision", symbol=position.symbol, error=str(e))
+            self.logger.error(
+                "Error in fallback exit decision", symbol=position.symbol, error=str(e)
+            )
             return True  # Exit on error for safety
 
     def update_trade_result(self, return_pct: float, trade_info: dict[str, Any]) -> None:
@@ -950,7 +953,7 @@ class FallbackStrategy(BaseStrategy):
             timestamp = trade_info.get("timestamp", datetime.now())
             self.failure_detector.add_trade_result(return_pct, timestamp)
 
-            logger.debug(
+            self.logger.debug(
                 "Trade result updated",
                 return_pct=return_pct,
                 mode=self.current_mode.value,
@@ -958,7 +961,7 @@ class FallbackStrategy(BaseStrategy):
             )
 
         except Exception as e:
-            logger.error("Error updating trade result", error=str(e))
+            self.logger.error("Error updating trade result", error=str(e))
 
     def get_fallback_statistics(self) -> dict[str, Any]:
         """Get comprehensive fallback statistics."""
@@ -987,5 +990,5 @@ class FallbackStrategy(BaseStrategy):
             }
 
         except Exception as e:
-            logger.error("Error getting fallback statistics", error=str(e))
+            self.logger.error("Error getting fallback statistics", error=str(e))
             return {"error": str(e)}

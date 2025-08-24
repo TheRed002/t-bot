@@ -16,12 +16,10 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from src.core.config import Config
+from src.base import BaseComponent
+from src.core.config.main import Config
 from src.core.exceptions import RiskManagementError
-from src.core.logging import get_logger
 from src.core.types import MarketData, Position
-
-logger = get_logger(__name__)
 
 
 @dataclass
@@ -49,7 +47,7 @@ class CorrelationMetrics:
     correlation_matrix: dict[tuple[str, str], Decimal]
 
 
-class CorrelationMonitor:
+class CorrelationMonitor(BaseComponent):
     """
     Real-time correlation monitoring system for portfolio positions.
 
@@ -65,9 +63,10 @@ class CorrelationMonitor:
             config: Application configuration
             thresholds: Correlation thresholds, uses defaults if None
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.thresholds = thresholds or CorrelationThresholds()
-        self.logger = logger.bind(component="correlation_monitor")
+        # Note: logger is a property from BaseComponent, no need to bind
 
         # Price history storage: symbol -> deque of (price, timestamp)
         self.price_history: dict[str, deque[tuple[Decimal, datetime]]] = defaultdict(
@@ -173,7 +172,18 @@ class CorrelationMonitor:
                 var1 = Decimal("0.0")
                 var2 = Decimal("0.0")
 
-                for r1, r2 in zip(returns1, returns2, strict=False):
+                # Validate equal lengths before zip
+                if len(returns1) != len(returns2):
+                    self.logger.warning(
+                        "Mismatched return series lengths for correlation calculation",
+                        symbol1=symbol1,
+                        symbol2=symbol2,
+                        len1=len(returns1),
+                        len2=len(returns2),
+                    )
+                    return None
+
+                for r1, r2 in zip(returns1, returns2, strict=True):
                     diff1 = r1 - mean1
                     diff2 = r2 - mean2
                     covariance += diff1 * diff2
@@ -332,7 +342,7 @@ class CorrelationMonitor:
             raise RiskManagementError(
                 f"Portfolio correlation calculation failed: {e}",
                 error_code="CORRELATION_CALCULATION_FAILED",
-            ) from e
+            )
 
     async def get_position_limits_for_correlation(
         self, correlation_metrics: CorrelationMetrics

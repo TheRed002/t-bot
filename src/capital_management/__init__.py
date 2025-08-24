@@ -24,12 +24,32 @@ Author: Trading Bot Framework
 Version: 1.0.0
 """
 
+# Export capital-specific types for convenience
+from src.core.types.capital import (
+    CapitalCurrencyExposure,
+    CapitalExchangeAllocation,
+    CapitalFundFlow,
+    ExtendedCapitalProtection,
+    ExtendedWithdrawalRule,
+)
+
 from .capital_allocator import CapitalAllocator
 from .currency_manager import CurrencyManager
 from .exchange_distributor import ExchangeDistributor
 from .fund_flow_manager import FundFlowManager
 
-__all__ = ["CapitalAllocator", "CurrencyManager", "ExchangeDistributor", "FundFlowManager"]
+__all__ = [
+    "CapitalAllocator",
+    "CurrencyManager",
+    "ExchangeDistributor",
+    "FundFlowManager",
+    # Types
+    "CapitalCurrencyExposure",
+    "CapitalExchangeAllocation",
+    "CapitalFundFlow",
+    "ExtendedCapitalProtection",
+    "ExtendedWithdrawalRule",
+]
 
 __version__ = "1.0.0"
 __author__ = "Trading Bot Framework"

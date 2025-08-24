@@ -31,13 +31,14 @@ from .health import HealthCheckManager
 from .interfaces import (
     Configurable,
     HealthCheckable,
+    HealthStatus,
     Injectable,
     Lifecycle,
     Loggable,
     Monitorable,
 )
 from .repository import BaseRepository
-from .service import BaseService
+from .service import BaseService, TransactionalService
 
 if TYPE_CHECKING:
     pass
@@ -49,10 +50,12 @@ __all__ = [
     "BaseFactory",
     "BaseRepository",
     "BaseService",
+    "TransactionalService",
     # Interfaces
     "Configurable",
     "HealthCheckManager",
     "HealthCheckable",
+    "HealthStatus",
     "Injectable",
     "Lifecycle",
     "Loggable",

@@ -13,24 +13,24 @@ from typing import Any
 
 import redis.asyncio as redis
 
+from src.base import BaseComponent
+
 # Import core components from P-001
 from src.core.exceptions import DataError, DataSourceError
-from src.core.logging import get_logger
 from src.utils.constants import TIMEOUTS
 
 # Import utils from P-007A
 from src.utils.formatters import format_api_response
 
-logger = get_logger(__name__)
 
-
-class RedisClient:
+class RedisClient(BaseComponent):
     """Async Redis client with utilities for trading bot data."""
 
     def __init__(self, config_or_url, *, auto_close: bool = True):
+        super().__init__()  # Initialize BaseComponent
         # Accept both config object and direct URL
         if hasattr(config_or_url, "redis"):
-            self.redis_url = config_or_url.redis.get("url", "redis://localhost:6379/0")
+            self.redis_url = getattr(config_or_url.redis, "url", "redis://localhost:6379/0") if hasattr(config_or_url, "redis") else "redis://localhost:6379/0"
         elif isinstance(config_or_url, str):
             self.redis_url = config_or_url
         else:
@@ -38,7 +38,7 @@ class RedisClient:
 
         self.client: redis.Redis | None = None
         # Use utils constants for default TTL
-        self._default_ttl = getattr(TIMEOUTS, "REDIS_DEFAULT_TTL", 3600)
+        self._default_ttl = TIMEOUTS.get("REDIS_DEFAULT_TTL", 3600)
         self.auto_close = auto_close
 
     async def connect(self) -> None:
@@ -54,11 +54,11 @@ class RedisClient:
 
             # Test connection
             await self.client.ping()
-            logger.info("Redis connection established")
+            self.logger.info("Redis connection established")
 
         except Exception as e:
-            logger.error("Redis connection failed", error=str(e))
-            raise DataSourceError(f"Redis connection failed: {e!s}") from e
+            self.logger.error("Redis connection failed", error=str(e))
+            raise DataSourceError(f"Redis connection failed: {e!s}")
 
     async def _ensure_connected(self) -> None:
         if self.client is None:
@@ -80,7 +80,7 @@ class RedisClient:
                 await self.client.aclose()
             except AttributeError:
                 await self.client.close()
-            logger.info("Redis connection closed")
+            self.logger.info("Redis connection closed")
 
     def _get_namespaced_key(self, key: str, namespace: str = "trading_bot") -> str:
         """Get namespaced key for organization."""
@@ -111,8 +111,8 @@ class RedisClient:
             return result
 
         except Exception as e:
-            logger.error("Redis set operation failed", key=key, error=str(e))
-            raise DataError(f"Redis set operation failed: {e!s}") from e
+            self.logger.error("Redis set operation failed", key=key, error=str(e))
+            raise DataError(f"Redis set operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -133,8 +133,8 @@ class RedisClient:
                 return value
 
         except Exception as e:
-            logger.error("Redis get operation failed", key=key, error=str(e))
-            raise DataError(f"Redis get operation failed: {e!s}") from e
+            self.logger.error("Redis get operation failed", key=key, error=str(e))
+            raise DataError(f"Redis get operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -147,8 +147,8 @@ class RedisClient:
             return result > 0
 
         except Exception as e:
-            logger.error("Redis delete operation failed", key=key, error=str(e))
-            raise DataError(f"Redis delete operation failed: {e!s}") from e
+            self.logger.error("Redis delete operation failed", key=key, error=str(e))
+            raise DataError(f"Redis delete operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -161,8 +161,8 @@ class RedisClient:
             return result > 0
 
         except Exception as e:
-            logger.error("Redis exists operation failed", key=key, error=str(e))
-            raise DataError(f"Redis exists operation failed: {e!s}") from e
+            self.logger.error("Redis exists operation failed", key=key, error=str(e))
+            raise DataError(f"Redis exists operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -175,8 +175,8 @@ class RedisClient:
             return result
 
         except Exception as e:
-            logger.error("Redis expire operation failed", key=key, error=str(e))
-            raise DataError(f"Redis expire operation failed: {e!s}") from e
+            self.logger.error("Redis expire operation failed", key=key, error=str(e))
+            raise DataError(f"Redis expire operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -189,8 +189,8 @@ class RedisClient:
             return result
 
         except Exception as e:
-            logger.error("Redis TTL operation failed", key=key, error=str(e))
-            raise DataError(f"Redis TTL operation failed: {e!s}") from e
+            self.logger.error("Redis TTL operation failed", key=key, error=str(e))
+            raise DataError(f"Redis TTL operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -211,8 +211,8 @@ class RedisClient:
             return result >= 0
 
         except Exception as e:
-            logger.error("Redis hset operation failed", key=key, field=field, error=str(e))
-            raise DataError(f"Redis hset operation failed: {e!s}") from e
+            self.logger.error("Redis hset operation failed", key=key, field=field, error=str(e))
+            raise DataError(f"Redis hset operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -233,8 +233,8 @@ class RedisClient:
                 return value
 
         except Exception as e:
-            logger.error("Redis hget operation failed", key=key, field=field, error=str(e))
-            raise DataError(f"Redis hget operation failed: {e!s}") from e
+            self.logger.error("Redis hget operation failed", key=key, field=field, error=str(e))
+            raise DataError(f"Redis hget operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -256,8 +256,8 @@ class RedisClient:
             return deserialized
 
         except Exception as e:
-            logger.error("Redis hgetall operation failed", key=key, error=str(e))
-            raise DataError(f"Redis hgetall operation failed: {e!s}") from e
+            self.logger.error("Redis hgetall operation failed", key=key, error=str(e))
+            raise DataError(f"Redis hgetall operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -270,8 +270,8 @@ class RedisClient:
             return result > 0
 
         except Exception as e:
-            logger.error("Redis hdel operation failed", key=key, field=field, error=str(e))
-            raise DataError(f"Redis hdel operation failed: {e!s}") from e
+            self.logger.error("Redis hdel operation failed", key=key, field=field, error=str(e))
+            raise DataError(f"Redis hdel operation failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -292,8 +292,8 @@ class RedisClient:
             return result
 
         except Exception as e:
-            logger.error("Redis lpush operation failed", key=key, error=str(e))
-            raise DataError(f"Redis lpush operation failed: {e!s}") from e
+            self.logger.error("Redis lpush operation failed", key=key, error=str(e))
+            raise DataError(f"Redis lpush operation failed: {e!s}")
 
     async def rpush(self, key: str, value: Any, namespace: str = "trading_bot") -> int:
         """Push a value to the right of a list."""
@@ -311,14 +311,15 @@ class RedisClient:
             return result
 
         except Exception as e:
-            logger.error("Redis rpush operation failed", key=key, error=str(e))
-            raise DataError(f"Redis rpush operation failed: {e!s}") from e
+            self.logger.error("Redis rpush operation failed", key=key, error=str(e))
+            raise DataError(f"Redis rpush operation failed: {e!s}")
 
     async def lrange(
         self, key: str, start: int = 0, end: int = -1, namespace: str = "trading_bot"
     ) -> list[Any]:
         """Get a range of elements from a list."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             result = await self.client.lrange(namespaced_key, start, end)
 
@@ -333,13 +334,14 @@ class RedisClient:
             return deserialized
 
         except Exception as e:
-            logger.error("Redis lrange operation failed", key=key, error=str(e))
-            raise DataError(f"Redis lrange operation failed: {e!s}") from e
+            self.logger.error("Redis lrange operation failed", key=key, error=str(e))
+            raise DataError(f"Redis lrange operation failed: {e!s}")
 
     # Set operations
     async def sadd(self, key: str, value: Any, namespace: str = "trading_bot") -> bool:
         """Add a value to a set."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
 
             # Serialize value
@@ -352,12 +354,13 @@ class RedisClient:
             return result > 0
 
         except Exception as e:
-            logger.error("Redis sadd operation failed", key=key, error=str(e))
-            raise DataError(f"Redis sadd operation failed: {e!s}") from e
+            self.logger.error("Redis sadd operation failed", key=key, error=str(e))
+            raise DataError(f"Redis sadd operation failed: {e!s}")
 
     async def smembers(self, key: str, namespace: str = "trading_bot") -> list[Any]:
         """Get all members of a set."""
         try:
+            await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             result = await self.client.smembers(namespaced_key)
 
@@ -372,8 +375,8 @@ class RedisClient:
             return list(deserialized)
 
         except Exception as e:
-            logger.error("Redis smembers operation failed", key=key, error=str(e))
-            raise DataError(f"Redis smembers operation failed: {e!s}") from e
+            self.logger.error("Redis smembers operation failed", key=key, error=str(e))
+            raise DataError(f"Redis smembers operation failed: {e!s}")
 
     # Trading-specific utilities
     async def store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool:
@@ -420,8 +423,8 @@ class RedisClient:
             result = await self.client.ping()
             return result
         except Exception as e:
-            logger.error("Redis ping failed", error=str(e))
-            raise DataError(f"Redis ping failed: {e!s}") from e
+            self.logger.error("Redis ping failed", error=str(e))
+            raise DataError(f"Redis ping failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -432,8 +435,8 @@ class RedisClient:
             info = await self.client.info()
             return info
         except Exception as e:
-            logger.error("Redis info failed", error=str(e))
-            raise DataError(f"Redis info failed: {e!s}") from e
+            self.logger.error("Redis info failed", error=str(e))
+            raise DataError(f"Redis info failed: {e!s}")
         finally:
             await self._maybe_autoclose()
 
@@ -443,7 +446,7 @@ class RedisClient:
             await self.ping()
             return True
         except Exception as e:
-            logger.error("Redis health check failed", error=str(e))
+            self.logger.error("Redis health check failed", error=str(e))
             return False
 
     # TODO: Remove in production - Debug functions

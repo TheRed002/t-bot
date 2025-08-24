@@ -17,11 +17,11 @@ from sklearn.preprocessing import StandardScaler
 
 from src.core.config import Config
 from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
 from src.ml.models.base_model import BaseModel
-from src.utils.decorators import log_calls, time_execution
+from src.utils.decorators import UnifiedDecorator
 
-logger = get_logger(__name__)
+# Initialize decorator instance
+dec = UnifiedDecorator()
 
 
 class RegimeDetector(BaseModel):
@@ -89,7 +89,7 @@ class RegimeDetector(BaseModel):
         self.regime_stats_ = None
         self.feature_importance_ = None
 
-        logger.info(
+        self.logger.info(
             "Regime detector initialized",
             detection_method=self.detection_method,
             n_regimes=self.n_regimes,
@@ -131,8 +131,8 @@ class RegimeDetector(BaseModel):
                 raise ValidationError(f"Unknown detection method: {self.detection_method}")
 
         except Exception as e:
-            logger.error(f"Failed to create model: {e}")
-            raise ValidationError(f"Model creation failed: {e}") from e
+            self.logger.error(f"Failed to create model: {e}")
+            raise ValidationError(f"Model creation failed: {e}")
 
     def _define_regime_names(self) -> list[str]:
         """Define regime names based on number of regimes."""
@@ -145,8 +145,7 @@ class RegimeDetector(BaseModel):
         else:
             return [f"Regime_{i}" for i in range(self.n_regimes)]
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> dict[str, Any]:
         """
         Train the regime detector.
@@ -238,7 +237,7 @@ class RegimeDetector(BaseModel):
 
             self.is_trained = True
 
-            logger.info(
+            self.logger.info(
                 "Regime detector training completed",
                 detection_method=self.detection_method,
                 n_regimes=self.n_regimes,
@@ -249,15 +248,14 @@ class RegimeDetector(BaseModel):
             return metrics
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Regime detector training failed",
                 detection_method=self.detection_method,
                 error=str(e),
             )
-            raise ValidationError(f"Training failed: {e}") from e
+            raise ValidationError(f"Training failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """
         Detect market regimes.
@@ -298,7 +296,7 @@ class RegimeDetector(BaseModel):
             # Make predictions
             regime_labels = self.model.predict(features_df)
 
-            logger.debug(
+            self.logger.debug(
                 "Regime detection completed",
                 prediction_count=len(regime_labels),
                 unique_regimes=len(np.unique(regime_labels)),
@@ -308,11 +306,10 @@ class RegimeDetector(BaseModel):
             return regime_labels
 
         except Exception as e:
-            logger.error("Regime detection failed", error=str(e), model_name=self.model_name)
-            raise ValidationError(f"Regime detection failed: {e}") from e
+            self.logger.error("Regime detection failed", error=str(e), model_name=self.model_name)
+            raise ValidationError(f"Regime detection failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     def evaluate(self, X: pd.DataFrame, y: pd.Series | None = None) -> dict[str, Any]:
         """
         Evaluate the regime detector.
@@ -351,7 +348,7 @@ class RegimeDetector(BaseModel):
                 test_accuracy = accuracy_score(y_aligned, y_pred)
                 metrics["test_accuracy"] = test_accuracy
 
-                logger.info(
+                self.logger.info(
                     "Supervised regime detector evaluation completed",
                     test_accuracy=test_accuracy,
                     model_name=self.model_name,
@@ -376,7 +373,7 @@ class RegimeDetector(BaseModel):
                 silhouette = silhouette_score(features_df, y_pred)
                 metrics["silhouette_score"] = silhouette
 
-                logger.info(
+                self.logger.info(
                     "Unsupervised regime detector evaluation completed",
                     silhouette_score=silhouette,
                     model_name=self.model_name,
@@ -385,10 +382,10 @@ class RegimeDetector(BaseModel):
             return metrics
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Regime detector evaluation failed", error=str(e), model_name=self.model_name
             )
-            raise ValidationError(f"Evaluation failed: {e}") from e
+            raise ValidationError(f"Evaluation failed: {e}")
 
     def _create_regime_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """Create features for regime detection."""
@@ -479,7 +476,7 @@ class RegimeDetector(BaseModel):
                 features["month"] = data.index.month
                 features["hour"] = data.index.hour if hasattr(data.index, "hour") else 0
 
-            logger.debug(
+            self.logger.debug(
                 "Regime features created",
                 feature_count=len(features.columns),
                 sample_count=len(features),
@@ -488,8 +485,8 @@ class RegimeDetector(BaseModel):
             return features
 
         except Exception as e:
-            logger.error(f"Failed to create regime features: {e}")
-            raise ValidationError(f"Regime feature creation failed: {e}") from e
+            self.logger.error(f"Failed to create regime features: {e}")
+            raise ValidationError(f"Regime feature creation failed: {e}")
 
     def _calculate_regime_statistics(
         self, features: pd.DataFrame, regime_labels: np.ndarray
@@ -512,7 +509,7 @@ class RegimeDetector(BaseModel):
             return regime_stats
 
         except Exception as e:
-            logger.error(f"Failed to calculate regime statistics: {e}")
+            self.logger.error(f"Failed to calculate regime statistics: {e}")
             return {}
 
     def predict_regime_labels(self, X: pd.DataFrame) -> list[str]:
@@ -533,8 +530,8 @@ class RegimeDetector(BaseModel):
             ]
 
         except Exception as e:
-            logger.error(f"Regime label prediction failed: {e}")
-            raise ValidationError(f"Regime label prediction failed: {e}") from e
+            self.logger.error(f"Regime label prediction failed: {e}")
+            raise ValidationError(f"Regime label prediction failed: {e}")
 
     def get_regime_probabilities(self, X: pd.DataFrame) -> np.ndarray | None:
         """
@@ -548,7 +545,7 @@ class RegimeDetector(BaseModel):
         """
         try:
             if not hasattr(self.model, "predict_proba"):
-                logger.warning("Model does not support probability prediction")
+                self.logger.warning("Model does not support probability prediction")
                 return None
 
             # Create regime features
@@ -568,7 +565,7 @@ class RegimeDetector(BaseModel):
             return self.model.predict_proba(features_df)
 
         except Exception as e:
-            logger.error(f"Regime probability prediction failed: {e}")
+            self.logger.error(f"Regime probability prediction failed: {e}")
             return None
 
     def get_regime_statistics(self) -> dict[str, Any] | None:
@@ -579,7 +576,7 @@ class RegimeDetector(BaseModel):
             Dictionary with regime statistics or None if not available
         """
         if not self.is_trained:
-            logger.warning("Model not trained, no regime statistics available")
+            self.logger.warning("Model not trained, no regime statistics available")
             return None
 
         return self.regime_stats_
@@ -592,7 +589,7 @@ class RegimeDetector(BaseModel):
             Series with feature importance scores or None if not available
         """
         if not self.is_trained or not self.use_supervised:
-            logger.warning("Feature importance only available for supervised models")
+            self.logger.warning("Feature importance only available for supervised models")
             return None
 
         return self.feature_importance_

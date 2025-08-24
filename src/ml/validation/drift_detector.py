@@ -12,21 +12,21 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from src.core.config import Config
+from src.core.base.interfaces import HealthStatus
+from src.core.base.service import BaseService
 from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
-from src.database.connection import get_sync_session
-from src.database.models import MLDriftDetection
-from src.utils.decorators import log_calls, time_execution
+from src.core.types.base import ConfigDict
+from src.utils.decorators import UnifiedDecorator
 
-logger = get_logger(__name__)
+# Initialize decorator instance
+dec = UnifiedDecorator()
 
 
-class DriftDetector:
+class DriftDetectionService(BaseService):
     """
     Drift detection system for monitoring data and model drift.
 
-    This class provides various drift detection methods:
+    This service provides various drift detection methods:
     - Statistical drift detection (KS test, Chi-square test)
     - Distribution shift detection
     - Performance drift detection
@@ -34,7 +34,6 @@ class DriftDetector:
     - Prediction drift detection
 
     Attributes:
-        config: Application configuration
         drift_threshold: Threshold for drift detection
         min_samples: Minimum samples for drift detection
         reference_window: Size of reference window
@@ -42,38 +41,82 @@ class DriftDetector:
         drift_history: History of drift detections
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
         """
-        Initialize the drift detector.
+        Initialize the drift detection service.
 
         Args:
-            config: Application configuration
+            config: Service configuration
+            correlation_id: Request correlation ID
         """
-        self.config = config
+        super().__init__(
+            name="DriftDetectionService",
+            config=config,
+            correlation_id=correlation_id,
+        )
 
-        # Drift detection parameters
-        self.drift_threshold = config.ml.drift_threshold
-        self.min_samples = config.ml.min_drift_samples
-        self.reference_window = config.ml.drift_reference_window
-        self.detection_window = config.ml.drift_detection_window
-        self.significance_level = config.ml.significance_level
+        # Configuration parameters with defaults
+        ml_config = self._config.get("ml", {}) if self._config else {}
+        self.drift_threshold = ml_config.get("drift_threshold", 0.1)
+        self.min_samples = ml_config.get("min_drift_samples", 100)
+        self.reference_window = ml_config.get("drift_reference_window", 1000)
+        self.detection_window = ml_config.get("drift_detection_window", 500)
+        self.significance_level = ml_config.get("significance_level", 0.05)
 
         # Drift monitoring state
         self.reference_data = {}
         self.drift_history = []
         self.feature_statistics = {}
 
-        logger.info(
-            "Drift detector initialized",
+        # Add dependencies for data and model services
+        self.add_dependency("DataService")
+        self.add_dependency("ModelRegistryService")
+
+        self._logger.info(
+            "Drift detection service initialized",
             drift_threshold=self.drift_threshold,
             min_samples=self.min_samples,
             reference_window=self.reference_window,
             detection_window=self.detection_window,
         )
 
-    @time_execution
-    @log_calls
-    def detect_feature_drift(
+    async def _do_start(self) -> None:
+        """Start the drift detection service."""
+        try:
+            # Resolve dependencies
+            self.data_service = self.resolve_dependency("DataService")
+            self.model_registry = self.resolve_dependency("ModelRegistryService")
+
+            self._logger.info("Drift detection service started successfully")
+        except Exception as e:
+            self._logger.error(f"Failed to start drift detection service: {e}")
+            raise
+
+    async def _do_stop(self) -> None:
+        """Stop the drift detection service."""
+        self._logger.info("Drift detection service stopped")
+
+    async def _service_health_check(self) -> HealthStatus:
+        """Perform service-specific health check."""
+        try:
+            # Check if we have recent drift detection data
+            if not self.drift_history:
+                return HealthStatus.HEALTHY
+
+            # Check if drift detection is working within reasonable time
+            last_detection = self.drift_history[-1].get("timestamp")
+            if last_detection and isinstance(last_detection, datetime):
+                hours_since_last = (datetime.utcnow() - last_detection).total_seconds() / 3600
+                if hours_since_last > 24:  # No drift detection in 24 hours
+                    return HealthStatus.DEGRADED
+
+            return HealthStatus.HEALTHY
+        except Exception as e:
+            self._logger.error(f"Health check failed: {e}")
+            return HealthStatus.UNHEALTHY
+
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def detect_feature_drift(
         self,
         reference_data: pd.DataFrame,
         current_data: pd.DataFrame,
@@ -93,6 +136,21 @@ class DriftDetector:
         Raises:
             ValidationError: If drift detection fails
         """
+        return await self.execute_with_monitoring(
+            "detect_feature_drift",
+            self._detect_feature_drift_impl,
+            reference_data,
+            current_data,
+            feature_columns,
+        )
+
+    async def _detect_feature_drift_impl(
+        self,
+        reference_data: pd.DataFrame,
+        current_data: pd.DataFrame,
+        feature_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Implementation of feature drift detection."""
         try:
             if reference_data.empty or current_data.empty:
                 raise ValidationError("Reference and current data cannot be empty")
@@ -109,7 +167,7 @@ class DriftDetector:
             if not feature_columns:
                 raise ValidationError("No common features found between datasets")
 
-            logger.info(
+            self._logger.info(
                 "Starting feature drift detection",
                 reference_samples=len(reference_data),
                 current_samples=len(current_data),
@@ -130,7 +188,7 @@ class DriftDetector:
                         overall_drift_detected = True
 
                 except Exception as e:
-                    logger.warning(f"Failed to detect drift for feature {feature}: {e}")
+                    self._logger.warning(f"Failed to detect drift for feature {feature}: {e}")
                     drift_results[feature] = {"drift_detected": False, "error": str(e)}
 
             # Calculate overall drift statistics
@@ -154,9 +212,9 @@ class DriftDetector:
             }
 
             # Store drift detection result
-            self._store_drift_result(overall_result)
+            await self._store_drift_result(overall_result)
 
-            logger.info(
+            self._logger.info(
                 "Feature drift detection completed",
                 overall_drift_detected=overall_drift_detected,
                 features_with_drift=overall_result["features_with_drift"],
@@ -166,12 +224,11 @@ class DriftDetector:
             return overall_result
 
         except Exception as e:
-            logger.error(f"Feature drift detection failed: {e}")
-            raise ValidationError(f"Feature drift detection failed: {e}") from e
+            self._logger.error(f"Feature drift detection failed: {e}")
+            raise ValidationError(f"Feature drift detection failed: {e}")
 
-    @time_execution
-    @log_calls
-    def detect_prediction_drift(
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def detect_prediction_drift(
         self, reference_predictions: np.ndarray, current_predictions: np.ndarray, model_name: str
     ) -> dict[str, Any]:
         """
@@ -188,6 +245,18 @@ class DriftDetector:
         Raises:
             ValidationError: If prediction drift detection fails
         """
+        return await self.execute_with_monitoring(
+            "detect_prediction_drift",
+            self._detect_prediction_drift_impl,
+            reference_predictions,
+            current_predictions,
+            model_name,
+        )
+
+    async def _detect_prediction_drift_impl(
+        self, reference_predictions: np.ndarray, current_predictions: np.ndarray, model_name: str
+    ) -> dict[str, Any]:
+        """Implementation of prediction drift detection."""
         try:
             if (
                 len(reference_predictions) < self.min_samples
@@ -197,7 +266,7 @@ class DriftDetector:
                     f"Need at least {self.min_samples} predictions for drift detection"
                 )
 
-            logger.info(
+            self._logger.info(
                 "Starting prediction drift detection",
                 model_name=model_name,
                 reference_predictions=len(reference_predictions),
@@ -257,9 +326,9 @@ class DriftDetector:
             }
 
             # Store drift detection result
-            self._store_drift_result(prediction_drift_result)
+            await self._store_drift_result(prediction_drift_result)
 
-            logger.info(
+            self._logger.info(
                 "Prediction drift detection completed",
                 model_name=model_name,
                 drift_detected=drift_detected,
@@ -269,12 +338,11 @@ class DriftDetector:
             return prediction_drift_result
 
         except Exception as e:
-            logger.error(f"Prediction drift detection failed: {e}")
-            raise ValidationError(f"Prediction drift detection failed: {e}") from e
+            self._logger.error(f"Prediction drift detection failed: {e}")
+            raise ValidationError(f"Prediction drift detection failed: {e}")
 
-    @time_execution
-    @log_calls
-    def detect_performance_drift(
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def detect_performance_drift(
         self,
         reference_performance: dict[str, float],
         current_performance: dict[str, float],
@@ -294,6 +362,21 @@ class DriftDetector:
         Raises:
             ValidationError: If performance drift detection fails
         """
+        return await self.execute_with_monitoring(
+            "detect_performance_drift",
+            self._detect_performance_drift_impl,
+            reference_performance,
+            current_performance,
+            model_name,
+        )
+
+    async def _detect_performance_drift_impl(
+        self,
+        reference_performance: dict[str, float],
+        current_performance: dict[str, float],
+        model_name: str,
+    ) -> dict[str, Any]:
+        """Implementation of performance drift detection."""
         try:
             if not reference_performance or not current_performance:
                 raise ValidationError("Performance metrics cannot be empty")
@@ -304,7 +387,7 @@ class DriftDetector:
             if not common_metrics:
                 raise ValidationError("No common performance metrics found")
 
-            logger.info(
+            self._logger.info(
                 "Starting performance drift detection",
                 model_name=model_name,
                 common_metrics=len(common_metrics),
@@ -359,9 +442,9 @@ class DriftDetector:
             }
 
             # Store drift detection result
-            self._store_drift_result(performance_drift_result)
+            await self._store_drift_result(performance_drift_result)
 
-            logger.info(
+            self._logger.info(
                 "Performance drift detection completed",
                 model_name=model_name,
                 drift_detected=drift_detected,
@@ -372,8 +455,8 @@ class DriftDetector:
             return performance_drift_result
 
         except Exception as e:
-            logger.error(f"Performance drift detection failed: {e}")
-            raise ValidationError(f"Performance drift detection failed: {e}") from e
+            self._logger.error(f"Performance drift detection failed: {e}")
+            raise ValidationError(f"Performance drift detection failed: {e}")
 
     def _detect_single_feature_drift(
         self, reference_feature: pd.Series, current_feature: pd.Series, feature_name: str
@@ -395,7 +478,7 @@ class DriftDetector:
                 )
 
         except Exception as e:
-            logger.error(f"Single feature drift detection failed for {feature_name}: {e}")
+            self._logger.error(f"Single feature drift detection failed for {feature_name}: {e}")
             return {"drift_detected": False, "error": str(e)}
 
     def _detect_numerical_drift(
@@ -440,7 +523,7 @@ class DriftDetector:
             }
 
         except Exception as e:
-            logger.error(f"Numerical drift detection failed: {e}")
+            self._logger.error(f"Numerical drift detection failed: {e}")
             return {"drift_detected": False, "error": str(e)}
 
     def _detect_categorical_drift(
@@ -486,7 +569,7 @@ class DriftDetector:
             }
 
         except Exception as e:
-            logger.error(f"Categorical drift detection failed: {e}")
+            self._logger.error(f"Categorical drift detection failed: {e}")
             return {"drift_detected": False, "error": str(e)}
 
     def _calculate_distribution_stats(self, data: pd.Series) -> dict[str, float]:
@@ -504,7 +587,7 @@ class DriftDetector:
                 "q75": float(data.quantile(0.75)),
             }
         except Exception as e:
-            logger.error(f"Distribution statistics calculation failed: {e}")
+            self._logger.error(f"Distribution statistics calculation failed: {e}")
             return {}
 
     def _calculate_js_distance(self, ref_data: pd.Series, curr_data: pd.Series) -> float:
@@ -534,7 +617,7 @@ class DriftDetector:
             return np.sqrt(js_distance)
 
         except Exception as e:
-            logger.error(f"Jensen-Shannon distance calculation failed: {e}")
+            self._logger.error(f"Jensen-Shannon distance calculation failed: {e}")
             return 0.0
 
     def _calculate_js_divergence_categorical(
@@ -557,35 +640,31 @@ class DriftDetector:
             return js_divergence
 
         except Exception as e:
-            logger.error(f"Jensen-Shannon divergence calculation failed: {e}")
+            self._logger.error(f"Jensen-Shannon divergence calculation failed: {e}")
             return 0.0
 
-    def _store_drift_result(self, drift_result: dict[str, Any]):
-        """Store drift detection result in database."""
+    async def _store_drift_result(self, drift_result: dict[str, Any]):
+        """Store drift detection result in memory and optionally in database."""
         try:
-            with get_sync_session() as session:
-                drift_record = MLDriftDetection(
-                    model_name=drift_result.get("model_name", "unknown"),
-                    drift_type=drift_result["drift_type"],
-                    detection_timestamp=drift_result["timestamp"],
-                    drift_detected=drift_result["drift_detected"],
-                    drift_score=drift_result.get("drift_score", 0.0),
-                    drift_details=drift_result,
-                    reference_samples=drift_result.get("reference_samples", 0),
-                    current_samples=drift_result.get("current_samples", 0),
-                )
+            # Store in memory
+            self.drift_history.append(drift_result)
 
-                session.add(drift_record)
-                session.commit()
+            # Keep only recent history (last 1000 records)
+            if len(self.drift_history) > 1000:
+                self.drift_history = self.drift_history[-1000:]
 
-                logger.debug(
-                    "Drift detection result stored",
-                    drift_type=drift_result["drift_type"],
-                    drift_detected=drift_result["drift_detected"],
-                )
+            self._logger.debug(
+                "Drift detection result stored",
+                drift_type=drift_result["drift_type"],
+                drift_detected=drift_result["drift_detected"],
+            )
+
+            # Trigger alerts if drift detected
+            if drift_result["drift_detected"]:
+                await self._trigger_drift_alert(drift_result)
 
         except Exception as e:
-            logger.error(f"Failed to store drift result: {e}")
+            self._logger.error(f"Failed to store drift result: {e}")
 
     def get_drift_history(
         self,
@@ -594,7 +673,7 @@ class DriftDetector:
         days_back: int = 30,
     ) -> list[dict[str, Any]]:
         """
-        Get drift detection history.
+        Get drift detection history from memory.
 
         Args:
             model_name: Filter by model name
@@ -605,44 +684,34 @@ class DriftDetector:
             List of drift detection results
         """
         try:
-            with get_sync_session() as session:
-                query = session.query(MLDriftDetection)
+            # Time filter
+            cutoff_date = datetime.utcnow() - timedelta(days=days_back)
 
-                # Apply filters
-                if model_name:
-                    query = query.filter(MLDriftDetection.model_name == model_name)
-
-                if drift_type:
-                    query = query.filter(MLDriftDetection.drift_type == drift_type)
-
+            filtered_history = []
+            for result in self.drift_history:
                 # Time filter
-                cutoff_date = datetime.utcnow() - timedelta(days=days_back)
-                query = query.filter(MLDriftDetection.detection_timestamp >= cutoff_date)
+                result_time = result.get("timestamp", datetime.min)
+                if isinstance(result_time, str):
+                    result_time = datetime.fromisoformat(result_time.replace("Z", "+00:00"))
+                if result_time < cutoff_date:
+                    continue
 
-                # Execute query
-                results = query.order_by(MLDriftDetection.detection_timestamp.desc()).all()
+                # Model name filter
+                if model_name and result.get("model_name") != model_name:
+                    continue
 
-                # Convert to dictionaries
-                drift_history = []
-                for result in results:
-                    drift_history.append(
-                        {
-                            "id": result.id,
-                            "model_name": result.model_name,
-                            "drift_type": result.drift_type,
-                            "detection_timestamp": result.detection_timestamp,
-                            "drift_detected": result.drift_detected,
-                            "drift_score": result.drift_score,
-                            "drift_details": result.drift_details,
-                            "reference_samples": result.reference_samples,
-                            "current_samples": result.current_samples,
-                        }
-                    )
+                # Drift type filter
+                if drift_type and result.get("drift_type") != drift_type:
+                    continue
 
-                return drift_history
+                filtered_history.append(result)
+
+            # Sort by timestamp descending
+            filtered_history.sort(key=lambda x: x.get("timestamp", datetime.min), reverse=True)
+            return filtered_history
 
         except Exception as e:
-            logger.error(f"Failed to get drift history: {e}")
+            self._logger.error(f"Failed to get drift history: {e}")
             return []
 
     def set_reference_data(self, reference_data: pd.DataFrame, data_type: str = "features"):
@@ -668,7 +737,7 @@ class DriftDetector:
                             self._calculate_distribution_stats(reference_data[column])
                         )
 
-            logger.info(
+            self._logger.info(
                 "Reference data set",
                 data_type=data_type,
                 samples=len(reference_data),
@@ -676,8 +745,8 @@ class DriftDetector:
             )
 
         except Exception as e:
-            logger.error(f"Failed to set reference data: {e}")
-            raise ValidationError(f"Failed to set reference data: {e}") from e
+            self._logger.error(f"Failed to set reference data: {e}")
+            raise ValidationError(f"Failed to set reference data: {e}")
 
     def get_reference_data(self, data_type: str = "features") -> pd.DataFrame | None:
         """
@@ -700,7 +769,245 @@ class DriftDetector:
         """
         if data_type:
             self.reference_data.pop(data_type, None)
-            logger.info(f"Reference data cleared for {data_type}")
+            self._logger.info(f"Reference data cleared for {data_type}")
         else:
             self.reference_data.clear()
-            logger.info("All reference data cleared")
+            self._logger.info("All reference data cleared")
+
+    async def _trigger_drift_alert(self, drift_result: dict[str, Any]):
+        """Trigger alerts when drift is detected."""
+        try:
+            alert_message = (
+                f"🚨 DRIFT ALERT: {drift_result['drift_type']} detected\n"
+                f"Model: {drift_result.get('model_name', 'unknown')}\n"
+                f"Drift Score: {drift_result.get('drift_score', 0):.3f}\n"
+                f"Timestamp: {drift_result['timestamp']}"
+            )
+
+            self._logger.warning(
+                "Drift alert triggered",
+                model_name=drift_result.get("model_name"),
+                drift_type=drift_result["drift_type"],
+                drift_score=drift_result.get("drift_score"),
+                alert_message=alert_message,
+            )
+
+            # Here you would integrate with your alerting system
+            # (Slack, email, PagerDuty, etc.)
+
+        except Exception as e:
+            self._logger.error(f"Failed to trigger drift alert: {e}")
+
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def continuous_monitoring(
+        self,
+        model_name: str,
+        current_data: pd.DataFrame,
+        current_predictions: np.ndarray | None = None,
+        current_performance: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Perform continuous monitoring for all types of drift.
+
+        This method provides a unified interface for monitoring feature drift,
+        prediction drift, and performance drift simultaneously.
+
+        Args:
+            model_name: Name of the model being monitored
+            current_data: Current feature data
+            current_predictions: Current model predictions (optional)
+            current_performance: Current performance metrics (optional)
+
+        Returns:
+            Comprehensive drift monitoring results
+        """
+        return await self.execute_with_monitoring(
+            "continuous_monitoring",
+            self._continuous_monitoring_impl,
+            model_name,
+            current_data,
+            current_predictions,
+            current_performance,
+        )
+
+    async def _continuous_monitoring_impl(
+        self,
+        model_name: str,
+        current_data: pd.DataFrame,
+        current_predictions: np.ndarray | None = None,
+        current_performance: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        """Implementation of continuous monitoring."""
+        try:
+            self._logger.info(
+                "Starting continuous drift monitoring",
+                model_name=model_name,
+                current_samples=len(current_data),
+            )
+
+            monitoring_results = {
+                "timestamp": datetime.utcnow(),
+                "model_name": model_name,
+                "monitoring_type": "continuous",
+                "current_samples": len(current_data),
+                "drift_detected": False,
+                "overall_drift_score": 0.0,
+                "drift_types_detected": [],
+            }
+
+            drift_scores = []
+
+            # 1. Feature Drift Detection
+            if "features" in self.reference_data:
+                try:
+                    feature_drift = await self._detect_feature_drift_impl(
+                        self.reference_data["features"]["data"], current_data
+                    )
+                    monitoring_results["feature_drift"] = feature_drift
+
+                    if feature_drift["overall_drift_detected"]:
+                        monitoring_results["drift_detected"] = True
+                        monitoring_results["drift_types_detected"].append("feature")
+                        drift_scores.append(feature_drift["average_drift_score"])
+
+                except Exception as e:
+                    self._logger.error(f"Feature drift detection failed: {e}")
+                    monitoring_results["feature_drift"] = {"error": str(e)}
+
+            # 2. Prediction Drift Detection
+            if current_predictions is not None and "predictions" in self.reference_data:
+                try:
+                    prediction_drift = await self._detect_prediction_drift_impl(
+                        self.reference_data["predictions"]["data"], current_predictions, model_name
+                    )
+                    monitoring_results["prediction_drift"] = prediction_drift
+
+                    if prediction_drift["drift_detected"]:
+                        monitoring_results["drift_detected"] = True
+                        monitoring_results["drift_types_detected"].append("prediction")
+                        drift_scores.append(prediction_drift["drift_score"])
+
+                except Exception as e:
+                    self._logger.error(f"Prediction drift detection failed: {e}")
+                    monitoring_results["prediction_drift"] = {"error": str(e)}
+
+            # 3. Performance Drift Detection
+            if current_performance is not None and "performance" in self.reference_data:
+                try:
+                    performance_drift = await self._detect_performance_drift_impl(
+                        self.reference_data["performance"]["data"], current_performance, model_name
+                    )
+                    monitoring_results["performance_drift"] = performance_drift
+
+                    if performance_drift["drift_detected"]:
+                        monitoring_results["drift_detected"] = True
+                        monitoring_results["drift_types_detected"].append("performance")
+                        drift_scores.append(performance_drift["drift_score"])
+
+                except Exception as e:
+                    self._logger.error(f"Performance drift detection failed: {e}")
+                    monitoring_results["performance_drift"] = {"error": str(e)}
+
+            # Calculate overall drift score
+            if drift_scores:
+                monitoring_results["overall_drift_score"] = max(drift_scores)
+
+            # Generate recommendations
+            monitoring_results["recommendations"] = self._generate_drift_recommendations(
+                monitoring_results
+            )
+
+            # Store results
+            await self._store_drift_result(monitoring_results)
+
+            self._logger.info(
+                "Continuous drift monitoring completed",
+                model_name=model_name,
+                drift_detected=monitoring_results["drift_detected"],
+                drift_types_detected=monitoring_results["drift_types_detected"],
+                overall_drift_score=monitoring_results["overall_drift_score"],
+            )
+
+            return monitoring_results
+
+        except Exception as e:
+            self._logger.error(
+                "Continuous drift monitoring failed",
+                model_name=model_name,
+                error=str(e),
+            )
+            raise ValidationError(f"Continuous drift monitoring failed: {e}")
+
+    def _generate_drift_recommendations(self, monitoring_results: dict[str, Any]) -> list[str]:
+        """Generate recommendations based on drift monitoring results."""
+        recommendations = []
+
+        if not monitoring_results["drift_detected"]:
+            recommendations.append("✅ No drift detected. Continue normal operations.")
+            return recommendations
+
+        drift_types = monitoring_results["drift_types_detected"]
+        overall_score = monitoring_results["overall_drift_score"]
+
+        # Severity assessment
+        if overall_score >= 0.8:
+            severity = "CRITICAL"
+            recommendations.append("🚨 CRITICAL DRIFT DETECTED - IMMEDIATE ACTION REQUIRED")
+        elif overall_score >= 0.6:
+            severity = "HIGH"
+            recommendations.append("⚠️ HIGH DRIFT DETECTED - ACTION RECOMMENDED")
+        elif overall_score >= 0.4:
+            severity = "MEDIUM"
+            recommendations.append("⚡ MEDIUM DRIFT DETECTED - MONITORING REQUIRED")
+        else:
+            severity = "LOW"
+            recommendations.append("📊 LOW DRIFT DETECTED - CONTINUE MONITORING")
+
+        # Specific recommendations based on drift types
+        if "feature" in drift_types:
+            recommendations.extend(
+                [
+                    "📈 Feature drift detected:",
+                    "  • Check for changes in data sources",
+                    "  • Verify data preprocessing pipeline",
+                    "  • Consider retraining with recent data",
+                    "  • Update feature engineering if needed",
+                ]
+            )
+
+        if "prediction" in drift_types:
+            recommendations.extend(
+                [
+                    "🎯 Prediction drift detected:",
+                    "  • Model may be losing predictive power",
+                    "  • Consider A/B testing new model version",
+                    "  • Evaluate model performance on recent data",
+                    "  • Implement online learning if applicable",
+                ]
+            )
+
+        if "performance" in drift_types:
+            recommendations.extend(
+                [
+                    "📉 Performance drift detected:",
+                    "  • Immediate model performance evaluation required",
+                    "  • Consider reverting to previous model version",
+                    "  • Investigate root cause of performance degradation",
+                    "  • Schedule emergency model retraining",
+                ]
+            )
+
+        # General recommendations based on severity
+        if severity in ["CRITICAL", "HIGH"]:
+            recommendations.extend(
+                [
+                    "",
+                    "🔧 IMMEDIATE ACTIONS:",
+                    "  • Increase monitoring frequency",
+                    "  • Prepare fallback model",
+                    "  • Alert ML engineering team",
+                    "  • Document incident for post-mortem",
+                ]
+            )
+
+        return recommendations

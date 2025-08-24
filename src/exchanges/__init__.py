@@ -8,9 +8,10 @@ CRITICAL: This integrates with P-001 (core types, exceptions, config),
 P-002A (error handling), and P-003 (base exchange interface) components.
 """
 
-from src.core.logging import get_logger
+import logging
 
-logger = get_logger(__name__)
+# Module level logger
+logger = logging.getLogger(__name__)
 
 # Import base exchange interface
 # Import exchange-related types

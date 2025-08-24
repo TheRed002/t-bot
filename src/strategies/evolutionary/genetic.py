@@ -6,6 +6,7 @@ through selection, crossover, and mutation operations.
 """
 
 import asyncio
+import logging
 import random
 from datetime import datetime
 from typing import Any
@@ -15,14 +16,11 @@ from pydantic import BaseModel, Field
 
 from src.backtesting.engine import BacktestConfig, BacktestEngine
 from src.core.exceptions import OptimizationError
-from src.core.logging import get_logger
 from src.utils.decorators import time_execution
 
 from .fitness import FitnessEvaluator
 from .mutations import CrossoverOperator, MutationOperator
 from .population import Individual, Population
-
-logger = get_logger(__name__)
 
 
 class GeneticConfig(BaseModel):
@@ -97,11 +95,11 @@ class GeneticAlgorithm:
         self.best_individual: Individual | None = None
         self.evolution_history: list[dict[str, Any]] = []
 
-        logger.info(
-            "GeneticAlgorithm initialized",
-            strategy=strategy_class.__name__,
-            parameters=list(parameter_ranges.keys()),
-            population_size=config.population_size,
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+
+        self.logger.info(
+            f"GeneticAlgorithm initialized with strategy {strategy_class.__name__}, parameters {list(parameter_ranges.keys())}, population_size {config.population_size}"
         )
 
     @time_execution
@@ -113,7 +111,7 @@ class GeneticAlgorithm:
             Best individual found during evolution
         """
         try:
-            logger.info("Starting evolution", generations=self.config.generations)
+            self.logger.info(f"Starting evolution with {self.config.generations} generations")
 
             # Initialize population
             self.population = self._initialize_population()
@@ -127,7 +125,7 @@ class GeneticAlgorithm:
 
             for generation in range(self.config.generations):
                 self.generation = generation
-                logger.info(f"Generation {generation + 1}/{self.config.generations}")
+                self.logger.info(f"Generation {generation + 1}/{self.config.generations}")
 
                 # Select parents
                 parents = self._selection(self.population)
@@ -148,10 +146,8 @@ class GeneticAlgorithm:
                     or current_best.fitness > self.best_individual.fitness
                 ):
                     self.best_individual = current_best
-                    logger.info(
-                        "New best individual found",
-                        fitness=current_best.fitness,
-                        generation=generation,
+                    self.logger.info(
+                        f"New best individual found with fitness {current_best.fitness} at generation {generation}"
                     )
 
                 # Record history
@@ -165,25 +161,23 @@ class GeneticAlgorithm:
                     generations_without_improvement += 1
 
                 if generations_without_improvement >= self.config.early_stopping_generations:
-                    logger.info("Early stopping triggered")
+                    self.logger.info("Early stopping triggered")
                     break
 
                 # Check diversity
                 diversity = self._calculate_diversity()
                 if diversity < self.config.diversity_threshold:
-                    logger.warning(f"Low diversity: {diversity:.3f}")
+                    self.logger.warning(f"Low diversity: {diversity:.3f}")
                     self._inject_diversity()
 
-            logger.info(
-                "Evolution completed",
-                best_fitness=self.best_individual.fitness if self.best_individual else 0,
-                generations_run=self.generation + 1,
+            self.logger.info(
+                f"Evolution completed with best_fitness {self.best_individual.fitness if self.best_individual else 0}, generations_run {self.generation + 1}"
             )
 
             return self.best_individual
 
         except Exception as e:
-            logger.error("Evolution failed", error=str(e))
+            self.logger.error(f"Evolution failed: {e!s}")
             raise OptimizationError(f"Evolution failed: {e!s}")
 
     def _initialize_population(self) -> Population:
@@ -221,7 +215,7 @@ class GeneticAlgorithm:
 
     async def _evaluate_population(self, population: Population) -> None:
         """Evaluate fitness of all individuals in population."""
-        logger.debug(f"Evaluating {len(population.individuals)} individuals")
+        self.logger.debug(f"Evaluating {len(population.individuals)} individuals")
 
         if self.config.parallel_evaluation:
             # Parallel evaluation
@@ -237,7 +231,7 @@ class GeneticAlgorithm:
                 # Handle results
                 for i, result in enumerate(results):
                     if isinstance(result, Exception):
-                        logger.error("Evaluation failed for individual", error=str(result))
+                        self.logger.error(f"Evaluation failed for individual: {result!s}")
                         population.individuals[i].fitness = -float("inf")
         else:
             # Sequential evaluation
@@ -274,7 +268,7 @@ class GeneticAlgorithm:
             )
 
         except Exception as e:
-            logger.error("Failed to evaluate individual", error=str(e))
+            self.logger.error(f"Failed to evaluate individual: {e!s}")
             individual.fitness = -float("inf")
 
     def _selection(self, population: Population) -> list[Individual]:
@@ -407,7 +401,7 @@ class GeneticAlgorithm:
 
     def _inject_diversity(self) -> None:
         """Inject diversity into population."""
-        logger.info("Injecting diversity into population")
+        self.logger.info("Injecting diversity into population")
 
         # Replace bottom 20% with random individuals
         num_replace = int(self.config.population_size * 0.2)

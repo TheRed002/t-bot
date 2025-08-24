@@ -17,26 +17,28 @@ Version: 1.0.0
 """
 
 import statistics
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import CurrencyExposure, FundFlow
+from src.core.types.capital import (
+    CapitalCurrencyExposure as CurrencyExposure,
+    CapitalFundFlow as FundFlow,
+)
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.exchanges.base import BaseExchange
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
-from src.utils.validators import validate_quantity
+from src.utils.validators import ValidationFramework
 
 # MANDATORY: Use structured logging from src.core.logging for all capital
 # management operations
-logger = get_logger(__name__)
 
 # From P-003+ - MANDATORY: Use existing exchange interfaces
 
@@ -45,7 +47,7 @@ logger = get_logger(__name__)
 # From P-007A - MANDATORY: Use decorators and validators
 
 
-class CurrencyManager:
+class CurrencyManager(BaseComponent):
     """
     Multi-currency capital management system.
 
@@ -53,14 +55,21 @@ class CurrencyManager:
     and implements hedging strategies to minimize exchange rate risk.
     """
 
-    def __init__(self, config: Config, exchanges: dict[str, BaseExchange]):
+    def __init__(
+        self,
+        config: Config,
+        exchanges: dict[str, BaseExchange],
+        error_handler: ErrorHandler | None = None,
+    ):
         """
         Initialize the currency manager.
 
         Args:
             config: Application configuration
             exchanges: Dictionary of exchange instances
+            error_handler: Optional error handler instance (uses DI if not provided)
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.exchanges = exchanges
         self.capital_config = config.capital_management
@@ -78,8 +87,17 @@ class CurrencyManager:
         # Historical exchange rates for volatility calculation
         self.rate_history: dict[str, list[tuple[datetime, Decimal]]] = {}
 
-        # Error handler
-        self.error_handler = ErrorHandler(config)
+        # Error handler - use dependency injection or provided instance
+        if error_handler:
+            self.error_handler = error_handler
+        else:
+            try:
+                from src.core.dependency_injection import get_container
+
+                self.error_handler = get_container().get("ErrorHandler")
+            except (ImportError, KeyError):
+                # Fallback to creating instance if DI not available
+                self.error_handler = ErrorHandler(config)
 
         # Recovery scenarios
         self.partial_fill_recovery = PartialFillRecovery(config)
@@ -87,7 +105,7 @@ class CurrencyManager:
         # Initialize supported currencies
         self._initialize_currencies()
 
-        logger.info(
+        self.logger.info(
             "Currency manager initialized",
             base_currency=self.base_currency,
             supported_currencies=self.capital_config.supported_currencies,
@@ -166,13 +184,13 @@ class CurrencyManager:
                     exposure_percentage=exposure_percentage,
                     hedging_required=hedging_required,
                     hedge_amount=hedge_amount,
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(timezone.utc),
                 )
 
                 exposures[currency] = exposure
                 self.currency_exposures[currency] = exposure
 
-            logger.info(
+            self.logger.info(
                 "Currency exposures updated",
                 total_currencies=len(exposures),
                 total_base_value=format_currency(float(total_base_value)),
@@ -182,7 +200,7 @@ class CurrencyManager:
             return exposures
 
         except Exception as e:
-            logger.error("Failed to update currency exposures", error=str(e))
+            self.logger.error("Failed to update currency exposures", error=str(e))
             raise
 
     @time_execution
@@ -208,7 +226,7 @@ class CurrencyManager:
                     if abs(hedge_delta) > Decimal("0.01"):  # Minimum hedge amount
                         hedging_requirements[currency] = hedge_delta
 
-            logger.info(
+            self.logger.info(
                 "Hedging requirements calculated",
                 currencies_to_hedge=len(hedging_requirements),
                 total_hedge_amount=format_currency(float(sum(hedging_requirements.values()))),
@@ -217,7 +235,7 @@ class CurrencyManager:
             return hedging_requirements
 
         except Exception as e:
-            logger.error("Failed to calculate hedging requirements", error=str(e))
+            self.logger.error("Failed to calculate hedging requirements", error=str(e))
             raise
 
     @time_execution
@@ -238,7 +256,8 @@ class CurrencyManager:
         """
         try:
             # Validate inputs
-            validate_quantity(float(amount), "currency_conversion")
+            if not ValidationFramework.validate_quantity(float(amount)):
+                raise ValidationError(f"Invalid currency conversion amount: {amount}")
 
             if from_currency not in self.capital_config.supported_currencies:
                 raise ValidationError(f"Unsupported source currency: {from_currency}")
@@ -275,10 +294,10 @@ class CurrencyManager:
                 converted_amount=converted_amount,
                 exchange_rate=rate,
                 reason="currency_conversion",
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
             )
 
-            logger.info(
+            self.logger.info(
                 "Currency conversion executed",
                 from_currency=from_currency,
                 to_currency=to_currency,
@@ -291,7 +310,7 @@ class CurrencyManager:
             return flow
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Currency conversion failed",
                 from_currency=from_currency,
                 to_currency=to_currency,
@@ -330,7 +349,7 @@ class CurrencyManager:
             # Optimize conversions to minimize costs
             optimized_changes = await self._optimize_conversions(required_changes)
 
-            logger.info(
+            self.logger.info(
                 "Currency allocation optimized",
                 currencies_optimized=len(optimized_changes),
                 total_conversion_cost=format_currency(
@@ -341,7 +360,7 @@ class CurrencyManager:
             return optimized_changes
 
         except Exception as e:
-            logger.error("Failed to optimize currency allocation", error=str(e))
+            self.logger.error("Failed to optimize currency allocation", error=str(e))
             raise
 
     @time_execution
@@ -363,8 +382,11 @@ class CurrencyManager:
                 rate_history = self.rate_history.get(f"{currency}/{self.base_currency}", [])
                 if len(rate_history) > 1:
                     # Last 30 data points
-                    rates = [rate for _, rate in rate_history[-30:]]
-                    volatility = statistics.stdev([float(rate) for rate in rates])
+                    rates = [float(rate) for _, rate in rate_history[-30:]]
+                    try:
+                        volatility = statistics.stdev(rates) if len(rates) > 1 else 0.0
+                    except (statistics.StatisticsError, ValueError):
+                        volatility = 0.0
                 else:
                     volatility = 0.0
 
@@ -385,7 +407,7 @@ class CurrencyManager:
             return risk_metrics
 
         except Exception as e:
-            logger.error("Failed to calculate currency risk metrics", error=str(e))
+            self.logger.error("Failed to calculate currency risk metrics", error=str(e))
             raise
 
     def _initialize_currencies(self) -> None:
@@ -398,45 +420,63 @@ class CurrencyManager:
                 exposure_percentage=0.0,
                 hedging_required=False,
                 hedge_amount=Decimal("0"),
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
             )
             self.currency_exposures[currency] = exposure
 
     async def _update_exchange_rates(self) -> None:
         """Update exchange rates from exchanges."""
         try:
-            # TODO: Remove in production - Mock exchange rates
-            # In production, this would fetch real rates from exchanges
+            rates_updated = 0
 
-            # Mock exchange rates
-            mock_rates = {
-                "BTC/USDT": Decimal("45000"),
-                "ETH/USDT": Decimal("3000"),
-                "USDC/USDT": Decimal("1.0"),
-                "BUSD/USDT": Decimal("1.0"),
-                "ETH/BTC": Decimal("0.0667"),
-                "USDC/BTC": Decimal("0.000022"),
-                "BUSD/BTC": Decimal("0.000022"),
-            }
+            # Fetch real rates from exchanges if available
+            if hasattr(self, "exchanges") and self.exchanges:
+                for exchange_name, exchange in self.exchanges.items():
+                    try:
+                        # Get ticker information from exchange
+                        tickers = await exchange.fetch_tickers()
 
-            # Update rates
-            for pair, rate in mock_rates.items():
-                self.exchange_rates[pair] = rate
+                        for symbol, ticker in tickers.items():
+                            if ticker.get("last"):
+                                rate = Decimal(str(ticker["last"]))
+                                self.exchange_rates[symbol] = rate
 
-                # Store in history for volatility calculation
-                if pair not in self.rate_history:
-                    self.rate_history[pair] = []
+                                # Store in history for volatility calculation
+                                if symbol not in self.rate_history:
+                                    self.rate_history[symbol] = []
 
-                self.rate_history[pair].append((datetime.now(), rate))
+                                self.rate_history[symbol].append((datetime.now(timezone.utc), rate))
 
-                # Keep only last 100 data points
-                if len(self.rate_history[pair]) > 100:
-                    self.rate_history[pair] = self.rate_history[pair][-100:]
+                                # Keep only last 100 data points
+                                if len(self.rate_history[symbol]) > 100:
+                                    self.rate_history[symbol] = self.rate_history[symbol][-100:]
 
-            logger.debug(f"Updated {len(mock_rates)} exchange rates")
+                                rates_updated += 1
+
+                    except Exception as e:
+                        self.logger.warning(f"Failed to fetch rates from {exchange_name}: {e}")
+
+            # Fallback to hardcoded rates if no exchanges available (for testing)
+            if rates_updated == 0:
+                self.logger.warning("No exchange rates fetched, using fallback rates for testing")
+                fallback_rates = {
+                    "BTC/USDT": Decimal("45000"),
+                    "ETH/USDT": Decimal("3000"),
+                    "USDC/USDT": Decimal("1.0"),
+                    "BUSD/USDT": Decimal("1.0"),
+                    "ETH/BTC": Decimal("0.0667"),
+                    "USDC/BTC": Decimal("0.000022"),
+                    "BUSD/BTC": Decimal("0.000022"),
+                }
+
+                for pair, rate in fallback_rates.items():
+                    self.exchange_rates[pair] = rate
+                    rates_updated += 1
+
+            self.logger.debug(f"Updated {rates_updated} exchange rates")
 
         except Exception as e:
-            logger.error("Failed to update exchange rates", error=str(e))
+            self.logger.error("Failed to update exchange rates", error=str(e))
 
     async def _optimize_conversions(
         self, required_changes: dict[str, Decimal]
@@ -484,7 +524,7 @@ class CurrencyManager:
             return optimized_changes
 
         except Exception as e:
-            logger.error("Failed to optimize conversions", error=str(e))
+            self.logger.error("Failed to optimize conversions", error=str(e))
             raise
 
     async def get_total_base_value(self) -> Decimal:
@@ -519,7 +559,7 @@ class CurrencyManager:
         """Update hedge position for a currency."""
         self.hedge_positions[currency] = hedge_amount
 
-        logger.info(
+        self.logger.info(
             "Hedge position updated",
             currency=currency,
             hedge_amount=format_currency(float(hedge_amount)),

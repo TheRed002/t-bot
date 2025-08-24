@@ -15,20 +15,20 @@ from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.query_api import QueryApi
 from influxdb_client.client.write_api import SYNCHRONOUS
 
+from src.base import BaseComponent
+
 # Import core components from P-001
 from src.core.exceptions import DataError, DataSourceError
-from src.core.logging import get_logger
 
 # Import utils from P-007A
 from src.utils.formatters import format_api_response
 
-logger = get_logger(__name__)
 
-
-class InfluxDBClientWrapper:
+class InfluxDBClientWrapper(BaseComponent):
     """InfluxDB client wrapper with trading-specific utilities."""
 
     def __init__(self, url: str, token: str, org: str, bucket: str):
+        super().__init__()  # Initialize BaseComponent
         self.url = url
         self.token = token
         self.org = org
@@ -49,21 +49,19 @@ class InfluxDBClientWrapper:
             # Test connection
             try:
                 self.client.ping()
-                logger.info("InfluxDB connection established")
+                self.logger.info("InfluxDB connection established")
             except Exception as e:
-                raise DataSourceError(f"InfluxDB health check failed: {e!s}") from e
-
-            logger.info("InfluxDB connection established")
+                raise DataSourceError(f"InfluxDB health check failed: {e!s}")
 
         except Exception as e:
-            logger.error("InfluxDB connection failed", error=str(e))
-            raise DataSourceError(f"InfluxDB connection failed: {e!s}") from e
+            self.logger.error("InfluxDB connection failed", error=str(e))
+            raise DataSourceError(f"InfluxDB connection failed: {e!s}")
 
     def disconnect(self) -> None:
         """Disconnect from InfluxDB."""
         if self.client:
             self.client.close()
-            logger.info("InfluxDB connection closed")
+            self.logger.info("InfluxDB connection closed")
 
     def _create_point(
         self,
@@ -104,16 +102,16 @@ class InfluxDBClientWrapper:
         try:
             self.write_api.write(bucket=self.bucket, record=point)
         except Exception as e:
-            logger.error("Failed to write point to InfluxDB", error=str(e))
-            raise DataError(f"Failed to write point to InfluxDB: {e!s}") from e
+            self.logger.error("Failed to write point to InfluxDB", error=str(e))
+            raise DataError(f"Failed to write point to InfluxDB: {e!s}")
 
     def write_points(self, points: list[Point]) -> None:
         """Write multiple points to InfluxDB."""
         try:
             self.write_api.write(bucket=self.bucket, record=points)
         except Exception as e:
-            logger.error("Failed to write points to InfluxDB", error=str(e))
-            raise DataError(f"Failed to write points to InfluxDB: {e!s}") from e
+            self.logger.error("Failed to write points to InfluxDB", error=str(e))
+            raise DataError(f"Failed to write points to InfluxDB: {e!s}")
 
     # Market data utilities
     def write_market_data(
@@ -270,8 +268,8 @@ class InfluxDBClientWrapper:
             result = self.query_api.query(query, org=self.org)
             return self._parse_query_result(result)
         except Exception as e:
-            logger.error("Failed to query market data", error=str(e))
-            raise DataError(f"Failed to query market data: {e!s}") from e
+            self.logger.error("Failed to query market data", error=str(e))
+            raise DataError(f"Failed to query market data: {e!s}")
 
     def query_trades(
         self, bot_id: str, start_time: datetime, end_time: datetime, limit: int = 1000
@@ -289,8 +287,8 @@ class InfluxDBClientWrapper:
             result = self.query_api.query(query, org=self.org)
             return self._parse_query_result(result)
         except Exception as e:
-            logger.error("Failed to query trades", error=str(e))
-            raise DataError(f"Failed to query trades: {e!s}") from e
+            self.logger.error("Failed to query trades", error=str(e))
+            raise DataError(f"Failed to query trades: {e!s}")
 
     def query_performance_metrics(
         self, bot_id: str, start_time: datetime, end_time: datetime
@@ -307,8 +305,8 @@ class InfluxDBClientWrapper:
             result = self.query_api.query(query, org=self.org)
             return self._parse_query_result(result)
         except Exception as e:
-            logger.error("Failed to query performance metrics", error=str(e))
-            raise DataError(f"Failed to query performance metrics: {e!s}") from e
+            self.logger.error("Failed to query performance metrics", error=str(e))
+            raise DataError(f"Failed to query performance metrics: {e!s}")
 
     def _parse_query_result(self, result) -> list[dict[str, Any]]:
         """Parse InfluxDB query result into list of dictionaries."""
@@ -358,7 +356,7 @@ class InfluxDBClientWrapper:
 
             return {"total_pnl": total_pnl}
         except Exception as e:
-            logger.error("Failed to get daily P&L", error=str(e))
+            self.logger.error("Failed to get daily P&L", error=str(e))
             return {"total_pnl": 0.0}
 
     def get_win_rate(self, bot_id: str, start_time: datetime, end_time: datetime) -> float:
@@ -404,7 +402,7 @@ class InfluxDBClientWrapper:
                 return 0.0
 
         except Exception as e:
-            logger.error("Failed to get win rate", error=str(e))
+            self.logger.error("Failed to get win rate", error=str(e))
             return 0.0
 
     # Health check
@@ -414,7 +412,7 @@ class InfluxDBClientWrapper:
             self.client.ping()
             return True
         except Exception as e:
-            logger.error("InfluxDB health check failed", error=str(e))
+            self.logger.error("InfluxDB health check failed", error=str(e))
             return False
 
     # TODO: Remove in production - Debug functions
@@ -436,3 +434,8 @@ class InfluxDBClientWrapper:
             return format_api_response(
                 {}, success=False, message=f"Failed to get InfluxDB info: {e!s}"
             )
+
+
+# Backward compatibility alias
+InfluxDBClient = InfluxDBClientWrapper
+

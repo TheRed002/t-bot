@@ -1,0 +1,135 @@
+"""Data pipeline and feature management models."""
+
+import uuid
+
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+
+from .base import Base, TimestampMixin
+
+
+class FeatureRecord(Base, TimestampMixin):
+    """Feature record model for ML feature storage."""
+
+    __tablename__ = "feature_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    feature_name = Column(String(100), nullable=False)
+    feature_group = Column(String(50), nullable=False)
+
+    # Feature metadata
+    data_type = Column(String(20), nullable=False)  # float, int, bool, string
+    feature_version = Column(String(20), default="1.0")
+
+    # Feature values
+    symbol = Column(String(20))
+    timestamp = Column(DateTime(timezone=True), nullable=False)
+    value = Column(Float)
+    string_value = Column(String(500))
+
+    # Quality metrics
+    quality_score = Column(Float, default=1.0)
+    is_valid = Column(Boolean, default=True)
+
+    # Additional data
+    metadata_json = Column(JSONB, default={})
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_feature_name", "feature_name"),
+        Index("idx_feature_group", "feature_group"),
+        Index("idx_feature_symbol", "symbol"),
+        Index("idx_feature_timestamp", "timestamp"),
+        Index("idx_feature_composite", "feature_name", "symbol", "timestamp"),
+    )
+
+    def __repr__(self):
+        return f"<FeatureRecord {self.feature_name}: {self.value}>"
+
+
+class DataQualityRecord(Base, TimestampMixin):
+    """Data quality tracking model."""
+
+    __tablename__ = "data_quality_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    data_source = Column(String(100), nullable=False)
+    data_type = Column(String(50), nullable=False)
+
+    # Quality metrics
+    completeness_score = Column(Float, default=0)
+    accuracy_score = Column(Float, default=0)
+    consistency_score = Column(Float, default=0)
+    timeliness_score = Column(Float, default=0)
+    overall_score = Column(Float, default=0)
+
+    # Check details
+    total_records = Column(Integer, default=0)
+    valid_records = Column(Integer, default=0)
+    invalid_records = Column(Integer, default=0)
+    missing_records = Column(Integer, default=0)
+
+    # Issues found
+    issues_detected = Column(JSONB, default=[])
+    recommendations = Column(JSONB, default=[])
+
+    # Check metadata
+    check_type = Column(String(50), default="scheduled")
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_data_quality_source", "data_source"),
+        Index("idx_data_quality_type", "data_type"),
+        Index("idx_data_quality_score", "overall_score"),
+        Index("idx_data_quality_created", "created_at"),
+    )
+
+    def __repr__(self):
+        return f"<DataQualityRecord {self.data_source}: {self.overall_score:.2f}>"
+
+
+class DataPipelineRecord(Base, TimestampMixin):
+    """Data pipeline execution tracking model."""
+
+    __tablename__ = "data_pipeline_records"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    pipeline_name = Column(String(100), nullable=False)
+    pipeline_version = Column(String(20), default="1.0")
+
+    # Execution details
+    execution_id = Column(String(100), nullable=False)
+    status = Column(String(20), default="RUNNING")  # RUNNING, COMPLETED, FAILED, CANCELLED
+
+    # Timing
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    completed_at = Column(DateTime(timezone=True))
+    duration_seconds = Column(Integer)
+
+    # Data processed
+    input_records = Column(Integer, default=0)
+    output_records = Column(Integer, default=0)
+    processed_records = Column(Integer, default=0)
+    failed_records = Column(Integer, default=0)
+
+    # Resource usage
+    memory_usage_mb = Column(Float)
+    cpu_usage_percent = Column(Float)
+
+    # Error tracking
+    error_message = Column(Text)
+    error_details = Column(JSONB)
+
+    # Pipeline configuration
+    configuration = Column(JSONB, default={})
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_pipeline_name", "pipeline_name"),
+        Index("idx_pipeline_status", "status"),
+        Index("idx_pipeline_started", "started_at"),
+        Index("idx_pipeline_execution", "execution_id"),
+    )
+
+    def __repr__(self):
+        return f"<DataPipelineRecord {self.pipeline_name}: {self.status}>"

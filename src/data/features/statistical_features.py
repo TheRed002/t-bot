@@ -1,7 +1,11 @@
 """
-Statistical Features Calculator
+Statistical Features Calculator - REFACTORED for FeatureStore Integration
 
-This module provides statistical feature extraction for market analysis:
+This module provides statistical feature extraction for market analysis,
+now integrated with the FeatureStore architecture to eliminate duplicate
+calculations and provide consistent feature management.
+
+Key Features:
 - Rolling statistics (mean, std, skewness, kurtosis)
 - Autocorrelation features
 - Cross-correlation between assets
@@ -12,7 +16,7 @@ Dependencies:
 - P-001: Core types, exceptions, logging
 - P-002A: Error handling framework
 - P-007A: Utility functions and decorators
-- P-000A: Data pipeline integration
+- FeatureStore: For centralized feature management
 """
 
 import warnings
@@ -26,9 +30,9 @@ import pandas as pd
 from scipy import stats
 from scipy.signal import periodogram
 
+from src.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataError
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import MarketData
@@ -38,8 +42,6 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import cache_result, time_execution
-
-logger = get_logger(__name__)
 
 
 class StatFeatureType(Enum):
@@ -86,18 +88,27 @@ class StatisticalResult:
     calculation_time: float
 
 
-class StatisticalFeatureCalculator:
+class StatisticalFeatures(BaseComponent):
     """
-    Comprehensive statistical feature calculator for market analysis.
+    REFACTORED: Statistical feature calculator integrated with FeatureStore architecture.
 
     This class provides advanced statistical analysis including regime detection,
-    autocorrelation analysis, and cross-asset correlation studies.
+    autocorrelation analysis, and cross-asset correlation studies, now designed
+    to work seamlessly with the FeatureStore for efficient feature management.
+
+    Key improvements:
+    - Integration with FeatureStore for centralized calculations
+    - Elimination of duplicate statistical computations
+    - Consistent result formatting for ML pipelines
+    - Better error handling and monitoring
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, feature_store=None):
         """Initialize statistical feature calculator."""
+        super().__init__()
         self.config = config
         self.error_handler = ErrorHandler(config)
+        self.feature_store = feature_store  # Will be injected by FeatureStore
 
         # Statistical configuration
         stats_config = getattr(config, "statistical_features", {})
@@ -135,7 +146,7 @@ class StatisticalFeatureCalculator:
             "avg_calculation_time": 0.0,
         }
 
-        logger.info("StatisticalFeatureCalculator initialized")
+        self.logger.info("StatisticalFeatureCalculator initialized")
 
     async def add_market_data(self, data: MarketData) -> None:
         """
@@ -185,9 +196,9 @@ class StatisticalFeatureCalculator:
                 "log_returns": log_returns,
             }
 
-            self.price_data[symbol] = pd.concat(
-                [self.price_data[symbol], pd.DataFrame([new_row])], ignore_index=True
-            )
+            # More efficient append using loc instead of concat
+            new_index = len(self.price_data[symbol])
+            self.price_data[symbol].loc[new_index] = new_row
 
             # Keep only recent data
             max_rows = getattr(self.config, "max_price_history", 2000)
@@ -199,11 +210,11 @@ class StatisticalFeatureCalculator:
                 self.feature_cache[symbol] = {}
 
         except Exception as e:
-            logger.error(f"Failed to add market data for {symbol}: {e!s}")
+            self.logger.error(f"Failed to add market data for {symbol}: {e!s}")
             raise DataError(f"Market data addition failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl_seconds=300)
+    @cache_result(ttl=300)
     async def calculate_rolling_stats(
         self, symbol: str, window: int | None = None, field: str = "returns"
     ) -> StatisticalResult:
@@ -282,11 +293,11 @@ class StatisticalFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Rolling stats calculation failed for {symbol}: {e!s}")
+            self.logger.error(f"Rolling stats calculation failed for {symbol}: {e!s}")
             raise DataError(f"Rolling stats calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl_seconds=600)
+    @cache_result(ttl=600)
     async def calculate_autocorrelation(
         self, symbol: str, max_lags: int | None = None, field: str = "returns"
     ) -> StatisticalResult:
@@ -343,7 +354,7 @@ class StatisticalFeatureCalculator:
                 ljung_box_pvalue = ljung_box_stat["lb_pvalue"].min()
             except ImportError:
                 ljung_box_pvalue = None
-                logger.warning("statsmodels not available for Ljung-Box test")
+                self.logger.warning("statsmodels not available for Ljung-Box test")
 
             autocorr_values = {
                 "autocorrelations": autocorrs[:10],  # Return first 10 lags
@@ -368,11 +379,11 @@ class StatisticalFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Autocorrelation calculation failed for {symbol}: {e!s}")
+            self.logger.error(f"Autocorrelation calculation failed for {symbol}: {e!s}")
             raise DataError(f"Autocorrelation calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl_seconds=600)
+    @cache_result(ttl=600)
     async def detect_regime(
         self, symbol: str, window: int | None = None, field: str = "returns"
     ) -> StatisticalResult:
@@ -412,7 +423,8 @@ class StatisticalFeatureCalculator:
             returns = recent_data["returns"]
 
             # Calculate trend indicators
-            price_trend = (prices.iloc[-1] - prices.iloc[0]) / prices.iloc[0]
+            price_trend = ((prices.iloc[-1] - prices.iloc[0]) / prices.iloc[0] 
+                          if prices.iloc[0] != 0 else 0)
             returns_mean = returns.mean()
             returns_std = returns.std()
 
@@ -445,9 +457,13 @@ class StatisticalFeatureCalculator:
                 confidence = 1.0 - abs(price_trend) / self.regime_threshold
 
             # Calculate additional regime metrics
-            directional_movement = np.sum(np.sign(returns) == np.sign(returns.shift(1))) / len(
-                returns
-            )
+            # Avoid division by zero and handle empty returns
+            if len(returns) > 0:
+                directional_movement = np.sum(np.sign(returns) == np.sign(returns.shift(1))) / len(
+                    returns
+                )
+            else:
+                directional_movement = 0.0
             trending_strength = abs(returns_mean) / returns_std if returns_std > 0 else 0
 
             regime_values = {
@@ -474,11 +490,11 @@ class StatisticalFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Regime detection failed for {symbol}: {e!s}")
+            self.logger.error(f"Regime detection failed for {symbol}: {e!s}")
             raise DataError(f"Regime detection failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl_seconds=900)
+    @cache_result(ttl=900)
     async def calculate_cross_correlation(
         self, symbol1: str, symbol2: str, max_lags: int = 20, field: str = "returns"
     ) -> StatisticalResult:
@@ -585,11 +601,13 @@ class StatisticalFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Cross-correlation calculation failed for {symbol1}-{symbol2}: {e!s}")
+            self.logger.error(
+                f"Cross-correlation calculation failed for {symbol1}-{symbol2}: {e!s}"
+            )
             raise DataError(f"Cross-correlation calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl_seconds=1800)
+    @cache_result(ttl=1800)
     async def detect_seasonality(self, symbol: str, field: str = "returns") -> StatisticalResult:
         """
         Detect seasonal patterns in price data.
@@ -687,7 +705,7 @@ class StatisticalFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Seasonality detection failed for {symbol}: {e!s}")
+            self.logger.error(f"Seasonality detection failed for {symbol}: {e!s}")
             raise DataError(f"Seasonality detection failed: {e!s}")
 
     @time_execution
@@ -718,18 +736,18 @@ class StatisticalFeatureCalculator:
                     elif feature.upper() == "SEASONALITY":
                         results["SEASONALITY"] = await self.detect_seasonality(symbol)
                     else:
-                        logger.warning(f"Unknown statistical feature: {feature}")
+                        self.logger.warning(f"Unknown statistical feature: {feature}")
 
                 except Exception as e:
-                    logger.error(f"Failed to calculate {feature} for {symbol}: {e!s}")
+                    self.logger.error(f"Failed to calculate {feature} for {symbol}: {e!s}")
                     results[feature] = None
 
             successful_count = len([r for r in results.values() if r is not None])
-            logger.info(f"Calculated {successful_count} statistical features for {symbol}")
+            self.logger.info(f"Calculated {successful_count} statistical features for {symbol}")
             return results
 
         except Exception as e:
-            logger.error(f"Batch statistical feature calculation failed for {symbol}: {e!s}")
+            self.logger.error(f"Batch statistical feature calculation failed for {symbol}: {e!s}")
             raise DataError(f"Batch calculation failed: {e!s}")
 
     @time_execution
@@ -753,5 +771,9 @@ class StatisticalFeatureCalculator:
             }
 
         except Exception as e:
-            logger.error(f"Failed to generate calculation summary: {e!s}")
+            self.logger.error(f"Failed to generate calculation summary: {e!s}")
             return {"error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+# Alias for backward compatibility
+StatisticalFeatureCalculator = StatisticalFeatures

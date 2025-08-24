@@ -16,26 +16,21 @@ from typing import Any
 # Binance-specific imports
 from binance.exceptions import BinanceAPIException, BinanceOrderException
 
+# LoggerMixin not needed - BaseComponent already provides logging
 from src.core.config import Config
 from src.core.exceptions import ExchangeError, ExecutionError, OrderRejectionError, ValidationError
-from src.core.logging import get_logger
 
+# Logger is provided by BaseExchange (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import OrderRejectionRecovery
-from src.utils.constants import FEE_STRUCTURES, PRECISION_LEVELS
-from src.utils.decimal_utils import (
-    to_decimal,
-)
-from src.utils.helpers import normalize_price, round_to_precision_decimal
+from src.utils import FEE_STRUCTURES, PRECISION_LEVELS, to_decimal, normalize_price, round_to_precision_decimal
 
 # MANDATORY: Import from P-007A (utils)
-from src.utils.validators import validate_price, validate_quantity
-
-logger = get_logger(__name__)
+from src.utils.validators import ValidationFramework
 
 
 class BinanceOrderManager:
@@ -78,7 +73,7 @@ class BinanceOrderManager:
         self.order_monitor_task: asyncio.Task | None = None
         self.monitoring_active = False
 
-        logger.info("Initialized Binance order manager")
+        self.logger.info("Initialized Binance order manager")
 
     async def _handle_order_error(
         self, error: Exception, operation: str, order: OrderRequest = None
@@ -115,11 +110,11 @@ class BinanceOrderManager:
                 recovery_scenario = None
 
             # Handle the error
-            self.error_handler.handle_error(error_context, recovery_scenario)
+            await self.error_handler.handle_error(error, error_context, recovery_scenario)
 
         except Exception as e:
             # Fallback to basic logging if error handling fails
-            logger.error(f"Error handling failed for {operation}: {e!s}")
+            self.logger.error(f"Error handling failed for {operation}: {e!s}")
 
     async def place_market_order(self, order: OrderRequest) -> OrderResponse:
         """
@@ -152,7 +147,7 @@ class BinanceOrderManager:
             # Track order
             self._track_order(response)
 
-            logger.info(f"Market order placed: {response.id}")
+            self.logger.info(f"Market order placed: {response.id}")
             return response
 
         except BinanceOrderException as e:
@@ -162,7 +157,7 @@ class BinanceOrderManager:
             await self._handle_order_error(e, "place_market_order", order)
             raise ExchangeError(f"Failed to place market order: {e}")
         except Exception as e:
-            logger.error(f"Error placing market order on Binance: {e!s}")
+            self.logger.error(f"Error placing market order on Binance: {e!s}")
             raise ExecutionError(f"Failed to place market order: {e!s}")
 
     async def place_limit_order(self, order: OrderRequest) -> OrderResponse:
@@ -198,17 +193,17 @@ class BinanceOrderManager:
             # Track order
             self._track_order(response)
 
-            logger.info(f"Limit order placed: {response.id}")
+            self.logger.info(f"Limit order placed: {response.id}")
             return response
 
         except BinanceOrderException as e:
-            logger.error(f"Binance limit order error: {e}")
+            self.logger.error(f"Binance limit order error: {e}")
             raise OrderRejectionError(f"Limit order rejected: {e}")
         except BinanceAPIException as e:
-            logger.error(f"Binance API error placing limit order: {e}")
+            self.logger.error(f"Binance API error placing limit order: {e}")
             raise ExchangeError(f"Failed to place limit order: {e}")
         except Exception as e:
-            logger.error(f"Error placing limit order on Binance: {e!s}")
+            self.logger.error(f"Error placing limit order on Binance: {e!s}")
             raise ExecutionError(f"Failed to place limit order: {e!s}")
 
     async def place_stop_loss_order(self, order: OrderRequest) -> OrderResponse:
@@ -243,17 +238,17 @@ class BinanceOrderManager:
             # Track order
             self._track_order(response)
 
-            logger.info(f"Stop-loss order placed: {response.id}")
+            self.logger.info(f"Stop-loss order placed: {response.id}")
             return response
 
         except BinanceOrderException as e:
-            logger.error(f"Binance stop-loss order error: {e}")
+            self.logger.error(f"Binance stop-loss order error: {e}")
             raise OrderRejectionError(f"Stop-loss order rejected: {e}")
         except BinanceAPIException as e:
-            logger.error(f"Binance API error placing stop-loss order: {e}")
+            self.logger.error(f"Binance API error placing stop-loss order: {e}")
             raise ExchangeError(f"Failed to place stop-loss order: {e}")
         except Exception as e:
-            logger.error(f"Error placing stop-loss order on Binance: {e!s}")
+            self.logger.error(f"Error placing stop-loss order on Binance: {e!s}")
             raise ExecutionError(f"Failed to place stop-loss order: {e!s}")
 
     async def place_oco_order(self, order: OrderRequest) -> OrderResponse:
@@ -292,17 +287,17 @@ class BinanceOrderManager:
             # Track order
             self._track_order(response)
 
-            logger.info(f"OCO order placed: {response.id}")
+            self.logger.info(f"OCO order placed: {response.id}")
             return response
 
         except BinanceOrderException as e:
-            logger.error(f"Binance OCO order error: {e}")
+            self.logger.error(f"Binance OCO order error: {e}")
             raise OrderRejectionError(f"OCO order rejected: {e}")
         except BinanceAPIException as e:
-            logger.error(f"Binance API error placing OCO order: {e}")
+            self.logger.error(f"Binance API error placing OCO order: {e}")
             raise ExchangeError(f"Failed to place OCO order: {e}")
         except Exception as e:
-            logger.error(f"Error placing OCO order on Binance: {e!s}")
+            self.logger.error(f"Error placing OCO order on Binance: {e!s}")
             raise ExecutionError(f"Failed to place OCO order: {e!s}")
 
     async def cancel_order(self, order_id: str, symbol: str) -> bool:
@@ -327,14 +322,14 @@ class BinanceOrderManager:
                 self.cancelled_orders[order_id] = order_info
                 del self.pending_orders[order_id]
 
-            logger.info(f"Order cancelled successfully: {order_id}")
+            self.logger.info(f"Order cancelled successfully: {order_id}")
             return True
 
         except BinanceAPIException as e:
-            logger.error(f"Binance API error cancelling order: {e}")
+            self.logger.error(f"Binance API error cancelling order: {e}")
             return False
         except Exception as e:
-            logger.error(f"Error cancelling order on Binance: {e!s}")
+            self.logger.error(f"Error cancelling order on Binance: {e!s}")
             return False
 
     async def get_order_status(self, order_id: str, symbol: str) -> OrderStatus:
@@ -363,10 +358,10 @@ class BinanceOrderManager:
             return status
 
         except BinanceAPIException as e:
-            logger.error(f"Binance API error getting order status: {e}")
+            self.logger.error(f"Binance API error getting order status: {e}")
             raise ExchangeError(f"Failed to get order status: {e}")
         except Exception as e:
-            logger.error(f"Error getting order status from Binance: {e!s}")
+            self.logger.error(f"Error getting order status from Binance: {e!s}")
             raise ExchangeError(f"Failed to get order status: {e!s}")
 
     async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
@@ -395,10 +390,10 @@ class BinanceOrderManager:
             return orders
 
         except BinanceAPIException as e:
-            logger.error(f"Binance API error getting open orders: {e}")
+            self.logger.error(f"Binance API error getting open orders: {e}")
             raise ExchangeError(f"Failed to get open orders: {e}")
         except Exception as e:
-            logger.error(f"Error getting open orders from Binance: {e!s}")
+            self.logger.error(f"Error getting open orders from Binance: {e!s}")
             raise ExchangeError(f"Failed to get open orders: {e!s}")
 
     async def get_order_history(self, symbol: str, limit: int = 500) -> list[OrderResponse]:
@@ -425,10 +420,10 @@ class BinanceOrderManager:
             return orders
 
         except BinanceAPIException as e:
-            logger.error(f"Binance API error getting order history: {e}")
+            self.logger.error(f"Binance API error getting order history: {e}")
             raise ExchangeError(f"Failed to get order history: {e}")
         except Exception as e:
-            logger.error(f"Error getting order history from Binance: {e!s}")
+            self.logger.error(f"Error getting order history from Binance: {e!s}")
             raise ExchangeError(f"Failed to get order history: {e!s}")
 
     def calculate_fees(self, order: OrderRequest, fill_price: Decimal) -> Decimal:
@@ -461,7 +456,7 @@ class BinanceOrderManager:
             return rounded_fee
 
         except Exception as e:
-            logger.error(f"Error calculating fees: {e!s}")
+            self.logger.error(f"Error calculating fees: {e!s}")
             return Decimal("0")
 
     # Validation methods
@@ -471,7 +466,7 @@ class BinanceOrderManager:
         if order.order_type != OrderType.MARKET:
             raise ValidationError("Order type must be MARKET for market orders")
 
-        if not validate_quantity(order.quantity, order.symbol):
+        if not ValidationFramework.validate_quantity(order.quantity):
             raise ValidationError("Market order must have valid quantity")
 
         if order.price:
@@ -482,10 +477,10 @@ class BinanceOrderManager:
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("Order type must be LIMIT for limit orders")
 
-        if not validate_quantity(order.quantity, order.symbol):
+        if not ValidationFramework.validate_quantity(order.quantity):
             raise ValidationError("Limit order must have valid quantity")
 
-        if not validate_price(order.price, order.symbol):
+        if not ValidationFramework.validate_price(order.price):
             raise ValidationError("Limit order must have valid price")
 
     def _validate_stop_loss_order(self, order: OrderRequest) -> None:
@@ -493,10 +488,10 @@ class BinanceOrderManager:
         if order.order_type != OrderType.STOP_LOSS:
             raise ValidationError("Order type must be STOP_LOSS for stop-loss orders")
 
-        if not validate_quantity(order.quantity, order.symbol):
+        if not ValidationFramework.validate_quantity(order.quantity):
             raise ValidationError("Stop-loss order must have valid quantity")
 
-        if not validate_price(order.stop_price, order.symbol):
+        if not ValidationFramework.validate_price(order.stop_price):
             raise ValidationError("Stop-loss order must have valid stop price")
 
     def _validate_oco_order(self, order: OrderRequest) -> None:
@@ -504,13 +499,13 @@ class BinanceOrderManager:
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("OCO orders must be LIMIT type")
 
-        if not validate_quantity(order.quantity, order.symbol):
+        if not ValidationFramework.validate_quantity(order.quantity):
             raise ValidationError("OCO order must have valid quantity")
 
-        if not validate_price(order.price, order.symbol):
+        if not ValidationFramework.validate_price(order.price):
             raise ValidationError("OCO order must have valid limit price")
 
-        if not validate_price(order.stop_price, order.symbol):
+        if not ValidationFramework.validate_price(order.stop_price):
             raise ValidationError("OCO order must have valid stop price")
 
     # Conversion methods
@@ -643,7 +638,7 @@ class BinanceOrderManager:
         }
 
         self.pending_orders[order.id] = order_info
-        logger.debug(f"Tracking order: {order.id}")
+        self.logger.debug(f"Tracking order: {order.id}")
 
     def get_tracked_orders(self) -> dict[str, dict]:
         """Get all tracked orders."""
@@ -658,4 +653,4 @@ class BinanceOrderManager:
         self.pending_orders.clear()
         self.filled_orders.clear()
         self.cancelled_orders.clear()
-        logger.info("Cleared all tracked orders")
+        self.logger.info("Cleared all tracked orders")

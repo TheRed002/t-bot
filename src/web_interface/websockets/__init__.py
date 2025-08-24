@@ -11,3 +11,7 @@ This module provides real-time WebSocket communication for:
 All WebSocket handlers implement proper authentication, error handling,
 and connection management for reliable real-time communication.
 """
+
+from .unified_manager import UnifiedWebSocketManager, get_unified_websocket_manager
+
+__all__ = ["UnifiedWebSocketManager", "get_unified_websocket_manager"]

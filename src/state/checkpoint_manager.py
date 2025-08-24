@@ -22,14 +22,19 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from src.core.config import Config
+from src.base import BaseComponent
+from src.core.config.main import Config
 from src.core.exceptions import StateError
-from src.core.logging import get_logger
 from src.core.types import BotState
-from src.utils.decorators import time_execution
-from src.utils.helpers import ensure_directory_exists
+from src.error_handling import (
+    ErrorContext,
+    ErrorHandler,
+    ErrorSeverity,
+    with_retry,
+)
 
-logger = get_logger(__name__)
+# Import utilities through centralized import handler
+from .utils_imports import ensure_directory_exists
 
 
 @dataclass
@@ -79,7 +84,7 @@ class RecoveryPlan:
     prerequisites: list[str] = field(default_factory=list)
 
 
-class CheckpointManager:
+class CheckpointManager(BaseComponent):
     """
     Advanced checkpoint management system for bot state persistence.
 
@@ -98,8 +103,8 @@ class CheckpointManager:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
-        self.logger = get_logger(f"{__name__}.{id(self)}")
 
         # Configuration
         checkpoint_config = config.state_management.get("checkpoints", {})
@@ -138,7 +143,11 @@ class CheckpointManager:
         """Initialize the checkpoint manager."""
         try:
             # Ensure checkpoint directory exists
-            await ensure_directory_exists(self.checkpoint_dir)
+            try:
+                ensure_directory_exists(str(self.checkpoint_dir))
+            except Exception as e:
+                self.logger.error(f"Failed to create checkpoint directory: {e}")
+                raise StateError(f"Cannot create checkpoint directory: {e}")
 
             # Load existing checkpoints
             await self._load_existing_checkpoints()
@@ -152,10 +161,17 @@ class CheckpointManager:
             self.logger.info("CheckpointManager initialized successfully")
 
         except Exception as e:
-            self.logger.error(f"CheckpointManager initialization failed: {e}")
+            error_context = ErrorContext.from_exception(
+                e,
+                component="CheckpointManager",
+                operation="initialize",
+                severity=ErrorSeverity.HIGH
+            )
+            error_context.details = {"error": str(e), "error_code": "CHECKPOINT_INIT_FAILED"}
+            ErrorHandler.log_error(error_context, e)
             raise StateError(f"Failed to initialize CheckpointManager: {e}")
 
-    @time_execution
+    @with_retry(max_attempts=3, base_delay=0.1, backoff_factor=2.0, exceptions=(StateError,))
     async def create_checkpoint(
         self,
         bot_id: str,
@@ -270,7 +286,7 @@ class CheckpointManager:
             self.logger.error(f"Failed to create checkpoint: {e}", bot_id=bot_id)
             raise StateError(f"Checkpoint creation failed: {e}")
 
-    @time_execution
+    @with_retry(max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateError,))
     async def restore_checkpoint(self, checkpoint_id: str) -> tuple[str, BotState]:
         """
         Restore bot state from a checkpoint.

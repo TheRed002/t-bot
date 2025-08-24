@@ -1,0 +1,357 @@
+---
+# Performance Monitoring Alert Rules Configuration
+# T-Bot Trading System - High-Frequency Trading Performance Alerts
+
+rules:
+  # Critical Order Execution Performance
+  - name: "critical_order_execution_latency"
+    description: "Critical order execution latency exceeds 500ms"
+    severity: "critical"
+    query: "histogram_quantile(0.99, rate(order_execution_latency_seconds_bucket[1m])) > 0.5"
+    threshold: 0.5
+    operator: ">"
+    duration: "30s"
+    labels:
+      category: "performance"
+      component: "order_execution"
+      priority: "P0"
+    annotations:
+      title: "Critical Order Execution Latency"
+      description: "Order execution P99 latency is {{ $value }}s, exceeding critical threshold of 500ms"
+      runbook_url: "https://docs.internal/runbooks/order-execution-latency"
+    notification_channels: ["email", "slack", "discord"]
+    escalation_delay: "5m"
+    enabled: true
+
+  - name: "high_order_execution_latency"
+    description: "High order execution latency exceeds 100ms"
+    severity: "high"
+    query: "histogram_quantile(0.95, rate(order_execution_latency_seconds_bucket[1m])) > 0.1"
+    threshold: 0.1
+    operator: ">"
+    duration: "1m"
+    labels:
+      category: "performance"
+      component: "order_execution"
+      priority: "P1"
+    annotations:
+      title: "High Order Execution Latency"
+      description: "Order execution P95 latency is {{ $value }}s, exceeding warning threshold of 100ms"
+    notification_channels: ["slack"]
+    escalation_delay: "15m"
+    enabled: true
+
+  # Market Data Processing Performance
+  - name: "critical_market_data_latency"
+    description: "Critical market data processing latency"
+    severity: "critical"
+    query: "histogram_quantile(0.99, rate(market_data_latency_seconds_bucket[1m])) > 0.2"
+    threshold: 0.2
+    operator: ">"
+    duration: "30s"
+    labels:
+      category: "performance"
+      component: "market_data"
+      priority: "P0"
+    annotations:
+      title: "Critical Market Data Processing Latency"
+      description: "Market data processing P99 latency is {{ $value }}s"
+    notification_channels: ["email", "slack"]
+    escalation_delay: "5m"
+    enabled: true
+
+  - name: "low_market_data_throughput"
+    description: "Market data processing throughput dropped significantly"
+    severity: "high"
+    query: "rate(market_data_processing_rate[5m]) < 100"
+    threshold: 100
+    operator: "<"
+    duration: "2m"
+    labels:
+      category: "performance"
+      component: "market_data"
+      priority: "P1"
+    annotations:
+      title: "Low Market Data Throughput"
+      description: "Market data processing rate is {{ $value }} messages/second"
+    notification_channels: ["slack"]
+    enabled: true
+
+  # WebSocket Connection Health
+  - name: "websocket_connection_unhealthy"
+    description: "WebSocket connection health degraded"
+    severity: "high"
+    query: "websocket_connection_health < 0.7"
+    threshold: 0.7
+    operator: "<"
+    duration: "1m"
+    labels:
+      category: "performance"
+      component: "websocket"
+      priority: "P1"
+    annotations:
+      title: "WebSocket Connection Health Degraded"
+      description: "WebSocket health score is {{ $value }} for {{ $labels.exchange }}"
+    notification_channels: ["slack"]
+    enabled: true
+
+  - name: "critical_websocket_latency"
+    description: "Critical WebSocket message latency"
+    severity: "critical"
+    query: "histogram_quantile(0.95, rate(websocket_message_latency_seconds_bucket[1m])) > 0.1"
+    threshold: 0.1
+    operator: ">"
+    duration: "30s"
+    labels:
+      category: "performance"
+      component: "websocket"
+      priority: "P0"
+    annotations:
+      title: "Critical WebSocket Latency"
+      description: "WebSocket P95 latency is {{ $value }}s for {{ $labels.exchange }}"
+    notification_channels: ["email", "slack"]
+    escalation_delay: "10m"
+    enabled: true
+
+  # Database Performance
+  - name: "slow_database_queries"
+    description: "Database queries are running slowly"
+    severity: "medium"
+    query: "histogram_quantile(0.95, rate(database_query_latency_seconds_bucket[5m])) > 1.0"
+    threshold: 1.0
+    operator: ">"
+    duration: "2m"
+    labels:
+      category: "performance"
+      component: "database"
+      priority: "P2"
+    annotations:
+      title: "Slow Database Queries"
+      description: "Database P95 query latency is {{ $value }}s for {{ $labels.database }}.{{ $labels.table }}"
+    notification_channels: ["slack"]
+    enabled: true
+
+  - name: "critical_database_performance"
+    description: "Critical database performance degradation"
+    severity: "critical"
+    query: "histogram_quantile(0.99, rate(database_query_latency_seconds_bucket[1m])) > 5.0"
+    threshold: 5.0
+    operator: ">"
+    duration: "30s"
+    labels:
+      category: "performance"
+      component: "database"
+      priority: "P0"
+    annotations:
+      title: "Critical Database Performance"
+      description: "Database P99 query latency is {{ $value }}s - potential database issues"
+    notification_channels: ["email", "slack"]
+    escalation_delay: "5m"
+    enabled: true
+
+  # System Resource Performance
+  - name: "critical_memory_usage"
+    description: "Critical system memory usage"
+    severity: "critical"
+    query: "system_memory_usage_percent > 95"
+    threshold: 95
+    operator: ">"
+    duration: "1m"
+    labels:
+      category: "performance"
+      component: "system"
+      priority: "P0"
+    annotations:
+      title: "Critical Memory Usage"
+      description: "System memory usage is {{ $value }}%"
+      action: "Consider restarting services or scaling up resources"
+    notification_channels: ["email", "slack"]
+    escalation_delay: "5m"
+    enabled: true
+
+  - name: "high_cpu_usage"
+    description: "High system CPU usage"
+    severity: "high"
+    query: "system_cpu_usage_percent > 80"
+    threshold: 80
+    operator: ">"
+    duration: "5m"
+    labels:
+      category: "performance"
+      component: "system"
+      priority: "P1"
+    annotations:
+      title: "High CPU Usage"
+      description: "System CPU usage is {{ $value }}% for extended period"
+    notification_channels: ["slack"]
+    enabled: true
+
+  - name: "high_load_average"
+    description: "System load average is high"
+    severity: "medium"
+    query: "system_load_average_5m > 4.0"
+    threshold: 4.0
+    operator: ">"
+    duration: "5m"
+    labels:
+      category: "performance"
+      component: "system"
+      priority: "P2"
+    annotations:
+      title: "High System Load"
+      description: "5-minute load average is {{ $value }}"
+    notification_channels: ["slack"]
+    enabled: true
+
+  # Strategy Performance
+  - name: "strategy_performance_degradation"
+    description: "Trading strategy performance has degraded"
+    severity: "high"
+    query: "strategy_sharpe_ratio < 0.5"
+    threshold: 0.5
+    operator: "<"
+    duration: "30m"
+    labels:
+      category: "performance"
+      component: "strategy"
+      priority: "P1"
+    annotations:
+      title: "Strategy Performance Degradation"
+      description: "Strategy {{ $labels.strategy }} Sharpe ratio is {{ $value }}"
+    notification_channels: ["slack"]
+    enabled: true
+
+  - name: "low_strategy_accuracy"
+    description: "Trading strategy signal accuracy is low"
+    severity: "medium"
+    query: "strategy_signal_accuracy_percent < 60"
+    threshold: 60
+    operator: "<"
+    duration: "1h"
+    labels:
+      category: "performance"
+      component: "strategy"
+      priority: "P2"
+    annotations:
+      title: "Low Strategy Signal Accuracy"
+      description: "Strategy {{ $labels.strategy }} accuracy is {{ $value }}%"
+    notification_channels: ["slack"]
+    enabled: true
+
+  # Garbage Collection Performance
+  - name: "excessive_gc_time"
+    description: "Excessive garbage collection time"
+    severity: "medium"
+    query: "rate(system_gc_duration_seconds_sum[5m]) > 0.1"
+    threshold: 0.1
+    operator: ">"
+    duration: "2m"
+    labels:
+      category: "performance"
+      component: "memory"
+      priority: "P2"
+    annotations:
+      title: "Excessive Garbage Collection"
+      description: "GC is consuming {{ $value }}s per second over 5 minutes"
+    notification_channels: ["slack"]
+    enabled: true
+
+  # Trading-Specific Performance Alerts
+  - name: "high_order_slippage"
+    description: "Order execution slippage is high"
+    severity: "high"
+    query: "histogram_quantile(0.95, rate(order_slippage_bps_bucket[5m])) > 50"
+    threshold: 50
+    operator: ">"
+    duration: "2m"
+    labels:
+      category: "performance"
+      component: "order_execution"
+      priority: "P1"
+    annotations:
+      title: "High Order Slippage"
+      description: "P95 order slippage is {{ $value }} basis points for {{ $labels.exchange }}"
+    notification_channels: ["slack"]
+    enabled: true
+
+  - name: "low_order_fill_rate"
+    description: "Order fill rate is below acceptable threshold"
+    severity: "high"
+    query: "order_fill_rate_percent < 90"
+    threshold: 90
+    operator: "<"
+    duration: "5m"
+    labels:
+      category: "performance"
+      component: "order_execution"
+      priority: "P1"
+    annotations:
+      title: "Low Order Fill Rate"
+      description: "Order fill rate is {{ $value }}% for {{ $labels.exchange }}"
+    notification_channels: ["slack"]
+    enabled: true
+
+  # Performance Anomaly Detection
+  - name: "performance_anomaly_detected"
+    description: "Performance anomaly detected via statistical analysis"
+    severity: "medium"
+    query: "increase(performance_anomalies_total[5m]) > 0"
+    threshold: 0
+    operator: ">"
+    duration: "0s"
+    labels:
+      category: "performance"
+      component: "anomaly_detection"
+      priority: "P2"
+    annotations:
+      title: "Performance Anomaly Detected"
+      description: "Statistical anomaly detected in performance metrics"
+    notification_channels: ["slack"]
+    enabled: true
+
+# Escalation policies for performance alerts
+escalation_policies:
+  - name: "critical_performance_escalation"
+    description: "Escalation policy for critical performance issues"
+    severity_levels: ["critical"]
+    escalation_rules:
+      - delay: "5m"
+        channels: ["email", "slack"]
+        recipients: ["ops-team@company.com", "#trading-ops"]
+      - delay: "15m"  
+        channels: ["email"]
+        recipients: ["manager@company.com"]
+      - delay: "30m"
+        channels: ["email"] 
+        recipients: ["director@company.com"]
+    max_escalations: 3
+    enabled: true
+
+  - name: "high_performance_escalation"
+    description: "Escalation policy for high severity performance issues"
+    severity_levels: ["high"]
+    escalation_rules:
+      - delay: "15m"
+        channels: ["slack"]
+        recipients: ["#trading-ops"]
+      - delay: "1h"
+        channels: ["email"]
+        recipients: ["ops-team@company.com"]
+    max_escalations: 2
+    enabled: true
+
+# Suppression rules for maintenance windows
+suppression_rules:
+  - name: "maintenance_window_suppression"
+    description: "Suppress alerts during planned maintenance"
+    labels:
+      maintenance: "true"
+    duration: "4h"
+    enabled: false
+
+  - name: "market_closed_suppression"
+    description: "Suppress non-critical alerts when markets are closed"
+    labels:
+      market_hours: "closed"
+    duration: "16h"
+    enabled: false

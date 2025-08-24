@@ -26,7 +26,6 @@ from typing import Any
 import numpy as np
 
 from src.core.config import Config
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import MarketData, Signal
@@ -36,8 +35,6 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
 
 
 class CleaningStrategy(Enum):
@@ -87,8 +84,8 @@ class DataCleaner:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
-        # Allow dict-like configs in tests
         cfg_get = config.get if isinstance(config, dict) else getattr
         self.error_handler = ErrorHandler(config if not isinstance(config, dict) else Config())
 
@@ -133,7 +130,7 @@ class DataCleaner:
             "duplicates_removed": 0,
         }
 
-        logger.info("DataCleaner initialized", config=config)
+        self.logger.info("DataCleaner initialized", config=config)
 
     @time_execution
     async def clean_market_data(self, data: MarketData) -> tuple[MarketData, CleaningResult]:
@@ -221,7 +218,7 @@ class DataCleaner:
             )
 
             if applied_strategies:
-                logger.info(
+                self.logger.info(
                     "Market data cleaned successfully",
                     symbol=data.symbol if data else "unknown",
                     applied_strategies=applied_strategies,
@@ -230,7 +227,7 @@ class DataCleaner:
                     imputed_count=imputed_count,
                 )
             else:
-                logger.debug(
+                self.logger.debug(
                     "Market data passed cleaning without changes",
                     symbol=data.symbol if data else "unknown",
                 )
@@ -238,7 +235,7 @@ class DataCleaner:
             return data, cleaning_result
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Market data cleaning failed",
                 symbol=data.symbol if data and data.symbol else "unknown",
                 error=str(e),
@@ -323,19 +320,19 @@ class DataCleaner:
             )
 
             if applied_strategies:
-                logger.info(
+                self.logger.info(
                     "Signal data cleaned successfully",
                     original_count=len(signals),
                     cleaned_count=len(cleaned_signals),
                     applied_strategies=applied_strategies,
                 )
             else:
-                logger.debug("Signal data passed cleaning without changes")
+                self.logger.debug("Signal data passed cleaning without changes")
 
             return cleaned_signals, cleaning_result
 
         except Exception as e:
-            logger.error("Signal data cleaning failed", error=str(e))
+            self.logger.error("Signal data cleaning failed", error=str(e))
             cleaning_result = CleaningResult(
                 original_data=original_signals,
                 cleaned_data=original_signals,
@@ -433,7 +430,7 @@ class DataCleaner:
                         )
                         data.price = Decimal(str(adjusted_price))
                         adjusted_count += 1
-                        logger.warning(
+                        self.logger.warning(
                             "Price outlier adjusted",
                             symbol=data.symbol,
                             original_price=current_price,
@@ -444,7 +441,7 @@ class DataCleaner:
                         # Strategy: remove by setting to None
                         data.price = None
                         removed_count += 1
-                        logger.warning(
+                        self.logger.warning(
                             "Price outlier removed",
                             symbol=data.symbol,
                             original_price=current_price,

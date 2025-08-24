@@ -12,41 +12,63 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import psutil
+from pydantic import BaseModel, Field
 
-from src.core.config import Config
-from src.core.logging import get_logger
-from src.ml.models.base_model import BaseModel
-from src.utils.decorators import log_calls, time_execution
+from src.core.base.service import BaseService
+from src.core.types.base import ConfigDict
+from src.utils.decorators import UnifiedDecorator
 
-logger = get_logger(__name__)
+# Initialize decorator instance
+dec = UnifiedDecorator()
 
 
-class ModelCache:
+class ModelCacheConfig(BaseModel):
+    """Configuration for model cache service."""
+
+    model_cache_size: int = Field(default=10, description="Maximum number of cached models")
+    max_memory_gb: float = Field(default=2.0, description="Maximum memory usage in GB")
+    prediction_cache_ttl_minutes: int = Field(default=60, description="Cache TTL in minutes")
+    enable_memory_monitoring: bool = Field(default=True, description="Enable memory monitoring")
+    cleanup_interval_seconds: int = Field(default=30, description="Cleanup interval in seconds")
+    memory_pressure_threshold: float = Field(
+        default=85.0, description="Memory pressure threshold %"
+    )
+
+
+class ModelCacheService(BaseService):
     """
     High-performance cache for ML models.
 
-    This class provides LRU-based caching with memory monitoring, automatic eviction,
-    and comprehensive statistics tracking.
+    This service provides LRU-based caching with memory monitoring, automatic eviction,
+    and comprehensive statistics tracking using proper service patterns.
 
-    Attributes:
-        config: Application configuration
-        cache: OrderedDict for LRU cache implementation
-        access_times: Dictionary tracking last access times
-        cache_stats: Cache statistics
-        lock: Thread lock for thread safety
-        max_size: Maximum number of models to cache
-        max_memory_mb: Maximum memory usage in MB
+    All cached models are managed through this service without direct database access.
     """
 
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        config: ConfigDict | None = None,
+        correlation_id: str | None = None,
+    ):
         """
-        Initialize the model cache.
+        Initialize the model cache service.
 
         Args:
-            config: Application configuration
+            config: Service configuration
+            correlation_id: Request correlation ID
         """
-        self.config = config
-        self.cache: OrderedDict[str, BaseModel] = OrderedDict()
+        super().__init__(
+            name="ModelCacheService",
+            config=config,
+            correlation_id=correlation_id,
+        )
+
+        # Parse model cache configuration
+        mc_config_dict = (config or {}).get("model_cache", {})
+        self.mc_config = ModelCacheConfig(**mc_config_dict)
+
+        # Cache data structures
+        self.cache: dict[str, Any] = OrderedDict()
         self.access_times: dict[str, datetime] = {}
         self.memory_usage: dict[str, float] = {}
 
@@ -64,21 +86,35 @@ class ModelCache:
         # Thread safety
         self.lock = threading.RLock()
 
-        # Configuration
-        self.max_size = config.ml.model_cache_size
-        self.max_memory_mb = config.ml.max_memory_gb * 1024  # Convert GB to MB
-        self.ttl_minutes = config.ml.prediction_cache_ttl_minutes
+        # Configuration properties
+        self.max_size = self.mc_config.model_cache_size
+        self.max_memory_mb = self.mc_config.max_memory_gb * 1024  # Convert GB to MB
+        self.ttl_minutes = self.mc_config.prediction_cache_ttl_minutes
 
         # Background cleanup
         self._cleanup_running = False
         self._cleanup_thread = None
 
-        logger.info(
-            "Model cache initialized",
+    async def _do_start(self) -> None:
+        """Start the model cache service."""
+        await super()._do_start()
+
+        # Start cleanup thread if memory monitoring is enabled
+        if self.mc_config.enable_memory_monitoring:
+            self.start_cleanup_thread()
+
+        self._logger.info(
+            "Model cache service started successfully",
+            config=self.mc_config.dict(),
             max_size=self.max_size,
             max_memory_mb=self.max_memory_mb,
             ttl_minutes=self.ttl_minutes,
         )
+
+    async def _do_stop(self) -> None:
+        """Stop the model cache service."""
+        self.stop_cleanup_thread()
+        await super()._do_stop()
 
     def start_cleanup_thread(self) -> None:
         """Start background cleanup thread."""
@@ -86,7 +122,7 @@ class ModelCache:
             self._cleanup_running = True
             self._cleanup_thread = threading.Thread(target=self._cleanup_loop, daemon=True)
             self._cleanup_thread.start()
-            logger.info("Cache cleanup thread started")
+            self._logger.info("Cache cleanup thread started")
 
     def stop_cleanup_thread(self) -> None:
         """Stop background cleanup thread."""
@@ -94,11 +130,10 @@ class ModelCache:
             self._cleanup_running = False
             if self._cleanup_thread:
                 self._cleanup_thread.join(timeout=5.0)
-            logger.info("Cache cleanup thread stopped")
+            self._logger.info("Cache cleanup thread stopped")
 
-    @time_execution
-    @log_calls
-    def cache_model(self, model_id: str, model: BaseModel) -> bool:
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    def cache_model(self, model_id: str, model: Any) -> bool:
         """
         Cache a model.
 
@@ -133,7 +168,7 @@ class ModelCache:
                 self.cache_stats["current_size"] = len(self.cache)
                 self.cache_stats["current_memory_mb"] = sum(self.memory_usage.values())
 
-                logger.debug(
+                self._logger.debug(
                     "Model cached successfully",
                     model_id=model_id,
                     model_memory_mb=model_memory_mb,
@@ -143,11 +178,11 @@ class ModelCache:
                 return True
 
             except Exception as e:
-                logger.error("Failed to cache model", model_id=model_id, error=str(e))
+                self._logger.error("Failed to cache model", model_id=model_id, error=str(e))
                 return False
 
-    @time_execution
-    def get_model(self, model_id: str) -> BaseModel | None:
+    @dec.enhance(monitor=True)
+    def get_model(self, model_id: str) -> Any | None:
         """
         Retrieve a model from cache.
 
@@ -176,13 +211,17 @@ class ModelCache:
 
                 self.cache_stats["hits"] += 1
 
-                logger.debug("Cache hit", model_id=model_id, hit_rate=self._calculate_hit_rate())
+                self._logger.debug(
+                    "Cache hit", model_id=model_id, hit_rate=self._calculate_hit_rate()
+                )
 
                 return model
             else:
                 self.cache_stats["misses"] += 1
 
-                logger.debug("Cache miss", model_id=model_id, hit_rate=self._calculate_hit_rate())
+                self._logger.debug(
+                    "Cache miss", model_id=model_id, hit_rate=self._calculate_hit_rate()
+                )
 
                 return None
 
@@ -211,7 +250,7 @@ class ModelCache:
             self.cache_stats["current_size"] = 0
             self.cache_stats["current_memory_mb"] = 0.0
 
-            logger.info(f"Cache cleared, removed {model_count} models")
+            self._logger.info(f"Cache cleared, removed {model_count} models")
 
     def get_cached_models(self) -> dict[str, dict[str, Any]]:
         """
@@ -225,13 +264,13 @@ class ModelCache:
 
             for model_id, model in self.cache.items():
                 models_info[model_id] = {
-                    "model_name": model.model_name,
-                    "model_type": model.model_type,
-                    "version": model.version,
-                    "is_trained": model.is_trained,
+                    "model_name": getattr(model, "model_name", "unknown"),
+                    "model_type": getattr(model, "model_type", "unknown"),
+                    "version": getattr(model, "version", "unknown"),
+                    "is_trained": getattr(model, "is_trained", False),
                     "last_access": self.access_times[model_id].isoformat(),
                     "memory_mb": self.memory_usage.get(model_id, 0.0),
-                    "feature_count": len(model.feature_names),
+                    "feature_count": len(getattr(model, "feature_names", [])),
                 }
 
             return models_info
@@ -261,7 +300,7 @@ class ModelCache:
                 {"hits": 0, "misses": 0, "evictions": 0, "total_requests": 0, "memory_evictions": 0}
             )
 
-            logger.info("Cache statistics cleared")
+            self._logger.info("Cache statistics cleared")
 
     def _make_space_for_model(self, required_memory_mb: float) -> None:
         """Make space for a new model by evicting old ones."""
@@ -309,7 +348,7 @@ class ModelCache:
         self.cache_stats["current_size"] = len(self.cache)
         self.cache_stats["current_memory_mb"] = sum(self.memory_usage.values())
 
-        logger.debug(
+        self._logger.debug(
             "Model removed from cache",
             model_id=model_id,
             reason=reason,
@@ -319,7 +358,7 @@ class ModelCache:
 
         return True
 
-    def _estimate_model_memory(self, model: BaseModel) -> float:
+    def _estimate_model_memory(self, model: Any) -> float:
         """
         Estimate memory usage of a model in MB.
 
@@ -359,7 +398,7 @@ class ModelCache:
             return base_memory_mb
 
         except Exception as e:
-            logger.warning(f"Failed to estimate model memory: {e}")
+            self._logger.warning(f"Failed to estimate model memory: {e}")
             return 10.0  # Default estimate
 
     def _calculate_hit_rate(self) -> float:
@@ -384,7 +423,7 @@ class ModelCache:
                 self._remove_model(model_id, reason="TTL cleanup")
 
         if expired_models:
-            logger.debug(f"Cleaned up {len(expired_models)} expired models")
+            self._logger.debug(f"Cleaned up {len(expired_models)} expired models")
 
         return len(expired_models)
 
@@ -398,11 +437,11 @@ class ModelCache:
                 # Check memory pressure
                 self._check_memory_pressure()
 
-                # Sleep for 30 seconds
-                time.sleep(30)
+                # Sleep for configured interval
+                time.sleep(self.mc_config.cleanup_interval_seconds)
 
             except Exception as e:
-                logger.error(f"Cache cleanup error: {e}")
+                self._logger.error(f"Cache cleanup error: {e}")
                 time.sleep(10)
 
     def _check_memory_pressure(self) -> None:
@@ -411,8 +450,8 @@ class ModelCache:
             # Check system memory
             system_memory = psutil.virtual_memory()
 
-            # If system memory usage is > 85%, start aggressive eviction
-            if system_memory.percent > 85.0:
+            # If system memory usage exceeds threshold, start aggressive eviction
+            if system_memory.percent > self.mc_config.memory_pressure_threshold:
                 with self.lock:
                     models_to_evict = max(1, len(self.cache) // 4)  # Evict 25% of models
 
@@ -420,14 +459,14 @@ class ModelCache:
                         if self.cache:
                             self._evict_lru_model("System memory pressure")
 
-                logger.warning(
+                self._logger.warning(
                     "High system memory pressure, evicted models",
                     system_memory_pct=system_memory.percent,
                     models_evicted=models_to_evict,
                 )
 
         except Exception as e:
-            logger.warning(f"Failed to check memory pressure: {e}")
+            self._logger.warning(f"Failed to check memory pressure: {e}")
 
     def health_check(self) -> dict[str, Any]:
         """Perform health check of the cache."""
@@ -466,3 +505,54 @@ class ModelCache:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.stop_cleanup_thread()
+
+    # Service Health and Metrics
+    async def _service_health_check(self) -> "HealthStatus":
+        """Model cache service specific health check."""
+        from src.core.base.interfaces import HealthStatus
+
+        try:
+            # Check cache state
+            with self.lock:
+                # Check if cache is at maximum capacity
+                if len(self.cache) >= self.max_size:
+                    return HealthStatus.DEGRADED
+
+                # Check memory usage
+                if sum(self.memory_usage.values()) > self.max_memory_mb * 0.9:
+                    return HealthStatus.DEGRADED
+
+                # Check hit rate
+                if self._calculate_hit_rate() < 0.5 and self.cache_stats["total_requests"] > 100:
+                    return HealthStatus.DEGRADED
+
+            return HealthStatus.HEALTHY
+
+        except Exception as e:
+            self._logger.error("Model cache service health check failed", error=str(e))
+            return HealthStatus.UNHEALTHY
+
+    def get_model_cache_metrics(self) -> dict[str, Any]:
+        """Get model cache service metrics."""
+        with self.lock:
+            stats = self.get_cache_stats()
+            stats.update(
+                {
+                    "cleanup_thread_running": self._cleanup_running,
+                    "memory_monitoring_enabled": self.mc_config.enable_memory_monitoring,
+                    "cleanup_interval_seconds": self.mc_config.cleanup_interval_seconds,
+                    "memory_pressure_threshold": self.mc_config.memory_pressure_threshold,
+                }
+            )
+            return stats
+
+    # Configuration validation
+    def _validate_service_config(self, config: ConfigDict) -> bool:
+        """Validate model cache service configuration."""
+        try:
+            mc_config_dict = config.get("model_cache", {})
+            ModelCacheConfig(**mc_config_dict)
+            return True
+        except Exception as e:
+            self._logger.error("Model cache service configuration validation failed", error=str(e))
+            return False

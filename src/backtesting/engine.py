@@ -12,14 +12,28 @@ from typing import Any
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator
 
-from src.core.exceptions import BacktestError
+from src.backtesting.utils import convert_market_records_to_dataframe
+from src.core.exceptions import TradingBotError
 from src.core.logging import get_logger
-from src.core.types import OrderSide, SignalDirection
-from src.database.manager import DatabaseManager
-from src.error_handling.decorators import with_retry
-from src.risk_management import RiskManager
-from src.strategies.base import BaseStrategy
+from src.core.types import (
+    ExecutionAlgorithm,
+    OrderRequest,
+    OrderSide,
+    OrderType,
+    Signal,
+    SignalDirection,
+    TimeInForce,
+)
+from src.data.services.data_service import DataService
+from src.data.types import DataRequest
+from src.error_handling.decorators import with_circuit_breaker, with_error_context, with_retry
+from src.execution import ExecutionEngine, OrderManager
+from src.execution.types import ExecutionInstruction
+from src.risk_management.base import BaseRiskManager
+from src.strategies.interfaces import BaseStrategyInterface
+from src.utils.decimal_utils import safe_decimal
 from src.utils.decorators import time_execution
+from src.utils.validators import ValidationFramework
 
 logger = get_logger(__name__)
 
@@ -30,18 +44,31 @@ class BacktestConfig(BaseModel):
     start_date: datetime = Field(..., description="Backtest start date")
     end_date: datetime = Field(..., description="Backtest end date")
     initial_capital: Decimal = Field(
-        default=Decimal("10000"), description="Initial capital for backtesting"
+        default_factory=lambda: safe_decimal("10000"), description="Initial capital for backtesting"
     )
     symbols: list[str] = Field(..., description="List of symbols to backtest")
+    exchange: str = Field(default="binance", description="Exchange to use for backtesting")
     timeframe: str = Field(default="1h", description="Timeframe for backtesting")
-    commission: Decimal = Field(default=Decimal("0.001"), description="Commission rate (0.1%)")
-    slippage: Decimal = Field(default=Decimal("0.0005"), description="Slippage rate (0.05%)")
+    commission: Decimal = Field(
+        default_factory=lambda: safe_decimal("0.001"), description="Commission rate (0.1%)"
+    )
+    slippage: Decimal = Field(
+        default_factory=lambda: safe_decimal("0.0005"), description="Slippage rate (0.05%)"
+    )
     enable_shorting: bool = Field(default=False, description="Enable short selling")
     max_open_positions: int = Field(default=5, description="Maximum number of open positions")
     use_tick_data: bool = Field(
         default=False, description="Use tick data for more accurate simulation"
     )
     warm_up_period: int = Field(default=100, description="Number of candles for indicator warm-up")
+
+    # Execution configuration
+    execution_algorithm: ExecutionAlgorithm = Field(
+        default=ExecutionAlgorithm.TWAP, description="Default execution algorithm"
+    )
+    execution_time_horizon_minutes: int = Field(
+        default=5, description="Execution time horizon in minutes"
+    )
 
     @field_validator("end_date")
     @classmethod
@@ -55,7 +82,12 @@ class BacktestConfig(BaseModel):
     @classmethod
     def validate_rates(cls, v: Decimal) -> Decimal:
         """Validate commission and slippage rates."""
-        if v < 0 or v > Decimal("0.1"):
+        # Validate as a price-like value (rates are similar to prices)
+        try:
+            ValidationFramework.validate_price(v, max_price=0.1)
+            if v < 0:
+                raise ValueError("Rate must be non-negative")
+        except ValueError:
             raise ValueError("Rate must be between 0 and 0.1 (10%)")
         return v
 
@@ -105,9 +137,11 @@ class BacktestEngine:
     def __init__(
         self,
         config: BacktestConfig,
-        strategy: BaseStrategy,
-        risk_manager: RiskManager | None = None,
-        db_manager: DatabaseManager | None = None,
+        strategy: BaseStrategyInterface,
+        risk_manager: BaseRiskManager | None = None,
+        data_service: DataService | None = None,
+        execution_engine: ExecutionEngine | None = None,
+        order_manager: OrderManager | None = None,
     ):
         """
         Initialize backtesting engine.
@@ -116,12 +150,16 @@ class BacktestEngine:
             config: Backtest configuration
             strategy: Strategy to backtest
             risk_manager: Optional risk manager for position sizing
-            db_manager: Optional database manager for data access
+            data_service: Optional data service for market data access
+            execution_engine: Optional execution engine for realistic order execution
+            order_manager: Optional order manager for order lifecycle management
         """
         self.config = config
         self.strategy = strategy
         self.risk_manager = risk_manager
-        self.db_manager = db_manager
+        self.data_service = data_service
+        self.execution_engine = execution_engine
+        self.order_manager = order_manager
 
         # Internal state
         self._capital = config.initial_capital
@@ -134,10 +172,14 @@ class BacktestEngine:
         logger.info(
             "BacktestEngine initialized",
             config=config.model_dump(),
-            strategy=strategy.__class__.__name__,
+            strategy=strategy.name,
+            strategy_type=strategy.strategy_type.value
+            if hasattr(strategy, "strategy_type")
+            else "unknown",
         )
 
     @time_execution
+    @with_error_context(component="backtesting", operation="run_backtest")
     @with_retry(max_attempts=3)
     async def run(self) -> BacktestResult:
         """
@@ -146,36 +188,32 @@ class BacktestEngine:
         Returns:
             BacktestResult containing performance metrics and trade data
         """
-        try:
-            logger.info("Starting backtest", start=self.config.start_date, end=self.config.end_date)
+        logger.info("Starting backtest", start=self.config.start_date, end=self.config.end_date)
 
-            # Load historical data
-            await self._load_historical_data()
+        # Load historical data
+        await self._load_historical_data()
 
-            # Initialize strategy
-            await self._initialize_strategy()
+        # Initialize strategy
+        await self._initialize_strategy()
 
-            # Run simulation
-            await self._run_simulation()
+        # Run simulation
+        await self._run_simulation()
 
-            # Calculate metrics
-            result = await self._calculate_results()
+        # Calculate metrics
+        result = await self._calculate_results()
 
-            logger.info("Backtest completed", total_trades=len(self._trades))
-            return result
+        logger.info("Backtest completed", total_trades=len(self._trades))
+        return result
 
-        except Exception as e:
-            logger.error("Backtest failed", error=str(e))
-            raise BacktestError(f"Backtest failed: {e!s}")
-
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
     async def _load_historical_data(self) -> None:
         """Load historical market data for all symbols."""
         logger.info("Loading historical data", symbols=self.config.symbols)
 
         for symbol in self.config.symbols:
-            if self.db_manager:
-                # Load from database
-                data = await self._load_from_database(symbol)
+            if self.data_service:
+                # Load using DataService
+                data = await self._load_from_data_service(symbol)
             else:
                 # Load from default source (placeholder)
                 data = await self._load_default_data(symbol)
@@ -183,25 +221,30 @@ class BacktestEngine:
             self._market_data[symbol] = data
             logger.debug(f"Loaded data for {symbol}", rows=len(data))
 
-    async def _load_from_database(self, symbol: str) -> pd.DataFrame:
-        """Load data from database."""
-        if not self.db_manager:
-            raise BacktestError("Database manager not configured")
+    @with_error_context(component="data_loading", operation="load_symbol_data")
+    async def _load_from_data_service(self, symbol: str) -> pd.DataFrame:
+        """Load data using DataService."""
+        if not self.data_service:
+            raise TradingBotError("Data service not configured", "BACKTEST_005")
 
-        query = """
-            SELECT timestamp, open, high, low, close, volume
-            FROM market_data
-            WHERE symbol = $1 AND timestamp >= $2 AND timestamp <= $3
-            ORDER BY timestamp
-        """
-
-        rows = await self.db_manager.fetch_all(
-            query, symbol, self.config.start_date, self.config.end_date
+        # Create data request
+        data_request = DataRequest(
+            symbol=symbol,
+            exchange=self.config.exchange,
+            start_time=self.config.start_date,
+            end_time=self.config.end_date,
+            use_cache=True,
         )
 
-        df = pd.DataFrame(rows)
-        df.set_index("timestamp", inplace=True)
-        return df
+        # Get market data records
+        records = await self.data_service.get_market_data(data_request)
+
+        if not records:
+            logger.warning(f"No data found for {symbol}")
+            return pd.DataFrame()
+
+        # Convert to DataFrame using shared utility
+        return convert_market_records_to_dataframe(records)
 
     async def _load_default_data(self, symbol: str) -> pd.DataFrame:
         """Load default/sample data for testing."""
@@ -219,12 +262,26 @@ class BacktestEngine:
         returns = np.random.normal(0.0001, 0.02, len(dates))
         prices = 100 * np.exp(np.cumsum(returns))
 
+        # Generate valid OHLC data
+        open_prices = prices * (1 + np.random.normal(0, 0.001, len(dates)))
+        close_prices = prices
+
+        # Ensure high and low are valid relative to open and close
+        high_offsets = np.abs(np.random.normal(0, 0.005, len(dates)))
+        low_offsets = np.abs(np.random.normal(0, 0.005, len(dates)))
+
+        # High is the maximum of open, close, and a price above the base price
+        high_prices = np.maximum(np.maximum(open_prices, close_prices), prices * (1 + high_offsets))
+
+        # Low is the minimum of open, close, and a price below the base price
+        low_prices = np.minimum(np.minimum(open_prices, close_prices), prices * (1 - low_offsets))
+
         df = pd.DataFrame(
             {
-                "open": prices * (1 + np.random.normal(0, 0.001, len(dates))),
-                "high": prices * (1 + np.abs(np.random.normal(0, 0.005, len(dates)))),
-                "low": prices * (1 - np.abs(np.random.normal(0, 0.005, len(dates)))),
-                "close": prices,
+                "open": open_prices,
+                "high": high_prices,
+                "low": low_prices,
+                "close": close_prices,
                 "volume": np.random.uniform(1000, 10000, len(dates)),
             },
             index=dates,
@@ -236,11 +293,46 @@ class BacktestEngine:
         """Initialize the strategy with warm-up data."""
         logger.info("Initializing strategy", warm_up_period=self.config.warm_up_period)
 
-        # Provide warm-up data to strategy
+        # Start the strategy if it has a start method
+        if hasattr(self.strategy, "start") and callable(self.strategy.start):
+            try:
+                await self.strategy.start()
+            except Exception as e:
+                logger.warning(
+                    f"Strategy {self.strategy.name} start() failed: {e}",
+                    strategy=self.strategy.name,
+                    error=str(e),
+                )
+        else:
+            logger.debug(f"Strategy {self.strategy.name} has no start() method")
+
+        # Prepare strategy for backtesting if it supports the interface
+        if hasattr(self.strategy, "prepare_for_backtest"):
+            try:
+                await self.strategy.prepare_for_backtest(
+                    {
+                        "start_date": self.config.start_date,
+                        "end_date": self.config.end_date,
+                        "symbols": self.config.symbols,
+                        "initial_capital": float(self.config.initial_capital),
+                        "timeframe": self.config.timeframe,
+                    }
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Strategy {self.strategy.name} prepare_for_backtest() failed: {e}",
+                    strategy=self.strategy.name,
+                    error=str(e),
+                )
+
+        # Strategy warm-up: process historical data without generating trades
         for symbol, data in self._market_data.items():
             if len(data) > self.config.warm_up_period:
-                warm_up_data = data.iloc[: self.config.warm_up_period]
-                await self.strategy.initialize(symbol, warm_up_data)
+                # Process warm-up data for indicator initialization
+                # This allows the strategy to build up its internal state
+                logger.debug(
+                    f"Warming up strategy with {self.config.warm_up_period} periods for {symbol}"
+                )
 
     async def _run_simulation(self) -> None:
         """Run the main simulation loop."""
@@ -284,25 +376,47 @@ class BacktestEngine:
                 current_data[symbol] = data.loc[timestamp]
         return current_data
 
-    async def _generate_signals(
-        self, market_data: dict[str, pd.Series]
-    ) -> dict[str, SignalDirection]:
+    async def _generate_signals(self, market_data: dict[str, pd.Series]) -> dict[str, Signal]:
         """Generate trading signals from strategy."""
-        signals = {}
+        from src.core.types import MarketData as CoreMarketData
 
-        for symbol, _data in market_data.items():
-            # Get historical data up to current point
-            hist_data = self._market_data[symbol].loc[: self._current_time]
+        all_signals = {}
 
-            # Generate signal
-            signal = await self.strategy.generate_signal(symbol, hist_data)
-            signals[symbol] = signal
+        for symbol, data in market_data.items():
+            # Convert pandas Series to MarketData object for strategy
+            market_data_obj = CoreMarketData(
+                symbol=symbol,
+                timestamp=self._current_time,
+                price=safe_decimal(data["close"]),
+                volume=safe_decimal(data["volume"]),
+                bid=safe_decimal(data["close"] * 0.999),  # Approximate bid
+                ask=safe_decimal(data["close"] * 1.001),  # Approximate ask
+                high=safe_decimal(data["high"]),
+                low=safe_decimal(data["low"]),
+                open=safe_decimal(data["open"]),
+            )
 
-        return signals
+            # Generate signals using the strategy's method with error handling
+            try:
+                signals = await self.strategy.generate_signals(market_data_obj)
+            except Exception as e:
+                logger.error(
+                    "Strategy signal generation failed",
+                    error=str(e),
+                    strategy=self.strategy.name,
+                    symbol=symbol,
+                )
+                signals = []  # Graceful degradation
+
+            # Store the first signal for this symbol if any
+            if signals:
+                all_signals[symbol] = signals[0]  # Take the first signal
+
+        return all_signals
 
     async def _execute_trades(
         self,
-        signals: dict[str, SignalDirection],
+        signals: dict[str, Signal],
         market_data: dict[str, pd.Series],
     ) -> None:
         """Execute trades based on signals."""
@@ -312,11 +426,189 @@ class BacktestEngine:
 
             price = float(market_data[symbol]["close"])
 
-            # Apply slippage
-            if signal == SignalDirection.BUY:
+            # Use ExecutionEngine if available, otherwise use simple execution
+            if self.execution_engine and self.order_manager:
+                await self._execute_with_engine(symbol, signal, market_data[symbol])
+            else:
+                # Fallback to simple execution
+                # Apply slippage based on signal direction
+                if signal.direction == SignalDirection.BUY:
+                    execution_price = price * (1 + float(self.config.slippage))
+                    await self._open_position(symbol, execution_price, signal.direction)
+                elif signal.direction == SignalDirection.SELL:
+                    # Check if we have a position to close
+                    if symbol in self._positions:
+                        execution_price = price * (1 - float(self.config.slippage))
+                        await self._close_position(symbol, execution_price)
+                    elif self.config.enable_shorting:
+                        # Open short position if shorting is enabled
+                        execution_price = price * (1 - float(self.config.slippage))
+                        await self._open_position(symbol, execution_price, signal.direction)
+
+    @with_error_context(component="backtesting", operation="execute_with_engine")
+    async def _execute_with_engine(
+        self,
+        symbol: str,
+        signal: Signal,
+        market_data_row: pd.Series,
+    ) -> None:
+        """Execute trades using the ExecutionEngine for realistic simulation."""
+        from src.core.types import MarketData as CoreMarketData
+
+        # Convert market data to MarketData object
+        market_data = CoreMarketData(
+            symbol=symbol,
+            timestamp=self._current_time,
+            price=safe_decimal(market_data_row["close"]),
+            volume=safe_decimal(market_data_row["volume"]),
+            bid=safe_decimal(market_data_row["close"] * 0.999),  # Approximate bid
+            ask=safe_decimal(market_data_row["close"] * 1.001),  # Approximate ask
+            high=safe_decimal(market_data_row["high"]),
+            low=safe_decimal(market_data_row["low"]),
+            open=safe_decimal(market_data_row["open"]),
+        )
+
+        # Determine order side based on signal and current position
+        order_side = OrderSide.BUY if signal.direction == SignalDirection.BUY else OrderSide.SELL
+
+        # Calculate position size
+        if self.risk_manager:
+            position_size = self.risk_manager.calculate_position_size(
+                signal, self._capital, market_data.price
+            )
+        else:
+            # Default position sizing
+            position_size = self._capital / safe_decimal(self.config.max_open_positions)
+
+        # Create order request
+        order_request = OrderRequest(
+            symbol=symbol,
+            side=order_side,
+            order_type=OrderType.MARKET,  # Use market orders for backtesting
+            quantity=position_size / market_data.price,  # Convert value to quantity
+            time_in_force=TimeInForce.GTC,
+            metadata={
+                "signal_confidence": signal.confidence,
+                "strategy": self.strategy.name,
+                "backtest": True,
+            },
+        )
+
+        # Create execution instruction
+        execution_instruction = ExecutionInstruction(
+            order=order_request,
+            algorithm=self.config.execution_algorithm,
+            strategy_name=self.strategy.name,
+            time_horizon_minutes=self.config.execution_time_horizon_minutes,
+            max_slippage_bps=safe_decimal(
+                float(self.config.slippage) * 10000
+            ),  # Convert to basis points
+        )
+
+        try:
+            # Execute through ExecutionEngine
+            result = await self.execution_engine.execute_order(
+                instruction=execution_instruction,
+                market_data=market_data,
+                strategy_name=self.strategy.name,
+            )
+
+            # Validate execution result structure
+            if not hasattr(result, "status"):
+                logger.error("Execution result missing status field", result=result)
+                raise ValueError("Invalid execution result: missing status")
+
+            # Process execution result
+            if result.status == "completed":
+                # Validate required fields for completed orders
+                required_fields = ["average_price", "total_quantity", "total_cost"]
+                for field in required_fields:
+                    if not hasattr(result, field):
+                        logger.error(f"Execution result missing {field}", result=result)
+                        raise ValueError(f"Invalid execution result: missing {field}")
+
+                # Update position tracking
+                if order_side == OrderSide.BUY:
+                    self._positions[symbol] = {
+                        "entry_time": self._current_time,
+                        "entry_price": float(result.average_price),
+                        "size": float(result.total_quantity),
+                        "side": order_side,
+                    }
+                else:
+                    # Close position
+                    if symbol in self._positions:
+                        position = self._positions[symbol]
+                        # Calculate P&L
+                        if position["side"] == OrderSide.BUY:
+                            pnl = (
+                                float(result.average_price) - position["entry_price"]
+                            ) * position["size"]
+                        else:
+                            pnl = (
+                                position["entry_price"] - float(result.average_price)
+                            ) * position["size"]
+
+                        # Record trade
+                        self._trades.append(
+                            {
+                                "symbol": symbol,
+                                "entry_time": position["entry_time"],
+                                "exit_time": self._current_time,
+                                "entry_price": position["entry_price"],
+                                "exit_price": float(result.average_price),
+                                "size": position["size"],
+                                "pnl": pnl - float(result.total_cost),  # Include execution costs
+                                "side": position["side"].value,
+                                "execution_cost": float(result.total_cost),
+                            }
+                        )
+
+                        # Remove position
+                        del self._positions[symbol]
+
+                # Update capital with execution costs
+                self._capital -= safe_decimal(result.total_cost)
+
+        except ValueError as e:
+            # Validation errors should not fall back
+            logger.error(
+                "Execution validation failed",
+                error=str(e),
+                symbol=symbol,
+                signal=signal,
+            )
+            raise  # Re-raise validation errors
+        except AttributeError as e:
+            # Missing attributes in result
+            logger.error(
+                "Execution result structure error",
+                error=str(e),
+                symbol=symbol,
+                signal=signal,
+            )
+            # Fall back to simple execution
+            price = float(market_data_row["close"])
+            if signal.direction == SignalDirection.BUY:
                 execution_price = price * (1 + float(self.config.slippage))
-                await self._open_position(symbol, execution_price, signal)
-            elif signal == SignalDirection.SELL:
+                await self._open_position(symbol, execution_price, signal.direction)
+            elif signal.direction == SignalDirection.SELL and symbol in self._positions:
+                execution_price = price * (1 - float(self.config.slippage))
+                await self._close_position(symbol, execution_price)
+        except Exception as e:
+            logger.error(
+                "Execution engine failed in backtest",
+                error=str(e),
+                symbol=symbol,
+                signal=signal,
+                error_type=type(e).__name__,
+            )
+            # Fall back to simple execution
+            price = float(market_data_row["close"])
+            if signal.direction == SignalDirection.BUY:
+                execution_price = price * (1 + float(self.config.slippage))
+                await self._open_position(symbol, execution_price, signal.direction)
+            elif signal.direction == SignalDirection.SELL and symbol in self._positions:
                 execution_price = price * (1 - float(self.config.slippage))
                 await self._close_position(symbol, execution_price)
 
@@ -330,16 +622,25 @@ class BacktestEngine:
 
         # Calculate position size
         if self.risk_manager:
-            position_size = await self.risk_manager.calculate_position_size(
-                symbol, Decimal(str(price)), self._capital
+            from src.core.types import Signal as CoreSignal
+
+            # Create a signal for position sizing
+            sizing_signal = CoreSignal(
+                direction=signal,
+                confidence=0.8,
+                timestamp=self._current_time,
+                symbol=symbol,
+                strategy_name="backtest",
+            )
+            position_size = self.risk_manager.calculate_position_size(
+                sizing_signal, self._capital, safe_decimal(price)
             )
         else:
             # Default position sizing (equal weight)
-            position_size = self._capital / Decimal(self.config.max_open_positions)
+            position_size = self._capital / safe_decimal(self.config.max_open_positions)
 
-        # Apply commission
+        # Calculate commission
         commission = position_size * self.config.commission
-        position_size -= commission
 
         # Create position
         self._positions[symbol] = {
@@ -349,8 +650,8 @@ class BacktestEngine:
             "side": OrderSide.BUY if signal == SignalDirection.BUY else OrderSide.SELL,
         }
 
-        # Update capital
-        self._capital -= Decimal(str(position_size))
+        # Update capital (deduct position size AND commission)
+        self._capital -= position_size + commission
 
         logger.debug(
             "Opened position",
@@ -368,16 +669,18 @@ class BacktestEngine:
 
         # Calculate P&L
         if position["side"] == OrderSide.BUY:
-            pnl = (price - position["entry_price"]) * position["size"] / position["entry_price"]
+            # For long: profit = (exit_price - entry_price) * size
+            pnl = (price - position["entry_price"]) * position["size"]
         else:
-            pnl = (position["entry_price"] - price) * position["size"] / position["entry_price"]
+            # For short: profit = (entry_price - exit_price) * size
+            pnl = (position["entry_price"] - price) * position["size"]
 
         # Apply commission
-        commission = Decimal(str(position["size"])) * self.config.commission
-        pnl_after_commission = Decimal(str(pnl)) - commission
+        commission = safe_decimal(position["size"]) * self.config.commission
+        pnl_after_commission = safe_decimal(pnl) - commission
 
         # Update capital
-        self._capital += Decimal(str(position["size"])) + pnl_after_commission
+        self._capital += safe_decimal(position["size"]) + pnl_after_commission
 
         # Record trade
         self._trades.append(
@@ -436,10 +739,7 @@ class BacktestEngine:
 
     async def _check_risk_limits(self) -> None:
         """Check and enforce risk limits."""
-        if not self.risk_manager:
-            return
-
-        # Check drawdown limits
+        # Check drawdown limits (basic check even without risk manager)
         if self._equity_curve:
             peak = max(e["equity"] for e in self._equity_curve)
             current = self._equity_curve[-1]["equity"]
@@ -448,6 +748,11 @@ class BacktestEngine:
             if drawdown > 0.2:  # 20% max drawdown
                 logger.warning("Max drawdown exceeded, closing all positions")
                 await self._close_all_positions()
+
+        # Additional risk checks if risk manager is available
+        if self.risk_manager:
+            # Could add more sophisticated risk checks here
+            pass
 
     async def _close_all_positions(self) -> None:
         """Close all open positions."""
@@ -467,7 +772,7 @@ class BacktestEngine:
         # Calculate returns
         initial_equity = float(self.config.initial_capital)
         final_equity = self._equity_curve[-1]["equity"] if self._equity_curve else initial_equity
-        total_return = Decimal(str((final_equity - initial_equity) / initial_equity * 100))
+        total_return = safe_decimal((final_equity - initial_equity) / initial_equity * 100)
 
         # Calculate daily returns
         equity_df = pd.DataFrame(self._equity_curve)
@@ -493,28 +798,44 @@ class BacktestEngine:
             initial_capital=float(self.config.initial_capital),
         )
 
+        # Get strategy-specific backtest metrics if available
+        strategy_metrics = {}
+        if hasattr(self.strategy, "get_backtest_metrics"):
+            try:
+                strategy_metrics = await self.strategy.get_backtest_metrics()
+            except Exception as e:
+                logger.error(
+                    "Failed to get strategy backtest metrics",
+                    error=str(e),
+                    strategy=self.strategy.name,
+                )
+
         return BacktestResult(
             total_return=total_return,
-            annual_return=metrics.get("annual_return", Decimal("0")),
+            annual_return=metrics.get("annual_return", safe_decimal("0")),
             sharpe_ratio=metrics.get("sharpe_ratio", 0.0),
             sortino_ratio=metrics.get("sortino_ratio", 0.0),
-            max_drawdown=metrics.get("max_drawdown", Decimal("0")),
+            max_drawdown=metrics.get("max_drawdown", safe_decimal("0")),
             win_rate=metrics.get("win_rate", 0.0),
             total_trades=len(self._trades),
             winning_trades=len(winning_trades),
             losing_trades=len(losing_trades),
-            avg_win=metrics.get("avg_win", Decimal("0")),
-            avg_loss=metrics.get("avg_loss", Decimal("0")),
+            avg_win=metrics.get("avg_win", safe_decimal("0")),
+            avg_loss=metrics.get("avg_loss", safe_decimal("0")),
             profit_factor=metrics.get("profit_factor", 0.0),
             volatility=metrics.get("volatility", 0.0),
-            var_95=metrics.get("var_95", Decimal("0")),
-            cvar_95=metrics.get("cvar_95", Decimal("0")),
+            var_95=metrics.get("var_95", safe_decimal("0")),
+            cvar_95=metrics.get("cvar_95", safe_decimal("0")),
             equity_curve=self._equity_curve,
             trades=self._trades,
             daily_returns=daily_returns,
             metadata={
                 "config": self.config.model_dump(),
-                "strategy": self.strategy.__class__.__name__,
+                "strategy": self.strategy.name,
+                "strategy_type": self.strategy.strategy_type.value
+                if hasattr(self.strategy, "strategy_type")
+                else "unknown",
                 "backtest_duration": str(self.config.end_date - self.config.start_date),
+                "strategy_metrics": strategy_metrics,
             },
         )

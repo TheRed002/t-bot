@@ -25,13 +25,14 @@ from sklearn.model_selection import (
     cross_validate,
 )
 
-from src.core.config import Config
+from src.core.base.service import BaseService
 from src.core.exceptions import ModelError, ValidationError
-from src.core.logging import get_logger
+from src.core.types.base import ConfigDict
 from src.ml.models.base_model import BaseModel
-from src.utils.decorators import log_calls, time_execution
+from src.utils.decorators import UnifiedDecorator
 
-logger = get_logger(__name__)
+# Initialize decorator instance
+dec = UnifiedDecorator()
 
 
 class TimeSeriesValidator:
@@ -39,8 +40,104 @@ class TimeSeriesValidator:
     Time series specific cross-validation strategies.
 
     This class provides validation strategies that respect the temporal nature
-    of financial time series data.
+    of financial time series data, including purged cross-validation to prevent
+    lookahead bias and data leakage.
     """
+
+    @staticmethod
+    def purged_walk_forward_split(
+        data: pd.DataFrame,
+        min_train_size: int,
+        test_size: int,
+        embargo_period: int = 0,
+        step_size: int = 1,
+    ) -> Generator[tuple[np.ndarray, np.ndarray], None, None]:
+        """
+        Purged walk-forward split with embargo periods to prevent lookahead bias.
+
+        This method implements proper time series cross-validation for financial data
+        by ensuring no overlap between training and test sets and adding embargo
+        periods to account for autocorrelation and delayed market reactions.
+
+        Args:
+            data: Time series data with datetime index
+            min_train_size: Minimum training set size
+            test_size: Test set size
+            embargo_period: Number of periods to skip after training (default: 0)
+            step_size: Step size for walking forward
+
+        Yields:
+            Tuple of (train_indices, test_indices) with proper purging
+        """
+        n_samples = len(data)
+
+        for i in range(min_train_size, n_samples - test_size - embargo_period + 1, step_size):
+            # Training set: from start to i
+            train_indices = np.arange(0, i)
+
+            # Embargo period: skip embargo_period samples after training
+            test_start = i + embargo_period
+            test_end = min(test_start + test_size, n_samples)
+
+            # Test set: after embargo period
+            test_indices = np.arange(test_start, test_end)
+
+            if len(test_indices) == test_size:
+                yield train_indices, test_indices
+
+    @staticmethod
+    def combinatorial_purged_cross_validation(
+        data: pd.DataFrame,
+        n_splits: int = 5,
+        test_size_ratio: float = 0.2,
+        embargo_ratio: float = 0.01,
+        purge_ratio: float = 0.02,
+    ) -> Generator[tuple[np.ndarray, np.ndarray], None, None]:
+        """
+        Combinatorial Purged Cross-Validation (CPCV) for financial time series.
+
+        This advanced cross-validation technique prevents data leakage by:
+        1. Purging overlapping observations based on feature generation windows
+        2. Adding embargo periods to account for non-instantaneous information incorporation
+        3. Using combinatorial approach to maximize data usage while maintaining independence
+
+        Args:
+            data: Time series data with datetime index
+            n_splits: Number of CV splits
+            test_size_ratio: Ratio of data for test set
+            embargo_ratio: Ratio of data for embargo period
+            purge_ratio: Ratio of data to purge around test set
+
+        Yields:
+            Tuple of (train_indices, test_indices) with purging and embargo
+        """
+        n_samples = len(data)
+        test_size = int(n_samples * test_size_ratio)
+        embargo_size = int(n_samples * embargo_ratio)
+        purge_size = int(n_samples * purge_ratio)
+
+        # Generate test set start points
+        test_starts = np.linspace(
+            purge_size, n_samples - test_size - embargo_size - purge_size, n_splits, dtype=int
+        )
+
+        for test_start in test_starts:
+            # Test set indices
+            test_end = test_start + test_size
+            test_indices = np.arange(test_start, test_end)
+
+            # Purged training set: remove data around test period
+            purge_start = test_start - purge_size
+            purge_end = test_end + embargo_size + purge_size
+
+            # Create training indices (everything except purged region)
+            all_indices = np.arange(n_samples)
+            purged_indices = np.arange(max(0, purge_start), min(n_samples, purge_end))
+            train_indices = np.setdiff1d(all_indices, purged_indices)
+
+            # Ensure minimum training size
+            if len(train_indices) >= len(data) // 4:  # At least 25% for training
+                yield train_indices, test_indices
 
     @staticmethod
     def walk_forward_split(
@@ -117,37 +214,46 @@ class TimeSeriesValidator:
             yield train_indices, test_indices
 
 
-class CrossValidator:
+class CrossValidationService(BaseService):
     """
-    Cross-validation system for ML models.
+    Cross-validation service for ML models.
 
-    This class provides comprehensive cross-validation capabilities including
+    This service provides comprehensive cross-validation capabilities including
     standard CV, time series CV, nested CV, and custom validation strategies.
 
     Attributes:
-        config: Application configuration
         validation_history: History of validation runs
+        ts_validator: Time series validator instance
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
         """
-        Initialize the cross-validator.
+        Initialize the cross-validation service.
 
         Args:
-            config: Application configuration
+            config: Service configuration
+            correlation_id: Request correlation ID
         """
-        self.config = config
+        super().__init__(
+            name="CrossValidationService",
+            config=config,
+            correlation_id=correlation_id,
+        )
+
+        # Service state
         self.validation_history: list[dict[str, Any]] = []
         self.ts_validator = TimeSeriesValidator()
 
-        # Configuration
-        self.cv_folds = config.ml.cross_validation_folds
+        # Configuration with defaults
+        self.cv_folds = self._config.get("ml", {}).get("cross_validation_folds", 5)
 
-        logger.info("Cross-validator initialized", cv_folds=self.cv_folds)
+        # Dependencies that will be resolved during startup
+        self.add_dependency("ModelFactory")
 
-    @time_execution
-    @log_calls
-    def validate_model(
+        self._logger.info("Cross-validation service initialized", cv_folds=self.cv_folds)
+
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def validate_model(
         self,
         model: BaseModel,
         X: pd.DataFrame,
@@ -184,7 +290,7 @@ class CrossValidator:
 
             cv_folds = cv_folds or self.cv_folds
 
-            logger.info(
+            self._logger.info(
                 "Starting cross-validation",
                 model_name=model.model_name,
                 cv_strategy=cv_strategy,
@@ -243,7 +349,7 @@ class CrossValidator:
             # Store in history
             self.validation_history.append(validation_result)
 
-            logger.info(
+            self._logger.info(
                 "Cross-validation completed",
                 model_name=model.model_name,
                 mean_score=validation_result.get("mean_test_score"),
@@ -253,21 +359,21 @@ class CrossValidator:
             return validation_result
 
         except Exception as e:
-            logger.error("Cross-validation failed", model_name=model.model_name, error=str(e))
-            raise ModelError(f"Cross-validation failed: {e}") from e
+            self._logger.error("Cross-validation failed", model_name=model.model_name, error=str(e))
+            raise ModelError(f"Cross-validation failed: {e}")
 
-    @time_execution
-    @log_calls
-    def time_series_validation(
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def time_series_validation(
         self,
         model: BaseModel,
         X: pd.DataFrame,
         y: pd.Series,
-        ts_strategy: str = "walk_forward",
+        ts_strategy: str = "purged_walk_forward",
         min_train_size: int | None = None,
         test_size: int | None = None,
         step_size: int = 1,
-        scoring: str = "r2",
+        embargo_period: int = 0,
+        scoring: str = "sharpe_ratio",
     ) -> dict[str, Any]:
         """
         Perform time series cross-validation.
@@ -276,14 +382,15 @@ class CrossValidator:
             model: Model to validate
             X: Feature data with datetime index
             y: Target data with datetime index
-            ts_strategy: Time series strategy ('walk_forward', 'expanding', 'sliding')
+            ts_strategy: Time series strategy ('purged_walk_forward', 'combinatorial_purged', 'walk_forward', 'expanding', 'sliding')
             min_train_size: Minimum training size
             test_size: Test set size
             step_size: Step size for validation
-            scoring: Scoring metric
+            embargo_period: Number of periods to skip after training to prevent lookahead bias
+            scoring: Scoring metric (supports trading-specific metrics)
 
         Returns:
-            Time series validation results
+            Time series validation results with trading performance metrics
         """
         try:
             if not isinstance(X.index, pd.DatetimeIndex):
@@ -295,7 +402,7 @@ class CrossValidator:
             if test_size is None:
                 test_size = max(10, len(X) // 20)
 
-            logger.info(
+            self._logger.info(
                 "Starting time series validation",
                 model_name=model.model_name,
                 strategy=ts_strategy,
@@ -307,6 +414,18 @@ class CrossValidator:
             if ts_strategy == "walk_forward":
                 splits = list(
                     self.ts_validator.walk_forward_split(X, min_train_size, test_size, step_size)
+                )
+            elif ts_strategy == "purged_walk_forward":
+                splits = list(
+                    self.ts_validator.purged_walk_forward_split(
+                        X, min_train_size, test_size, embargo_period, step_size
+                    )
+                )
+            elif ts_strategy == "combinatorial_purged":
+                splits = list(
+                    self.ts_validator.combinatorial_purged_cross_validation(
+                        X, n_splits=5, test_size_ratio=0.2
+                    )
                 )
             elif ts_strategy == "expanding":
                 splits = list(
@@ -332,7 +451,8 @@ class CrossValidator:
                 y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
                 # Create fresh model instance
-                model_copy = type(model)(self.config, model.model_name)
+                model_factory = self.resolve_dependency("ModelFactory")
+                model_copy = model_factory.create_model(type(model).__name__, model.model_name)
 
                 # Train model
                 model_copy.train(X_train, y_train)
@@ -376,7 +496,7 @@ class CrossValidator:
                 "timestamp": datetime.utcnow().isoformat(),
             }
 
-            logger.info(
+            self._logger.info(
                 "Time series validation completed",
                 model_name=model.model_name,
                 mean_score=mean_score,
@@ -387,12 +507,13 @@ class CrossValidator:
             return ts_validation_result
 
         except Exception as e:
-            logger.error("Time series validation failed", model_name=model.model_name, error=str(e))
-            raise ModelError(f"Time series validation failed: {e}") from e
+            self._logger.error(
+                "Time series validation failed", model_name=model.model_name, error=str(e)
+            )
+            raise ModelError(f"Time series validation failed: {e}")
 
-    @time_execution
-    @log_calls
-    def nested_cross_validation(
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def nested_cross_validation(
         self,
         model_class: type,
         X: pd.DataFrame,
@@ -420,7 +541,7 @@ class CrossValidator:
         try:
             from sklearn.model_selection import GridSearchCV
 
-            logger.info(
+            self._logger.info(
                 "Starting nested cross-validation",
                 model_class=model_class.__name__,
                 outer_folds=outer_cv_folds,
@@ -440,7 +561,8 @@ class CrossValidator:
                 y_train_outer, y_test_outer = y.iloc[train_idx], y.iloc[test_idx]
 
                 # Create model instance
-                model = model_class(self.config)
+                model_factory = self.resolve_dependency("ModelFactory")
+                model = model_factory.create_model(model_class.__name__)
 
                 # Grid search on inner folds
                 if hasattr(model, "model") and model.model is not None:
@@ -470,7 +592,8 @@ class CrossValidator:
                         param_dict = dict(zip(parameter_grid.keys(), params, strict=False))
 
                         # Create and evaluate model
-                        test_model = model_class(self.config, **param_dict)
+                        model_factory = self.resolve_dependency("ModelFactory")
+                        test_model = model_factory.create_model(model_class.__name__, **param_dict)
 
                         # Cross-validate on inner folds
                         inner_scores = []
@@ -493,7 +616,8 @@ class CrossValidator:
                             best_params = param_dict
 
                     # Train best model on full outer training set
-                    final_model = model_class(self.config, **best_params)
+                    model_factory = self.resolve_dependency("ModelFactory")
+                    final_model = model_factory.create_model(model_class.__name__, **best_params)
                     final_model.train(X_train_outer, y_train_outer)
 
                     # Evaluate on outer test set
@@ -503,7 +627,7 @@ class CrossValidator:
                 outer_scores.append(score)
                 best_params_per_fold.append(best_params)
 
-                logger.info(f"Outer fold {fold + 1} completed, score: {score}")
+                self._logger.info(f"Outer fold {fold + 1} completed, score: {score}")
 
             # Calculate final statistics
             mean_score = np.mean(outer_scores)
@@ -522,7 +646,7 @@ class CrossValidator:
                 "timestamp": datetime.utcnow().isoformat(),
             }
 
-            logger.info(
+            self._logger.info(
                 "Nested cross-validation completed",
                 model_class=model_class.__name__,
                 mean_score=mean_score,
@@ -532,10 +656,10 @@ class CrossValidator:
             return nested_cv_result
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Nested cross-validation failed", model_class=model_class.__name__, error=str(e)
             )
-            raise ModelError(f"Nested cross-validation failed: {e}") from e
+            raise ModelError(f"Nested cross-validation failed: {e}")
 
     def _create_cv_splitter(self, cv_strategy: str, cv_folds: int, y: pd.Series, **kwargs):
         """Create cross-validation splitter based on strategy."""
@@ -567,7 +691,8 @@ class CrossValidator:
             y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
             # Create fresh model instance
-            model_copy = type(model)(self.config, model.model_name)
+            model_factory = self.resolve_dependency("ModelFactory")
+            model_copy = model_factory.create_model(type(model).__name__, model.model_name)
 
             # Train model
             model_copy.train(X_train, y_train)
@@ -590,7 +715,7 @@ class CrossValidator:
         return results
 
     def _calculate_score(self, y_true, y_pred, scoring: str) -> float:
-        """Calculate score based on scoring metric."""
+        """Calculate score based on scoring metric, including trading-specific metrics."""
         if scoring == "accuracy":
             return accuracy_score(y_true, y_pred)
         elif scoring == "f1":
@@ -605,12 +730,157 @@ class CrossValidator:
             return r2_score(y_true, y_pred)
         elif scoring == "neg_root_mean_squared_error":
             return -np.sqrt(mean_squared_error(y_true, y_pred))
+        elif scoring == "sharpe_ratio":
+            return self._calculate_sharpe_ratio(y_true, y_pred)
+        elif scoring == "information_ratio":
+            return self._calculate_information_ratio(y_true, y_pred)
+        elif scoring == "calmar_ratio":
+            return self._calculate_calmar_ratio(y_true, y_pred)
+        elif scoring == "max_drawdown":
+            return -self._calculate_max_drawdown(y_true, y_pred)  # Negative for minimization
+        elif scoring == "hit_ratio":
+            return self._calculate_hit_ratio(y_true, y_pred)
+        elif scoring == "profit_factor":
+            return self._calculate_profit_factor(y_true, y_pred)
         else:
             # Default to r2 for regression, accuracy for classification
             if len(np.unique(y_true)) < 10:
                 return accuracy_score(y_true, y_pred)
             else:
                 return r2_score(y_true, y_pred)
+
+    def _calculate_sharpe_ratio(
+        self, y_true: np.ndarray, y_pred: np.ndarray, risk_free_rate: float = 0.02
+    ) -> float:
+        """
+        Calculate Sharpe ratio for trading predictions.
+
+        Args:
+            y_true: Actual returns
+            y_pred: Predicted returns
+            risk_free_rate: Annual risk-free rate
+
+        Returns:
+            Sharpe ratio (annualized)
+        """
+        # Convert predictions to trading signals (assuming y_pred are returns)
+        returns = y_true * np.sign(y_pred)  # Long/short based on prediction sign
+
+        if len(returns) == 0 or np.std(returns) == 0:
+            return 0.0
+
+        # Annualize assuming daily returns
+        mean_return = np.mean(returns) * 252  # 252 trading days
+        std_return = np.std(returns) * np.sqrt(252)
+
+        return (mean_return - risk_free_rate) / std_return if std_return != 0 else 0.0
+
+    def _calculate_information_ratio(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        """
+        Calculate Information Ratio (excess return / tracking error).
+
+        Args:
+            y_true: Actual returns
+            y_pred: Predicted returns
+
+        Returns:
+            Information ratio
+        """
+        # Assume benchmark return is 0 (excess return calculation)
+        excess_returns = y_true * np.sign(y_pred)
+
+        if len(excess_returns) == 0 or np.std(excess_returns) == 0:
+            return 0.0
+
+        return np.mean(excess_returns) / np.std(excess_returns) * np.sqrt(252)
+
+    def _calculate_calmar_ratio(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        """
+        Calculate Calmar ratio (annual return / max drawdown).
+
+        Args:
+            y_true: Actual returns
+            y_pred: Predicted returns
+
+        Returns:
+            Calmar ratio
+        """
+        returns = y_true * np.sign(y_pred)
+
+        if len(returns) == 0:
+            return 0.0
+
+        annual_return = np.mean(returns) * 252
+        max_dd = self._calculate_max_drawdown(y_true, y_pred)
+
+        return annual_return / max_dd if max_dd != 0 else 0.0
+
+    def _calculate_max_drawdown(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        """
+        Calculate maximum drawdown for trading strategy.
+
+        Args:
+            y_true: Actual returns
+            y_pred: Predicted returns
+
+        Returns:
+            Maximum drawdown (positive value)
+        """
+        returns = y_true * np.sign(y_pred)
+
+        if len(returns) == 0:
+            return 0.0
+
+        # Calculate cumulative returns
+        cumulative = np.cumprod(1 + returns)
+
+        # Calculate running maximum
+        running_max = np.maximum.accumulate(cumulative)
+
+        # Calculate drawdown
+        drawdown = (cumulative - running_max) / running_max
+
+        return abs(np.min(drawdown))
+
+    def _calculate_hit_ratio(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        """
+        Calculate hit ratio (percentage of correct directional predictions).
+
+        Args:
+            y_true: Actual returns
+            y_pred: Predicted returns
+
+        Returns:
+            Hit ratio (0 to 1)
+        """
+        if len(y_true) == 0:
+            return 0.0
+
+        # Check if prediction and actual have same sign
+        correct_direction = np.sign(y_true) == np.sign(y_pred)
+
+        return np.mean(correct_direction)
+
+    def _calculate_profit_factor(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
+        """
+        Calculate profit factor (gross profit / gross loss).
+
+        Args:
+            y_true: Actual returns
+            y_pred: Predicted returns
+
+        Returns:
+            Profit factor
+        """
+        returns = y_true * np.sign(y_pred)
+
+        if len(returns) == 0:
+            return 0.0
+
+        gross_profit = np.sum(returns[returns > 0])
+        gross_loss = abs(np.sum(returns[returns < 0]))
+
+        return gross_profit / gross_loss if gross_loss != 0 else np.inf
 
     def _process_cv_results(
         self,
@@ -673,6 +943,26 @@ class CrossValidator:
 
         return result
 
+    async def _do_start(self) -> None:
+        """Start the service and resolve dependencies."""
+        await super()._do_start()
+        self._logger.info("Cross-validation service started successfully")
+
+    async def _do_stop(self) -> None:
+        """Stop the service and cleanup resources."""
+        await super()._do_stop()
+        self._logger.info("Cross-validation service stopped")
+
+    async def _service_health_check(self) -> "HealthStatus":
+        """Check service-specific health."""
+        from src.core.base.interfaces import HealthStatus
+
+        # Check if we have reasonable validation history size
+        if len(self.validation_history) > 10000:  # Too many entries might indicate memory issues
+            return HealthStatus.DEGRADED
+
+        return HealthStatus.HEALTHY
+
     def get_validation_history(self) -> list[dict[str, Any]]:
         """Get validation history."""
         return self.validation_history.copy()
@@ -680,4 +970,4 @@ class CrossValidator:
     def clear_history(self) -> None:
         """Clear validation history."""
         self.validation_history.clear()
-        logger.info("Validation history cleared")
+        self._logger.info("Validation history cleared")

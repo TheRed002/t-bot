@@ -32,8 +32,6 @@ from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.core.types import TradingMode
 
-logger = get_logger(__name__)
-
 
 class OptimizationStatus(Enum):
     """Status enumeration for optimization processes."""
@@ -264,7 +262,9 @@ class OptimizationProgress(BaseModel):
     def add_warning(self, warning: str) -> None:
         """Add a warning to the progress tracker."""
         self.warnings.append(warning)
-        logger.warning(f"Optimization warning: {warning}", optimization_id=self.optimization_id)
+        self.logger.warning(
+            f"Optimization warning: {warning}", optimization_id=self.optimization_id
+        )
 
     def estimate_completion_time(self) -> None:
         """Estimate completion time based on current progress."""
@@ -477,6 +477,9 @@ class OptimizationEngine(ABC):
         # Generate unique optimization ID
         self.optimization_id = str(uuid.uuid4())
 
+        # Initialize logger
+        self.logger = get_logger(self.__class__.__name__)
+
         # Initialize progress tracking
         self.progress = OptimizationProgress(
             optimization_id=self.optimization_id, status=OptimizationStatus.PENDING
@@ -488,7 +491,7 @@ class OptimizationEngine(ABC):
         # Validation
         self._validate_configuration()
 
-        logger.info(
+        self.logger.info(
             "Optimization engine initialized",
             optimization_id=self.optimization_id,
             engine_type=self.__class__.__name__,
@@ -569,7 +572,7 @@ class OptimizationEngine(ABC):
 
         # Log progress periodically
         if iteration % self.config.progress_callback_interval == 0:
-            logger.info(
+            self.logger.info(
                 "Optimization progress update",
                 optimization_id=self.optimization_id,
                 iteration=iteration,
@@ -643,7 +646,7 @@ class OptimizationEngine(ABC):
     async def stop(self) -> None:
         """Stop the optimization process."""
         self.progress.status = OptimizationStatus.CANCELLED
-        logger.info("Optimization stopped", optimization_id=self.optimization_id)
+        self.logger.info("Optimization stopped", optimization_id=self.optimization_id)
 
 
 # Utility functions for common optimization patterns

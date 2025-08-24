@@ -10,22 +10,21 @@ for connection state persistence and will be used by all subsequent prompts.
 """
 
 import asyncio
+import secrets
 import time
+from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
 from src.core.config import Config
-
-# MANDATORY: Import from P-001 core framework
 from src.core.logging import get_logger
 
+# MANDATORY: Import from P-001 core framework
 # MANDATORY: Import from P-007A utils framework
-from src.utils.decorators import circuit_breaker, retry, time_execution
-
-logger = get_logger(__name__)
+from src.utils.decorators import circuit_breaker, time_execution
 
 
 class ConnectionState(Enum):
@@ -40,7 +39,7 @@ class ConnectionState(Enum):
 
 @dataclass
 class ConnectionHealth:
-    """Connection health metrics."""
+    """Optimized connection health metrics with memory-efficient storage."""
 
     last_heartbeat: datetime
     latency_ms: float
@@ -49,6 +48,40 @@ class ConnectionHealth:
     uptime_seconds: int
     reconnect_count: int
     last_error: str | None = None
+
+    # Efficient latency history storage
+    _latency_history: deque[float] = field(default_factory=lambda: deque(maxlen=100))
+    _quality_history: deque[float] = field(default_factory=lambda: deque(maxlen=50))
+
+    def add_latency_measurement(self, latency: float) -> None:
+        """Add latency measurement to history."""
+        self._latency_history.append(latency)
+        self.latency_ms = latency
+
+    def add_quality_measurement(self, quality: float) -> None:
+        """Add quality measurement to history."""
+        self._quality_history.append(quality)
+        self.connection_quality = quality
+
+    def get_average_latency(self, samples: int = 10) -> float:
+        """Get average latency from recent samples."""
+        if not self._latency_history:
+            return 0.0
+        recent_samples = list(self._latency_history)[-samples:]
+        return sum(recent_samples) / len(recent_samples)
+
+    def get_quality_trend(self) -> str:
+        """Get quality trend (improving, degrading, stable)."""
+        if len(self._quality_history) < 3:
+            return "stable"
+
+        recent = list(self._quality_history)[-3:]
+        if recent[-1] > recent[-2] > recent[-3]:
+            return "improving"
+        elif recent[-1] < recent[-2] < recent[-3]:
+            return "degrading"
+        else:
+            return "stable"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -60,33 +93,119 @@ class ConnectionHealth:
             "uptime_seconds": self.uptime_seconds,
             "reconnect_count": self.reconnect_count,
             "last_error": self.last_error,
+            "avg_latency_10s": self.get_average_latency(10),
+            "quality_trend": self.get_quality_trend(),
         }
 
 
+class MessageQueue:
+    """Efficient message queue with size limits and TTL."""
+
+    def __init__(self, max_size: int = 1000, ttl_seconds: int = 300):
+        self.max_size = max_size
+        self.ttl_seconds = ttl_seconds
+        self._queue: deque[dict[str, Any]] = deque(maxlen=max_size)
+        self._total_size_bytes = 0
+        self._max_size_bytes = 10 * 1024 * 1024  # 10MB limit
+
+    def add_message(self, message: dict[str, Any]) -> bool:
+        """Add message to queue with size and TTL checks."""
+        # Add timestamp for TTL
+        message["queued_at"] = datetime.now(timezone.utc).isoformat()
+
+        # Estimate size
+        estimated_size = len(str(message))
+
+        # Check memory limit
+        if self._total_size_bytes + estimated_size > self._max_size_bytes:
+            # Remove old messages until under limit
+            while self._queue and self._total_size_bytes > self._max_size_bytes * 0.7:
+                old_msg = self._queue.popleft()
+                self._total_size_bytes -= len(str(old_msg))
+
+        # Add new message
+        self._queue.append(message)
+        self._total_size_bytes += estimated_size
+
+        return True
+
+    def get_messages(self) -> list[dict[str, Any]]:
+        """Get all messages, removing expired ones."""
+        now = datetime.now(timezone.utc)
+        valid_messages = []
+
+        for message in self._queue:
+            # Parse ISO format datetime string properly
+            queued_at_str = message["queued_at"]
+            if queued_at_str.endswith("Z"):
+                queued_at_str = queued_at_str[:-1] + "+00:00"
+            queued_time = datetime.fromisoformat(queued_at_str)
+            if (now - queued_time).total_seconds() <= self.ttl_seconds:
+                valid_messages.append(message)
+
+        return valid_messages
+
+    def clear(self) -> int:
+        """Clear all messages and return count."""
+        count = len(self._queue)
+        self._queue.clear()
+        self._total_size_bytes = 0
+        return count
+
+    def size(self) -> int:
+        """Get current queue size."""
+        return len(self._queue)
+
+
 class ConnectionManager:
-    """Manages connection reliability with automatic reconnection."""
+    """Optimized connection reliability manager with efficient memory usage."""
 
     def __init__(self, config: Config):
         self.config = config
+        self.logger = get_logger(self.__class__.__module__)
+
+        # Optimized connection storage
         self.connections: dict[str, dict[str, Any]] = {}
         self.health_monitors: dict[str, ConnectionHealth] = {}
+
+        # Reconnection policies
         self.reconnect_policies: dict[str, dict[str, Any]] = {
             "exchange": {"max_attempts": 5, "base_delay": 1, "max_delay": 60, "jitter": True},
             "database": {"max_attempts": 3, "base_delay": 0.5, "max_delay": 10, "jitter": False},
             "websocket": {"max_attempts": 10, "base_delay": 0.1, "max_delay": 30, "jitter": True},
         }
-        self.message_queues: dict[str, list[dict[str, Any]]] = {}
+
+        # Optimized message queues
+        self.message_queues: dict[str, MessageQueue] = {}
         self.heartbeat_intervals: dict[str, int] = {"exchange": 30, "database": 60, "websocket": 10}
+
+        # Task management with weak references
         self._health_monitor_tasks: dict[str, asyncio.Task] = {}
+        self._cleanup_task: asyncio.Task | None = None
+
+        # Performance monitoring
+        self._connection_stats = {
+            "total_connections_created": 0,
+            "total_reconnections": 0,
+            "total_messages_queued": 0,
+            "last_cleanup": datetime.now(timezone.utc),
+        }
+
+        # Cleanup task - will be started when needed
+        self._cleanup_task = None
+        # Don't start cleanup task immediately - start it when first connection is made
 
     @time_execution
-    @retry(max_attempts=5)
     async def establish_connection(
-        self, connection_id: str, connection_type: str, connect_func: Callable, **kwargs
+        self,
+        connection_id: str,
+        connection_type: str,
+        connect_func: Callable[..., Any],
+        **kwargs: Any,
     ) -> bool:
         """Establish a new connection with automatic retry."""
 
-        logger.info(
+        self.logger.info(
             "Establishing connection", connection_id=connection_id, connection_type=connection_type
         )
 
@@ -98,10 +217,15 @@ class ConnectionManager:
                 delay = min(policy["base_delay"] * (2**attempt), policy["max_delay"])
 
                 if policy["jitter"]:
-                    delay *= 0.5 + 0.5 * time.time() % 1  # Add jitter
+                    # Use cryptographically secure random for jitter
+                    jitter_factor = 0.5 + (secrets.randbelow(50) / 100)  # 0.5 to 1.0
+                    delay *= jitter_factor
 
                 if attempt > 0:
                     await asyncio.sleep(delay)
+
+                # Start cleanup task if not already running
+                self._start_cleanup_task()
 
                 # Attempt connection
                 connection = await connect_func(**kwargs)
@@ -131,7 +255,7 @@ class ConnectionManager:
                     self._monitor_connection_health(connection_id)
                 )
 
-                logger.info(
+                self.logger.info(
                     "Connection established successfully",
                     connection_id=connection_id,
                     connection_type=connection_type,
@@ -141,7 +265,7 @@ class ConnectionManager:
                 return True
 
             except Exception as e:
-                logger.warning(
+                self.logger.warning(
                     "Connection attempt failed",
                     connection_id=connection_id,
                     connection_type=connection_type,
@@ -150,7 +274,7 @@ class ConnectionManager:
                 )
 
                 if attempt == policy["max_attempts"] - 1:
-                    logger.error(
+                    self.logger.error(
                         "Connection establishment failed",
                         connection_id=connection_id,
                         connection_type=connection_type,
@@ -164,7 +288,7 @@ class ConnectionManager:
         """Close a connection gracefully."""
 
         if connection_id not in self.connections:
-            logger.warning("Connection not found", connection_id=connection_id)
+            self.logger.warning("Connection not found", connection_id=connection_id)
             return False
 
         try:
@@ -181,11 +305,13 @@ class ConnectionManager:
             connection_info["state"] = ConnectionState.DISCONNECTED
             connection_info["last_activity"] = datetime.now(timezone.utc)
 
-            logger.info("Connection closed", connection_id=connection_id)
+            self.logger.info("Connection closed", connection_id=connection_id)
             return True
 
         except Exception as e:
-            logger.error("Failed to close connection", connection_id=connection_id, error=str(e))
+            self.logger.error(
+                "Failed to close connection", connection_id=connection_id, error=str(e)
+            )
             return False
 
     @time_execution
@@ -194,13 +320,15 @@ class ConnectionManager:
         """Reconnect a failed connection."""
 
         if connection_id not in self.connections:
-            logger.warning("Connection not found for reconnection", connection_id=connection_id)
+            self.logger.warning(
+                "Connection not found for reconnection", connection_id=connection_id
+            )
             return False
 
         connection_info = self.connections[connection_id]
         connection_type = connection_info["type"]
 
-        logger.info(
+        self.logger.info(
             "Attempting reconnection", connection_id=connection_id, connection_type=connection_type
         )
 
@@ -217,7 +345,7 @@ class ConnectionManager:
         connection_info["state"] = ConnectionState.CONNECTED
         connection_info["last_activity"] = datetime.now(timezone.utc)
 
-        logger.info(
+        self.logger.info(
             "Reconnection successful",
             connection_id=connection_id,
             reconnect_count=connection_info["reconnect_count"],
@@ -243,10 +371,10 @@ class ConnectionManager:
                 latency_ms = (time.time() - start_time) * 1000
 
                 if is_healthy:
-                    # Update health metrics
+                    # Update health metrics with optimized storage
                     health = self.health_monitors[connection_id]
                     health.last_heartbeat = datetime.now(timezone.utc)
-                    health.latency_ms = latency_ms
+                    health.add_latency_measurement(latency_ms)
                     health.uptime_seconds = int(
                         (
                             datetime.now(timezone.utc) - connection_info["established_at"]
@@ -254,21 +382,31 @@ class ConnectionManager:
                     )
                     health.last_error = None
 
-                    # Update connection quality based on latency
+                    # Update connection quality based on latency with trend analysis
                     if latency_ms < 100:
-                        health.connection_quality = 1.0
+                        quality = 1.0
                     elif latency_ms < 500:
-                        health.connection_quality = 0.8
+                        quality = 0.8
                     elif latency_ms < 1000:
-                        health.connection_quality = 0.6
+                        quality = 0.6
                     else:
-                        health.connection_quality = 0.4
+                        quality = 0.4
 
+                    # Factor in trend for more accurate quality assessment
+                    trend = health.get_quality_trend()
+                    if trend == "degrading":
+                        quality *= 0.9
+                    elif trend == "improving":
+                        quality = min(quality * 1.1, 1.0)
+
+                    health.add_quality_measurement(quality)
                     connection_info["last_activity"] = datetime.now(timezone.utc)
 
                 else:
                     # Connection is unhealthy, trigger reconnection
-                    logger.warning("Connection health check failed", connection_id=connection_id)
+                    self.logger.warning(
+                        "Connection health check failed", connection_id=connection_id
+                    )
 
                     health = self.health_monitors[connection_id]
                     health.last_error = "Heartbeat failed"
@@ -280,7 +418,9 @@ class ConnectionManager:
                 await asyncio.sleep(heartbeat_interval)
 
             except Exception as e:
-                logger.error("Health monitoring error", connection_id=connection_id, error=str(e))
+                self.logger.error(
+                    "Health monitoring error", connection_id=connection_id, error=str(e)
+                )
                 await asyncio.sleep(heartbeat_interval)
 
     async def _perform_heartbeat(self, connection_id: str) -> bool:
@@ -337,27 +477,97 @@ class ConnectionManager:
                     return connection is not None
 
         except Exception as e:
-            logger.error("Heartbeat failed", connection_id=connection_id, error=str(e))
+            self.logger.error("Heartbeat failed", connection_id=connection_id, error=str(e))
             return False
+
+    def _start_cleanup_task(self) -> None:
+        """Start periodic cleanup task."""
+        try:
+            if self._cleanup_task is None or self._cleanup_task.done():
+                self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+        except RuntimeError:
+            # No event loop running, cleanup task will be started on first use
+            self.logger.debug(
+                "No event loop available for cleanup task - will be started on first connection"
+            )
+            pass
+
+    async def _periodic_cleanup(self) -> None:
+        """Periodic cleanup of connection data and metrics."""
+        while True:
+            try:
+                await asyncio.sleep(300)  # Cleanup every 5 minutes
+
+                # Clean up dead connections
+                dead_connections = []
+                for conn_id, conn_info in self.connections.items():
+                    if conn_info["state"] == ConnectionState.FAILED:
+                        last_activity = conn_info.get("last_activity")
+                        if (
+                            last_activity
+                            and (datetime.now(timezone.utc) - last_activity).total_seconds() > 3600
+                        ):
+                            dead_connections.append(conn_id)
+
+                for conn_id in dead_connections:
+                    await self._cleanup_connection(conn_id)
+
+                # Log performance stats
+                self.logger.info(
+                    "Connection manager stats",
+                    active_connections=len(self.connections),
+                    queued_connections=len(self.message_queues),
+                    total_created=self._connection_stats["total_connections_created"],
+                    total_reconnections=self._connection_stats["total_reconnections"],
+                )
+
+                self._connection_stats["last_cleanup"] = datetime.now(timezone.utc)
+
+            except Exception as e:
+                self.logger.error("Error in periodic cleanup", error=str(e))
+                await asyncio.sleep(300)
+
+    async def _cleanup_connection(self, connection_id: str) -> None:
+        """Clean up resources for a dead connection."""
+        # Cancel monitoring task
+        if connection_id in self._health_monitor_tasks:
+            task = self._health_monitor_tasks[connection_id]
+            if not task.done():
+                task.cancel()
+            del self._health_monitor_tasks[connection_id]
+
+        # Remove connection data
+        self.connections.pop(connection_id, None)
+        self.health_monitors.pop(connection_id, None)
+
+        # Clear message queue
+        if connection_id in self.message_queues:
+            cleared_count = self.message_queues[connection_id].clear()
+            del self.message_queues[connection_id]
+            self.logger.info(
+                f"Cleaned up connection {connection_id}, cleared {cleared_count} queued messages"
+            )
 
     async def queue_message(self, connection_id: str, message: dict[str, Any]) -> bool:
         """Queue a message for later transmission when connection is restored."""
 
         if connection_id not in self.message_queues:
-            self.message_queues[connection_id] = []
+            self.message_queues[connection_id] = MessageQueue(
+                max_size=1000, ttl_seconds=900
+            )  # 15 min TTL
 
-        message_with_timestamp = {**message, "queued_at": datetime.now(timezone.utc).isoformat()}
+        success = self.message_queues[connection_id].add_message(message)
 
-        self.message_queues[connection_id].append(message_with_timestamp)
+        if success:
+            self._connection_stats["total_messages_queued"] += 1
+            self.logger.info(
+                "Message queued",
+                connection_id=connection_id,
+                message_type=message.get("type", "unknown"),
+                queue_size=self.message_queues[connection_id].size(),
+            )
 
-        logger.info(
-            "Message queued",
-            connection_id=connection_id,
-            message_type=message.get("type", "unknown"),
-            queue_size=len(self.message_queues[connection_id]),
-        )
-
-        return True
+        return success
 
     async def flush_message_queue(self, connection_id: str) -> int:
         """Flush queued messages for a connection."""
@@ -365,17 +575,19 @@ class ConnectionManager:
         if connection_id not in self.message_queues:
             return 0
 
-        queue = self.message_queues[connection_id]
-        if not queue:
+        message_queue = self.message_queues[connection_id]
+        messages = message_queue.get_messages()  # Get valid (non-expired) messages
+
+        if not messages:
             return 0
 
         flushed_count = 0
 
-        for message in queue:
+        for message in messages:
             try:
                 # TODO: Implement actual message transmission
                 # This will be implemented in P-003+ (Exchange Integrations)
-                logger.info(
+                self.logger.info(
                     "Flushing queued message",
                     connection_id=connection_id,
                     message_type=message.get("type", "unknown"),
@@ -383,7 +595,7 @@ class ConnectionManager:
                 flushed_count += 1
 
             except Exception as e:
-                logger.error(
+                self.logger.error(
                     "Failed to flush message",
                     connection_id=connection_id,
                     message_type=message.get("type", "unknown"),
@@ -391,10 +603,13 @@ class ConnectionManager:
                 )
 
         # Clear the queue
-        self.message_queues[connection_id] = []
+        cleared_count = message_queue.clear()
 
-        logger.info(
-            "Message queue flushed", connection_id=connection_id, flushed_count=flushed_count
+        self.logger.info(
+            "Message queue flushed",
+            connection_id=connection_id,
+            flushed_count=flushed_count,
+            cleared_count=cleared_count,
         )
 
         return flushed_count
@@ -416,10 +631,10 @@ class ConnectionManager:
             "last_activity": connection_info["last_activity"].isoformat(),
             "reconnect_count": connection_info["reconnect_count"],
             "health": health.to_dict() if health else None,
-            "queued_messages": len(self.message_queues.get(connection_id, [])),
+            "queued_messages": self.message_queues.get(connection_id, MessageQueue()).size(),
         }
 
-    def get_all_connection_status(self) -> dict[str, dict[str, Any]]:
+    def get_all_connection_status(self) -> dict[str, dict[str, Any] | None]:
         """Get status of all connections."""
         return {
             connection_id: self.get_connection_status(connection_id)

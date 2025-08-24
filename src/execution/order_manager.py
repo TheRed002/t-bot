@@ -18,31 +18,47 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
+from src.base import BaseComponent
+
+# Caching imports
+from src.core.caching import CacheKeys, cached, get_cache_manager
 from src.core.config import Config
-from src.core.exceptions import ExecutionError, ValidationError
-from src.core.logging import get_logger
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+    ExchangeRateLimitError,
+    ExecutionError,
+    NetworkError,
+    ValidationError,
+)
 
 # MANDATORY: Import from P-001
 from src.core.types import (
     MarketData,
     OrderRequest,
+    OrderResponse,
     OrderSide,
     OrderStatus,
+    OrderType,
 )
 
-# MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+# Import error handling decorators
+from src.error_handling.decorators import with_circuit_breaker, with_error_context, with_retry
+
+# Import exchange interfaces
+from src.execution.exchange_interface import ExchangeFactoryInterface, ExchangeInterface
 
 # Import idempotency manager
 from src.execution.idempotency_manager import OrderIdempotencyManager
-from src.utils.decimal_utils import (
-    format_decimal,
-)
+
+# Import monitoring components
+from src.monitoring import MetricsCollector, get_tracer
+
+# Import state management
+from src.state.state_service import StateService, StateType
 
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
-
-logger = get_logger(__name__)
+from src.utils import format_decimal, log_calls, time_execution
 
 
 class OrderRouteInfo:
@@ -213,7 +229,7 @@ class ManagedOrder:
             )
 
 
-class OrderManager:
+class OrderManager(BaseComponent):
     """
     Comprehensive order lifecycle management system.
 
@@ -227,20 +243,39 @@ class OrderManager:
     - Risk-aware order management workflows
     """
 
-    def __init__(self, config: Config, redis_client=None):
+    def __init__(
+        self,
+        config: Config,
+        redis_client=None,
+        state_service: StateService | None = None,
+        metrics_collector: MetricsCollector | None = None,
+    ):
         """
         Initialize order manager.
 
         Args:
             config: Application configuration
             redis_client: Optional Redis client for idempotency management
+            state_service: Optional StateService for state persistence
+            metrics_collector: Optional metrics collector for monitoring
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
-        self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.state_service = state_service
+        self.metrics_collector = metrics_collector
+
+        # Initialize tracer for distributed tracing with safety check
+        try:
+            self._tracer = get_tracer("execution.order_manager")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize tracer: {e}")
+            self._tracer = None
 
         # Initialize idempotency manager
         self.idempotency_manager = OrderIdempotencyManager(config, redis_client)
+
+        # Initialize cache manager
+        self.cache_manager = get_cache_manager(config=config)
 
         # Order tracking with thread safety
         self._order_lock = RLock()
@@ -255,10 +290,25 @@ class OrderManager:
         self.order_modifications: dict[str, list[OrderModificationRequest]] = defaultdict(list)
 
         # Management configuration
-        self.default_order_timeout_minutes = 60  # 1 hour default timeout
-        self.status_check_interval_seconds = 5  # Check status every 5 seconds
-        self.max_concurrent_orders = 100  # Maximum concurrent orders
-        self.order_history_retention_hours = 24  # Keep order history for 24 hours
+        self.default_order_timeout_minutes = config.execution.get("order_timeout_minutes", 60)
+        self.status_check_interval_seconds = config.execution.get(
+            "status_check_interval_seconds", 5
+        )
+        self.max_concurrent_orders = config.execution.get("max_concurrent_orders", 100)
+        self.order_history_retention_hours = config.execution.get(
+            "order_history_retention_hours", 24
+        )
+
+        # Exchange routing configuration
+        self.routing_config = config.execution.get(
+            "routing",
+            {
+                "large_order_exchange": None,  # Will be determined dynamically
+                "usdt_preferred_exchange": None,  # Will be determined dynamically
+                "default_exchange": None,  # Will be determined dynamically
+                "large_order_threshold": "100000",
+            },
+        )
 
         # P-020 Enhanced configuration
         self.order_aggregation_rules: dict[str, OrderAggregationRule] = {}
@@ -292,7 +342,10 @@ class OrderManager:
         self._cleanup_task: asyncio.Task | None = None
         self._cleanup_started = False
 
-        self.logger.info("Order manager initialized with lifecycle management")
+        self.logger.info(
+            "Order manager initialized with lifecycle management",
+            has_state_service=self.state_service is not None,
+        )
 
     async def start(self) -> None:
         """Start the order manager and its background tasks."""
@@ -305,6 +358,10 @@ class OrderManager:
             # Start WebSocket connections for real-time updates
             if self.websocket_enabled:
                 await self._initialize_websocket_connections()
+
+            # Restore orders from StateService if available
+            if self.state_service:
+                await self._restore_orders_from_state()
 
             self._cleanup_started = True
             self.logger.info("Order manager started with enhanced P-020 features and idempotency")
@@ -324,11 +381,14 @@ class OrderManager:
 
         self._cleanup_task = asyncio.create_task(cleanup_periodically())
 
+    @with_error_context(component="OrderManager", operation="submit_order")
+    @with_circuit_breaker(failure_threshold=10, recovery_timeout=60)
+    @with_retry(max_attempts=3, exceptions=(NetworkError, ExchangeError))
     @time_execution
     async def submit_order(
         self,
         order_request: OrderRequest,
-        exchange,
+        exchange: ExchangeInterface,
         execution_id: str,
         timeout_minutes: int | None = None,
         callbacks: dict[str, Callable] | None = None,
@@ -416,10 +476,66 @@ class OrderManager:
                 order_type=order_request.order_type.value,
             )
 
-            # Submit to exchange
-            order_response = await exchange.place_order(order_request)
+            # Submit to exchange with comprehensive error handling
+            try:
+                order_response = await exchange.place_order(order_request)
+            except ExchangeRateLimitError as e:
+                self.logger.error(
+                    f"Rate limit error placing order: {e}",
+                    exchange=exchange.exchange_name,
+                    symbol=order_request.symbol,
+                    error_type="rate_limit_error",
+                )
+                managed_order.status = OrderStatus.REJECTED
+                await self._add_order_event(
+                    managed_order, "order_rejected", {"reason": "rate_limit_error", "error": str(e)}
+                )
+                raise
+            except ExchangeConnectionError as e:
+                self.logger.error(
+                    f"Connection error placing order: {e}",
+                    exchange=exchange.exchange_name,
+                    symbol=order_request.symbol,
+                    error_type="connection_error",
+                )
+                managed_order.status = OrderStatus.FAILED
+                await self._add_order_event(
+                    managed_order, "order_failed", {"reason": "connection_error", "error": str(e)}
+                )
+                raise
+            except ExchangeError as e:
+                self.logger.error(
+                    f"Exchange error placing order: {e}",
+                    exchange=exchange.exchange_name,
+                    symbol=order_request.symbol,
+                    error_type="exchange_error",
+                )
+                managed_order.status = OrderStatus.REJECTED
+                await self._add_order_event(
+                    managed_order, "order_rejected", {"reason": "exchange_error", "error": str(e)}
+                )
+                raise
+            except NetworkError as e:
+                self.logger.error(
+                    f"Network error placing order: {e}",
+                    exchange=exchange.exchange_name,
+                    symbol=order_request.symbol,
+                    error_type="network_error",
+                )
+                managed_order.status = OrderStatus.FAILED
+                await self._add_order_event(
+                    managed_order, "order_failed", {"reason": "network_error", "error": str(e)}
+                )
+                raise
 
-            # Update managed order with response
+            # Validate order response structure
+            if not order_response:
+                raise ExecutionError("Exchange returned null order response")
+
+            if not hasattr(order_response, "id") or not order_response.id:
+                raise ExecutionError("Order response missing required id field")
+
+            # Update managed order with validated response
             managed_order.order_id = order_response.id
             managed_order.status = OrderStatus.PENDING
 
@@ -429,6 +545,10 @@ class OrderManager:
             if execution_id not in self.execution_orders:
                 self.execution_orders[execution_id] = []
             self.execution_orders[execution_id].append(order_response.id)
+
+            # Persist order state if StateService is available
+            if self.state_service:
+                await self._persist_order_state(managed_order)
 
             # Add creation event
             await self._add_order_event(
@@ -476,7 +596,7 @@ class OrderManager:
                 except Exception as callback_error:
                     self.logger.error(f"Error callback failed: {callback_error}")
 
-            raise ExecutionError(f"Order submission failed: {e}") from e
+            raise ExecutionError(f"Order submission failed: {e}")
 
     # ========== P-020 Enhanced Order Management Methods ==========
 
@@ -484,7 +604,7 @@ class OrderManager:
     async def submit_order_with_routing(
         self,
         order_request: OrderRequest,
-        exchange_factory,
+        exchange_factory: ExchangeFactoryInterface,
         execution_id: str,
         preferred_exchanges: list[str] | None = None,
         market_data: MarketData | None = None,
@@ -552,7 +672,7 @@ class OrderManager:
 
         except Exception as e:
             self.logger.error(f"Order submission with routing failed: {e}")
-            raise ExecutionError(f"Order submission with routing failed: {e}") from e
+            raise ExecutionError(f"Order submission with routing failed: {e}")
 
     @log_calls
     async def modify_order(self, modification_request: OrderModificationRequest) -> bool:
@@ -587,6 +707,7 @@ class OrderManager:
                 self.order_modifications[order_id].append(modification_request)
 
                 # Update order details
+                old_quantity = None
                 if modification_request.new_quantity:
                     old_quantity = managed_order.order_request.quantity
                     managed_order.order_request.quantity = modification_request.new_quantity
@@ -601,9 +722,7 @@ class OrderManager:
                 managed_order.add_audit_entry(
                     "order_modified",
                     {
-                        "old_quantity": (
-                            float(old_quantity) if modification_request.new_quantity else None
-                        ),
+                        "old_quantity": (float(old_quantity) if old_quantity is not None else None),
                         "new_quantity": (
                             float(modification_request.new_quantity)
                             if modification_request.new_quantity
@@ -745,7 +864,7 @@ class OrderManager:
         try:
             # This would initialize WebSocket connections to exchanges
             # For now, simulate the initialization
-            exchanges = ["binance", "coinbase", "okx"]  # Would come from config
+            exchanges = self.config.execution.get("exchanges", ["binance", "coinbase", "okx"])
 
             for exchange in exchanges:
                 try:
@@ -824,38 +943,51 @@ class OrderManager:
     async def _select_optimal_exchange(
         self,
         order_request: OrderRequest,
-        exchange_factory,
+        exchange_factory: ExchangeFactoryInterface,
         preferred_exchanges: list[str] | None = None,
         market_data: MarketData | None = None,
     ) -> OrderRouteInfo:
         """Select optimal exchange for order execution."""
         try:
-            available_exchanges = preferred_exchanges or ["binance", "coinbase", "okx"]
+            # Get available exchanges from factory if not specified
+            if preferred_exchanges:
+                available_exchanges = preferred_exchanges
+            else:
+                try:
+                    available_exchanges = exchange_factory.get_available_exchanges()
+                except Exception:
+                    # Fallback to common exchanges if factory method not available
+                    available_exchanges = ["binance", "coinbase", "okx"]
 
             # Simple routing logic (in reality, this would be much more sophisticated)
             # For now, select based on order size and symbol
-            order_value = order_request.quantity * (order_request.price or Decimal("50000"))
+            order_value = order_request.quantity * (
+                order_request.price or market_data.price if market_data else Decimal("50000")
+            )
 
-            if order_value > Decimal("100000"):  # Large orders
-                selected_exchange = "binance"  # Typically better for large orders
+            # Determine exchange based on order characteristics
+            selected_exchange = None
+
+            if order_value > Decimal(self.routing_config["large_order_threshold"]):
+                # Large orders - prefer exchanges with deep liquidity
+                # For now, use first available exchange (could be enhanced with liquidity data)
+                selected_exchange = self.routing_config.get("large_order_exchange")
                 routing_reason = "large_order_routing"
                 expected_cost_bps = Decimal("15")
                 expected_time = 30.0
             elif order_request.symbol.endswith("USDT"):
-                selected_exchange = "binance"  # Better for USDT pairs
+                # USDT pairs - prefer exchanges with USDT pairs
+                selected_exchange = self.routing_config.get("usdt_preferred_exchange")
                 routing_reason = "usdt_pair_routing"
                 expected_cost_bps = Decimal("10")
                 expected_time = 20.0
-            else:
-                selected_exchange = "coinbase"  # Default
-                routing_reason = "default_routing"
+
+            # If no specific preference or configured exchange not available, use first available
+            if not selected_exchange or selected_exchange not in available_exchanges:
+                selected_exchange = available_exchanges[0] if available_exchanges else "binance"
+                routing_reason = "default_routing" if not selected_exchange else "fallback_routing"
                 expected_cost_bps = Decimal("20")
                 expected_time = 15.0
-
-            # Ensure selected exchange is in available list
-            if selected_exchange not in available_exchanges:
-                selected_exchange = available_exchanges[0]
-                routing_reason = "fallback_routing"
 
             alternative_exchanges = [ex for ex in available_exchanges if ex != selected_exchange]
 
@@ -878,7 +1010,9 @@ class OrderManager:
                 expected_execution_time_seconds=60.0,
             )
 
-    async def _start_order_monitoring(self, managed_order: ManagedOrder, exchange) -> None:
+    async def _start_order_monitoring(
+        self, managed_order: ManagedOrder, exchange: ExchangeInterface
+    ) -> None:
         """Start monitoring an order's lifecycle."""
 
         async def monitor_order():
@@ -915,7 +1049,7 @@ class OrderManager:
 
                             # Stop monitoring if order is in terminal state
                             if managed_order.status in [
-                                OrderStatus.FILLED,
+                                OrderStatus.COMPLETED,
                                 OrderStatus.CANCELLED,
                                 OrderStatus.REJECTED,
                                 OrderStatus.EXPIRED,
@@ -943,14 +1077,61 @@ class OrderManager:
         if managed_order.order_id:
             self.monitoring_tasks[managed_order.order_id] = task
 
-    async def _check_order_status(self, managed_order: ManagedOrder, exchange) -> None:
+    async def _check_order_status(
+        self, managed_order: ManagedOrder, exchange: ExchangeInterface
+    ) -> None:
         """Check and update order status."""
         try:
             if not managed_order.order_id:
                 return
 
-            # Get current status from exchange
-            current_status = await exchange.get_order_status(managed_order.order_id)
+            # Get current status from exchange with error handling and rate limit awareness
+            try:
+                # Check if we should skip this check due to rate limiting
+                if hasattr(self, "_last_status_check"):
+                    time_since_last = (
+                        datetime.now(timezone.utc) - self._last_status_check
+                    ).total_seconds()
+                    if time_since_last < 1.0:  # Minimum 1 second between status checks
+                        await asyncio.sleep(1.0 - time_since_last)
+
+                current_status = await exchange.get_order_status(managed_order.order_id)
+                self._last_status_check = datetime.now(timezone.utc)
+
+            except ExchangeRateLimitError as e:
+                self.logger.warning(
+                    f"Rate limit error checking order status: {e}",
+                    order_id=managed_order.order_id,
+                    error_type="rate_limit_error",
+                )
+                # Back off for longer on rate limit
+                await asyncio.sleep(10)
+                return
+            except ExchangeConnectionError as e:
+                self.logger.warning(
+                    f"Connection error checking order status: {e}",
+                    order_id=managed_order.order_id,
+                    error_type="connection_error",
+                )
+                # Connection issues - retry with backoff
+                await asyncio.sleep(5)
+                return
+            except ExchangeError as e:
+                self.logger.warning(
+                    f"Exchange error checking order status: {e}",
+                    order_id=managed_order.order_id,
+                    error_type="exchange_error",
+                )
+                # Don't update status on error, will retry next time
+                return
+            except NetworkError as e:
+                self.logger.warning(
+                    f"Network error checking order status: {e}",
+                    order_id=managed_order.order_id,
+                    error_type="network_error",
+                )
+                # Don't update status on error, will retry next time
+                return
 
             # Check if status changed
             if current_status != managed_order.status:
@@ -975,7 +1156,11 @@ class OrderManager:
     ) -> None:
         """Handle order status changes."""
         try:
-            if new_status == OrderStatus.FILLED:
+            # Persist state change if StateService is available
+            if self.state_service:
+                await self._persist_order_state(managed_order)
+
+            if new_status == OrderStatus.COMPLETED:
                 # Order fully filled
                 managed_order.filled_quantity = managed_order.order_request.quantity
                 managed_order.remaining_quantity = Decimal("0")
@@ -989,8 +1174,6 @@ class OrderManager:
                 # Mark idempotency key as completed
                 if managed_order.order_request.client_order_id and managed_order.order_id:
                     # Create a minimal order response for idempotency tracking
-                    from src.core.types import OrderResponse
-
                     order_response = OrderResponse(
                         id=managed_order.order_id,
                         client_order_id=managed_order.order_request.client_order_id,
@@ -1138,6 +1321,8 @@ class OrderManager:
         )
 
     @log_calls
+    @with_error_context(component="OrderManager", operation="cancel_order")
+    @with_retry(max_attempts=3, exceptions=(NetworkError, ExchangeError))
     async def cancel_order(self, order_id: str, reason: str = "manual") -> bool:
         """
         Cancel a managed order.
@@ -1157,7 +1342,7 @@ class OrderManager:
             managed_order = self.managed_orders[order_id]
 
             if managed_order.status in [
-                OrderStatus.FILLED,
+                OrderStatus.COMPLETED,
                 OrderStatus.CANCELLED,
                 OrderStatus.REJECTED,
             ]:
@@ -1166,10 +1351,37 @@ class OrderManager:
 
             await self._add_order_event(managed_order, "cancellation_requested", {"reason": reason})
 
-            # Note: In a real implementation, this would call exchange.cancel_order()
-            # For now, simulate cancellation
-            managed_order.status = OrderStatus.CANCELLED
-            managed_order.updated_at = datetime.now(timezone.utc)
+            # Cancel order on exchange with error handling
+            try:
+                # In real implementation, need exchange reference
+                # For now, simulate cancellation
+                # cancel_result = await exchange.cancel_order(order_id)
+                managed_order.status = OrderStatus.CANCELLED
+                managed_order.updated_at = datetime.now(timezone.utc)
+            except ExchangeError as e:
+                self.logger.error(
+                    f"Exchange error cancelling order: {e}",
+                    order_id=order_id,
+                    error_type="exchange_error",
+                )
+                await self._add_order_event(
+                    managed_order,
+                    "cancellation_failed",
+                    {"reason": "exchange_error", "error": str(e)},
+                )
+                return False
+            except NetworkError as e:
+                self.logger.error(
+                    f"Network error cancelling order: {e}",
+                    order_id=order_id,
+                    error_type="network_error",
+                )
+                await self._add_order_event(
+                    managed_order,
+                    "cancellation_failed",
+                    {"reason": "network_error", "error": str(e)},
+                )
+                return False
 
             await self._add_order_event(managed_order, "order_cancelled", {"reason": reason})
 
@@ -1185,6 +1397,12 @@ class OrderManager:
             self.logger.error(f"Order cancellation failed: {e}")
             return False
 
+    @cached(
+        ttl=5,
+        namespace="orders",
+        data_type="orders",
+        key_generator=lambda self, order_id: CacheKeys.active_orders("single", order_id),
+    )
     async def get_order_status(self, order_id: str) -> OrderStatus | None:
         """Get current status of a managed order."""
         if order_id in self.managed_orders:
@@ -1195,6 +1413,14 @@ class OrderManager:
         """Get managed order by ID."""
         return self.managed_orders.get(order_id)
 
+    @cached(
+        ttl=10,
+        namespace="orders",
+        data_type="orders",
+        key_generator=lambda self, execution_id: CacheKeys.execution_state(
+            "execution", execution_id
+        ),
+    )
     async def get_execution_orders(self, execution_id: str) -> list[ManagedOrder]:
         """Get all orders for an execution."""
         order_ids = self.execution_orders.get(execution_id, [])
@@ -1230,7 +1456,7 @@ class OrderManager:
                 if (
                     managed_order.status
                     in [
-                        OrderStatus.FILLED,
+                        OrderStatus.COMPLETED,
                         OrderStatus.CANCELLED,
                         OrderStatus.REJECTED,
                         OrderStatus.EXPIRED,
@@ -1557,7 +1783,7 @@ class OrderManager:
                 for order in self.managed_orders.values()
                 if order.status
                 not in [
-                    OrderStatus.FILLED,
+                    OrderStatus.COMPLETED,
                     OrderStatus.CANCELLED,
                     OrderStatus.REJECTED,
                     OrderStatus.EXPIRED,
@@ -1666,6 +1892,209 @@ class OrderManager:
             self.logger.warning(f"Alert condition check failed: {e}")
 
         return alerts
+
+    # ========== State Persistence Methods ==========
+
+    async def _persist_order_state(self, managed_order: ManagedOrder) -> None:
+        """
+        Persist order state to StateService.
+
+        Args:
+            managed_order: Order to persist
+        """
+        if not self.state_service or not managed_order.order_id:
+            return
+
+        try:
+            # Prepare state data
+            state_data = {
+                "order_id": managed_order.order_id,
+                "execution_id": managed_order.execution_id,
+                "order_request": {
+                    "symbol": managed_order.order_request.symbol,
+                    "side": managed_order.order_request.side.value,
+                    "order_type": managed_order.order_request.order_type.value,
+                    "quantity": float(managed_order.order_request.quantity),
+                    "price": float(managed_order.order_request.price)
+                    if managed_order.order_request.price
+                    else None,
+                    "time_in_force": managed_order.order_request.time_in_force,
+                    "client_order_id": managed_order.order_request.client_order_id,
+                },
+                "status": managed_order.status.value,
+                "filled_quantity": float(managed_order.filled_quantity),
+                "remaining_quantity": float(managed_order.remaining_quantity),
+                "average_fill_price": float(managed_order.average_fill_price)
+                if managed_order.average_fill_price
+                else None,
+                "total_fees": float(managed_order.total_fees),
+                "created_at": managed_order.created_at.isoformat(),
+                "updated_at": managed_order.updated_at.isoformat(),
+                "timeout_minutes": managed_order.timeout_minutes,
+                "retry_count": managed_order.retry_count,
+                "parent_order_id": managed_order.parent_order_id,
+                "child_order_ids": managed_order.child_order_ids,
+                "audit_trail": managed_order.audit_trail,
+                "events": [
+                    {
+                        "event_type": event.event_type,
+                        "timestamp": event.timestamp.isoformat(),
+                        "data": event.data,
+                    }
+                    for event in managed_order.events
+                ],
+            }
+
+            # Add routing info if available
+            if managed_order.route_info:
+                state_data["route_info"] = {
+                    "selected_exchange": managed_order.route_info.selected_exchange,
+                    "routing_reason": managed_order.route_info.routing_reason,
+                    "expected_cost_bps": float(managed_order.route_info.expected_cost_bps),
+                }
+
+            # Save to StateService
+            await self.state_service.set_state(
+                state_type=StateType.ORDER_STATE,
+                state_id=f"order_{managed_order.order_id}",
+                state_data=state_data,
+                source_component="OrderManager",
+                reason=f"Order state update: {managed_order.status.value}",
+            )
+
+            self.logger.debug(
+                "Order state persisted",
+                order_id=managed_order.order_id,
+                status=managed_order.status.value,
+            )
+
+        except Exception as e:
+            self.logger.error(
+                f"Failed to persist order state: {e}", order_id=managed_order.order_id
+            )
+
+    async def _restore_orders_from_state(self) -> None:
+        """Restore active orders from StateService on startup."""
+        if not self.state_service:
+            return
+
+        try:
+            # Get all execution states
+            execution_states = await self.state_service.get_states_by_type(
+                state_type=StateType.ORDER_STATE,
+                include_metadata=True,
+            )
+
+            restored_count = 0
+            for state_item in execution_states:
+                try:
+                    # Extract state data and metadata
+                    if isinstance(state_item, dict) and "data" in state_item:
+                        state_data = state_item["data"]
+                        metadata = state_item.get("metadata", {})
+                    else:
+                        state_data = state_item
+                        metadata = {}
+                    
+                    # Get state_id from metadata
+                    state_id = metadata.get("state_id", "")
+                    
+                    # Skip if not an order state
+                    if not state_id.startswith("order_"):
+                        continue
+
+                    # Restore ManagedOrder from state
+                    order_id = state_data.get("order_id")
+                    if not order_id or order_id in self.managed_orders:
+                        continue
+                    
+                    # Skip if not an active order
+                    status = state_data.get("status", "")
+                    if status not in ["PENDING", "PARTIAL", "PARTIALLY_FILLED"]:
+                        continue
+
+                    # Recreate OrderRequest
+                    order_req_data = state_data.get("order_request", {})
+                    order_request = OrderRequest(
+                        symbol=order_req_data.get("symbol", ""),
+                        side=OrderSide(order_req_data.get("side", "BUY")),
+                        order_type=OrderType(order_req_data.get("order_type", "MARKET")),
+                        quantity=Decimal(str(order_req_data.get("quantity", 0))),
+                        price=Decimal(str(order_req_data.get("price", 0)))
+                        if order_req_data.get("price")
+                        else None,
+                        time_in_force=order_req_data.get("time_in_force"),
+                        client_order_id=order_req_data.get("client_order_id"),
+                    )
+
+                    # Recreate ManagedOrder
+                    managed_order = ManagedOrder(
+                        order_request=order_request,
+                        execution_id=state_data.get("execution_id", ""),
+                    )
+
+                    # Restore state
+                    managed_order.order_id = order_id
+                    managed_order.status = OrderStatus(state_data.get("status", "PENDING"))
+                    managed_order.filled_quantity = Decimal(
+                        str(state_data.get("filled_quantity", 0))
+                    )
+                    managed_order.remaining_quantity = Decimal(
+                        str(state_data.get("remaining_quantity", 0))
+                    )
+                    managed_order.average_fill_price = (
+                        Decimal(str(state_data.get("average_fill_price")))
+                        if state_data.get("average_fill_price")
+                        else None
+                    )
+                    managed_order.total_fees = Decimal(str(state_data.get("total_fees", 0)))
+                    managed_order.created_at = datetime.fromisoformat(state_data.get("created_at"))
+                    managed_order.updated_at = datetime.fromisoformat(state_data.get("updated_at"))
+                    managed_order.timeout_minutes = state_data.get("timeout_minutes")
+                    managed_order.retry_count = state_data.get("retry_count", 0)
+                    managed_order.parent_order_id = state_data.get("parent_order_id")
+                    managed_order.child_order_ids = state_data.get("child_order_ids", [])
+                    managed_order.audit_trail = state_data.get("audit_trail", [])
+
+                    # Restore events
+                    for event_data in state_data.get("events", []):
+                        event = OrderLifecycleEvent(
+                            event_type=event_data.get("event_type", "unknown"),
+                            order_id=order_id,
+                            timestamp=datetime.fromisoformat(event_data.get("timestamp")),
+                            data=event_data.get("data", {}),
+                        )
+                        managed_order.events.append(event)
+
+                    # Register restored order
+                    self.managed_orders[order_id] = managed_order
+
+                    # Restore execution mapping
+                    execution_id = managed_order.execution_id
+                    if execution_id not in self.execution_orders:
+                        self.execution_orders[execution_id] = []
+                    self.execution_orders[execution_id].append(order_id)
+
+                    # Restore symbol mapping
+                    self.symbol_orders[managed_order.order_request.symbol].append(order_id)
+
+                    restored_count += 1
+
+                    self.logger.debug(
+                        "Order restored from state",
+                        order_id=order_id,
+                        status=managed_order.status.value,
+                        symbol=managed_order.order_request.symbol,
+                    )
+
+                except Exception as e:
+                    self.logger.warning(f"Failed to restore order {state_id}: {e}")
+
+            if restored_count > 0:
+                self.logger.info(f"Restored {restored_count} orders from state")
+
+        except Exception as e:
+            self.logger.error(f"Failed to restore orders from state: {e}")
 
     async def shutdown(self) -> None:
         """Shutdown order manager and cleanup resources."""

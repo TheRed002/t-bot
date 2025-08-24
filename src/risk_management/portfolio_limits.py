@@ -17,23 +17,21 @@ from typing import Any
 
 import numpy as np
 
-from src.core.config import Config
+from src.base import BaseComponent
+from src.core.config.main import Config
 from src.core.exceptions import PositionLimitError, ValidationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import Position, PositionLimits
 
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
 
-logger = get_logger(__name__)
 
-
-class PortfolioLimits:
+class PortfolioLimits(BaseComponent):
     """
     Portfolio limits enforcer for risk management.
 
@@ -48,10 +46,11 @@ class PortfolioLimits:
         Args:
             config: Application configuration containing risk settings
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.risk_config = config.risk
         self.error_handler = ErrorHandler(config)
-        self.logger = logger.bind(component="portfolio_limits")
+        # Note: logger is a property from BaseComponent, no need to bind
 
         # Portfolio state tracking
         self.positions: list[Position] = []
@@ -504,9 +503,4 @@ class PortfolioLimits:
         """
         self.logger.warning(
             "Portfolio limit violation detected", violation_type=violation_type, details=details
-        )
-
-        # TODO: Remove in production - Debug logging
-        self.logger.debug(
-            "Portfolio limit violation details", violation_type=violation_type, details=details
         )

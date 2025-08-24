@@ -1,0 +1,305 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "T-Bot Trading Performance Monitoring",
+    "tags": ["trading", "performance", "hft"],
+    "style": "dark",
+    "timezone": "UTC",
+    "refresh": "5s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Order Execution Latency Percentiles",
+        "type": "graph",
+        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(order_execution_latency_seconds_bucket[1m]))",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(order_execution_latency_seconds_bucket[1m]))",
+            "legendFormat": "P95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(order_execution_latency_seconds_bucket[1m]))",
+            "legendFormat": "P99",
+            "refId": "C"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Seconds",
+            "min": 0,
+            "max": null
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "query": {"params": ["C", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "evaluator": {"params": [0.5], "type": "gt"}
+            }
+          ],
+          "executionErrorState": "alerting",
+          "for": "1m",
+          "frequency": "10s",
+          "handler": 1,
+          "name": "Critical Order Execution Latency",
+          "noDataState": "no_data"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Order Fill Rate by Exchange",
+        "type": "stat",
+        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 0},
+        "targets": [
+          {
+            "expr": "avg by (exchange) (order_fill_rate_percent)",
+            "legendFormat": "{{exchange}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 85},
+                {"color": "green", "value": 95}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Market Data Processing Rate",
+        "type": "graph",
+        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 9},
+        "targets": [
+          {
+            "expr": "sum by (exchange) (market_data_processing_rate)",
+            "legendFormat": "{{exchange}}",
+            "refId": "A"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Messages/Second",
+            "min": 0
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "WebSocket Connection Health",
+        "type": "gauge",
+        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 9},
+        "targets": [
+          {
+            "expr": "websocket_connection_health",
+            "legendFormat": "{{exchange}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 0.5},
+                {"color": "green", "value": 0.8}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "System Resource Utilization",
+        "type": "graph",
+        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 18},
+        "targets": [
+          {
+            "expr": "system_cpu_usage_percent",
+            "legendFormat": "CPU %",
+            "refId": "A"
+          },
+          {
+            "expr": "system_memory_usage_percent",
+            "legendFormat": "Memory %",
+            "refId": "B"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Percent",
+            "min": 0,
+            "max": 100
+          }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "query": {"params": ["A", "5m", "now"]},
+              "reducer": {"params": [], "type": "avg"},
+              "evaluator": {"params": [95], "type": "gt"}
+            }
+          ],
+          "executionErrorState": "alerting",
+          "for": "2m",
+          "frequency": "10s",
+          "handler": 1,
+          "name": "Critical System Resource Usage"
+        }
+      },
+      {
+        "id": 6,
+        "title": "Database Query Performance",
+        "type": "graph",
+        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 27},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(database_query_latency_seconds_bucket[5m]))",
+            "legendFormat": "P95 Query Latency",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(database_query_latency_seconds_count[1m])",
+            "legendFormat": "Queries/sec",
+            "refId": "B"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Seconds / QPS",
+            "min": 0
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Trading Strategy Performance",
+        "type": "table",
+        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 27},
+        "targets": [
+          {
+            "expr": "strategy_sharpe_ratio",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          },
+          {
+            "expr": "strategy_signal_accuracy_percent",
+            "format": "table",
+            "instant": true,
+            "refId": "B"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "merge",
+            "options": {}
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Order Execution Slippage",
+        "type": "heatmap",
+        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 36},
+        "targets": [
+          {
+            "expr": "rate(order_slippage_bps_bucket[5m])",
+            "format": "heatmap",
+            "refId": "A"
+          }
+        ],
+        "heatmap": {
+          "xBucketSize": null,
+          "yBucketSize": null,
+          "yBucketNumber": null
+        },
+        "yAxis": {
+          "label": "Slippage (bps)"
+        }
+      },
+      {
+        "id": 9,
+        "title": "Garbage Collection Impact",
+        "type": "graph",
+        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 36},
+        "targets": [
+          {
+            "expr": "rate(system_gc_duration_seconds_sum[1m])",
+            "legendFormat": "GC Time/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(system_gc_objects_collected_total[1m])",
+            "legendFormat": "Objects Collected/sec",
+            "refId": "B"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "title": "Performance Anomalies",
+        "type": "logs",
+        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 45},
+        "targets": [
+          {
+            "expr": "{job=\"tbot\", category=\"performance\"} |= \"anomaly\"",
+            "refId": "A"
+          }
+        ]
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "exchange",
+          "type": "query",
+          "query": "label_values(order_execution_latency_seconds, exchange)",
+          "refresh": "time",
+          "includeAll": true,
+          "multi": true
+        },
+        {
+          "name": "strategy",
+          "type": "query",
+          "query": "label_values(strategy_sharpe_ratio, strategy)",
+          "refresh": "time",
+          "includeAll": true,
+          "multi": true
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "prometheus",
+          "expr": "changes(up[5m]) > 0",
+          "titleFormat": "Deployment",
+          "textFormat": "Service restart detected"
+        }
+      ]
+    }
+  }
+}

@@ -11,16 +11,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.core.exceptions import BacktestError
-from src.core.logging import get_logger
+from src.backtesting.engine import BacktestConfig, BacktestEngine
+from src.core.base.component import BaseComponent
+from src.core.exceptions import TradingBotError
 from src.utils.decorators import time_execution
 
-from .engine import BacktestConfig, BacktestEngine
 
-logger = get_logger(__name__)
-
-
-class MonteCarloAnalyzer:
+class MonteCarloAnalyzer(BaseComponent):
     """
     Monte Carlo simulation for backtesting robustness analysis.
 
@@ -33,6 +30,7 @@ class MonteCarloAnalyzer:
 
     def __init__(
         self,
+        config: Any = None,
         num_simulations: int = 1000,
         confidence_level: float = 0.95,
         seed: int | None = None,
@@ -41,10 +39,18 @@ class MonteCarloAnalyzer:
         Initialize Monte Carlo analyzer.
 
         Args:
+            config: Configuration object (for compatibility)
             num_simulations: Number of simulation runs
             confidence_level: Confidence level for intervals (e.g., 0.95 for 95%)
             seed: Random seed for reproducibility
         """
+        # Convert config to dict if needed
+        config_dict = None
+        if config:
+            config_dict = config.dict() if hasattr(config, "dict") else {}
+
+        super().__init__(name="MonteCarloAnalyzer", config=config_dict)
+        self.config = config
         self.num_simulations = num_simulations
         self.confidence_level = confidence_level
         self.seed = seed
@@ -52,7 +58,7 @@ class MonteCarloAnalyzer:
         if seed:
             np.random.seed(seed)
 
-        logger.info(
+        self.logger.info(
             "MonteCarloAnalyzer initialized",
             simulations=num_simulations,
             confidence=confidence_level,
@@ -73,9 +79,9 @@ class MonteCarloAnalyzer:
             Analysis results including confidence intervals
         """
         if not trades:
-            raise BacktestError("No trades to analyze")
+            raise TradingBotError("No trades to analyze", "BACKTEST_001")
 
-        logger.info("Starting Monte Carlo analysis", num_trades=len(trades))
+        self.logger.info("Starting Monte Carlo analysis", num_trades=len(trades))
 
         # Extract trade returns
         trade_returns = [t["pnl"] / initial_capital for t in trades]
@@ -101,8 +107,62 @@ class MonteCarloAnalyzer:
         # Analyze results
         analysis = self._analyze_simulation_results(simulation_results)
 
-        logger.info("Monte Carlo analysis completed", simulations_run=len(simulation_results))
+        self.logger.info("Monte Carlo analysis completed", simulations_run=len(simulation_results))
         return analysis
+
+    @time_execution
+    async def run_analysis(
+        self,
+        simulation_result: dict[str, Any],
+        market_data: dict[str, pd.DataFrame],
+        num_runs: int | None = None,
+    ) -> dict[str, Any]:
+        """
+        Run Monte Carlo analysis on simulation results.
+
+        Args:
+            simulation_result: Base simulation results
+            market_data: Historical market data
+            num_runs: Number of Monte Carlo runs (uses default if None)
+
+        Returns:
+            Dictionary with Monte Carlo analysis results
+        """
+        if num_runs:
+            original_num_sims = self.num_simulations
+            self.num_simulations = num_runs
+
+        try:
+            trades = simulation_result.get("trades", [])
+            daily_returns = simulation_result.get("daily_returns", [])
+            initial_capital = 10000.0  # Default, could be extracted from simulation_result
+
+            # Run trade-based analysis if we have trades
+            if trades:
+                trade_analysis = await self.analyze_trades(trades, initial_capital)
+            else:
+                trade_analysis = {}
+
+            # Run return-based analysis if we have returns
+            if daily_returns:
+                return_analysis = await self.analyze_returns(daily_returns)
+            else:
+                return_analysis = {}
+
+            # Combine results
+            combined_analysis = {
+                "trade_analysis": trade_analysis,
+                "return_analysis": return_analysis,
+                "num_simulations": self.num_simulations,
+                "confidence_level": self.confidence_level,
+            }
+
+            return combined_analysis
+
+        finally:
+            # Restore original number of simulations if changed
+            if num_runs:
+                self.num_simulations = original_num_sims
 
     @time_execution
     async def analyze_returns(
@@ -119,13 +179,13 @@ class MonteCarloAnalyzer:
             Simulation results with probable outcomes
         """
         if not daily_returns:
-            raise BacktestError("No returns to analyze")
+            raise TradingBotError("No returns to analyze", "BACKTEST_002")
 
         returns_array = np.array(daily_returns)
         mean_return = np.mean(returns_array)
         std_return = np.std(returns_array)
 
-        logger.info(
+        self.logger.info(
             "Simulating return paths",
             mean_return=mean_return,
             volatility=std_return,
@@ -265,7 +325,7 @@ class MonteCarloAnalyzer:
         return analysis
 
 
-class WalkForwardAnalyzer:
+class WalkForwardAnalyzer(BaseComponent):
     """
     Walk-Forward Analysis for robust parameter optimization.
 
@@ -278,6 +338,7 @@ class WalkForwardAnalyzer:
 
     def __init__(
         self,
+        config: Any = None,
         optimization_window: int = 252,  # Trading days
         test_window: int = 63,  # Trading days
         step_size: int | None = None,  # If None, equals test_window
@@ -286,15 +347,23 @@ class WalkForwardAnalyzer:
         Initialize walk-forward analyzer.
 
         Args:
+            config: Configuration object (for compatibility)
             optimization_window: Days for in-sample optimization
             test_window: Days for out-of-sample testing
             step_size: Days to step forward (if None, non-overlapping windows)
         """
+        # Convert config to dict if needed
+        config_dict = None
+        if config:
+            config_dict = config.dict() if hasattr(config, "dict") else {}
+
+        super().__init__(name="WalkForwardAnalyzer", config=config_dict)
+        self.config = config
         self.optimization_window = optimization_window
         self.test_window = test_window
         self.step_size = step_size or test_window
 
-        logger.info(
+        self.logger.info(
             "WalkForwardAnalyzer initialized",
             opt_window=optimization_window,
             test_window=test_window,
@@ -321,7 +390,7 @@ class WalkForwardAnalyzer:
         Returns:
             Walk-forward analysis results
         """
-        logger.info(
+        self.logger.info(
             "Starting walk-forward analysis",
             strategy=strategy_class.__name__,
             parameters=list(parameter_ranges.keys()),
@@ -331,13 +400,13 @@ class WalkForwardAnalyzer:
         windows = self._generate_windows(market_data)
 
         if not windows:
-            raise BacktestError("Insufficient data for walk-forward analysis")
+            raise TradingBotError("Insufficient data for walk-forward analysis", "BACKTEST_003")
 
         # Run analysis for each window
         window_results = []
 
         for i, (opt_start, opt_end, test_start, test_end) in enumerate(windows):
-            logger.info(f"Processing window {i + 1}/{len(windows)}")
+            self.logger.info(f"Processing window {i + 1}/{len(windows)}")
 
             # Optimize on in-sample data
             opt_data = market_data[opt_start:opt_end]
@@ -363,8 +432,46 @@ class WalkForwardAnalyzer:
         # Analyze results
         analysis = self._analyze_results(window_results, optimization_metric)
 
-        logger.info("Walk-forward analysis completed", windows_analyzed=len(windows))
+        self.logger.info("Walk-forward analysis completed", windows_analyzed=len(windows))
         return analysis
+
+    async def run_analysis(
+        self,
+        strategy_config: dict[str, Any],
+        market_data: dict[str, pd.DataFrame],
+        start_date: datetime,
+        end_date: datetime,
+    ) -> dict[str, Any]:
+        """
+        Run walk-forward analysis.
+
+        Args:
+            strategy_config: Strategy configuration
+            market_data: Historical market data
+            start_date: Analysis start date
+            end_date: Analysis end date
+
+        Returns:
+            Dictionary with walk-forward analysis results
+        """
+        self.logger.info("Starting walk-forward analysis for service")
+
+        # For now, return a placeholder result
+        # In a full implementation, this would run the actual walk-forward analysis
+        return {
+            "windows_analyzed": 0,
+            "performance_stability": {
+                "return_consistency": 0.0,
+                "positive_periods_ratio": 0.0,
+                "sharpe_stability": 0.0,
+            },
+            "parameter_sensitivity": {
+                "parameter_drift": 0.0,
+                "regime_dependence": 0.0,
+            },
+            "efficiency_ratio": 0.0,
+            "performance_degradation": 0.0,
+        }
 
     def _generate_windows(
         self, data: pd.DataFrame

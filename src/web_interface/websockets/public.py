@@ -39,9 +39,11 @@ async def public_websocket(websocket: WebSocket, token: str | None = Query(None)
         await websocket.send_json(
             {
                 "type": "welcome",
-                "message": "Connected to T-Bot WebSocket"
-                if is_authenticated
-                else "Connected to T-Bot public stream",
+                "message": (
+                    "Connected to T-Bot WebSocket"
+                    if is_authenticated
+                    else "Connected to T-Bot public stream"
+                ),
                 "timestamp": datetime.utcnow().isoformat(),
                 "client_id": client_id,
                 "authenticated": is_authenticated,

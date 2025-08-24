@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from src.core.config import Config
+from src.core.config.main import Config
 from src.core.exceptions import (
     CircuitBreakerTriggeredError,
 )
@@ -34,7 +34,10 @@ from src.core.types import (
 )
 
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
+
+# Monitoring integration
+from src.monitoring.metrics import MetricsCollector
 
 # MANDATORY: Import from P-008
 from src.risk_management.base import BaseRiskManager
@@ -179,11 +182,10 @@ class BaseCircuitBreaker(ABC):
             )
             # Route through central error handler with context
             try:
-                if hasattr(self.error_handler, "create_error_context"):
-                    context = self.error_handler.create_error_context(
-                        e, component="circuit_breaker", operation="evaluate"
-                    )
-                    await self.error_handler.handle_error(e, context)
+                context = self.error_handler.create_error_context(
+                    error=e, component="circuit_breaker", operation="evaluate"
+                )
+                await self.error_handler.handle_error(e, context)
             except Exception as handler_error:
                 self.logger.error("Error handler failed", error=str(handler_error))
 
@@ -700,6 +702,13 @@ class CircuitBreakerManager:
         self.risk_manager = risk_manager
         self.logger = logger.bind(component="circuit_breaker_manager")
 
+        # Initialize monitoring integration
+        try:
+            self.metrics_collector = MetricsCollector()
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize metrics collector: {e}")
+            self.metrics_collector = None
+
         # Initialize all circuit breakers
         self.circuit_breakers: dict[str, BaseCircuitBreaker] = {
             "daily_loss_limit": DailyLossLimitBreaker(config, risk_manager),
@@ -711,7 +720,9 @@ class CircuitBreakerManager:
         }
 
         self.logger.info(
-            "Circuit breaker manager initialized", breaker_count=len(self.circuit_breakers)
+            "Circuit breaker manager initialized",
+            breaker_count=len(self.circuit_breakers),
+            monitoring_enabled=self.metrics_collector is not None,
         )
 
     @time_execution
@@ -737,11 +748,39 @@ class CircuitBreakerManager:
                     triggered_breakers.append(name)
                     self.logger.warning("Circuit breaker triggered", breaker_name=name)
 
+                    # Update monitoring metrics
+                    if self.metrics_collector:
+                        try:
+                            self.metrics_collector.increment_counter(
+                                "risk_circuit_breaker_triggers_total",
+                                labels={
+                                    "trigger_type": name,
+                                    "exchange": data.get("exchange", "unknown"),
+                                },
+                            )
+                        except Exception as e:
+                            self.logger.warning(f"Failed to update circuit breaker metric: {e}")
+
             except CircuitBreakerTriggeredError as e:
                 # Circuit breaker was triggered, record it and continue
                 triggered_breakers.append(name)
                 results[name] = True
                 self.logger.error("Circuit breaker triggered", breaker_name=name, error=str(e))
+
+                # Update monitoring metrics
+                if self.metrics_collector:
+                    try:
+                        self.metrics_collector.increment_counter(
+                            "risk_circuit_breaker_triggers_total",
+                            labels={
+                                "trigger_type": name,
+                                "exchange": data.get("exchange", "unknown"),
+                            },
+                        )
+                    except Exception as metric_error:
+                        self.logger.warning(
+                            f"Failed to update circuit breaker metric: {metric_error}"
+                        )
             except Exception as e:
                 self.logger.error(
                     "Circuit breaker evaluation failed", breaker_name=name, error=str(e)

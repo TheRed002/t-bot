@@ -21,19 +21,17 @@ from typing import Any
 
 import aiohttp
 
+from src.base import BaseComponent
 from src.core.config import Config
 
 # Import from P-001 core components
 from src.core.exceptions import DataSourceError
-from src.core.logging import get_logger
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import retry, time_execution
-
-logger = get_logger(__name__)
 
 
 class DataType(Enum):
@@ -76,7 +74,7 @@ class EconomicIndicator:
     market_relevance: float  # 0-1 score
 
 
-class AlternativeDataSource:
+class AlternativeDataSource(BaseComponent):
     """
     Alternative data source for economic and environmental indicators.
 
@@ -91,6 +89,7 @@ class AlternativeDataSource:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.error_handler = ErrorHandler(config)
 
@@ -123,7 +122,7 @@ class AlternativeDataSource:
             },
         }
 
-        logger.info("AlternativeDataSource initialized")
+        self.logger.info("AlternativeDataSource initialized")
 
     @retry(max_attempts=3, base_delay=2.0)
     async def initialize(self) -> None:
@@ -138,10 +137,10 @@ class AlternativeDataSource:
             # Test available data sources
             await self._test_data_sources()
 
-            logger.info("AlternativeDataSource initialized successfully")
+            self.logger.info("AlternativeDataSource initialized successfully")
 
         except Exception as e:
-            logger.error(f"Failed to initialize AlternativeDataSource: {e!s}")
+            self.logger.error(f"Failed to initialize AlternativeDataSource: {e!s}")
             raise DataSourceError(f"Alternative data source initialization failed: {e!s}")
 
     @retry(max_attempts=2, base_delay=1.0)
@@ -155,31 +154,31 @@ class AlternativeDataSource:
                 try:
                     # Test FRED connection
                     available_sources.append("fred")
-                    logger.info("FRED API connection available")
+                    self.logger.info("FRED API connection available")
                 except Exception as e:
-                    logger.warning(f"FRED API not available: {e!s}")
+                    self.logger.warning(f"FRED API not available: {e!s}")
 
             # Test Weather API
             if self.weather_config.get("api_key"):
                 try:
                     # Test weather API connection
                     available_sources.append("weather")
-                    logger.info("Weather API connection available")
+                    self.logger.info("Weather API connection available")
                 except Exception as e:
-                    logger.warning(f"Weather API not available: {e!s}")
+                    self.logger.warning(f"Weather API not available: {e!s}")
 
             # Test Satellite data
             if self.satellite_config.get("enabled"):
                 available_sources.append("satellite")
-                logger.info("Satellite data source available")
+                self.logger.info("Satellite data source available")
 
             if not available_sources:
-                logger.warning("No alternative data sources configured")
+                self.logger.warning("No alternative data sources configured")
             else:
-                logger.info(f"Alternative data sources available: {available_sources}")
+                self.logger.info(f"Alternative data sources available: {available_sources}")
 
         except Exception as e:
-            logger.error(f"Alternative data source test failed: {e!s}")
+            self.logger.error(f"Alternative data source test failed: {e!s}")
             raise
 
     @time_execution
@@ -215,7 +214,7 @@ class AlternativeDataSource:
                     all_indicators.extend(indicator_data)
 
                 except Exception as e:
-                    logger.warning(f"Failed to fetch indicator {indicator_id}: {e!s}")
+                    self.logger.warning(f"Failed to fetch indicator {indicator_id}: {e!s}")
                     continue
 
             # Cache results
@@ -227,12 +226,12 @@ class AlternativeDataSource:
             self.stats["source_stats"]["fred"]["requests"] += 1
             self.stats["source_stats"]["fred"]["data_points"] += len(all_indicators)
 
-            logger.info(f"Retrieved {len(all_indicators)} economic indicators")
+            self.logger.info(f"Retrieved {len(all_indicators)} economic indicators")
             return all_indicators
 
         except Exception as e:
             self.stats["failed_requests"] += 1
-            logger.error(f"Failed to get economic indicators: {e!s}")
+            self.logger.error(f"Failed to get economic indicators: {e!s}")
             raise DataSourceError(f"Economic indicators retrieval failed: {e!s}")
 
     async def _fetch_fred_indicator(
@@ -293,7 +292,7 @@ class AlternativeDataSource:
             return indicators
 
         except Exception as e:
-            logger.error(f"Failed to fetch FRED indicator {indicator_id}: {e!s}")
+            self.logger.error(f"Failed to fetch FRED indicator {indicator_id}: {e!s}")
             return []
 
     @time_execution
@@ -322,7 +321,7 @@ class AlternativeDataSource:
                     all_weather_data.extend(weather_data)
 
                 except Exception as e:
-                    logger.warning(f"Failed to fetch weather for {location}: {e!s}")
+                    self.logger.warning(f"Failed to fetch weather for {location}: {e!s}")
                     continue
 
             # Cache results
@@ -334,12 +333,12 @@ class AlternativeDataSource:
             self.stats["source_stats"]["weather"]["requests"] += 1
             self.stats["source_stats"]["weather"]["data_points"] += len(all_weather_data)
 
-            logger.info(f"Retrieved {len(all_weather_data)} weather data points")
+            self.logger.info(f"Retrieved {len(all_weather_data)} weather data points")
             return all_weather_data
 
         except Exception as e:
             self.stats["failed_requests"] += 1
-            logger.error(f"Failed to get weather data: {e!s}")
+            self.logger.error(f"Failed to get weather data: {e!s}")
             raise DataSourceError(f"Weather data retrieval failed: {e!s}")
 
     async def _fetch_weather_data(
@@ -410,7 +409,7 @@ class AlternativeDataSource:
             return weather_points
 
         except Exception as e:
-            logger.error(f"Failed to fetch weather data for {location}: {e!s}")
+            self.logger.error(f"Failed to fetch weather data for {location}: {e!s}")
             return []
 
     @time_execution
@@ -443,7 +442,7 @@ class AlternativeDataSource:
                         all_satellite_data.extend(satellite_data)
 
                     except Exception as e:
-                        logger.warning(f"Failed to fetch {indicator} for {region}: {e!s}")
+                        self.logger.warning(f"Failed to fetch {indicator} for {region}: {e!s}")
                         continue
 
             # Cache results
@@ -455,12 +454,12 @@ class AlternativeDataSource:
             self.stats["source_stats"]["satellite"]["requests"] += 1
             self.stats["source_stats"]["satellite"]["data_points"] += len(all_satellite_data)
 
-            logger.info(f"Retrieved {len(all_satellite_data)} satellite data points")
+            self.logger.info(f"Retrieved {len(all_satellite_data)} satellite data points")
             return all_satellite_data
 
         except Exception as e:
             self.stats["failed_requests"] += 1
-            logger.error(f"Failed to get satellite data: {e!s}")
+            self.logger.error(f"Failed to get satellite data: {e!s}")
             raise DataSourceError(f"Satellite data retrieval failed: {e!s}")
 
     async def _fetch_satellite_data(
@@ -517,7 +516,7 @@ class AlternativeDataSource:
             return satellite_points
 
         except Exception as e:
-            logger.error(f"Failed to fetch satellite data for {region}/{indicator}: {e!s}")
+            self.logger.error(f"Failed to fetch satellite data for {region}/{indicator}: {e!s}")
             return []
 
     @time_execution
@@ -574,12 +573,12 @@ class AlternativeDataSource:
                 dataset["satellite"] = satellite_data
 
             total_points = sum(len(data) for data in dataset.values())
-            logger.info(f"Collected {total_points} alternative data points")
+            self.logger.info(f"Collected {total_points} alternative data points")
 
             return dataset
 
         except Exception as e:
-            logger.error(f"Failed to get comprehensive dataset: {e!s}")
+            self.logger.error(f"Failed to get comprehensive dataset: {e!s}")
             raise DataSourceError(f"Comprehensive dataset collection failed: {e!s}")
 
     async def get_source_statistics(self) -> dict[str, Any]:
@@ -612,7 +611,7 @@ class AlternativeDataSource:
             self.weather_cache.clear()
             self.satellite_cache.clear()
 
-            logger.info("AlternativeDataSource cleanup completed")
+            self.logger.info("AlternativeDataSource cleanup completed")
 
         except Exception as e:
-            logger.error(f"Error during AlternativeDataSource cleanup: {e!s}")
+            self.logger.error(f"Error during AlternativeDataSource cleanup: {e!s}")

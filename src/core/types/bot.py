@@ -1,6 +1,6 @@
 """Bot management types for the T-Bot trading system."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -53,6 +53,7 @@ class ResourceType(Enum):
     DISK = "disk"
     API_CALLS = "api_calls"
     WEBSOCKET_CONNECTIONS = "websocket_connections"
+    CAPITAL = "capital"
 
 
 class BotConfiguration(BaseModel):
@@ -98,7 +99,7 @@ class BotConfiguration(BaseModel):
     metrics_interval: int = 300  # seconds
     alert_settings: dict[str, Any] = Field(default_factory=dict)
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime | None = None
 
     metadata: dict[str, Any] = Field(default_factory=dict)

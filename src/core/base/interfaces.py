@@ -5,7 +5,8 @@ These protocols define the contracts that all base classes must follow,
 ensuring consistent behavior across the entire system.
 """
 
-import builtins
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, TypeVar
@@ -312,7 +313,7 @@ class RepositoryComponent(Protocol):
 
     # Injectable methods
     def configure_dependencies(self, container: Any) -> None: ...
-    def get_dependencies(self) -> builtins.list[str]: ...
+    def get_dependencies(self) -> list[str]: ...
 
     # Loggable properties
     @property

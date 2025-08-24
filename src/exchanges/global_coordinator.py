@@ -13,13 +13,14 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
+from src.core.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import (
     ExchangeRateLimitError,
     ValidationError,
 )
-from src.core.logging import get_logger
 
+# Logger is provided by BaseExchange (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import RequestType
 
@@ -27,10 +28,8 @@ from src.core.types import RequestType
 # MANDATORY: Import from P-007A (placeholder until P-007A is implemented)
 from src.utils.decorators import log_calls, time_execution
 
-logger = get_logger(__name__)
 
-
-class GlobalRateCoordinator:
+class GlobalRateCoordinator(BaseComponent):
     """
     Global rate coordinator for cross-exchange rate limit management.
 
@@ -45,6 +44,7 @@ class GlobalRateCoordinator:
         Args:
             config: Application configuration
         """
+        super().__init__()
         self.config = config
 
         # Global limits
@@ -67,7 +67,7 @@ class GlobalRateCoordinator:
         )
 
         # TODO: Remove in production
-        logger.debug("GlobalRateCoordinator initialized", global_limits=self.global_limits)
+        self.logger.debug("GlobalRateCoordinator initialized", global_limits=self.global_limits)
 
     @time_execution
     @log_calls
@@ -114,13 +114,15 @@ class GlobalRateCoordinator:
             # Record request
             self._record_request(request_type, count)
 
-            logger.debug("Global rate limit check passed", request_type=request_type, count=count)
+            self.logger.debug(
+                "Global rate limit check passed", request_type=request_type, count=count
+            )
             return True
 
         except (ValidationError, ExchangeRateLimitError):
             raise
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Global rate limit check failed",
                 request_type=request_type,
                 count=count,
@@ -153,7 +155,7 @@ class GlobalRateCoordinator:
 
             # Check global limits first
             if not await self.check_global_limits(request_type, 1):
-                logger.warning(
+                self.logger.warning(
                     "Global rate limit exceeded",
                     exchange=exchange,
                     endpoint=endpoint,
@@ -163,7 +165,7 @@ class GlobalRateCoordinator:
 
             # Check exchange-specific limits
             if not await self._check_exchange_specific_limits(exchange, endpoint, request_type):
-                logger.warning(
+                self.logger.warning(
                     "Exchange-specific rate limit exceeded",
                     exchange=exchange,
                     endpoint=endpoint,
@@ -174,7 +176,7 @@ class GlobalRateCoordinator:
             # Record exchange usage
             self._record_exchange_usage(exchange, endpoint, request_type)
 
-            logger.debug(
+            self.logger.debug(
                 "Request coordination successful",
                 exchange=exchange,
                 endpoint=endpoint,
@@ -185,7 +187,7 @@ class GlobalRateCoordinator:
         except (ValidationError, ExchangeRateLimitError):
             raise
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Request coordination failed",
                 exchange=exchange,
                 endpoint=endpoint,
@@ -204,7 +206,7 @@ class GlobalRateCoordinator:
 
         # Check if adding these orders would exceed limit
         if len(self.order_history) + count > self.global_limits["orders_per_minute"]:
-            logger.warning(
+            self.logger.warning(
                 "Global order limit exceeded",
                 current_orders=len(self.order_history),
                 new_orders=count,
@@ -224,7 +226,7 @@ class GlobalRateCoordinator:
 
         # Check if adding these connections would exceed limit
         if len(self.connection_history) + count > self.global_limits["concurrent_connections"]:
-            logger.warning(
+            self.logger.warning(
                 "Global connection limit exceeded",
                 current_connections=len(self.connection_history),
                 new_connections=count,
@@ -249,7 +251,7 @@ class GlobalRateCoordinator:
             len(self.request_history["general"]) + count
             > self.global_limits["total_requests_per_minute"]
         ):
-            logger.warning(
+            self.logger.warning(
                 "Global request limit exceeded",
                 current_requests=len(self.request_history["general"]),
                 new_requests=count,
@@ -282,13 +284,18 @@ class GlobalRateCoordinator:
             for _ in range(count):
                 self.request_history["general"].append(now)
 
-        # Clean old history (keep last 10000 entries)
+        # Clean old history - remove entries older than 1 hour AND keep max entries
+        hour_ago = now - timedelta(hours=1)
+        
+        self.request_history["general"] = [t for t in self.request_history["general"] if t > hour_ago]
         if len(self.request_history["general"]) > 10000:
             self.request_history["general"] = self.request_history["general"][-10000:]
 
+        self.order_history = [t for t in self.order_history if t > hour_ago]
         if len(self.order_history) > 10000:
             self.order_history = self.order_history[-10000:]
 
+        self.connection_history = [t for t in self.connection_history if t > hour_ago]
         if len(self.connection_history) > 10000:
             self.connection_history = self.connection_history[-10000:]
 
@@ -297,7 +304,11 @@ class GlobalRateCoordinator:
         now = datetime.now()
         self.exchange_usage[exchange][endpoint].append(now)
 
-        # Clean old history (keep last 1000 entries per endpoint)
+        # Clean old history - remove entries older than 1 hour AND keep max 1000 entries per endpoint
+        hour_ago = now - timedelta(hours=1)
+        self.exchange_usage[exchange][endpoint] = [
+            t for t in self.exchange_usage[exchange][endpoint] if t > hour_ago
+        ]
         if len(self.exchange_usage[exchange][endpoint]) > 1000:
             self.exchange_usage[exchange][endpoint] = self.exchange_usage[exchange][endpoint][
                 -1000:
@@ -380,7 +391,7 @@ class GlobalRateCoordinator:
                 wait_time = await self._calculate_general_wait_time(count)
 
             if wait_time > 0:
-                logger.info(
+                self.logger.info(
                     "Waiting for global capacity",
                     request_type=request_type,
                     count=count,
@@ -393,7 +404,7 @@ class GlobalRateCoordinator:
         except ValidationError:
             raise
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Global capacity wait failed", request_type=request_type, count=count, error=str(e)
             )
             raise ExchangeRateLimitError(f"Global capacity wait failed: {e!s}")
@@ -462,7 +473,7 @@ class GlobalRateCoordinator:
         self.websocket_message_history.clear()
         self.exchange_usage.clear()
 
-        logger.info("Global rate limits reset")
+        self.logger.info("Global rate limits reset")
 
     def update_global_limits(self, new_limits: dict[str, int]) -> None:
         """
@@ -474,9 +485,9 @@ class GlobalRateCoordinator:
         for key, value in new_limits.items():
             if key in self.global_limits:
                 self.global_limits[key] = value
-                logger.info(f"Updated global limit: {key} = {value}")
+                self.logger.info(f"Updated global limit: {key} = {value}")
             else:
-                logger.warning(f"Unknown global limit key: {key}")
+                self.logger.warning(f"Unknown global limit key: {key}")
 
     def get_health_status(self) -> dict[str, Any]:
         """

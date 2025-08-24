@@ -18,9 +18,7 @@ from pydantic import BaseModel, Field
 
 # MANDATORY: Import from P-001
 # Use centralized validators to avoid duplication
-from src.utils.validators import (
-    validate_symbol as core_validate_symbol,
-)
+from src.utils import ValidationFramework
 
 
 class ExchangeTypes:
@@ -41,9 +39,9 @@ class ExchangeTypes:
         separators like '-' or '/').
         """
         try:
-            normalized = core_validate_symbol(symbol)
+            validated = ValidationFramework.validate_symbol(symbol)
             # Exchange-specific stricter rule: alphanumeric only
-            return bool(re.match(r"^[A-Z0-9]+$", normalized))
+            return bool(re.match(r"^[A-Z0-9]+$", symbol.upper())) if validated else False
         except Exception:
             return False
 
@@ -197,7 +195,7 @@ class ExchangeErrorResponse(BaseModel):
     code: int
     message: str
     details: dict[str, Any] | None = None
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now())
 
 
 class ExchangeHealthStatus(BaseModel):

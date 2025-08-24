@@ -29,10 +29,6 @@ from typing import Any
 import numpy as np
 from pydantic import BaseModel, Field, field_validator
 
-from src.core.logging import get_logger
-
-logger = get_logger(__name__)
-
 
 class ParameterType(Enum):
     """Parameter type enumeration."""

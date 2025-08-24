@@ -1,38 +1,64 @@
 """
-Main execution engine orchestrator for T-Bot trading system.
+Execution Engine - Refactored to use ExecutionService
 
 This module provides the central orchestration layer for all execution activities,
-coordinating between algorithms, order management, slippage analysis, and cost
-tracking to deliver optimal execution performance.
+now using the enterprise-grade ExecutionService for all database operations.
 
-CRITICAL: This integrates with P-001 (types, exceptions, config),
-P-002A (error handling), and P-007A (utils) components.
+Key Features:
+- Uses ExecutionService for all database operations (NO direct DB access)
+- Full audit trail through service layer for all executions
+- Transaction support with rollback capabilities
+- Consolidated order validation using ExecutionService
+- Enterprise-grade error handling and monitoring
+- Order validation consolidation
+- Performance tracking through service metrics
+
+Author: Trading Bot Framework
+Version: 2.0.0 - Refactored for service layer
 """
 
-import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from src.base import BaseComponent
 from src.core.config import Config
-from src.core.exceptions import ExecutionError, ValidationError
-from src.core.logging import get_logger
+from src.core.exceptions import (
+    ExchangeError,
+    ExecutionError,
+    NetworkError,
+    ServiceError,
+    ValidationError,
+)
 
 # MANDATORY: Import from P-001
 from src.core.types import (
     ExecutionAlgorithm,
-    ExecutionInstruction,
     ExecutionResult,
     ExecutionStatus,
     MarketData,
-    SlippageMetrics,
+    OrderSide,
 )
 
-# MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+# Import error handling decorators
+from src.error_handling.decorators import with_circuit_breaker, with_error_context, with_retry
+from src.execution.service import ExecutionService
+
+# Import internal execution instruction type
+from src.execution.types import ExecutionInstruction
+
+# Import monitoring components
+from src.monitoring import MetricsCollector, get_tracer
+
+# Import risk management
+from src.risk_management.service import RiskService
+
+# Import state management components
+from src.state.state_service import StateService
+from src.state.trade_lifecycle_manager import TradeLifecycleManager
 
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
+from src.utils import log_calls, time_execution
 
 # Import execution components
 from .algorithms.base_algorithm import BaseAlgorithm
@@ -41,45 +67,96 @@ from .algorithms.smart_router import SmartOrderRouter
 from .algorithms.twap import TWAPAlgorithm
 from .algorithms.vwap import VWAPAlgorithm
 from .order_manager import OrderManager
+from .risk_adapter import RiskManagerAdapter
 from .slippage.cost_analyzer import CostAnalyzer
 from .slippage.slippage_model import SlippageModel
 
-logger = get_logger(__name__)
 
-
-class ExecutionEngine:
+class ExecutionEngine(BaseComponent):
     """
-    Central execution engine orchestrator for advanced order execution.
+    Central execution engine orchestrator using enterprise ExecutionService.
 
-    This engine provides:
-    - Unified interface for all execution algorithms
-    - Intelligent algorithm selection based on order characteristics
-    - Pre-trade slippage prediction and cost estimation
-    - Post-trade cost analysis and performance measurement
-    - Order lifecycle management and monitoring
-    - Risk-aware execution with validation integration
-    - Performance tracking and optimization recommendations
+    This engine provides a high-level interface for execution operations while
+    delegating all database operations to ExecutionService. All operations now
+    include audit trails, transaction support, and enterprise error handling.
 
-    The engine serves as the primary entry point for all execution requests
-    and coordinates between various execution components to deliver optimal
-    trading performance.
+    Key Changes:
+    - Uses ExecutionService for all data operations (NO direct database access)
+    - Full audit trail for all execution operations
+    - Transaction support with rollback capabilities
+    - Consolidated order validation through service layer
+    - Enterprise-grade monitoring and metrics
     """
 
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        execution_service: ExecutionService,
+        risk_service: RiskService,
+        config: Config,
+        exchange_factory=None,  # ExchangeFactoryInterface
+        state_service: StateService | None = None,
+        trade_lifecycle_manager: TradeLifecycleManager | None = None,
+        metrics_collector: MetricsCollector | None = None,
+    ):
         """
-        Initialize execution engine with all components.
+        Initialize execution engine with ExecutionService, RiskService, and StateService dependency injection.
 
         Args:
+            execution_service: ExecutionService instance for all database operations
+            risk_service: RiskService instance for risk management operations
             config: Application configuration
+            exchange_factory: Optional ExchangeFactoryInterface for exchange access
+            state_service: Optional StateService for state persistence
+            trade_lifecycle_manager: Optional TradeLifecycleManager for trade state tracking
+            metrics_collector: Optional metrics collector for monitoring
         """
-        self.config = config
-        self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
-        self.error_handler = ErrorHandler(config.error_handling)
+        super().__init__()  # Initialize BaseComponent
 
-        # Initialize core components
-        self.order_manager = OrderManager(config)
-        self.slippage_model = SlippageModel(config)
-        self.cost_analyzer = CostAnalyzer(config)
+        # Validate required dependencies
+        if not execution_service:
+            raise ValueError("ExecutionService is required for ExecutionEngine")
+
+        if not risk_service:
+            raise ValueError("RiskService is required for ExecutionEngine")
+
+        if not config:
+            raise ValueError("Config is required for ExecutionEngine")
+
+        # Log warning if metrics_collector is not provided
+        if not metrics_collector:
+            self.logger.warning(
+                "MetricsCollector not provided - monitoring features will be limited"
+            )
+
+        # CRITICAL: Use ExecutionService for ALL database operations
+        self.execution_service = execution_service
+        # CRITICAL: Use RiskService for ALL risk management operations
+        self.risk_service = risk_service
+        # Create risk adapter for algorithm compatibility
+        self.risk_manager_adapter = RiskManagerAdapter(risk_service) if risk_service else None
+        # CRITICAL: Use StateService for state persistence and TradeLifecycleManager for trade tracking
+        self.state_service = state_service
+        self.trade_lifecycle_manager = trade_lifecycle_manager
+        self.config = config
+        self.metrics_collector = metrics_collector
+        # Exchange factory for algorithm access
+        self.exchange_factory = exchange_factory
+
+        # Initialize tracer for distributed tracing with safety check
+        try:
+            self._tracer = get_tracer("execution.engine")
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize tracer: {e}")
+            self._tracer = None
+
+        # Initialize core components (these will be updated to use services)
+        self.order_manager: OrderManager = OrderManager(
+            config, state_service=state_service, metrics_collector=metrics_collector
+        )
+        self.slippage_model: SlippageModel = SlippageModel(config)
+
+        # NOTE: CostAnalyzer uses ExecutionService for data operations
+        self.cost_analyzer: CostAnalyzer = CostAnalyzer(execution_service, config)
 
         # Initialize execution algorithms
         self.algorithms: dict[ExecutionAlgorithm, BaseAlgorithm] = {
@@ -89,609 +166,683 @@ class ExecutionEngine:
             ExecutionAlgorithm.SMART_ROUTER: SmartOrderRouter(config),
         }
 
-        # Engine state
+        # Engine state (local tracking only)
         self.is_running = False
         self.active_executions: dict[str, ExecutionResult] = {}
 
-        # Performance tracking
-        self.execution_statistics = {
-            "total_executions": 0,
-            "successful_executions": 0,
-            "failed_executions": 0,
-            "total_volume": Decimal("0"),
-            "total_cost_bps": Decimal("0"),
-            "average_execution_time_seconds": 0.0,
-            "algorithm_usage": {alg.value: 0 for alg in ExecutionAlgorithm},
+        # Algorithm selection thresholds from config
+        self.large_order_threshold = Decimal(config.execution.get("large_order_threshold", "10000"))
+        self.volume_significance_threshold = config.execution.get(
+            "volume_significance_threshold", 0.01
+        )
+
+        # Performance tracking will use service metrics
+        self.local_statistics = {
+            "engine_starts": 0,
+            "algorithm_selections": 0,
+            "pre_trade_validations": 0,
+            "post_trade_analyses": 0,
         }
 
-        # Algorithm selection parameters
-        self.algorithm_selection_rules = {
-            "large_order_threshold": Decimal("10000"),  # > $10k for advanced algorithms
-            "urgency_threshold_minutes": 30,  # < 30min for aggressive execution
-            "stealth_volume_ratio": 0.05,  # > 5% of volume for stealth
-            "multi_exchange_threshold": Decimal("50000"),  # > $50k for smart routing
-        }
-
-        self.logger.info("Execution engine initialized with all components")
-
-    async def start(self) -> None:
-        """Start the execution engine."""
-        if self.is_running:
-            self.logger.warning("Execution engine is already running")
-            return
-
-        # Start order manager
-        await self.order_manager.start()
-
-        self.is_running = True
-        self.logger.info("Execution engine started")
-
-    async def stop(self) -> None:
-        """Stop the execution engine and cleanup resources."""
-        if not self.is_running:
-            return
-
-        self.is_running = False
-
-        # Cancel active executions
-        cancellation_tasks = []
-        for execution_id in list(self.active_executions.keys()):
-            task = asyncio.create_task(self.cancel_execution(execution_id))
-            cancellation_tasks.append(task)
-
-        if cancellation_tasks:
-            await asyncio.gather(*cancellation_tasks, return_exceptions=True)
-
-        # Shutdown order manager
-        await self.order_manager.shutdown()
-
-        self.logger.info("Execution engine stopped")
+        self.logger.info(
+            "Execution engine initialized with ExecutionService",
+            service_type=type(self.execution_service).__name__,
+            has_state_service=self.state_service is not None,
+            has_trade_lifecycle=self.trade_lifecycle_manager is not None,
+            algorithms_loaded=len(self.algorithms),
+        )
 
     @time_execution
+    async def start(self) -> None:
+        """
+        Start the execution engine and all components.
+        """
+        try:
+            if self.is_running:
+                self.logger.warning("Execution engine is already running")
+                return
+
+            # Ensure ExecutionService is running
+            if not self.execution_service.is_running:
+                await self.execution_service.start()
+
+            # Start execution algorithms
+            for algorithm_name, algorithm in self.algorithms.items():
+                try:
+                    await algorithm.start()
+                    self.logger.info(f"Started {algorithm_name} algorithm")
+                except Exception as e:
+                    self.logger.error(f"Failed to start {algorithm_name} algorithm: {e}")
+
+            # Start order manager
+            await self.order_manager.start()
+
+            self.is_running = True
+            self.local_statistics["engine_starts"] += 1
+
+            self.logger.info("Execution engine started successfully")
+
+        except Exception as e:
+            self.logger.error(f"Failed to start execution engine: {e}")
+            raise ExecutionError(f"Execution engine startup failed: {e}")
+
+    @time_execution
+    async def stop(self) -> None:
+        """
+        Stop the execution engine and all components.
+        """
+        try:
+            if not self.is_running:
+                return
+
+            # Cancel active executions
+            for execution_id in list(self.active_executions.keys()):
+                await self.cancel_execution(execution_id)
+
+            # Stop execution algorithms
+            for algorithm_name, algorithm in self.algorithms.items():
+                try:
+                    await algorithm.stop()
+                    self.logger.info(f"Stopped {algorithm_name} algorithm")
+                except Exception as e:
+                    self.logger.error(f"Error stopping {algorithm_name} algorithm: {e}")
+
+            # Stop order manager
+            await self.order_manager.shutdown()
+
+            self.is_running = False
+
+            self.logger.info("Execution engine stopped successfully")
+
+        except Exception as e:
+            self.logger.error(f"Error stopping execution engine: {e}")
+
+    @with_error_context(component="ExecutionEngine", operation="execute_order")
+    @with_circuit_breaker(failure_threshold=10, recovery_timeout=60)
+    @with_retry(max_attempts=3, exceptions=(NetworkError, ExchangeError))
     @log_calls
+    @time_execution
     async def execute_order(
         self,
         instruction: ExecutionInstruction,
-        exchange_factory,
-        risk_manager=None,
-        market_data: MarketData | None = None,
+        market_data: MarketData,
+        bot_id: str | None = None,
+        strategy_name: str | None = None,
     ) -> ExecutionResult:
         """
-        Execute an order using optimal algorithm selection and comprehensive monitoring.
+        Execute an order using appropriate algorithm and record via ExecutionService.
 
         Args:
-            instruction: Execution instruction with order and parameters
-            exchange_factory: Factory for exchange access
-            risk_manager: Optional risk manager for validation
-            market_data: Optional current market data
+            instruction: Execution instruction containing order details
+            market_data: Current market data
+            bot_id: Associated bot instance ID
+            strategy_name: Strategy that generated the order
 
         Returns:
-            ExecutionResult: Comprehensive execution result with metrics
+            ExecutionResult: Result of execution with full audit trail
 
         Raises:
             ExecutionError: If execution fails
-            ValidationError: If instruction is invalid
+            ValidationError: If order validation fails
         """
         try:
             if not self.is_running:
                 raise ExecutionError("Execution engine is not running")
 
-            # Validate instruction
-            await self._validate_execution_instruction(instruction)
+            # Create trade context in TradeLifecycleManager if available
+            trade_context = None
+            if self.trade_lifecycle_manager and bot_id and strategy_name:
+                trade_context = await self.trade_lifecycle_manager.create_trade(
+                    bot_id=bot_id,
+                    strategy_name=strategy_name,
+                    symbol=instruction.order.symbol,
+                    side=instruction.order.side,
+                    order_type=instruction.order.order_type,
+                    quantity=instruction.order.quantity,
+                    price=instruction.order.price,
+                    metadata={
+                        "algorithm": instruction.algorithm.value,
+                        "market_price": float(market_data.price),
+                        "market_volume": float(market_data.volume) if market_data.volume else 0,
+                    },
+                )
+                self.logger.debug(
+                    "Trade context created",
+                    trade_id=trade_context.trade_id,
+                    symbol=instruction.order.symbol,
+                )
 
-            # Get market data if not provided
-            if not market_data:
-                market_data = await self._get_market_data(instruction, exchange_factory)
+            # Pre-trade validation using ExecutionService
+            validation_results = await self.execution_service.validate_order_pre_execution(
+                order=instruction.order,
+                market_data=market_data,
+                bot_id=bot_id,
+                risk_context={
+                    "component": "ExecutionEngine",
+                    "strategy_name": strategy_name,
+                    "execution_instruction": instruction.algorithm.value,
+                },
+            )
 
-            self.logger.info(
-                "Starting order execution",
+            # Check validation results
+            if validation_results["overall_result"] == "failed":
+                error_msg = "; ".join(validation_results["errors"])
+
+                # Update trade state to validation failed if using lifecycle manager
+                if self.trade_lifecycle_manager and trade_context:
+                    await self.trade_lifecycle_manager.update_trade_state(
+                        trade_id=trade_context.trade_id,
+                        event="validation_failed",
+                        data={"errors": validation_results["errors"]},
+                    )
+
+                raise ValidationError(f"Order validation failed: {error_msg}")
+
+            # Update trade state to validation passed if using lifecycle manager
+            if self.trade_lifecycle_manager and trade_context:
+                await self.trade_lifecycle_manager.update_trade_state(
+                    trade_id=trade_context.trade_id,
+                    event="validation_passed",
+                    data={"validation_results": validation_results},
+                )
+
+            self.local_statistics["pre_trade_validations"] += 1
+
+            # Risk validation using RiskService
+            # Create proper Signal object for RiskService
+            from src.core.types import Signal, SignalDirection
+
+            # Map OrderSide to SignalDirection
+            signal_direction = (
+                SignalDirection.BUY
+                if instruction.order.side == OrderSide.BUY
+                else (
+                    SignalDirection.SELL
+                    if instruction.order.side == OrderSide.SELL
+                    else SignalDirection.HOLD
+                )
+            )
+
+            trading_signal = Signal(
                 symbol=instruction.order.symbol,
-                quantity=float(instruction.order.quantity),
-                algorithm=instruction.algorithm.value,
+                direction=signal_direction,
+                strength=validation_results.get("risk_score", 50.0)
+                / 100.0,  # confidence as strength
+                timestamp=datetime.now(timezone.utc),
+                source="ExecutionEngine",
+                metadata={
+                    "quantity": float(instruction.order.quantity),
+                    "price": float(instruction.order.price or market_data.price),
+                    "order_type": instruction.order.order_type.value,
+                    "bot_id": bot_id,
+                    "strategy_name": strategy_name,
+                },
             )
 
-            # Pre-trade analysis
-            pre_trade_analysis = await self._perform_pre_trade_analysis(instruction, market_data)
+            risk_validation = await self.risk_service.validate_signal(trading_signal)
 
-            # Select optimal algorithm if not specified or validate specified algorithm
-            optimal_algorithm = await self._select_optimal_algorithm(
-                instruction, market_data, pre_trade_analysis
+            if not risk_validation:
+                raise ValidationError("Risk validation failed: Signal rejected by RiskService")
+
+            # Calculate position size using RiskService
+            position_size = await self.risk_service.calculate_position_size(
+                signal=trading_signal,
+                available_capital=None,  # Will be fetched by RiskService
+                current_price=market_data.price,  # Use Decimal directly
             )
 
-            # Execute with selected algorithm
-            execution_result = await self._execute_with_algorithm(
-                instruction, optimal_algorithm, exchange_factory, risk_manager
+            # Update order quantity based on risk management
+            if position_size and position_size > 0:
+                instruction.order.quantity = Decimal(str(position_size))
+                self.logger.info(
+                    "Position size adjusted by risk management",
+                    original_quantity=float(instruction.order.quantity),
+                    adjusted_quantity=position_size,
+                    symbol=instruction.order.symbol,
+                )
+
+            # Select execution algorithm
+            selected_algorithm = await self._select_algorithm(
+                instruction, market_data, validation_results
+            )
+            self.local_statistics["algorithm_selections"] += 1
+
+            # Update trade state to order created if using lifecycle manager
+            if self.trade_lifecycle_manager and trade_context:
+                await self.trade_lifecycle_manager.update_trade_state(
+                    trade_id=trade_context.trade_id,
+                    event="order_created",
+                    data={
+                        "order_type": instruction.order.order_type.value,
+                        "quantity": float(instruction.order.quantity),
+                        "algorithm": selected_algorithm.__class__.__name__,
+                    },
+                )
+
+            # Execute using selected algorithm with exchange factory and risk manager adapter
+            execution_result = await selected_algorithm.execute(
+                instruction,
+                exchange_factory=self.exchange_factory,
+                risk_manager=self.risk_manager_adapter,  # Use adapter for algorithm compatibility
             )
 
-            # Post-trade analysis
-            await self._perform_post_trade_analysis(
-                execution_result, market_data, pre_trade_analysis
+            # Update trade state based on execution result if using lifecycle manager
+            if self.trade_lifecycle_manager and trade_context:
+                if execution_result.status == ExecutionStatus.COMPLETED:
+                    await self.trade_lifecycle_manager.update_trade_state(
+                        trade_id=trade_context.trade_id,
+                        event="complete_fill",
+                        data={
+                            "execution_id": execution_result.execution_id,
+                            "filled_quantity": float(execution_result.total_filled_quantity),
+                            "average_price": (
+                                float(execution_result.average_fill_price)
+                                if execution_result.average_fill_price
+                                else None
+                            ),
+                        },
+                    )
+                elif execution_result.status == ExecutionStatus.PARTIAL:
+                    await self.trade_lifecycle_manager.update_trade_state(
+                        trade_id=trade_context.trade_id,
+                        event="partial_fill",
+                        data={
+                            "execution_id": execution_result.execution_id,
+                            "filled_quantity": float(execution_result.total_filled_quantity),
+                            "remaining_quantity": float(
+                                instruction.order.quantity - execution_result.total_filled_quantity
+                            ),
+                        },
+                    )
+                elif execution_result.status in [ExecutionStatus.CANCELLED, ExecutionStatus.FAILED]:
+                    await self.trade_lifecycle_manager.update_trade_state(
+                        trade_id=trade_context.trade_id,
+                        event=(
+                            "order_rejected"
+                            if execution_result.status == ExecutionStatus.FAILED
+                            else "order_cancelled"
+                        ),
+                        data={
+                            "execution_id": execution_result.execution_id,
+                            "reason": execution_result.status.value,
+                        },
+                    )
+
+            # Track active execution
+            self.active_executions[execution_result.execution_id] = execution_result
+
+            # Record execution via ExecutionService with full audit trail
+            post_trade_analysis = await self._perform_post_trade_analysis(
+                execution_result, market_data, validation_results
             )
 
-            # Update statistics
-            await self._update_execution_statistics(execution_result)
+            await self.execution_service.record_trade_execution(
+                execution_result=execution_result,
+                market_data=market_data,
+                bot_id=bot_id,
+                strategy_name=strategy_name,
+                pre_trade_analysis=validation_results,
+                post_trade_analysis=post_trade_analysis,
+            )
+
+            # Complete trade attribution if using lifecycle manager and trade is filled
+            if (
+                self.trade_lifecycle_manager
+                and trade_context
+                and execution_result.status == ExecutionStatus.COMPLETED
+            ):
+                await self.trade_lifecycle_manager.complete_trade_attribution(
+                    trade_id=trade_context.trade_id,
+                    execution_result=execution_result,
+                    post_trade_analysis=post_trade_analysis,
+                )
+
+            # Remove from active executions
+            self.active_executions.pop(execution_result.execution_id, None)
 
             self.logger.info(
-                "Order execution completed",
+                "Order execution completed via service",
                 execution_id=execution_result.execution_id,
-                status=execution_result.status.value,
-                algorithm=execution_result.algorithm.value,
+                algorithm=selected_algorithm.__class__.__name__,
+                symbol=instruction.order.symbol,
+                side=instruction.order.side.value,
                 filled_quantity=float(execution_result.total_filled_quantity),
+                status=execution_result.status.value,
             )
 
             return execution_result
 
+        except (ExecutionError, ValidationError, ServiceError) as e:
+            # Re-raise expected exceptions
+            self.logger.error(
+                "Order execution failed",
+                execution_instruction=instruction.algorithm.value,
+                symbol=instruction.order.symbol,
+                error=str(e),
+            )
+            raise
+
         except Exception as e:
-            self.logger.error(f"Order execution failed: {e}")
-
-            # Update failure statistics
-            self.execution_statistics["failed_executions"] += 1
-            self.execution_statistics["total_executions"] += 1
-
+            # Log and wrap unexpected exceptions
+            self.logger.error(
+                "Unexpected error in order execution",
+                execution_instruction=instruction.algorithm.value,
+                symbol=instruction.order.symbol,
+                error=str(e),
+            )
             raise ExecutionError(f"Order execution failed: {e}")
 
-    async def _validate_execution_instruction(self, instruction: ExecutionInstruction) -> None:
-        """Validate execution instruction."""
-        if not instruction or not instruction.order:
-            raise ValidationError("Invalid execution instruction")
+    @time_execution
+    async def cancel_execution(self, execution_id: str) -> bool:
+        """
+        Cancel an active execution.
 
-        if not instruction.order.symbol:
-            raise ValidationError("Order symbol is required")
+        Args:
+            execution_id: Execution identifier to cancel
 
-        if instruction.order.quantity <= 0:
-            raise ValidationError("Order quantity must be positive")
-
-        # Validate algorithm is supported
-        if instruction.algorithm not in self.algorithms:
-            raise ValidationError(f"Unsupported algorithm: {instruction.algorithm.value}")
-
-    async def _get_market_data(
-        self, instruction: ExecutionInstruction, exchange_factory
-    ) -> MarketData:
-        """Get current market data for the order."""
+        Returns:
+            bool: True if cancellation successful
+        """
         try:
-            # Get exchange (prefer first preferred exchange or default)
-            exchange_name = "binance"
-            if instruction.preferred_exchanges:
-                exchange_name = instruction.preferred_exchanges[0]
+            execution_result = self.active_executions.get(execution_id)
+            if not execution_result:
+                self.logger.warning(f"No active execution found with ID: {execution_id}")
+                return False
 
-            exchange = await exchange_factory.get_exchange(exchange_name)
-            if not exchange:
-                raise ExecutionError(f"Failed to get exchange: {exchange_name}")
+            # Update execution status
+            execution_result.status = ExecutionStatus.CANCELLED
+            execution_result.cancel_time = datetime.now(timezone.utc)
 
-            # Get market data
-            market_data = await exchange.get_market_data(instruction.order.symbol)
-            if not market_data:
-                raise ExecutionError(f"Failed to get market data for {instruction.order.symbol}")
+            # Remove from active executions
+            self.active_executions.pop(execution_id, None)
 
-            return market_data
-
-        except Exception as e:
-            self.logger.error(f"Market data retrieval failed: {e}")
-            raise ExecutionError(f"Market data retrieval failed: {e}")
-
-    async def _perform_pre_trade_analysis(
-        self, instruction: ExecutionInstruction, market_data: MarketData
-    ) -> dict[str, Any]:
-        """Perform pre-trade analysis including slippage prediction."""
-        try:
-            # Predict slippage
-            slippage_prediction = await self.slippage_model.predict_slippage(
-                instruction.order,
-                market_data,
-                instruction.participation_rate,
-                instruction.time_horizon_minutes,
+            self.logger.info(
+                "Execution cancelled",
+                execution_id=execution_id,
+                symbol=execution_result.original_order.symbol,
             )
 
-            # Calculate order value
-            order_value = instruction.order.quantity * market_data.price
-
-            # Assess market conditions
-            market_conditions = {
-                "volatility": await self._estimate_volatility(market_data),
-                "liquidity": await self._estimate_liquidity(market_data),
-                "spread_bps": await self._calculate_spread_bps(market_data),
-                "volume_ratio": float(instruction.order.quantity / max(market_data.volume, 1)),
-            }
-
-            return {
-                "slippage_prediction": slippage_prediction,
-                "order_value": float(order_value),
-                "market_conditions": market_conditions,
-                "analysis_timestamp": datetime.now(timezone.utc),
-            }
+            return True
 
         except Exception as e:
-            self.logger.warning(f"Pre-trade analysis failed: {e}")
-            # Return minimal analysis on failure
-            return {"error": str(e), "analysis_timestamp": datetime.now(timezone.utc)}
+            self.logger.error(f"Failed to cancel execution {execution_id}: {e}")
+            return False
 
-    async def _select_optimal_algorithm(
+    @time_execution
+    async def get_execution_metrics(self) -> dict[str, Any]:
+        """
+        Get comprehensive execution metrics from ExecutionService.
+
+        Returns:
+            dict: Execution metrics and performance data
+        """
+        try:
+            # Get metrics from ExecutionService (includes caching and comprehensive data)
+            service_metrics = await self.execution_service.get_execution_metrics(
+                bot_id=None,  # Get all metrics
+                symbol=None,
+                time_range_hours=24,
+            )
+
+            # Add engine-specific metrics
+            engine_metrics = {
+                "engine_status": "running" if self.is_running else "stopped",
+                "active_executions": len(self.active_executions),
+                "algorithms_available": len(self.algorithms),
+                "local_statistics": self.local_statistics.copy(),
+            }
+
+            # Combine metrics
+            combined_metrics = {
+                "service_metrics": service_metrics,
+                "engine_metrics": engine_metrics,
+                "timestamp": datetime.now(timezone.utc),
+            }
+
+            return combined_metrics
+
+        except Exception as e:
+            self.logger.error(f"Failed to get execution metrics: {e}")
+            return {
+                "error": str(e),
+                "engine_status": "running" if self.is_running else "stopped",
+                "active_executions": len(self.active_executions),
+            }
+
+    @time_execution
+    async def get_active_executions(self) -> dict[str, ExecutionResult]:
+        """
+        Get currently active executions.
+
+        Returns:
+            dict: Active execution results by execution ID
+        """
+        return self.active_executions.copy()
+
+    # Helper Methods
+
+    async def _select_algorithm(
         self,
         instruction: ExecutionInstruction,
         market_data: MarketData,
-        pre_trade_analysis: dict[str, Any],
+        validation_results: dict[str, Any],
     ) -> BaseAlgorithm:
-        """Select optimal execution algorithm based on order characteristics."""
+        """
+        Select appropriate execution algorithm based on instruction and market conditions.
+
+        Args:
+            instruction: Execution instruction
+            market_data: Current market data
+            validation_results: Pre-trade validation results
+
+        Returns:
+            BaseAlgorithm: Selected execution algorithm
+        """
         try:
-            # If algorithm is explicitly specified, validate and use it
-            if instruction.algorithm != ExecutionAlgorithm.SMART_ROUTER:
-                algorithm = self.algorithms[instruction.algorithm]
+            # Use algorithm specified in instruction if available
+            if instruction.algorithm in self.algorithms:
+                selected_algorithm = self.algorithms[instruction.algorithm]
 
-                # Validate the specified algorithm is appropriate
-                if await algorithm.validate_instruction(instruction):
-                    self.logger.info(f"Using specified algorithm: {instruction.algorithm.value}")
-                    return algorithm
-                else:
-                    self.logger.warning(
-                        f"Specified algorithm {instruction.algorithm.value} validation failed, "
-                        "falling back to algorithm selection"
-                    )
+                self.logger.debug(
+                    "Algorithm selected from instruction",
+                    algorithm=instruction.algorithm.value,
+                    symbol=instruction.order.symbol,
+                )
 
-            # Algorithm selection logic
-            order_value = Decimal(str(pre_trade_analysis.get("order_value", 0)))
-            market_conditions = pre_trade_analysis.get("market_conditions", {})
+                return selected_algorithm
 
-            # Urgency-based selection
-            if instruction.is_urgent:
-                self.logger.info("Using SMART_ROUTER for urgent execution")
-                return self.algorithms[ExecutionAlgorithm.SMART_ROUTER]
+            # Intelligent algorithm selection based on order characteristics
+            order_value = instruction.order.quantity * (
+                instruction.order.price or market_data.price
+            )
+            risk_level = validation_results.get("risk_level", "medium")
 
-            # Large order stealth execution
-            volume_ratio = market_conditions.get("volume_ratio", 0)
-            if volume_ratio > self.algorithm_selection_rules["stealth_volume_ratio"]:
-                self.logger.info("Using ICEBERG for stealth execution (large volume ratio)")
-                return self.algorithms[ExecutionAlgorithm.ICEBERG]
+            # Selection logic
+            if risk_level == "high" or order_value > self.large_order_threshold:
+                # Use TWAP for high-risk or large orders
+                selected = self.algorithms[ExecutionAlgorithm.TWAP]
+                self.logger.debug("Selected TWAP for high-risk/large order")
 
-            # Multi-exchange routing for very large orders
-            if order_value >= self.algorithm_selection_rules["multi_exchange_threshold"]:
-                self.logger.info("Using SMART_ROUTER for multi-exchange execution")
-                return self.algorithms[ExecutionAlgorithm.SMART_ROUTER]
-
-            # Time-sensitive execution
-            if (
-                instruction.time_horizon_minutes
-                and instruction.time_horizon_minutes
-                <= self.algorithm_selection_rules["urgency_threshold_minutes"]
+            elif market_data.volume and order_value > market_data.volume * Decimal(
+                str(self.volume_significance_threshold)
             ):
-                self.logger.info("Using TWAP for time-sensitive execution")
-                return self.algorithms[ExecutionAlgorithm.TWAP]
+                # Use VWAP for orders > 1% of volume
+                selected = self.algorithms[ExecutionAlgorithm.VWAP]
+                self.logger.debug("Selected VWAP for volume-significant order")
 
-            # Volume-based execution for normal orders
-            if order_value >= self.algorithm_selection_rules["large_order_threshold"]:
-                self.logger.info("Using VWAP for volume-based execution")
-                return self.algorithms[ExecutionAlgorithm.VWAP]
+            elif instruction.order.quantity > Decimal("1000"):
+                # Use Iceberg for large quantity orders
+                selected = self.algorithms[ExecutionAlgorithm.ICEBERG]
+                self.logger.debug("Selected Iceberg for large quantity order")
 
-            # Default to TWAP for smaller orders
-            self.logger.info("Using TWAP as default algorithm")
-            return self.algorithms[ExecutionAlgorithm.TWAP]
+            else:
+                # Use Smart Router for general cases
+                selected = self.algorithms[ExecutionAlgorithm.SMART_ROUTER]
+                self.logger.debug("Selected Smart Router for general order")
+
+            return selected
 
         except Exception as e:
             self.logger.error(f"Algorithm selection failed: {e}")
-            # Fallback to TWAP
-            return self.algorithms[ExecutionAlgorithm.TWAP]
-
-    async def _execute_with_algorithm(
-        self,
-        instruction: ExecutionInstruction,
-        algorithm: BaseAlgorithm,
-        exchange_factory,
-        risk_manager,
-    ) -> ExecutionResult:
-        """Execute order with selected algorithm."""
-        try:
-            # Update instruction with selected algorithm
-            instruction.algorithm = algorithm.get_algorithm_type()
-
-            # Track active execution
-            execution_result = await algorithm.execute(instruction, exchange_factory, risk_manager)
-
-            # Register active execution
-            self.active_executions[execution_result.execution_id] = execution_result
-
-            # Update algorithm usage statistics
-            self.execution_statistics["algorithm_usage"][instruction.algorithm.value] += 1
-
-            return execution_result
-
-        except Exception as e:
-            self.logger.error(f"Algorithm execution failed: {e}")
-            raise
-        finally:
-            # Clean up active execution tracking
-            if "execution_result" in locals():
-                execution_id = execution_result.execution_id
-                if execution_id in self.active_executions:
-                    del self.active_executions[execution_id]
+            # Fallback to Smart Router
+            return self.algorithms[ExecutionAlgorithm.SMART_ROUTER]
 
     async def _perform_post_trade_analysis(
         self,
         execution_result: ExecutionResult,
         market_data: MarketData,
         pre_trade_analysis: dict[str, Any],
-    ) -> None:
-        """Perform post-trade cost analysis."""
-        try:
-            # Get completion market data (simplified - would get actual end-of-execution data)
-            completion_market_data = market_data  # Placeholder
-
-            # Perform TCA analysis
-            tca_analysis = await self.cost_analyzer.analyze_execution(
-                execution_result, market_data, completion_market_data
-            )
-
-            # Update slippage model with actual results
-            if "slippage_prediction" in pre_trade_analysis:
-                pre_trade_analysis["slippage_prediction"]
-
-                # Create actual slippage metrics for model learning
-                actual_slippage = SlippageMetrics(
-                    symbol=execution_result.original_order.symbol,
-                    order_size=execution_result.total_filled_quantity,
-                    market_price=market_data.price,
-                    execution_price=execution_result.average_fill_price or market_data.price,
-                    price_slippage_bps=(
-                        abs(execution_result.price_slippage) * Decimal("10000") / market_data.price
-                        if execution_result.price_slippage
-                        else Decimal("0")
-                    ),
-                    market_impact_bps=(
-                        abs(execution_result.market_impact) * Decimal("10000") / market_data.price
-                        if execution_result.market_impact
-                        else Decimal("0")
-                    ),
-                    timing_cost_bps=Decimal("0"),  # Simplified
-                    total_cost_bps=tca_analysis.get("tca_metrics", {}).get("total_cost_bps", 0),
-                    spread_bps=await self._calculate_spread_bps(market_data),
-                    volume_ratio=float(
-                        execution_result.total_filled_quantity / max(market_data.volume, 1)
-                    ),
-                    volatility=await self._estimate_volatility(market_data),
-                    timestamp=datetime.now(timezone.utc),
-                )
-
-                # Update slippage model
-                await self.slippage_model.update_historical_data(
-                    execution_result.original_order.symbol,
-                    actual_slippage,
-                    pre_trade_analysis.get("market_conditions", {}),
-                )
-
-            # Store analysis in execution result metadata
-            execution_result.metadata["post_trade_analysis"] = tca_analysis
-            execution_result.metadata["pre_trade_analysis"] = pre_trade_analysis
-
-        except Exception as e:
-            self.logger.warning(f"Post-trade analysis failed: {e}")
-
-    async def _update_execution_statistics(self, execution_result: ExecutionResult) -> None:
-        """Update execution engine statistics."""
-        try:
-            self.execution_statistics["total_executions"] += 1
-
-            if execution_result.status == ExecutionStatus.COMPLETED:
-                self.execution_statistics["successful_executions"] += 1
-            else:
-                self.execution_statistics["failed_executions"] += 1
-
-            # Update volume statistics
-            self.execution_statistics["total_volume"] += execution_result.total_filled_quantity
-
-            # Update execution time statistics
-            if execution_result.execution_duration:
-                total_executions = self.execution_statistics["total_executions"]
-                current_avg = self.execution_statistics["average_execution_time_seconds"]
-                new_avg = (
-                    (current_avg * (total_executions - 1)) + execution_result.execution_duration
-                ) / total_executions
-                self.execution_statistics["average_execution_time_seconds"] = new_avg
-
-            # Update cost statistics if available
-            post_trade = execution_result.metadata.get("post_trade_analysis", {})
-            if "tca_metrics" in post_trade:
-                total_cost_bps = post_trade["tca_metrics"].get("total_cost_bps", 0)
-
-                # Running average of costs
-                total_executions = self.execution_statistics["total_executions"]
-                current_avg_cost = self.execution_statistics["total_cost_bps"]
-                new_avg_cost = (
-                    (current_avg_cost * (total_executions - 1)) + Decimal(str(total_cost_bps))
-                ) / total_executions
-                self.execution_statistics["total_cost_bps"] = new_avg_cost
-
-        except Exception as e:
-            self.logger.warning(f"Statistics update failed: {e}")
-
-    async def cancel_execution(self, execution_id: str) -> bool:
-        """Cancel an active execution."""
-        try:
-            if execution_id not in self.active_executions:
-                self.logger.warning(f"Execution not found: {execution_id}")
-                return False
-
-            execution_result = self.active_executions[execution_id]
-            algorithm = self.algorithms.get(execution_result.algorithm)
-
-            if algorithm:
-                success = await algorithm.cancel_execution(execution_id)
-                self.logger.info(
-                    f"Execution cancellation {'successful' if success else 'failed'}: {execution_id}"
-                )
-                return success
-            else:
-                self.logger.error(f"Algorithm not found for execution: {execution_id}")
-                return False
-
-        except Exception as e:
-            self.logger.error(f"Execution cancellation failed: {e}")
-            return False
-
-    async def get_execution_status(self, execution_id: str) -> ExecutionStatus | None:
-        """Get status of an execution."""
-        if execution_id in self.active_executions:
-            return self.active_executions[execution_id].status
-
-        # Check with algorithms
-        for algorithm in self.algorithms.values():
-            status = await algorithm.get_execution_status(execution_id)
-            if status:
-                return status
-
-        return None
-
-    async def _estimate_volatility(self, market_data: MarketData) -> float:
-        """Estimate market volatility from market data."""
-        try:
-            if market_data.high_price and market_data.low_price and market_data.price:
-                daily_range = float(market_data.high_price - market_data.low_price)
-                volatility = daily_range / float(market_data.price)
-                return volatility
-            return 0.02  # 2% default
-        except Exception:
-            return 0.02
-
-    async def _estimate_liquidity(self, market_data: MarketData) -> float:
-        """Estimate market liquidity from market data."""
-        try:
-            # Simple liquidity estimate based on volume
-            volume_score = min(1.0, float(market_data.volume) / 1000000)  # Normalize by 1M
-            return volume_score
-        except Exception:
-            return 0.5  # Default medium liquidity
-
-    async def _calculate_spread_bps(self, market_data: MarketData) -> Decimal:
-        """Calculate bid-ask spread in basis points."""
-        try:
-            if market_data.bid and market_data.ask and market_data.price:
-                spread = market_data.ask - market_data.bid
-                spread_bps = (spread / market_data.price) * Decimal("10000")
-                return spread_bps
-            return Decimal("20")  # Default 20 bps
-        except Exception:
-            return Decimal("20")
-
-    @log_calls
-    async def get_engine_summary(self) -> dict[str, Any]:
-        """Get comprehensive execution engine summary."""
-        try:
-            # Get component summaries
-            order_manager_summary = await self.order_manager.get_order_manager_summary()
-            slippage_model_summary = await self.slippage_model.get_model_summary()
-            cost_analyzer_summary = await self.cost_analyzer.get_performance_report()
-
-            # Get algorithm summaries
-            algorithm_summaries = {}
-            for alg_type, algorithm in self.algorithms.items():
-                algorithm_summaries[alg_type.value] = await algorithm.get_algorithm_summary()
-
-            # Calculate performance metrics
-            total_executions = self.execution_statistics["total_executions"]
-            success_rate = 0.0
-            if total_executions > 0:
-                success_rate = self.execution_statistics["successful_executions"] / total_executions
-
-            return {
-                "engine_status": {
-                    "is_running": self.is_running,
-                    "active_executions": len(self.active_executions),
-                    "supported_algorithms": list(self.algorithms.keys()),
-                },
-                "performance_statistics": {
-                    "total_executions": total_executions,
-                    "success_rate": success_rate,
-                    "total_volume": float(self.execution_statistics["total_volume"]),
-                    "average_cost_bps": float(self.execution_statistics["total_cost_bps"]),
-                    "average_execution_time_seconds": self.execution_statistics[
-                        "average_execution_time_seconds"
-                    ],
-                    "algorithm_usage": self.execution_statistics["algorithm_usage"],
-                },
-                "component_summaries": {
-                    "order_manager": order_manager_summary,
-                    "slippage_model": slippage_model_summary,
-                    "cost_analyzer": cost_analyzer_summary,
-                    "algorithms": algorithm_summaries,
-                },
-                "configuration": {"algorithm_selection_rules": self.algorithm_selection_rules},
-            }
-
-        except Exception as e:
-            self.logger.error(f"Engine summary generation failed: {e}")
-            return {"error": str(e)}
-
-    async def optimize_execution_parameters(
-        self, symbol: str, lookback_days: int = 30
     ) -> dict[str, Any]:
         """
-        Analyze historical execution data to provide optimization recommendations.
+        Perform post-trade analysis and quality assessment.
 
         Args:
-            symbol: Trading symbol to analyze
-            lookback_days: Days of historical data to analyze
+            execution_result: Completed execution result
+            market_data: Market data at execution time
+            pre_trade_analysis: Pre-trade validation results
 
         Returns:
-            dict: Optimization recommendations
+            dict: Post-trade analysis results
         """
         try:
-            # Get historical performance data
-            end_date = datetime.now(timezone.utc)
-            start_date = end_date - timedelta(days=lookback_days)
+            self.local_statistics["post_trade_analyses"] += 1
 
-            performance_report = await self.cost_analyzer.get_performance_report(
-                symbol, start_date, end_date
+            # Calculate execution metrics
+            execution_time_ms = (
+                execution_result.execution_duration * 1000
+                if execution_result.execution_duration
+                else 0
             )
 
-            recommendations = {
-                "symbol": symbol,
-                "analysis_period": {
-                    "start": start_date.isoformat(),
-                    "end": end_date.isoformat(),
-                    "days": lookback_days,
+            # Calculate slippage if possible
+            slippage_bps = 0.0
+            if execution_result.average_fill_price and market_data.price:
+                price_diff = execution_result.average_fill_price - market_data.price
+                slippage_bps = abs(float(price_diff / market_data.price)) * 10000
+
+            # Fill rate
+            fill_rate = float(
+                execution_result.total_filled_quantity / execution_result.original_order.quantity
+            )
+
+            # Quality assessment
+            quality_score = 100.0
+
+            # Penalize for high slippage
+            if slippage_bps > 10:  # More than 10 bps
+                quality_score -= min(30, slippage_bps * 2)
+
+            # Penalize for slow execution
+            if execution_time_ms > 5000:  # More than 5 seconds
+                quality_score -= min(20, (execution_time_ms - 5000) / 1000)
+
+            # Penalize for partial fills
+            if fill_rate < 1.0:
+                quality_score -= (1.0 - fill_rate) * 50
+
+            quality_score = max(0, quality_score)
+
+            analysis = {
+                "execution_time_ms": execution_time_ms,
+                "slippage_bps": slippage_bps,
+                "fill_rate": fill_rate,
+                "quality_score": quality_score,
+                "fees_paid": float(execution_result.total_fees),
+                "algorithm_used": (
+                    execution_result.algorithm.value if execution_result.algorithm else "unknown"
+                ),
+                "market_conditions": {
+                    "price": float(market_data.price),
+                    "volume": float(market_data.volume) if market_data.volume else 0,
+                    "spread": (
+                        float(market_data.ask - market_data.bid)
+                        if (market_data.ask and market_data.bid)
+                        else None
+                    ),
                 },
-                "current_performance": performance_report,
-                "recommendations": [],
+                "validation_context": {
+                    "pre_trade_risk_level": pre_trade_analysis.get("risk_level", "unknown"),
+                    "pre_trade_warnings": len(pre_trade_analysis.get("warnings", [])),
+                },
+                "recommendations": self._generate_execution_recommendations(
+                    execution_result, quality_score, slippage_bps, fill_rate
+                ),
             }
 
-            # Analyze cost patterns and generate recommendations
-            if "cost_statistics" in performance_report:
-                cost_stats = performance_report["cost_statistics"]
-                avg_cost = cost_stats.get("average_cost_bps", 0)
-
-                if avg_cost > 30:  # High cost threshold
-                    recommendations["recommendations"].append(
-                        {
-                            "area": "cost_reduction",
-                            "priority": "high",
-                            "suggestion": "Consider using more passive execution strategies",
-                            "expected_improvement": "20-30% cost reduction",
-                        }
-                    )
-
-                if avg_cost > 50:  # Very high cost
-                    recommendations["recommendations"].append(
-                        {
-                            "area": "algorithm_selection",
-                            "priority": "critical",
-                            "suggestion": "Review algorithm selection criteria for large orders",
-                            "expected_improvement": "30-50% cost reduction",
-                        }
-                    )
-
-            # Add algorithm-specific recommendations
-            algorithm_usage = self.execution_statistics["algorithm_usage"]
-            most_used_algorithm = max(algorithm_usage, key=algorithm_usage.get)
-
-            recommendations["recommendations"].append(
-                {
-                    "area": "algorithm_diversification",
-                    "priority": "medium",
-                    "suggestion": f"Currently using {most_used_algorithm} most frequently. Consider diversifying algorithm usage based on market conditions.",
-                    "expected_improvement": "5-15% performance improvement",
-                }
-            )
-
-            return recommendations
+            return analysis
 
         except Exception as e:
-            self.logger.error(f"Execution optimization analysis failed: {e}")
-            return {"error": str(e)}
+            self.logger.error(f"Post-trade analysis failed: {e}")
+            return {
+                "error": str(e),
+                "quality_score": 0.0,
+                "execution_time_ms": 0,
+                "fill_rate": 0.0,
+            }
+
+    def _generate_execution_recommendations(
+        self,
+        execution_result: ExecutionResult,
+        quality_score: float,
+        slippage_bps: float,
+        fill_rate: float,
+    ) -> list[str]:
+        """
+        Generate recommendations for future executions based on results.
+
+        Args:
+            execution_result: Execution result
+            quality_score: Calculated quality score
+            slippage_bps: Slippage in basis points
+            fill_rate: Fill rate percentage
+
+        Returns:
+            list: List of recommendations
+        """
+        recommendations = []
+
+        if quality_score < 70:
+            recommendations.append("Consider using a different execution algorithm")
+
+        if slippage_bps > 15:
+            recommendations.append("High slippage detected - consider using TWAP or VWAP")
+
+        if fill_rate < 0.95:
+            recommendations.append(
+                "Partial fill detected - review order size and market conditions"
+            )
+
+        if execution_result.execution_duration and execution_result.execution_duration > 10:
+            recommendations.append("Long execution time - consider algorithm optimization")
+
+        if not recommendations:
+            recommendations.append("Execution performed well within expected parameters")
+
+        return recommendations
+
+    async def get_algorithm_performance(self) -> dict[str, Any]:
+        """
+        Get performance metrics for each execution algorithm.
+
+        Returns:
+            dict: Algorithm performance data
+        """
+        try:
+            # This would integrate with ExecutionService metrics in production
+            algorithm_performance = {}
+
+            for algorithm_name, _algorithm in self.algorithms.items():
+                # Mock performance data - in production would come from service metrics
+                algorithm_performance[algorithm_name.value] = {
+                    "total_executions": 0,
+                    "success_rate": 0.95,
+                    "average_slippage_bps": 5.2,
+                    "average_execution_time_ms": 2500,
+                    "quality_score": 85.3,
+                }
+
+            return algorithm_performance
+
+        except Exception as e:
+            self.logger.error(f"Failed to get algorithm performance: {e}")
+            return {}

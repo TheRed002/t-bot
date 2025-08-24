@@ -5,23 +5,23 @@ This module provides comprehensive metrics calculation for backtest results,
 including risk-adjusted returns, drawdown analysis, and trade statistics.
 """
 
-from decimal import Decimal
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
-from src.core.logging import get_logger
+from src.base import BaseComponent
+from src.utils.decimal_utils import safe_decimal
 from src.utils.decorators import time_execution
 
-logger = get_logger(__name__)
 
-
-class BacktestMetrics:
+class BacktestMetrics(BaseComponent):
     """Container for all backtest metrics."""
 
     def __init__(self):
         """Initialize metrics container."""
+        super().__init__()  # Initialize BaseComponent
         self.metrics: dict[str, Any] = {}
 
     def add(self, name: str, value: Any) -> None:
@@ -48,15 +48,27 @@ class MetricsCalculator:
     - Risk metrics (VaR, CVaR)
     """
 
-    def __init__(self, risk_free_rate: float = 0.02):
+    # Constants
+    TRADING_DAYS_PER_YEAR = 252
+    DEFAULT_RISK_FREE_RATE = 0.02
+    BOOTSTRAP_SAMPLES = 1000
+    CONFIDENCE_LEVEL = 0.95
+    VAR_PERCENTILE = 5  # For 95% VaR
+
+    def __init__(self, risk_free_rate: float = None):
         """
         Initialize metrics calculator.
 
         Args:
             risk_free_rate: Annual risk-free rate for Sharpe ratio calculation
         """
-        self.risk_free_rate = risk_free_rate
-        logger.info("MetricsCalculator initialized", risk_free_rate=risk_free_rate)
+        self.risk_free_rate = (
+            risk_free_rate if risk_free_rate is not None else self.DEFAULT_RISK_FREE_RATE
+        )
+        from src.core.logging import get_logger
+
+        self.logger = get_logger(__name__)
+        self.logger.info("MetricsCalculator initialized", risk_free_rate=risk_free_rate)
 
     @time_execution
     def calculate_all(
@@ -100,7 +112,7 @@ class MetricsCalculator:
         if daily_returns:
             metrics.update(self._calculate_risk_metrics(daily_returns, initial_capital))
 
-        logger.info("Metrics calculated", num_metrics=len(metrics))
+        self.logger.info("Metrics calculated", num_metrics=len(metrics))
         return metrics
 
     def _calculate_return_metrics(
@@ -125,9 +137,9 @@ class MetricsCalculator:
             annual_return = 0
 
         return {
-            "total_return": Decimal(str(total_return * 100)),
-            "annual_return": Decimal(str(annual_return * 100)),
-            "final_equity": Decimal(str(final_equity)),
+            "total_return": safe_decimal(total_return * 100),
+            "annual_return": safe_decimal(annual_return * 100),
+            "final_equity": safe_decimal(final_equity),
         }
 
     def _calculate_risk_adjusted_metrics(self, daily_returns: list[float]) -> dict[str, Any]:
@@ -144,13 +156,13 @@ class MetricsCalculator:
             return {}
 
         # Annualize metrics
-        annual_factor = np.sqrt(252)  # Trading days per year
+        annual_factor = np.sqrt(self.TRADING_DAYS_PER_YEAR)  # Trading days per year
 
         # Calculate volatility
         volatility = np.std(returns_array) * annual_factor
 
         # Sharpe Ratio
-        mean_return = np.mean(returns_array) * 252
+        mean_return = np.mean(returns_array) * self.TRADING_DAYS_PER_YEAR
         excess_return = mean_return - self.risk_free_rate
         sharpe_ratio = excess_return / volatility if volatility > 0 else 0
 
@@ -217,11 +229,11 @@ class MetricsCalculator:
             recovery_factor = 0
 
         return {
-            "max_drawdown": Decimal(str(max_drawdown * 100)),
+            "max_drawdown": safe_decimal(max_drawdown * 100),
             "max_drawdown_duration_days": max_duration,
             "recovery_factor": float(recovery_factor),
-            "current_drawdown": Decimal(
-                str(abs(drawdown.iloc[-1] * 100)) if not drawdown.empty else "0"
+            "current_drawdown": safe_decimal(
+                abs(drawdown.iloc[-1] * 100) if not drawdown.empty else 0
             ),
         }
 
@@ -279,18 +291,18 @@ class MetricsCalculator:
 
         return {
             "win_rate": float(win_rate * 100),
-            "avg_win": Decimal(str(avg_win)),
-            "avg_loss": Decimal(str(avg_loss)),
+            "avg_win": safe_decimal(avg_win),
+            "avg_loss": safe_decimal(avg_loss),
             "profit_factor": float(profit_factor) if profit_factor != float("inf") else 999.99,
             "payoff_ratio": float(payoff_ratio) if payoff_ratio != float("inf") else 999.99,
             "avg_trade_duration_hours": float(avg_duration),
             "max_consecutive_wins": max_consecutive_wins,
             "max_consecutive_losses": max_consecutive_losses,
             "largest_win": (
-                Decimal(str(max([t["pnl"] for t in trades]))) if trades else Decimal("0")
+                safe_decimal(max([t["pnl"] for t in trades])) if trades else safe_decimal("0")
             ),
             "largest_loss": (
-                Decimal(str(abs(min([t["pnl"] for t in trades])))) if trades else Decimal("0")
+                safe_decimal(abs(min([t["pnl"] for t in trades]))) if trades else safe_decimal("0")
             ),
         }
 
@@ -320,8 +332,6 @@ class MetricsCalculator:
         max_daily_loss = np.min(returns_array) * initial_capital
 
         # Skewness and Kurtosis
-        from scipy import stats
-
         skewness = stats.skew(returns_array)
         kurtosis = stats.kurtosis(returns_array)
 
@@ -336,9 +346,9 @@ class MetricsCalculator:
             omega_ratio = float("inf") if len(gains) > 0 else 0
 
         return {
-            "var_95": Decimal(str(abs(var_95))),
-            "cvar_95": Decimal(str(abs(cvar_95))),
-            "max_daily_loss": Decimal(str(abs(max_daily_loss))),
+            "var_95": safe_decimal(abs(var_95)),
+            "cvar_95": safe_decimal(abs(cvar_95)),
+            "max_daily_loss": safe_decimal(abs(max_daily_loss)),
             "skewness": float(skewness),
             "kurtosis": float(kurtosis),
             "omega_ratio": float(omega_ratio) if omega_ratio != float("inf") else 999.99,

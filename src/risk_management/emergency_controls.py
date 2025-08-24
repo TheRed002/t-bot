@@ -24,15 +24,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.core.config import Config
+from src.core.config.main import Config
 from src.core.exceptions import EmergencyStopError, ValidationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import CircuitBreakerType, OrderRequest, OrderSide, OrderType, RiskLevel
 
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
 
 # MANDATORY: Import from P-003+
 from src.exchanges.base import BaseExchange
@@ -43,8 +42,6 @@ from src.risk_management.circuit_breakers import CircuitBreakerManager
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
 
 
 class EmergencyState(Enum):
@@ -101,11 +98,12 @@ class EmergencyControls:
             risk_manager: Risk manager for calculations
             circuit_breaker_manager: Circuit breaker manager
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.risk_manager = risk_manager
         self.circuit_breaker_manager = circuit_breaker_manager
         self.error_handler = ErrorHandler(config)
-        self.logger = logger.bind(component="emergency_controls")
+        # Note: logger is a property from BaseComponent, no need to bind
 
         # Emergency state
         self.state = EmergencyState.NORMAL
@@ -166,15 +164,15 @@ class EmergencyControls:
 
         except Exception as e:
             self.logger.error("Failed to activate emergency stop", error=str(e), reason=reason)
-            # Handle error handler call safely (for testing with Mock objects)
+            # Handle error properly with ErrorContext
             try:
-                if hasattr(self.error_handler, "handle_error"):
-                    await self.error_handler.handle_error(
-                        e, "emergency_controls", "activate_emergency_stop"
-                    )
+                error_context = self.error_handler.create_error_context(
+                    error=e, component="emergency_controls", operation="activate_emergency_stop"
+                )
+                await self.error_handler.handle_error(e, error_context)
             except Exception as handler_error:
                 self.logger.error("Error handler failed", error=str(handler_error))
-            raise EmergencyStopError(f"Failed to activate emergency stop: {e!s}")
+            raise EmergencyStopError(f"Failed to activate emergency stop: {e!s}") from e
 
     @time_execution
     async def _execute_emergency_procedures(self) -> None:
@@ -197,12 +195,14 @@ class EmergencyControls:
 
         except Exception as e:
             self.logger.error("Emergency procedures failed", error=str(e))
-            # Handle error handler call safely (for testing with Mock objects)
+            # Handle error properly with ErrorContext
             try:
-                if hasattr(self.error_handler, "handle_error"):
-                    await self.error_handler.handle_error(
-                        e, "emergency_controls", "_execute_emergency_procedures"
-                    )
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="emergency_controls",
+                    operation="_execute_emergency_procedures",
+                )
+                await self.error_handler.handle_error(e, error_context)
             except Exception as handler_error:
                 self.logger.error("Error handler failed", error=str(handler_error))
             raise
@@ -484,12 +484,12 @@ class EmergencyControls:
 
         except Exception as e:
             self.logger.error("Failed to deactivate emergency stop", error=str(e), reason=reason)
-            # Handle error handler call safely (for testing with Mock objects)
+            # Handle error properly with ErrorContext
             try:
-                if hasattr(self.error_handler, "handle_error"):
-                    await self.error_handler.handle_error(
-                        e, "emergency_controls", "deactivate_emergency_stop"
-                    )
+                error_context = self.error_handler.create_error_context(
+                    error=e, component="emergency_controls", operation="deactivate_emergency_stop"
+                )
+                await self.error_handler.handle_error(e, error_context)
             except Exception as handler_error:
                 self.logger.error("Error handler failed", error=str(handler_error))
             raise

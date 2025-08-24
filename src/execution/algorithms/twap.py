@@ -15,26 +15,28 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.config import Config
-from src.core.exceptions import ExecutionError, ValidationError
-from src.core.logging import get_logger
+from src.core.exceptions import ExchangeError, ExecutionError, NetworkError, ValidationError
 
 # MANDATORY: Import from P-001
 from src.core.types import (
     ExecutionAlgorithm,
-    ExecutionInstruction,
     ExecutionResult,
     ExecutionStatus,
     OrderRequest,
     OrderType,
 )
 
+# Import exchange interfaces
+from src.execution.exchange_interface import ExchangeFactoryInterface
+
+# Import internal execution instruction type
+from src.execution.types import ExecutionInstruction
+
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
+from src.utils import log_calls, time_execution
 
 from .base_algorithm import BaseAlgorithm
-
-logger = get_logger(__name__)
 
 
 class TWAPAlgorithm(BaseAlgorithm):
@@ -69,6 +71,11 @@ class TWAPAlgorithm(BaseAlgorithm):
         # Timing controls
         self.slice_interval_buffer = 5  # 5 seconds buffer between slices
         self.market_close_buffer_minutes = 30  # Stop 30 minutes before market close
+
+        # Risk validation configuration
+        self.default_portfolio_value = Decimal(
+            config.execution.get("default_portfolio_value", "100000")
+        )
 
         self.logger.info("TWAP algorithm initialized with default parameters")
 
@@ -114,7 +121,10 @@ class TWAPAlgorithm(BaseAlgorithm):
     @time_execution
     @log_calls
     async def execute(
-        self, instruction: ExecutionInstruction, exchange_factory=None, risk_manager=None
+        self,
+        instruction: ExecutionInstruction,
+        exchange_factory: ExchangeFactoryInterface | None = None,
+        risk_manager=None,
     ) -> ExecutionResult:
         """
         Execute an order using TWAP algorithm.
@@ -156,14 +166,35 @@ class TWAPAlgorithm(BaseAlgorithm):
             if not exchange_factory:
                 raise ExecutionError("Exchange factory is required for TWAP execution")
 
-            # Determine which exchange to use (default to first available)
-            exchange_name = "binance"  # Default exchange
+            # Determine which exchange to use
             if instruction.preferred_exchanges:
                 exchange_name = instruction.preferred_exchanges[0]
+            else:
+                # Get first available exchange from factory
+                available_exchanges = exchange_factory.get_available_exchanges()
+                if not available_exchanges:
+                    raise ExecutionError("No exchanges available")
+                exchange_name = available_exchanges[0]
 
-            exchange = await exchange_factory.get_exchange(exchange_name)
-            if not exchange:
-                raise ExecutionError(f"Failed to get exchange: {exchange_name}")
+            try:
+                exchange = await exchange_factory.get_exchange(exchange_name)
+
+                # Validate exchange instance
+                if not exchange:
+                    raise ExecutionError(f"Exchange factory returned None for {exchange_name}")
+
+                # Type check the exchange
+                if not hasattr(exchange, "place_order") or not hasattr(exchange, "health_check"):
+                    raise ExecutionError(
+                        f"Exchange {exchange_name} does not implement required interface methods"
+                    )
+
+            except ValidationError as e:
+                self.logger.error(f"Exchange not found: {exchange_name}")
+                raise ExecutionError(f"Exchange {exchange_name} not available: {e}")
+            except Exception as e:
+                self.logger.error(f"Failed to get exchange: {e}")
+                raise ExecutionError(f"Failed to access exchange {exchange_name}: {e}")
 
             # Calculate TWAP execution plan
             execution_plan = await self._create_execution_plan(instruction)
@@ -388,7 +419,7 @@ class TWAPAlgorithm(BaseAlgorithm):
 
                 # Validate order with risk manager if provided
                 if risk_manager:
-                    portfolio_value = Decimal("100000")  # Default portfolio value
+                    portfolio_value = self.default_portfolio_value
                     try:
                         is_valid = await risk_manager.validate_order(slice_order, portfolio_value)
                         if not is_valid:
@@ -407,7 +438,36 @@ class TWAPAlgorithm(BaseAlgorithm):
                 try:
                     slice_info["status"] = "executing"
 
-                    order_response = await exchange.place_order(slice_order)
+                    # Place order with error handling
+                    try:
+                        order_response = await exchange.place_order(slice_order)
+
+                        # Validate order response
+                        if not order_response or not hasattr(order_response, "id"):
+                            raise ExecutionError("Invalid order response from exchange")
+
+                    except ExchangeError as e:
+                        self.logger.error(
+                            f"Exchange error placing slice {slice_num}: {e}",
+                            slice_num=slice_num,
+                            symbol=slice_order.symbol,
+                            quantity=float(slice_order.quantity),
+                        )
+                        # Continue with next slice, don't fail entire execution
+                        execution_result.add_fill(
+                            price=slice_order.price or current_market_price,
+                            quantity=Decimal("0"),
+                            timestamp=datetime.now(timezone.utc),
+                            order_id=f"failed_slice_{slice_num}",
+                        )
+                        await asyncio.sleep(self.slice_interval_buffer)
+                        continue
+                    except NetworkError as e:
+                        self.logger.error(
+                            f"Network error placing slice {slice_num}: {e}", slice_num=slice_num
+                        )
+                        # For network errors, might want to retry or abort
+                        raise ExecutionError(f"Network error during TWAP execution: {e}")
 
                     # Update execution result with new child order
                     await self._update_execution_result(
@@ -481,9 +541,11 @@ class TWAPAlgorithm(BaseAlgorithm):
 
                 if total_time_seconds > 0:
                     # Estimate participation rate (simplified)
-                    estimated_market_volume = Decimal("1000000")  # Placeholder
+                    estimated_market_volume = self.config.execution.get(
+                        "default_daily_volume", "1000000"
+                    )
                     execution_result.participation_rate = float(
-                        execution_result.total_filled_quantity / estimated_market_volume
+                        execution_result.total_filled_quantity / Decimal(estimated_market_volume)
                     )
 
                 # Calculate slippage metrics

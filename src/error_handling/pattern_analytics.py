@@ -10,21 +10,28 @@ for error logging and will be used by all subsequent prompts.
 """
 
 import asyncio
-from collections import Counter, defaultdict
+import threading
+from collections import Counter, OrderedDict, defaultdict, deque
+from collections.abc import Sized
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any
-
-from src.core.config import Config
 
 # MANDATORY: Import from P-001 core framework
+# Import ErrorPattern using TYPE_CHECKING to avoid circular dependency
+from typing import TYPE_CHECKING, Any
+
+from src.core.config import Config
 from src.core.logging import get_logger
-from src.core.types import ErrorPattern
+
+if TYPE_CHECKING:
+    from src.error_handling.error_handler import ErrorPattern
 
 # MANDATORY: Import from P-007A utils framework
+# Import security components
+from src.error_handling.security_sanitizer import (
+    SensitivityLevel,
+)
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
 
 
 @dataclass
@@ -41,33 +48,279 @@ class ErrorTrend:
     data_points: list[tuple[datetime, int]] = field(default_factory=list)
 
 
+class OptimizedErrorHistory:
+    """Memory-efficient error history with size limits and automatic cleanup."""
+
+    def __init__(self, max_size: int = 5000, cleanup_interval_minutes: int = 30):
+        self.max_size = max_size
+        self.cleanup_interval_minutes = cleanup_interval_minutes
+        self._history: deque[dict[str, Any]] = deque(maxlen=max_size)
+        self._last_cleanup = datetime.utcnow()
+        self._lock = threading.RLock()
+        self._total_events = 0
+
+    def add_event(self, event: dict[str, Any]) -> None:
+        """Add error event with automatic cleanup."""
+        with self._lock:
+            # Add timestamp if not present
+            if "timestamp" not in event:
+                event["timestamp"] = datetime.now(timezone.utc)
+
+            self._history.append(event)
+            self._total_events += 1
+
+            # Periodic cleanup
+            if self._should_cleanup():
+                self._cleanup_old_events()
+
+    def get_recent_events(self, hours: int) -> list[dict[str, Any]]:
+        """Get events from the last specified hours."""
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        with self._lock:
+            return [event for event in self._history if event["timestamp"] > cutoff]
+
+    def get_all_events(self) -> list[dict[str, Any]]:
+        """Get all events in history."""
+        with self._lock:
+            return list(self._history)
+
+    def _should_cleanup(self) -> bool:
+        """Check if cleanup is needed."""
+        minutes_since_cleanup = (datetime.utcnow() - self._last_cleanup).total_seconds() / 60
+        return minutes_since_cleanup >= self.cleanup_interval_minutes
+
+    def _cleanup_old_events(self) -> None:
+        """Remove events older than 48 hours."""
+        cutoff = datetime.utcnow() - timedelta(hours=48)
+        with self._lock:
+            # Since we're using deque, we can only remove from left
+            # This is acceptable since we want to remove oldest events
+            original_size = len(self._history)
+
+            # Convert to list, filter, and recreate deque
+            filtered_events = [event for event in self._history if event["timestamp"] > cutoff]
+
+            self._history.clear()
+            self._history.extend(filtered_events)
+
+            removed_count = original_size - len(self._history)
+            if removed_count > 0:
+                # Update logger reference from parent class
+                pass  # Will be logged by parent
+
+            self._last_cleanup = datetime.utcnow()
+
+    def size(self) -> int:
+        """Get current history size."""
+        return len(self._history)
+
+    def total_events(self) -> int:
+        """Get total events processed."""
+        return self._total_events
+
+    def __iter__(self):
+        """Make the history iterable."""
+        with self._lock:
+            return iter(list(self._history))
+
+    def __len__(self):
+        """Get current history size."""
+        return len(self._history)
+
+
+class OptimizedPatternCache(Sized):
+    """LRU cache for error patterns with TTL and memory limits."""
+
+    def __init__(self, max_patterns: int = 1000, ttl_hours: int = 48):
+        self.max_patterns = max_patterns
+        self.ttl_hours = ttl_hours
+        self._patterns: OrderedDict[str, ErrorPattern] = OrderedDict()
+        self._lock = threading.RLock()
+
+    def add_pattern(self, pattern: "ErrorPattern") -> None:
+        """Add or update pattern."""
+        with self._lock:
+            # Remove expired patterns
+            self._cleanup_expired()
+
+            # Remove LRU patterns if at capacity
+            while len(self._patterns) >= self.max_patterns:
+                self._patterns.popitem(last=False)
+
+            # Add/update pattern
+            self._patterns[pattern.pattern_id] = pattern
+            self._patterns.move_to_end(pattern.pattern_id)
+
+    def get_pattern(self, pattern_id: str) -> "ErrorPattern | None":
+        """Get pattern and mark as recently used."""
+        with self._lock:
+            if pattern_id not in self._patterns:
+                return None
+
+            pattern = self._patterns[pattern_id]
+            # Check expiration
+            age_hours = (datetime.now(timezone.utc) - pattern.first_detected).total_seconds() / 3600
+            if age_hours > self.ttl_hours:
+                del self._patterns[pattern_id]
+                return None
+
+            # Mark as recently used
+            self._patterns.move_to_end(pattern_id)
+            return pattern
+
+    def get_all_patterns(self) -> dict[str, "ErrorPattern"]:
+        """Get all active patterns."""
+        with self._lock:
+            self._cleanup_expired()
+            return dict(self._patterns)
+
+    def _cleanup_expired(self) -> None:
+        """Remove expired patterns."""
+        current_time = datetime.now(timezone.utc)
+        expired_keys = []
+
+        for pattern_id, pattern in self._patterns.items():
+            age_hours = (current_time - pattern.first_detected).total_seconds() / 3600
+            if age_hours > self.ttl_hours:
+                expired_keys.append(pattern_id)
+
+        for key in expired_keys:
+            del self._patterns[key]
+
+    def size(self) -> int:
+        """Get current pattern count."""
+        return len(self._patterns)
+
+    def __len__(self) -> int:
+        """Get current pattern count for Sized protocol."""
+        return len(self._patterns)
+
+    def values(self) -> list["ErrorPattern"]:
+        """Get all pattern values."""
+        with self._lock:
+            return list(self._patterns.values())
+
+    def __setitem__(self, key: str, pattern: "ErrorPattern") -> None:
+        """Support dictionary-style assignment."""
+        self.add_pattern(pattern)
+
+    def __getitem__(self, key: str) -> "ErrorPattern":
+        """Support dictionary-style access."""
+        pattern = self.get_pattern(key)
+        if pattern is None:
+            raise KeyError(key)
+        return pattern
+
+    def __contains__(self, key: str) -> bool:
+        """Support 'in' operator."""
+        return self.get_pattern(key) is not None
+
+
 class ErrorPatternAnalytics:
-    """Analyzes error patterns for predictive detection and root cause analysis."""
+    """Optimized error pattern analyzer with memory-efficient data structures."""
 
     def __init__(self, config: Config):
         self.config = config
-        self.error_analytics_config = config.error_handling
-        self.pattern_detection = self.error_analytics_config.pattern_detection_enabled
-        self.correlation_analysis = self.error_analytics_config.correlation_analysis_enabled
-        self.predictive_alerts = self.error_analytics_config.predictive_alerts_enabled
+        self.logger = get_logger(self.__class__.__module__)
 
-        # Error tracking
-        self.error_history: list[dict[str, Any]] = []
-        self.detected_patterns: dict[str, ErrorPattern] = {}
-        self.error_trends: dict[str, ErrorTrend] = {}
-        self.correlation_matrix: dict[str, dict[str, float]] = {}
+        # Handle missing error_handling config gracefully
+        self.error_analytics_config = getattr(config, "error_handling", None)
+        if self.error_analytics_config:
+            self.pattern_detection = getattr(
+                self.error_analytics_config, "pattern_detection_enabled", True
+            )
+            self.correlation_analysis = getattr(
+                self.error_analytics_config, "correlation_analysis_enabled", True
+            )
+            self.predictive_alerts = getattr(
+                self.error_analytics_config, "predictive_alerts_enabled", True
+            )
+        else:
+            # Default values when error_handling config is not available
+            self.pattern_detection = True
+            self.correlation_analysis = True
+            self.predictive_alerts = True
+
+        # Optimized error tracking with memory limits
+        self.error_history = OptimizedErrorHistory(max_size=5000, cleanup_interval_minutes=30)
+        self.detected_patterns = OptimizedPatternCache(max_patterns=1000, ttl_hours=48)
+
+        # Limited-size data structures
+        self.error_trends: OrderedDict[str, ErrorTrend] = OrderedDict()
+        self.correlation_matrix: dict[str, float] = {}  # Flattened for efficiency
+
+        # Performance tracking
+        self._analytics_stats: dict[str, int | datetime] = {
+            "total_events_processed": 0,
+            "patterns_detected": 0,
+            "correlations_found": 0,
+            "last_analytics_run": datetime.utcnow(),
+        }
 
         # Analytics settings
         self.frequency_threshold = 5  # errors per hour to trigger pattern detection
         self.correlation_threshold = 0.7  # minimum correlation coefficient
         self.trend_window_hours = 24  # hours to analyze for trends
-        # minimum confidence for pattern detection
         self.pattern_confidence_threshold = 0.8
         self._pattern_analysis_task: asyncio.Task | None = None
 
+        # Memory management
+        self.max_trends = 500
+        self.max_correlations = 1000
+
+        # Cleanup task - will be started when needed
+        self._cleanup_task: asyncio.Task | None = None
+        # Don't start cleanup task immediately - start it when first pattern is added
+
+    def _start_cleanup_task(self) -> None:
+        """Start periodic cleanup task."""
+        try:
+            if self._cleanup_task is None or self._cleanup_task.done():
+                self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+        except RuntimeError:
+            # No event loop running, cleanup task will be started on first use
+            pass
+
+    async def _periodic_cleanup(self) -> None:
+        """Periodic cleanup of analytics data."""
+        while True:
+            try:
+                await asyncio.sleep(1800)  # Cleanup every 30 minutes
+
+                # Cleanup trends
+                if len(self.error_trends) > self.max_trends:
+                    # Remove oldest trends
+                    items_to_remove = len(self.error_trends) - self.max_trends
+                    for _ in range(items_to_remove):
+                        self.error_trends.popitem(last=False)
+
+                # Cleanup correlations
+                if len(self.correlation_matrix) > self.max_correlations:
+                    # Remove lowest correlations
+                    sorted_corrs = sorted(self.correlation_matrix.items(), key=lambda x: x[1])
+                    items_to_remove = len(self.correlation_matrix) - self.max_correlations
+                    for key, _ in sorted_corrs[:items_to_remove]:
+                        del self.correlation_matrix[key]
+
+                # Log statistics
+                self.logger.info(
+                    "Pattern analytics cleanup completed",
+                    history_size=self.error_history.size(),
+                    patterns_count=self.detected_patterns.size(),
+                    trends_count=len(self.error_trends),
+                    correlations_count=len(self.correlation_matrix),
+                    total_events=self.error_history.total_events(),
+                )
+
+            except Exception as e:
+                self.logger.error("Error in pattern analytics cleanup", error=str(e))
+                await asyncio.sleep(1800)
+
     @time_execution
-    def add_error_event(self, error_context: dict[str, Any]):
+    def add_error_event(self, error_context: dict[str, Any]) -> None:
         """Add an error event to the analytics system."""
+        # Start cleanup task if not already running
+        self._start_cleanup_task()
 
         error_event = {
             "timestamp": datetime.now(timezone.utc),
@@ -79,14 +332,15 @@ class ErrorPatternAnalytics:
             "error_id": error_context.get("error_id", "unknown"),
         }
 
-        self.error_history.append(error_event)
+        # Add to optimized history
+        self.error_history.add_event(error_event)
+        current_count = self._analytics_stats["total_events_processed"]
+        if isinstance(current_count, int):
+            self._analytics_stats["total_events_processed"] = current_count + 1
 
-        # Keep only last 10000 error events
-        if len(self.error_history) > 10000:
-            self.error_history = self.error_history[-10000:]
-
-        # Trigger pattern analysis
-        self._pattern_analysis_task = asyncio.create_task(self._analyze_patterns())
+        # Trigger pattern analysis (non-blocking)
+        if self._pattern_analysis_task is None or self._pattern_analysis_task.done():
+            self._pattern_analysis_task = asyncio.create_task(self._analyze_patterns())
 
     @time_execution
     async def _analyze_patterns(self):
@@ -109,7 +363,7 @@ class ErrorPatternAnalytics:
                 await self._predictive_analysis()
 
         except Exception as e:
-            logger.error("Error pattern analysis failed", error=str(e))
+            self.logger.error("Error pattern analysis failed", error=str(e))
 
     async def _analyze_frequency_patterns(self):
         """Analyze error frequency patterns."""
@@ -131,6 +385,9 @@ class ErrorPatternAnalytics:
 
                     if pattern_id not in self.detected_patterns:
                         # New pattern detected
+                        # Import locally to avoid circular dependency
+                        from src.error_handling.error_handler import ErrorPattern
+
                         pattern = ErrorPattern(
                             pattern_id=pattern_id,
                             pattern_type="frequency",
@@ -148,7 +405,7 @@ class ErrorPatternAnalytics:
 
                         self.detected_patterns[pattern_id] = pattern
 
-                        logger.warning(
+                        self.logger.warning(
                             "Error pattern detected",
                             pattern_id=pattern_id,
                             frequency=count,
@@ -190,7 +447,7 @@ class ErrorPatternAnalytics:
                         correlation_key = f"{error_type1}:{error_type2}"
                         self.correlation_matrix[correlation_key] = correlation
 
-                        logger.info(
+                        self.logger.info(
                             "Error correlation detected",
                             error_type1=error_type1,
                             error_type2=error_type2,
@@ -212,7 +469,7 @@ class ErrorPatternAnalytics:
                     trend_key = f"{component}:{error_type}:trend"
                     self.error_trends[trend_key] = trend
 
-                    logger.info(
+                    self.logger.info(
                         "Error trend detected",
                         component=component,
                         error_type=error_type,
@@ -236,7 +493,7 @@ class ErrorPatternAnalytics:
                     prediction = await self._predict_issues(pattern)
 
                     if prediction:
-                        logger.warning(
+                        self.logger.warning(
                             "Predictive alert",
                             pattern_id=pattern.pattern_id,
                             prediction=prediction,
@@ -248,9 +505,7 @@ class ErrorPatternAnalytics:
 
     def _get_recent_errors(self, hours: int) -> list[dict[str, Any]]:
         """Get errors from the last specified hours."""
-
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        return [error for error in self.error_history if error["timestamp"] > cutoff]
+        return self.error_history.get_recent_events(hours)
 
     def _create_time_windows(
         self, errors: list[dict[str, Any]], window_minutes: int
@@ -328,7 +583,7 @@ class ErrorPatternAnalytics:
             return None
 
         # Group by hour
-        hourly_counts = defaultdict(int)
+        hourly_counts: dict[datetime, int] = defaultdict(int)
         for error in component_errors:
             hour = error["timestamp"].replace(minute=0, second=0, microsecond=0)
             hourly_counts[hour] += 1
@@ -403,7 +658,7 @@ class ErrorPatternAnalytics:
         else:
             return "low"
 
-    async def _predict_issues(self, pattern: ErrorPattern) -> str | None:
+    async def _predict_issues(self, pattern: "ErrorPattern") -> str | None:
         """Predict potential issues based on error pattern."""
 
         # Simple prediction logic based on pattern characteristics
@@ -416,7 +671,7 @@ class ErrorPatternAnalytics:
         else:
             return None
 
-    async def _trigger_pattern_alert(self, pattern: ErrorPattern):
+    async def _trigger_pattern_alert(self, pattern: "ErrorPattern") -> None:
         """Trigger alert for detected pattern."""
 
         alert_message = {
@@ -432,12 +687,12 @@ class ErrorPatternAnalytics:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        logger.warning("Error pattern alert", alert_data=alert_message)
+        self.logger.warning("Error pattern alert", alert_data=alert_message)
 
         # TODO: Send alert to notification system
         # This will be implemented in P-031 (Alerting and Notification System)
 
-    async def _trigger_predictive_alert(self, pattern: ErrorPattern, prediction: str):
+    async def _trigger_predictive_alert(self, pattern: "ErrorPattern", prediction: str) -> None:
         """Trigger predictive alert."""
 
         alert_message = {
@@ -450,7 +705,7 @@ class ErrorPatternAnalytics:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        logger.warning("Predictive alert", alert_data=alert_message)
+        self.logger.warning("Predictive alert", alert_data=alert_message)
 
         # TODO: Send alert to notification system
         # This will be implemented in P-031 (Alerting and Notification System)
@@ -514,3 +769,21 @@ class ErrorPatternAnalytics:
                 if (datetime.now(timezone.utc) - t.end_time).total_seconds() < 3600
             ],
         }
+
+    def _get_sensitivity_level(self, component: str, severity: str) -> SensitivityLevel:
+        """Determine sensitivity level for error analytics data."""
+        # Financial/trading components always get high sensitivity
+        financial_components = ["trading", "exchange", "wallet", "payment", "order", "position"]
+
+        if any(keyword in component.lower() for keyword in financial_components):
+            return SensitivityLevel.CRITICAL
+
+        # Map severity to sensitivity level
+        severity_mapping = {
+            "critical": SensitivityLevel.CRITICAL,
+            "high": SensitivityLevel.HIGH,
+            "medium": SensitivityLevel.MEDIUM,
+            "low": SensitivityLevel.LOW,
+        }
+
+        return severity_mapping.get(severity.lower(), SensitivityLevel.MEDIUM)

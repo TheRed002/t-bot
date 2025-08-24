@@ -13,8 +13,8 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.exceptions import RiskManagementError
-from src.core.logging import get_logger
 
+# Logger is provided by BaseStrategy (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderSide, OrderType, Position
 
@@ -22,8 +22,6 @@ from src.core.types import OrderRequest, OrderSide, OrderType, Position
 from src.utils.decorators import time_execution
 
 # MANDATORY: Import from P-008+
-
-logger = get_logger(__name__)
 
 
 class InventoryManager:
@@ -74,7 +72,7 @@ class InventoryManager:
         self.total_rebalance_cost = Decimal("0")
         self.total_emergency_cost = Decimal("0")
 
-        logger.info(
+        self.logger.info(
             "Inventory Manager initialized",
             target_inventory=float(self.target_inventory),
             max_inventory=float(self.max_inventory),
@@ -98,7 +96,7 @@ class InventoryManager:
             else:
                 self.inventory_skew = 0.0
 
-            logger.debug(
+            self.logger.debug(
                 "Inventory updated",
                 current_inventory=float(self.current_inventory),
                 inventory_skew=self.inventory_skew,
@@ -106,7 +104,7 @@ class InventoryManager:
             )
 
         except Exception as e:
-            logger.error("Inventory update failed", error=str(e))
+            self.logger.error("Inventory update failed", error=str(e))
             raise RiskManagementError(f"Inventory update failed: {e!s}")
 
     @time_execution
@@ -123,7 +121,7 @@ class InventoryManager:
             threshold = self.max_inventory * Decimal(str(self.rebalance_threshold))
 
             if inventory_deviation >= threshold:
-                logger.info(
+                self.logger.info(
                     "Inventory rebalancing needed",
                     current_inventory=float(self.current_inventory),
                     target_inventory=float(self.target_inventory),
@@ -134,7 +132,7 @@ class InventoryManager:
 
             # Check if we've exceeded max inventory
             if abs(self.current_inventory) > self.max_inventory:
-                logger.warning(
+                self.logger.warning(
                     "Inventory exceeds maximum limit",
                     current_inventory=float(self.current_inventory),
                     max_inventory=float(self.max_inventory),
@@ -144,7 +142,7 @@ class InventoryManager:
             # Check time-based rebalancing
             time_since_rebalance = datetime.now() - self.last_rebalance
             if time_since_rebalance > timedelta(hours=self.rebalance_frequency_hours):
-                logger.info(
+                self.logger.info(
                     "Time-based rebalancing triggered",
                     hours_since_rebalance=time_since_rebalance.total_seconds() / 3600,
                 )
@@ -153,7 +151,7 @@ class InventoryManager:
             return False
 
         except Exception as e:
-            logger.error("Rebalancing check failed", error=str(e))
+            self.logger.error("Rebalancing check failed", error=str(e))
             return False
 
     @time_execution
@@ -181,7 +179,9 @@ class InventoryManager:
                     required_change = -self.max_rebalance_size
 
             if abs(required_change) < Decimal("0.001"):  # Minimum change threshold
-                logger.debug("Rebalancing change too small", required_change=float(required_change))
+                self.logger.debug(
+                    "Rebalancing change too small", required_change=float(required_change)
+                )
                 return orders
 
             # Create rebalancing order
@@ -197,7 +197,7 @@ class InventoryManager:
                 )
                 orders.append(order)
 
-                logger.info(
+                self.logger.info(
                     "Created rebalancing buy order",
                     quantity=float(abs(required_change)),
                     current_inventory=float(self.current_inventory),
@@ -216,7 +216,7 @@ class InventoryManager:
                 )
                 orders.append(order)
 
-                logger.info(
+                self.logger.info(
                     "Created rebalancing sell order",
                     quantity=float(abs(required_change)),
                     current_inventory=float(self.current_inventory),
@@ -226,7 +226,7 @@ class InventoryManager:
             return orders
 
         except Exception as e:
-            logger.error("Rebalancing order calculation failed", error=str(e))
+            self.logger.error("Rebalancing order calculation failed", error=str(e))
             return []
 
     @time_execution
@@ -245,7 +245,7 @@ class InventoryManager:
             emergency_limit = self.max_inventory * Decimal(str(self.emergency_threshold))
 
             if abs(self.current_inventory) > emergency_limit:
-                logger.warning(
+                self.logger.warning(
                     "Emergency liquidation threshold exceeded",
                     current_inventory=float(self.current_inventory),
                     emergency_limit=float(emergency_limit),
@@ -258,7 +258,7 @@ class InventoryManager:
             return False
 
         except Exception as e:
-            logger.error("Emergency liquidation check failed", error=str(e))
+            self.logger.error("Emergency liquidation check failed", error=str(e))
             return False
 
     @time_execution
@@ -287,7 +287,7 @@ class InventoryManager:
                 )
                 orders.append(order)
 
-                logger.warning(
+                self.logger.warning(
                     "Created emergency liquidation sell order",
                     quantity=float(self.current_inventory),
                     current_inventory=float(self.current_inventory),
@@ -305,7 +305,7 @@ class InventoryManager:
                 )
                 orders.append(order)
 
-                logger.warning(
+                self.logger.warning(
                     "Created emergency liquidation buy order",
                     quantity=float(abs(self.current_inventory)),
                     current_inventory=float(self.current_inventory),
@@ -314,7 +314,7 @@ class InventoryManager:
             return orders
 
         except Exception as e:
-            logger.error("Emergency order calculation failed", error=str(e))
+            self.logger.error("Emergency order calculation failed", error=str(e))
             return []
 
     @time_execution
@@ -339,7 +339,7 @@ class InventoryManager:
             min_spread = Decimal("0.0001")  # 0.01%
             adjusted_spread = max(adjusted_spread, min_spread)
 
-            logger.debug(
+            self.logger.debug(
                 "Spread adjustment calculated",
                 base_spread=float(base_spread),
                 inventory_skew=self.inventory_skew,
@@ -350,7 +350,7 @@ class InventoryManager:
             return adjusted_spread
 
         except Exception as e:
-            logger.error("Spread adjustment calculation failed", error=str(e))
+            self.logger.error("Spread adjustment calculation failed", error=str(e))
             return base_spread
 
     @time_execution
@@ -375,7 +375,7 @@ class InventoryManager:
             min_size = base_size * Decimal("0.1")  # 10% of base size
             adjusted_size = max(adjusted_size, min_size)
 
-            logger.debug(
+            self.logger.debug(
                 "Size adjustment calculated",
                 base_size=float(base_size),
                 inventory_skew=self.inventory_skew,
@@ -386,7 +386,7 @@ class InventoryManager:
             return adjusted_size
 
         except Exception as e:
-            logger.error("Size adjustment calculation failed", error=str(e))
+            self.logger.error("Size adjustment calculation failed", error=str(e))
             return base_size
 
     @time_execution
@@ -402,7 +402,7 @@ class InventoryManager:
             self.rebalance_count += 1
             self.last_rebalance = datetime.now()
 
-            logger.info(
+            self.logger.info(
                 "Rebalancing recorded",
                 cost=float(cost),
                 total_cost=float(self.total_rebalance_cost),
@@ -410,7 +410,7 @@ class InventoryManager:
             )
 
         except Exception as e:
-            logger.error("Rebalancing record failed", error=str(e))
+            self.logger.error("Rebalancing record failed", error=str(e))
 
     @time_execution
     async def record_emergency(self, cost: Decimal) -> None:
@@ -424,7 +424,7 @@ class InventoryManager:
             self.total_emergency_cost += cost
             self.emergency_count += 1
 
-            logger.warning(
+            self.logger.warning(
                 "Emergency liquidation recorded",
                 cost=float(cost),
                 total_cost=float(self.total_emergency_cost),
@@ -432,7 +432,7 @@ class InventoryManager:
             )
 
         except Exception as e:
-            logger.error("Emergency liquidation record failed", error=str(e))
+            self.logger.error("Emergency liquidation record failed", error=str(e))
 
     def get_inventory_summary(self) -> dict[str, Any]:
         """
@@ -459,7 +459,7 @@ class InventoryManager:
             }
 
         except Exception as e:
-            logger.error("Inventory summary generation failed", error=str(e))
+            self.logger.error("Inventory summary generation failed", error=str(e))
             return {}
 
     @time_execution
@@ -476,7 +476,7 @@ class InventoryManager:
         try:
             # Check against max inventory
             if abs(new_position.quantity) > self.max_inventory:
-                logger.warning(
+                self.logger.warning(
                     "Position violates max inventory limit",
                     position_quantity=float(new_position.quantity),
                     max_inventory=float(self.max_inventory),
@@ -485,7 +485,7 @@ class InventoryManager:
 
             # Check against min inventory
             if new_position.quantity < self.min_inventory:
-                logger.warning(
+                self.logger.warning(
                     "Position violates min inventory limit",
                     position_quantity=float(new_position.quantity),
                     min_inventory=float(self.min_inventory),
@@ -495,5 +495,5 @@ class InventoryManager:
             return True
 
         except Exception as e:
-            logger.error("Inventory limit validation failed", error=str(e))
+            self.logger.error("Inventory limit validation failed", error=str(e))
             return False

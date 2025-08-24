@@ -10,13 +10,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.core.logging import get_logger
+from src.core.base.component import BaseComponent
 from src.utils.decorators import time_execution
 
-logger = get_logger(__name__)
 
-
-class PerformanceAttributor:
+class PerformanceAttributor(BaseComponent):
     """
     Analyzes and attributes performance to various factors.
 
@@ -27,9 +25,16 @@ class PerformanceAttributor:
     - Cost analysis
     """
 
-    def __init__(self):
+    def __init__(self, config: Any = None):
         """Initialize performance attributor."""
-        logger.info("PerformanceAttributor initialized")
+        # Convert config to dict if needed
+        config_dict = None
+        if config:
+            config_dict = config.dict() if hasattr(config, "dict") else {}
+
+        super().__init__(name="PerformanceAttributor", config=config_dict)
+        self.config = config
+        self.logger.info("PerformanceAttributor initialized")
 
     @time_execution
     def attribute_returns(
@@ -52,7 +57,7 @@ class PerformanceAttributor:
         if not trades:
             return self._empty_attribution()
 
-        logger.info("Starting return attribution", num_trades=len(trades))
+        self.logger.info("Starting return attribution", num_trades=len(trades))
 
         # Group trades by symbol
         symbol_trades = self._group_trades_by_symbol(trades)
@@ -74,7 +79,7 @@ class PerformanceAttributor:
             ),
         }
 
-        logger.info("Return attribution completed")
+        self.logger.info("Return attribution completed")
         return results
 
     def _empty_attribution(self) -> dict[str, Any]:
@@ -247,8 +252,8 @@ class PerformanceAttributor:
 
         # Estimate factor exposures (simplified)
         # Market factor (beta)
+        market_vals = []
         if market_returns:
-            market_vals = []
             for _symbol, data in market_returns.items():
                 if len(data) > 1:
                     market_vals.extend(data.pct_change().dropna().tolist())
@@ -459,3 +464,45 @@ class PerformanceAttributor:
         report.append("\n" + "=" * 60)
 
         return "\n".join(report)
+
+    async def analyze(
+        self, simulation_result: dict[str, Any], market_data: dict[str, pd.DataFrame]
+    ) -> dict[str, Any]:
+        """
+        Analyze performance attribution for service interface.
+
+        Args:
+            simulation_result: Simulation results with trades and equity curve
+            market_data: Historical market data
+
+        Returns:
+            Dictionary with comprehensive attribution analysis
+        """
+        trades = simulation_result.get("trades", [])
+
+        if not trades:
+            return {
+                "asset_allocation": {},
+                "security_selection": {},
+                "timing_effects": {},
+                "factor_attribution": {},
+                "regime_analysis": {},
+            }
+
+        # Convert market data to the expected format
+        market_returns = {}
+        for symbol, df in market_data.items():
+            if "close" in df.columns:
+                market_returns[symbol] = df["close"].pct_change().dropna()
+
+        # Use existing attribution methods
+        attribution_results = self.attribute_returns(trades, market_returns)
+
+        # Reformat to expected structure
+        return {
+            "asset_allocation": attribution_results.get("symbol_attribution", {}),
+            "security_selection": attribution_results.get("timing_attribution", {}),
+            "timing_effects": attribution_results.get("timing_attribution", {}),
+            "factor_attribution": attribution_results.get("factor_attribution", {}),
+            "regime_analysis": {"summary": attribution_results.get("summary", {})},
+        }

@@ -27,6 +27,7 @@ Dependencies:
 - Base strategy from src/strategies/base.py
 """
 
+import logging
 import random
 import uuid
 from dataclasses import dataclass
@@ -41,13 +42,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.core.exceptions import OptimizationError
-from src.core.logging import get_logger
 from src.core.types import MarketData, Position, Signal, SignalDirection
 from src.strategies.base import BaseStrategy
 from src.strategies.evolutionary.fitness import FitnessEvaluator
 from src.utils.decorators import memory_usage, time_execution
-
-logger = get_logger(__name__)
 
 
 class ActivationType(Enum):
@@ -231,6 +229,9 @@ class NEATGenome:
         self.adjusted_fitness = 0.0
         self.species_id: int | None = None
 
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+
         # Initialize basic topology
         self._initialize_minimal_topology()
 
@@ -331,11 +332,8 @@ class NEATGenome:
             weight=connection.weight,
         )
 
-        logger.debug(
-            "Added node mutation",
-            genome_id=self.genome_id,
-            new_node_id=new_node_id,
-            split_connection=connection.innovation_id,
+        self.logger.debug(
+            f"Added node mutation - genome_id: {self.genome_id}, new_node_id: {new_node_id}, split_connection: {connection.innovation_id}"
         )
 
         return True
@@ -405,12 +403,8 @@ class NEATGenome:
             connection_type=conn_type,
         )
 
-        logger.debug(
-            "Added connection mutation",
-            genome_id=self.genome_id,
-            from_node=from_id,
-            to_node=to_id,
-            connection_type=conn_type.value,
+        self.logger.debug(
+            f"Added connection mutation - genome_id: {self.genome_id}, from_node: {from_id}, to_node: {to_id}, connection_type: {conn_type.value}"
         )
 
         return True
@@ -965,6 +959,9 @@ class SpeciationManager:
         self.species: dict[int, Species] = {}
         self.next_species_id = 0
 
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+
     def speciate_population(self, population: list[NEATGenome]) -> None:
         """Organize population into species based on genetic similarity.
 
@@ -1032,7 +1029,7 @@ class SpeciationManager:
             species_to_remove.remove(best_species.species_id)
 
         for species_id in species_to_remove:
-            logger.info(f"Removing stagnant species {species_id}")
+            self.logger.info(f"Removing stagnant species {species_id}")
             del self.species[species_id]
 
     def _adjust_compatibility_threshold(self) -> None:
@@ -1179,11 +1176,8 @@ class NeuroEvolutionStrategy(BaseStrategy):
         # Initialize population
         self._initialize_population()
 
-        logger.info(
-            "NeuroEvolutionStrategy initialized",
-            population_size=self.neuro_config.population_size,
-            target_species=self.neuro_config.target_species,
-            device=self.neuro_config.device,
+        self.logger.info(
+            f"NeuroEvolutionStrategy initialized - population_size: {self.neuro_config.population_size}, target_species: {self.neuro_config.target_species}, device: {self.neuro_config.device}"
         )
 
     def _initialize_population(self) -> None:
@@ -1250,7 +1244,7 @@ class NeuroEvolutionStrategy(BaseStrategy):
             return [signal]
 
         except Exception as e:
-            logger.error("Signal generation failed in neuroevolution", error=str(e))
+            self.logger.error(f"Signal generation failed in neuroevolution: {e!s}")
             return []
 
     async def _maybe_adapt(self) -> None:
@@ -1306,11 +1300,11 @@ class NeuroEvolutionStrategy(BaseStrategy):
                 )
 
                 if recent_avg < older_avg * 0.9:  # 10% decline
-                    logger.info("Performance decline detected, triggering micro-evolution")
+                    self.logger.info("Performance decline detected, triggering micro-evolution")
                     await self._micro_evolution()
 
         except Exception as e:
-            logger.error("Network adaptation failed", error=str(e))
+            self.logger.error(f"Network adaptation failed: {e!s}")
 
     async def _micro_evolution(self) -> None:
         """Perform micro-evolution to adapt to changing conditions."""
@@ -1343,7 +1337,7 @@ class NeuroEvolutionStrategy(BaseStrategy):
         if best_variation.fitness > self.best_genome.fitness:
             self.best_genome = best_variation
             self._update_best_network()
-            logger.info("Adopted new best genome from micro-evolution")
+            self.logger.info("Adopted new best genome from micro-evolution")
 
     async def evolve_population(self, fitness_evaluator: FitnessEvaluator) -> None:
         """Evolve the population for one generation.
@@ -1352,7 +1346,7 @@ class NeuroEvolutionStrategy(BaseStrategy):
             fitness_evaluator: Fitness evaluation function
         """
         try:
-            logger.info(f"Starting evolution generation {self.generation + 1}")
+            self.logger.info(f"Starting evolution generation {self.generation + 1}")
 
             # Evaluate population fitness (this would normally use backtesting)
             # For now, assign random fitness values
@@ -1413,15 +1407,12 @@ class NeuroEvolutionStrategy(BaseStrategy):
             # Record evolution statistics
             self._record_generation_stats()
 
-            logger.info(
-                f"Generation {self.generation} completed",
-                best_fitness=self.best_genome.fitness if self.best_genome else 0,
-                species_count=len(self.speciation_manager.species),
-                population_size=len(self.population),
+            self.logger.info(
+                f"Generation {self.generation} completed - best_fitness: {self.best_genome.fitness if self.best_genome else 0}, species_count: {len(self.speciation_manager.species)}, population_size: {len(self.population)}"
             )
 
         except Exception as e:
-            logger.error("Population evolution failed", error=str(e))
+            self.logger.error(f"Population evolution failed: {e!s}")
             raise OptimizationError(f"Evolution failed: {e!s}")
 
     def _create_offspring(self, species: Species, parents: list[NEATGenome]) -> NEATGenome:
@@ -1574,7 +1565,7 @@ class NeuroEvolutionStrategy(BaseStrategy):
                     return exit_signal.confidence > 0.7
 
             except Exception as e:
-                logger.error("Neural network exit decision failed", error=str(e))
+                self.logger.error(f"Neural network exit decision failed: {e!s}")
 
         return False
 
@@ -1682,10 +1673,10 @@ class NeuroEvolutionStrategy(BaseStrategy):
             with open(filepath, "wb") as f:
                 pickle.dump(save_data, f)
 
-            logger.info(f"Population saved to {filepath}")
+            self.logger.info(f"Population saved to {filepath}")
 
         except Exception as e:
-            logger.error(f"Failed to save population: {e!s}")
+            self.logger.error(f"Failed to save population: {e!s}")
             raise
 
     async def load_population(self, filepath: str) -> None:
@@ -1712,10 +1703,10 @@ class NeuroEvolutionStrategy(BaseStrategy):
             # Re-speciate population
             self.speciation_manager.speciate_population(self.population)
 
-            logger.info(f"Population loaded from {filepath}")
+            self.logger.info(f"Population loaded from {filepath}")
 
         except Exception as e:
-            logger.error(f"Failed to load population: {e!s}")
+            self.logger.error(f"Failed to load population: {e!s}")
             raise
 
 

@@ -12,54 +12,40 @@ from .connection import get_async_session, get_sync_session
 
 # Expose wrapper with a consistent name
 from .influxdb_client import InfluxDBClientWrapper as InfluxDBClient
-from .models import (
-    Alert,
-    AuditLog,
-    BalanceSnapshot,
-    Base,
-    BotInstance,
-    CapitalAllocationDB,
-    CurrencyExposureDB,
-    DataPipelineRecord,
-    DataQualityRecord,
-    ExchangeAllocationDB,
-    FeatureRecord,
-    FundFlowDB,
-    MarketDataRecord,
-    MLModel,
-    PerformanceMetrics,
-    Position,
-    StrategyConfig,
-    Trade,
-    User,
-)
+from .models import *  # noqa: F403
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import TimeoutError as SQLTimeoutError
 from .redis_client import RedisClient
 
 __all__ = [
-    "Alert",
-    "AuditLog",
-    "BalanceSnapshot",
     # Models
     "Base",
-    "BotInstance",
-    "CapitalAllocationDB",
-    "CurrencyExposureDB",
-    "DataPipelineRecord",
-    "DataQualityRecord",
-    "ExchangeAllocationDB",
-    "FeatureRecord",
-    "FundFlowDB",
-    "InfluxDBClient",
-    "MLModel",
-    "MarketDataRecord",
-    "PerformanceMetrics",
-    "Position",
+    # Bot models
+    "Bot",
+    "BotLog",
+    # Audit models
+    "CapitalAuditLog",
+    "ExecutionAuditLog",
     # Clients
+    "InfluxDBClient",
+    # Market data models
+    "MarketDataRecord",
+    # Trading models
+    "Order",
+    "OrderFill",
+    "PerformanceAuditLog",
+    "Position",
     "RedisClient",
-    "StrategyConfig",
+    "RiskAuditLog",
+    "Signal",
+    "Strategy",
     "Trade",
-    "User",
-    "get_async_session",
+    # Database exceptions
+    "IntegrityError",
+    "OperationalError",
+    "SQLAlchemyError",
+    "SQLTimeoutError",
     # Connection management
+    "get_async_session",
     "get_sync_session",
 ]

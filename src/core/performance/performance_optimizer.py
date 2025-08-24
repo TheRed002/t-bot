@@ -32,7 +32,8 @@ from src.core.performance.memory_optimizer import MemoryOptimizer
 from src.core.performance.performance_monitor import AlertLevel, PerformanceMonitor
 from src.core.performance.trading_profiler import TradingOperation, TradingOperationOptimizer
 from src.database.service import DatabaseService
-from src.exchanges.connection_pool import ConnectionPoolManager
+
+# from src.exchanges.connection_pool import ConnectionPoolManager  # Removed to fix circular dependency
 
 logger = get_logger(__name__)
 
@@ -62,7 +63,7 @@ class PerformanceOptimizer(BaseComponent):
         self.trading_profiler: TradingOperationOptimizer | None = None
         self.cache_layer: UnifiedCacheLayer | None = None
         self.database_service: DatabaseService | None = None
-        self.connection_pool_manager: ConnectionPoolManager | None = None
+        # self.connection_pool_manager: ConnectionPoolManager | None = None  # Commented to fix circular dependency
 
         # Performance targets
         self.latency_targets = {
@@ -160,7 +161,7 @@ class PerformanceOptimizer(BaseComponent):
 
     async def _initialize_connection_pools(self) -> None:
         """Initialize connection pool management."""
-        self.connection_pool_manager = ConnectionPoolManager(self.config)
+        # self.connection_pool_manager = ConnectionPoolManager(self.config)  # Commented to fix circular dependency
         await self.connection_pool_manager.initialize()
         self.logger.info("Connection pool manager initialized")
 
@@ -272,9 +273,9 @@ class PerformanceOptimizer(BaseComponent):
         try:
             # Performance monitor metrics
             if self.performance_monitor:
-                metrics["performance_monitor"] = (
-                    await self.performance_monitor.get_performance_summary()
-                )
+                metrics[
+                    "performance_monitor"
+                ] = await self.performance_monitor.get_performance_summary()
 
             # Memory optimizer metrics
             if self.memory_optimizer:
@@ -610,9 +611,7 @@ class PerformanceOptimizer(BaseComponent):
                     opp["recommendation"]
                     for opp in latest_opportunities
                     if opp.get("priority") in ["high", "medium"]
-                ][
-                    :5
-                ]  # Top 5 recommendations
+                ][:5]  # Top 5 recommendations
 
         except Exception as e:
             self.logger.error(f"Error generating performance report: {e}")
@@ -635,15 +634,15 @@ class PerformanceOptimizer(BaseComponent):
         try:
             # Force memory optimization
             if self.memory_optimizer:
-                results["memory_optimization"] = (
-                    await self.memory_optimizer.force_memory_optimization()
-                )
+                results[
+                    "memory_optimization"
+                ] = await self.memory_optimizer.force_memory_optimization()
 
             # Force trading optimization analysis
             if self.trading_profiler:
-                results["trading_optimization"] = (
-                    await self.trading_profiler.force_optimization_analysis()
-                )
+                results[
+                    "trading_optimization"
+                ] = await self.trading_profiler.force_optimization_analysis()
 
             # Clear and optimize caches
             if self.cache_layer:

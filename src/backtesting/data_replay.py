@@ -13,12 +13,11 @@ from typing import Any
 
 import pandas as pd
 
+from src.core.base.component import BaseComponent
+from src.core.config import Config
 from src.core.exceptions import DataError
-from src.core.logging import get_logger
-from src.database.manager import DatabaseManager
+from src.error_handling.decorators import with_circuit_breaker, with_error_context
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
 
 
 class ReplayMode(Enum):
@@ -30,7 +29,7 @@ class ReplayMode(Enum):
     SHUFFLE = "shuffle"  # Shuffle historical periods
 
 
-class DataReplayManager:
+class DataReplayManager(BaseComponent):
     """
     Manages historical data replay for backtesting.
 
@@ -43,21 +42,31 @@ class DataReplayManager:
 
     def __init__(
         self,
-        db_manager: DatabaseManager | None = None,
+        config: Config = None,
         cache_size: int = 10000,
     ):
         """
         Initialize data replay manager.
 
         Args:
-            db_manager: Optional database manager for data loading
+            config: Configuration object
             cache_size: Maximum number of records to cache in memory
         """
-        self.db_manager = db_manager
+        # Convert Config to dict if needed
+        config_dict = None
+        if config:
+            config_dict = config.dict() if hasattr(config, "dict") else {}
+
+        super().__init__(name="DataReplayManager", config=config_dict)
+        self.config = config
         self.cache_size = cache_size
 
         # Data storage
         self._data_cache: dict[str, pd.DataFrame] = {}
+        # Use self._config from BaseComponent, with proper fallback
+        self._max_cache_size: int = self._config.get(
+            "max_cache_size", 1000
+        )  # Max dataframes in cache
         self._current_index: dict[str, int] = {}
         self._subscribers: list[Callable] = []
 
@@ -66,9 +75,11 @@ class DataReplayManager:
         self._current_timestamp: datetime | None = None
         self._speed_multiplier = 1.0
 
-        logger.info("DataReplayManager initialized", cache_size=cache_size)
+        self.logger.info("DataReplayManager initialized", cache_size=cache_size)
 
     @time_execution
+    @with_error_context(component="data_loading", operation="replay_load_data")
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
     async def load_data(
         self,
         symbols: list[str],
@@ -87,7 +98,7 @@ class DataReplayManager:
             timeframe: Data timeframe
             source: Data source (database, csv, api)
         """
-        logger.info(
+        self.logger.info(
             "Loading historical data",
             symbols=symbols,
             start=start_date,
@@ -97,11 +108,10 @@ class DataReplayManager:
 
         for symbol in symbols:
             try:
-                if source == "database" and self.db_manager:
-                    data = await self._load_from_database(symbol, start_date, end_date, timeframe)
-                elif source == "csv":
+                if source == "csv":
                     data = await self._load_from_csv(symbol, start_date, end_date)
                 else:
+                    # Generate synthetic data as default
                     data = await self._generate_synthetic_data(
                         symbol, start_date, end_date, timeframe
                     )
@@ -110,44 +120,22 @@ class DataReplayManager:
                 data = self._validate_data(data)
 
                 # Cache data
+                # Implement cache eviction if needed
+                if len(self._data_cache) >= self._max_cache_size:
+                    # Remove oldest entry (simple FIFO eviction)
+                    oldest_symbol = next(iter(self._data_cache))
+                    del self._data_cache[oldest_symbol]
+                    if oldest_symbol in self._current_index:
+                        del self._current_index[oldest_symbol]
+
                 self._data_cache[symbol] = data
                 self._current_index[symbol] = 0
 
-                logger.info(f"Loaded data for {symbol}", records=len(data))
+                self.logger.info(f"Loaded data for {symbol}", records=len(data))
 
             except Exception as e:
-                logger.error(f"Failed to load data for {symbol}", error=str(e))
+                self.logger.error(f"Failed to load data for {symbol}", error=str(e))
                 raise DataError(f"Failed to load data for {symbol}: {e!s}")
-
-    async def _load_from_database(
-        self,
-        symbol: str,
-        start_date: datetime,
-        end_date: datetime,
-        timeframe: str,
-    ) -> pd.DataFrame:
-        """Load data from database."""
-        if not self.db_manager:
-            raise DataError("Database manager not configured")
-
-        query = """
-            SELECT timestamp, open, high, low, close, volume
-            FROM market_data
-            WHERE symbol = $1
-            AND timestamp >= $2
-            AND timestamp <= $3
-            AND timeframe = $4
-            ORDER BY timestamp
-        """
-
-        rows = await self.db_manager.fetch_all(query, symbol, start_date, end_date, timeframe)
-
-        if not rows:
-            raise DataError(f"No data found for {symbol}")
-
-        df = pd.DataFrame(rows)
-        df.set_index("timestamp", inplace=True)
-        return df
 
     async def _load_from_csv(
         self, symbol: str, start_date: datetime, end_date: datetime
@@ -227,7 +215,7 @@ class DataReplayManager:
         after_rows = len(data)
 
         if after_rows < before_rows:
-            logger.warning(f"Removed {before_rows - after_rows} rows with NaN values")
+            self.logger.warning(f"Removed {before_rows - after_rows} rows with NaN values")
 
         # Validate OHLC relationships
         invalid_ohlc = (
@@ -239,14 +227,14 @@ class DataReplayManager:
         )
 
         if invalid_ohlc.any():
-            logger.warning(f"Found {invalid_ohlc.sum()} invalid OHLC relationships")
+            self.logger.warning(f"Found {invalid_ohlc.sum()} invalid OHLC relationships")
             data = data[~invalid_ohlc]
 
         # Validate positive values
         negative_values = (data[required_columns] < 0).any(axis=1)
 
         if negative_values.any():
-            logger.warning(f"Found {negative_values.sum()} rows with negative values")
+            self.logger.warning(f"Found {negative_values.sum()} rows with negative values")
             data = data[~negative_values]
 
         return data
@@ -271,7 +259,7 @@ class DataReplayManager:
         if callback:
             self._subscribers.append(callback)
 
-        logger.info("Starting data replay", mode=mode.value, speed=speed)
+        self.logger.info("Starting data replay", mode=mode.value, speed=speed)
 
         if mode == ReplayMode.SEQUENTIAL:
             await self._replay_sequential()
@@ -427,7 +415,7 @@ class DataReplayManager:
                 else:
                     callback(timestamp, data)
             except Exception as e:
-                logger.error("Subscriber callback failed", error=str(e))
+                self.logger.error("Subscriber callback failed", error=str(e))
 
     def get_current_data(self, symbol: str) -> pd.Series | None:
         """Get current data point for a symbol."""
@@ -466,7 +454,7 @@ class DataReplayManager:
             self._current_index[symbol] = 0
 
         self._current_timestamp = None
-        logger.info("Data replay reset")
+        self.logger.info("Data replay reset")
 
     def get_statistics(self) -> dict[str, Any]:
         """Get data statistics."""

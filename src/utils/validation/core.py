@@ -4,6 +4,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from src.core.exceptions import ValidationError
+
 
 class ValidationFramework:
     """Centralized validation framework to eliminate duplication."""
@@ -20,9 +22,9 @@ class ValidationFramework:
             True if valid
 
         Raises:
-            ValueError: If validation fails
+            ValidationError: If validation fails
         """
-        validators = [
+        validators: list[tuple[str, Callable[[Any], bool], str]] = [
             ("price", lambda x: x > 0, "Price must be positive"),
             ("quantity", lambda x: x > 0, "Quantity must be positive"),
             (
@@ -43,23 +45,23 @@ class ValidationFramework:
         for field in required_fields:
             if field not in order:
                 if field == "type":
-                    raise ValueError("type: Invalid order type")
+                    raise ValidationError("type: Invalid order type")
                 else:
-                    raise ValueError(f"{field} is required")
+                    raise ValidationError(f"{field} is required")
 
         # Check if quantity is provided for all order types
         if "quantity" not in order:
-            raise ValueError("quantity is required")
+            raise ValidationError("quantity is required")
 
         # Check if price is required based on order type
         if order.get("type") in ["LIMIT", "STOP_LIMIT"] and "price" not in order:
-            raise ValueError("price is required for LIMIT orders")
+            raise ValidationError("price is required for LIMIT orders")
 
         # Validate provided fields
         for field, validator_func, error_msg in validators:
             if field in order:
                 if not validator_func(order[field]):
-                    raise ValueError(f"{field}: {error_msg}")
+                    raise ValidationError(f"{field}: {error_msg}")
 
         return True
 
@@ -75,10 +77,10 @@ class ValidationFramework:
             True if valid
 
         Raises:
-            ValueError: If validation fails
+            ValidationError: If validation fails
         """
         if "strategy_type" not in params:
-            raise ValueError("strategy_type is required")
+            raise ValidationError("strategy_type is required")
 
         strategy_type = params["strategy_type"]
 
@@ -86,37 +88,37 @@ class ValidationFramework:
         if "timeframe" in params:
             valid_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
             if params["timeframe"] not in valid_timeframes:
-                raise ValueError(f"Invalid timeframe. Must be one of {valid_timeframes}")
+                raise ValidationError(f"Invalid timeframe. Must be one of {valid_timeframes}")
 
         # Strategy-specific validations
         if strategy_type == "MEAN_REVERSION":
             required = ["window_size", "num_std", "entry_threshold"]
             for field in required:
                 if field not in params:
-                    raise ValueError(f"{field} is required for MEAN_REVERSION strategy")
+                    raise ValidationError(f"{field} is required for MEAN_REVERSION strategy")
 
             if params["window_size"] < 2:
-                raise ValueError("window_size must be at least 2")
+                raise ValidationError("window_size must be at least 2")
             if params["num_std"] <= 0:
-                raise ValueError("num_std must be positive")
+                raise ValidationError("num_std must be positive")
 
         elif strategy_type == "MOMENTUM":
             required = ["lookback_period", "momentum_threshold"]
             for field in required:
                 if field not in params:
-                    raise ValueError(f"{field} is required for MOMENTUM strategy")
+                    raise ValidationError(f"{field} is required for MOMENTUM strategy")
 
             if params["lookback_period"] < 1:
-                raise ValueError("lookback_period must be at least 1")
+                raise ValidationError("lookback_period must be at least 1")
 
         elif strategy_type == "market_making":
             # Validate market making specific parameters
             if "bid_spread" in params and params["bid_spread"] < 0:
-                raise ValueError("bid_spread must be non-negative")
+                raise ValidationError("bid_spread must be non-negative")
             if "ask_spread" in params and params["ask_spread"] < 0:
-                raise ValueError("ask_spread must be non-negative")
+                raise ValidationError("ask_spread must be non-negative")
             if "order_size" in params and params["order_size"] <= 0:
-                raise ValueError("order_size must be positive")
+                raise ValidationError("order_size must be positive")
 
         return True
 
@@ -133,19 +135,19 @@ class ValidationFramework:
             True if valid
 
         Raises:
-            ValueError: If price is invalid
+            ValidationError: If price is invalid
         """
         try:
             price_float = float(price)
         except (TypeError, ValueError) as e:
-            raise ValueError(f"Price must be numeric, got {type(price)}") from e
+            raise ValidationError(f"Price must be numeric, got {type(price)}") from e
 
         if price_float <= 0:
-            raise ValueError("Price must be positive")
+            raise ValidationError("Price must be positive")
         if price_float > max_price:
-            raise ValueError(f"Price {price_float} exceeds maximum {max_price}")
+            raise ValidationError(f"Price {price_float} exceeds maximum {max_price}")
         if price_float == float("inf"):
-            raise ValueError("Price cannot be infinity")
+            raise ValidationError("Price cannot be infinity")
 
         return True
 
@@ -162,19 +164,19 @@ class ValidationFramework:
             True if valid
 
         Raises:
-            ValueError: If quantity is invalid
+            ValidationError: If quantity is invalid
         """
         try:
             qty_float = float(quantity)
         except (TypeError, ValueError) as e:
-            raise ValueError(f"Quantity must be numeric, got {type(quantity)}") from e
+            raise ValidationError(f"Quantity must be numeric, got {type(quantity)}") from e
 
         if qty_float <= 0:
-            raise ValueError("Quantity must be positive")
+            raise ValidationError("Quantity must be positive")
         if qty_float < min_qty:
-            raise ValueError(f"Quantity {qty_float} below minimum {min_qty}")
+            raise ValidationError(f"Quantity {qty_float} below minimum {min_qty}")
         if qty_float == float("inf"):
-            raise ValueError("Quantity cannot be infinity")
+            raise ValidationError("Quantity cannot be infinity")
 
         return True
 
@@ -190,17 +192,17 @@ class ValidationFramework:
             True if valid
 
         Raises:
-            ValueError: If symbol is invalid
+            ValidationError: If symbol is invalid
         """
         if not symbol or not isinstance(symbol, str):
-            raise ValueError("Symbol must be a non-empty string")
+            raise ValidationError("Symbol must be a non-empty string")
 
         # Normalize to uppercase
         symbol_norm = symbol.upper().strip()
 
         # Check format (e.g., BTC/USDT or BTCUSDT)
         if not re.match(r"^[A-Z]+(/|_|-)?[A-Z]+$", symbol_norm):
-            raise ValueError(f"Invalid symbol format: {symbol}")
+            raise ValidationError(f"Invalid symbol format: {symbol}")
 
         return True
 
@@ -216,19 +218,19 @@ class ValidationFramework:
             True if valid
 
         Raises:
-            ValueError: If validation fails
+            ValidationError: If validation fails
         """
         required_fields = ["api_key", "api_secret"]
 
         for field in required_fields:
             if field not in credentials:
-                raise ValueError(f"{field} is required")
+                raise ValidationError(f"{field} is required")
             if not credentials[field] or not isinstance(credentials[field], str):
-                raise ValueError(f"{field} must be a non-empty string")
+                raise ValidationError(f"{field} must be a non-empty string")
 
         # Check for test/production mode
         if "testnet" in credentials and not isinstance(credentials["testnet"], bool):
-            raise ValueError("testnet must be a boolean")
+            raise ValidationError("testnet must be a boolean")
 
         return True
 
@@ -244,27 +246,27 @@ class ValidationFramework:
             True if valid
 
         Raises:
-            ValueError: If validation fails
+            ValidationError: If validation fails
         """
         # Check risk_per_trade specifically
         if "risk_per_trade" in params:
             if params["risk_per_trade"] > 0.1:  # 10% max
-                raise ValueError("Risk per trade must be at most 0.1 (10%)")
+                raise ValidationError("Risk per trade must be at most 0.1 (10%)")
             if params["risk_per_trade"] <= 0:
-                raise ValueError("Risk per trade must be positive")
+                raise ValidationError("Risk per trade must be positive")
 
         # Check other risk parameters
         if "stop_loss" in params:
             if params["stop_loss"] <= 0 or params["stop_loss"] >= 1:
-                raise ValueError("Stop loss must be between 0 and 1")
+                raise ValidationError("Stop loss must be between 0 and 1")
 
         if "take_profit" in params:
             if params["take_profit"] <= 0:
-                raise ValueError("Take profit must be positive")
+                raise ValidationError("Take profit must be positive")
 
         if "max_position_size" in params:
             if params["max_position_size"] <= 0:
-                raise ValueError("Max position size must be positive")
+                raise ValidationError("Max position size must be positive")
 
         return True
 
@@ -280,9 +282,9 @@ class ValidationFramework:
             True if valid
 
         Raises:
-            ValueError: If validation fails
+            ValidationError: If validation fails
         """
-        validators = [
+        validators: list[tuple[str, Callable[[Any], bool], str]] = [
             (
                 "max_position_size",
                 lambda x: 0 < x <= 1,
@@ -305,7 +307,7 @@ class ValidationFramework:
         for field, validator_func, error_msg in validators:
             if field in params:
                 if not validator_func(params[field]):
-                    raise ValueError(f"{field}: {error_msg}")
+                    raise ValidationError(f"{field}: {error_msg}")
 
         return True
 
@@ -321,7 +323,7 @@ class ValidationFramework:
             Normalized timeframe
 
         Raises:
-            ValueError: If timeframe is invalid
+            ValidationError: If timeframe is invalid
         """
         valid_timeframes = {
             "1m": "1m",
@@ -356,12 +358,12 @@ class ValidationFramework:
 
         if timeframe_lower not in valid_timeframes:
             valid_options = list(set(valid_timeframes.values()))
-            raise ValueError(f"Invalid timeframe: {timeframe}. Valid options: {valid_options}")
+            raise ValidationError(f"Invalid timeframe: {timeframe}. Valid options: {valid_options}")
 
         return valid_timeframes[timeframe_lower]
 
     @staticmethod
-    def validate_batch(validations: list[tuple[str, Callable, Any]]) -> dict[str, Any]:
+    def validate_batch(validations: list[tuple[str, Callable[[Any], Any], Any]]) -> dict[str, Any]:
         """
         Run multiple validations and collect results.
 

@@ -21,6 +21,12 @@ from src.core.exceptions import (
     ValidationError,
 )
 from src.core.logging import get_logger
+from src.error_handling import (
+    ErrorContext,
+    ErrorSeverity,
+    get_global_error_handler,
+)
+from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 
 logger = get_logger(__name__)
 
@@ -48,6 +54,20 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.debug = debug
         self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
+
+        # Integrate with global error handler with safe initialization
+        try:
+            self.global_error_handler = get_global_error_handler()
+        except Exception as e:
+            self.logger.warning(f"Global error handler not available: {e}")
+            self.global_error_handler = None
+
+        # Initialize pattern analytics
+        try:
+            self.pattern_analytics = ErrorPatternAnalytics()
+        except Exception as e:
+            self.logger.warning(f"Error pattern analytics not available: {e}")
+            self.pattern_analytics = None
 
         # Error code mappings
         self.exception_mapping = {
@@ -87,8 +107,43 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             return await self._handle_tbot_exception(request, e)
 
         except Exception as e:
-            # Handle unexpected exceptions
-            return await self._handle_unexpected_exception(request, e)
+            # Handle unexpected exceptions through global error handler
+            error_context = ErrorContext(
+                error=e,
+                operation=f"{request.method} {request.url.path}",
+                severity=ErrorSeverity.HIGH,
+                context={
+                    "method": request.method,
+                    "path": str(request.url.path),
+                    "client_ip": request.client.host if request.client else "unknown",
+                },
+            )
+
+            # Handle through global error handler if available
+            handled = False
+            recovery_details = None
+            if self.global_error_handler:
+                try:
+                    handled = await self.global_error_handler.handle_error(error_context)
+                    # Extract recovery details from context if successful
+                    if handled and error_context.details:
+                        recovery_details = {
+                            "method": error_context.details.get("recovery_method"),
+                            "attempts": error_context.recovery_attempts,
+                            "max_attempts": error_context.max_recovery_attempts,
+                        }
+                except Exception as handler_error:
+                    self.logger.error(f"Error handler failed: {handler_error}")
+                    handled = False
+
+            if handled:
+                # If error was handled, return appropriate response with recovery details
+                if recovery_details:
+                    error_context.details["recovery_details"] = recovery_details
+                return await self._handle_recovered_error(request, e, error_context)
+            else:
+                # Otherwise, handle as unexpected exception
+                return await self._handle_unexpected_exception(request, e)
 
     async def _handle_tbot_exception(
         self, request: Request, exception: TradingBotError
@@ -265,6 +320,51 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
 
         self.logger.error("Unexpected server error", **log_data)
 
+    async def _handle_recovered_error(
+        self, request: Request, exception: Exception, error_context: ErrorContext
+    ) -> JSONResponse:
+        """
+        Handle errors that were recovered by the global error handler.
+        
+        Args:
+            request: HTTP request
+            exception: Original exception
+            error_context: Error context with recovery information
+            
+        Returns:
+            JSONResponse: Error response with recovery info
+        """
+        # Log the recovery
+        self.logger.info(
+            "Error recovered by global handler",
+            request_id=self._get_request_id(request),
+            operation=error_context.operation,
+            recovery_method=error_context.details.get("recovery_method", "unknown"),
+        )
+
+        # Create response with recovery information
+        recovery_details = error_context.details.get("recovery_details", {})
+        error_response = {
+            "error": {
+                "type": exception.__class__.__name__,
+                "message": "Operation completed with recovery",
+                "code": getattr(exception, "error_code", None),
+                "timestamp": self._get_current_timestamp(),
+                "request_id": self._get_request_id(request),
+                "recovery": {
+                    "attempted": True,
+                    "success": True,
+                    "method": recovery_details.get("method", error_context.details.get("recovery_method", "unknown")),
+                    "attempts": recovery_details.get("attempts", error_context.recovery_attempts),
+                    "max_attempts": recovery_details.get("max_attempts", error_context.max_recovery_attempts),
+                    "details": error_context.details.get("recovery_message", "Recovery successful"),
+                },
+            }
+        }
+
+        # Return 206 Partial Content to indicate recovery
+        return JSONResponse(status_code=206, content=error_response)
+
     def _get_request_id(self, request: Request) -> str:
         """
         Get or generate request ID.
@@ -305,21 +405,14 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
         Returns:
             dict: Error handling statistics
         """
-        return {
+        stats = {
             "debug_mode": self.debug,
             "exception_mappings": {
                 exc.__name__: status for exc, status in self.exception_mapping.items()
             },
             "handled_exception_types": [
-                "HTTPException",
-                "TradingBotError",
-                "ValidationError",
-                "AuthenticationError",
-                "ExecutionError",
-                "ConfigurationError",
-                "NetworkError",
-                "UnexpectedException",
-            ],
+                exc.__name__ for exc in self.exception_mapping.keys()
+            ] + ["HTTPException", "TradingBotError", "UnexpectedException"],
             "features": [
                 "structured_error_responses",
                 "detailed_logging",
@@ -327,5 +420,26 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 "request_context",
                 "user_context",
                 "sanitized_messages",
+                "global_error_handler_integration",
+                "pattern_analytics",
+                "recovery_handling",
             ],
         }
+
+        # Add global error handler stats if available
+        if self.global_error_handler:
+            try:
+                handler_stats = self.global_error_handler.get_handler_stats()
+                stats["global_handler_stats"] = handler_stats
+            except Exception:
+                stats["global_handler_stats"] = {"status": "unavailable"}
+
+        # Add pattern analytics stats if available
+        if self.pattern_analytics:
+            try:
+                pattern_stats = self.pattern_analytics.get_analytics_stats()
+                stats["pattern_analytics_stats"] = pattern_stats
+            except Exception:
+                stats["pattern_analytics_stats"] = {"status": "unavailable"}
+
+        return stats

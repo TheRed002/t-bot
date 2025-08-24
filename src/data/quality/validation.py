@@ -20,8 +20,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
+from src.base import BaseComponent
 from src.core.config import Config
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import MarketData, Signal, ValidationLevel
@@ -33,9 +33,6 @@ from src.error_handling.recovery_scenarios import DataFeedInterruptionRecovery
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
-
 
 # ValidationLevel and ValidationResult are now imported from core.types
 
@@ -54,7 +51,7 @@ class ValidationIssue:
     metadata: dict[str, Any]
 
 
-class DataValidator:
+class DataValidator(BaseComponent):
     """
     Comprehensive data validation system for market data quality assurance.
 
@@ -71,6 +68,7 @@ class DataValidator:
         """
 
         # Handle both Config object and dict
+        super().__init__()  # Initialize BaseComponent
         if isinstance(config, dict):
             # Create a minimal Config object for testing
             self.config = type("Config", (), config)()
@@ -113,7 +111,7 @@ class DataValidator:
             config, "consistency_threshold", 0.01
         )  # 1% max difference
 
-        logger.info("DataValidator initialized", config=config)
+        self.logger.info("DataValidator initialized", config=config)
 
     @time_execution
     async def validate_market_data(self, data: MarketData) -> tuple[bool, list[ValidationIssue]]:
@@ -173,7 +171,7 @@ class DataValidator:
             is_valid = len(critical_issues) == 0 and len(high_issues) == 0
 
             if issues:
-                logger.warning(
+                self.logger.warning(
                     "Market data validation issues detected",
                     symbol=data.symbol if data and data.symbol else "unknown",
                     issue_count=len(issues),
@@ -181,7 +179,7 @@ class DataValidator:
                     high_count=len(high_issues),
                 )
             else:
-                logger.debug(
+                self.logger.debug(
                     "Market data validation passed", symbol=data.symbol if data else "unknown"
                 )
 
@@ -200,7 +198,7 @@ class DataValidator:
                 )
 
                 # Handle the error through the error handling framework
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
 
             # Add error event to pattern analytics
             if self.pattern_analytics and error_context:
@@ -307,7 +305,7 @@ class DataValidator:
             is_valid = len(critical_issues) == 0 and len(high_issues) == 0
 
             if issues:
-                logger.warning(
+                self.logger.warning(
                     "Signal validation issues detected",
                     symbol=signal.symbol if signal else "unknown",
                     issue_count=len(issues),
@@ -315,7 +313,7 @@ class DataValidator:
                     high_count=len(high_issues),
                 )
             else:
-                logger.debug(
+                self.logger.debug(
                     "Signal validation passed", symbol=signal.symbol if signal else "unknown"
                 )
 
@@ -334,7 +332,7 @@ class DataValidator:
                 )
 
                 # Handle the error through the error handling framework
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
 
             # Add error event to pattern analytics
             if self.pattern_analytics and error_context:
@@ -454,7 +452,7 @@ class DataValidator:
                     details={"validation_stage": "schema_validation", "data_type": "market_data"},
                 )
 
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
@@ -574,7 +572,7 @@ class DataValidator:
                     details={"validation_stage": "range_validation", "data_type": "market_data"},
                 )
 
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
@@ -703,7 +701,7 @@ class DataValidator:
                     },
                 )
 
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
@@ -809,7 +807,7 @@ class DataValidator:
                     details={"validation_stage": "outlier_detection", "data_type": "market_data"},
                 )
 
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
@@ -897,7 +895,7 @@ class DataValidator:
                     },
                 )
 
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
@@ -961,11 +959,11 @@ class DataValidator:
                     details={"operation": "statistics_update", "data_type": "market_data"},
                 )
 
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to update statistics for {data.symbol}: {e!s}")
+            self.logger.error(f"Failed to update statistics for {data.symbol}: {e!s}")
 
     async def _validate_cross_source_consistency(
         self, primary_data: MarketData, secondary_data: MarketData
@@ -1043,9 +1041,9 @@ class DataValidator:
             is_consistent = len(issues) == 0
 
             if is_consistent:
-                logger.debug("Cross-source consistency validated", symbol=primary_data.symbol)
+                self.logger.debug("Cross-source consistency validated", symbol=primary_data.symbol)
             else:
-                logger.warning(
+                self.logger.warning(
                     "Cross-source consistency issues detected",
                     symbol=primary_data.symbol,
                     issue_count=len(issues),
@@ -1070,7 +1068,7 @@ class DataValidator:
                     },
                 )
 
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
@@ -1153,11 +1151,11 @@ class DataValidator:
                     details={"operation": "summary_generation"},
                 )
 
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to generate validation summary: {e!s}")
+            self.logger.error(f"Failed to generate validation summary: {e!s}")
             result = {
                 "error": str(e),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1206,7 +1204,7 @@ class DataValidator:
             self.volume_history.clear()
             self.source_data.clear()
 
-            logger.info("DataValidator cleanup completed")
+            self.logger.info("DataValidator cleanup completed")
 
         except Exception as e:
             # Use ErrorHandler for cleanup errors
@@ -1219,8 +1217,8 @@ class DataValidator:
                     details={"operation": "cleanup"},
                 )
 
-                self.error_handler.handle_error(error_context)
+                await self.error_handler.handle_error(e, error_context)
                 if self.pattern_analytics:
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Error during DataValidator cleanup: {e!s}")
+            self.logger.error(f"Error during DataValidator cleanup: {e!s}")

@@ -14,29 +14,33 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from src.base import BaseComponent
 from src.core.config import Config
-from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
+from src.core.exceptions import ExecutionError, ValidationError
 
 # MANDATORY: Import from P-001
 from src.core.types import (
     ExecutionAlgorithm,
-    ExecutionInstruction,
     ExecutionResult,
     ExecutionStatus,
     OrderResponse,
+    OrderSide,
 )
 
-# MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+# Import adapter for type conversion
+from src.execution.adapters import ExecutionResultAdapter
+
+# Import execution state management
+from src.execution.execution_state import ExecutionState
+
+# Import internal execution instruction type
+from src.execution.types import ExecutionInstruction
 
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
-
-logger = get_logger(__name__)
+from src.utils import log_calls, time_execution
 
 
-class BaseAlgorithm(ABC):
+class BaseAlgorithm(BaseComponent, ABC):
     """
     Abstract base class for all execution algorithms.
 
@@ -58,13 +62,12 @@ class BaseAlgorithm(ABC):
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
-        self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
-        self.error_handler = ErrorHandler(config.error_handling)
 
         # Algorithm state
         self.is_running = False
-        self.current_executions: dict[str, ExecutionResult] = {}
+        self.current_executions: dict[str, ExecutionState] = {}
 
         # Performance tracking
         self.total_executions = 0
@@ -72,6 +75,19 @@ class BaseAlgorithm(ABC):
         self.failed_executions = 0
 
         self.logger.info(f"Initialized {self.__class__.__name__} execution algorithm")
+
+    async def start(self) -> None:
+        """Start the execution algorithm."""
+        self.is_running = True
+        self.logger.info(f"Started {self.__class__.__name__} execution algorithm")
+
+    async def stop(self) -> None:
+        """Stop the execution algorithm."""
+        self.is_running = False
+        # Cancel any running executions
+        for execution_id in list(self.current_executions.keys()):
+            await self.cancel_execution(execution_id)
+        self.logger.info(f"Stopped {self.__class__.__name__} execution algorithm")
 
     @abstractmethod
     async def execute(
@@ -153,13 +169,16 @@ class BaseAlgorithm(ABC):
 
             return True
 
+        except ValidationError:
+            # Re-raise validation errors as-is
+            raise
         except Exception as e:
             self.logger.error(
-                "Instruction validation failed",
+                "Unexpected error during instruction validation",
                 error=str(e),
                 symbol=instruction.order.symbol if instruction.order else None,
             )
-            raise ValidationError(f"Instruction validation failed: {e}")
+            raise ValidationError(f"Instruction validation failed: {e}") from e
 
     @abstractmethod
     async def _validate_algorithm_parameters(self, instruction: ExecutionInstruction) -> None:
@@ -198,7 +217,10 @@ class BaseAlgorithm(ABC):
         Returns:
             ExecutionResult: Execution result or None if not found
         """
-        return self.current_executions.get(execution_id)
+        state = self.current_executions.get(execution_id)
+        if state:
+            return self._state_to_result(state)
+        return None
 
     def _generate_execution_id(self) -> str:
         """
@@ -209,23 +231,24 @@ class BaseAlgorithm(ABC):
         """
         return f"{self.__class__.__name__.lower()}_{uuid.uuid4().hex[:8]}"
 
-    async def _create_execution_result(
+    async def _create_execution_state(
         self, instruction: ExecutionInstruction, execution_id: str | None = None
-    ) -> ExecutionResult:
+    ) -> ExecutionState:
         """
-        Create an initial execution result for tracking.
+        Create an initial execution state for tracking.
 
         Args:
             instruction: Execution instruction
             execution_id: Optional execution ID (generated if not provided)
 
         Returns:
-            ExecutionResult: Initial execution result
+            ExecutionState: Initial execution state
         """
         if not execution_id:
             execution_id = self._generate_execution_id()
 
-        return ExecutionResult(
+        # Create mutable execution state
+        state = ExecutionState(
             execution_id=execution_id,
             original_order=instruction.order,
             algorithm=self.get_algorithm_type(),
@@ -238,126 +261,127 @@ class BaseAlgorithm(ABC):
             },
         )
 
-    async def _update_execution_result(
+        # Store in current executions
+        self.current_executions[execution_id] = state
+
+        return state
+
+    def _state_to_result(self, state: ExecutionState) -> ExecutionResult:
+        """Convert ExecutionState to core ExecutionResult."""
+        return ExecutionResultAdapter.to_core_result(
+            execution_id=state.execution_id,
+            original_order=state.original_order,
+            algorithm=state.algorithm,
+            status=state.status,
+            start_time=state.start_time,
+            child_orders=state.child_orders,
+            total_filled_quantity=state.total_filled_quantity,
+            average_fill_price=state.average_fill_price,
+            total_fees=state.total_fees,
+            end_time=state.end_time,
+            execution_duration=state.execution_duration,
+            error_message=state.error_message,
+            metadata=state.metadata,
+        )
+
+    async def _update_execution_state(
         self,
-        execution_result: ExecutionResult,
+        execution_state: ExecutionState,
         status: ExecutionStatus | None = None,
         child_order: OrderResponse | None = None,
         error_message: str | None = None,
-    ) -> ExecutionResult:
+    ) -> ExecutionState:
         """
-        Update an execution result with new information.
+        Update an execution state with new information.
 
         Args:
-            execution_result: Execution result to update
+            execution_state: Execution state to update
             status: New status (optional)
             child_order: New child order to add (optional)
             error_message: Error message if failed (optional)
 
         Returns:
-            ExecutionResult: Updated execution result
+            ExecutionState: Updated execution state
         """
         if status:
-            execution_result.status = status
+            execution_state.status = status
 
         if child_order:
-            execution_result.child_orders.append(child_order)
-
-            # Update metrics based on fills
-            if child_order.filled_quantity > 0:
-                old_total = execution_result.total_filled_quantity
-                old_avg_price = execution_result.average_fill_price or Decimal("0")
-
-                # Update total filled quantity
-                execution_result.total_filled_quantity += child_order.filled_quantity
-
-                # Update average fill price (volume-weighted)
-                if child_order.price and child_order.filled_quantity > 0:
-                    if old_total > 0 and old_avg_price > 0:
-                        # Weighted average calculation
-                        total_value = (old_total * old_avg_price) + (
-                            child_order.filled_quantity * child_order.price
-                        )
-                        execution_result.average_fill_price = (
-                            total_value / execution_result.total_filled_quantity
-                        )
-                    else:
-                        execution_result.average_fill_price = child_order.price
-
-            # Update trade count
-            execution_result.number_of_trades = len(execution_result.child_orders)
+            execution_state.add_child_order(child_order)
 
         if error_message:
-            execution_result.error_message = error_message
-            execution_result.status = ExecutionStatus.FAILED
+            execution_state.set_failed(error_message, datetime.now(timezone.utc))
 
         # Update timing if completed or failed
         if status in [ExecutionStatus.COMPLETED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED]:
-            end_time = datetime.now(timezone.utc)
-            execution_result.end_time = end_time
-            execution_result.execution_duration = (
-                end_time - execution_result.start_time
-            ).total_seconds()
+            execution_state.set_completed(datetime.now(timezone.utc))
 
-        return execution_result
+        return execution_state
 
     async def _calculate_slippage_metrics(
-        self, execution_result: ExecutionResult, expected_price: Decimal | None = None
+        self, execution_state: ExecutionState, expected_price: Decimal | None = None
     ) -> None:
         """
         Calculate slippage and cost metrics for the execution.
 
         Args:
-            execution_result: Execution result to update
+            execution_state: Execution state to update
             expected_price: Expected execution price for slippage calculation
         """
         try:
-            if (
-                not execution_result.average_fill_price
-                or execution_result.total_filled_quantity <= 0
-            ):
+            if not execution_state.average_fill_price or execution_state.total_filled_quantity <= 0:
                 return
 
             # Set expected price if provided
             if expected_price:
-                execution_result.expected_price = expected_price
+                execution_state.expected_price = expected_price
 
                 # Calculate price slippage (positive = adverse)
-                if execution_result.original_order.side.value == "buy":
+                if execution_state.original_order.side == OrderSide.BUY:
                     # For buy orders, slippage is paying more than expected
-                    execution_result.price_slippage = (
-                        execution_result.average_fill_price - expected_price
+                    execution_state.price_slippage = (
+                        execution_state.average_fill_price - expected_price
                     )
                 else:
                     # For sell orders, slippage is receiving less than expected
-                    execution_result.price_slippage = (
-                        expected_price - execution_result.average_fill_price
+                    execution_state.price_slippage = (
+                        expected_price - execution_state.average_fill_price
                     )
 
             # Calculate fees
             total_fees = Decimal("0")
-            for child_order in execution_result.child_orders:
+            for child_order in execution_state.child_orders:
                 # Estimate fees (can be made more sophisticated)
                 if child_order.filled_quantity > 0 and child_order.price:
                     order_value = child_order.filled_quantity * child_order.price
                     estimated_fee = order_value * Decimal("0.001")  # 0.1% estimated fee
                     total_fees += estimated_fee
 
-            execution_result.total_fees = total_fees
+            execution_state.total_fees = total_fees
 
             self.logger.debug(
                 "Slippage metrics calculated",
-                execution_id=execution_result.execution_id,
-                price_slippage=float(execution_result.price_slippage),
-                total_fees=float(execution_result.total_fees),
+                execution_id=execution_state.execution_id,
+                price_slippage=(
+                    float(execution_state.price_slippage) if execution_state.price_slippage else 0
+                ),
+                total_fees=float(execution_state.total_fees),
             )
 
-        except Exception as e:
+        except (ValidationError, ExecutionError) as e:
             self.logger.warning(
                 "Failed to calculate slippage metrics",
-                execution_id=execution_result.execution_id,
+                execution_id=execution_state.execution_id,
                 error=str(e),
             )
+            raise
+        except Exception as e:
+            self.logger.error(
+                "Unexpected error calculating slippage metrics",
+                execution_id=execution_state.execution_id,
+                error=str(e),
+            )
+            raise ExecutionError(f"Slippage calculation failed: {e}") from e
 
     @log_calls
     async def get_algorithm_summary(self) -> dict[str, Any]:

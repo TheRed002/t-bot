@@ -13,12 +13,12 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from src.core.config import Config
+from src.core.base.component import BaseComponent
+from src.core.config.main import Config
 from src.core.exceptions import (
     RiskManagementError,
     ValidationError,
 )
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -32,16 +32,17 @@ from src.core.types import (
 )
 
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
+
+# Monitoring integration
+from src.monitoring.metrics import MetricsCollector
 
 # MANDATORY: Import from P-003+
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
 
-logger = get_logger(__name__)
 
-
-class BaseRiskManager(ABC):
+class BaseRiskManager(BaseComponent, ABC):
     """
     Abstract base class for risk management implementations.
 
@@ -58,10 +59,10 @@ class BaseRiskManager(ABC):
         Args:
             config: Application configuration containing risk settings
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.risk_config = config.risk
         self.error_handler = ErrorHandler(config)
-        self.logger = logger.bind(component="risk_manager")
 
         # Risk state tracking
         self.current_risk_level = RiskLevel.LOW
@@ -75,7 +76,19 @@ class BaseRiskManager(ABC):
         self.current_drawdown = Decimal("0")
         self.max_drawdown = Decimal("0")
 
-        self.logger.info("Risk manager initialized", risk_config=dict(self.risk_config))
+        # Initialize monitoring integration
+        try:
+            self.metrics_collector = MetricsCollector()
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize metrics collector: {e}")
+            self.metrics_collector = None
+
+        # Mark as initialized
+        self.logger.info(
+            "Risk manager initialized",
+            risk_config=dict(self.risk_config),
+            monitoring_enabled=self.metrics_collector is not None,
+        )
 
     @abstractmethod
     @time_execution
@@ -244,15 +257,11 @@ class BaseRiskManager(ABC):
         self.logger.critical("Emergency stop triggered", reason=reason)
 
         # Create error context and handle error
+        error = RiskManagementError(f"Emergency stop: {reason}")
         error_context = self.error_handler.create_error_context(
-            RiskManagementError(f"Emergency stop: {reason}"),
-            component="risk_manager",
-            operation="emergency_stop",
-            severity="critical",
+            error=error, component="risk_manager", operation="emergency_stop"
         )
-        await self.error_handler.handle_error(
-            RiskManagementError(f"Emergency stop: {reason}"), error_context
-        )
+        await self.error_handler.handle_error(error, error_context)
 
     @time_execution
     async def validate_risk_parameters(self) -> bool:
@@ -351,5 +360,54 @@ class BaseRiskManager(ABC):
             risk_level=self.current_risk_level.value,
         )
 
+        # Update monitoring metrics
+        if self.metrics_collector:
+            try:
+                severity = self._determine_violation_severity(violation_type, details)
+                self.metrics_collector.increment_counter(
+                    "risk_limit_violations_total",
+                    labels={"limit_type": violation_type, "severity": severity},
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to update violation metric: {e}")
+
         # TODO: Remove in production - Debug logging
         self.logger.debug("Risk violation details", violation_type=violation_type, details=details)
+
+    def _determine_violation_severity(self, violation_type: str, details: dict[str, Any]) -> str:
+        """
+        Determine severity of risk violation for monitoring.
+
+        Args:
+            violation_type: Type of violation
+            details: Violation details
+
+        Returns:
+            Severity level: "critical", "high", "medium", or "low"
+        """
+        critical_violations = {"daily_loss_limit", "drawdown_limit", "emergency_stop"}
+        high_violations = {"position_limit", "exposure_limit", "leverage_limit"}
+        medium_violations = {"concentration_limit", "sector_exposure", "correlation_limit"}
+
+        if violation_type in critical_violations:
+            return "critical"
+        elif violation_type in high_violations:
+            return "high"
+        elif violation_type in medium_violations:
+            return "medium"
+        else:
+            return "low"
+
+    def cleanup(self) -> None:
+        """Cleanup risk manager resources."""
+        try:
+            # Clear portfolio state
+            self.positions.clear()
+            self.risk_metrics = None
+            self.position_limits = None
+
+            self.logger.info("Risk manager cleanup completed")
+        except Exception as e:
+            self.logger.error(f"Error during risk manager cleanup: {e}")
+        finally:
+            super().cleanup()  # Call parent cleanup

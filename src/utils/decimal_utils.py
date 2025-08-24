@@ -14,7 +14,6 @@ import warnings
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, setcontext
 from typing import Any
 
-from src.base import BaseComponent
 from src.core.exceptions import ValidationError
 
 # Module level logger for static methods
@@ -113,8 +112,8 @@ def to_decimal(value: str | int | float | Decimal, context: Context | None = Non
                 raise ValidationError("Cannot convert infinity to Decimal")
 
             # Convert via string to preserve precision
-            # Use repr() for exact float representation
-            result = ctx.create_decimal(repr(value))
+            # Use str() for float to string conversion
+            result = ctx.create_decimal(str(value))
         else:
             # Direct conversion for strings and integers
             result = ctx.create_decimal(str(value))
@@ -404,7 +403,13 @@ def decimal_to_float(value: Decimal) -> float:
     Returns:
         Float representation of the Decimal
     """
-    FloatDeprecationWarning.warn_float_usage("decimal_to_float conversion")
+    # FloatDeprecationWarning is defined later in the file
+    # Direct warning for now
+    warnings.warn(
+        "decimal_to_float conversion: Use Decimal for all financial calculations to prevent precision loss.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return float(value)
 
 
@@ -421,7 +426,7 @@ def float_to_decimal(value: float) -> Decimal:
     return to_decimal(value)
 
 
-class DecimalEncoder(BaseComponent):
+class DecimalEncoder:
     """JSON encoder that handles Decimal values."""
 
     @staticmethod
@@ -451,17 +456,19 @@ class FloatDeprecationWarning:
     Context manager to detect and warn about float usage in financial code.
     """
 
-    def __enter__(self):
+    def __enter__(self) -> "FloatDeprecationWarning":
         """Enable float deprecation warnings."""
         warnings.filterwarnings("always", category=DeprecationWarning)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any | None
+    ) -> None:
         """Disable float deprecation warnings."""
         warnings.filterwarnings("default", category=DeprecationWarning)
 
     @staticmethod
-    def warn_float_usage(context: str):
+    def warn_float_usage(context: str) -> None:
         """
         Issue a deprecation warning for float usage.
 

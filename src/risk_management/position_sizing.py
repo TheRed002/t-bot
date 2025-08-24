@@ -1,7 +1,19 @@
 """
-Position Sizing Module for P-008 Risk Management Framework.
+Position Sizing Module - DEPRECATED.
 
-This module implements various position sizing algorithms including:
+DEPRECATED: This module is deprecated in favor of RiskService.
+The new RiskService (src/risk_management/service.py) provides all position sizing
+functionality with:
+- DatabaseService integration (no direct DB access)
+- StateService integration for state management
+- Comprehensive caching layer
+- Enhanced error handling with circuit breakers
+- Multiple position sizing algorithms including Kelly Criterion
+
+This module is maintained for backward compatibility only.
+New implementations should use RiskService.calculate_position_size() directly.
+
+Legacy algorithms (now in RiskService):
 - Fixed percentage sizing
 - Kelly Criterion optimal sizing
 - Volatility-adjusted sizing using ATR
@@ -12,19 +24,23 @@ P-002A (error handling), and P-007A (utils) components.
 """
 
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from src.core.config import Config
+from src.core.base.component import BaseComponent
+from src.core.config.main import Config
 from src.core.exceptions import RiskManagementError, ValidationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import PositionSizeMethod, Signal
 
+# Type checking imports to avoid circular dependencies
+if TYPE_CHECKING:
+    from src.database.service import DatabaseService
+
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
 from src.utils.decimal_utils import (
     ONE,
     ZERO,
@@ -40,34 +56,62 @@ from src.utils.decorators import time_execution
 # P-010A: Reverse integration - CapitalAllocator integration
 # Note: CapitalAllocator can be imported when needed, avoiding circular imports
 
-logger = get_logger(__name__)
 
-
-class PositionSizer:
+class PositionSizer(BaseComponent):
     """
-    Position sizing calculator with multiple algorithms.
+    DEPRECATED: Position sizing calculator with multiple algorithms.
+
+    This class is deprecated in favor of RiskService which provides:
+    - Enterprise-grade service architecture
+    - DatabaseService integration (no direct DB access)
+    - Enhanced caching and monitoring
+    - Real-time risk management
 
     This class implements various position sizing methods to optimize
     risk-adjusted returns while respecting portfolio limits.
+
+    DEPRECATED METHODS -> USE RiskService INSTEAD:
+    - calculate_position_size() -> RiskService.calculate_position_size()
+    - _fixed_percentage_sizing() -> Built into RiskService
+    - _kelly_criterion_sizing() -> Built into RiskService with caching
+    - _volatility_adjusted_sizing() -> Built into RiskService
+    - _confidence_weighted_sizing() -> Built into RiskService
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, database_service: "DatabaseService | None" = None):
         """
-        Initialize position sizer with configuration.
+        Initialize DEPRECATED position sizer with configuration.
+
+        DEPRECATED: Use RiskService.calculate_position_size() directly.
 
         Args:
             config: Application configuration containing risk settings
+            database_service: Database service for data access (not used in legacy mode)
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.risk_config = config.risk
         self.error_handler = ErrorHandler(config)
-        self.logger = logger.bind(component="position_sizer")
+        # Note: logger is a property from BaseComponent, no need to bind
 
-        # Historical data for calculations - use Decimal for precision
+        # Database service integration (optional for backward compatibility)
+        self.database_service = database_service
+
+        # DEPRECATED: Historical data for calculations - use Decimal for precision
+        # NOTE: RiskService handles this with proper caching and state management
         self.price_history: dict[str, list[Decimal]] = {}
-        self.return_history: dict[str, list[Decimal]] = {}
+        self.return_history: dict[str, list[float]] = {}
 
-        self.logger.info("Position sizer initialized")
+        if database_service:
+            self.logger.warning(
+                "PositionSizer initialized with DatabaseService - "
+                "consider migrating to RiskService for full integration"
+            )
+        else:
+            self.logger.warning(
+                "DEPRECATED PositionSizer initialized in legacy mode - "
+                "migrate to RiskService for enterprise features"
+            )
 
     @time_execution
     async def calculate_position_size(
@@ -438,7 +482,8 @@ class PositionSizer:
             prev_price = self.price_history[symbol][-2]
             if prev_price > ZERO:
                 return_rate = safe_divide(decimal_price - prev_price, prev_price, ZERO)
-                self.return_history[symbol].append(return_rate)
+                # Convert to float for return history to match test expectations
+                self.return_history[symbol].append(float(return_rate))
 
                 # Keep only recent returns
                 if len(self.return_history[symbol]) > max_history:

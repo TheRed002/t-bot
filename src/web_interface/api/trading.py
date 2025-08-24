@@ -14,8 +14,23 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from src.core.exceptions import NetworkError, ValidationError
 from src.core.logging import get_logger
 from src.core.types import ExecutionInstruction, OrderRequest, OrderSide, OrderType
+from src.error_handling import (
+    ErrorSeverity,
+    get_global_error_handler,
+    with_error_context,
+    with_retry,
+)
+from src.error_handling.error_handler import ErrorContext
+from src.utils import (
+    format_price,
+    format_quantity,
+    validate_price,
+    validate_quantity,
+    validate_symbol,
+)
 from src.web_interface.security.auth import User, get_current_user, get_trading_user
 
 logger = get_logger(__name__)
@@ -125,6 +140,15 @@ class MarketDataResponse(BaseModel):
 
 
 @router.post("/orders", response_model=dict[str, Any])
+@with_error_context(
+    component="trading",
+    operation="place_order",
+)
+@with_retry(
+    max_attempts=3,
+    exceptions=(NetworkError, TimeoutError),
+    backoff_factor=1.5,
+)
 async def place_order(
     order_request: PlaceOrderRequest, current_user: User = Depends(get_trading_user)
 ):
@@ -142,11 +166,52 @@ async def place_order(
         HTTPException: If order placement fails
     """
     try:
+        # Get global error handler for integrated recovery
+        global_error_handler = get_global_error_handler()
+    except Exception:
+        global_error_handler = None
+
+    try:
         if not execution_engine:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Execution engine not available",
             )
+
+        # Validate inputs using utils validators
+        try:
+            validate_symbol(order_request.symbol)
+        except ValidationError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid symbol: {e!s}",
+            ) from e
+
+        try:
+            validate_quantity(float(order_request.quantity))
+        except ValidationError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid quantity: {e!s}",
+            ) from e
+
+        if order_request.price:
+            try:
+                validate_price(float(order_request.price))
+            except ValidationError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid price: {e!s}",
+                ) from e
+
+        if order_request.stop_price:
+            try:
+                validate_price(float(order_request.stop_price))
+            except ValidationError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid stop price: {e!s}",
+                ) from e
 
         # Generate client order ID if not provided
         client_order_id = order_request.client_order_id or f"web_{uuid4().hex[:8]}"
@@ -191,6 +256,27 @@ async def place_order(
             user=current_user.username,
         )
 
+        # Format response with error handling
+        try:
+            formatted_quantity = format_quantity(float(execution_result.total_filled_quantity))
+        except Exception as e:
+            logger.warning(f"Error formatting quantity: {e}")
+            formatted_quantity = f"{float(execution_result.total_filled_quantity):.8f}"
+
+        try:
+            formatted_price = (
+                format_price(float(execution_result.average_fill_price))
+                if execution_result.average_fill_price
+                else None
+            )
+        except Exception as e:
+            logger.warning(f"Error formatting price: {e}")
+            formatted_price = (
+                f"{float(execution_result.average_fill_price):.2f}"
+                if execution_result.average_fill_price
+                else None
+            )
+
         return {
             "success": True,
             "message": "Order placed successfully",
@@ -198,22 +284,70 @@ async def place_order(
             "order_id": execution_result.execution_id,  # Simplified
             "client_order_id": client_order_id,
             "status": execution_result.status.value,
-            "filled_quantity": float(execution_result.total_filled_quantity),
-            "average_fill_price": (
-                float(execution_result.average_fill_price)
-                if execution_result.average_fill_price
-                else None
-            ),
+            "filled_quantity": formatted_quantity,
+            "average_fill_price": formatted_price,
         }
 
+    except HTTPException:
+        # Re-raise FastAPI exceptions
+        raise
     except Exception as e:
-        logger.error(f"Order placement failed: {e}", user=current_user.username)
+        # Create error context
+        error_context = ErrorContext(
+            error=e,
+            operation="place_order",
+            severity=ErrorSeverity.HIGH,
+            context={
+                "user": current_user.username,
+                "symbol": order_request.symbol,
+                "side": order_request.side.value,
+                "quantity": str(order_request.quantity),
+                "exchange": order_request.exchange,
+            },
+        )
+
+        # Try to handle through global error handler
+        if global_error_handler:
+            try:
+                handled = await global_error_handler.handle_error(error_context)
+                if handled:
+                    # Recovery was successful
+                    logger.info(
+                        "Order error recovered by global handler",
+                        order_id=execution_result.execution_id if "execution_result" in locals() else None,
+                        recovery_method=error_context.details.get("recovery_method", "unknown"),
+                    )
+                    return {
+                        "success": False,
+                        "message": "Order processed with recovery",
+                        "recovery_attempted": True,
+                        "recovery_method": error_context.details.get("recovery_method", "unknown"),
+                    }
+            except Exception as handler_error:
+                logger.warning(f"Error handler failed: {handler_error}")
+
+        logger.error(
+            f"Order placement failed: {e}",
+            user=current_user.username,
+            error_type=error_context.error.__class__.__name__,
+            severity=error_context.severity.value,
+            operation=error_context.operation,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Order placement failed: {e!s}"
         )
 
 
 @router.delete("/orders/{order_id}")
+@with_error_context(
+    component="trading",
+    operation="cancel_order",
+)
+@with_retry(
+    max_attempts=2,
+    exceptions=(NetworkError, TimeoutError),
+    backoff_factor=1.0,
+)
 async def cancel_order(
     order_id: str,
     exchange: str = Query(..., description="Exchange where order was placed"),
@@ -263,8 +397,25 @@ async def cancel_order(
     except HTTPException:
         raise
     except Exception as e:
+        # Create error context
+        error_context = ErrorContext(
+            error=e,
+            operation="cancel_order",
+            severity=ErrorSeverity.MEDIUM,
+            context={
+                "user": current_user.username,
+                "order_id": order_id,
+                "exchange": exchange,
+            },
+        )
+
         logger.error(
-            f"Order cancellation failed: {e}", order_id=order_id, user=current_user.username
+            f"Order cancellation failed: {e}",
+            order_id=order_id,
+            user=current_user.username,
+            error_type=error_context.error.__class__.__name__,
+            severity=error_context.severity.value,
+            operation=error_context.operation,
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Order cancellation failed: {e!s}"

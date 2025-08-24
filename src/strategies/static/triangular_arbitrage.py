@@ -14,8 +14,8 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.exceptions import ArbitrageError
-from src.core.logging import get_logger
 
+# Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
 from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
 
@@ -37,8 +37,6 @@ from src.utils.validators import (
 # From P-008+ - Use risk management
 
 # From P-003+ - Use exchange interfaces
-
-logger = get_logger(__name__)
 
 
 class TriangularArbitrageStrategy(BaseStrategy):
@@ -77,7 +75,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
         self.pair_prices: dict[str, MarketData] = {}
         self.last_opportunity_check = datetime.now()
 
-        logger.info(
+        self.logger.info(
             "Triangular arbitrage strategy initialized",
             strategy=self.name,
             exchange=self.exchange,
@@ -105,7 +103,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
             # TODO: Remove in production - Debug logging
             if signals:
-                logger.debug(
+                self.logger.debug(
                     "Triangular arbitrage signals generated",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -116,7 +114,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             return signals
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular arbitrage signal generation failed",
                 strategy=self.name,
                 symbol=data.symbol,
@@ -145,7 +143,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                         signals.append(signal)
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular opportunity detection failed",
                 strategy=self.name,
                 symbol=symbol,
@@ -185,7 +183,10 @@ class TriangularArbitrageStrategy(BaseStrategy):
             eth_btc_rate = price2.price  # ETH/BTC rate
             eth_usdt_rate = price3.price  # ETH/USDT rate
 
-            # Step 2: Calculate triangular conversion
+            # CRITICAL FIX: Atomic calculation with timestamp validation
+            calculation_timestamp = datetime.now()
+            
+            # Step 2: Calculate triangular conversion atomically
             # Start with 1 BTC worth of USDT
             start_usdt = btc_usdt_rate
 
@@ -194,6 +195,15 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
             # Convert ETH to USDT
             final_usdt = eth_amount * eth_usdt_rate
+
+            # Validate prices haven't changed significantly
+            price_age = (datetime.now() - price1.timestamp).total_seconds()
+            if price_age > 0.5:  # Prices older than 500ms are stale
+                self.logger.debug(
+                    "Triangular calculation aborted - stale prices",
+                    age_seconds=price_age,
+                )
+                return None
 
             # Calculate profit
             profit = final_usdt - start_usdt
@@ -235,7 +245,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                         },
                     )
 
-                    logger.info(
+                    self.logger.info(
                         "Triangular arbitrage opportunity detected",
                         strategy=self.name,
                         path=path,
@@ -247,7 +257,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                     return signal
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular path check failed", strategy=self.name, path=path, error=str(e)
             )
 
@@ -308,7 +318,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             # Validate final result
             validate_decimal(total_fees)
 
-            logger.debug(
+            self.logger.debug(
                 "Triangular fee calculation completed",
                 strategy=self.name,
                 rate1=format_currency(rate1),
@@ -327,7 +337,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             return total_fees
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular fee calculation failed",
                 strategy=self.name,
                 rate1=float(rate1),
@@ -356,7 +366,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 if pair in self.pair_prices:
                     price_data = self.pair_prices[pair]
                     if current_time - price_data.timestamp > max_age:
-                        logger.warning(
+                        self.logger.warning(
                             "Price data too old for triangular arbitrage",
                             strategy=self.name,
                             pair=pair,
@@ -364,7 +374,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                         )
                         return False
                 else:
-                    logger.warning(
+                    self.logger.warning(
                         "Missing price data for triangular arbitrage", strategy=self.name, pair=pair
                     )
                     return False
@@ -376,7 +386,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
             max_arbitrages = self.config.parameters.get("max_open_arbitrages", 3)
             if active_count >= max_arbitrages:
-                logger.warning(
+                self.logger.warning(
                     "Too many active triangular arbitrages",
                     strategy=self.name,
                     path=path,
@@ -388,7 +398,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular timing validation failed", strategy=self.name, path=path, error=str(e)
             )
             return False
@@ -414,7 +424,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
             for field in required_fields:
                 if field not in metadata:
-                    logger.warning(
+                    self.logger.warning(
                         "Missing required metadata field",
                         strategy=self.name,
                         field=field,
@@ -429,7 +439,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             # Validate path structure
             path = metadata.get("path", [])
             if len(path) != 3:
-                logger.warning(
+                self.logger.warning(
                     "Invalid triangular path length",
                     strategy=self.name,
                     path_length=len(path),
@@ -450,7 +460,9 @@ class TriangularArbitrageStrategy(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error("Triangular signal validation failed", strategy=self.name, error=str(e))
+            self.logger.error(
+                "Triangular signal validation failed", strategy=self.name, error=str(e)
+            )
             return False
 
     @log_errors
@@ -517,7 +529,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             validate_decimal(position_size)
             validate_quantity(position_size, "position_size")
 
-            logger.debug(
+            self.logger.debug(
                 "Triangular position size calculated",
                 strategy=self.name,
                 base_size=format_currency(base_size),
@@ -530,7 +542,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             return position_size
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular position size calculation failed",
                 strategy=self.name,
                 signal_confidence=signal.confidence if signal else None,
@@ -562,7 +574,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             position_age = (datetime.now() - position.timestamp).total_seconds() * 1000
 
             if position_age > execution_timeout:
-                logger.info(
+                self.logger.info(
                     "Triangular arbitrage position timeout",
                     strategy=self.name,
                     symbol=position.symbol,
@@ -580,7 +592,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 current_opportunity = await self._check_triangular_path(path)
 
                 if not current_opportunity:
-                    logger.info(
+                    self.logger.info(
                         "Triangular arbitrage opportunity closed",
                         strategy=self.name,
                         symbol=position.symbol,
@@ -591,7 +603,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             return False
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular exit condition check failed",
                 strategy=self.name,
                 symbol=position.symbol,
@@ -624,7 +636,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                 self.metrics.win_rate = self.metrics.winning_trades / self.metrics.total_trades
 
             # Log trade result
-            logger.info(
+            self.logger.info(
                 "Triangular arbitrage trade completed",
                 strategy=self.name,
                 symbol=trade_result.get("symbol"),
@@ -634,6 +646,6 @@ class TriangularArbitrageStrategy(BaseStrategy):
             )
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular post-trade processing failed", strategy=self.name, error=str(e)
             )

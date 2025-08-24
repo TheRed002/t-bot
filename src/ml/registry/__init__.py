@@ -6,7 +6,7 @@ for ML models with database integration and audit trails.
 """
 
 from .artifact_store import ArtifactStore
-from .model_registry import ModelRegistry
+from .model_registry import ModelRegistryService as ModelRegistry
 
 __all__ = [
     "ArtifactStore",

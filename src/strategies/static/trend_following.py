@@ -15,8 +15,7 @@ from typing import Any
 import numpy as np
 
 # From P-001 - Use structured logging
-from src.core.logging import get_logger
-
+# Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
 from src.core.types import (
     MarketData,
@@ -34,7 +33,7 @@ from src.strategies.base import BaseStrategy
 from src.utils.decorators import time_execution
 from src.utils.helpers import calculate_rsi
 
-logger = get_logger(__name__)
+# Logger is now provided by BaseStrategy (via BaseComponent)
 
 
 class TrendFollowingStrategy(BaseStrategy):
@@ -86,7 +85,7 @@ class TrendFollowingStrategy(BaseStrategy):
         self.position_levels: dict[str, int] = {}
         self.position_entries: dict[str, list[datetime]] = {}
 
-        logger.info(
+        self.logger.info(
             "Trend Following Strategy initialized",
             strategy=self.name,
             fast_ma=self.fast_ma,
@@ -109,13 +108,13 @@ class TrendFollowingStrategy(BaseStrategy):
         try:
             # MANDATORY: Input validation
             if not data or not data.price:
-                logger.warning("Invalid market data received", strategy=self.name)
+                self.logger.warning("Invalid market data received", strategy=self.name)
                 return []
 
             # Validate price data
             price = float(data.price)
             if price <= 0:
-                logger.warning("Invalid price value", strategy=self.name, price=price)
+                self.logger.warning("Invalid price value", strategy=self.name, price=price)
                 return []
 
             # Update price history with current data
@@ -124,7 +123,7 @@ class TrendFollowingStrategy(BaseStrategy):
             # Check if we have enough data for calculations
             min_required = max(self.slow_ma, self.rsi_period) + 10
             if len(self.price_history) < min_required:
-                logger.debug(
+                self.logger.debug(
                     "Insufficient price history for signal generation",
                     strategy=self.name,
                     current_length=len(self.price_history),
@@ -142,7 +141,7 @@ class TrendFollowingStrategy(BaseStrategy):
 
             # Check volume confirmation if enabled
             if self.volume_confirmation and not self._check_volume_confirmation(data):
-                logger.debug(
+                self.logger.debug(
                     "Volume confirmation failed",
                     strategy=self.name,
                     rsi=rsi,
@@ -195,7 +194,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return signals
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Signal generation failed",
                 strategy=self.name,
                 error=str(e),
@@ -241,7 +240,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return np.mean(recent_prices)
 
         except Exception as e:
-            logger.error("Fast MA calculation failed", strategy=self.name, error=str(e))
+            self.logger.error("Fast MA calculation failed", strategy=self.name, error=str(e))
             return None
 
     def _calculate_slow_ma(self) -> float | None:
@@ -258,7 +257,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return np.mean(recent_prices)
 
         except Exception as e:
-            logger.error("Slow MA calculation failed", strategy=self.name, error=str(e))
+            self.logger.error("Slow MA calculation failed", strategy=self.name, error=str(e))
             return None
 
     def _calculate_rsi(self) -> float | None:
@@ -276,7 +275,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return rsi
 
         except Exception as e:
-            logger.error("RSI calculation failed", strategy=self.name, error=str(e))
+            self.logger.error("RSI calculation failed", strategy=self.name, error=str(e))
             return None
 
     def _check_volume_confirmation(self, data: MarketData) -> bool:
@@ -308,7 +307,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return volume_ratio >= self.min_volume_ratio
 
         except Exception as e:
-            logger.error("Volume confirmation check failed", strategy=self.name, error=str(e))
+            self.logger.error("Volume confirmation check failed", strategy=self.name, error=str(e))
             return True  # Pass on error
 
     async def _generate_bullish_signal(
@@ -329,7 +328,7 @@ class TrendFollowingStrategy(BaseStrategy):
             # Check pyramiding limits
             current_levels = self.position_levels.get(data.symbol, 0)
             if current_levels >= self.max_pyramid_levels:
-                logger.debug(
+                self.logger.debug(
                     "Maximum pyramid levels reached",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -365,7 +364,7 @@ class TrendFollowingStrategy(BaseStrategy):
             )
 
             if await self.validate_signal(signal):
-                logger.info(
+                self.logger.info(
                     "Bullish trend signal generated",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -379,7 +378,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error("Bullish signal generation failed", strategy=self.name, error=str(e))
+            self.logger.error("Bullish signal generation failed", strategy=self.name, error=str(e))
             return None
 
     async def _generate_bearish_signal(
@@ -400,7 +399,7 @@ class TrendFollowingStrategy(BaseStrategy):
             # Check pyramiding limits
             current_levels = self.position_levels.get(data.symbol, 0)
             if current_levels >= self.max_pyramid_levels:
-                logger.debug(
+                self.logger.debug(
                     "Maximum pyramid levels reached",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -436,7 +435,7 @@ class TrendFollowingStrategy(BaseStrategy):
             )
 
             if await self.validate_signal(signal):
-                logger.info(
+                self.logger.info(
                     "Bearish trend signal generated",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -450,7 +449,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error("Bearish signal generation failed", strategy=self.name, error=str(e))
+            self.logger.error("Bearish signal generation failed", strategy=self.name, error=str(e))
             return None
 
     async def _generate_exit_signal(
@@ -483,7 +482,7 @@ class TrendFollowingStrategy(BaseStrategy):
             )
 
             if await self.validate_signal(signal):
-                logger.info(
+                self.logger.info(
                     "Trend exit signal generated",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -495,7 +494,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error("Exit signal generation failed", strategy=self.name, error=str(e))
+            self.logger.error("Exit signal generation failed", strategy=self.name, error=str(e))
             return None
 
     async def validate_signal(self, signal: Signal) -> bool:
@@ -512,7 +511,7 @@ class TrendFollowingStrategy(BaseStrategy):
         try:
             # Basic signal validation
             if not signal or signal.confidence < self.config.min_confidence:
-                logger.debug(
+                self.logger.debug(
                     "Signal confidence below threshold",
                     strategy=self.name,
                     confidence=signal.confidence if signal else 0,
@@ -523,13 +522,13 @@ class TrendFollowingStrategy(BaseStrategy):
             # Check if signal is too old (more than 10 minutes for trend
             # signals)
             if datetime.now(signal.timestamp.tzinfo) - signal.timestamp > timedelta(minutes=10):
-                logger.debug("Signal too old", strategy=self.name, signal_age_minutes=10)
+                self.logger.debug("Signal too old", strategy=self.name, signal_age_minutes=10)
                 return False
 
             # Validate signal metadata
             metadata = signal.metadata
             if "signal_type" not in metadata:
-                logger.warning("Missing signal_type in signal metadata", strategy=self.name)
+                self.logger.warning("Missing signal_type in signal metadata", strategy=self.name)
                 return False
 
             # Additional validation for trend entry signals
@@ -537,19 +536,21 @@ class TrendFollowingStrategy(BaseStrategy):
                 required_fields = ["fast_ma", "slow_ma", "rsi", "trend_direction"]
                 for field in required_fields:
                     if field not in metadata:
-                        logger.warning(f"Missing {field} in signal metadata", strategy=self.name)
+                        self.logger.warning(
+                            f"Missing {field} in signal metadata", strategy=self.name
+                        )
                         return False
 
                 # Validate RSI bounds
                 rsi = metadata.get("rsi")
                 if rsi is None or rsi < 0 or rsi > 100:
-                    logger.warning("Invalid RSI value", strategy=self.name, rsi=rsi)
+                    self.logger.warning("Invalid RSI value", strategy=self.name, rsi=rsi)
                     return False
 
             return True
 
         except Exception as e:
-            logger.error("Signal validation failed", strategy=self.name, error=str(e))
+            self.logger.error("Signal validation failed", strategy=self.name, error=str(e))
             return False
 
     def get_position_size(self, signal: Signal) -> Decimal:
@@ -591,7 +592,7 @@ class TrendFollowingStrategy(BaseStrategy):
             max_size = Decimal(str(self.config.parameters.get("max_position_size_pct", 0.1)))
             position_size = min(position_size, max_size)
 
-            logger.debug(
+            self.logger.debug(
                 "Position size calculated",
                 strategy=self.name,
                 base_size=float(base_size),
@@ -604,7 +605,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return position_size
 
         except Exception as e:
-            logger.error("Position size calculation failed", strategy=self.name, error=str(e))
+            self.logger.error("Position size calculation failed", strategy=self.name, error=str(e))
             # Return minimum position size on error
             return Decimal(str(self.config.position_size_pct * 0.5))
 
@@ -624,12 +625,16 @@ class TrendFollowingStrategy(BaseStrategy):
 
             # Check time-based exit
             if self._should_exit_by_time(position):
-                logger.info("Time-based exit triggered", strategy=self.name, symbol=position.symbol)
+                self.logger.info(
+                    "Time-based exit triggered", strategy=self.name, symbol=position.symbol
+                )
                 return True
 
             # Check trailing stop
             if self._should_exit_by_trailing_stop(position, data):
-                logger.info("Trailing stop triggered", strategy=self.name, symbol=position.symbol)
+                self.logger.info(
+                    "Trailing stop triggered", strategy=self.name, symbol=position.symbol
+                )
                 return True
 
             # Check trend reversal
@@ -643,7 +648,7 @@ class TrendFollowingStrategy(BaseStrategy):
             # Exit if trend has reversed
             if position.side.value == "buy":
                 if fast_ma < slow_ma and rsi < 50:
-                    logger.info(
+                    self.logger.info(
                         "Trend reversal exit triggered",
                         strategy=self.name,
                         symbol=position.symbol,
@@ -654,7 +659,7 @@ class TrendFollowingStrategy(BaseStrategy):
                     return True
             else:  # sell position
                 if fast_ma > slow_ma and rsi > 50:
-                    logger.info(
+                    self.logger.info(
                         "Trend reversal exit triggered",
                         strategy=self.name,
                         symbol=position.symbol,
@@ -667,7 +672,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return False
 
         except Exception as e:
-            logger.error("Exit check failed", strategy=self.name, error=str(e))
+            self.logger.error("Exit check failed", strategy=self.name, error=str(e))
             return False
 
     def _should_exit_by_time(self, position: Position) -> bool:
@@ -690,7 +695,7 @@ class TrendFollowingStrategy(BaseStrategy):
             return time_diff > timedelta(hours=self.time_exit_hours)
 
         except Exception as e:
-            logger.error("Time exit check failed", strategy=self.name, error=str(e))
+            self.logger.error("Time exit check failed", strategy=self.name, error=str(e))
             return False
 
     def _should_exit_by_trailing_stop(self, position: Position, data: MarketData) -> bool:
@@ -721,7 +726,7 @@ class TrendFollowingStrategy(BaseStrategy):
                 return current_price >= trailing_stop
 
         except Exception as e:
-            logger.error("Trailing stop check failed", strategy=self.name, error=str(e))
+            self.logger.error("Trailing stop check failed", strategy=self.name, error=str(e))
             return False
 
     def get_strategy_info(self) -> dict[str, Any]:

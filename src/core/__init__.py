@@ -6,15 +6,27 @@ exceptions, and logging systems.
 """
 
 # Core framework exports
+from .base import HealthStatus, TransactionalService
+from .caching import CacheKeys, cached, get_cache_manager
 from .config import Config, DatabaseConfig
 from .exceptions import (
+    AuthenticationError,
+    ConfigurationError,
     DataError,
+    ErrorCategory,
+    ExchangeConnectionError,
     ExchangeError,
+    ExchangeErrorMapper,
+    ExchangeRateLimitError,
     ExecutionError,
     ModelError,
+    NetworkError,
+    OrderRejectionError,
     RiskManagementError,
     SecurityError,
+    ServiceError,
     StateConsistencyError,
+    StateError,
     TradingBotError,
     ValidationError,
 )
@@ -28,8 +40,16 @@ from .logging import (
     setup_logging,
 )
 from .types import (
+    BotConfiguration,
+    BotPriority,
+    BotState,
+    BotStatus,
+    BotType,
     DriftType,
     ErrorPattern,
+    ExecutionAlgorithm,
+    ExecutionInstruction,
+    ExecutionResult,
     IngestionMode,
     MarketData,
     NewsSentiment,
@@ -51,19 +71,35 @@ from .types import (
 )
 
 __all__ = [
-    # Configuration
+    "AuthenticationError",
+    "BotConfiguration",
+    "BotPriority",
+    "BotState",
+    "BotStatus",
+    "BotType",
+    "CacheKeys",
     "Config",
+    "ConfigurationError",
     "DataError",
     "DatabaseConfig",
     "DriftType",
-    # Error handling types (P-002A)
+    "ErrorCategory",
     "ErrorPattern",
+    "ExchangeConnectionError",
     "ExchangeError",
+    "ExchangeErrorMapper",
+    "ExchangeRateLimitError",
+    "ExecutionAlgorithm",
     "ExecutionError",
+    "ExecutionInstruction",
+    "ExecutionResult",
+    "HealthStatus",
     "IngestionMode",
     "MarketData",
     "ModelError",
+    "NetworkError",
     "NewsSentiment",
+    "OrderRejectionError",
     "OrderRequest",
     "OrderResponse",
     "OrderSide",
@@ -75,20 +111,22 @@ __all__ = [
     "QualityLevel",
     "RiskManagementError",
     "SecurityError",
+    "ServiceError",
     "Signal",
     "SignalDirection",
     "SocialSentiment",
     "StateConsistencyError",
+    "StateError",
     "StorageMode",
-    # Exceptions
     "TradingBotError",
-    # Types
     "TradingMode",
+    "TransactionalService",
     "ValidationError",
     "ValidationLevel",
     "ValidationResult",
+    "cached",
     "correlation_context",
-    # Logging
+    "get_cache_manager",
     "get_logger",
     "get_secure_logger",
     "log_async_performance",

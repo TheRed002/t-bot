@@ -23,15 +23,20 @@ Dependencies:
 - P-002A: Error handling framework
 """
 
-# Import from specialized utility modules
-# Import from P-001 core components
+# Import from P-001 core components first
+from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
+
+# Import specialized utility modules
 import src.utils.data_utils as data_utils
 import src.utils.datetime_utils as datetime_utils
 import src.utils.file_utils as file_utils
 import src.utils.math_utils as math_utils
 import src.utils.network_utils as network_utils
 import src.utils.string_utils as string_utils
+
+# Import formatting functions needed later
+from src.utils.formatters import format_percentage, format_price
 
 logger = get_logger(__name__)
 
@@ -125,9 +130,6 @@ camel_to_snake = string_utils.camel_to_snake
 snake_to_camel = string_utils.snake_to_camel
 truncate = string_utils.truncate
 
-# Import formatting functions from formatters module
-from src.utils.formatters import format_percentage, format_price
-
 
 # =============================================================================
 # Technical Analysis Utilities - Legacy Support
@@ -152,25 +154,30 @@ def calculate_atr(
     Raises:
         ValidationError: If data is insufficient or invalid
     """
-    from src.core.exceptions import ValidationError
-
     try:
         import numpy as np
-        import talib
+        try:
+            import talib
+            HAS_TALIB = True
+        except ImportError:
+            HAS_TALIB = False
 
-        # Convert to numpy arrays
-        high_array = np.array(highs, dtype=np.float64)
-        low_array = np.array(lows, dtype=np.float64)
-        close_array = np.array(closes, dtype=np.float64)
+        if HAS_TALIB:
+            # Convert to numpy arrays
+            high_array = np.array(highs, dtype=np.float64)
+            low_array = np.array(lows, dtype=np.float64)
+            close_array = np.array(closes, dtype=np.float64)
 
-        # Calculate ATR using ta-lib
-        atr = talib.ATR(high_array, low_array, close_array, timeperiod=period)
+            # Calculate ATR using ta-lib
+            atr = talib.ATR(high_array, low_array, close_array, timeperiod=period)
 
-        # Find the last non-NaN value
-        for i in range(len(atr) - 1, -1, -1):
-            if not np.isnan(atr[i]):
-                return float(atr[i])
-        return None
+            # Find the last non-NaN value
+            for i in range(len(atr) - 1, -1, -1):
+                if not np.isnan(atr[i]):
+                    return float(atr[i])
+            return None
+        else:
+            raise ImportError("ta-lib not available")
 
     except ImportError:
         logger.warning("ta-lib not available, falling back to manual ATR calculation")
@@ -204,7 +211,7 @@ def calculate_atr(
         return float(atr)
     except Exception as e:
         logger.error(f"Error calculating ATR: {e}")
-        return None
+        raise ValidationError(f"Failed to calculate ATR: {e}") from e
 
 
 def calculate_zscore(values: list[float], lookback_period: int = 20) -> float:
@@ -221,30 +228,35 @@ def calculate_zscore(values: list[float], lookback_period: int = 20) -> float:
     Raises:
         ValidationError: If insufficient data or invalid parameters
     """
-    from src.core.exceptions import ValidationError
-
     try:
         import numpy as np
-        import talib
+        try:
+            import talib
+            HAS_TALIB = True
+        except ImportError:
+            HAS_TALIB = False
 
-        # Convert to numpy array
-        price_array = np.array(values, dtype=np.float64)
+        if HAS_TALIB:
+            # Convert to numpy array
+            price_array = np.array(values, dtype=np.float64)
 
-        # Calculate Simple Moving Average using ta-lib
-        sma = talib.SMA(price_array, timeperiod=lookback_period)
+            # Calculate Simple Moving Average using ta-lib
+            sma = talib.SMA(price_array, timeperiod=lookback_period)
 
-        # Calculate Standard Deviation manually for the lookback period
-        if len(sma) > 0 and not np.isnan(sma[-1]):
-            mean = sma[-1]
-            recent_prices = price_array[-lookback_period:]
-            std_dev = np.std(recent_prices)
+            # Calculate Standard Deviation manually for the lookback period
+            if len(sma) > 0 and not np.isnan(sma[-1]):
+                mean = sma[-1]
+                recent_prices = price_array[-lookback_period:]
+                std_dev = np.std(recent_prices)
 
-            if std_dev > 0:
-                current_price = price_array[-1]
-                z_score = (current_price - mean) / std_dev
-                return float(z_score)
+                if std_dev > 0:
+                    current_price = price_array[-1]
+                    z_score = (current_price - mean) / std_dev
+                    return float(z_score)
 
-        return None
+            return None
+        else:
+            raise ImportError("ta-lib not available")
 
     except ImportError:
         logger.warning("ta-lib not available, falling back to manual Z-score calculation")
@@ -263,8 +275,9 @@ def calculate_zscore(values: list[float], lookback_period: int = 20) -> float:
         # Calculate mean and standard deviation
         mean = sum(recent_values) / len(recent_values)
 
-        # Calculate variance
-        variance = sum((x - mean) ** 2 for x in recent_values) / len(recent_values)
+        # Calculate variance using unbiased estimator (n-1 divisor)
+        n = len(recent_values)
+        variance = sum((x - mean) ** 2 for x in recent_values) / (n - 1) if n > 1 else 0
         std_dev = variance**0.5
 
         # Avoid division by zero
@@ -279,7 +292,7 @@ def calculate_zscore(values: list[float], lookback_period: int = 20) -> float:
         return float(zscore)
     except Exception as e:
         logger.error(f"Error calculating Z-score: {e}")
-        return None
+        raise ValidationError(f"Failed to calculate Z-score: {e}") from e
 
 
 def calculate_rsi(prices: list[float], period: int = 14) -> float:
@@ -296,22 +309,27 @@ def calculate_rsi(prices: list[float], period: int = 14) -> float:
     Raises:
         ValidationError: If insufficient data or invalid parameters
     """
-    from src.core.exceptions import ValidationError
-
     try:
         import numpy as np
-        import talib
+        try:
+            import talib
+            HAS_TALIB = True
+        except ImportError:
+            HAS_TALIB = False
 
-        # Convert to numpy array
-        price_array = np.array(prices, dtype=np.float64)
+        if HAS_TALIB:
+            # Convert to numpy array
+            price_array = np.array(prices, dtype=np.float64)
 
-        # Calculate RSI using ta-lib
-        rsi = talib.RSI(price_array, timeperiod=period)
+            # Calculate RSI using ta-lib
+            rsi = talib.RSI(price_array, timeperiod=period)
 
-        # Return the last non-NaN value
-        if len(rsi) > 0 and not np.isnan(rsi[-1]):
-            return float(rsi[-1])
-        return None
+            # Return the last non-NaN value
+            if len(rsi) > 0 and not np.isnan(rsi[-1]):
+                return float(rsi[-1])
+            return None
+        else:
+            raise ImportError("ta-lib not available")
 
     except ImportError:
         logger.warning("ta-lib not available, falling back to manual RSI calculation")
@@ -355,7 +373,7 @@ def calculate_rsi(prices: list[float], period: int = 14) -> float:
         return float(rsi)
     except Exception as e:
         logger.error(f"Error calculating RSI: {e}")
-        return None
+        raise ValidationError(f"Failed to calculate RSI: {e}") from e
 
 
 def calculate_moving_average(prices: list[float], period: int, ma_type: str = "sma") -> float:
@@ -373,29 +391,34 @@ def calculate_moving_average(prices: list[float], period: int, ma_type: str = "s
     Raises:
         ValidationError: If insufficient data or invalid parameters
     """
-    from src.core.exceptions import ValidationError
-
     try:
         import numpy as np
-        import talib
+        try:
+            import talib
+            HAS_TALIB = True
+        except ImportError:
+            HAS_TALIB = False
 
-        # Convert to numpy array
-        price_array = np.array(prices, dtype=np.float64)
+        if HAS_TALIB:
+            # Convert to numpy array
+            price_array = np.array(prices, dtype=np.float64)
 
-        if ma_type.lower() == "sma":
-            ma = talib.SMA(price_array, timeperiod=period)
-        elif ma_type.lower() == "ema":
-            ma = talib.EMA(price_array, timeperiod=period)
-        elif ma_type.lower() == "wma":
-            ma = talib.WMA(price_array, timeperiod=period)
-        else:
-            logger.error(f"Unsupported moving average type: {ma_type}")
+            if ma_type.lower() == "sma":
+                ma = talib.SMA(price_array, timeperiod=period)
+            elif ma_type.lower() == "ema":
+                ma = talib.EMA(price_array, timeperiod=period)
+            elif ma_type.lower() == "wma":
+                ma = talib.WMA(price_array, timeperiod=period)
+            else:
+                logger.error(f"Unsupported moving average type: {ma_type}")
+                return None
+
+            # Return the last non-NaN value
+            if len(ma) > 0 and not np.isnan(ma[-1]):
+                return float(ma[-1])
             return None
-
-        # Return the last non-NaN value
-        if len(ma) > 0 and not np.isnan(ma[-1]):
-            return float(ma[-1])
-        return None
+        else:
+            raise ImportError("ta-lib not available")
 
     except ImportError:
         logger.warning("ta-lib not available, falling back to manual MA calculation")
@@ -438,7 +461,7 @@ def calculate_moving_average(prices: list[float], period: int, ma_type: str = "s
             raise ValidationError(f"Unsupported moving average type: {ma_type}") from None
     except Exception as e:
         logger.error(f"Error calculating moving average: {e}")
-        return None
+        raise ValidationError(f"Failed to calculate moving average: {e}") from e
 
 
 def calculate_support_resistance(
@@ -478,4 +501,4 @@ def calculate_support_resistance(
 
     except Exception as e:
         logger.error(f"Error calculating support/resistance: {e}")
-        return None, None
+        raise ValidationError(f"Failed to calculate support/resistance: {e}") from e

@@ -15,8 +15,14 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.config import Config
-from src.core.exceptions import ExecutionError, ValidationError
-from src.core.logging import get_logger
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+    ExchangeRateLimitError,
+    ExecutionError,
+    NetworkError,
+    ValidationError,
+)
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -28,13 +34,14 @@ from src.core.types import (
     OrderType,
 )
 
+# Import exchange interfaces
+from src.execution.exchange_interface import ExchangeFactoryInterface
+
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
+from src.utils import log_calls, time_execution
 
 from .base_algorithm import BaseAlgorithm
-
-logger = get_logger(__name__)
 
 
 class VWAPAlgorithm(BaseAlgorithm):
@@ -154,7 +161,10 @@ class VWAPAlgorithm(BaseAlgorithm):
     @time_execution
     @log_calls
     async def execute(
-        self, instruction: ExecutionInstruction, exchange_factory=None, risk_manager=None
+        self,
+        instruction: ExecutionInstruction,
+        exchange_factory: ExchangeFactoryInterface | None = None,
+        risk_manager=None,
     ) -> ExecutionResult:
         """
         Execute an order using VWAP algorithm.
@@ -197,13 +207,23 @@ class VWAPAlgorithm(BaseAlgorithm):
                 raise ExecutionError("Exchange factory is required for VWAP execution")
 
             # Determine which exchange to use
-            exchange_name = "binance"  # Default exchange
             if instruction.preferred_exchanges:
                 exchange_name = instruction.preferred_exchanges[0]
+            else:
+                # Get first available exchange from factory
+                available_exchanges = exchange_factory.get_available_exchanges()
+                if not available_exchanges:
+                    raise ExecutionError("No exchanges available")
+                exchange_name = available_exchanges[0]
 
-            exchange = await exchange_factory.get_exchange(exchange_name)
-            if not exchange:
-                raise ExecutionError(f"Failed to get exchange: {exchange_name}")
+            try:
+                exchange = await exchange_factory.get_exchange(exchange_name)
+            except ValidationError as e:
+                self.logger.error(f"Exchange not found: {exchange_name}")
+                raise ExecutionError(f"Exchange {exchange_name} not available: {e}")
+            except Exception as e:
+                self.logger.error(f"Failed to get exchange: {e}")
+                raise ExecutionError(f"Failed to access exchange {exchange_name}: {e}")
 
             # Create VWAP execution plan based on volume patterns
             execution_plan = await self._create_vwap_execution_plan(instruction, exchange)
@@ -546,7 +566,55 @@ class VWAPAlgorithm(BaseAlgorithm):
                 try:
                     slice_info["status"] = "executing"
 
-                    order_response = await exchange.place_order(slice_order)
+                    # Place order with comprehensive error handling
+                    try:
+                        order_response = await exchange.place_order(slice_order)
+                    except ExchangeRateLimitError as e:
+                        self.logger.error(
+                            f"Rate limit error placing slice {slice_num}: {e}",
+                            slice_num=slice_num,
+                            symbol=slice_order.symbol,
+                        )
+                        # Wait longer before retrying
+                        await asyncio.sleep(10)
+                        continue
+                    except ExchangeConnectionError as e:
+                        self.logger.error(
+                            f"Connection error placing slice {slice_num}: {e}",
+                            slice_num=slice_num,
+                        )
+                        # For connection errors, retry with backoff
+                        await asyncio.sleep(5)
+                        continue
+                    except ExchangeError as e:
+                        self.logger.error(
+                            f"Exchange error placing slice {slice_num}: {e}",
+                            slice_num=slice_num,
+                            symbol=slice_order.symbol,
+                            quantity=float(slice_order.quantity),
+                        )
+                        # Continue with next slice, don't fail entire execution
+                        execution_result.add_fill(
+                            price=slice_order.price or current_price,
+                            quantity=Decimal("0"),
+                            timestamp=datetime.now(timezone.utc),
+                            order_id=f"failed_slice_{slice_num}",
+                        )
+                        await asyncio.sleep(1)  # Brief pause before next slice
+                        continue
+                    except NetworkError as e:
+                        self.logger.error(
+                            f"Network error placing slice {slice_num}: {e}", slice_num=slice_num
+                        )
+                        # For network errors, might want to retry or abort
+                        raise ExecutionError(f"Network error during VWAP execution: {e}")
+                    except asyncio.TimeoutError:
+                        self.logger.error(
+                            f"Timeout placing slice {slice_num}",
+                            slice_num=slice_num,
+                        )
+                        # Timeout - skip this slice
+                        continue
 
                     # Update execution result with new child order
                     await self._update_execution_result(

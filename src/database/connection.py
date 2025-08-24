@@ -85,7 +85,7 @@ class DatabaseConnectionManager:
 
                 if not handled:
                     logger.error("Failed to initialize database connections", error=str(e))
-                    raise DataSourceError(f"Database initialization failed: {e!s}") from e
+                    raise DataSourceError(f"Database initialization failed: {e!s}")
                 else:
                     logger.info("Database connections recovered after error handling")
 
@@ -97,7 +97,7 @@ class DatabaseConnectionManager:
                 db_host = self.config.database.postgresql_host
                 db_port = self.config.database.postgresql_port
                 logger.info(f"Starting health monitoring for {db_host}:{db_port}")
-                monitor_interval = getattr(TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
+                monitor_interval = TIMEOUTS.get("HEALTH_CHECK_INTERVAL", 30)
                 logger.debug(f"Health check interval: {monitor_interval}s")
             except Exception as e:
                 logger.warning(f"Health monitoring setup warning: {e}")
@@ -111,7 +111,7 @@ class DatabaseConnectionManager:
         while True:
             try:
                 # Use timeout constants from utils
-                health_check_interval = getattr(TIMEOUTS, "HEALTH_CHECK_INTERVAL", 30)
+                health_check_interval = TIMEOUTS.get("HEALTH_CHECK_INTERVAL", 30)
                 await asyncio.sleep(health_check_interval)
 
                 # Use utils constants and performance monitoring
@@ -151,19 +151,23 @@ class DatabaseConnectionManager:
     async def _setup_postgresql(self) -> None:
         """Setup PostgreSQL connections with async support."""
         try:
-            # Create async engine using limits from utils
-            max_overflow = getattr(LIMITS, "DB_MAX_OVERFLOW", 20)
-            pool_recycle = getattr(TIMEOUTS, "DB_POOL_RECYCLE", 3600)
+            # Create async engine using optimized limits for high-frequency trading
+            max_overflow = LIMITS.get("DB_MAX_OVERFLOW", 40)  # Increased for burst capacity
+            pool_recycle = TIMEOUTS.get("DB_POOL_RECYCLE", 1800)  # Shorter recycle for freshness
+            # Performance optimizations
+            pool_pre_ping = True  # Ensure connections are alive
+            pool_reset_on_return = "commit"  # Fast cleanup
+            pool_timeout = 5  # Quick timeout for connection acquisition
 
             # Use NullPool under pytest to avoid pooled connection GC warnings
             try:
-                from sqlalchemy.pool import NullPool as _NullPool
+                from sqlalchemy.pool import NullPool
 
                 use_null_pool = bool(os.getenv("PYTEST_CURRENT_TEST"))
             except Exception:
                 use_null_pool = False
 
-            async_pool_class = _NullPool if use_null_pool else AsyncAdaptedQueuePool
+            async_pool_class = NullPool if use_null_pool else AsyncAdaptedQueuePool
 
             async_engine_kwargs = {
                 "echo": self.config.debug,
@@ -173,10 +177,17 @@ class DatabaseConnectionManager:
             if async_pool_class.__name__ != "NullPool":
                 async_engine_kwargs.update(
                     {
-                        "pool_size": self.config.database.postgresql_pool_size,
+                        "pool_size": max(
+                            self.config.database.postgresql_pool_size, 20
+                        ),  # Minimum 20 for HFT
                         "max_overflow": max_overflow,
-                        "pool_pre_ping": True,
+                        "pool_pre_ping": pool_pre_ping,
                         "pool_recycle": pool_recycle,
+                        "pool_reset_on_return": pool_reset_on_return,
+                        "pool_timeout": pool_timeout,
+                        # Additional performance settings
+                        "pool_reset_on_invalid": True,
+                        "pool_events": True,  # Enable pool event logging for monitoring
                     }
                 )
 
@@ -185,12 +196,10 @@ class DatabaseConnectionManager:
             )
 
             # Create sync engine for migrations using limits
-            sync_pool_size = getattr(LIMITS, "DB_SYNC_POOL_SIZE", 5)
-            sync_max_overflow = getattr(LIMITS, "DB_SYNC_MAX_OVERFLOW", 10)
+            sync_pool_size = LIMITS.get("DB_SYNC_POOL_SIZE", 5)
+            sync_max_overflow = LIMITS.get("DB_SYNC_MAX_OVERFLOW", 10)
 
-            from sqlalchemy.pool import NullPool as _NullPool
-
-            sync_pool_class = _NullPool if use_null_pool else QueuePool
+            sync_pool_class = NullPool if use_null_pool else QueuePool
 
             if sync_pool_class.__name__ == "NullPool":
                 self.sync_engine = create_engine(
@@ -228,7 +237,7 @@ class DatabaseConnectionManager:
 
             if not handled:
                 logger.error("PostgreSQL connection failed", error=str(e))
-                raise DataSourceError(f"PostgreSQL connection failed: {e!s}") from e
+                raise DataSourceError(f"PostgreSQL connection failed: {e!s}")
             else:
                 logger.info("PostgreSQL connection recovered after error handling")
 
@@ -265,7 +274,7 @@ class DatabaseConnectionManager:
 
             if not handled:
                 logger.error("Redis connection failed", error=str(e))
-                raise DataSourceError(f"Redis connection failed: {e!s}") from e
+                raise DataSourceError(f"Redis connection failed: {e!s}")
             else:
                 logger.info("Redis connection recovered after error handling")
 
@@ -285,7 +294,7 @@ class DatabaseConnectionManager:
             try:
                 self.influxdb_client.ping()
             except Exception as e:
-                raise DataSourceError(f"InfluxDB health check failed: {e!s}") from e
+                raise DataSourceError(f"InfluxDB health check failed: {e!s}")
 
             logger.info("InfluxDB connection established")
 
@@ -306,7 +315,7 @@ class DatabaseConnectionManager:
 
             if not handled:
                 logger.error("InfluxDB connection failed", error=str(e))
-                raise DataSourceError(f"InfluxDB connection failed: {e!s}") from e
+                raise DataSourceError(f"InfluxDB connection failed: {e!s}")
             else:
                 logger.info("InfluxDB connection recovered after error handling")
 
@@ -388,10 +397,6 @@ class DatabaseConnectionManager:
 
         except Exception as e:
             logger.error("Error closing database connections", error=str(e))
-        finally:
-            # Ensure we clear the global reference
-            global _connection_manager
-            _connection_manager = None
 
     def is_healthy(self) -> bool:
         """Check if all database connections are healthy."""
@@ -411,12 +416,45 @@ class DatabaseConnectionManager:
         if not self.async_engine:
             return {"size": 0, "used": 0, "free": 0}
 
-        pool = self.async_engine.pool
-        return {
-            "size": pool.size(),
-            "used": pool.checkedin(),
-            "free": pool.size() - pool.checkedin(),
-        }
+        try:
+            pool = self.async_engine.pool
+
+            # Handle NullPool which doesn't have these attributes
+            if hasattr(pool, "__class__") and pool.__class__.__name__ == "NullPool":
+                return {"size": 0, "used": 0, "free": 0}
+
+            # Standardize the return format to what's expected by consumers
+            # Try to get pool statistics safely
+            size = 0
+            used = 0
+            free = 0
+
+            # Try to get size from pool
+            if hasattr(pool, "size"):
+                size_val = pool.size
+                size = size_val() if callable(size_val) else size_val
+
+            # Try to get usage stats
+            if hasattr(pool, "checkedout"):
+                checkedout_val = pool.checkedout
+                used = checkedout_val() if callable(checkedout_val) else checkedout_val
+
+            # Calculate free connections
+            if hasattr(pool, "checkedin"):
+                checkedin_val = pool.checkedin
+                checkedin = checkedin_val() if callable(checkedin_val) else checkedin_val
+                free = checkedin
+            else:
+                free = max(0, size - used)
+
+            return {
+                "size": size,
+                "used": used,
+                "free": free
+            }
+        except Exception as e:
+            logger.warning(f"Unable to get pool status: {e}")
+            return {"size": 0, "used": 0, "free": 0}
 
 
 # Global connection manager instance
@@ -529,11 +567,17 @@ async def health_check() -> dict[str, bool]:
     return health_status
 
 
-# TODO: Remove in production - Debug functions
 async def debug_connection_info() -> dict[str, Any]:
-    """Debug function to get connection information."""
+    """Debug function to get connection information.
+    
+    WARNING: This function should only be used in development/debugging.
+    """
     if not _connection_manager:
         return format_api_response({}, success=False, message="Database not initialized")
+
+    # Only allow in debug mode
+    if not _connection_manager.config.debug:
+        return format_api_response({}, success=False, message="Debug mode not enabled")
 
     # Use utils formatter for consistent API response
     debug_data = {

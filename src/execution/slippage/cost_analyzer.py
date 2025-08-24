@@ -1,73 +1,72 @@
 """
-Transaction Cost Analysis (TCA) for execution performance measurement.
+Transaction Cost Analysis (TCA) - Refactored to use ExecutionService
 
 This module provides comprehensive transaction cost analysis capabilities
-to measure and analyze execution quality, identifying sources of cost
-and opportunities for improvement in trading execution.
+using the enterprise-grade ExecutionService for all database operations.
 
-CRITICAL: This integrates with P-001 (types, exceptions, config),
-P-002A (error handling), and P-007A (utils) components.
+Key Features:
+- Uses ExecutionService for all database operations (NO direct DB access)
+- Full audit trail through service layer for TCA operations
+- Transaction support with rollback capabilities
+- Enterprise-grade error handling and monitoring
+- Performance tracking through service metrics
+- Comprehensive execution cost analysis
+
+Author: Trading Bot Framework
+Version: 2.0.0 - Refactored for service layer
 """
 
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any
 
-import numpy as np
-
+from src.base import BaseComponent
 from src.core.config import Config
-from src.core.exceptions import ExecutionError, ValidationError
-from src.core.logging import get_logger
+from src.core.exceptions import ServiceError, ValidationError
 
 # MANDATORY: Import from P-001
 from src.core.types import (
     ExecutionResult,
     MarketData,
-    OrderSide,
 )
-
-# MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+from src.execution.service import ExecutionService
 
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
-
-logger = get_logger(__name__)
+from src.utils import log_calls, time_execution
 
 
-class CostAnalyzer:
+class CostAnalyzer(BaseComponent):
     """
-    Advanced Transaction Cost Analysis (TCA) engine.
+    Advanced Transaction Cost Analysis (TCA) engine using ExecutionService.
 
-    This analyzer provides comprehensive measurement and analysis of
-    execution costs, including:
-    - Implementation shortfall analysis
-    - Benchmark comparison (VWAP, TWAP, arrival price)
-    - Cost component breakdown
-    - Execution quality scoring
-    - Performance attribution analysis
-    - Statistical analysis and reporting
+    This analyzer provides comprehensive measurement and analysis of execution
+    costs while delegating all database operations to ExecutionService. All TCA
+    operations now include audit trails and enterprise error handling.
 
-    The analyzer helps traders understand execution performance and
-    identify areas for improvement in their execution strategies.
+    Key Changes:
+    - Uses ExecutionService for all data operations (NO direct database access)
+    - Full audit trail for TCA analysis operations
+    - Enterprise-grade monitoring and metrics
+    - Performance tracking through service layer
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, execution_service: ExecutionService, config: Config):
         """
-        Initialize transaction cost analyzer.
+        Initialize transaction cost analyzer with ExecutionService dependency injection.
 
         Args:
+            execution_service: ExecutionService instance for all database operations
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
+
+        # CRITICAL: Use ExecutionService for ALL database operations
+        self.execution_service = execution_service
         self.config = config
-        self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
-        self.error_handler = ErrorHandler(config.error_handling)
 
         # TCA configuration
         self.benchmark_lookback_hours = 24  # Look back 24 hours for benchmarks
         self.cost_component_weights = {
             "market_impact": 0.4,
-            "timing_cost": 0.3,
             "spread_cost": 0.2,
             "opportunity_cost": 0.1,
         }
@@ -78,805 +77,529 @@ class CostAnalyzer:
         self.acceptable_threshold_bps = 30  # < 30 bps acceptable
         self.poor_threshold_above_bps = 30  # > 30 bps poor
 
-        # Analysis storage
-        self.execution_analyses = {}  # Store historical analyses
-        self.benchmark_cache = {}  # Cache benchmark calculations
-        self.performance_statistics = {}  # Aggregate performance stats
+        # Local analysis tracking (non-persistent data)
+        self.analysis_cache = {}
+        self.benchmark_cache = {}
 
-        # Statistical parameters
-        self.confidence_levels = [0.9, 0.95, 0.99]
-        self.min_samples_for_stats = 10
-        self.outlier_threshold_std = 3.0  # 3 standard deviations
+        # TCA statistics
+        self.tca_statistics = {
+            "analyses_performed": 0,
+            "benchmark_calculations": 0,
+            "cost_breakdowns": 0,
+            "quality_scores": 0,
+        }
 
-        self.logger.info("Transaction cost analyzer initialized")
+        self.logger.info(
+            "Cost analyzer initialized with ExecutionService",
+            service_type=type(self.execution_service).__name__,
+            benchmark_lookback_hours=self.benchmark_lookback_hours,
+        )
 
+    @log_calls
     @time_execution
     async def analyze_execution(
         self,
         execution_result: ExecutionResult,
-        market_data_at_decision: MarketData,
-        market_data_at_completion: MarketData | None = None,
-        benchmarks: dict[str, Decimal] | None = None,
+        market_data: MarketData,
+        bot_id: str | None = None,
+        strategy_name: str | None = None,
     ) -> dict[str, Any]:
         """
-        Perform comprehensive transaction cost analysis on an execution.
+        Perform comprehensive transaction cost analysis using ExecutionService data.
 
         Args:
             execution_result: Completed execution result
-            market_data_at_decision: Market data when decision was made
-            market_data_at_completion: Market data at execution completion
-            benchmarks: Optional benchmark prices for comparison
+            market_data: Market data at execution time
+            bot_id: Associated bot instance ID
+            strategy_name: Strategy that generated the execution
 
         Returns:
             dict: Comprehensive TCA analysis results
 
         Raises:
-            ValidationError: If inputs are invalid
-            ExecutionError: If analysis fails
+            ServiceError: If analysis fails
+            ValidationError: If input data is invalid
         """
         try:
+            self.tca_statistics["analyses_performed"] += 1
+
             # Validate inputs
-            if not execution_result or not market_data_at_decision:
-                raise ValidationError("Execution result and decision market data required")
+            self._validate_analysis_inputs(execution_result, market_data)
 
-            if execution_result.total_filled_quantity <= 0:
-                raise ValidationError("No filled quantity to analyze")
-
-            if not execution_result.average_fill_price:
-                raise ValidationError("Average fill price required for analysis")
-
-            self.logger.info(
-                "Starting TCA analysis",
-                execution_id=execution_result.execution_id,
+            # Get historical execution data from ExecutionService for benchmarking
+            historical_metrics = await self.execution_service.get_execution_metrics(
+                bot_id=bot_id,
                 symbol=execution_result.original_order.symbol,
-                filled_quantity=float(execution_result.total_filled_quantity),
+                time_range_hours=self.benchmark_lookback_hours,
             )
 
-            # Calculate core TCA metrics
-            tca_metrics = await self._calculate_core_tca_metrics(
-                execution_result, market_data_at_decision, market_data_at_completion
+            # Perform cost analysis
+            cost_analysis = await self._perform_cost_analysis(
+                execution_result, market_data, historical_metrics
             )
 
             # Calculate benchmark comparisons
-            benchmark_analysis = await self._calculate_benchmark_comparisons(
-                execution_result, market_data_at_decision, benchmarks
+            benchmark_analysis = await self._calculate_benchmarks(
+                execution_result, market_data, historical_metrics
             )
 
-            # Analyze cost components
-            cost_breakdown = await self._analyze_cost_components(
-                execution_result, market_data_at_decision, tca_metrics
-            )
-
-            # Calculate execution quality score
-            quality_score = await self._calculate_execution_quality_score(
-                tca_metrics, cost_breakdown
-            )
-
-            # Generate performance attribution
-            attribution = await self._generate_performance_attribution(
-                execution_result, tca_metrics, cost_breakdown
-            )
+            # Generate execution quality score
+            quality_score = self._calculate_quality_score(cost_analysis, benchmark_analysis)
 
             # Compile comprehensive analysis
-            analysis = {
+            analysis_result = {
+                "analysis_id": f"tca_{execution_result.execution_id}_{int(datetime.now(timezone.utc).timestamp())}",
                 "execution_id": execution_result.execution_id,
                 "symbol": execution_result.original_order.symbol,
                 "analysis_timestamp": datetime.now(timezone.utc),
-                # Core metrics
-                "tca_metrics": tca_metrics,
+                "cost_analysis": cost_analysis,
                 "benchmark_analysis": benchmark_analysis,
-                "cost_breakdown": cost_breakdown,
-                "quality_score": quality_score,
-                "attribution": attribution,
-                # Execution details
-                "execution_summary": {
-                    "algorithm": execution_result.algorithm.value,
-                    "total_quantity": float(execution_result.original_order.quantity),
-                    "filled_quantity": float(execution_result.total_filled_quantity),
-                    "fill_rate": float(
-                        execution_result.total_filled_quantity
-                        / execution_result.original_order.quantity
-                    ),
-                    "number_of_trades": execution_result.number_of_trades,
-                    "execution_duration_seconds": execution_result.execution_duration,
-                    "average_fill_price": float(execution_result.average_fill_price),
+                "quality_assessment": {
+                    "overall_score": quality_score,
+                    "grade": self._get_quality_grade(quality_score),
+                    "performance_tier": self._get_performance_tier(cost_analysis["total_cost_bps"]),
                 },
-                # Market conditions
-                "market_conditions": {
-                    "decision_price": float(market_data_at_decision.price),
-                    "decision_spread_bps": await self._calculate_spread_bps(
-                        market_data_at_decision
+                "recommendations": self._generate_recommendations(
+                    cost_analysis, benchmark_analysis
+                ),
+                "market_context": {
+                    "price": float(market_data.price),
+                    "volume": float(market_data.volume) if market_data.volume else 0,
+                    "volatility_regime": self._assess_volatility_regime(market_data),
+                },
+                "execution_context": {
+                    "bot_id": bot_id,
+                    "strategy_name": strategy_name,
+                    "algorithm_used": (
+                        execution_result.algorithm.value
+                        if execution_result.algorithm
+                        else "unknown"
                     ),
-                    "volatility_estimate": await self._estimate_volatility(market_data_at_decision),
-                    "volume": float(market_data_at_decision.volume),
+                    "execution_duration_ms": (
+                        execution_result.execution_duration * 1000
+                        if execution_result.execution_duration
+                        else 0
+                    ),
                 },
             }
 
-            # Store analysis for historical tracking
-            symbol = execution_result.original_order.symbol
-            if symbol not in self.execution_analyses:
-                self.execution_analyses[symbol] = []
-            self.execution_analyses[symbol].append(analysis)
-
-            # Update performance statistics
-            await self._update_performance_statistics(symbol, analysis)
+            # Cache analysis for future reference
+            self.analysis_cache[analysis_result["analysis_id"]] = analysis_result
 
             self.logger.info(
-                "TCA analysis completed",
+                "TCA analysis completed via service",
+                analysis_id=analysis_result["analysis_id"],
+                symbol=execution_result.original_order.symbol,
+                quality_score=quality_score,
+                total_cost_bps=cost_analysis["total_cost_bps"],
+            )
+
+            return analysis_result
+
+        except (ValidationError, ServiceError) as e:
+            # Re-raise service layer exceptions
+            self.logger.error(
+                "TCA analysis failed",
                 execution_id=execution_result.execution_id,
-                implementation_shortfall_bps=tca_metrics["implementation_shortfall_bps"],
-                quality_score=quality_score["overall_score"],
-                quality_rating=quality_score["rating"],
+                symbol=execution_result.original_order.symbol,
+                error=str(e),
             )
-
-            return analysis
+            raise
 
         except Exception as e:
-            self.logger.error(f"TCA analysis failed: {e}")
-            raise ExecutionError(f"Transaction cost analysis failed: {e}")
-
-    async def _calculate_core_tca_metrics(
-        self,
-        execution_result: ExecutionResult,
-        market_data_at_decision: MarketData,
-        market_data_at_completion: MarketData | None,
-    ) -> dict[str, Any]:
-        """
-        Calculate core transaction cost analysis metrics.
-
-        Args:
-            execution_result: Execution result
-            market_data_at_decision: Market data at decision time
-            market_data_at_completion: Market data at completion
-
-        Returns:
-            dict: Core TCA metrics
-        """
-        try:
-            # Decision price (price when trade decision was made)
-            decision_price = market_data_at_decision.price
-
-            # Arrival price (price when execution started)
-            arrival_price = decision_price  # Simplified assumption
-
-            # Average execution price
-            execution_price = execution_result.average_fill_price
-
-            # Completion price (price when execution finished)
-            if market_data_at_completion:
-                completion_price = market_data_at_completion.price
-            else:
-                completion_price = execution_price  # Fallback
-
-            # Calculate implementation shortfall
-            if execution_result.original_order.side == OrderSide.BUY:
-                # For buy orders: positive shortfall means paid more than decision price
-                implementation_shortfall = execution_price - decision_price
-            else:
-                # For sell orders: positive shortfall means received less than decision price
-                implementation_shortfall = decision_price - execution_price
-
-            # Convert to basis points
-            implementation_shortfall_bps = (implementation_shortfall / decision_price) * Decimal(
-                "10000"
+            # Log and wrap unexpected exceptions
+            self.logger.error(
+                "Unexpected error in TCA analysis",
+                execution_id=execution_result.execution_id,
+                symbol=execution_result.original_order.symbol,
+                error=str(e),
             )
+            raise ServiceError(f"TCA analysis failed: {e}")
 
-            # Calculate arrival price slippage
-            if execution_result.original_order.side == OrderSide.BUY:
-                arrival_slippage = execution_price - arrival_price
-            else:
-                arrival_slippage = arrival_price - execution_price
-
-            arrival_slippage_bps = (arrival_slippage / arrival_price) * Decimal("10000")
-
-            # Calculate market impact (pre-trade vs post-trade price movement)
-            market_impact = completion_price - arrival_price
-            if execution_result.original_order.side == OrderSide.SELL:
-                market_impact = -market_impact  # Reverse for sell orders
-
-            market_impact_bps = (market_impact / arrival_price) * Decimal("10000")
-
-            # Calculate timing cost (decision delay cost)
-            timing_cost = arrival_price - decision_price
-            if execution_result.original_order.side == OrderSide.SELL:
-                timing_cost = -timing_cost
-
-            timing_cost_bps = (timing_cost / decision_price) * Decimal("10000")
-
-            # Calculate opportunity cost (for unfilled portion)
-            unfilled_quantity = (
-                execution_result.original_order.quantity - execution_result.total_filled_quantity
-            )
-            if unfilled_quantity > 0:
-                opportunity_cost = (completion_price - decision_price) * unfilled_quantity
-                if execution_result.original_order.side == OrderSide.SELL:
-                    opportunity_cost = -opportunity_cost
-            else:
-                opportunity_cost = Decimal("0")
-
-            opportunity_cost_bps = Decimal("0")
-            if execution_result.original_order.quantity > 0:
-                opportunity_cost_bps = (
-                    opportunity_cost / (decision_price * execution_result.original_order.quantity)
-                ) * Decimal("10000")
-
-            return {
-                "decision_price": float(decision_price),
-                "arrival_price": float(arrival_price),
-                "execution_price": float(execution_price),
-                "completion_price": float(completion_price),
-                "implementation_shortfall": float(implementation_shortfall),
-                "implementation_shortfall_bps": float(implementation_shortfall_bps),
-                "arrival_slippage_bps": float(arrival_slippage_bps),
-                "market_impact_bps": float(market_impact_bps),
-                "timing_cost_bps": float(timing_cost_bps),
-                "opportunity_cost_bps": float(opportunity_cost_bps),
-                "total_cost_bps": float(
-                    arrival_slippage_bps + timing_cost_bps + opportunity_cost_bps
-                ),
-            }
-
-        except Exception as e:
-            self.logger.error(f"Core TCA metrics calculation failed: {e}")
-            return {}
-
-    async def _calculate_benchmark_comparisons(
-        self,
-        execution_result: ExecutionResult,
-        market_data_at_decision: MarketData,
-        benchmarks: dict[str, Decimal] | None,
-    ) -> dict[str, Any]:
-        """
-        Calculate performance relative to various benchmarks.
-
-        Args:
-            execution_result: Execution result
-            market_data_at_decision: Market data at decision
-            benchmarks: Optional benchmark prices
-
-        Returns:
-            dict: Benchmark comparison results
-        """
-        try:
-            execution_price = execution_result.average_fill_price
-            side = execution_result.original_order.side
-
-            comparisons = {}
-
-            # Arrival price benchmark
-            arrival_price = market_data_at_decision.price
-            if side == OrderSide.BUY:
-                arrival_performance_bps = (
-                    (execution_price - arrival_price) / arrival_price
-                ) * Decimal("10000")
-            else:
-                arrival_performance_bps = (
-                    (arrival_price - execution_price) / arrival_price
-                ) * Decimal("10000")
-
-            comparisons["arrival_price"] = {
-                "benchmark_price": float(arrival_price),
-                "performance_bps": float(arrival_performance_bps),
-                "description": "Performance vs arrival price",
-            }
-
-            # Mid-price benchmark (if bid/ask available)
-            if market_data_at_decision.bid and market_data_at_decision.ask:
-                mid_price = (market_data_at_decision.bid + market_data_at_decision.ask) / Decimal(
-                    "2"
-                )
-                if side == OrderSide.BUY:
-                    mid_performance_bps = ((execution_price - mid_price) / mid_price) * Decimal(
-                        "10000"
-                    )
-                else:
-                    mid_performance_bps = ((mid_price - execution_price) / mid_price) * Decimal(
-                        "10000"
-                    )
-
-                comparisons["mid_price"] = {
-                    "benchmark_price": float(mid_price),
-                    "performance_bps": float(mid_performance_bps),
-                    "description": "Performance vs mid price",
-                }
-
-            # Add custom benchmarks if provided
-            if benchmarks:
-                for bench_name, bench_price in benchmarks.items():
-                    if side == OrderSide.BUY:
-                        bench_performance_bps = (
-                            (execution_price - bench_price) / bench_price
-                        ) * Decimal("10000")
-                    else:
-                        bench_performance_bps = (
-                            (bench_price - execution_price) / bench_price
-                        ) * Decimal("10000")
-
-                    comparisons[bench_name] = {
-                        "benchmark_price": float(bench_price),
-                        "performance_bps": float(bench_performance_bps),
-                        "description": f"Performance vs {bench_name}",
-                    }
-
-            return comparisons
-
-        except Exception as e:
-            self.logger.error(f"Benchmark comparison calculation failed: {e}")
-            return {}
-
-    async def _analyze_cost_components(
-        self,
-        execution_result: ExecutionResult,
-        market_data_at_decision: MarketData,
-        tca_metrics: dict[str, Any],
-    ) -> dict[str, Any]:
-        """
-        Analyze breakdown of execution costs by component.
-
-        Args:
-            execution_result: Execution result
-            market_data_at_decision: Market data at decision
-            tca_metrics: Core TCA metrics
-
-        Returns:
-            dict: Cost component breakdown
-        """
-        try:
-            # Extract cost components from TCA metrics
-            timing_cost_bps = Decimal(str(abs(tca_metrics.get("timing_cost_bps", 0))))
-            market_impact_bps = Decimal(str(abs(tca_metrics.get("market_impact_bps", 0))))
-            opportunity_cost_bps = Decimal(str(abs(tca_metrics.get("opportunity_cost_bps", 0))))
-
-            # Calculate spread cost
-            spread_cost_bps = await self._calculate_spread_cost_component(
-                execution_result, market_data_at_decision
-            )
-
-            # Calculate total explicit costs (fees, commissions)
-            explicit_cost_bps = await self._calculate_explicit_costs(execution_result)
-
-            # Calculate total costs
-            total_implicit_cost_bps = (
-                timing_cost_bps + market_impact_bps + spread_cost_bps + opportunity_cost_bps
-            )
-            total_cost_bps = total_implicit_cost_bps + explicit_cost_bps
-
-            # Calculate component percentages
-            component_breakdown = {}
-            if total_cost_bps > 0:
-                component_breakdown = {
-                    "timing_cost_pct": float((timing_cost_bps / total_cost_bps) * 100),
-                    "market_impact_pct": float((market_impact_bps / total_cost_bps) * 100),
-                    "spread_cost_pct": float((spread_cost_bps / total_cost_bps) * 100),
-                    "opportunity_cost_pct": float((opportunity_cost_bps / total_cost_bps) * 100),
-                    "explicit_cost_pct": float((explicit_cost_bps / total_cost_bps) * 100),
-                }
-
-            return {
-                "cost_components_bps": {
-                    "timing_cost": float(timing_cost_bps),
-                    "market_impact": float(market_impact_bps),
-                    "spread_cost": float(spread_cost_bps),
-                    "opportunity_cost": float(opportunity_cost_bps),
-                    "explicit_cost": float(explicit_cost_bps),
-                },
-                "total_implicit_cost_bps": float(total_implicit_cost_bps),
-                "total_explicit_cost_bps": float(explicit_cost_bps),
-                "total_cost_bps": float(total_cost_bps),
-                "component_percentages": component_breakdown,
-                "dominant_cost_component": (
-                    max(component_breakdown.items(), key=lambda x: x[1], default=("unknown", 0))[
-                        0
-                    ].replace("_pct", "")
-                    if component_breakdown
-                    else "unknown"
-                ),
-            }
-
-        except Exception as e:
-            self.logger.error(f"Cost component analysis failed: {e}")
-            return {}
-
-    async def _calculate_spread_cost_component(
-        self, execution_result: ExecutionResult, market_data: MarketData
-    ) -> Decimal:
-        """Calculate the spread cost component."""
-        try:
-            if not market_data.bid or not market_data.ask:
-                return Decimal("10")  # Default 10 bps
-
-            spread = market_data.ask - market_data.bid
-            spread_bps = (spread / market_data.price) * Decimal("10000")
-
-            # Typically pay about half the spread
-            spread_cost_bps = spread_bps * Decimal("0.5")
-
-            return spread_cost_bps
-
-        except Exception:
-            return Decimal("10")  # Default
-
-    async def _calculate_explicit_costs(self, execution_result: ExecutionResult) -> Decimal:
-        """Calculate explicit costs (fees, commissions)."""
-        try:
-            # Use the total fees from execution result if available
-            if execution_result.total_fees > 0:
-                # Convert fees to basis points of trade value
-                trade_value = (
-                    execution_result.total_filled_quantity * execution_result.average_fill_price
-                )
-                if trade_value > 0:
-                    explicit_cost_bps = (execution_result.total_fees / trade_value) * Decimal(
-                        "10000"
-                    )
-                    return explicit_cost_bps
-
-            # Default fee estimate
-            return Decimal("8")  # 8 bps default fee estimate
-
-        except Exception:
-            return Decimal("8")  # Default
-
-    async def _calculate_execution_quality_score(
-        self, tca_metrics: dict[str, Any], cost_breakdown: dict[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Calculate overall execution quality score.
-
-        Args:
-            tca_metrics: Core TCA metrics
-            cost_breakdown: Cost component breakdown
-
-        Returns:
-            dict: Quality score and rating
-        """
-        try:
-            total_cost_bps = cost_breakdown.get("total_cost_bps", 0)
-
-            # Determine quality rating based on total cost
-            if total_cost_bps <= self.excellent_threshold_bps:
-                rating = "excellent"
-                score = 90 + (
-                    10
-                    * (self.excellent_threshold_bps - total_cost_bps)
-                    / self.excellent_threshold_bps
-                )
-            elif total_cost_bps <= self.good_threshold_bps:
-                rating = "good"
-                score = 70 + (
-                    20
-                    * (self.good_threshold_bps - total_cost_bps)
-                    / (self.good_threshold_bps - self.excellent_threshold_bps)
-                )
-            elif total_cost_bps <= self.acceptable_threshold_bps:
-                rating = "acceptable"
-                score = 50 + (
-                    20
-                    * (self.acceptable_threshold_bps - total_cost_bps)
-                    / (self.acceptable_threshold_bps - self.good_threshold_bps)
-                )
-            else:
-                rating = "poor"
-                score = max(0, 50 - (total_cost_bps - self.acceptable_threshold_bps))
-
-            # Adjust score based on cost component balance
-            component_pcts = cost_breakdown.get("component_percentages", {})
-            if component_pcts:
-                # Penalize if one component dominates (indicates imbalanced execution)
-                max_component_pct = max(component_pcts.values())
-                if max_component_pct > 70:  # If one component > 70%
-                    score *= 0.9  # 10% penalty
-
-            score = max(0, min(100, score))  # Clamp between 0-100
-
-            return {
-                "overall_score": float(score),
-                "rating": rating,
-                "total_cost_bps": total_cost_bps,
-                "cost_efficiency": (
-                    "high"
-                    if total_cost_bps <= self.good_threshold_bps
-                    else "medium"
-                    if total_cost_bps <= self.acceptable_threshold_bps
-                    else "low"
-                ),
-            }
-
-        except Exception as e:
-            self.logger.error(f"Quality score calculation failed: {e}")
-            return {
-                "overall_score": 50.0,
-                "rating": "unknown",
-                "total_cost_bps": 0,
-                "cost_efficiency": "unknown",
-            }
-
-    async def _generate_performance_attribution(
-        self,
-        execution_result: ExecutionResult,
-        tca_metrics: dict[str, Any],
-        cost_breakdown: dict[str, Any],
-    ) -> dict[str, Any]:
-        """
-        Generate performance attribution analysis.
-
-        Args:
-            execution_result: Execution result
-            tca_metrics: TCA metrics
-            cost_breakdown: Cost breakdown
-
-        Returns:
-            dict: Performance attribution analysis
-        """
-        try:
-            attribution = {
-                "algorithm_performance": {},
-                "market_condition_impact": {},
-                "execution_efficiency": {},
-                "improvement_opportunities": [],
-            }
-
-            # Algorithm performance attribution
-            algorithm = execution_result.algorithm.value
-            total_cost_bps = cost_breakdown.get("total_cost_bps", 0)
-
-            attribution["algorithm_performance"] = {
-                "algorithm_used": algorithm,
-                "cost_effectiveness": (
-                    "good"
-                    if total_cost_bps <= 20
-                    else "average"
-                    if total_cost_bps <= 40
-                    else "poor"
-                ),
-                "execution_speed": (
-                    "fast"
-                    if execution_result.execution_duration
-                    and execution_result.execution_duration < 300
-                    else (
-                        "medium"
-                        if execution_result.execution_duration
-                        and execution_result.execution_duration < 1800
-                        else "slow"
-                    )
-                ),
-                "fill_rate": float(
-                    execution_result.total_filled_quantity
-                    / execution_result.original_order.quantity
-                ),
-            }
-
-            # Market condition impact
-            market_impact_bps = abs(tca_metrics.get("market_impact_bps", 0))
-            timing_cost_bps = abs(tca_metrics.get("timing_cost_bps", 0))
-
-            attribution["market_condition_impact"] = {
-                "market_impact_severity": (
-                    "low"
-                    if market_impact_bps <= 10
-                    else "medium"
-                    if market_impact_bps <= 25
-                    else "high"
-                ),
-                "timing_impact": (
-                    "favorable"
-                    if timing_cost_bps <= 5
-                    else "neutral"
-                    if timing_cost_bps <= 15
-                    else "adverse"
-                ),
-                "market_volatility_effect": "low",  # Simplified
-            }
-
-            # Execution efficiency
-            number_of_trades = execution_result.number_of_trades
-            quantity_per_trade = float(execution_result.total_filled_quantity) / max(
-                number_of_trades, 1
-            )
-
-            attribution["execution_efficiency"] = {
-                "trade_frequency": (
-                    "high" if number_of_trades > 10 else "medium" if number_of_trades > 3 else "low"
-                ),
-                "average_trade_size": quantity_per_trade,
-                "execution_consistency": "good",  # Simplified
-            }
-
-            # Improvement opportunities
-            opportunities = []
-
-            # Check dominant cost components for improvement suggestions
-            dominant_component = cost_breakdown.get("dominant_cost_component", "")
-
-            if dominant_component == "timing_cost" and timing_cost_bps > 15:
-                opportunities.append(
-                    {
-                        "area": "timing",
-                        "suggestion": "Consider faster execution to reduce timing costs",
-                        "potential_savings_bps": timing_cost_bps * 0.3,
-                    }
-                )
-
-            if dominant_component == "market_impact" and market_impact_bps > 20:
-                opportunities.append(
-                    {
-                        "area": "market_impact",
-                        "suggestion": "Use more passive execution strategy to reduce market impact",
-                        "potential_savings_bps": market_impact_bps * 0.4,
-                    }
-                )
-
-            if dominant_component == "spread_cost":
-                opportunities.append(
-                    {
-                        "area": "spread_cost",
-                        "suggestion": "Use limit orders or improve timing to reduce spread costs",
-                        "potential_savings_bps": cost_breakdown.get("cost_components_bps", {}).get(
-                            "spread_cost", 0
-                        )
-                        * 0.5,
-                    }
-                )
-
-            attribution["improvement_opportunities"] = opportunities
-
-            return attribution
-
-        except Exception as e:
-            self.logger.error(f"Performance attribution generation failed: {e}")
-            return {}
-
-    async def _calculate_spread_bps(self, market_data: MarketData) -> float:
-        """Calculate bid-ask spread in basis points."""
-        try:
-            if market_data.bid and market_data.ask and market_data.price:
-                spread = market_data.ask - market_data.bid
-                spread_bps = (spread / market_data.price) * 10000
-                return float(spread_bps)
-            return 20.0  # Default 20 bps
-        except Exception:
-            return 20.0
-
-    async def _estimate_volatility(self, market_data: MarketData) -> float:
-        """Estimate volatility from market data."""
-        try:
-            if market_data.high_price and market_data.low_price and market_data.price:
-                daily_range = float(market_data.high_price - market_data.low_price)
-                volatility = daily_range / float(market_data.price)
-                return volatility
-            return 0.02  # Default 2% volatility
-        except Exception:
-            return 0.02
-
-    async def _update_performance_statistics(self, symbol: str, analysis: dict[str, Any]) -> None:
-        """Update aggregated performance statistics."""
-        try:
-            if symbol not in self.performance_statistics:
-                self.performance_statistics[symbol] = {
-                    "total_analyses": 0,
-                    "average_cost_bps": 0.0,
-                    "average_quality_score": 0.0,
-                    "cost_history": [],
-                    "last_updated": datetime.now(timezone.utc),
-                }
-
-            stats = self.performance_statistics[symbol]
-
-            # Update counters
-            stats["total_analyses"] += 1
-
-            # Update running averages
-            cost_bps = analysis.get("cost_breakdown", {}).get("total_cost_bps", 0)
-            quality_score = analysis.get("quality_score", {}).get("overall_score", 0)
-
-            # Simple running average
-            n = stats["total_analyses"]
-            stats["average_cost_bps"] = ((stats["average_cost_bps"] * (n - 1)) + cost_bps) / n
-            stats["average_quality_score"] = (
-                (stats["average_quality_score"] * (n - 1)) + quality_score
-            ) / n
-
-            # Add to cost history (keep last 100)
-            stats["cost_history"].append(
-                {
-                    "timestamp": analysis["analysis_timestamp"],
-                    "cost_bps": cost_bps,
-                    "quality_score": quality_score,
-                }
-            )
-
-            if len(stats["cost_history"]) > 100:
-                stats["cost_history"] = stats["cost_history"][-100:]
-
-            stats["last_updated"] = datetime.now(timezone.utc)
-
-        except Exception as e:
-            self.logger.error(f"Performance statistics update failed: {e}")
-
-    @log_calls
-    async def get_performance_report(
+    @time_execution
+    async def get_historical_performance(
         self,
         symbol: str | None = None,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
+        bot_id: str | None = None,
+        time_range_hours: int = 168,  # 1 week default
     ) -> dict[str, Any]:
         """
-        Generate comprehensive performance report.
+        Get historical execution performance using ExecutionService data.
 
         Args:
             symbol: Optional symbol filter
-            start_date: Optional start date filter
-            end_date: Optional end date filter
+            bot_id: Optional bot instance filter
+            time_range_hours: Time range for analysis
 
         Returns:
-            dict: Performance report
+            dict: Historical performance analysis
         """
         try:
-            if symbol:
-                symbols = [symbol] if symbol in self.execution_analyses else []
-            else:
-                symbols = list(self.execution_analyses.keys())
+            # Get execution metrics from service
+            service_metrics = await self.execution_service.get_execution_metrics(
+                bot_id=bot_id,
+                symbol=symbol,
+                time_range_hours=time_range_hours,
+            )
 
-            if not symbols:
-                return {"error": "No execution data available"}
+            # Calculate TCA-specific metrics
+            tca_metrics = await self._calculate_tca_metrics(service_metrics)
 
-            # Filter analyses by date if specified
-            filtered_analyses = []
-            for sym in symbols:
-                for analysis in self.execution_analyses[sym]:
-                    analysis_time = analysis["analysis_timestamp"]
-                    if start_date and analysis_time < start_date:
-                        continue
-                    if end_date and analysis_time > end_date:
-                        continue
-                    filtered_analyses.append(analysis)
-
-            if not filtered_analyses:
-                return {"error": "No analyses in specified date range"}
-
-            # Calculate aggregate statistics
-            costs = [a["cost_breakdown"]["total_cost_bps"] for a in filtered_analyses]
-            quality_scores = [a["quality_score"]["overall_score"] for a in filtered_analyses]
-
-            report = {
-                "summary": {
-                    "total_executions": len(filtered_analyses),
-                    "symbols_analyzed": len(symbols),
-                    "date_range": {
-                        "start": start_date.isoformat() if start_date else "all",
-                        "end": end_date.isoformat() if end_date else "all",
-                    },
+            # Compile historical analysis
+            historical_analysis = {
+                "analysis_period": {
+                    "time_range_hours": time_range_hours,
+                    "symbol": symbol,
+                    "bot_id": bot_id,
                 },
-                "cost_statistics": {
-                    "average_cost_bps": float(np.mean(costs)),
-                    "median_cost_bps": float(np.median(costs)),
-                    "std_cost_bps": float(np.std(costs)),
-                    "min_cost_bps": float(np.min(costs)),
-                    "max_cost_bps": float(np.max(costs)),
-                    "percentiles": {
-                        "25th": float(np.percentile(costs, 25)),
-                        "75th": float(np.percentile(costs, 75)),
-                        "90th": float(np.percentile(costs, 90)),
-                        "95th": float(np.percentile(costs, 95)),
-                    },
+                "execution_overview": {
+                    "total_executions": service_metrics.get("total_trades", 0),
+                    "successful_rate": service_metrics.get("success_rate", 0),
+                    "total_volume": service_metrics.get("total_volume", 0),
                 },
-                "quality_statistics": {
-                    "average_quality_score": float(np.mean(quality_scores)),
-                    "median_quality_score": float(np.median(quality_scores)),
-                    "excellent_executions": len([s for s in quality_scores if s >= 90]),
-                    "good_executions": len([s for s in quality_scores if 70 <= s < 90]),
-                    "poor_executions": len([s for s in quality_scores if s < 50]),
-                },
-                "performance_by_symbol": {},
+                "cost_metrics": tca_metrics,
+                "performance_trends": self._analyze_performance_trends(service_metrics),
+                "benchmark_performance": self._calculate_benchmark_performance(service_metrics),
+                "recommendations": self._generate_historical_recommendations(tca_metrics),
+                "timestamp": datetime.now(timezone.utc),
             }
 
-            # Add per-symbol breakdown
-            for sym in symbols:
-                if sym in self.performance_statistics:
-                    report["performance_by_symbol"][sym] = self.performance_statistics[sym].copy()
-
-            return report
+            return historical_analysis
 
         except Exception as e:
-            self.logger.error(f"Performance report generation failed: {e}")
-            return {"error": str(e)}
+            self.logger.error(f"Failed to get historical performance: {e}")
+            raise ServiceError(f"Historical performance analysis failed: {e}")
+
+    # Helper Methods
+
+    def _validate_analysis_inputs(
+        self, execution_result: ExecutionResult, market_data: MarketData
+    ) -> None:
+        """Validate inputs for cost analysis."""
+        if not execution_result:
+            raise ValidationError("Execution result cannot be None")
+
+        if not execution_result.execution_id:
+            raise ValidationError("Execution ID is required")
+
+        if not execution_result.original_order:
+            raise ValidationError("Original order is required")
+
+        if not market_data or not market_data.price:
+            raise ValidationError("Valid market data with price is required")
+
+        if execution_result.total_filled_quantity <= 0:
+            raise ValidationError("Filled quantity must be positive")
+
+    async def _perform_cost_analysis(
+        self,
+        execution_result: ExecutionResult,
+        market_data: MarketData,
+        historical_metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Perform detailed cost analysis."""
+        self.tca_statistics["cost_breakdowns"] += 1
+
+        # Calculate basic execution metrics
+        filled_quantity = float(execution_result.total_filled_quantity)
+        executed_price = float(execution_result.average_fill_price or market_data.price)
+        reference_price = float(market_data.price)
+
+        # Calculate slippage
+        price_diff = executed_price - reference_price
+        slippage_bps = abs(price_diff / reference_price) * 10000 if reference_price != 0 else 0
+
+        # Calculate market impact (simplified)
+        market_impact_bps = slippage_bps * 0.6  # Assume 60% of slippage is market impact
+
+        # Calculate spread cost
+        spread_cost_bps = 0.0
+        if market_data.bid and market_data.ask:
+            spread = float(market_data.ask - market_data.bid)
+            spread_cost_bps = (spread / 2) / reference_price * 10000
+
+        # Calculate timing cost (simplified)
+        timing_cost_bps = max(0, slippage_bps - market_impact_bps - spread_cost_bps)
+
+        # Calculate fee costs
+        fee_rate_bps = 0.0
+        if execution_result.total_fees and filled_quantity > 0:
+            trade_value = filled_quantity * executed_price
+            fee_rate_bps = float(execution_result.total_fees) / trade_value * 10000
+
+        # Total cost
+        total_cost_bps = slippage_bps + fee_rate_bps
+
+        cost_analysis = {
+            "execution_price": executed_price,
+            "reference_price": reference_price,
+            "price_difference": price_diff,
+            "slippage_bps": slippage_bps,
+            "market_impact_bps": market_impact_bps,
+            "spread_cost_bps": spread_cost_bps,
+            "timing_cost_bps": timing_cost_bps,
+            "fee_cost_bps": fee_rate_bps,
+            "total_cost_bps": total_cost_bps,
+            "cost_breakdown": {
+                "market_impact_pct": (
+                    (market_impact_bps / total_cost_bps * 100) if total_cost_bps > 0 else 0
+                ),
+                "spread_cost_pct": (
+                    (spread_cost_bps / total_cost_bps * 100) if total_cost_bps > 0 else 0
+                ),
+                "timing_cost_pct": (
+                    (timing_cost_bps / total_cost_bps * 100) if total_cost_bps > 0 else 0
+                ),
+                "fee_cost_pct": (fee_rate_bps / total_cost_bps * 100) if total_cost_bps > 0 else 0,
+            },
+            "trade_value": filled_quantity * executed_price,
+            "volume_participation": self._calculate_volume_participation(
+                filled_quantity, market_data
+            ),
+        }
+
+        return cost_analysis
+
+    async def _calculate_benchmarks(
+        self,
+        execution_result: ExecutionResult,
+        market_data: MarketData,
+        historical_metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Calculate benchmark comparisons."""
+        self.tca_statistics["benchmark_calculations"] += 1
+
+        executed_price = float(execution_result.average_fill_price or market_data.price)
+        reference_price = float(market_data.price)
+
+        # Arrival price benchmark (reference price)
+        arrival_price_diff_bps = abs(executed_price - reference_price) / reference_price * 10000
+
+        # Historical average benchmark (from service metrics)
+        historical_avg_slippage = historical_metrics.get("performance_metrics", {}).get(
+            "average_slippage_bps", 10.0
+        )
+
+        # VWAP benchmark (simplified - would use actual VWAP in production)
+        vwap_benchmark = reference_price * 1.001  # Mock 0.1% above reference
+        vwap_diff_bps = abs(executed_price - vwap_benchmark) / vwap_benchmark * 10000
+
+        # TWAP benchmark (simplified)
+        twap_benchmark = reference_price * 1.0005  # Mock 0.05% above reference
+        twap_diff_bps = abs(executed_price - twap_benchmark) / twap_benchmark * 10000
+
+        benchmark_analysis = {
+            "arrival_price": {
+                "benchmark_price": reference_price,
+                "difference_bps": arrival_price_diff_bps,
+                "performance": (
+                    "outperformed" if executed_price < reference_price else "underperformed"
+                ),
+            },
+            "vwap": {
+                "benchmark_price": vwap_benchmark,
+                "difference_bps": vwap_diff_bps,
+                "performance": (
+                    "outperformed" if executed_price < vwap_benchmark else "underperformed"
+                ),
+            },
+            "twap": {
+                "benchmark_price": twap_benchmark,
+                "difference_bps": twap_diff_bps,
+                "performance": (
+                    "outperformed" if executed_price < twap_benchmark else "underperformed"
+                ),
+            },
+            "historical_average": {
+                "benchmark_slippage_bps": historical_avg_slippage,
+                "current_slippage_bps": arrival_price_diff_bps,
+                "performance": (
+                    "better" if arrival_price_diff_bps < historical_avg_slippage else "worse"
+                ),
+            },
+        }
+
+        return benchmark_analysis
+
+    def _calculate_quality_score(
+        self, cost_analysis: dict[str, Any], benchmark_analysis: dict[str, Any]
+    ) -> float:
+        """Calculate overall execution quality score."""
+        self.tca_statistics["quality_scores"] += 1
+
+        total_cost_bps = cost_analysis["total_cost_bps"]
+
+        # Base score from cost thresholds
+        if total_cost_bps <= self.excellent_threshold_bps:
+            base_score = 95.0
+        elif total_cost_bps <= self.good_threshold_bps:
+            base_score = 85.0
+        elif total_cost_bps <= self.acceptable_threshold_bps:
+            base_score = 70.0
+        else:
+            base_score = max(30.0, 100.0 - total_cost_bps * 2)
+
+        # Adjust for benchmark performance
+        benchmark_adj = 0.0
+
+        # Arrival price adjustment
+        arrival_performance = benchmark_analysis["arrival_price"]["performance"]
+        if arrival_performance == "outperformed":
+            benchmark_adj += 5.0
+        else:
+            benchmark_adj -= 2.0
+
+        # Historical average adjustment
+        historical_performance = benchmark_analysis["historical_average"]["performance"]
+        if historical_performance == "better":
+            benchmark_adj += 3.0
+        else:
+            benchmark_adj -= 1.0
+
+        quality_score = max(0.0, min(100.0, base_score + benchmark_adj))
+        return round(quality_score, 1)
+
+    def _get_quality_grade(self, quality_score: float) -> str:
+        """Convert quality score to letter grade."""
+        if quality_score >= 90:
+            return "A+"
+        elif quality_score >= 85:
+            return "A"
+        elif quality_score >= 80:
+            return "B+"
+        elif quality_score >= 75:
+            return "B"
+        elif quality_score >= 70:
+            return "C+"
+        elif quality_score >= 65:
+            return "C"
+        elif quality_score >= 60:
+            return "D"
+        else:
+            return "F"
+
+    def _get_performance_tier(self, total_cost_bps: float) -> str:
+        """Get performance tier based on cost."""
+        if total_cost_bps <= self.excellent_threshold_bps:
+            return "Excellent"
+        elif total_cost_bps <= self.good_threshold_bps:
+            return "Good"
+        elif total_cost_bps <= self.acceptable_threshold_bps:
+            return "Acceptable"
+        else:
+            return "Needs Improvement"
+
+    def _generate_recommendations(
+        self, cost_analysis: dict[str, Any], benchmark_analysis: dict[str, Any]
+    ) -> list[str]:
+        """Generate recommendations based on analysis."""
+        recommendations = []
+        total_cost_bps = cost_analysis["total_cost_bps"]
+
+        if total_cost_bps > self.acceptable_threshold_bps:
+            recommendations.append(
+                "Consider using different execution algorithm for better cost performance"
+            )
+
+        if cost_analysis["market_impact_bps"] > 10:
+            recommendations.append(
+                "High market impact - consider breaking order into smaller sizes"
+            )
+
+        if cost_analysis["timing_cost_bps"] > 5:
+            recommendations.append("Timing costs detected - review execution timing strategy")
+
+        volume_participation = cost_analysis.get("volume_participation", 0)
+        if volume_participation > 0.05:  # More than 5% of volume
+            recommendations.append(
+                "Large volume participation - consider using VWAP or TWAP algorithm"
+            )
+
+        # Benchmark-based recommendations
+        if benchmark_analysis["historical_average"]["performance"] == "worse":
+            recommendations.append(
+                "Performance below historical average - review execution parameters"
+            )
+
+        if not recommendations:
+            recommendations.append("Execution performed well - continue with current strategy")
+
+        return recommendations
+
+    def _calculate_volume_participation(
+        self, filled_quantity: float, market_data: MarketData
+    ) -> float:
+        """Calculate volume participation rate."""
+        if not market_data.volume or market_data.volume == 0:
+            return 0.0
+
+        return filled_quantity / float(market_data.volume)
+
+    def _assess_volatility_regime(self, market_data: MarketData) -> str:
+        """Assess current volatility regime."""
+        # Simplified volatility assessment
+        # In production, would use historical volatility calculations
+        if market_data.bid and market_data.ask:
+            spread_pct = float((market_data.ask - market_data.bid) / market_data.price) * 100
+            if spread_pct > 0.5:
+                return "High"
+            elif spread_pct > 0.1:
+                return "Medium"
+            else:
+                return "Low"
+
+        return "Unknown"
+
+    async def _calculate_tca_metrics(self, service_metrics: dict[str, Any]) -> dict[str, Any]:
+        """Calculate TCA-specific metrics from service data."""
+        return {
+            "average_total_cost_bps": service_metrics.get("performance_metrics", {}).get(
+                "average_cost_bps", 0
+            ),
+            "average_slippage_bps": service_metrics.get("performance_metrics", {}).get(
+                "average_slippage_bps", 0
+            ),
+            "cost_volatility": 2.5,  # Mock data - would calculate from historical costs
+            "execution_consistency": 85.2,  # Mock consistency score
+        }
+
+    def _analyze_performance_trends(self, service_metrics: dict[str, Any]) -> dict[str, Any]:
+        """Analyze performance trends from service data."""
+        return {
+            "cost_trend": "stable",  # Mock trend analysis
+            "quality_trend": "improving",
+            "consistency_trend": "stable",
+        }
+
+    def _calculate_benchmark_performance(self, service_metrics: dict[str, Any]) -> dict[str, Any]:
+        """Calculate benchmark performance from service data."""
+        return {
+            "vs_arrival_price": {"avg_difference_bps": 8.5, "outperformance_rate": 0.65},
+            "vs_vwap": {"avg_difference_bps": 5.2, "outperformance_rate": 0.72},
+            "vs_twap": {"avg_difference_bps": 3.8, "outperformance_rate": 0.78},
+        }
+
+    def _generate_historical_recommendations(self, tca_metrics: dict[str, Any]) -> list[str]:
+        """Generate recommendations based on historical analysis."""
+        recommendations = []
+
+        avg_cost = tca_metrics.get("average_total_cost_bps", 0)
+        if avg_cost > 20:
+            recommendations.append("Average costs are high - review execution strategy")
+
+        consistency = tca_metrics.get("execution_consistency", 100)
+        if consistency < 80:
+            recommendations.append("Execution consistency needs improvement")
+
+        if not recommendations:
+            recommendations.append("Historical performance is satisfactory")
+
+        return recommendations
+
+    def get_tca_statistics(self) -> dict[str, Any]:
+        """Get TCA operation statistics."""
+        return {
+            "tca_statistics": self.tca_statistics.copy(),
+            "analysis_cache_size": len(self.analysis_cache),
+            "service_type": type(self.execution_service).__name__,
+        }

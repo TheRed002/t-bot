@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, field_validator
+from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -25,13 +25,13 @@ class BaseConfig(BaseSettings):
     variable support, case insensitive matching, and validation.
     """
 
-    model_config = {
-        "env_file": ".env",
-        "case_sensitive": False,
-        "validate_assignment": True,
-        "extra": "ignore",
-        "populate_by_name": True,  # Allow both field names and aliases
-    }
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        validate_assignment=True,
+        extra="ignore",
+        populate_by_name=True,  # Allow both field names and aliases
+    )
 
 
 class DatabaseConfig(BaseConfig):
@@ -146,11 +146,42 @@ class SecurityConfig(BaseConfig):
     @field_validator("secret_key", "encryption_key")
     @classmethod
     def validate_key_length(cls, v):
-        """Validate key lengths for security."""
+        """Validate key lengths and entropy for security."""
         if not v:
             raise ValueError("Key must be set via environment variable")
         if len(v) < 32:
             raise ValueError(f"Key must be at least 32 characters long, got {len(v)}")
+
+        # Check for sufficient entropy (at least different character types)
+        has_lower = any(c.islower() for c in v)
+        has_upper = any(c.isupper() for c in v)
+        has_digit = any(c.isdigit() for c in v)
+        has_special = any(not c.isalnum() for c in v)
+
+        char_types = sum([has_lower, has_upper, has_digit, has_special])
+        if char_types < 3:
+            raise ValueError(
+                "Key must contain at least 3 different character types "
+                "(lowercase, uppercase, digits, special characters)"
+            )
+
+        # Check for obvious patterns and common weak patterns
+        lower_v = v.lower()
+        if any(
+            pattern in lower_v for pattern in ["password", "secret", "admin", "12345", "qwerty"]
+        ):
+            raise ValueError("Key contains common weak patterns")
+
+        # Check for sufficient unique characters (entropy)
+        if len(set(v)) < 10:
+            raise ValueError("Key has insufficient entropy (too few unique characters)")
+
+        # Check for repetitive patterns
+        for i in range(2, len(v) // 2 + 1):
+            pattern = v[:i]
+            if v == pattern * (len(v) // i) + pattern[: len(v) % i]:
+                raise ValueError("Key contains repetitive patterns")
+
         return v
 
 
@@ -292,9 +323,25 @@ class ExchangeConfig(BaseConfig):
         dummy values (e.g., "test_api_key"). Enforces a minimum length in
         production-like environments.
         """
+        # Strip whitespace first
+        v = v.strip()
+
+        # Empty strings are allowed (no API key configured) but not whitespace
+        if not v:
+            return ""
+
         env = os.getenv("ENVIRONMENT", "development").lower()
-        if env in ("production", "staging") and v and len(v) < 16:
-            raise ValueError(f"API credential must be at least 16 characters long, got {len(v)}")
+
+        # In production/staging, enforce minimum length
+        if env in ("production", "staging"):
+            if len(v) < 16:
+                raise ValueError(
+                    f"API credential must be at least 16 characters long in {env}, got {len(v)}"
+                )
+            # Basic format validation - should contain alphanumeric characters
+            if not any(c.isalnum() for c in v):
+                raise ValueError("API credential must contain alphanumeric characters")
+
         return v
 
     @property

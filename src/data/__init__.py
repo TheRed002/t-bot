@@ -27,12 +27,13 @@ Dependencies:
 from .quality.cleaning import DataCleaner
 from .quality.monitoring import QualityMonitor
 from .quality.validation import DataValidator
-from .services import DataIntegrationService
+from .services import DataIntegrationService, DataService
 
 __all__ = [
     "DataCleaner",
-    # Data Integration Service
+    # Data Services
     "DataIntegrationService",
+    "DataService",
     # Data Quality Management
     "DataValidator",
     "QualityMonitor",

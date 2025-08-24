@@ -17,11 +17,11 @@ from xgboost import XGBRegressor
 
 from src.core.config import Config
 from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
 from src.ml.models.base_model import BaseModel
-from src.utils.decorators import log_calls, time_execution
+from src.utils.decorators import UnifiedDecorator
 
-logger = get_logger(__name__)
+# Initialize decorator instance
+dec = UnifiedDecorator()
 
 
 class VolatilityForecaster(BaseModel):
@@ -88,7 +88,7 @@ class VolatilityForecaster(BaseModel):
         self.feature_importance_ = None
         self.volatility_stats_ = None
 
-        logger.info(
+        self.logger.info(
             "Volatility forecaster initialized",
             algorithm=self.algorithm,
             volatility_method=self.volatility_method,
@@ -130,11 +130,10 @@ class VolatilityForecaster(BaseModel):
                 raise ValidationError(f"Unknown algorithm: {self.algorithm}")
 
         except Exception as e:
-            logger.error(f"Failed to create model: {e}")
-            raise ValidationError(f"Model creation failed: {e}") from e
+            self.logger.error(f"Failed to create model: {e}")
+            raise ValidationError(f"Model creation failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     def fit(self, X: pd.DataFrame, y: pd.Series) -> dict[str, Any]:
         """
         Train the volatility forecaster.
@@ -236,7 +235,7 @@ class VolatilityForecaster(BaseModel):
 
             self.is_trained = True
 
-            logger.info(
+            self.logger.info(
                 "Volatility forecaster training completed",
                 training_rmse=training_rmse,
                 training_r2=training_r2,
@@ -248,13 +247,12 @@ class VolatilityForecaster(BaseModel):
             return metrics
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Volatility forecaster training failed", algorithm=self.algorithm, error=str(e)
             )
-            raise ValidationError(f"Training failed: {e}") from e
+            raise ValidationError(f"Training failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """
         Make volatility predictions.
@@ -287,7 +285,7 @@ class VolatilityForecaster(BaseModel):
             # Ensure predictions are non-negative (volatility must be positive)
             predictions = np.maximum(predictions, 0)
 
-            logger.debug(
+            self.logger.debug(
                 "Volatility predictions made",
                 prediction_count=len(predictions),
                 mean_prediction=np.mean(predictions),
@@ -297,11 +295,12 @@ class VolatilityForecaster(BaseModel):
             return predictions
 
         except Exception as e:
-            logger.error("Volatility prediction failed", error=str(e), model_name=self.model_name)
-            raise ValidationError(f"Prediction failed: {e}") from e
+            self.logger.error(
+                "Volatility prediction failed", error=str(e), model_name=self.model_name
+            )
+            raise ValidationError(f"Prediction failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     def evaluate(self, X: pd.DataFrame, y: pd.Series) -> dict[str, Any]:
         """
         Evaluate the model on test data.
@@ -385,7 +384,7 @@ class VolatilityForecaster(BaseModel):
                 "test_samples": len(X_test),
             }
 
-            logger.info(
+            self.logger.info(
                 "Volatility forecaster evaluation completed",
                 test_rmse=test_rmse,
                 test_r2=test_r2,
@@ -396,10 +395,10 @@ class VolatilityForecaster(BaseModel):
             return metrics
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Volatility forecaster evaluation failed", error=str(e), model_name=self.model_name
             )
-            raise ValidationError(f"Evaluation failed: {e}") from e
+            raise ValidationError(f"Evaluation failed: {e}")
 
     def _calculate_volatility_targets(self, price_data: pd.Series) -> np.ndarray:
         """Calculate volatility targets from price data."""
@@ -414,8 +413,8 @@ class VolatilityForecaster(BaseModel):
                 raise ValidationError(f"Unknown volatility method: {self.volatility_method}")
 
         except Exception as e:
-            logger.error(f"Failed to calculate volatility targets: {e}")
-            raise ValidationError(f"Volatility calculation failed: {e}") from e
+            self.logger.error(f"Failed to calculate volatility targets: {e}")
+            raise ValidationError(f"Volatility calculation failed: {e}")
 
     def _calculate_realized_volatility(self, price_data: pd.Series) -> np.ndarray:
         """Calculate realized volatility using rolling standard deviation."""
@@ -439,8 +438,8 @@ class VolatilityForecaster(BaseModel):
             return volatility.values
 
         except Exception as e:
-            logger.error(f"Realized volatility calculation failed: {e}")
-            raise ValidationError(f"Realized volatility calculation failed: {e}") from e
+            self.logger.error(f"Realized volatility calculation failed: {e}")
+            raise ValidationError(f"Realized volatility calculation failed: {e}")
 
     def _calculate_garch_volatility(self, price_data: pd.Series) -> np.ndarray:
         """Calculate GARCH-style volatility (simplified exponential smoothing)."""
@@ -484,8 +483,8 @@ class VolatilityForecaster(BaseModel):
             return full_volatility.values
 
         except Exception as e:
-            logger.error(f"GARCH volatility calculation failed: {e}")
-            raise ValidationError(f"GARCH volatility calculation failed: {e}") from e
+            self.logger.error(f"GARCH volatility calculation failed: {e}")
+            raise ValidationError(f"GARCH volatility calculation failed: {e}")
 
     def _calculate_intraday_volatility(self, price_data: pd.Series) -> np.ndarray:
         """Calculate intraday volatility (simplified high-low approach)."""
@@ -510,8 +509,8 @@ class VolatilityForecaster(BaseModel):
             return volatility.values
 
         except Exception as e:
-            logger.error(f"Intraday volatility calculation failed: {e}")
-            raise ValidationError(f"Intraday volatility calculation failed: {e}") from e
+            self.logger.error(f"Intraday volatility calculation failed: {e}")
+            raise ValidationError(f"Intraday volatility calculation failed: {e}")
 
     def _calculate_volatility_accuracy(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
         """Calculate volatility-specific accuracy metric."""
@@ -525,7 +524,7 @@ class VolatilityForecaster(BaseModel):
             return accurate_predictions / len(y_true)
 
         except Exception as e:
-            logger.error(f"Volatility accuracy calculation failed: {e}")
+            self.logger.error(f"Volatility accuracy calculation failed: {e}")
             return 0.0
 
     def _calculate_directional_volatility_accuracy(
@@ -548,7 +547,7 @@ class VolatilityForecaster(BaseModel):
             return directional_agreement / len(true_changes)
 
         except Exception as e:
-            logger.error(f"Directional volatility accuracy calculation failed: {e}")
+            self.logger.error(f"Directional volatility accuracy calculation failed: {e}")
             return 0.0
 
     def _calculate_volatility_regime_accuracy(
@@ -578,7 +577,7 @@ class VolatilityForecaster(BaseModel):
             return regime_accuracy
 
         except Exception as e:
-            logger.error(f"Volatility regime accuracy calculation failed: {e}")
+            self.logger.error(f"Volatility regime accuracy calculation failed: {e}")
             return 0.0
 
     def get_feature_importance(self) -> pd.Series | None:
@@ -589,7 +588,7 @@ class VolatilityForecaster(BaseModel):
             Series with feature importance scores or None if not available
         """
         if not self.is_trained:
-            logger.warning("Model not trained, no feature importance available")
+            self.logger.warning("Model not trained, no feature importance available")
             return None
 
         return self.feature_importance_
@@ -602,7 +601,7 @@ class VolatilityForecaster(BaseModel):
             Dictionary with volatility statistics or None if not trained
         """
         if not self.is_trained:
-            logger.warning("Model not trained, no volatility statistics available")
+            self.logger.warning("Model not trained, no volatility statistics available")
             return None
 
         return self.volatility_stats_
@@ -621,7 +620,7 @@ class VolatilityForecaster(BaseModel):
             predictions = self.predict(X)
 
             if self.volatility_stats_ is None:
-                logger.warning("No volatility statistics available for regime classification")
+                self.logger.warning("No volatility statistics available for regime classification")
                 return ["unknown"] * len(predictions)
 
             # Use training statistics to define regimes
@@ -640,5 +639,5 @@ class VolatilityForecaster(BaseModel):
             return regimes
 
         except Exception as e:
-            logger.error(f"Volatility regime prediction failed: {e}")
-            raise ValidationError(f"Volatility regime prediction failed: {e}") from e
+            self.logger.error(f"Volatility regime prediction failed: {e}")
+            raise ValidationError(f"Volatility regime prediction failed: {e}")

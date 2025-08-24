@@ -13,6 +13,7 @@ Key Features:
 """
 
 import asyncio
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
@@ -20,6 +21,25 @@ from enum import Enum
 from typing import Any
 
 import psutil
+
+try:
+    from src.core.base import BaseComponent
+except ImportError:
+    # Fallback if core module not available
+    from src.base import BaseComponent
+
+# Import utils decorators and helpers for better integration
+from src.utils.decorators import cache_result, logged, monitored, retry
+
+# Simple fallback ErrorContext for error handling integration
+
+
+@dataclass
+class ErrorContext:
+    component: str
+    operation: str
+    details: dict = None
+
 
 # Try to import Prometheus client, fall back gracefully if not available
 try:
@@ -67,11 +87,36 @@ except ImportError:
         pass
 
 
-from src.core.exceptions import MonitoringError
-from src.core.logging import get_logger
-from src.core.types import OrderStatus, OrderType
+try:
+    from src.core import MonitoringError, OrderStatus, OrderType
+except ImportError:
+    # Fallback definitions
+    from enum import Enum
 
-logger = get_logger(__name__)
+    class MonitoringError(Exception):
+        """Monitoring error fallback."""
+
+        def __init__(self, message: str, error_code: str = "MONITORING_000"):
+            super().__init__(message)
+            self.error_code = error_code
+
+    class OrderStatus(Enum):
+        """Order status fallback."""
+
+        NEW = "NEW"
+        PARTIALLY_FILLED = "PARTIALLY_FILLED"
+        FILLED = "FILLED"
+        CANCELED = "CANCELED"
+        REJECTED = "REJECTED"
+        EXPIRED = "EXPIRED"
+
+    class OrderType(Enum):
+        """Order type fallback."""
+
+        MARKET = "MARKET"
+        LIMIT = "LIMIT"
+        STOP = "STOP"
+        STOP_LIMIT = "STOP_LIMIT"
 
 
 class MetricType(Enum):
@@ -97,7 +142,7 @@ class MetricDefinition:
     namespace: str = "tbot"
 
 
-class MetricsCollector:
+class MetricsCollector(BaseComponent):
     """
     Central metrics collector for the T-Bot trading system.
 
@@ -112,6 +157,7 @@ class MetricsCollector:
         Args:
             registry: Prometheus collector registry. If None, uses default registry.
         """
+        super().__init__(name="MetricsCollector")  # Initialize BaseComponent with name
         self.registry = registry or CollectorRegistry()
         self._metrics: dict[str, Any] = {}
         self._metric_definitions: dict[str, MetricDefinition] = {}
@@ -119,8 +165,6 @@ class MetricsCollector:
         self._running = False
         self._collection_interval = 5.0  # seconds
         self._background_task: asyncio.Task | None = None
-
-        # Initialize core metric collections
         self.trading_metrics = TradingMetrics(self)
         self.system_metrics = SystemMetrics(self)
         self.exchange_metrics = ExchangeMetrics(self)
@@ -131,7 +175,13 @@ class MetricsCollector:
         self._cache_ttl = 1.0  # seconds
         self._last_cache_update = 0.0
 
-        logger.info("MetricsCollector initialized")
+        # Error handler for error tracking
+        self._error_handler = None
+
+        self.logger.info("MetricsCollector initialized")
+
+        # Register error handling metrics
+        self._register_error_handling_metrics()
 
     def register_metric(self, definition: MetricDefinition) -> None:
         """
@@ -148,7 +198,7 @@ class MetricsCollector:
                 full_name = f"{definition.namespace}_{definition.name}"
 
                 if full_name in self._metrics:
-                    logger.warning(f"Metric {full_name} already registered")
+                    self.logger.warning(f"Metric {full_name} already registered")
                     return
 
                 # Create metric based on type
@@ -196,15 +246,18 @@ class MetricsCollector:
                         registry=self.registry,
                     )
                 else:
-                    raise MonitoringError(f"Unknown metric type: {definition.metric_type}")
+                    raise MonitoringError(
+                        f"Unknown metric type: {definition.metric_type}",
+                        error_code="MONITORING_002",
+                    )
 
                 self._metrics[full_name] = metric
                 self._metric_definitions[full_name] = definition
 
-                logger.debug(f"Registered metric: {full_name}")
+                self.logger.debug(f"Registered metric: {full_name}")
 
         except Exception as e:
-            raise MonitoringError(f"Failed to register metric {definition.name}: {e}")
+            raise MonitoringError(f"Failed to register metric {definition.name}: {e}") from e
 
     def get_metric(self, name: str, namespace: str = "tbot") -> Any | None:
         """
@@ -320,12 +373,12 @@ class MetricsCollector:
     async def start_collection(self) -> None:
         """Start background metrics collection."""
         if self._running:
-            logger.warning("Metrics collection already running")
+            self.logger.warning("Metrics collection already running")
             return
 
         self._running = True
         self._background_task = asyncio.create_task(self._collection_loop())
-        logger.info("Started metrics collection")
+        self.logger.info("Started metrics collection")
 
     async def stop_collection(self) -> None:
         """Stop background metrics collection."""
@@ -339,7 +392,7 @@ class MetricsCollector:
                 pass
             self._background_task = None
 
-        logger.info("Stopped metrics collection")
+        self.logger.info("Stopped metrics collection")
 
     async def _collection_loop(self) -> None:
         """Background loop for collecting system metrics."""
@@ -350,9 +403,11 @@ class MetricsCollector:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in metrics collection loop: {e}")
+                self.logger.error(f"Error in metrics collection loop: {e}")
                 await asyncio.sleep(1.0)
 
+    @retry(max_attempts=3, delay=1.0)
+    @logged(level="debug")
     async def _collect_system_metrics(self) -> None:
         """Collect system-level metrics."""
         try:
@@ -370,7 +425,7 @@ class MetricsCollector:
             disk = psutil.disk_usage("/")
             self.set_gauge("system_disk_usage_bytes", disk.used)
             self.set_gauge("system_disk_total_bytes", disk.total)
-            self.set_gauge("system_disk_usage_percent", (disk.used / disk.total) * 100)
+            self.set_gauge("system_disk_usage_percent", disk.percent)
 
             # Network metrics
             network = psutil.net_io_counters()
@@ -378,8 +433,24 @@ class MetricsCollector:
             self.increment_counter("system_network_bytes_recv_total", value=network.bytes_recv)
 
         except Exception as e:
-            logger.error(f"Error collecting system metrics: {e}")
+            # Track system metrics collection errors
+            if self._error_handler:
+                context = ErrorContext(
+                    component="MetricsCollector",
+                    operation="collect_system_metrics",
+                )
+                # Use simplified sync error handling
+                try:
+                    if hasattr(self._error_handler, "handle_error_sync"):
+                        self._error_handler.handle_error_sync(e, context)
+                    else:
+                        self.logger.error(f"Error handler sync method not available: {e}")
+                except Exception as handler_error:
+                    self.logger.error(f"Error in error handler: {handler_error}")
+            self.logger.error(f"Error collecting system metrics: {e}")
 
+    @cache_result(ttl=5)
+    @monitored()
     def export_metrics(self) -> str:
         """
         Export metrics in Prometheus format.
@@ -393,8 +464,51 @@ class MetricsCollector:
         """Get content type for metrics response."""
         return CONTENT_TYPE_LATEST
 
+    def _register_error_handling_metrics(self) -> None:
+        """Register metrics for error handling system monitoring."""
+        error_metrics = [
+            MetricDefinition(
+                "error_handler_errors_total",
+                "Total errors processed by error handler",
+                "counter",
+                ["component", "operation", "error_type"],
+            ),
+            MetricDefinition(
+                "error_handler_recovery_success_total",
+                "Successful error recoveries",
+                "counter",
+                ["recovery_scenario", "component"],
+            ),
+            MetricDefinition(
+                "error_handler_recovery_failed_total",
+                "Failed error recoveries",
+                "counter",
+                ["recovery_scenario", "component"],
+            ),
+            MetricDefinition(
+                "error_handler_pattern_detections_total",
+                "Error pattern detections",
+                "counter",
+                ["pattern_type", "component"],
+            ),
+            MetricDefinition(
+                "error_handler_circuit_breaker_state",
+                "Circuit breaker state (0=closed, 1=open, 2=half-open)",
+                "gauge",
+                ["component", "operation"],
+            ),
+        ]
 
-class TradingMetrics:
+        for metric_def in error_metrics:
+            try:
+                self.register_metric(metric_def)
+            except Exception as e:
+                self.logger.warning(
+                    f"Failed to register error handling metric {metric_def.name}: {e}"
+                )
+
+
+class TradingMetrics(BaseComponent):
     """Trading-specific metrics collection."""
 
     def __init__(self, collector: MetricsCollector):
@@ -404,6 +518,7 @@ class TradingMetrics:
         Args:
             collector: Parent metrics collector
         """
+        super().__init__(name="TradingMetrics")  # Initialize BaseComponent
         self.collector = collector
         self._initialize_metrics()
 
@@ -577,7 +692,7 @@ class TradingMetrics:
         self.collector.increment_counter("strategy_signals_total", labels)
 
 
-class SystemMetrics:
+class SystemMetrics(BaseComponent):
     """System-level metrics collection."""
 
     def __init__(self, collector: MetricsCollector):
@@ -587,6 +702,7 @@ class SystemMetrics:
         Args:
             collector: Parent metrics collector
         """
+        super().__init__(name="SystemMetrics")  # Initialize BaseComponent
         self.collector = collector
         self._initialize_metrics()
 
@@ -594,9 +710,7 @@ class SystemMetrics:
         """Initialize system-level metrics."""
         metrics = [
             # Application metrics
-            MetricDefinition(
-                "application_uptime_seconds", "Application uptime in seconds", "gauge"
-            ),
+            MetricDefinition("app_uptime_seconds", "Application uptime in seconds", "gauge"),
             MetricDefinition(
                 "application_info",
                 "Application information",
@@ -633,7 +747,7 @@ class SystemMetrics:
             self.collector.register_metric(metric_def)
 
 
-class ExchangeMetrics:
+class ExchangeMetrics(BaseComponent):
     """Exchange-specific metrics collection."""
 
     def __init__(self, collector: MetricsCollector):
@@ -643,6 +757,7 @@ class ExchangeMetrics:
         Args:
             collector: Parent metrics collector
         """
+        super().__init__(name="ExchangeMetrics")  # Initialize BaseComponent
         self.collector = collector
         self._initialize_metrics()
 
@@ -737,7 +852,7 @@ class ExchangeMetrics:
         self.collector.set_gauge("exchange_rate_limit_remaining", remaining, labels)
 
 
-class RiskMetrics:
+class RiskMetrics(BaseComponent):
     """Risk management metrics collection."""
 
     def __init__(self, collector: MetricsCollector):
@@ -747,6 +862,7 @@ class RiskMetrics:
         Args:
             collector: Parent metrics collector
         """
+        super().__init__(name="RiskMetrics")  # Initialize BaseComponent
         self.collector = collector
         self._initialize_metrics()
 
@@ -804,6 +920,17 @@ def get_metrics_collector() -> MetricsCollector:
     return _global_collector
 
 
+def set_metrics_collector(collector: MetricsCollector) -> None:
+    """
+    Set the global metrics collector instance.
+
+    Args:
+        collector: MetricsCollector instance to set globally
+    """
+    global _global_collector
+    _global_collector = collector
+
+
 def setup_prometheus_server(port: int = 8001, host: str = "0.0.0.0") -> None:
     """
     Setup Prometheus metrics HTTP server.
@@ -814,7 +941,9 @@ def setup_prometheus_server(port: int = 8001, host: str = "0.0.0.0") -> None:
     """
     try:
         start_http_server(port, host)
+        logger = logging.getLogger(__name__)
         logger.info(f"Prometheus metrics server started on {host}:{port}")
     except Exception as e:
+        logger = logging.getLogger(__name__)
         logger.error(f"Failed to start Prometheus server: {e}")
-        raise MonitoringError(f"Failed to start Prometheus server: {e}")
+        raise MonitoringError(f"Failed to start Prometheus server: {e}") from e

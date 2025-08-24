@@ -22,9 +22,9 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from src.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import MarketData, OrderBook, Ticker, Trade
@@ -41,8 +41,6 @@ from src.exchanges.factory import ExchangeFactory
 
 # Import from P-007A utilities
 from src.utils.decorators import retry, time_execution
-
-logger = get_logger(__name__)
 
 
 class DataStreamType(Enum):
@@ -68,7 +66,7 @@ class DataSubscription:
     error_count: int = 0
 
 
-class MarketDataSource:
+class MarketDataSource(BaseComponent):
     """
     Market data source for real-time and historical data ingestion.
 
@@ -83,9 +81,8 @@ class MarketDataSource:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
-
-        # Initialize error handling components
         self.error_handler = ErrorHandler(config)
         self.network_recovery = NetworkDisconnectionRecovery(config)
         self.api_rate_limit_recovery = APIRateLimitRecovery(config)
@@ -116,7 +113,7 @@ class MarketDataSource:
             "active_subscriptions": 0,
         }
 
-        logger.info("MarketDataSource initialized")
+        self.logger.info("MarketDataSource initialized")
 
     async def initialize(self) -> None:
         """Initialize exchange connections and data sources."""
@@ -129,19 +126,19 @@ class MarketDataSource:
                     exchange = await self.exchange_factory.create_exchange(exchange_name)
                     if await exchange.connect():
                         self.exchanges[exchange_name] = exchange
-                        logger.info(f"Connected to {exchange_name} for market data")
+                        self.logger.info(f"Connected to {exchange_name} for market data")
                     else:
-                        logger.warning(f"Failed to connect to {exchange_name}")
+                        self.logger.warning(f"Failed to connect to {exchange_name}")
                 except Exception as e:
-                    logger.error(f"Error initializing {exchange_name}: {e!s}")
+                    self.logger.error(f"Error initializing {exchange_name}: {e!s}")
 
             if not self.exchanges:
                 raise DataSourceError("No exchanges connected for market data")
 
-            logger.info(f"MarketDataSource initialized with {len(self.exchanges)} exchanges")
+            self.logger.info(f"MarketDataSource initialized with {len(self.exchanges)} exchanges")
 
         except Exception as e:
-            logger.error(f"Failed to initialize MarketDataSource: {e!s}")
+            self.logger.error(f"Failed to initialize MarketDataSource: {e!s}")
             raise DataSourceError(f"Market data source initialization failed: {e!s}")
 
     @time_execution
@@ -182,11 +179,11 @@ class MarketDataSource:
                 task = asyncio.create_task(self._ticker_stream(exchange_name))
                 self.stream_tasks[stream_key] = task
 
-            logger.info(f"Subscribed to ticker updates: {subscription_id}")
+            self.logger.info(f"Subscribed to ticker updates: {subscription_id}")
             return subscription_id
 
         except Exception as e:
-            logger.error(f"Failed to subscribe to ticker {exchange_name}: {symbol}: {e!s}")
+            self.logger.error(f"Failed to subscribe to ticker {exchange_name}: {symbol}: {e!s}")
             raise DataSourceError(f"Ticker subscription failed: {e!s}")
 
     @retry(max_attempts=3, base_delay=1.0)
@@ -221,7 +218,7 @@ class MarketDataSource:
             # Implementation would depend on specific exchange API
             historical_data = []
 
-            logger.info(
+            self.logger.info(
                 f"Retrieved {len(historical_data)} historical data points "
                 f"for {exchange_name}:{symbol} from {start_time} to {end_time}"
             )
@@ -244,12 +241,12 @@ class MarketDataSource:
             )
 
             # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
 
             # Add error event to pattern analytics
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to get historical data {exchange_name}: {symbol}: {e!s}")
+            self.logger.error(f"Failed to get historical data {exchange_name}: {symbol}: {e!s}")
             raise DataSourceError(f"Historical data retrieval failed: {e!s}")
 
     async def _ticker_stream(self, exchange_name: str) -> None:
@@ -306,12 +303,14 @@ class MarketDataSource:
                                 },
                             )
 
-                            self.error_handler.handle_error(error_context)
+                            await self.error_handler.handle_error(e, error_context)
                             self.pattern_analytics.add_error_event(error_context.__dict__)
 
                             subscription.error_count += 1
                             self.stats["failed_updates"] += 1
-                            logger.warning(f"Ticker update failed for {subscription.symbol}: {e!s}")
+                            self.logger.warning(
+                                f"Ticker update failed for {subscription.symbol}: {e!s}"
+                            )
 
                 except Exception as e:
                     # Use ErrorHandler for stream errors
@@ -322,10 +321,10 @@ class MarketDataSource:
                         details={"exchange_name": exchange_name, "stage": "stream_processing"},
                     )
 
-                    self.error_handler.handle_error(error_context)
+                    await self.error_handler.handle_error(e, error_context)
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                    logger.error(f"Error in ticker stream {exchange_name}: {e!s}")
+                    self.logger.error(f"Error in ticker stream {exchange_name}: {e!s}")
                     await asyncio.sleep(5)  # Longer delay on error
 
         except Exception as e:
@@ -341,10 +340,10 @@ class MarketDataSource:
                 },
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Fatal error in ticker stream {exchange_name}: {e!s}")
+            self.logger.error(f"Fatal error in ticker stream {exchange_name}: {e!s}")
         finally:
             self.active_streams[f"{exchange_name}_ticker"] = False
 
@@ -360,7 +359,7 @@ class MarketDataSource:
         """
         try:
             if subscription_id not in self.subscriptions:
-                logger.warning(f"Subscription {subscription_id} not found")
+                self.logger.warning(f"Subscription {subscription_id} not found")
                 return False
 
             subscription = self.subscriptions[subscription_id]
@@ -369,7 +368,7 @@ class MarketDataSource:
             # Remove subscription
             del self.subscriptions[subscription_id]
 
-            logger.info(f"Unsubscribed from {subscription_id}")
+            self.logger.info(f"Unsubscribed from {subscription_id}")
             return True
 
         except Exception as e:
@@ -381,10 +380,10 @@ class MarketDataSource:
                 details={"subscription_id": subscription_id, "stage": "unsubscription"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to unsubscribe {subscription_id}: {e!s}")
+            self.logger.error(f"Failed to unsubscribe {subscription_id}: {e!s}")
             return False
 
     @time_execution
@@ -423,7 +422,7 @@ class MarketDataSource:
             self.order_book_cache.clear()
             self.trade_cache.clear()
 
-            logger.info("MarketDataSource cleanup completed")
+            self.logger.info("MarketDataSource cleanup completed")
 
         except Exception as e:
             # Use ErrorHandler for cleanup errors
@@ -438,10 +437,10 @@ class MarketDataSource:
                 },
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Error during MarketDataSource cleanup: {e!s}")
+            self.logger.error(f"Error during MarketDataSource cleanup: {e!s}")
 
     async def get_error_analytics(self) -> dict[str, Any]:
         """Get error pattern analytics, connection status, and circuit breaker status."""
@@ -478,10 +477,10 @@ class MarketDataSource:
                 details={"operation": "analytics_retrieval"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to get error analytics: {e!s}")
+            self.logger.error(f"Failed to get error analytics: {e!s}")
             return {
                 "error": str(e),
                 "error_id": error_context.error_id,

@@ -21,9 +21,9 @@ from typing import Any
 
 import aiohttp
 
+from src.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import SocialSentiment
@@ -33,9 +33,6 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import retry, time_execution
-
-logger = get_logger(__name__)
-
 
 # SocialSentiment enum moved to src.core.types to avoid circular dependencies
 
@@ -71,7 +68,7 @@ class SocialMetrics:
     last_updated: datetime
 
 
-class SocialMediaDataSource:
+class SocialMediaDataSource(BaseComponent):
     """
     Social media data source for sentiment analysis and trend detection.
 
@@ -86,6 +83,7 @@ class SocialMediaDataSource:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.error_handler = ErrorHandler(config)
 
@@ -117,7 +115,7 @@ class SocialMediaDataSource:
             },
         }
 
-        logger.info("SocialMediaDataSource initialized")
+        self.logger.info("SocialMediaDataSource initialized")
 
     @retry(max_attempts=3, base_delay=2.0)
     async def initialize(self) -> None:
@@ -132,10 +130,10 @@ class SocialMediaDataSource:
             # Test connections to available platforms
             await self._test_connections()
 
-            logger.info("SocialMediaDataSource initialized successfully")
+            self.logger.info("SocialMediaDataSource initialized successfully")
 
         except Exception as e:
-            logger.error(f"Failed to initialize SocialMediaDataSource: {e!s}")
+            self.logger.error(f"Failed to initialize SocialMediaDataSource: {e!s}")
             raise DataSourceError(f"Social media data source initialization failed: {e!s}")
 
     @retry(max_attempts=2, base_delay=1.0)
@@ -150,20 +148,20 @@ class SocialMediaDataSource:
             if self.twitter_config.get("enabled", False):
                 # Twitter API test would go here
                 platforms_available.append("twitter")
-                logger.info("Twitter API connection available")
+                self.logger.info("Twitter API connection available")
 
             if self.reddit_config.get("enabled", False):
                 # Reddit API test would go here
                 platforms_available.append("reddit")
-                logger.info("Reddit API connection available")
+                self.logger.info("Reddit API connection available")
 
             if not platforms_available:
-                logger.warning("No social media platforms configured")
+                self.logger.warning("No social media platforms configured")
             else:
-                logger.info(f"Social media platforms available: {platforms_available}")
+                self.logger.info(f"Social media platforms available: {platforms_available}")
 
         except Exception as e:
-            logger.error(f"Social media connection test failed: {e!s}")
+            self.logger.error(f"Social media connection test failed: {e!s}")
             raise
 
     @time_execution
@@ -210,12 +208,12 @@ class SocialMediaDataSource:
             self.stats["successful_requests"] += 1
             self.stats["last_update_time"] = datetime.now(timezone.utc)
 
-            logger.info(f"Analyzed {len(all_posts)} social posts for {symbol}")
+            self.logger.info(f"Analyzed {len(all_posts)} social posts for {symbol}")
             return metrics
 
         except Exception as e:
             self.stats["failed_requests"] += 1
-            logger.error(f"Failed to get social sentiment for {symbol}: {e!s}")
+            self.logger.error(f"Failed to get social sentiment for {symbol}: {e!s}")
             raise DataSourceError(f"Social sentiment analysis failed: {e!s}")
 
     async def _get_twitter_posts(self, symbol: str, hours_back: int) -> list[SocialPost]:
@@ -258,7 +256,7 @@ class SocialMediaDataSource:
             return posts
 
         except Exception as e:
-            logger.error(f"Failed to get Twitter posts for {symbol}: {e!s}")
+            self.logger.error(f"Failed to get Twitter posts for {symbol}: {e!s}")
             return []
 
     async def _get_reddit_posts(self, symbol: str, hours_back: int) -> list[SocialPost]:
@@ -301,7 +299,7 @@ class SocialMediaDataSource:
             return posts
 
         except Exception as e:
-            logger.error(f"Failed to get Reddit posts for {symbol}: {e!s}")
+            self.logger.error(f"Failed to get Reddit posts for {symbol}: {e!s}")
             return []
 
     def _analyze_social_sentiment(self, content: str) -> tuple[SocialSentiment, float]:
@@ -449,7 +447,7 @@ class SocialMediaDataSource:
                     )
 
                 except Exception as e:
-                    logger.warning(f"Failed to get metrics for {symbol}: {e!s}")
+                    self.logger.warning(f"Failed to get metrics for {symbol}: {e!s}")
                     continue
 
             # Sort by trending score
@@ -458,7 +456,7 @@ class SocialMediaDataSource:
             return trending_data[:limit]
 
         except Exception as e:
-            logger.error(f"Failed to get trending symbols: {e!s}")
+            self.logger.error(f"Failed to get trending symbols: {e!s}")
             raise DataSourceError(f"Trending symbols analysis failed: {e!s}")
 
     @time_execution
@@ -499,14 +497,14 @@ class SocialMediaDataSource:
                             callback(symbol, new_posts)
 
                     except Exception as e:
-                        logger.error(f"Error monitoring {symbol}: {e!s}")
+                        self.logger.error(f"Error monitoring {symbol}: {e!s}")
                         continue
 
                 # Wait before next check
                 await asyncio.sleep(self.update_interval)
 
         except Exception as e:
-            logger.error(f"Error in social media monitoring: {e!s}")
+            self.logger.error(f"Error in social media monitoring: {e!s}")
         finally:
             self.active = False
 
@@ -536,7 +534,7 @@ class SocialMediaDataSource:
             self.posts_cache.clear()
             self.metrics_cache.clear()
 
-            logger.info("SocialMediaDataSource cleanup completed")
+            self.logger.info("SocialMediaDataSource cleanup completed")
 
         except Exception as e:
-            logger.error(f"Error during SocialMediaDataSource cleanup: {e!s}")
+            self.logger.error(f"Error during SocialMediaDataSource cleanup: {e!s}")

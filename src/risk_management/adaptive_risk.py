@@ -12,8 +12,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from src.core.base.component import BaseComponent
 from src.core.exceptions import RiskManagementError, ValidationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import MarketRegime, Position, Signal
@@ -25,10 +25,8 @@ from src.risk_management.regime_detection import MarketRegimeDetector
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
 
-logger = get_logger(__name__)
 
-
-class AdaptiveRiskManager:
+class AdaptiveRiskManager(BaseComponent):
     """
     Adaptive risk management system that adjusts parameters based on market regimes.
 
@@ -38,6 +36,7 @@ class AdaptiveRiskManager:
 
     def __init__(self, config: dict[str, Any], regime_detector: MarketRegimeDetector):
         """Initialize adaptive risk manager with configuration and regime detector."""
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.regime_detector = regime_detector
 
@@ -66,12 +65,6 @@ class AdaptiveRiskManager:
                 "take_profit_multiplier": 1.2,  # Higher targets
                 "max_positions_multiplier": 0.8,  # Fewer positions
             },
-            MarketRegime.CRISIS: {
-                "position_size_multiplier": 0.5,  # Minimal position size
-                "stop_loss_multiplier": 1.5,  # Very wide stops
-                "take_profit_multiplier": 1.5,  # Higher targets
-                "max_positions_multiplier": 0.5,  # Minimal positions
-            },
             MarketRegime.TRENDING_UP: {
                 "position_size_multiplier": 1.1,  # Slightly larger positions
                 "stop_loss_multiplier": 0.9,  # Tighter stops
@@ -94,11 +87,11 @@ class AdaptiveRiskManager:
 
         # Correlation-based adjustments
         self.correlation_adjustments = {
-            MarketRegime.HIGH_CORRELATION: {
+            "high_correlation": {
                 "position_size_multiplier": 0.8,  # Reduce size due to correlation
                 "max_positions_multiplier": 0.7,  # Fewer positions
             },
-            MarketRegime.LOW_CORRELATION: {
+            "low_correlation": {
                 "position_size_multiplier": 1.1,  # Increase size due to diversification
                 "max_positions_multiplier": 1.1,  # More positions
             },
@@ -116,7 +109,7 @@ class AdaptiveRiskManager:
             "correlation_breakdown": {"price_shock": -0.15, "volatility_multiplier": 2.0},
         }
 
-        logger.info(
+        self.logger.info(
             "Adaptive risk manager initialized",
             base_position_size=self.base_position_size_pct,
             base_stop_loss=self.base_stop_loss_pct,
@@ -171,7 +164,7 @@ class AdaptiveRiskManager:
 
             adaptive_size = max(min_size, min(adaptive_size, max_size))
 
-            logger.debug(
+            self.logger.debug(
                 "Adaptive position size calculated",
                 symbol=signal.symbol,
                 base_size=float(base_size),
@@ -183,7 +176,7 @@ class AdaptiveRiskManager:
             return adaptive_size
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Error calculating adaptive position size", symbol=signal.symbol, error=str(e)
             )
             raise RiskManagementError(f"Adaptive position sizing failed: {e!s}")
@@ -233,7 +226,7 @@ class AdaptiveRiskManager:
             else:
                 stop_loss_price = entry_price * (1 + adaptive_stop_loss_pct)
 
-            logger.debug(
+            self.logger.debug(
                 "Adaptive stop loss calculated",
                 symbol=signal.symbol,
                 entry_price=float(entry_price),
@@ -245,7 +238,9 @@ class AdaptiveRiskManager:
             return stop_loss_price
 
         except Exception as e:
-            logger.error("Error calculating adaptive stop loss", symbol=signal.symbol, error=str(e))
+            self.logger.error(
+                "Error calculating adaptive stop loss", symbol=signal.symbol, error=str(e)
+            )
             raise RiskManagementError(f"Adaptive stop loss calculation failed: {e!s}")
 
     @time_execution
@@ -287,7 +282,7 @@ class AdaptiveRiskManager:
             else:
                 take_profit_price = entry_price * (1 - adaptive_take_profit_pct)
 
-            logger.debug(
+            self.logger.debug(
                 "Adaptive take profit calculated",
                 symbol=signal.symbol,
                 entry_price=float(entry_price),
@@ -299,7 +294,7 @@ class AdaptiveRiskManager:
             return take_profit_price
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Error calculating adaptive take profit", symbol=signal.symbol, error=str(e)
             )
             raise RiskManagementError(f"Adaptive take profit calculation failed: {e!s}")
@@ -354,7 +349,7 @@ class AdaptiveRiskManager:
                     # Reduce correlation exposure
                     adaptive_limits["max_correlation_exposure"] *= 0.7
 
-            logger.debug(
+            self.logger.debug(
                 "Adaptive portfolio limits calculated",
                 regime=current_regime.value,
                 adaptive_limits=adaptive_limits,
@@ -363,7 +358,7 @@ class AdaptiveRiskManager:
             return adaptive_limits
 
         except Exception as e:
-            logger.error("Error calculating adaptive portfolio limits", error=str(e))
+            self.logger.error("Error calculating adaptive portfolio limits", error=str(e))
             raise RiskManagementError(f"Adaptive portfolio limits calculation failed: {e!s}")
 
     @time_execution
@@ -437,7 +432,7 @@ class AdaptiveRiskManager:
                 "timestamp": datetime.now(),
             }
 
-            logger.warning(
+            self.logger.warning(
                 "Stress test completed",
                 scenario=scenario_name,
                 value_change_pct=value_change_pct,
@@ -450,17 +445,17 @@ class AdaptiveRiskManager:
             # Re-raise ValidationError as-is
             raise
         except Exception as e:
-            logger.error("Error running stress test", scenario=scenario_name, error=str(e))
+            self.logger.error("Error running stress test", scenario=scenario_name, error=str(e))
             raise RiskManagementError(f"Stress test failed: {e!s}")
 
-    async def _get_correlation_regime(self) -> MarketRegime | None:
+    async def _get_correlation_regime(self) -> str | None:
         """Get current correlation regime from detector."""
         try:
             # This would typically get correlation regime from the regime detector
             # For now, return None to use default behavior
             return None
         except Exception as e:
-            logger.error("Error getting correlation regime", error=str(e))
+            self.logger.error("Error getting correlation regime", error=str(e))
             return None
 
     async def _calculate_momentum_adjustment(self, symbol: str) -> float:
@@ -489,7 +484,7 @@ class AdaptiveRiskManager:
             return momentum_multiplier
 
         except Exception as e:
-            logger.error("Error calculating momentum adjustment", symbol=symbol, error=str(e))
+            self.logger.error("Error calculating momentum adjustment", symbol=symbol, error=str(e))
             return 1.0  # Return neutral adjustment on error
 
     def get_adaptive_parameters(self, regime: MarketRegime) -> dict[str, Any]:
@@ -531,4 +526,4 @@ class AdaptiveRiskManager:
             new_detector: New regime detector instance
         """
         self.regime_detector = new_detector
-        logger.info("Regime detector updated")
+        self.logger.info("Regime detector updated")

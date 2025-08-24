@@ -16,28 +16,66 @@ Components:
     telemetry: OpenTelemetry instrumentation and tracing
 """
 
+from .alerting import (
+    AlertManager,
+    AlertRule,
+    AlertSeverity,
+    AlertStatus,
+    NotificationChannel,
+    NotificationConfig,
+    get_alert_manager,
+    set_global_alert_manager,
+)
 from .metrics import (
     ExchangeMetrics,
     MetricsCollector,
     RiskMetrics,
     SystemMetrics,
     TradingMetrics,
+    get_metrics_collector,
+    set_metrics_collector,
+)
+from .performance import (
+    PerformanceProfiler,
+    get_performance_profiler,
+    set_global_profiler,
 )
 from .telemetry import (
     OpenTelemetryConfig,
     get_tracer,
+    get_trading_tracer,
     instrument_fastapi,
+    set_global_trading_tracer,
     setup_telemetry,
 )
+from .trace_wrapper import Status, StatusCode, trace
 
 __all__ = [
+    "AlertManager",
+    "AlertRule",
+    "AlertSeverity",
+    "AlertStatus",
     "ExchangeMetrics",
     "MetricsCollector",
+    "NotificationChannel",
+    "NotificationConfig",
     "OpenTelemetryConfig",
+    "PerformanceProfiler",
     "RiskMetrics",
+    "Status",
+    "StatusCode",
     "SystemMetrics",
     "TradingMetrics",
+    "get_alert_manager",
+    "get_metrics_collector",
+    "get_performance_profiler",
     "get_tracer",
+    "get_trading_tracer",
     "instrument_fastapi",
+    "set_global_alert_manager",
+    "set_global_profiler",
+    "set_global_trading_tracer",
+    "set_metrics_collector",
     "setup_telemetry",
+    "trace",
 ]

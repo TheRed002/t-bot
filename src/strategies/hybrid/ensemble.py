@@ -23,8 +23,8 @@ import numpy as np
 from scipy.stats import pearsonr
 
 from src.core.exceptions import StrategyError
-from src.core.logging import get_logger
 
+# Logger is provided by BaseStrategy (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
 
@@ -36,8 +36,6 @@ from src.strategies.base import BaseStrategy
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
 
 
 class StrategyPerformanceTracker:
@@ -460,7 +458,7 @@ class EnsembleStrategy(BaseStrategy):
         # Voting mechanism
         self.voting_mechanism = VotingMechanism()
 
-        logger.info(
+        self.logger.info(
             "Ensemble strategy initialized",
             voting_method=self.voting_method,
             max_strategies=self.max_strategies,
@@ -473,7 +471,7 @@ class EnsembleStrategy(BaseStrategy):
             strategy_name = strategy.name
 
             if len(self.component_strategies) >= self.max_strategies:
-                logger.warning(
+                self.logger.warning(
                     "Maximum strategies reached, cannot add strategy",
                     strategy=strategy_name,
                     max_strategies=self.max_strategies,
@@ -484,7 +482,7 @@ class EnsembleStrategy(BaseStrategy):
             self.strategy_weights[strategy_name] = initial_weight
             self.performance_trackers[strategy_name] = StrategyPerformanceTracker(strategy_name)
 
-            logger.info(
+            self.logger.info(
                 "Strategy added to ensemble",
                 strategy=strategy_name,
                 initial_weight=initial_weight,
@@ -492,7 +490,9 @@ class EnsembleStrategy(BaseStrategy):
             )
 
         except Exception as e:
-            logger.error("Error adding strategy to ensemble", strategy=strategy.name, error=str(e))
+            self.logger.error(
+                "Error adding strategy to ensemble", strategy=strategy.name, error=str(e)
+            )
             raise StrategyError(f"Failed to add strategy {strategy.name}: {e}")
 
     def remove_strategy(self, strategy_name: str) -> None:
@@ -503,16 +503,16 @@ class EnsembleStrategy(BaseStrategy):
                 del self.strategy_weights[strategy_name]
                 del self.performance_trackers[strategy_name]
 
-                logger.info(
+                self.logger.info(
                     "Strategy removed from ensemble",
                     strategy=strategy_name,
                     remaining_strategies=len(self.component_strategies),
                 )
             else:
-                logger.warning("Strategy not found in ensemble", strategy=strategy_name)
+                self.logger.warning("Strategy not found in ensemble", strategy=strategy_name)
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Error removing strategy from ensemble", strategy=strategy_name, error=str(e)
             )
 
@@ -521,7 +521,7 @@ class EnsembleStrategy(BaseStrategy):
         """Generate ensemble signals by combining component strategy signals."""
         try:
             if len(self.component_strategies) < self.min_strategies:
-                logger.warning(
+                self.logger.warning(
                     "Insufficient strategies for ensemble signal generation",
                     current_strategies=len(self.component_strategies),
                     min_required=self.min_strategies,
@@ -542,14 +542,14 @@ class EnsembleStrategy(BaseStrategy):
                         # Track signal for performance analysis
                         self.performance_trackers[strategy_name].add_signal(signal)
                 except Exception as e:
-                    logger.error(
+                    self.logger.error(
                         "Error getting signals from component strategy",
                         strategy=strategy_name,
                         error=str(e),
                     )
 
             if not component_signals:
-                logger.debug("No signals from component strategies")
+                self.logger.debug("No signals from component strategies")
                 return []
 
             # Check if rebalancing is needed
@@ -582,7 +582,7 @@ class EnsembleStrategy(BaseStrategy):
             return []
 
         except Exception as e:
-            logger.error("Error generating ensemble signals", symbol=data.symbol, error=str(e))
+            self.logger.error("Error generating ensemble signals", symbol=data.symbol, error=str(e))
             return []
 
     async def _vote_on_signals(
@@ -613,7 +613,7 @@ class EnsembleStrategy(BaseStrategy):
                     filtered_signals, performance_scores
                 )
             else:
-                logger.warning(
+                self.logger.warning(
                     "Unknown voting method, using confidence_weighted", method=self.voting_method
                 )
                 performance_scores = {
@@ -625,7 +625,7 @@ class EnsembleStrategy(BaseStrategy):
                 )
 
         except Exception as e:
-            logger.error("Error in signal voting", error=str(e))
+            self.logger.error("Error in signal voting", error=str(e))
             return None
 
     async def _filter_signals_by_regime(
@@ -650,7 +650,7 @@ class EnsembleStrategy(BaseStrategy):
                 self.last_rebalance = current_time
 
         except Exception as e:
-            logger.error("Error in rebalancing check", error=str(e))
+            self.logger.error("Error in rebalancing check", error=str(e))
 
     async def _rebalance_strategies(self) -> None:
         """Rebalance strategy weights based on performance and diversity."""
@@ -658,7 +658,7 @@ class EnsembleStrategy(BaseStrategy):
             if len(self.component_strategies) < 2:
                 return
 
-            logger.info("Starting strategy rebalancing")
+            self.logger.info("Starting strategy rebalancing")
 
             # Calculate performance-based weights
             performance_weights = {}
@@ -711,7 +711,7 @@ class EnsembleStrategy(BaseStrategy):
             # Update strategy weights
             self.strategy_weights = final_weights
 
-            logger.info(
+            self.logger.info(
                 "Strategy rebalancing completed",
                 new_weights=self.strategy_weights,
                 diversity_score=diversity_score,
@@ -719,7 +719,7 @@ class EnsembleStrategy(BaseStrategy):
             )
 
         except Exception as e:
-            logger.error("Error during strategy rebalancing", error=str(e))
+            self.logger.error("Error during strategy rebalancing", error=str(e))
 
     async def validate_signal(self, signal: Signal) -> bool:
         """Validate ensemble signal."""
@@ -738,7 +738,7 @@ class EnsembleStrategy(BaseStrategy):
             # Ensure sufficient strategy participation
             contributing_strategies = signal.metadata.get("contributing_strategies", [])
             if len(contributing_strategies) < self.min_strategies:
-                logger.warning(
+                self.logger.warning(
                     "Insufficient strategy participation",
                     contributing=len(contributing_strategies),
                     required=self.min_strategies,
@@ -748,7 +748,7 @@ class EnsembleStrategy(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error("Error validating ensemble signal", error=str(e))
+            self.logger.error("Error validating ensemble signal", error=str(e))
             return False
 
     def get_position_size(self, signal: Signal) -> Decimal:
@@ -779,7 +779,7 @@ class EnsembleStrategy(BaseStrategy):
             return max(min_size, min(max_size, final_size))
 
         except Exception as e:
-            logger.error("Error calculating ensemble position size", error=str(e))
+            self.logger.error("Error calculating ensemble position size", error=str(e))
             return Decimal("0.01")
 
     def should_exit(self, position: Position, data: MarketData) -> bool:
@@ -830,7 +830,7 @@ class EnsembleStrategy(BaseStrategy):
 
             # Exit if majority of strategies are signaling opposite direction
             if total_signals > 0 and opposing_signals / total_signals > 0.6:
-                logger.info(
+                self.logger.info(
                     "Ensemble exit signal triggered",
                     symbol=position.symbol,
                     opposing_ratio=opposing_signals / total_signals,
@@ -840,32 +840,34 @@ class EnsembleStrategy(BaseStrategy):
             return False
 
         except Exception as e:
-            logger.error("Error in ensemble exit decision", symbol=position.symbol, error=str(e))
+            self.logger.error(
+                "Error in ensemble exit decision", symbol=position.symbol, error=str(e)
+            )
             return False
 
     async def _on_start(self) -> None:
         """Start all component strategies."""
-        logger.info("Starting ensemble strategy components")
+        self.logger.info("Starting ensemble strategy components")
 
         for strategy_name, strategy in self.component_strategies.items():
             try:
                 await strategy.start()
-                logger.info("Component strategy started", strategy=strategy_name)
+                self.logger.info("Component strategy started", strategy=strategy_name)
             except Exception as e:
-                logger.error(
+                self.logger.error(
                     "Failed to start component strategy", strategy=strategy_name, error=str(e)
                 )
 
     async def _on_stop(self) -> None:
         """Stop all component strategies."""
-        logger.info("Stopping ensemble strategy components")
+        self.logger.info("Stopping ensemble strategy components")
 
         for strategy_name, strategy in self.component_strategies.items():
             try:
                 await strategy.stop()
-                logger.info("Component strategy stopped", strategy=strategy_name)
+                self.logger.info("Component strategy stopped", strategy=strategy_name)
             except Exception as e:
-                logger.error(
+                self.logger.error(
                     "Failed to stop component strategy", strategy=strategy_name, error=str(e)
                 )
 
@@ -878,14 +880,14 @@ class EnsembleStrategy(BaseStrategy):
                 self.performance_trackers[strategy_name].add_trade_result(return_pct, trade_info)
                 self.correlation_analyzer.add_strategy_return(strategy_name, return_pct)
 
-                logger.debug(
+                self.logger.debug(
                     "Strategy performance updated",
                     strategy=strategy_name,
                     return_pct=return_pct,
                     new_score=self.performance_trackers[strategy_name].get_performance_score(),
                 )
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Error updating strategy performance", strategy=strategy_name, error=str(e)
             )
 
@@ -919,5 +921,5 @@ class EnsembleStrategy(BaseStrategy):
             }
 
         except Exception as e:
-            logger.error("Error getting ensemble statistics", error=str(e))
+            self.logger.error("Error getting ensemble statistics", error=str(e))
             return {"error": str(e)}

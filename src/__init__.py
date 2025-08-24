@@ -9,7 +9,7 @@ __author__ = "Trading Bot Team"
 __description__ = "Comprehensive algorithmic trading platform"
 
 # Core framework imports
-from .core.config import Config, DatabaseConfig, SecurityConfig
+from .core.config import Config, DatabaseConfig
 from .core.exceptions import (
     DataError,
     ExchangeError,
@@ -58,7 +58,6 @@ __all__ = [
     "PerformanceMonitor",
     "Position",
     "RiskManagementError",
-    "SecurityConfig",
     "SecurityError",
     "Signal",
     "SignalDirection",

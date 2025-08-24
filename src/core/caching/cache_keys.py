@@ -151,7 +151,7 @@ class CacheKeys:
 
     # API Response Keys
     @classmethod
-    def api_response(cls, endpoint: str, user_id: str = "anonymous", **params) -> str:
+    def api_response(cls, endpoint: str, user_id: str = "anonymous", **params: Any) -> str:
         """Cache key for API responses."""
         param_str = "_".join(f"{k}-{v}" for k, v in sorted(params.items()))
         return cls._build_key(cls.API, "response", endpoint, user_id, param_str)

@@ -38,8 +38,6 @@ from src.strategies.evolutionary.fitness import FitnessEvaluator
 from src.strategies.evolutionary.population import Individual, Population
 from src.utils.decorators import memory_usage, retry, time_execution
 
-logger = get_logger(__name__)
-
 
 class OptimizationObjective(BaseModel):
     """
@@ -130,8 +128,9 @@ class ConstraintHandler:
         """
         self.constraints = constraints
         self.penalty_factor = 1000.0  # Penalty factor for constraint violations
+        self.logger = get_logger(__name__)
 
-        logger.info(
+        self.logger.info(
             "ConstraintHandler initialized",
             constraint_count=len(constraints),
             constraint_names=[c.name for c in constraints],
@@ -238,8 +237,9 @@ class DominanceComparator:
             objectives: List of optimization objectives
         """
         self.objectives = {obj.name: obj for obj in objectives}
+        self.logger = get_logger(__name__)
 
-        logger.debug("DominanceComparator initialized", objective_count=len(objectives))
+        self.logger.debug("DominanceComparator initialized", objective_count=len(objectives))
 
     def dominates(self, solution1: dict[str, float], solution2: dict[str, float]) -> bool:
         """
@@ -350,8 +350,9 @@ class CrowdingDistanceCalculator:
             objectives: List of optimization objectives
         """
         self.objectives = objectives
+        self.logger = get_logger(__name__)
 
-        logger.debug("CrowdingDistanceCalculator initialized", objective_count=len(objectives))
+        self.logger.debug("CrowdingDistanceCalculator initialized", objective_count=len(objectives))
 
     def calculate_crowding_distance(
         self, solutions: list[dict[str, float]], front_indices: list[int]
@@ -428,8 +429,11 @@ class ParetoFrontierManager:
         self.dominance_comparator = DominanceComparator(config.objectives)
         self.crowding_calculator = CrowdingDistanceCalculator(config.objectives)
         self.constraint_handler = ConstraintHandler(config.objectives)
+        self.logger = get_logger(__name__)
 
-        logger.info("ParetoFrontierManager initialized", objective_count=len(config.objectives))
+        self.logger.info(
+            "ParetoFrontierManager initialized", objective_count=len(config.objectives)
+        )
 
     @time_execution
     def update_frontier(self, solutions: list[ParetoSolution]) -> None:
@@ -475,7 +479,7 @@ class ParetoFrontierManager:
         # Calculate convergence metrics
         self._calculate_convergence_metrics()
 
-        logger.info(
+        self.logger.info(
             "Pareto frontier updated",
             frontier_size=len(self.current_frontier),
             total_solutions=len(all_solutions),
@@ -698,8 +702,9 @@ class NSGAIIOptimizer:
 
         # Evolution history
         self.evolution_history: list[dict[str, Any]] = []
+        self.logger = get_logger(__name__)
 
-        logger.info(
+        self.logger.info(
             "NSGAIIOptimizer initialized",
             strategy=strategy_class.__name__,
             objective_count=len(config.objectives),
@@ -716,7 +721,7 @@ class NSGAIIOptimizer:
             List of Pareto optimal solutions
         """
         try:
-            logger.info(
+            self.logger.info(
                 "Starting NSGA-II optimization",
                 generations=self.config.generations,
                 population_size=self.config.population_size,
@@ -733,7 +738,7 @@ class NSGAIIOptimizer:
             for generation in range(self.config.generations):
                 self.generation = generation
 
-                logger.info(
+                self.logger.info(
                     f"Generation {generation + 1}/{self.config.generations}",
                     frontier_size=len(self.frontier_manager.current_frontier),
                 )
@@ -758,14 +763,14 @@ class NSGAIIOptimizer:
 
                 # Check convergence
                 if self._check_convergence():
-                    logger.info(
+                    self.logger.info(
                         "Optimization converged",
                         generation=generation + 1,
                         stagnation_count=self.stagnation_count,
                     )
                     break
 
-            logger.info(
+            self.logger.info(
                 "NSGA-II optimization completed",
                 final_frontier_size=len(self.frontier_manager.current_frontier),
                 generations_run=self.generation + 1,
@@ -774,7 +779,7 @@ class NSGAIIOptimizer:
             return self.frontier_manager.current_frontier
 
         except Exception as e:
-            logger.error("NSGA-II optimization failed", error=str(e))
+            self.logger.error("NSGA-II optimization failed", error=str(e))
             raise OptimizationError(f"NSGA-II optimization failed: {e!s}")
 
     async def _initialize_population(self) -> Population:
@@ -827,7 +832,7 @@ class NSGAIIOptimizer:
 
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
-                    logger.error(
+                    self.logger.error(
                         "Individual evaluation failed",
                         individual_id=population.individuals[i].id,
                         error=str(result),
@@ -880,7 +885,9 @@ class NSGAIIOptimizer:
             )
 
         except Exception as e:
-            logger.error("Individual evaluation failed", individual_id=individual.id, error=str(e))
+            self.logger.error(
+                "Individual evaluation failed", individual_id=individual.id, error=str(e)
+            )
             return None
 
     async def _simulate_objectives(self, individual: Individual) -> dict[str, float]:
@@ -1201,8 +1208,10 @@ class MultiObjectiveOptimizer:
         # Validate configuration
         for objective in config.objectives:
             objective.validate_direction()
+        
+        self.logger = get_logger(__name__)
 
-        logger.info(
+        self.logger.info(
             "MultiObjectiveOptimizer initialized",
             objective_count=len(config.objectives),
             algorithm="NSGA-II",
@@ -1228,7 +1237,7 @@ class MultiObjectiveOptimizer:
             List of Pareto optimal solutions
         """
         try:
-            logger.info(
+            self.logger.info(
                 "Starting multi-objective strategy optimization",
                 strategy=strategy_class.__name__,
                 parameter_count=len(parameter_ranges),
@@ -1246,7 +1255,7 @@ class MultiObjectiveOptimizer:
             # Run optimization
             pareto_solutions = await self.optimizer.optimize()
 
-            logger.info(
+            self.logger.info(
                 "Multi-objective optimization completed",
                 pareto_solutions_count=len(pareto_solutions),
                 strategy=strategy_class.__name__,
@@ -1255,7 +1264,7 @@ class MultiObjectiveOptimizer:
             return pareto_solutions
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Multi-objective optimization failed",
                 strategy=strategy_class.__name__,
                 error=str(e),
@@ -1322,7 +1331,7 @@ class MultiObjectiveOptimizer:
         with open(filepath, "w") as f:
             json.dump(results, f, indent=2, default=str)
 
-        logger.info("Optimization results exported", filepath=filepath)
+        self.logger.info("Optimization results exported", filepath=filepath)
 
 
 # Example usage and factory functions

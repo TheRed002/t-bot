@@ -19,9 +19,9 @@ from typing import Any
 
 import aiohttp
 
+from src.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import NewsSentiment
@@ -31,8 +31,6 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import retry, time_execution
-
-logger = get_logger(__name__)
 
 
 @dataclass
@@ -51,7 +49,7 @@ class NewsArticle:
     metadata: dict[str, Any]
 
 
-class NewsDataSource:
+class NewsDataSource(BaseComponent):
     """
     News data source for sentiment analysis and market impact assessment.
 
@@ -66,6 +64,7 @@ class NewsDataSource:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.error_handler = ErrorHandler(config)
 
@@ -91,7 +90,7 @@ class NewsDataSource:
             "last_update_time": None,
         }
 
-        logger.info("NewsDataSource initialized")
+        self.logger.info("NewsDataSource initialized")
 
     @retry(max_attempts=3, base_delay=2.0)
     async def initialize(self) -> None:
@@ -109,10 +108,10 @@ class NewsDataSource:
             # Test API connection
             await self._test_connection()
 
-            logger.info("NewsDataSource initialized successfully")
+            self.logger.info("NewsDataSource initialized successfully")
 
         except Exception as e:
-            logger.error(f"Failed to initialize NewsDataSource: {e!s}")
+            self.logger.error(f"Failed to initialize NewsDataSource: {e!s}")
             raise DataSourceError(f"News data source initialization failed: {e!s}")
 
     @retry(max_attempts=3, base_delay=2.0)
@@ -124,12 +123,12 @@ class NewsDataSource:
 
             async with self.session.get(url, params=params) as response:
                 if response.status == 200:
-                    logger.info("NewsAPI connection test successful")
+                    self.logger.info("NewsAPI connection test successful")
                 else:
                     raise DataSourceError(f"NewsAPI test failed with status {response.status}")
 
         except Exception as e:
-            logger.error(f"NewsAPI connection test failed: {e!s}")
+            self.logger.error(f"NewsAPI connection test failed: {e!s}")
             raise
 
     @time_execution
@@ -185,12 +184,12 @@ class NewsDataSource:
             self.stats["successful_requests"] += 1
             self.stats["last_update_time"] = datetime.now(timezone.utc)
 
-            logger.info(f"Retrieved {len(result)} news articles for {symbol}")
+            self.logger.info(f"Retrieved {len(result)} news articles for {symbol}")
             return result
 
         except Exception as e:
             self.stats["failed_requests"] += 1
-            logger.error(f"Failed to get news for {symbol}: {e!s}")
+            self.logger.error(f"Failed to get news for {symbol}: {e!s}")
             raise DataSourceError(f"News retrieval failed: {e!s}")
 
     @retry(max_attempts=3, base_delay=1.0)
@@ -221,11 +220,11 @@ class NewsDataSource:
 
                     return articles
                 else:
-                    logger.warning(f"NewsAPI request failed with status {response.status}")
+                    self.logger.warning(f"NewsAPI request failed with status {response.status}")
                     return []
 
         except Exception as e:
-            logger.error(f"Failed to fetch articles: {e!s}")
+            self.logger.error(f"Failed to fetch articles: {e!s}")
             return []
 
     def _parse_article(self, article_data: dict[str, Any], query: str) -> NewsArticle | None:
@@ -270,7 +269,7 @@ class NewsDataSource:
             )
 
         except Exception as e:
-            logger.warning(f"Failed to parse article: {e!s}")
+            self.logger.warning(f"Failed to parse article: {e!s}")
             return None
 
     def _build_search_queries(self, symbol: str) -> list[str]:
@@ -446,7 +445,7 @@ class NewsDataSource:
             return sentiment_data
 
         except Exception as e:
-            logger.error(f"Failed to get market sentiment: {e!s}")
+            self.logger.error(f"Failed to get market sentiment: {e!s}")
             raise DataSourceError(f"Market sentiment calculation failed: {e!s}")
 
     async def cleanup(self) -> None:
@@ -460,7 +459,7 @@ class NewsDataSource:
             self.news_cache.clear()
             self.sentiment_cache.clear()
 
-            logger.info("NewsDataSource cleanup completed")
+            self.logger.info("NewsDataSource cleanup completed")
 
         except Exception as e:
-            logger.error(f"Error during NewsDataSource cleanup: {e!s}")
+            self.logger.error(f"Error during NewsDataSource cleanup: {e!s}")

@@ -50,7 +50,7 @@ from .brute_force import (
     GridSearchConfig,
     OptimizationResult,
     ParameterSpace,
-    ValidationConfig,
+    ValidationConfig as BruteForceValidationConfig,
 )
 from .core import (
     ObjectiveDirection,
@@ -74,7 +74,7 @@ from .validation import (
     RobustnessAnalyzer,
     StatisticalTester,
     TimeSeriesValidator,
-    ValidationConfig,
+    ValidationConfig as OptimizationValidationConfig,
     ValidationEngine,
     ValidationMetrics,
     WalkForwardValidator,
@@ -117,8 +117,8 @@ __all__ = [
     "StabilityAnalysis",
     "StatisticalTester",
     "TimeSeriesValidator",
-    "ValidationConfig",
-    "ValidationConfig",
+    "BruteForceValidationConfig",
+    "OptimizationValidationConfig",
     # Validation and overfitting prevention
     "ValidationEngine",
     "ValidationMetrics",

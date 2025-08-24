@@ -22,7 +22,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import structlog
 
@@ -38,12 +38,10 @@ class CorrelationContext:
     """
 
     def __init__(self):
-        self.correlation_id: str | None = None
         self._context = contextvars.ContextVar("correlation_id", default=None)
 
     def set_correlation_id(self, correlation_id: str) -> None:
         """Set correlation ID for current context."""
-        self.correlation_id = correlation_id
         self._context.set(correlation_id)
 
     def get_correlation_id(self) -> str | None:
@@ -68,24 +66,33 @@ class CorrelationContext:
 
 
 def _add_correlation_id(
-    logger: Any, method_name: str, event_dict: dict[str, Any]
+    logger: Any, method_name: str, event_dict: dict[str, Any] | None
 ) -> dict[str, Any]:
     """Add correlation ID to event dict."""
-    if event_dict is not None:
-        event_dict.update(correlation_id=correlation_context.get_correlation_id())
-        return event_dict
-    return {"correlation_id": correlation_context.get_correlation_id()}
+    if event_dict is None:
+        event_dict = {}
+    event_dict["correlation_id"] = correlation_context.get_correlation_id()
+    return event_dict
 
 
 def _safe_unicode_decoder(
-    logger: Any, method_name: str, event_dict: dict[str, Any]
+    logger: Any, method_name: str, event_dict: dict[str, Any] | None
 ) -> dict[str, Any]:
     """Safe unicode decoder for event dict."""
-    if event_dict is not None:
-        return cast(
-            dict[str, Any], structlog.processors.UnicodeDecoder()(logger, method_name, event_dict)
-        )
-    return {}
+    if event_dict is None:
+        return {}
+    # Ensure we have a dict before processing
+    if not isinstance(event_dict, dict):
+        return {}
+    try:
+        result = structlog.processors.UnicodeDecoder()(logger, method_name, event_dict)
+        # Verify result is a dict before returning
+        if isinstance(result, dict):
+            return result
+        return event_dict  # Return original if decoder failed
+    except Exception:
+        # If decoding fails, return original dict
+        return event_dict
 
 
 # Global correlation context
@@ -320,6 +327,22 @@ class SecureLogger:
             "refresh_token",
             "authorization",
             "auth",
+            "credential",
+            "credentials",
+            "apikey",
+            "apipass",
+            "passphrase",
+            "session",
+            "sessionid",
+            "session_id",
+            "csrf",
+            "jwt",
+            "bearer",
+            "oauth",
+            "signature",
+            "signed",
+            "x-api-key",
+            "x-auth-token",
         }
 
     def _sanitize_data(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -426,7 +449,8 @@ def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None
         log_name: Base name of log files
         retention_days: Number of days to retain log files
     """
-    import time
+    # Import logging here since structured logger may not be set up
+    import logging as basic_logging
 
     if not log_dir.exists():
         return
@@ -438,14 +462,14 @@ def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None
         try:
             if log_file.stat().st_mtime < cutoff_time:
                 log_file.unlink()
-                # Use basic logging here since structured logger may not be set up
-                import logging
-
-                logging.info(f"Removed old log file: {log_file}")
+                basic_logging.info(f"Removed old log file: {log_file}")
+        except FileNotFoundError:
+            # File was already removed, ignore
+            pass
+        except PermissionError as e:
+            basic_logging.error(f"Permission denied removing log file {log_file}: {e}")
         except OSError as e:
-            import logging
-
-            logging.warning(f"Failed to remove old log file {log_file}: {e}")
+            basic_logging.warning(f"Failed to remove old log file {log_file}: {e}")
 
 
 def setup_production_logging(log_dir: str = "logs", app_name: str = "trading-bot") -> None:

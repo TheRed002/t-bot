@@ -22,25 +22,25 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
+from src.base import BaseComponent
+
+# Database service abstractions - use service pattern instead of direct imports
+# Caching imports
+from src.core.caching import CacheKeys, cache_invalidate, cached, get_cache_manager
+
 # Core framework imports
-from src.core.config import Config
+from src.core.config.main import Config
 from src.core.exceptions import StateError
-from src.core.logging import get_logger
 from src.core.types import (
     ExecutionResult,
     OrderRequest,
     OrderSide,
     OrderType,
 )
+from src.database.service import DatabaseService
 
-# Database imports
-from src.database.manager import DatabaseManager
-from src.database.redis_client import RedisClient
-
-# Utility imports
-from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
+# Import utilities through centralized import handler
+from .utils_imports import time_execution
 
 
 class TradeLifecycleState(Enum):
@@ -188,7 +188,7 @@ class PerformanceAttribution:
     attribution_date: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-class TradeLifecycleManager:
+class TradeLifecycleManager(BaseComponent):
     """
     Comprehensive trade lifecycle management system.
 
@@ -200,19 +200,26 @@ class TradeLifecycleManager:
     - Integration with execution and risk systems
     """
 
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        config: Config,
+        database_service: DatabaseService | None = None,
+        cache_service: Any | None = None,
+    ):
         """
         Initialize the trade lifecycle manager.
 
         Args:
             config: Application configuration
+            database_service: Database service for data persistence
+            cache_service: Cache service for performance optimization
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
-        self.logger = get_logger(f"{__name__}.{id(self)}")
 
-        # Database clients
-        self.db_manager = DatabaseManager(config)
-        self.redis_client = RedisClient(config)
+        # Injected services (with fallback handling)
+        self.database_service = database_service
+        self.cache_service = cache_service
 
         # Active trades tracking
         self.active_trades: dict[str, TradeContext] = {}
@@ -261,25 +268,43 @@ class TradeLifecycleManager:
         self.logger.info("TradeLifecycleManager initialized")
 
     async def initialize(self) -> None:
-        """Initialize the trade lifecycle manager."""
+        """Initialize the trade lifecycle manager with service dependencies."""
         try:
-            # Initialize database connections
-            await self.db_manager.initialize()
-            await self.redis_client.initialize()
+            # Initialize database service if available
+            if self.database_service and not self.database_service.is_running:
+                await self.database_service.start()
+                self.logger.info("Database service initialized")
+            elif not self.database_service:
+                self.logger.warning(
+                    "Database service not available - persistence operations will be limited"
+                )
 
-            # Load active trades from Redis
+            # Initialize cache service if available
+            if not self.cache_service:
+                # Fall back to cache manager if no cache service provided
+                try:
+                    self.cache_service = get_cache_manager(config=self.config)
+                    self.logger.info("Cache manager initialized as fallback")
+                except Exception as e:
+                    self.logger.warning(
+                        f"Cache initialization failed: {e} - operating without cache"
+                    )
+                    self.cache_service = None
+
+            # Load active trades from persistence layer
             await self._load_active_trades()
 
             # Start background monitoring
-            asyncio.create_task(self._monitoring_loop())
+            self._monitoring_task = asyncio.create_task(self._monitoring_loop())
 
             self.logger.info("TradeLifecycleManager initialization completed")
 
         except Exception as e:
             self.logger.error(f"TradeLifecycleManager initialization failed: {e}")
-            raise StateError(f"Failed to initialize TradeLifecycleManager: {e}")
+            raise StateError(f"Failed to initialize TradeLifecycleManager: {e}") from e
 
     @time_execution
+    @cache_invalidate(patterns=["trade_lifecycle:*"], namespace="state")
     async def start_trade_lifecycle(
         self, bot_id: str, strategy_name: str, order_request: OrderRequest
     ) -> str:
@@ -313,7 +338,7 @@ class TradeLifecycleManager:
             # Store in active trades
             self.active_trades[trade_context.trade_id] = trade_context
 
-            # Cache in Redis for persistence
+            # Cache trade context for persistence
             await self._cache_trade_context(trade_context)
 
             # Log trade start
@@ -336,7 +361,7 @@ class TradeLifecycleManager:
 
         except Exception as e:
             self.logger.error(f"Failed to start trade lifecycle: {e}")
-            raise StateError(f"Trade lifecycle start failed: {e}")
+            raise StateError(f"Trade lifecycle start failed: {e}") from e
 
     async def transition_trade_state(
         self,
@@ -411,7 +436,7 @@ class TradeLifecycleManager:
 
         except Exception as e:
             self.logger.error(f"Failed to transition trade state: {e}", trade_id=trade_id)
-            raise StateError(f"Trade state transition failed: {e}")
+            raise StateError(f"Trade state transition failed: {e}") from e
 
     async def update_trade_execution(
         self, trade_id: str, execution_result: ExecutionResult
@@ -433,12 +458,12 @@ class TradeLifecycleManager:
 
             # Update execution details
             trade_context.execution_results.append(execution_result)
-            trade_context.order_id = execution_result.execution_id
+            trade_context.order_id = execution_result.instruction_id
             trade_context.exchange_order_id = getattr(execution_result, "exchange_order_id", None)
 
             # Update fill quantities
-            if execution_result.total_filled_quantity > 0:
-                trade_context.filled_quantity += execution_result.total_filled_quantity
+            if execution_result.filled_quantity > 0:
+                trade_context.filled_quantity += execution_result.filled_quantity
                 trade_context.remaining_quantity = (
                     trade_context.original_quantity - trade_context.filled_quantity
                 )
@@ -449,10 +474,10 @@ class TradeLifecycleManager:
                     total_quantity = Decimal("0")
 
                     for result in trade_context.execution_results:
-                        if result.total_filled_quantity > 0:
-                            fill_value = result.total_filled_quantity * result.average_fill_price
+                        if result.filled_quantity > 0:
+                            fill_value = result.filled_quantity * result.average_price
                             total_value += fill_value
-                            total_quantity += result.total_filled_quantity
+                            total_quantity += result.filled_quantity
 
                     if total_quantity > 0:
                         trade_context.average_fill_price = total_value / total_quantity
@@ -477,13 +502,13 @@ class TradeLifecycleManager:
             self.logger.info(
                 "Trade execution updated",
                 trade_id=trade_id,
-                filled_quantity=float(execution_result.total_filled_quantity),
+                filled_quantity=float(execution_result.filled_quantity),
                 total_filled=float(trade_context.filled_quantity),
             )
 
         except Exception as e:
             self.logger.error(f"Failed to update trade execution: {e}", trade_id=trade_id)
-            raise StateError(f"Trade execution update failed: {e}")
+            raise StateError(f"Trade execution update failed: {e}") from e
 
     async def calculate_trade_performance(self, trade_id: str) -> dict[str, Any]:
         """
@@ -556,8 +581,14 @@ class TradeLifecycleManager:
 
         except Exception as e:
             self.logger.error(f"Failed to calculate trade performance: {e}", trade_id=trade_id)
-            raise StateError(f"Trade performance calculation failed: {e}")
+            raise StateError(f"Trade performance calculation failed: {e}") from e
 
+    @cached(
+        ttl=60,
+        namespace="state",
+        data_type="orders",
+        key_generator=lambda self, bot_id=None, strategy_name=None, symbol=None, start_date=None, end_date=None, limit=100: f"trade_history:{bot_id}:{strategy_name}:{symbol}:{limit}",
+    )
     async def get_trade_history(
         self,
         bot_id: str | None = None,
@@ -689,9 +720,13 @@ class TradeLifecycleManager:
     # Private helper methods
 
     async def _cache_trade_context(self, trade_context: TradeContext) -> None:
-        """Cache trade context in Redis."""
+        """Cache trade context using cache service abstraction."""
+        if not self.cache_service:
+            # No cache service available - skip caching
+            return
+
         try:
-            redis_key = f"trade_context:{trade_context.trade_id}"
+            cache_key = CacheKeys.trade_lifecycle(trade_context.trade_id)
             context_data = {
                 "trade_id": trade_context.trade_id,
                 "bot_id": trade_context.bot_id,
@@ -706,7 +741,13 @@ class TradeLifecycleManager:
                 "signal_timestamp": trade_context.signal_timestamp.isoformat(),
             }
 
-            await self.redis_client.setex(redis_key, 3600, str(context_data))  # 1 hour TTL
+            await self.cache_service.set(
+                cache_key,
+                context_data,
+                namespace="state",
+                ttl=3600,  # 1 hour TTL
+                data_type="state",
+            )
 
         except Exception as e:
             self.logger.warning(f"Failed to cache trade context: {e}")
@@ -833,10 +874,21 @@ class TradeLifecycleManager:
         }
 
     async def _load_active_trades(self) -> None:
-        """Load active trades from Redis."""
+        """Load active trades from persistence layer."""
         try:
-            # In a full implementation, this would scan Redis for active trade contexts
-            self.logger.info("Loaded active trades from storage")
+            if not self.cache_service:
+                self.logger.info("No cache service available - starting with empty active trades")
+                return
+
+            # In a full implementation, this would scan cache service for active trade contexts
+            # For now, we'll use a simple pattern-based scan if supported by the cache service
+            if hasattr(self.cache_service, "invalidate_pattern"):
+                # Cache service supports pattern operations
+                self.logger.info("Cache service available for trade context persistence")
+            else:
+                self.logger.info("Cache service available but limited pattern support")
+
+            self.logger.info("Active trades loading completed")
 
         except Exception as e:
             self.logger.warning(f"Failed to load active trades: {e}")

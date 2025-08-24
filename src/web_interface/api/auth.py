@@ -75,7 +75,7 @@ async def login(login_request: LoginRequest):
     """
     try:
         # Authenticate user
-        user = authenticate_user(login_request.username, login_request.password)
+        user = await authenticate_user(login_request.username, login_request.password)
         if not user:
             logger.warning(f"Login failed for username: {login_request.username}")
             raise HTTPException(
@@ -219,7 +219,7 @@ async def change_password(
         # Verify current password
         from src.web_interface.security.auth import get_user
 
-        user_db = get_user(current_user.username)
+        user_db = await get_user(current_user.username)
         if not user_db or not jwt_handler.verify_password(
             change_request.current_password, user_db.hashed_password
         ):
@@ -267,7 +267,7 @@ async def create_new_user(
     """
     try:
         # Create user
-        user_db = create_user(
+        user_db = await create_user(
             username=user_request.username,
             email=user_request.email,
             password=user_request.password,
@@ -382,7 +382,7 @@ async def get_auth_status():
         dict: Authentication system status
     """
     try:
-        return get_auth_summary()
+        return await get_auth_summary()
 
     except Exception as e:
         logger.error(f"Auth status error: {e}")

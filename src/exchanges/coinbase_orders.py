@@ -15,24 +15,20 @@ from typing import Any
 # Coinbase-specific imports
 from coinbase.rest import RESTClient
 
+# LoggerMixin not needed - BaseComponent already provides logging
 from src.core.config import Config
 from src.core.exceptions import ExchangeConnectionError, ExecutionError, ValidationError
-from src.core.logging import get_logger
 
+# Logger is provided by BaseExchange (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.utils.helpers import normalize_price, round_to_precision
-
-# MANDATORY: Import from P-007A (utils)
-from src.utils.validators import validate_order_request, validate_symbol
+from src.utils import normalize_price, round_to_precision, ValidationFramework
 
 # Note: Using generic Exception handling for REST API as no specific
 # exceptions are documented
-
-logger = get_logger(__name__)
 
 
 class CoinbaseOrderManager:
@@ -81,7 +77,7 @@ class CoinbaseOrderManager:
 
         self.rate_limiter = RateLimiter(config, exchange_name)
 
-        logger.info(f"Initialized {exchange_name} order manager")
+        self.logger.info(f"Initialized {exchange_name} order manager")
 
     async def initialize(self) -> bool:
         """
@@ -102,11 +98,11 @@ class CoinbaseOrderManager:
             # Test connection
             await self._test_connection()
 
-            logger.info(f"Successfully initialized {self.exchange_name} order manager")
+            self.logger.info(f"Successfully initialized {self.exchange_name} order manager")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to initialize {self.exchange_name} order manager: {e!s}")
+            self.logger.error(f"Failed to initialize {self.exchange_name} order manager: {e!s}")
             return False
 
     async def place_order(self, order: OrderRequest) -> OrderResponse:
@@ -124,7 +120,7 @@ class CoinbaseOrderManager:
                 raise ExchangeConnectionError("Not connected to Coinbase")
 
             # Validate order using utils validators
-            if not validate_order_request(order):
+            if not ValidationFramework.validate_order(order.__dict__):
                 raise ValidationError("Order validation failed using utils validators")
 
             # Additional Coinbase-specific validation
@@ -148,14 +144,14 @@ class CoinbaseOrderManager:
             self.order_status_cache[order_response.id] = OrderStatus.PENDING
             self.order_history.append(order_response)
 
-            logger.info(f"Placed order {order_response.id} for {order.symbol}")
+            self.logger.info(f"Placed order {order_response.id} for {order.symbol}")
             return order_response
 
         except ExchangeConnectionError:
             # Re-raise connection errors as-is
             raise
         except Exception as e:
-            logger.error(f"Failed to place order: {e!s}")
+            self.logger.error(f"Failed to place order: {e!s}")
             raise ExecutionError(f"Failed to place order: {e!s}")
 
     async def cancel_order(self, order_id: str) -> bool:
@@ -182,11 +178,11 @@ class CoinbaseOrderManager:
             if order_id in self.pending_orders:
                 del self.pending_orders[order_id]
 
-            logger.info(f"Cancelled order {order_id}")
+            self.logger.info(f"Cancelled order {order_id}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to cancel order {order_id}: {e!s}")
+            self.logger.error(f"Failed to cancel order {order_id}: {e!s}")
             return False
 
     async def get_order_status(self, order_id: str) -> OrderStatus:
@@ -215,7 +211,7 @@ class CoinbaseOrderManager:
             return status
 
         except Exception as e:
-            logger.error(f"Failed to get order status for {order_id}: {e!s}")
+            self.logger.error(f"Failed to get order status for {order_id}: {e!s}")
             return OrderStatus.UNKNOWN
 
     async def get_order_details(self, order_id: str) -> OrderResponse | None:
@@ -241,7 +237,7 @@ class CoinbaseOrderManager:
             return order_response
 
         except Exception as e:
-            logger.error(f"Failed to get order details for {order_id}: {e!s}")
+            self.logger.error(f"Failed to get order details for {order_id}: {e!s}")
             return None
 
     async def get_open_orders(self, symbol: str | None = None) -> list[OrderResponse]:
@@ -270,7 +266,7 @@ class CoinbaseOrderManager:
             return order_responses
 
         except Exception as e:
-            logger.error(f"Failed to get open orders: {e!s}")
+            self.logger.error(f"Failed to get open orders: {e!s}")
             return []
 
     async def get_order_history(
@@ -302,7 +298,7 @@ class CoinbaseOrderManager:
             return order_responses
 
         except Exception as e:
-            logger.error(f"Failed to get order history: {e!s}")
+            self.logger.error(f"Failed to get order history: {e!s}")
             return []
 
     async def get_fills(self, order_id: str | None = None, symbol: str | None = None) -> list[dict]:
@@ -326,7 +322,7 @@ class CoinbaseOrderManager:
             return fills
 
         except Exception as e:
-            logger.error(f"Failed to get fills: {e!s}")
+            self.logger.error(f"Failed to get fills: {e!s}")
             return []
 
     async def calculate_fees(self, order: OrderRequest) -> dict[str, Decimal]:
@@ -361,7 +357,7 @@ class CoinbaseOrderManager:
             }
 
         except Exception as e:
-            logger.error(f"Failed to calculate fees: {e!s}")
+            self.logger.error(f"Failed to calculate fees: {e!s}")
             return {
                 "fee_rate": Decimal("0"),
                 "fee_amount": Decimal("0"),
@@ -418,24 +414,24 @@ class CoinbaseOrderManager:
         """
         try:
             # Use utils validators for comprehensive validation
-            if not validate_order_request(order):
-                logger.error("Order validation failed using utils validators")
+            if not ValidationFramework.validate_order(order.__dict__):
+                self.logger.error("Order validation failed using utils validators")
                 return False
 
             # Additional Coinbase-specific validation
-            if not validate_symbol(order.symbol):
-                logger.error("Invalid symbol format for Coinbase")
+            if not ValidationFramework.validate_symbol(order.symbol):
+                self.logger.error("Invalid symbol format for Coinbase")
                 return False
 
             # Check symbol format (Coinbase uses format like "BTC-USD")
             if "-" not in order.symbol:
-                logger.error("Invalid symbol format for Coinbase")
+                self.logger.error("Invalid symbol format for Coinbase")
                 return False
 
             return True
 
         except Exception as e:
-            logger.error(f"Order validation failed: {e!s}")
+            self.logger.error(f"Order validation failed: {e!s}")
             return False
 
     def _convert_order_to_coinbase(self, order: OrderRequest) -> dict[str, Any]:

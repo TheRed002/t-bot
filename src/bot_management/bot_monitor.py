@@ -1,65 +1,160 @@
 """
-Bot health and performance monitoring system.
+Bot health and performance monitoring system using service layer architecture.
 
 This module implements the BotMonitor class that provides comprehensive
-monitoring of bot instances, including health checks, performance metrics
-collection, alert generation, and error pattern detection.
+monitoring of bot instances through service layer dependencies, including
+health checks, performance metrics collection, alert generation, and error
+pattern detection.
 
-CRITICAL: This integrates with P-002 (database), P-002A (error handling),
-and P-007A (utils) components.
+REFACTORED: Now uses service layer pattern with proper dependency injection:
+- BotService: Bot management operations and status
+- StateService: Bot state monitoring and persistence
+- DatabaseService: Metrics storage and retrieval (via other services)
+- RiskService: Risk assessment and monitoring integration
 """
 
 import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psutil
 
-from src.core.config import Config
-from src.core.exceptions import ExecutionError
-from src.core.logging import get_logger
+from src.core.base.service import BaseService
+from src.core.exceptions import (
+    NetworkError,
+    ServiceError,
+    ValidationError,
+)
 from src.core.types import BotMetrics, BotStatus
 
-# MANDATORY: Import from P-002 (database)
-from src.database.connection import DatabaseConnectionManager, get_influxdb_client
-
 # MANDATORY: Import from P-002A (error handling)
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import (
+    ErrorSeverity,
+    get_global_error_handler,
+    with_circuit_breaker,
+    with_error_context,
+    with_retry,
+)
 
+# Import monitoring components with error handling
+try:
+    from src.monitoring import MetricsCollector, RiskMetrics, TradingMetrics, get_tracer
+except ImportError as e:
+    import logging
+
+    logging.getLogger(__name__).warning(f"Failed to import monitoring components: {e}")
+    # Provide fallback implementations or None
+    MetricsCollector = None
+    RiskMetrics = None
+    TradingMetrics = None
+
+    def get_tracer(x):
+        return None
+
+
+# REMOVED: Direct database error decorator - using service layer pattern instead
 # MANDATORY: Import from P-007A (utils)
-from src.utils.decorators import log_calls
+try:
+    from src.utils.decorators import log_calls
+
+    # Validate imported decorators are callable
+    if not callable(log_calls):
+        raise ImportError(f"log_calls is not callable: {type(log_calls)}")
+
+except ImportError as e:
+    # Fallback if decorators module is not available
+    import functools
+    import logging
+
+    def log_calls(func):
+        """Fallback decorator that just logs function calls."""
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            logger = logging.getLogger(func.__module__)
+            logger.info(f"Calling {func.__name__}")
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    logging.getLogger(__name__).warning(f"Failed to import decorators, using fallback: {e}")
+
+# Forward references for service dependencies
+if TYPE_CHECKING:
+    from src.database.service import DatabaseService
+    from src.risk_management import RiskService
+    from src.state import StateService
+
+    from .service import BotService
 
 
-class BotMonitor:
+class BotMonitor(BaseService):
     """
-    Comprehensive bot health and performance monitoring system.
+    Comprehensive bot health and performance monitoring system using service layer.
 
-    This class provides:
-    - Bot status monitoring and health checks
-    - Performance metrics collection and analysis
+    This service provides:
+    - Bot status monitoring and health checks via BotService
+    - Performance metrics collection and analysis via StateService
     - Alert generation for anomalies and issues
-    - Resource usage tracking per bot
+    - Resource usage tracking per bot through service layer
     - Error pattern detection and reporting
-    - Historical performance analysis
+    - Historical performance analysis via DatabaseService
+
+    The monitor coordinates with other services rather than accessing data directly.
     """
 
-    def __init__(self, config: Config):
+    def __init__(self):
         """
-        Initialize bot monitor.
+        Initialize bot monitor with service layer dependencies.
 
-        Args:
-            config: Application configuration
+        Dependencies resolved via DI:
+        - BotService: Bot management operations and status queries
+        - StateService: Bot state monitoring and persistence
+        - DatabaseService: Metrics storage and retrieval
+        - RiskService: Risk assessment and alert integration
         """
-        self.config = config
-        self.logger = get_logger(f"{__name__}.BotMonitor")
-        self.error_handler = ErrorHandler(config.error_handling)
+        super().__init__(name="BotMonitor")
 
-        # Database connections for metrics storage
-        self.db_connection = DatabaseConnectionManager(config)
-        self.influxdb_client = None  # Will be initialized when needed
+        # Declare service dependencies for DI resolution
+        self.add_dependency("BotService")
+        self.add_dependency("StateService")
+        self.add_dependency("DatabaseService")
+        self.add_dependency("RiskService")
+        self.add_dependency("MetricsCollector")  # Add monitoring dependency
+        self.add_dependency("ConfigService")
 
-        # Bot monitoring state
+        # Initialize error handler
+        self.error_handler = get_global_error_handler()
+
+        # Service instances (resolved during startup)
+        self._bot_service: BotService | None = None
+        self._state_service: StateService | None = None
+        self._database_service: DatabaseService | None = None
+        self._risk_service: RiskService | None = None
+        self._metrics_collector: MetricsCollector | None = None
+        self._config_service = None
+
+        # Initialize monitoring components with error handling
+        try:
+            self._tracer = get_tracer(__name__) if get_tracer else None
+        except Exception as e:
+            self._logger.warning(f"Failed to initialize tracer: {e}")
+            self._tracer = None
+
+        try:
+            self._trading_metrics = TradingMetrics() if TradingMetrics else None
+        except Exception as e:
+            self._logger.warning(f"Failed to initialize trading metrics: {e}")
+            self._trading_metrics = None
+
+        try:
+            self._risk_metrics = RiskMetrics() if RiskMetrics else None
+        except Exception as e:
+            self._logger.warning(f"Failed to initialize risk metrics: {e}")
+            self._risk_metrics = None
+
+        # Bot monitoring state (local cache for performance)
         self.monitored_bots: dict[str, dict[str, Any]] = {}
         self.bot_health_status: dict[str, dict[str, Any]] = {}
         self.performance_baselines: dict[str, dict[str, float]] = {}
@@ -70,30 +165,29 @@ class BotMonitor:
         self.health_check_task = None
         self.metrics_collection_task = None
 
-        # Alert tracking
+        # Alert tracking (local cache - persisted via StateService)
         self.active_alerts: dict[str, list[dict[str, Any]]] = {}
         self.alert_history: list[dict[str, Any]] = []
 
-        # Configuration
-        self.monitoring_interval = config.bot_management.get("monitoring_interval", 30)
-        self.health_check_interval = config.bot_management.get("health_check_interval", 60)
-        self.metrics_collection_interval = config.bot_management.get(
-            "metrics_collection_interval", 10
-        )
-        self.alert_retention_hours = config.bot_management.get("alert_retention_hours", 24)
+        # Metrics history storage (local cache)
+        self.metrics_history: dict[str, list[BotMetrics]] = {}
 
-        # Performance thresholds
+        # Configuration (should come from config service)
+        self.monitoring_interval = 30  # seconds
+        self.health_check_interval = 60  # seconds
+        self.metrics_collection_interval = 10  # seconds
+        self.alert_retention_hours = 24  # hours
+
+        # Performance thresholds (should come from config service)
         self.performance_thresholds = {
-            "cpu_usage_warning": config.bot_management.get("cpu_usage_warning", 70.0),
-            "cpu_usage_critical": config.bot_management.get("cpu_usage_critical", 90.0),
-            "memory_usage_warning": config.bot_management.get("memory_usage_warning", 500.0),  # MB
-            "memory_usage_critical": config.bot_management.get(
-                "memory_usage_critical", 1000.0
-            ),  # MB
-            "error_rate_warning": config.bot_management.get("error_rate_warning", 0.05),  # 5%
-            "error_rate_critical": config.bot_management.get("error_rate_critical", 0.15),  # 15%
-            "heartbeat_timeout": config.bot_management.get("heartbeat_timeout", 120),  # seconds
-            "win_rate_threshold": config.bot_management.get("win_rate_threshold", 0.30),  # 30%
+            "cpu_usage_warning": 70.0,
+            "cpu_usage_critical": 90.0,
+            "memory_usage_warning": 500.0,  # MB
+            "memory_usage_critical": 1000.0,  # MB
+            "error_rate_warning": 0.15,  # 15%
+            "error_rate_critical": 0.30,  # 30%
+            "heartbeat_timeout": 120,  # seconds
+            "win_rate_threshold": 0.30,  # 30%
         }
 
         # Monitoring statistics
@@ -106,75 +200,94 @@ class BotMonitor:
             "last_monitoring_time": None,
         }
 
-        self.logger.info("Bot monitor initialized")
+        self._logger.info("BotMonitor initialized with service layer dependencies")
 
-    @log_calls
-    async def start(self) -> None:
+    @with_error_context(component="BotMonitor", operation="startup")
+    async def _do_start(self) -> None:
         """
-        Start the bot monitoring system.
+        Start the bot monitoring system with service layer dependencies.
 
         Raises:
-            ExecutionError: If startup fails
+            ServiceError: If startup fails
         """
+        if self.is_running:
+            self._logger.warning("Bot monitor is already running")
+            return
+
+        self._logger.info("Starting bot monitor with service layer")
+
+        # Resolve service dependencies
+        self._bot_service = self.resolve_dependency("BotService")
+        self._state_service = self.resolve_dependency("StateService")
+        self._database_service = self.resolve_dependency("DatabaseService")
+
+        # Risk service is optional - handle gracefully if not available
         try:
-            if self.is_running:
-                self.logger.warning("Bot monitor is already running")
-                return
-
-            self.logger.info("Starting bot monitor")
-
-            # Initialize database connections
-            await self.db_connection.initialize()
-
-            # Start monitoring tasks
-            self.monitoring_task = asyncio.create_task(self._monitoring_loop())
-            self.health_check_task = asyncio.create_task(self._health_check_loop())
-            self.metrics_collection_task = asyncio.create_task(self._metrics_collection_loop())
-
-            self.is_running = True
-            self.logger.info("Bot monitor started successfully")
-
+            self._risk_service = self.resolve_dependency("RiskService")
         except Exception as e:
-            self.logger.error(f"Failed to start bot monitor: {e}")
-            raise ExecutionError(f"Bot monitor startup failed: {e}")
+            self._logger.warning(
+                f"RiskService not available, monitoring will continue without risk metrics: {e}"
+            )
+            self._risk_service = None
 
-    @log_calls
-    async def stop(self) -> None:
+        self._metrics_collector = self.resolve_dependency("MetricsCollector")
+        self._config_service = self.resolve_dependency("ConfigService")
+
+        # Verify core dependencies are resolved (risk service is optional)
+        if not all([self._bot_service, self._state_service, self._database_service]):
+            raise ServiceError("Failed to resolve all required service dependencies")
+
+        # Validate MetricsCollector is available
+        if not self._metrics_collector:
+            self._logger.warning("MetricsCollector not available - monitoring will be limited")
+
+        # Start monitoring tasks
+        self.monitoring_task = asyncio.create_task(self._monitoring_loop())
+        self.health_check_task = asyncio.create_task(self._health_check_loop())
+        self.metrics_collection_task = asyncio.create_task(self._metrics_collection_loop())
+
+        self.is_running = True
+
+        self._logger.info(
+            "Bot monitor started successfully with service dependencies",
+            dependencies=["BotService", "StateService", "DatabaseService", "RiskService"],
+        )
+
+    @with_error_context(component="BotMonitor", operation="shutdown")
+    async def _do_stop(self) -> None:
         """
         Stop the bot monitoring system.
 
         Raises:
-            ExecutionError: If shutdown fails
+            ServiceError: If shutdown fails
         """
-        try:
-            if not self.is_running:
-                self.logger.warning("Bot monitor is not running")
-                return
+        if not self.is_running:
+            self._logger.warning("Bot monitor is not running")
+            return
 
-            self.logger.info("Stopping bot monitor")
-            self.is_running = False
+        self._logger.info("Stopping bot monitor")
+        self.is_running = False
 
-            # Stop monitoring tasks
-            tasks = [self.monitoring_task, self.health_check_task, self.metrics_collection_task]
-            for task in tasks:
-                if task:
-                    task.cancel()
+        # Stop monitoring tasks
+        tasks = [self.monitoring_task, self.health_check_task, self.metrics_collection_task]
+        for task in tasks:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
-            # Close database connections
-            await self.db_connection.close()
+        # Clear local state (services will handle their own cleanup)
+        self.monitored_bots.clear()
+        self.bot_health_status.clear()
+        self.active_alerts.clear()
+        self.metrics_history.clear()
 
-            # Clear state
-            self.monitored_bots.clear()
-            self.bot_health_status.clear()
-            self.active_alerts.clear()
-
-            self.logger.info("Bot monitor stopped successfully")
-
-        except Exception as e:
-            self.logger.error(f"Failed to stop bot monitor: {e}")
-            raise ExecutionError(f"Bot monitor shutdown failed: {e}")
+        self._logger.info("Bot monitor stopped successfully")
 
     @log_calls
+    @with_error_context(component="BotMonitor", operation="register_bot")
     async def register_bot(self, bot_id: str) -> None:
         """
         Register a bot for monitoring.
@@ -185,51 +298,50 @@ class BotMonitor:
         Raises:
             ValidationError: If registration is invalid
         """
-        try:
-            if bot_id in self.monitored_bots:
-                self.logger.warning("Bot already registered for monitoring", bot_id=bot_id)
-                return
+        if not bot_id or not isinstance(bot_id, str):
+            raise ValidationError("Bot ID must be a non-empty string")
 
-            # Initialize monitoring data
-            self.monitored_bots[bot_id] = {
-                "registered_at": datetime.now(timezone.utc),
-                "last_health_check": None,
-                "last_metrics_collection": None,
-                "consecutive_failures": 0,
-                "total_health_checks": 0,
-                "health_check_failures": 0,
-            }
+        if bot_id in self.monitored_bots:
+            self._logger.warning("Bot already registered for monitoring", bot_id=bot_id)
+            return
 
-            # Initialize health status
-            self.bot_health_status[bot_id] = {
-                "status": "unknown",
-                "last_heartbeat": None,
-                "health_score": 0.0,
-                "issues": [],
-                "last_updated": datetime.now(timezone.utc),
-            }
+        # Initialize monitoring data
+        self.monitored_bots[bot_id] = {
+            "registered_at": datetime.now(timezone.utc),
+            "last_health_check": None,
+            "last_metrics_collection": None,
+            "consecutive_failures": 0,
+            "total_health_checks": 0,
+            "health_check_failures": 0,
+        }
 
-            # Initialize performance baseline
-            self.performance_baselines[bot_id] = {
-                "cpu_usage": 0.0,
-                "memory_usage": 0.0,
-                "trade_frequency": 0.0,
-                "error_rate": 0.0,
-                "baseline_established": False,
-            }
+        # Initialize health status
+        self.bot_health_status[bot_id] = {
+            "status": "unknown",
+            "last_heartbeat": None,
+            "health_score": 0.0,
+            "issues": [],
+            "last_updated": datetime.now(timezone.utc),
+        }
 
-            # Initialize alert tracking
-            self.active_alerts[bot_id] = []
+        # Initialize performance baseline
+        self.performance_baselines[bot_id] = {
+            "cpu_usage": 0.0,
+            "memory_usage": 0.0,
+            "trade_frequency": 0.0,
+            "error_rate": 0.0,
+            "baseline_established": False,
+        }
 
-            self.monitoring_stats["bots_monitored"] += 1
+        # Initialize alert tracking
+        self.active_alerts[bot_id] = []
 
-            self.logger.info("Bot registered for monitoring", bot_id=bot_id)
+        self.monitoring_stats["bots_monitored"] += 1
 
-        except Exception as e:
-            self.logger.error(f"Failed to register bot for monitoring: {e}", bot_id=bot_id)
-            raise
+        self._logger.info("Bot registered for monitoring", bot_id=bot_id)
 
     @log_calls
+    @with_error_context(component="BotMonitor", operation="unregister_bot")
     async def unregister_bot(self, bot_id: str) -> None:
         """
         Unregister a bot from monitoring.
@@ -237,25 +349,22 @@ class BotMonitor:
         Args:
             bot_id: Bot identifier
         """
-        try:
-            if bot_id not in self.monitored_bots:
-                self.logger.warning("Bot not registered for monitoring", bot_id=bot_id)
-                return
+        if bot_id not in self.monitored_bots:
+            self._logger.warning("Bot not registered for monitoring", bot_id=bot_id)
+            return
 
-            # Remove from all tracking
-            del self.monitored_bots[bot_id]
-            del self.bot_health_status[bot_id]
-            del self.performance_baselines[bot_id]
-            del self.active_alerts[bot_id]
+        # Remove from all tracking
+        del self.monitored_bots[bot_id]
+        del self.bot_health_status[bot_id]
+        del self.performance_baselines[bot_id]
+        del self.active_alerts[bot_id]
 
-            self.monitoring_stats["bots_monitored"] -= 1
+        self.monitoring_stats["bots_monitored"] -= 1
 
-            self.logger.info("Bot unregistered from monitoring", bot_id=bot_id)
-
-        except Exception as e:
-            self.logger.error(f"Failed to unregister bot from monitoring: {e}", bot_id=bot_id)
+        self._logger.info("Bot unregistered from monitoring", bot_id=bot_id)
 
     @log_calls
+    @with_error_context(component="BotMonitor", operation="update_bot_metrics")
     async def update_bot_metrics(self, bot_id: str, metrics: BotMetrics) -> None:
         """
         Update metrics for a monitored bot.
@@ -264,31 +373,41 @@ class BotMonitor:
             bot_id: Bot identifier
             metrics: Current bot metrics
         """
-        try:
-            if bot_id not in self.monitored_bots:
-                await self.register_bot(bot_id)
+        if not metrics:
+            raise ValidationError("Metrics cannot be None")
 
-            current_time = datetime.now(timezone.utc)
+        if bot_id not in self.monitored_bots:
+            await self.register_bot(bot_id)
 
-            # Update monitoring tracking
-            self.monitored_bots[bot_id]["last_metrics_collection"] = current_time
+        current_time = datetime.now(timezone.utc)
 
-            # Update health status
-            await self._update_bot_health_status(bot_id, metrics)
+        # Update monitoring tracking
+        self.monitored_bots[bot_id]["last_metrics_collection"] = current_time
 
-            # Store metrics in InfluxDB
-            await self._store_metrics(bot_id, metrics)
+        # Store metrics in history
+        if bot_id not in self.metrics_history:
+            self.metrics_history[bot_id] = []
+        self.metrics_history[bot_id].append(metrics)
 
-            # Check for performance anomalies
-            await self._check_performance_anomalies(bot_id, metrics)
+        # Keep only recent history (limit to prevent memory bloat)
+        if len(self.metrics_history[bot_id]) > 1000:
+            self.metrics_history[bot_id] = self.metrics_history[bot_id][-1000:]
 
-            # Update performance baseline
-            await self._update_performance_baseline(bot_id, metrics)
+        # Update health status
+        await self._update_bot_health_status(bot_id, metrics)
 
-        except Exception as e:
-            self.logger.error(f"Failed to update bot metrics: {e}", bot_id=bot_id)
+        # Store metrics in InfluxDB
+        await self._store_metrics(bot_id, metrics)
+
+        # Check for performance anomalies
+        await self._check_performance_anomalies(bot_id, metrics)
+
+        # Update performance baseline
+        await self._update_performance_baseline(bot_id, metrics)
 
     @log_calls
+    @with_error_context(component="BotMonitor", operation="check_bot_health")
+    @with_retry(max_attempts=2, base_delay=1.0, exceptions=(NetworkError, ServiceError))
     async def check_bot_health(self, bot_id: str, bot_status: BotStatus) -> dict[str, Any]:
         """
         Perform comprehensive health check for a bot.
@@ -300,49 +419,68 @@ class BotMonitor:
         Returns:
             dict: Health check results
         """
-        try:
-            if bot_id not in self.monitored_bots:
-                return {"error": "Bot not registered for monitoring"}
+        if bot_id not in self.monitored_bots:
+            return {"error": "Bot not registered for monitoring"}
 
-            current_time = datetime.now(timezone.utc)
-            monitoring_data = self.monitored_bots[bot_id]
+        current_time = datetime.now(timezone.utc)
+        monitoring_data = self.monitored_bots[bot_id]
 
-            # Update monitoring statistics
-            monitoring_data["total_health_checks"] += 1
-            monitoring_data["last_health_check"] = current_time
-            self.monitoring_stats["total_checks"] += 1
+        # Update monitoring statistics
+        monitoring_data["total_health_checks"] += 1
+        monitoring_data["last_health_check"] = current_time
+        self.monitoring_stats["total_checks"] += 1
 
-            health_results = {
-                "bot_id": bot_id,
-                "timestamp": current_time.isoformat(),
-                "overall_health": "healthy",
-                "health_score": 1.0,
-                "checks": {},
-                "issues": [],
-                "recommendations": [],
-            }
+        # Record health check in monitoring system with error handling
+        if self._metrics_collector:
+            try:
+                self._metrics_collector.increment(
+                    "bot_health_checks_total", labels={"bot_id": bot_id}
+                )
+            except Exception as e:
+                self._logger.debug(f"Failed to record health check metric: {e}")
 
-            # Status check
-            status_healthy = await self._check_bot_status(bot_id, bot_status)
-            health_results["checks"]["status"] = status_healthy
+        health_results = {
+            "bot_id": bot_id,
+            "timestamp": current_time.isoformat(),
+            "overall_health": "healthy",
+            "health_score": 1.0,
+            "checks": {},
+            "issues": [],
+            "recommendations": [],
+        }
 
-            # Heartbeat check
-            heartbeat_healthy = await self._check_bot_heartbeat(bot_id)
-            health_results["checks"]["heartbeat"] = heartbeat_healthy
+        # Status check
+        status_healthy = await self._check_bot_status(bot_id, bot_status)
+        health_results["checks"]["status"] = status_healthy
 
-            # Resource usage check
-            resource_healthy = await self._check_resource_usage(bot_id)
-            health_results["checks"]["resources"] = resource_healthy
+        # Heartbeat check
+        heartbeat_healthy = await self._check_bot_heartbeat(bot_id)
+        health_results["checks"]["heartbeat"] = heartbeat_healthy
 
-            # Performance check
-            performance_healthy = await self._check_performance_health(bot_id)
-            health_results["checks"]["performance"] = performance_healthy
+        # Resource usage check
+        resource_healthy = await self._check_resource_usage(bot_id)
+        health_results["checks"]["resources"] = resource_healthy
 
-            # Error rate check
-            error_rate_healthy = await self._check_error_rate(bot_id)
-            health_results["checks"]["error_rate"] = error_rate_healthy
+        # Performance check
+        performance_healthy = await self._check_performance_health(bot_id)
+        health_results["checks"]["performance"] = performance_healthy
 
-            # Calculate overall health score
+        # Error rate check
+        error_rate_healthy = await self._check_error_rate(bot_id)
+        health_results["checks"]["error_rate"] = error_rate_healthy
+
+        # Risk health check
+        risk_healthy = await self._check_risk_health(bot_id)
+        health_results["checks"]["risk"] = risk_healthy
+
+        # Calculate overall health score using my dedicated method
+        if self.metrics_history.get(bot_id):
+            latest_metrics = self.metrics_history[bot_id][-1]
+            health_results["health_score"] = await self._calculate_health_score(
+                bot_id, bot_status, latest_metrics
+            )
+        else:
+            # Fallback to simple average if no metrics
             check_scores = [
                 status_healthy.get("score", 0.0),
                 heartbeat_healthy.get("score", 0.0),
@@ -350,130 +488,129 @@ class BotMonitor:
                 performance_healthy.get("score", 0.0),
                 error_rate_healthy.get("score", 0.0),
             ]
-
             health_results["health_score"] = sum(check_scores) / len(check_scores)
 
-            # Determine overall health
-            if health_results["health_score"] >= 0.8:
-                health_results["overall_health"] = "healthy"
-            elif health_results["health_score"] >= 0.6:
-                health_results["overall_health"] = "warning"
-            else:
-                health_results["overall_health"] = "critical"
+        # Record health score in monitoring with error handling
+        if self._metrics_collector:
+            try:
+                self._metrics_collector.gauge(
+                    "bot_health_score", health_results["health_score"], labels={"bot_id": bot_id}
+                )
+            except Exception as e:
+                self._logger.debug(f"Failed to record health score metric: {e}")
 
-            # Collect issues and recommendations
-            for _check_name, check_result in health_results["checks"].items():
-                if check_result.get("issues"):
-                    health_results["issues"].extend(check_result["issues"])
-                if check_result.get("recommendations"):
-                    health_results["recommendations"].extend(check_result["recommendations"])
+        # Determine overall health
+        if health_results["health_score"] >= 0.8:
+            health_results["overall_health"] = "healthy"
+        elif health_results["health_score"] >= 0.6:
+            health_results["overall_health"] = "warning"
+        else:
+            health_results["overall_health"] = "critical"
 
-            # Update bot health status
-            self.bot_health_status[bot_id].update(
-                {
-                    "status": health_results["overall_health"],
-                    "health_score": health_results["health_score"],
-                    "issues": health_results["issues"],
-                    "last_updated": current_time,
-                }
-            )
+        # Also get issues from bot health status that was updated by update_bot_metrics
+        if bot_id in self.bot_health_status:
+            bot_issues = self.bot_health_status[bot_id].get("issues", [])
+            health_results["issues"].extend(bot_issues)
 
-            # Generate alerts if needed
-            await self._generate_health_alerts(bot_id, health_results)
+        # Collect issues and recommendations from individual checks
+        for _check_name, check_result in health_results["checks"].items():
+            if check_result.get("issues"):
+                health_results["issues"].extend(check_result["issues"])
+            if check_result.get("recommendations"):
+                health_results["recommendations"].extend(check_result["recommendations"])
 
-            return health_results
-
-        except Exception as e:
-            self.logger.error(f"Bot health check failed: {e}", bot_id=bot_id)
-            monitoring_data["health_check_failures"] += 1
-            monitoring_data["consecutive_failures"] += 1
-
-            return {
-                "bot_id": bot_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "overall_health": "error",
-                "health_score": 0.0,
-                "error": str(e),
+        # Update bot health status
+        self.bot_health_status[bot_id].update(
+            {
+                "status": health_results["overall_health"],
+                "health_score": health_results["health_score"],
+                "issues": health_results["issues"],
+                "last_updated": current_time,
             }
+        )
 
+        # Generate alerts if needed
+        await self._generate_health_alerts(bot_id, health_results)
+
+        return health_results
+
+    @with_error_context(component="BotMonitor", operation="get_monitoring_summary")
     async def get_monitoring_summary(self) -> dict[str, Any]:
         """Get comprehensive monitoring summary for all bots."""
-        try:
-            datetime.now(timezone.utc)
 
-            # Aggregate health statistics
-            health_summary = {"healthy": 0, "warning": 0, "critical": 0, "error": 0, "unknown": 0}
+        # Aggregate health statistics
+        health_summary = {"healthy": 0, "warning": 0, "critical": 0, "error": 0, "unknown": 0}
 
-            # Aggregate performance statistics
-            performance_summary = {
-                "total_cpu_usage": 0.0,
-                "total_memory_usage": 0.0,
-                "average_health_score": 0.0,
-                "bots_with_issues": 0,
+        # Aggregate performance statistics
+        performance_summary = {
+            "total_cpu_usage": 0.0,
+            "total_memory_usage": 0.0,
+            "average_health_score": 0.0,
+            "bots_with_issues": 0,
+        }
+
+        # Process each monitored bot
+        bot_summaries = {}
+        total_health_score = 0.0
+
+        for bot_id, health_status in self.bot_health_status.items():
+            status = health_status["status"]
+            health_summary[status] = health_summary.get(status, 0) + 1
+
+            health_score = health_status["health_score"]
+            total_health_score += health_score
+
+            if health_status["issues"]:
+                performance_summary["bots_with_issues"] += 1
+
+            bot_summaries[bot_id] = {
+                "status": status,
+                "health_score": health_score,
+                "last_updated": health_status["last_updated"].isoformat(),
+                "active_alerts": len(self.active_alerts.get(bot_id, [])),
+                "issues_count": len(health_status["issues"]),
             }
 
-            # Process each monitored bot
-            bot_summaries = {}
-            total_health_score = 0.0
+        # Calculate averages
+        bot_count = len(self.bot_health_status)
+        if bot_count > 0:
+            performance_summary["average_health_score"] = total_health_score / bot_count
 
-            for bot_id, health_status in self.bot_health_status.items():
-                status = health_status["status"]
-                health_summary[status] = health_summary.get(status, 0) + 1
+        # Count active alerts
+        total_active_alerts = sum(len(alerts) for alerts in self.active_alerts.values())
+        critical_alerts = sum(
+            1
+            for alerts in self.active_alerts.values()
+            for alert in alerts
+            if alert.get("severity") == "critical"
+        )
 
-                health_score = health_status["health_score"]
-                total_health_score += health_score
-
-                if health_status["issues"]:
-                    performance_summary["bots_with_issues"] += 1
-
-                bot_summaries[bot_id] = {
-                    "status": status,
-                    "health_score": health_score,
-                    "last_updated": health_status["last_updated"].isoformat(),
-                    "active_alerts": len(self.active_alerts.get(bot_id, [])),
-                    "issues_count": len(health_status["issues"]),
-                }
-
-            # Calculate averages
-            bot_count = len(self.bot_health_status)
-            if bot_count > 0:
-                performance_summary["average_health_score"] = total_health_score / bot_count
-
-            # Count active alerts
-            total_active_alerts = sum(len(alerts) for alerts in self.active_alerts.values())
-            critical_alerts = sum(
-                1
-                for alerts in self.active_alerts.values()
-                for alert in alerts
-                if alert.get("severity") == "critical"
-            )
-
-            return {
-                "monitoring_overview": {
-                    "is_running": self.is_running,
-                    "bots_monitored": self.monitoring_stats["bots_monitored"],
-                    "total_checks_performed": self.monitoring_stats["total_checks"],
-                    "active_alerts": total_active_alerts,
-                    "critical_alerts": critical_alerts,
-                    "last_monitoring_cycle": (
-                        self.monitoring_stats["last_monitoring_time"].isoformat()
-                        if self.monitoring_stats["last_monitoring_time"]
-                        else None
-                    ),
-                },
-                "health_summary": health_summary,
-                "performance_summary": performance_summary,
-                "bot_summaries": bot_summaries,
-                "alert_statistics": {
-                    "total_alerts_generated": self.monitoring_stats["alerts_generated"],
-                    "critical_alerts_total": self.monitoring_stats["critical_alerts"],
-                    "warning_alerts_total": self.monitoring_stats["warning_alerts"],
-                },
-            }
-
-        except Exception as e:
-            self.logger.error(f"Failed to generate monitoring summary: {e}")
-            return {"error": str(e)}
+        return {
+            "monitoring_overview": {
+                "monitored_bots": self.monitoring_stats["bots_monitored"],
+                "is_running": self.is_running,
+                "total_checks_performed": self.monitoring_stats["total_checks"],
+                "active_alerts": total_active_alerts,
+                "critical_alerts": critical_alerts,
+                "last_monitoring_cycle": (
+                    self.monitoring_stats["last_monitoring_time"].isoformat()
+                    if self.monitoring_stats["last_monitoring_time"]
+                    else None
+                ),
+            },
+            "bot_health_summary": health_summary,
+            "alert_summary": {
+                "total_alerts": self.monitoring_stats["alerts_generated"],
+                "critical_alerts_total": self.monitoring_stats["critical_alerts"],
+                "warning_alerts_total": self.monitoring_stats["warning_alerts"],
+            },
+            "performance_overview": performance_summary,
+            "system_health": {
+                "average_health_score": performance_summary["average_health_score"],
+                "bots_with_issues": performance_summary["bots_with_issues"],
+            },
+            "bot_summaries": bot_summaries,
+        }
 
     async def get_bot_health_details(self, bot_id: str) -> dict[str, Any] | None:
         """
@@ -536,6 +673,7 @@ class BotMonitor:
             ],
         }
 
+    @with_error_context(component="BotMonitor", operation="monitoring_loop")
     async def _monitoring_loop(self) -> None:
         """Main monitoring loop."""
         try:
@@ -555,13 +693,32 @@ class BotMonitor:
                     # Wait for next cycle
                     await asyncio.sleep(self.monitoring_interval)
 
+                except NetworkError as e:
+                    await self.error_handler.handle_error(
+                        e,
+                        context={"operation": "monitoring_loop"},
+                        severity=ErrorSeverity.MEDIUM.value,
+                    )
+                    await asyncio.sleep(10)
+                except ServiceError as e:
+                    await self.error_handler.handle_error(
+                        e,
+                        context={"operation": "monitoring_loop"},
+                        severity=ErrorSeverity.HIGH.value,
+                    )
+                    await asyncio.sleep(30)
                 except Exception as e:
-                    self.logger.error(f"Monitoring loop error: {e}")
+                    await self.error_handler.handle_error(
+                        e,
+                        context={"operation": "monitoring_loop"},
+                        severity=ErrorSeverity.HIGH.value,
+                    )
                     await asyncio.sleep(10)
 
         except asyncio.CancelledError:
-            self.logger.info("Monitoring loop cancelled")
+            self._logger.info("Monitoring loop cancelled")
 
+    @with_error_context(component="BotMonitor", operation="health_check_loop")
     async def _health_check_loop(self) -> None:
         """Health check loop for all monitored bots."""
         try:
@@ -573,19 +730,41 @@ class BotMonitor:
                             # Note: In a real implementation, we would get actual bot status
                             # For now, assume bot is running if recently registered
                             await self.check_bot_health(bot_id, BotStatus.RUNNING)
-                        except Exception as e:
-                            self.logger.warning(f"Health check failed for bot: {e}", bot_id=bot_id)
+                        except (NetworkError, ServiceError) as e:
+                            await self.error_handler.handle_error(
+                                e,
+                                context={"operation": "health_check", "bot_id": bot_id},
+                                severity=ErrorSeverity.MEDIUM.value,
+                            )
+                        except ValidationError as e:
+                            await self.error_handler.handle_error(
+                                e,
+                                context={"operation": "health_check", "bot_id": bot_id},
+                                severity=ErrorSeverity.LOW.value,
+                            )
 
                     # Wait for next cycle
                     await asyncio.sleep(self.health_check_interval)
 
+                except (NetworkError, ServiceError) as e:
+                    await self.error_handler.handle_error(
+                        e,
+                        context={"operation": "health_check_loop"},
+                        severity=ErrorSeverity.MEDIUM.value,
+                    )
+                    await asyncio.sleep(30)
                 except Exception as e:
-                    self.logger.error(f"Health check loop error: {e}")
+                    await self.error_handler.handle_error(
+                        e,
+                        context={"operation": "health_check_loop"},
+                        severity=ErrorSeverity.HIGH.value,
+                    )
                     await asyncio.sleep(30)
 
         except asyncio.CancelledError:
-            self.logger.info("Health check loop cancelled")
+            self._logger.info("Health check loop cancelled")
 
+    @with_error_context(component="BotMonitor", operation="metrics_collection_loop")
     async def _metrics_collection_loop(self) -> None:
         """Metrics collection loop."""
         try:
@@ -594,18 +773,45 @@ class BotMonitor:
                     # Collect system-wide metrics
                     await self._collect_system_metrics()
 
+                    # Collect risk metrics for all bots
+                    for bot_id in list(self.monitored_bots.keys()):
+                        try:
+                            await self._collect_risk_metrics(bot_id)
+                        except Exception as e:
+                            self._logger.warning(
+                                f"Failed to collect risk metrics for bot {bot_id}: {e}"
+                            )
+
                     # Update performance baselines
                     await self._update_all_baselines()
 
                     # Wait for next cycle
                     await asyncio.sleep(self.metrics_collection_interval)
 
+                except ServiceError as e:
+                    await self.error_handler.handle_error(
+                        e,
+                        context={"operation": "metrics_collection_loop"},
+                        severity=ErrorSeverity.HIGH.value,
+                    )
+                    await asyncio.sleep(60)  # Longer delay for service issues
+                except NetworkError as e:
+                    await self.error_handler.handle_error(
+                        e,
+                        context={"operation": "metrics_collection_loop"},
+                        severity=ErrorSeverity.MEDIUM.value,
+                    )
+                    await asyncio.sleep(30)
                 except Exception as e:
-                    self.logger.error(f"Metrics collection loop error: {e}")
+                    await self.error_handler.handle_error(
+                        e,
+                        context={"operation": "metrics_collection_loop"},
+                        severity=ErrorSeverity.HIGH.value,
+                    )
                     await asyncio.sleep(30)
 
         except asyncio.CancelledError:
-            self.logger.info("Metrics collection loop cancelled")
+            self._logger.info("Metrics collection loop cancelled")
 
     async def _update_bot_health_status(self, bot_id: str, metrics: BotMetrics) -> None:
         """Update bot health status based on metrics."""
@@ -650,42 +856,49 @@ class BotMonitor:
         health_status["issues"] = issues
         health_status["last_updated"] = current_time
 
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
+    @with_error_context(component="BotMonitor", operation="store_metrics")
     async def _store_metrics(self, bot_id: str, metrics: BotMetrics) -> None:
-        """Store metrics in InfluxDB."""
+        """Store metrics using database service - NO MORE DIRECT INFLUXDB ACCESS."""
         try:
-            # Prepare metrics data for InfluxDB
-            {
-                "measurement": "bot_metrics",
-                "tags": {"bot_id": bot_id},
-                "fields": {
-                    "total_trades": metrics.total_trades,
-                    "profitable_trades": metrics.profitable_trades,
-                    "losing_trades": metrics.losing_trades,
-                    "total_pnl": float(metrics.total_pnl),
-                    "unrealized_pnl": float(metrics.unrealized_pnl),
-                    "win_rate": metrics.win_rate,
-                    "average_trade_pnl": float(metrics.average_trade_pnl),
-                    "max_drawdown": float(metrics.max_drawdown),
-                    "uptime_percentage": metrics.uptime_percentage,
-                    "error_count": metrics.error_count,
-                    "cpu_usage": metrics.cpu_usage,
-                    "memory_usage": metrics.memory_usage,
-                    "api_calls_count": metrics.api_calls_count,
-                },
+            if not self._database_service:
+                self._logger.warning("DatabaseService not available for metrics storage")
+                return
+
+            # Create metrics record for storage through database service
+            metrics_record = {
+                "bot_id": bot_id,
+                "total_trades": metrics.total_trades,
+                "profitable_trades": metrics.profitable_trades,
+                "losing_trades": metrics.losing_trades,
+                "total_pnl": float(metrics.total_pnl),
+                "unrealized_pnl": float(metrics.unrealized_pnl),
+                "win_rate": metrics.win_rate,
+                "average_trade_pnl": float(metrics.average_trade_pnl),
+                "max_drawdown": float(metrics.max_drawdown),
+                "uptime_percentage": metrics.uptime_percentage,
+                "error_count": metrics.error_count,
+                "cpu_usage": metrics.cpu_usage,
+                "memory_usage": metrics.memory_usage,
+                "api_calls_count": metrics.api_calls_count,
                 "timestamp": datetime.now(timezone.utc),
             }
 
-            if self.config.monitoring.get("influxdb_enabled", False):
-                try:
-                    get_influxdb_client()
-                    # Write metrics to InfluxDB (implementation depends on client interface)
-                    # This would need to be implemented based on actual InfluxDB client API
-                    pass
-                except Exception as e:
-                    self.logger.warning(f"Failed to write metrics to InfluxDB: {e}")
+            # Store through database service layer using the store_bot_metrics method
+            await self._database_service.store_bot_metrics(metrics_record)
+
+            self._logger.debug(
+                "Stored metrics through database service",
+                bot_id=bot_id,
+                metrics_count=len(metrics_record),
+            )
 
         except Exception as e:
-            self.logger.warning(f"Failed to store metrics: {e}", bot_id=bot_id)
+            await self.error_handler.handle_error(
+                e,
+                context={"operation": "store_metrics", "bot_id": bot_id},
+                severity=ErrorSeverity.MEDIUM.value,
+            )
 
     async def _check_performance_anomalies(self, bot_id: str, metrics: BotMetrics) -> None:
         """Check for performance anomalies against baseline."""
@@ -840,6 +1053,7 @@ class BotMonitor:
         else:
             return {"score": 1.0, "last_heartbeat_age": heartbeat_age}
 
+    @with_error_context(component="BotMonitor", operation="check_resource_usage")
     async def _check_resource_usage(self, bot_id: str) -> dict[str, Any]:
         """Check resource usage health."""
         # In a real implementation, this would get actual resource usage
@@ -881,7 +1095,23 @@ class BotMonitor:
                 "recommendations": recommendations,
             }
 
+        except OSError as e:
+            await self.error_handler.handle_error(
+                e,
+                context={"operation": "resource_check", "bot_id": bot_id},
+                severity=ErrorSeverity.MEDIUM.value,
+            )
+            return {
+                "score": 0.5,
+                "issues": [f"System resource check failed: {e}"],
+                "recommendations": ["Manual resource monitoring required"],
+            }
         except Exception as e:
+            await self.error_handler.handle_error(
+                e,
+                context={"operation": "resource_check", "bot_id": bot_id},
+                severity=ErrorSeverity.LOW.value,
+            )
             return {
                 "score": 0.5,
                 "issues": [f"Resource check failed: {e}"],
@@ -899,6 +1129,43 @@ class BotMonitor:
         # This would integrate with actual error tracking
         # For now, return baseline health check
         return {"score": 0.9, "issues": [], "recommendations": []}
+
+    async def _check_risk_health(self, bot_id: str) -> dict[str, Any]:
+        """Check risk health metrics."""
+        score = 1.0
+        issues = []
+        recommendations = []
+
+        if not self._risk_service:
+            return {
+                "score": 0.5,
+                "issues": ["Risk service not available"],
+                "recommendations": ["Enable risk service for proper risk monitoring"],
+            }
+
+        try:
+            # Skip risk metrics - method doesn't exist in RiskService
+            # TODO: Implement when RiskService provides get_risk_metrics method
+            self._logger.debug(
+                "Risk metrics collection skipped - RiskService method not available", bot_id=bot_id
+            )
+            # Use placeholder values to maintain health score logic
+            risk_metrics = None
+
+            # Skip risk checks since we don't have metrics
+            if risk_metrics is not None:
+                # Check max drawdown
+                if risk_metrics.max_drawdown > 0.2:  # 20% drawdown threshold
+                    score *= 0.6
+                    issues.append(f"High max drawdown: {risk_metrics.max_drawdown:.1%}")
+                    recommendations.append("Implement stricter stop-loss controls")
+
+        except Exception as e:
+            self._logger.warning(f"Failed to check risk health for bot {bot_id}: {e}")
+            score = 0.5
+            issues.append(f"Risk health check failed: {e!s}")
+
+        return {"score": score, "issues": issues, "recommendations": recommendations}
 
     async def _generate_health_alerts(self, bot_id: str, health_results: dict[str, Any]) -> None:
         """Generate alerts based on health check results."""
@@ -929,7 +1196,7 @@ class BotMonitor:
             else:
                 self.monitoring_stats["warning_alerts"] += 1
 
-            self.logger.warning(
+            self._logger.warning(
                 "Health alert generated for bot",
                 bot_id=bot_id,
                 severity=severity,
@@ -956,7 +1223,7 @@ class BotMonitor:
             self.monitoring_stats["alerts_generated"] += 1
             self.monitoring_stats["warning_alerts"] += 1
 
-            self.logger.warning(
+            self._logger.warning(
                 "Performance anomaly alert generated",
                 bot_id=bot_id,
                 anomaly_type=anomaly["type"],
@@ -997,7 +1264,7 @@ class BotMonitor:
                     critical_alerts.append((bot_id, alert))
 
         if critical_alerts:
-            self.logger.critical(
+            self._logger.critical(
                 "Unacknowledged critical alerts requiring attention", count=len(critical_alerts)
             )
 
@@ -1006,43 +1273,822 @@ class BotMonitor:
         # Update bot count
         self.monitoring_stats["bots_monitored"] = len(self.monitored_bots)
 
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
+    @with_error_context(component="BotMonitor", operation="collect_system_metrics")
     async def _collect_system_metrics(self) -> None:
-        """Collect system-wide metrics."""
+        """Collect system-wide metrics using database service - NO MORE DIRECT INFLUXDB ACCESS."""
         try:
+            if not self._database_service:
+                self._logger.warning("DatabaseService not available for system metrics collection")
+                return
+
             # Collect system resource usage
             cpu_percent = psutil.cpu_percent(interval=1)
             memory = psutil.virtual_memory()
-            disk = psutil.disk_usage("/")
 
-            # Store system metrics
-            {
-                "measurement": "system_metrics",
-                "tags": {"component": "bot_monitor"},
-                "fields": {
-                    "cpu_usage_percent": cpu_percent,
-                    "memory_usage_percent": memory.percent,
-                    "memory_available_mb": memory.available / 1024 / 1024,
-                    "disk_usage_percent": disk.percent,
-                    "disk_free_gb": disk.free / 1024 / 1024 / 1024,
-                    "monitored_bots": len(self.monitored_bots),
-                    "active_alerts": sum(len(alerts) for alerts in self.active_alerts.values()),
-                },
+            # Create system metrics record for database service
+            system_metrics = {
+                "component": "bot_monitor",
+                "cpu_usage_percent": cpu_percent,
+                "memory_usage_percent": memory.percent,
+                "memory_available_mb": memory.available / 1024 / 1024,
+                "monitored_bots": len(self.monitored_bots),
+                "active_alerts": sum(len(alerts) for alerts in self.active_alerts.values()),
                 "timestamp": datetime.now(timezone.utc),
             }
 
-            if self.config.monitoring.get("influxdb_enabled", False):
+            # Push to monitoring system with error handling
+            if self._metrics_collector:
                 try:
-                    get_influxdb_client()
-                    # Write system metrics to InfluxDB
-                    pass
+                    self._metrics_collector.gauge(
+                        "bot_monitor_cpu_usage_percent",
+                        cpu_percent,
+                        labels={"component": "bot_monitor"},
+                    )
+                    self._metrics_collector.gauge(
+                        "bot_monitor_memory_usage_percent",
+                        memory.percent,
+                        labels={"component": "bot_monitor"},
+                    )
+                    self._metrics_collector.gauge(
+                        "bot_monitor_monitored_bots_count",
+                        len(self.monitored_bots),
+                        labels={"component": "bot_monitor"},
+                    )
+                    self._metrics_collector.gauge(
+                        "bot_monitor_active_alerts_count",
+                        sum(len(alerts) for alerts in self.active_alerts.values()),
+                        labels={"component": "bot_monitor"},
+                    )
                 except Exception as e:
-                    self.logger.warning(f"Failed to write system metrics to InfluxDB: {e}")
+                    self._logger.debug(f"Failed to push system metrics: {e}")
 
+            # Store through database service layer using the store_bot_metrics method
+            # We'll use bot_id="system" to indicate system-wide metrics
+            await self._database_service.store_bot_metrics(
+                {"bot_id": "system_monitor", **system_metrics}
+            )
+
+            self._logger.debug(
+                "Collected and stored system metrics through database service",
+                cpu_percent=cpu_percent,
+                memory_percent=memory.percent,
+                monitored_bots=len(self.monitored_bots),
+            )
+
+        except OSError as e:
+            await self.error_handler.handle_error(
+                e,
+                context={"operation": "collect_system_metrics"},
+                severity=ErrorSeverity.MEDIUM.value,
+            )
         except Exception as e:
-            self.logger.warning(f"Failed to collect system metrics: {e}")
+            await self.error_handler.handle_error(
+                e,
+                context={"operation": "collect_system_metrics"},
+                severity=ErrorSeverity.MEDIUM.value,
+            )
 
     async def _update_all_baselines(self) -> None:
         """Update performance baselines for all bots."""
         # This would be called periodically to refresh baselines
         # Implementation would recalculate baselines based on recent performance
         pass
+
+    @with_error_context(component="BotMonitor", operation="collect_risk_metrics")
+    async def _collect_risk_metrics(self, bot_id: str) -> None:
+        """
+        Collect risk metrics from RiskService for a bot.
+
+        Args:
+            bot_id: Bot identifier
+        """
+        if not self._risk_service:
+            return
+
+        try:
+            # Skip risk metrics collection - method doesn't exist in RiskService
+            # TODO: Implement when RiskService provides get_risk_metrics method
+            self._logger.debug(
+                "Risk metrics collection skipped - RiskService method not available", bot_id=bot_id
+            )
+            risk_metrics = None
+
+            if risk_metrics and self._metrics_collector:
+                # This block won't execute until get_risk_metrics is available
+                try:
+                    self._metrics_collector.gauge(
+                        "bot_risk_var",
+                        float(risk_metrics.value_at_risk),
+                        labels={"bot_id": bot_id},
+                    )
+                    self._metrics_collector.gauge(
+                        "bot_risk_sharpe_ratio",
+                        float(risk_metrics.sharpe_ratio),
+                        labels={"bot_id": bot_id},
+                    )
+                    self._metrics_collector.gauge(
+                        "bot_risk_max_drawdown",
+                        float(risk_metrics.max_drawdown),
+                        labels={"bot_id": bot_id},
+                    )
+                except Exception as e:
+                    self._logger.debug(f"Failed to record risk metrics: {e}")
+
+                # Check risk thresholds and generate alerts
+                if risk_metrics.max_drawdown > self.performance_thresholds.get(
+                    "max_drawdown_threshold", 0.2
+                ):
+                    await self._generate_alert(
+                        bot_id,
+                        "high_drawdown",
+                        "critical",
+                        f"Max drawdown is {risk_metrics.max_drawdown:.1%}",
+                    )
+
+                if risk_metrics.sharpe_ratio < self.performance_thresholds.get(
+                    "min_sharpe_ratio", 0.5
+                ):
+                    await self._generate_alert(
+                        bot_id,
+                        "low_sharpe_ratio",
+                        "warning",
+                        f"Sharpe ratio is {risk_metrics.sharpe_ratio:.2f}",
+                    )
+
+        except Exception as e:
+            await self.error_handler.handle_error(
+                e,
+                context={"operation": "collect_risk_metrics", "bot_id": bot_id},
+                severity=ErrorSeverity.MEDIUM.value,
+            )
+
+    # Missing methods expected by tests
+
+    @with_error_context(component="BotMonitor", operation="check_alert_conditions")
+    async def _check_alert_conditions(self, bot_id: str) -> None:
+        """
+        Check alert conditions for a bot and generate alerts if needed.
+
+        Args:
+            bot_id: Bot identifier
+        """
+        if bot_id not in self.monitored_bots:
+            return
+
+        # Get latest metrics from history
+        if bot_id not in self.metrics_history or not self.metrics_history[bot_id]:
+            return
+
+        latest_metrics = self.metrics_history[bot_id][-1]
+
+        # Check CPU threshold
+        if latest_metrics.cpu_usage > self.performance_thresholds["cpu_usage_warning"]:
+            severity = (
+                "critical"
+                if latest_metrics.cpu_usage > self.performance_thresholds["cpu_usage_critical"]
+                else "warning"
+            )
+            await self._generate_alert(
+                bot_id,
+                "high_cpu_usage",
+                severity,
+                f"CPU usage is {latest_metrics.cpu_usage:.1f}%",
+            )
+
+        # Check memory threshold
+        if latest_metrics.memory_usage > self.performance_thresholds["memory_usage_warning"]:
+            severity = (
+                "critical"
+                if latest_metrics.memory_usage
+                > self.performance_thresholds["memory_usage_critical"]
+                else "warning"
+            )
+            await self._generate_alert(
+                bot_id,
+                "high_memory_usage",
+                severity,
+                f"Memory usage is {latest_metrics.memory_usage:.1f} MB",
+            )
+
+        # Check error rate
+        if latest_metrics.total_trades > 0:
+            error_rate = latest_metrics.error_count / latest_metrics.total_trades
+            if error_rate > self.performance_thresholds["error_rate_warning"]:
+                severity = (
+                    "critical"
+                    if error_rate > self.performance_thresholds["error_rate_critical"]
+                    else "warning"
+                )
+                await self._generate_alert(
+                    bot_id, "high_error_rate", severity, f"Error rate is {error_rate:.1%}"
+                )
+
+    @with_error_context(component="BotMonitor", operation="generate_alert")
+    async def _generate_alert(
+        self, bot_id: str, alert_type: str, severity: str, message: str
+    ) -> None:
+        """
+        Generate an alert for a bot.
+
+        Args:
+            bot_id: Bot identifier
+            alert_type: Type of alert
+            severity: Alert severity (warning/critical)
+            message: Alert message
+        """
+        # Check for rate limiting - don't generate duplicate alerts too frequently
+        recent_alerts = [
+            alert
+            for alert in self.alert_history
+            if (
+                alert["bot_id"] == bot_id
+                and alert["alert_type"] == alert_type
+                and (
+                    datetime.now(timezone.utc) - datetime.fromisoformat(alert["timestamp"])
+                ).total_seconds()
+                < 300  # 5 minutes
+            )
+        ]
+
+        if len(recent_alerts) >= 3:  # Rate limit: max 3 alerts of same type per 5 minutes
+            return
+
+        alert = {
+            "alert_id": str(uuid.uuid4()),
+            "bot_id": bot_id,
+            "alert_type": alert_type,
+            "severity": severity,
+            "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "acknowledged": False,
+        }
+
+        # Add to active alerts and history
+        if bot_id not in self.active_alerts:
+            self.active_alerts[bot_id] = []
+
+        self.active_alerts[bot_id].append(alert)
+        self.alert_history.append(alert)
+
+        # Update statistics
+        self.monitoring_stats["alerts_generated"] += 1
+        if severity == "critical":
+            self.monitoring_stats["critical_alerts"] += 1
+        else:
+            self.monitoring_stats["warning_alerts"] += 1
+
+        self._logger.warning(
+            "Alert generated for bot", bot_id=bot_id, alert_type=alert_type, severity=severity
+        )
+
+    @with_error_context(component="BotMonitor", operation="establish_performance_baseline")
+    async def _establish_performance_baseline(self, bot_id: str) -> None:
+        """
+        Establish performance baseline for a bot.
+
+        Args:
+            bot_id: Bot identifier
+        """
+        if bot_id not in self.metrics_history or len(self.metrics_history[bot_id]) < 5:
+            return  # Need at least 5 data points
+
+        metrics_list = self.metrics_history[bot_id][-10:]  # Use last 10 data points
+
+        # Calculate averages for baseline
+        cpu_values = [m.cpu_usage for m in metrics_list if hasattr(m, "cpu_usage")]
+        memory_values = [m.memory_usage for m in metrics_list if hasattr(m, "memory_usage")]
+
+        if cpu_values and memory_values:
+            baseline = {
+                "cpu_usage": {
+                    "mean": sum(cpu_values) / len(cpu_values),
+                    "min": min(cpu_values),
+                    "max": max(cpu_values),
+                },
+                "memory_usage": {
+                    "mean": sum(memory_values) / len(memory_values),
+                    "min": min(memory_values),
+                    "max": max(memory_values),
+                },
+                "established_at": datetime.now(timezone.utc),
+                "sample_count": len(metrics_list),
+            }
+
+            self.performance_baselines[bot_id].update(baseline)
+            self.performance_baselines[bot_id]["baseline_established"] = True
+
+            self._logger.info("Performance baseline established for bot", bot_id=bot_id)
+
+    @with_error_context(component="BotMonitor", operation="detect_anomalies")
+    async def _detect_anomalies(self, bot_id: str, metrics: BotMetrics) -> list[dict[str, Any]]:
+        """
+        Detect performance anomalies against baseline.
+
+        Args:
+            bot_id: Bot identifier
+            metrics: Current metrics
+
+        Returns:
+            List of detected anomalies
+        """
+        anomalies = []
+
+        if bot_id not in self.performance_baselines:
+            return anomalies
+
+        baseline = self.performance_baselines[bot_id]
+        if not baseline.get("baseline_established"):
+            return anomalies
+
+        # Check CPU anomaly
+        if "cpu_usage" in baseline and hasattr(metrics, "cpu_usage"):
+            cpu_mean = baseline["cpu_usage"]["mean"]
+            cpu_deviation = abs(metrics.cpu_usage - cpu_mean) / max(cpu_mean, 1.0)
+
+            if cpu_deviation > 0.5:  # 50% deviation from baseline
+                anomalies.append(
+                    {
+                        "metric": "cpu_usage",
+                        "current": metrics.cpu_usage,
+                        "baseline": cpu_mean,
+                        "deviation": cpu_deviation,
+                        "severity": "high" if cpu_deviation > 1.0 else "medium",
+                    }
+                )
+
+        # Check memory anomaly
+        if "memory_usage" in baseline and hasattr(metrics, "memory_usage"):
+            memory_mean = baseline["memory_usage"]["mean"]
+            memory_deviation = abs(metrics.memory_usage - memory_mean) / max(memory_mean, 1.0)
+
+            if memory_deviation > 0.5:  # 50% deviation from baseline
+                anomalies.append(
+                    {
+                        "metric": "memory_usage",
+                        "current": metrics.memory_usage,
+                        "baseline": memory_mean,
+                        "deviation": memory_deviation,
+                        "severity": "high" if memory_deviation > 1.0 else "medium",
+                    }
+                )
+
+        return anomalies
+
+    @with_error_context(component="BotMonitor", operation="get_bot_health_history")
+    async def get_bot_health_history(self, bot_id: str, hours: int = 24) -> list[dict[str, Any]]:
+        """
+        Get bot health history.
+
+        Args:
+            bot_id: Bot identifier
+            hours: Number of hours to look back
+
+        Returns:
+            List of historical health records
+        """
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        # For this implementation, we'll create a simple history based on metrics
+        history = []
+
+        if bot_id in self.metrics_history:
+            for _i, metrics in enumerate(self.metrics_history[bot_id]):
+                # Filter by cutoff time
+                if (
+                    hasattr(metrics, "metrics_updated_at")
+                    and metrics.metrics_updated_at < cutoff_time
+                ):
+                    continue
+                try:
+                    # Create a health record for each metrics point
+                    health_score = await self._calculate_health_score(
+                        bot_id, BotStatus.RUNNING, metrics
+                    )
+
+                    history.append(
+                        {
+                            "timestamp": metrics.metrics_updated_at.isoformat(),
+                            "health_score": health_score,
+                            "cpu_usage": metrics.cpu_usage,
+                            "memory_usage": metrics.memory_usage,
+                            "error_count": metrics.error_count,
+                            "total_trades": metrics.total_trades,
+                        }
+                    )
+                except ValidationError as e:
+                    await self.error_handler.handle_error(
+                        e,
+                        context={"operation": "get_health_history", "bot_id": bot_id},
+                        severity=ErrorSeverity.LOW.value,
+                    )
+                    continue  # Skip this metrics entry
+
+        return history
+
+    @with_error_context(component="BotMonitor", operation="get_alert_history")
+    async def get_alert_history(
+        self, bot_id: str | None = None, hours: int = 24
+    ) -> list[dict[str, Any]]:
+        """
+        Get alert history, optionally filtered by bot ID.
+
+        Args:
+            bot_id: Optional bot identifier to filter by
+            hours: Number of hours to look back
+
+        Returns:
+            List of historical alerts
+        """
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        filtered_alerts = []
+        for alert in self.alert_history:
+            try:
+                # Handle both string and datetime timestamps
+                timestamp = alert["timestamp"]
+                if isinstance(timestamp, str):
+                    alert_time = datetime.fromisoformat(timestamp)
+                else:
+                    alert_time = timestamp
+
+                if alert_time >= cutoff_time:
+                    if bot_id is None or alert["bot_id"] == bot_id:
+                        filtered_alerts.append(alert)
+            except (ValueError, TypeError) as e:
+                await self.error_handler.handle_error(
+                    e,
+                    context={
+                        "operation": "parse_alert_timestamp",
+                        "alert_id": alert.get("alert_id"),
+                    },
+                    severity=ErrorSeverity.LOW.value,
+                )
+                continue  # Skip this alert
+
+        return sorted(filtered_alerts, key=lambda x: x["timestamp"], reverse=True)
+
+    @with_error_context(component="BotMonitor", operation="calculate_health_score")
+    async def _calculate_health_score(
+        self, bot_id: str, bot_status: BotStatus, metrics: BotMetrics
+    ) -> float:
+        """
+        Calculate a health score for a bot.
+
+        Args:
+            bot_id: Bot identifier
+            bot_status: Current bot status
+            metrics: Bot metrics
+
+        Returns:
+            Health score between 0.0 and 1.0
+        """
+        if not metrics:
+            return 0.0
+
+        score = 1.0
+
+        # Status check (40% of score)
+        if bot_status == BotStatus.RUNNING:
+            status_score = 1.0
+        elif bot_status == BotStatus.PAUSED:
+            status_score = 0.7
+        elif bot_status == BotStatus.STOPPED:
+            status_score = 0.3
+        else:
+            status_score = 0.0
+
+        score *= 0.4 * status_score + 0.6  # Weight status as 40% of total score
+
+        # Resource usage check - more aggressive scoring
+        resource_score = 1.0
+
+        if hasattr(metrics, "cpu_usage"):
+            if metrics.cpu_usage > self.performance_thresholds["cpu_usage_critical"]:
+                resource_score = 0.1  # Very low score for critical CPU
+            elif metrics.cpu_usage > self.performance_thresholds["cpu_usage_warning"]:
+                resource_score = 0.4  # Low score for high CPU
+
+        if hasattr(metrics, "memory_usage"):
+            if metrics.memory_usage > self.performance_thresholds["memory_usage_critical"]:
+                resource_score = min(resource_score, 0.1)  # Very low score for critical memory
+            elif metrics.memory_usage > self.performance_thresholds["memory_usage_warning"]:
+                resource_score = min(resource_score, 0.4)  # Low score for high memory
+
+        score *= resource_score
+
+        # Error rate check - more aggressive scoring
+        if metrics.total_trades > 0:
+            error_rate = metrics.error_count / metrics.total_trades
+            if error_rate > self.performance_thresholds["error_rate_critical"]:
+                error_score = 0.1  # Very low score for critical error rate
+            elif error_rate > self.performance_thresholds["error_rate_warning"]:
+                error_score = 0.4  # Low score for high error rate
+            else:
+                error_score = 1.0
+
+            score *= error_score
+
+        # Win rate check - more aggressive scoring
+        if hasattr(metrics, "win_rate"):
+            if metrics.win_rate < self.performance_thresholds["win_rate_threshold"]:
+                win_rate_score = 0.3  # Low score for bad win rate
+            else:
+                win_rate_score = 1.0
+
+            score *= win_rate_score
+
+        return max(0.0, min(1.0, score))  # Clamp between 0 and 1
+
+    async def _monitoring_loop(self) -> None:
+        """Main monitoring loop."""
+        self._logger.info("Starting monitoring loop")
+
+        try:
+            while self.is_running:
+                try:
+                    self.monitoring_stats["last_monitoring_time"] = datetime.now(timezone.utc)
+
+                    # Clean up old alerts
+                    await self._cleanup_old_alerts()
+
+                    # Clean up old metrics
+                    await self._cleanup_old_metrics()
+
+                    # Process alert escalations
+                    await self._process_alert_escalations()
+
+                    # Update monitoring statistics
+                    await self._update_monitoring_statistics()
+
+                    # Wait for next cycle
+                    await asyncio.sleep(self.monitoring_interval)
+
+                except Exception as e:
+                    self._logger.error(f"Monitoring loop error: {e}")
+                    await asyncio.sleep(10)
+
+        except asyncio.CancelledError:
+            self._logger.info("Monitoring loop cancelled")
+
+    @with_error_context(component="BotMonitor", operation="cleanup_old_metrics")
+    async def _cleanup_old_metrics(self) -> None:
+        """Clean up old metrics to prevent memory bloat."""
+        max_metrics_per_bot = 1000  # Keep last 1000 metrics per bot
+
+        for bot_id in list(self.metrics_history.keys()):
+            try:
+                metrics_list = self.metrics_history[bot_id]
+                if len(metrics_list) > max_metrics_per_bot:
+                    # Keep only the most recent metrics
+                    self.metrics_history[bot_id] = metrics_list[-max_metrics_per_bot:]
+                    self._logger.debug("Cleaned up old metrics for bot", bot_id=bot_id)
+            except (KeyError, IndexError) as e:
+                await self.error_handler.handle_error(
+                    e,
+                    context={"operation": "cleanup_metrics", "bot_id": bot_id},
+                    severity=ErrorSeverity.LOW.value,
+                )
+                continue
+
+    async def _export_metrics_to_influxdb(self, bot_id: str, metrics: BotMetrics) -> None:
+        """
+        Export metrics to InfluxDB if enabled.
+
+        Args:
+            bot_id: Bot identifier
+            metrics: Bot metrics to export
+        """
+        try:
+            config = self._config_service.get_config() if self._config_service else {}
+            if not config.get("monitoring", {}).get("influxdb_enabled", False):
+                return
+
+            # This would integrate with actual InfluxDB client
+            # For now, just log that we would export
+            self._logger.debug("Would export metrics to InfluxDB", bot_id=bot_id)
+
+        except Exception as e:
+            self._logger.warning(f"Failed to export metrics to InfluxDB: {e}", bot_id=bot_id)
+
+    @with_error_context(component="BotMonitor", operation="detect_performance_degradation")
+    async def _detect_performance_degradation(
+        self, bot_id: str, metrics: BotMetrics
+    ) -> dict[str, Any]:
+        """
+        Detect performance degradation compared to baseline.
+
+        Args:
+            bot_id: Bot identifier
+            metrics: Current metrics
+
+        Returns:
+            Dictionary with degradation analysis
+        """
+        if bot_id not in self.performance_baselines:
+            return {"is_degraded": False, "reason": "No baseline established"}
+
+        baseline = self.performance_baselines[bot_id]
+        if not baseline.get("baseline_established"):
+            return {"is_degraded": False, "reason": "Baseline not established"}
+
+        degraded_metrics = []
+
+        # Check CPU degradation
+        if "cpu_usage" in baseline and hasattr(metrics, "cpu_usage"):
+            cpu_baseline = baseline["cpu_usage"]["mean"]
+            if metrics.cpu_usage > cpu_baseline * 1.5:  # 50% increase
+                degraded_metrics.append(
+                    {
+                        "metric": "cpu_usage",
+                        "current": metrics.cpu_usage,
+                        "baseline": cpu_baseline,
+                        "increase_pct": ((metrics.cpu_usage - cpu_baseline) / cpu_baseline) * 100,
+                    }
+                )
+
+        # Check memory degradation
+        if "memory_usage" in baseline and hasattr(metrics, "memory_usage"):
+            memory_baseline = baseline["memory_usage"]["mean"]
+            if metrics.memory_usage > memory_baseline * 1.5:  # 50% increase
+                degraded_metrics.append(
+                    {
+                        "metric": "memory_usage",
+                        "current": metrics.memory_usage,
+                        "baseline": memory_baseline,
+                        "increase_pct": ((metrics.memory_usage - memory_baseline) / memory_baseline)
+                        * 100,
+                    }
+                )
+
+        return {
+            "is_degraded": len(degraded_metrics) > 0,
+            "degraded_metrics": degraded_metrics,
+            "severity": (
+                "high" if len(degraded_metrics) >= 2 else "medium" if degraded_metrics else "none"
+            ),
+        }
+
+    @with_error_context(component="BotMonitor", operation="get_resource_usage_summary")
+    async def get_resource_usage_summary(self, bot_id: str) -> dict[str, Any]:
+        """
+        Get resource usage summary for a bot.
+
+        Args:
+            bot_id: Bot identifier
+
+        Returns:
+            Resource usage summary
+        """
+        if bot_id not in self.metrics_history or not self.metrics_history[bot_id]:
+            return {"error": "No metrics available"}
+
+        recent_metrics = self.metrics_history[bot_id][-10:]  # Last 10 metrics
+
+        # Calculate trends
+        cpu_values = [m.cpu_usage for m in recent_metrics if hasattr(m, "cpu_usage")]
+        memory_values = [m.memory_usage for m in recent_metrics if hasattr(m, "memory_usage")]
+
+        cpu_trend = "stable"
+        memory_trend = "stable"
+
+        if len(cpu_values) >= 3:
+            if cpu_values[-1] > cpu_values[0] * 1.2:
+                cpu_trend = "increasing"
+            elif cpu_values[-1] < cpu_values[0] * 0.8:
+                cpu_trend = "decreasing"
+
+        if len(memory_values) >= 3:
+            if memory_values[-1] > memory_values[0] * 1.2:
+                memory_trend = "increasing"
+            elif memory_values[-1] < memory_values[0] * 0.8:
+                memory_trend = "decreasing"
+
+        latest = recent_metrics[-1]
+
+        return {
+            "cpu_usage": {
+                "current": latest.cpu_usage if hasattr(latest, "cpu_usage") else 0,
+                "trend": cpu_trend,
+                "average_recent": sum(cpu_values) / len(cpu_values) if cpu_values else 0,
+            },
+            "memory_usage": {
+                "current": latest.memory_usage if hasattr(latest, "memory_usage") else 0,
+                "trend": memory_trend,
+                "average_recent": (sum(memory_values) / len(memory_values) if memory_values else 0),
+            },
+            "timestamp": latest.metrics_updated_at.isoformat(),
+        }
+
+    async def _generate_predictive_alerts(self, bot_id: str) -> list[dict[str, Any]]:
+        """
+        Generate predictive alerts based on trends.
+
+        Args:
+            bot_id: Bot identifier
+
+        Returns:
+            List of predictive alerts
+        """
+        predictions = []
+
+        try:
+            if bot_id not in self.metrics_history or len(self.metrics_history[bot_id]) < 5:
+                return predictions
+
+            recent_metrics = self.metrics_history[bot_id][-10:]  # Last 10 data points
+
+            # Check CPU usage trend
+            cpu_values = [m.cpu_usage for m in recent_metrics if hasattr(m, "cpu_usage")]
+            if len(cpu_values) >= 5:
+                # Simple linear trend detection
+                trend_slope = (cpu_values[-1] - cpu_values[0]) / len(cpu_values)
+                if trend_slope > 2.0:  # Increasing by 2% per measurement
+                    predictions.append(
+                        {
+                            "type": "cpu_trend_alert",
+                            "message": f"CPU trending up (slope: {trend_slope:.1f}%/cycle)",
+                            "severity": "warning",
+                            "projected_threshold_breach": (
+                                "within_30_minutes" if trend_slope > 5.0 else "within_2_hours"
+                            ),
+                        }
+                    )
+
+            # Check memory usage trend
+            memory_values = [m.memory_usage for m in recent_metrics if hasattr(m, "memory_usage")]
+            if len(memory_values) >= 5:
+                trend_slope = (memory_values[-1] - memory_values[0]) / len(memory_values)
+                if trend_slope > 10.0:  # Increasing by 10MB per measurement
+                    predictions.append(
+                        {
+                            "type": "memory_trend_alert",
+                            "message": f"Memory trending up (slope: {trend_slope:.1f} MB/cycle)",
+                            "severity": "warning",
+                            "projected_threshold_breach": (
+                                "within_1_hour" if trend_slope > 20.0 else "within_4_hours"
+                            ),
+                        }
+                    )
+
+        except Exception as e:
+            self._logger.warning(f"Failed to generate predictive alerts: {e}", bot_id=bot_id)
+
+        return predictions
+
+    @with_error_context(component="BotMonitor", operation="compare_bot_performance")
+    async def compare_bot_performance(self) -> dict[str, Any]:
+        """
+        Compare performance across all monitored bots.
+
+        Returns:
+            Dictionary with bot performance comparison
+        """
+        if not self.monitored_bots:
+            return {"rankings": [], "performance_gaps": []}
+
+        bot_performances = []
+
+        for bot_id in self.monitored_bots.keys():
+            if self.metrics_history.get(bot_id):
+                latest_metrics = self.metrics_history[bot_id][-1]
+                health_status = self.bot_health_status.get(bot_id, {})
+
+                performance_score = health_status.get("health_score", 0.0)
+
+                bot_performances.append(
+                    {
+                        "bot_id": bot_id,
+                        "health_score": performance_score,
+                        "cpu_usage": getattr(latest_metrics, "cpu_usage", 0),
+                        "memory_usage": getattr(latest_metrics, "memory_usage", 0),
+                        "error_count": getattr(latest_metrics, "error_count", 0),
+                        "total_trades": getattr(latest_metrics, "total_trades", 0),
+                    }
+                )
+
+        # Sort by health score (descending)
+        bot_performances.sort(key=lambda x: x["health_score"], reverse=True)
+
+        # Identify performance gaps
+        performance_gaps = []
+        if len(bot_performances) >= 2:
+            best_performance = bot_performances[0]["health_score"]
+            worst_performance = bot_performances[-1]["health_score"]
+
+            if best_performance - worst_performance > 0.3:  # 30% gap
+                performance_gaps.append(
+                    {
+                        "type": "health_score_gap",
+                        "best_bot": bot_performances[0]["bot_id"],
+                        "worst_bot": bot_performances[-1]["bot_id"],
+                        "gap": best_performance - worst_performance,
+                    }
+                )
+
+        return {
+            "rankings": bot_performances,
+            "performance_gaps": performance_gaps,
+            "total_bots_compared": len(bot_performances),
+            "comparison_timestamp": datetime.now(timezone.utc).isoformat(),
+        }

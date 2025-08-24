@@ -14,10 +14,10 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.exceptions import ArbitrageError
-from src.core.logging import get_logger
 
+# Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
-from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
+from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyStatus, StrategyType
 
 # MANDATORY: Import from P-011 - NEVER recreate the base strategy
 from src.strategies.base import BaseStrategy
@@ -38,8 +38,6 @@ from src.utils.validators import (
 
 # From P-003+ - Use exchange interfaces
 
-logger = get_logger(__name__)
-
 
 class CrossExchangeArbitrageStrategy(BaseStrategy):
     """
@@ -56,8 +54,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             config: Strategy configuration dictionary
         """
         super().__init__(config)
-        self.name = "cross_exchange_arbitrage"
-        self.strategy_type = StrategyType.ARBITRAGE
+        # Note: name, version, status are set by BaseStrategy
 
         # Strategy-specific configuration
         self.min_profit_threshold = Decimal(
@@ -74,13 +71,51 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         self.exchange_prices: dict[str, dict[str, MarketData]] = {}
         self.last_opportunity_check = datetime.now()
 
-        logger.info(
+        self.logger.info(
             "Cross-exchange arbitrage strategy initialized",
             strategy=self.name,
             exchanges=self.exchanges,
             symbols=self.symbols,
             min_profit_threshold=self.min_profit_threshold,
         )
+
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Get the strategy type."""
+        return StrategyType.ARBITRAGE
+
+    @property
+    def name(self) -> str:
+        """Get the strategy name."""
+        # BaseStrategy sets self.name as an attribute, this property allows getting it
+        return getattr(self, "_name_attr", "cross_exchange_arbitrage")
+
+    @name.setter
+    def name(self, value: str) -> None:
+        """Set the strategy name."""
+        self._name_attr = value
+
+    @property
+    def version(self) -> str:
+        """Get the strategy version."""
+        # BaseStrategy sets self.version as an attribute, this property allows getting it
+        return getattr(self, "_version_attr", "1.0.0")
+
+    @version.setter
+    def version(self, value: str) -> None:
+        """Set the strategy version."""
+        self._version_attr = value
+
+    @property
+    def status(self) -> StrategyStatus:
+        """Get the current strategy status."""
+        # BaseStrategy sets self.status as an attribute, this property allows getting it
+        return getattr(self, "_status_attr", StrategyStatus.STOPPED)
+
+    @status.setter
+    def status(self, value: StrategyStatus) -> None:
+        """Set the strategy status."""
+        self._status_attr = value
 
     @time_execution
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
@@ -106,7 +141,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
 
             # TODO: Remove in production - Debug logging
             if signals:
-                logger.debug(
+                self.logger.debug(
                     "Arbitrage signals generated",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -117,7 +152,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             return signals
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Arbitrage signal generation failed",
                 strategy=self.name,
                 symbol=data.symbol,
@@ -205,7 +240,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
 
                         signals.append(signal)
 
-                        logger.info(
+                        self.logger.info(
                             "Arbitrage opportunity detected",
                             strategy=self.name,
                             symbol=symbol,
@@ -216,7 +251,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                         )
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Arbitrage opportunity detection failed",
                 strategy=self.name,
                 symbol=symbol,
@@ -249,7 +284,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             validate_price(sell_price, "sell_price")
 
             # Get fee structure from constants and convert to Decimal
-            Decimal(str(GLOBAL_FEE_STRUCTURE.get("maker_fee", 0.001)))  # 0.1%
+            maker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("maker_fee", 0.001)))  # 0.1%
             taker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
 
             # Calculate fees using proper rounding
@@ -275,7 +310,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             # Validate final result
             validate_decimal(total_fees)
 
-            logger.debug(
+            self.logger.debug(
                 "Fee calculation completed",
                 strategy=self.name,
                 buy_price=format_currency(buy_price),
@@ -289,7 +324,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             return total_fees
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Fee calculation failed",
                 strategy=self.name,
                 buy_price=float(buy_price),
@@ -317,7 +352,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                 if exchange in self.exchange_prices and symbol in self.exchange_prices[exchange]:
                     price_data = self.exchange_prices[exchange][symbol]
                     if current_time - price_data.timestamp > max_age:
-                        logger.warning(
+                        self.logger.warning(
                             "Price data too old for arbitrage",
                             strategy=self.name,
                             exchange=exchange,
@@ -333,7 +368,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
 
             max_arbitrages = self.config.parameters.get("max_open_arbitrages", 5)
             if active_count >= max_arbitrages:
-                logger.warning(
+                self.logger.warning(
                     "Too many active arbitrages",
                     strategy=self.name,
                     symbol=symbol,
@@ -345,7 +380,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Execution timing validation failed",
                 strategy=self.name,
                 symbol=symbol,
@@ -385,7 +420,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
 
             for field in required_fields:
                 if field not in metadata:
-                    logger.warning(
+                    self.logger.warning(
                         "Missing required metadata field",
                         strategy=self.name,
                         field=field,
@@ -405,7 +440,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error("Signal validation failed", strategy=self.name, error=str(e))
+            self.logger.error("Signal validation failed", strategy=self.name, error=str(e))
             return False
 
     @log_errors
@@ -441,6 +476,16 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             max_size = total_capital * Decimal(str(max_position_size))
             if base_size > max_size:
                 base_size = max_size
+                
+            # CRITICAL FIX: Ensure position size doesn't exceed 10% of total capital
+            absolute_max = total_capital * Decimal("0.1")  # 10% hard limit
+            if base_size > absolute_max:
+                self.logger.warning(
+                    "Position size exceeded absolute limit",
+                    requested_size=base_size,
+                    absolute_max=absolute_max,
+                )
+                base_size = absolute_max
 
             # Scale by arbitrage-specific factors
             metadata = signal.metadata
@@ -470,7 +515,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             validate_decimal(position_size)
             validate_quantity(position_size, "position_size")
 
-            logger.debug(
+            self.logger.debug(
                 "Position size calculated",
                 strategy=self.name,
                 base_size=format_currency(base_size),
@@ -482,7 +527,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             return position_size
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Position size calculation failed",
                 strategy=self.name,
                 signal_confidence=signal.confidence if signal else None,
@@ -511,7 +556,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             position_age = (datetime.now() - position.timestamp).total_seconds() * 1000
 
             if position_age > execution_timeout:
-                logger.info(
+                self.logger.info(
                     "Arbitrage position timeout",
                     strategy=self.name,
                     symbol=position.symbol,
@@ -532,7 +577,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                 )
 
                 if current_spread <= 0:
-                    logger.info(
+                    self.logger.info(
                         "Arbitrage opportunity closed",
                         strategy=self.name,
                         symbol=position.symbol,
@@ -543,7 +588,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             return False
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Exit condition check failed",
                 strategy=self.name,
                 symbol=position.symbol,
@@ -588,7 +633,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             return Decimal("0")
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Spread calculation failed", strategy=self.name, symbol=symbol, error=str(e)
             )
             return Decimal("0")
@@ -618,7 +663,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                 self.metrics.win_rate = self.metrics.winning_trades / self.metrics.total_trades
 
             # Log trade result
-            logger.info(
+            self.logger.info(
                 "Arbitrage trade completed",
                 strategy=self.name,
                 symbol=trade_result.get("symbol"),
@@ -627,4 +672,4 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             )
 
         except Exception as e:
-            logger.error("Post-trade processing failed", strategy=self.name, error=str(e))
+            self.logger.error("Post-trade processing failed", strategy=self.name, error=str(e))

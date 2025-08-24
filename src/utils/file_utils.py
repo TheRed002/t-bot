@@ -211,7 +211,7 @@ def get_file_size(file_path: str) -> int:
         raise ValidationError(f"Cannot get file size for '{file_path}': {e!s}")
 
 
-def list_files(directory: str, pattern: str = "*") -> list:
+def list_files(directory: str, pattern: str = "*") -> list[str]:
     """
     List files in directory matching pattern.
 

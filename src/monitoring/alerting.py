@@ -19,11 +19,29 @@ Key Features:
 
 import asyncio
 import hashlib
+import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
+
+try:
+    from src.core.base import BaseComponent
+except ImportError:
+    from src.base import BaseComponent
+
+# Import utils decorators instead of error_handling directly
+from src.utils.decorators import logged, monitored, retry
+
+# Still need error handler for pattern analytics
+try:
+    from src.error_handling import get_global_error_handler
+except ImportError:
+
+    def get_global_error_handler():
+        return None
+
 
 # Try to import email modules, handle gracefully if missing
 try:
@@ -69,13 +87,28 @@ except ImportError:
     smtplib = type("MockSMTPLib", (), {"SMTP": MockSMTP})()
     MimeText = MockMimeText
     MimeMultipart = MockMimeMultipart
+
+# Try to import yaml
+try:
+    import yaml
+
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+    yaml = None
+
 import aiohttp
-import yaml
 
-from src.core.exceptions import MonitoringError
-from src.core.logging import get_logger
+try:
+    from src.core import MonitoringError
+except ImportError:
 
-logger = get_logger(__name__)
+    class MonitoringError(Exception):
+        """Monitoring error fallback."""
+
+        def __init__(self, message: str, error_code: str = "MONITORING_000"):
+            super().__init__(message)
+            self.error_code = error_code
 
 
 class AlertSeverity(Enum):
@@ -216,7 +249,7 @@ class EscalationPolicy:
     enabled: bool = True
 
 
-class AlertManager:
+class AlertManager(BaseComponent):
     """
     Central alert manager for the T-Bot trading system.
 
@@ -224,14 +257,17 @@ class AlertManager:
     and implements escalation policies.
     """
 
-    def __init__(self, config: NotificationConfig):
+    def __init__(self, config: NotificationConfig, error_handler=None):
         """
         Initialize alert manager.
 
         Args:
             config: Notification configuration
+            error_handler: Error handler instance for pattern analytics
         """
+        super().__init__(name="AlertManager")  # Initialize BaseComponent
         self.config = config
+        self._error_handler = error_handler or get_global_error_handler()
         self._rules: dict[str, AlertRule] = {}
         self._active_alerts: dict[str, Alert] = {}
         self._alert_history: list[Alert] = []
@@ -239,7 +275,7 @@ class AlertManager:
         self._escalation_policies: dict[str, EscalationPolicy] = {}
         self._running = False
         self._background_task: asyncio.Task | None = None
-        self._notification_queue: asyncio.Queue = asyncio.Queue()
+        self._notification_queue: asyncio.Queue[tuple[str, Alert]] = asyncio.Queue()
 
         # Metrics for alerting system
         self._alerts_fired = 0
@@ -247,7 +283,7 @@ class AlertManager:
         self._notifications_sent = 0
         self._escalations_triggered = 0
 
-        logger.info("AlertManager initialized")
+        self.logger.info("AlertManager initialized")
 
     def add_rule(self, rule: AlertRule) -> None:
         """
@@ -257,7 +293,7 @@ class AlertManager:
             rule: Alert rule to add
         """
         self._rules[rule.name] = rule
-        logger.info(f"Added alert rule: {rule.name} (severity: {rule.severity.value})")
+        self.logger.info(f"Added alert rule: {rule.name} (severity: {rule.severity.value})")
 
     def remove_rule(self, rule_name: str) -> bool:
         """
@@ -271,7 +307,7 @@ class AlertManager:
         """
         if rule_name in self._rules:
             del self._rules[rule_name]
-            logger.info(f"Removed alert rule: {rule_name}")
+            self.logger.info(f"Removed alert rule: {rule_name}")
             return True
         return False
 
@@ -283,7 +319,7 @@ class AlertManager:
             policy: Escalation policy to add
         """
         self._escalation_policies[policy.name] = policy
-        logger.info(f"Added escalation policy: {policy.name}")
+        self.logger.info(f"Added escalation policy: {policy.name}")
 
     def add_suppression_rule(self, rule: dict[str, Any]) -> None:
         """
@@ -293,8 +329,11 @@ class AlertManager:
             rule: Suppression rule (e.g., {"labels": {"environment": "test"}, "duration": "1h"})
         """
         self._suppression_rules.append(rule)
-        logger.info(f"Added suppression rule: {rule}")
+        self.logger.info(f"Added suppression rule: {rule}")
 
+    @retry(max_attempts=3, delay=1.5)
+    @logged(level="info")
+    @monitored()
     async def fire_alert(self, alert: Alert) -> None:
         """
         Fire a new alert.
@@ -306,7 +345,7 @@ class AlertManager:
             # Check if alert should be suppressed
             if self._is_suppressed(alert):
                 alert.status = AlertStatus.SUPPRESSED
-                logger.debug(f"Alert suppressed: {alert.rule_name}")
+                self.logger.debug(f"Alert suppressed: {alert.rule_name}")
                 return
 
             # Check for existing alert with same fingerprint
@@ -314,7 +353,7 @@ class AlertManager:
             if existing_alert:
                 # Update existing alert
                 existing_alert.ends_at = None  # Reset end time
-                logger.debug(f"Updated existing alert: {alert.rule_name}")
+                self.logger.debug(f"Updated existing alert: {alert.rule_name}")
                 return
 
             # Add new alert
@@ -325,12 +364,27 @@ class AlertManager:
             # Queue notification
             await self._notification_queue.put(("fire", alert))
 
-            logger.warning(
-                f"Alert fired: {alert.rule_name} (severity: {alert.severity.value}) - {alert.message}"
+            self.logger.warning(
+                f"Alert fired: {alert.rule_name} (severity: {alert.severity.value}) - "
+                f"{alert.message}"
             )
 
         except Exception as e:
-            logger.error(f"Error firing alert: {e}")
+            # Record error pattern for analysis
+            if hasattr(self, "_error_handler") and self._error_handler:
+                # Use proper ErrorContext object
+                from src.error_handling import ErrorContext
+                error_context = ErrorContext(
+                    component="AlertManager",
+                    operation="fire_alert",
+                    details={
+                        "alert_name": alert.rule_name,
+                        "severity": alert.severity.value,
+                    }
+                )
+                await self._error_handler.handle_error(e, error_context)
+            self.logger.error(f"Error firing alert: {e}")
+            raise
 
     async def resolve_alert(self, fingerprint: str) -> None:
         """
@@ -354,10 +408,20 @@ class AlertManager:
             # Queue resolution notification
             await self._notification_queue.put(("resolve", alert))
 
-            logger.info(f"Alert resolved: {alert.rule_name}")
+            self.logger.info(f"Alert resolved: {alert.rule_name}")
 
         except Exception as e:
-            logger.error(f"Error resolving alert: {e}")
+            if self._error_handler:
+                from src.error_handling import ErrorContext
+                error_context = ErrorContext(
+                    component="AlertManager",
+                    operation="resolve_alert",
+                    details={
+                        "fingerprint": fingerprint,
+                    }
+                )
+                await self._error_handler.handle_error(e, error_context)
+            self.logger.error(f"Error resolving alert: {e}")
 
     async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool:
         """
@@ -379,11 +443,11 @@ class AlertManager:
             alert.acknowledgment_by = acknowledged_by
             alert.acknowledgment_at = datetime.now(timezone.utc)
 
-            logger.info(f"Alert acknowledged by {acknowledged_by}: {alert.rule_name}")
+            self.logger.info(f"Alert acknowledged by {acknowledged_by}: {alert.rule_name}")
             return True
 
         except Exception as e:
-            logger.error(f"Error acknowledging alert: {e}")
+            self.logger.error(f"Error acknowledging alert: {e}")
             return False
 
     def get_active_alerts(self, severity: AlertSeverity | None = None) -> list[Alert]:
@@ -440,12 +504,12 @@ class AlertManager:
     async def start(self) -> None:
         """Start alert manager background tasks."""
         if self._running:
-            logger.warning("Alert manager already running")
+            self.logger.warning("Alert manager already running")
             return
 
         self._running = True
         self._background_task = asyncio.create_task(self._processing_loop())
-        logger.info("Alert manager started")
+        self.logger.info("Alert manager started")
 
     async def stop(self) -> None:
         """Stop alert manager background tasks."""
@@ -459,7 +523,7 @@ class AlertManager:
                 pass
             self._background_task = None
 
-        logger.info("Alert manager stopped")
+        self.logger.info("Alert manager stopped")
 
     def _is_suppressed(self, alert: Alert) -> bool:
         """
@@ -508,7 +572,7 @@ class AlertManager:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"Error in alert processing loop: {e}")
+                self.logger.error(f"Error in alert processing loop: {e}")
                 await asyncio.sleep(5)
 
     async def _send_notifications(self, alert: Alert) -> None:
@@ -537,12 +601,29 @@ class AlertManager:
                     self._notifications_sent += 1
 
                 except Exception as e:
-                    logger.error(f"Failed to send {channel.value} notification: {e}")
+                    # Track notification failures in error handling system
+                    if self._error_handler:
+                        # Use proper ErrorContext object
+                        from src.error_handling import ErrorContext
+                        error_context = ErrorContext(
+                            component="AlertManager",
+                            operation="send_notification",
+                            details={
+                                "channel": channel.value,
+                                "alert_name": alert.rule_name,
+                            }
+                        )
+                        # Properly await error handling
+                        try:
+                            await self._error_handler.handle_error(e, error_context)
+                        except Exception as handler_error:
+                            self.logger.error(f"Error handler failed: {handler_error}")
+                    self.logger.error(f"Failed to send {channel.value} notification: {e}")
 
             alert.notification_sent = True
 
         except Exception as e:
-            logger.error(f"Error sending notifications for alert: {e}")
+            self.logger.error(f"Error sending notifications for alert: {e}")
 
     async def _send_resolution_notifications(self, alert: Alert) -> None:
         """
@@ -569,10 +650,10 @@ class AlertManager:
                         await self._send_discord_resolution(alert)
 
                 except Exception as e:
-                    logger.error(f"Failed to send {channel.value} resolution: {e}")
+                    self.logger.error(f"Failed to send {channel.value} resolution: {e}")
 
         except Exception as e:
-            logger.error(f"Error sending resolution notifications: {e}")
+            self.logger.error(f"Error sending resolution notifications: {e}")
 
     async def _send_email_notification(self, alert: Alert) -> None:
         """Send email notification."""
@@ -597,6 +678,7 @@ Annotations:
 Fingerprint: {alert.fingerprint}
         """
 
+        server = None
         try:
             msg = MimeMultipart()
             msg["From"] = self.config.email_from
@@ -613,12 +695,16 @@ Fingerprint: {alert.fingerprint}
                 server.login(self.config.email_username, self.config.email_password)
 
             server.send_message(msg)
-            server.quit()
-
-            logger.debug(f"Email notification sent for alert: {alert.rule_name}")
+            self.logger.debug(f"Email notification sent for alert: {alert.rule_name}")
 
         except Exception as e:
-            logger.error(f"Failed to send email notification: {e}")
+            self.logger.error(f"Failed to send email notification: {e}")
+        finally:
+            if server:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
 
     async def _send_email_resolution(self, alert: Alert) -> None:
         """Send email resolution notification."""
@@ -641,6 +727,7 @@ Started: {alert.starts_at.strftime("%Y-%m-%d %H:%M:%S UTC")}
 Fingerprint: {alert.fingerprint}
         """
 
+        server = None
         try:
             msg = MimeMultipart()
             msg["From"] = self.config.email_from
@@ -657,12 +744,16 @@ Fingerprint: {alert.fingerprint}
                 server.login(self.config.email_username, self.config.email_password)
 
             server.send_message(msg)
-            server.quit()
-
-            logger.debug(f"Email resolution sent for alert: {alert.rule_name}")
+            self.logger.debug(f"Email resolution sent for alert: {alert.rule_name}")
 
         except Exception as e:
-            logger.error(f"Failed to send email resolution: {e}")
+            self.logger.error(f"Failed to send email resolution: {e}")
+        finally:
+            if server:
+                try:
+                    server.quit()
+                except Exception:
+                    pass
 
     async def _send_slack_notification(self, alert: Alert) -> None:
         """Send Slack notification."""
@@ -714,12 +805,14 @@ Fingerprint: {alert.fingerprint}
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as response:
                     if response.status == 200:
-                        logger.debug(f"Slack notification sent for alert: {alert.rule_name}")
+                        self.logger.debug(f"Slack notification sent for alert: {alert.rule_name}")
                     else:
-                        logger.error(f"Slack notification failed with status {response.status}")
+                        self.logger.error(
+                            f"Slack notification failed with status {response.status}"
+                        )
 
         except Exception as e:
-            logger.error(f"Failed to send Slack notification: {e}")
+            self.logger.error(f"Failed to send Slack notification: {e}")
 
     async def _send_slack_resolution(self, alert: Alert) -> None:
         """Send Slack resolution notification."""
@@ -763,12 +856,12 @@ Fingerprint: {alert.fingerprint}
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as response:
                     if response.status == 200:
-                        logger.debug(f"Slack resolution sent for alert: {alert.rule_name}")
+                        self.logger.debug(f"Slack resolution sent for alert: {alert.rule_name}")
                     else:
-                        logger.error(f"Slack resolution failed with status {response.status}")
+                        self.logger.error(f"Slack resolution failed with status {response.status}")
 
         except Exception as e:
-            logger.error(f"Failed to send Slack resolution: {e}")
+            self.logger.error(f"Failed to send Slack resolution: {e}")
 
     async def _send_webhook_notification(self, alert: Alert) -> None:
         """Send webhook notification."""
@@ -798,14 +891,16 @@ Fingerprint: {alert.fingerprint}
                         timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout),
                     ) as response:
                         if response.status == 200:
-                            logger.debug(f"Webhook notification sent for alert: {alert.rule_name}")
+                            self.logger.debug(
+                                f"Webhook notification sent for alert: {alert.rule_name}"
+                            )
                         else:
-                            logger.error(
+                            self.logger.error(
                                 f"Webhook notification failed with status {response.status}"
                             )
 
             except Exception as e:
-                logger.error(f"Failed to send webhook notification to {webhook_url}: {e}")
+                self.logger.error(f"Failed to send webhook notification to {webhook_url}: {e}")
 
     async def _send_webhook_resolution(self, alert: Alert) -> None:
         """Send webhook resolution notification."""
@@ -837,12 +932,16 @@ Fingerprint: {alert.fingerprint}
                         timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout),
                     ) as response:
                         if response.status == 200:
-                            logger.debug(f"Webhook resolution sent for alert: {alert.rule_name}")
+                            self.logger.debug(
+                                f"Webhook resolution sent for alert: {alert.rule_name}"
+                            )
                         else:
-                            logger.error(f"Webhook resolution failed with status {response.status}")
+                            self.logger.error(
+                                f"Webhook resolution failed with status {response.status}"
+                            )
 
             except Exception as e:
-                logger.error(f"Failed to send webhook resolution to {webhook_url}: {e}")
+                self.logger.error(f"Failed to send webhook resolution to {webhook_url}: {e}")
 
     async def _send_discord_notification(self, alert: Alert) -> None:
         """Send Discord notification."""
@@ -892,12 +991,14 @@ Fingerprint: {alert.fingerprint}
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as response:
                     if response.status in [200, 204]:
-                        logger.debug(f"Discord notification sent for alert: {alert.rule_name}")
+                        self.logger.debug(f"Discord notification sent for alert: {alert.rule_name}")
                     else:
-                        logger.error(f"Discord notification failed with status {response.status}")
+                        self.logger.error(
+                            f"Discord notification failed with status {response.status}"
+                        )
 
         except Exception as e:
-            logger.error(f"Failed to send Discord notification: {e}")
+            self.logger.error(f"Failed to send Discord notification: {e}")
 
     async def _send_discord_resolution(self, alert: Alert) -> None:
         """Send Discord resolution notification."""
@@ -942,12 +1043,14 @@ Fingerprint: {alert.fingerprint}
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as response:
                     if response.status in [200, 204]:
-                        logger.debug(f"Discord resolution sent for alert: {alert.rule_name}")
+                        self.logger.debug(f"Discord resolution sent for alert: {alert.rule_name}")
                     else:
-                        logger.error(f"Discord resolution failed with status {response.status}")
+                        self.logger.error(
+                            f"Discord resolution failed with status {response.status}"
+                        )
 
         except Exception as e:
-            logger.error(f"Failed to send Discord resolution: {e}")
+            self.logger.error(f"Failed to send Discord resolution: {e}")
 
     async def _check_escalations(self) -> None:
         """Check for alerts that need escalation."""
@@ -1018,12 +1121,12 @@ Fingerprint: {alert.fingerprint}
             # Send escalation notifications
             await self._send_notifications(escalated_alert)
 
-            logger.warning(
+            self.logger.warning(
                 f"Alert escalated: {alert.rule_name} (escalation #{alert.escalation_count})"
             )
 
         except Exception as e:
-            logger.error(f"Error escalating alert: {e}")
+            self.logger.error(f"Error escalating alert: {e}")
 
 
 def load_alert_rules_from_file(file_path: str) -> list[AlertRule]:
@@ -1039,6 +1142,9 @@ def load_alert_rules_from_file(file_path: str) -> list[AlertRule]:
     Raises:
         MonitoringError: If file loading fails
     """
+    if not YAML_AVAILABLE:
+        raise MonitoringError("YAML library is not available. Please install PyYAML.")
+
     try:
         with open(file_path) as f:
             data = yaml.safe_load(f)
@@ -1069,11 +1175,12 @@ def load_alert_rules_from_file(file_path: str) -> list[AlertRule]:
             )
             rules.append(rule)
 
+        logger = logging.getLogger(__name__)
         logger.info(f"Loaded {len(rules)} alert rules from {file_path}")
         return rules
 
     except Exception as e:
-        raise MonitoringError(f"Failed to load alert rules from {file_path}: {e}")
+        raise MonitoringError(f"Failed to load alert rules from {file_path}: {e}") from e
 
 
 # Global alert manager instance

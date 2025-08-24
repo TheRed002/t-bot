@@ -9,86 +9,154 @@ from datetime import datetime
 from typing import Any
 
 import pandas as pd
+from pydantic import BaseModel as PydanticBaseModel, Field
 
-from src.core.config import Config
+from src.core.base.service import BaseService
 from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
-from src.ml.feature_engineering import FeatureEngineer
-from src.ml.inference.batch_predictor import BatchPredictor
-from src.ml.inference.inference_engine import InferenceEngine
-from src.ml.models.base_model import BaseModel
-from src.ml.models.direction_classifier import DirectionClassifier
-from src.ml.models.price_predictor import PricePredictor
-from src.ml.models.regime_detector import RegimeDetector
-from src.ml.models.volatility_forecaster import VolatilityForecaster
-from src.ml.registry.model_registry import ModelRegistry
-from src.ml.training.trainer import Trainer
-from src.ml.validation.drift_detector import DriftDetector
-from src.ml.validation.model_validator import ModelValidator
-from src.utils.decorators import log_calls, time_execution
+from src.core.types.base import ConfigDict
+from src.utils.decorators import UnifiedDecorator
 
-logger = get_logger(__name__)
+# Initialize decorator instance
+dec = UnifiedDecorator()
 
 
-class ModelManager:
+class ModelManagerConfig(PydanticBaseModel):
+    """Configuration for model manager service."""
+
+    enable_model_monitoring: bool = Field(default=True, description="Enable model monitoring")
+    default_validation_threshold: float = Field(
+        default=0.6, description="Default validation accuracy threshold"
+    )
+    max_active_models: int = Field(default=10, description="Maximum number of active models")
+    model_retirement_days: int = Field(
+        default=90, description="Days after which unused models are retired"
+    )
+    enable_auto_retraining: bool = Field(
+        default=False, description="Enable automatic model retraining"
+    )
+    drift_threshold: float = Field(default=0.1, description="Drift detection threshold")
+    performance_decline_threshold: float = Field(
+        default=0.05, description="Performance decline threshold"
+    )
+
+
+class ModelManagerService(BaseService):
     """
     Central manager for ML model lifecycle.
 
-    This class orchestrates all aspects of the ML pipeline:
+    This service orchestrates all aspects of the ML pipeline using proper service patterns:
     - Model creation and training
     - Model validation and testing
     - Model deployment and versioning
     - Performance monitoring and drift detection
     - Model retirement and replacement
 
-    Attributes:
-        config: Application configuration
-        model_registry: Model registry for storage and versioning
-        feature_engineer: Feature engineering pipeline
-        trainer: Model training orchestrator
-        validator: Model validation system
-        drift_detector: Drift detection system
-        inference_engine: Real-time inference engine
-        batch_predictor: Batch prediction system
+    All operations go through service dependencies without direct database access.
     """
 
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        config: ConfigDict | None = None,
+        correlation_id: str | None = None,
+    ):
         """
-        Initialize the model manager.
+        Initialize the model manager service.
 
         Args:
-            config: Application configuration
+            config: Service configuration
+            correlation_id: Request correlation ID
         """
-        self.config = config
+        super().__init__(
+            name="ModelManagerService",
+            config=config,
+            correlation_id=correlation_id,
+        )
 
-        # Initialize ML components
-        self.model_registry = ModelRegistry(config)
-        self.feature_engineer = FeatureEngineer(config)
-        self.trainer = Trainer(config)
-        self.validator = ModelValidator(config)
-        self.drift_detector = DriftDetector(config)
-        self.inference_engine = InferenceEngine(config)
-        self.batch_predictor = BatchPredictor(config)
+        # Parse model manager configuration
+        mm_config_dict = (config or {}).get("model_manager", {})
+        self.mm_config = ModelManagerConfig(**mm_config_dict)
 
-        # Model types
-        self.model_types = {
-            "price_predictor": PricePredictor,
-            "direction_classifier": DirectionClassifier,
-            "volatility_forecaster": VolatilityForecaster,
-            "regime_detector": RegimeDetector,
-        }
+        # Service dependencies - resolved during startup
+        self.model_registry_service: Any = None
+        self.feature_engineering_service: Any = None
+        self.training_service: Any = None
+        self.validation_service: Any = None
+        self.drift_detection_service: Any = None
+        self.inference_service: Any = None
+        self.batch_prediction_service: Any = None
+        
+        # Legacy service references (will be mapped to actual services)
+        self.trainer: Any = None
+        self.validator: Any = None
+        self.drift_detector: Any = None
+        self.model_registry: Any = None
+        self.inference_engine: Any = None
+        self.feature_engineer: Any = None
+        self.batch_predictor: Any = None
+
+        # Model type registry - populated during startup
+        self.model_types = {}
 
         # Lifecycle state
         self.active_models = {}
         self.training_jobs = {}
         self.monitoring_jobs = {}
 
-        logger.info(
-            "Model manager initialized", available_model_types=list(self.model_types.keys())
+        # Add required dependencies
+        self.add_dependency("ModelRegistryService")
+        self.add_dependency("FeatureEngineeringService")
+        self.add_dependency("TrainingService")
+        self.add_dependency("ModelValidationService")
+        self.add_dependency("DriftDetectionService")
+        self.add_dependency("InferenceService")
+        self.add_dependency("BatchPredictionService")
+
+    async def _do_start(self) -> None:
+        """Start the model manager service."""
+        await super()._do_start()
+
+        # Resolve dependencies
+        self.model_registry_service = self.resolve_dependency("ModelRegistryService")
+        self.feature_engineering_service = self.resolve_dependency("FeatureEngineeringService")
+        self.training_service = self.resolve_dependency("TrainingService")
+        self.validation_service = self.resolve_dependency("ModelValidationService")
+        self.drift_detection_service = self.resolve_dependency("DriftDetectionService")
+        self.inference_service = self.resolve_dependency("InferenceService")
+        self.batch_prediction_service = self.resolve_dependency("BatchPredictionService")
+        
+        # Map legacy references to actual services
+        self.trainer = self.training_service
+        self.validator = self.validation_service
+        self.drift_detector = self.drift_detection_service
+        self.model_registry = self.model_registry_service
+        self.inference_engine = self.inference_service
+        self.feature_engineer = self.feature_engineering_service
+        self.batch_predictor = self.batch_prediction_service
+
+        # Initialize available model types (these would be registered dynamically)
+        self.model_types = {
+            "price_predictor": "PricePredictor",
+            "direction_classifier": "DirectionClassifier",
+            "volatility_forecaster": "VolatilityForecaster",
+            "regime_detector": "RegimeDetector",
+        }
+
+        self._logger.info(
+            "Model manager service started successfully",
+            config=self.mm_config.dict(),
+            available_model_types=list(self.model_types.keys()),
+            dependencies_resolved=7,
         )
 
-    @time_execution
-    @log_calls
+    async def _do_stop(self) -> None:
+        """Stop the model manager service."""
+        # Clean up active monitoring jobs
+        for model_name in list(self.monitoring_jobs.keys()):
+            await self._stop_model_monitoring(model_name)
+
+        await super()._do_stop()
+
+    @dec.enhance(log=True, monitor=True, log_level="info")
     async def create_and_train_model(
         self,
         model_type: str,
@@ -122,7 +190,7 @@ class ModelManager:
             if training_data.empty:
                 raise ValidationError("Training data cannot be empty")
 
-            logger.info(
+            self._logger.info(
                 "Starting model creation and training",
                 model_type=model_type,
                 model_name=model_name,
@@ -130,11 +198,16 @@ class ModelManager:
                 training_samples=len(training_data),
             )
 
-            # Create model instance
-            model_class = self.model_types[model_type]
+            # Create model instance (this would be handled by a model factory service)
+            # For now, we'll use a placeholder implementation
             model_params = model_params or {}
-            model = model_class(self.config, **model_params)
-            model.model_name = model_name
+
+            # This should be replaced with proper model factory service
+            model_instance_info = await self._create_model_instance(model_type, model_name, model_params)
+            
+            # For now, create a placeholder model object
+            # In production, this would come from a model factory service
+            model = model_instance_info  # Placeholder model
 
             # Prepare training data
             training_result = await self._prepare_and_train_model(
@@ -161,7 +234,7 @@ class ModelManager:
                     "status": "active",
                 }
 
-                logger.info(
+                self._logger.info(
                     "Model creation and training completed successfully",
                     model_name=model_name,
                     model_id=model_info["id"],
@@ -176,7 +249,9 @@ class ModelManager:
                 }
 
             else:
-                logger.warning("Model validation failed, not registering", model_name=model_name)
+                self._logger.warning(
+                    "Model validation failed, not registering", model_name=model_name
+                )
 
                 return {
                     "success": False,
@@ -187,16 +262,15 @@ class ModelManager:
                 }
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Model creation and training failed",
                 model_type=model_type,
                 model_name=model_name,
                 error=str(e),
             )
-            raise ValidationError(f"Model creation and training failed: {e}") from e
+            raise ValidationError(f"Model creation and training failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     async def deploy_model(
         self, model_name: str, deployment_stage: str = "production"
     ) -> dict[str, Any]:
@@ -214,19 +288,19 @@ class ModelManager:
             ValidationError: If deployment fails
         """
         try:
-            logger.info(
+            self._logger.info(
                 "Starting model deployment",
                 model_name=model_name,
                 deployment_stage=deployment_stage,
             )
 
-            # Get model from registry
-            model_info = self.model_registry.get_latest_model(model_name)
+            # Get model from registry service
+            model_info = await self.model_registry_service.get_latest_model(model_name)
             if not model_info:
                 raise ValidationError(f"Model {model_name} not found in registry")
 
             # Load model
-            model = self.model_registry.load_model(model_info["id"])
+            model = await self.model_registry_service.load_model(model_info["id"])
 
             # Perform pre-deployment validation
             pre_deployment_checks = await self._pre_deployment_validation(model, model_info)
@@ -257,7 +331,7 @@ class ModelManager:
                 "promotion_result": promotion_result,
             }
 
-            logger.info(
+            self._logger.info(
                 "Model deployment completed",
                 model_name=model_name,
                 deployment_stage=deployment_stage,
@@ -267,16 +341,15 @@ class ModelManager:
             return deployment_result
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Model deployment failed",
                 model_name=model_name,
                 deployment_stage=deployment_stage,
                 error=str(e),
             )
-            raise ValidationError(f"Model deployment failed: {e}") from e
+            raise ValidationError(f"Model deployment failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     async def monitor_model_performance(
         self,
         model_name: str,
@@ -298,7 +371,7 @@ class ModelManager:
             ValidationError: If monitoring fails
         """
         try:
-            logger.info(
+            self._logger.info(
                 "Starting model performance monitoring",
                 model_name=model_name,
                 monitoring_samples=len(monitoring_data),
@@ -306,10 +379,10 @@ class ModelManager:
 
             # Get model
             if model_name not in self.active_models:
-                model_info = self.model_registry.get_latest_model(model_name)
+                model_info = await self.model_registry_service.get_latest_model(model_name)
                 if not model_info:
                     raise ValidationError(f"Model {model_name} not found")
-                model = self.model_registry.load_model(model_info["id"])
+                model = await self.model_registry_service.load_model(model_info["id"])
             else:
                 model = self.active_models[model_name]["model"]
 
@@ -323,7 +396,7 @@ class ModelManager:
                 )
                 monitoring_results["feature_drift"] = feature_drift
             else:
-                logger.warning("No reference data for feature drift detection")
+                self._logger.warning("No reference data for feature drift detection")
 
             # 2. Prediction drift detection
             predictions = model.predict(monitoring_data)
@@ -345,9 +418,11 @@ class ModelManager:
                 monitoring_results["current_performance"] = performance_metrics
 
                 # Performance drift detection
-                reference_performance = self.drift_detector.reference_data.get(
-                    "performance", {}
-                ).get("data")
+                reference_performance = None
+                if hasattr(self.drift_detector, "reference_data"):
+                    reference_performance = self.drift_detector.reference_data.get(
+                        "performance", {}
+                    ).get("data")
                 if reference_performance is not None:
                     performance_drift = self.drift_detector.detect_performance_drift(
                         reference_performance, performance_metrics, model_name
@@ -373,7 +448,7 @@ class ModelManager:
                 "alerts": alerts,
             }
 
-            logger.info(
+            self._logger.info(
                 "Model performance monitoring completed",
                 model_name=model_name,
                 overall_drift_detected=overall_drift_detected,
@@ -383,11 +458,12 @@ class ModelManager:
             return final_monitoring_result
 
         except Exception as e:
-            logger.error("Model performance monitoring failed", model_name=model_name, error=str(e))
-            raise ValidationError(f"Model performance monitoring failed: {e}") from e
+            self._logger.error(
+                "Model performance monitoring failed", model_name=model_name, error=str(e)
+            )
+            raise ValidationError(f"Model performance monitoring failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     async def retire_model(self, model_name: str, reason: str = "replaced") -> dict[str, Any]:
         """
         Retire a model from active service.
@@ -403,7 +479,7 @@ class ModelManager:
             ValidationError: If retirement fails
         """
         try:
-            logger.info("Starting model retirement", model_name=model_name, reason=reason)
+            self._logger.info("Starting model retirement", model_name=model_name, reason=reason)
 
             # Remove from inference engine
             await self.inference_engine.unload_model(model_name)
@@ -413,7 +489,7 @@ class ModelManager:
                 await self._stop_model_monitoring(model_name)
 
             # Update registry status
-            model_info = self.model_registry.get_latest_model(model_name)
+            model_info = await self.model_registry_service.get_latest_model(model_name)
             if model_info:
                 self.model_registry.update_model_metadata(
                     model_info["id"],
@@ -436,17 +512,17 @@ class ModelManager:
                 "reason": reason,
             }
 
-            logger.info("Model retirement completed", model_name=model_name, reason=reason)
+            self._logger.info("Model retirement completed", model_name=model_name, reason=reason)
 
             return retirement_result
 
         except Exception as e:
-            logger.error("Model retirement failed", model_name=model_name, error=str(e))
-            raise ValidationError(f"Model retirement failed: {e}") from e
+            self._logger.error("Model retirement failed", model_name=model_name, error=str(e))
+            raise ValidationError(f"Model retirement failed: {e}")
 
     async def _prepare_and_train_model(
         self,
-        model: BaseModel,
+        model: Any,
         training_data: pd.DataFrame,
         symbol: str,
         training_params: dict[str, Any] | None,
@@ -461,11 +537,11 @@ class ModelManager:
             return training_result
 
         except Exception as e:
-            logger.error(f"Model training preparation failed: {e}")
-            raise ValidationError(f"Model training preparation failed: {e}") from e
+            self._logger.error(f"Model training preparation failed: {e}")
+            raise ValidationError(f"Model training preparation failed: {e}")
 
     async def _validate_trained_model(
-        self, model: BaseModel, test_data: tuple[pd.DataFrame, pd.Series]
+        self, model: Any, test_data: tuple[pd.DataFrame, pd.Series]
     ) -> dict[str, Any]:
         """Validate trained model."""
         try:
@@ -477,12 +553,12 @@ class ModelManager:
             return validation_result
 
         except Exception as e:
-            logger.error(f"Model validation failed: {e}")
-            raise ValidationError(f"Model validation failed: {e}") from e
+            self._logger.error(f"Model validation failed: {e}")
+            raise ValidationError(f"Model validation failed: {e}")
 
     async def _register_model(
         self,
-        model: BaseModel,
+        model: Any,
         training_result: dict[str, Any],
         validation_result: dict[str, Any],
         symbol: str,
@@ -510,36 +586,56 @@ class ModelManager:
             return model_info
 
         except Exception as e:
-            logger.error(f"Model registration failed: {e}")
-            raise ValidationError(f"Model registration failed: {e}") from e
+            self._logger.error(f"Model registration failed: {e}")
+            raise ValidationError(f"Model registration failed: {e}")
 
     async def _pre_deployment_validation(
-        self, model: BaseModel, model_info: dict[str, Any]
+        self, model: Any, model_info: dict[str, Any]
     ) -> dict[str, Any]:
         """Perform pre-deployment validation."""
         try:
             checks = {
                 "model_trained": model.is_trained,
                 "has_required_methods": all(
-                    hasattr(model, method) for method in ["predict", "evaluate"]
+                    hasattr(model, method) for method in ["predict", "evaluate", "prepare_data"]
                 ),
                 "model_registered": model_info is not None,
-                "recent_validation": True,  # Placeholder for validation recency check
+                "has_feature_names": bool(getattr(model, "feature_names", [])),
+                "has_metrics": bool(getattr(model, "metrics", {})),
             }
+
+            # Check validation recency
+            validation_timestamp = model_info.get("metadata", {}).get("last_validation", None)
+            if validation_timestamp:
+                validation_age = (
+                    datetime.utcnow() - datetime.fromisoformat(validation_timestamp)
+                ).days
+                checks["recent_validation"] = validation_age <= 7  # Validated within last 7 days
+            else:
+                checks["recent_validation"] = False
+
+            # Check minimum performance thresholds
+            metrics = getattr(model, "metrics", {})
+            if model.model_type.endswith("classifier"):
+                checks["min_accuracy"] = metrics.get("val_accuracy", 0) >= 0.6
+                checks["min_f1_score"] = metrics.get("val_f1_score", 0) >= 0.5
+            else:
+                checks["max_mse"] = metrics.get("val_mse", float("inf")) <= 1.0
+                checks["min_r2"] = metrics.get("val_r2_score", 0) >= 0.3
 
             issues = [check_name for check_name, passed in checks.items() if not passed]
 
             return {"ready_for_deployment": len(issues) == 0, "checks": checks, "issues": issues}
 
         except Exception as e:
-            logger.error(f"Pre-deployment validation failed: {e}")
+            self._logger.error(f"Pre-deployment validation failed: {e}")
             return {
                 "ready_for_deployment": False,
                 "checks": {},
                 "issues": [f"Validation error: {e}"],
             }
 
-    async def _start_model_monitoring(self, model_name: str, model: BaseModel):
+    async def _start_model_monitoring(self, model_name: str, model: Any):
         """Start monitoring for a deployed model."""
         try:
             # Create monitoring job (placeholder implementation)
@@ -549,10 +645,10 @@ class ModelManager:
                 "status": "active",
             }
 
-            logger.info(f"Monitoring started for model {model_name}")
+            self._logger.info(f"Monitoring started for model {model_name}")
 
         except Exception as e:
-            logger.error(f"Failed to start monitoring for {model_name}: {e}")
+            self._logger.error(f"Failed to start monitoring for {model_name}: {e}")
 
     async def _stop_model_monitoring(self, model_name: str):
         """Stop monitoring for a model."""
@@ -562,10 +658,10 @@ class ModelManager:
                 self.monitoring_jobs[model_name]["stop_time"] = datetime.utcnow()
                 del self.monitoring_jobs[model_name]
 
-            logger.info(f"Monitoring stopped for model {model_name}")
+            self._logger.info(f"Monitoring stopped for model {model_name}")
 
         except Exception as e:
-            logger.error(f"Failed to stop monitoring for {model_name}: {e}")
+            self._logger.error(f"Failed to stop monitoring for {model_name}: {e}")
 
     async def _generate_monitoring_alerts(
         self, model_name: str, monitoring_results: dict[str, Any], overall_drift_detected: bool
@@ -591,7 +687,7 @@ class ModelManager:
             return alerts
 
         except Exception as e:
-            logger.error(f"Alert generation failed: {e}")
+            self._logger.error(f"Alert generation failed: {e}")
             return []
 
     def get_active_models(self) -> dict[str, Any]:
@@ -606,13 +702,13 @@ class ModelManager:
             for name, info in self.active_models.items()
         }
 
-    def get_model_status(self, model_name: str) -> dict[str, Any] | None:
+    async def get_model_status(self, model_name: str) -> dict[str, Any] | None:
         """Get status information for a specific model."""
         if model_name in self.active_models:
             return {"status": "active", "details": self.active_models[model_name]}
 
         # Check registry
-        model_info = self.model_registry.get_latest_model(model_name)
+        model_info = await self.model_registry_service.get_latest_model(model_name)
         if model_info:
             return {"status": "registered", "details": model_info}
 
@@ -654,5 +750,74 @@ class ModelManager:
             return health_status
 
         except Exception as e:
-            logger.error(f"Health check failed: {e}")
+            self._logger.error(f"Health check failed: {e}")
             return {"timestamp": datetime.utcnow(), "status": "unhealthy", "error": str(e)}
+
+    # Helper Methods
+    async def _create_model_instance(
+        self, model_type: str, model_name: str, model_params: dict[str, Any]
+    ) -> Any:
+        """Create model instance through proper factory service."""
+        # This should be implemented with a proper model factory service
+        # For now, return a placeholder
+        return {
+            "model_type": model_type,
+            "model_name": model_name,
+            "params": model_params,
+            "status": "created",
+        }
+
+    # Service Health and Metrics
+    async def _service_health_check(self) -> "HealthStatus":
+        """Model manager service specific health check."""
+        from src.core.types import HealthStatus
+
+        try:
+            # Check dependencies
+            required_services = [
+                self.model_registry_service,
+                self.feature_engineering_service,
+                self.training_service,
+                self.validation_service,
+                self.drift_detection_service,
+                self.inference_service,
+                self.batch_prediction_service,
+            ]
+
+            if not all(required_services):
+                return HealthStatus.UNHEALTHY
+
+            # Check if we have too many active models
+            if len(self.active_models) > self.mm_config.max_active_models:
+                return HealthStatus.DEGRADED
+
+            return HealthStatus.HEALTHY
+
+        except Exception as e:
+            self._logger.error("Model manager service health check failed", error=str(e))
+            return HealthStatus.UNHEALTHY
+
+    def get_model_manager_metrics(self) -> dict[str, Any]:
+        """Get model manager service metrics."""
+        return {
+            "active_models_count": len(self.active_models),
+            "training_jobs_count": len(self.training_jobs),
+            "monitoring_jobs_count": len(self.monitoring_jobs),
+            "available_model_types": list(self.model_types.keys()),
+            "model_monitoring_enabled": self.mm_config.enable_model_monitoring,
+            "auto_retraining_enabled": self.mm_config.enable_auto_retraining,
+            "max_active_models": self.mm_config.max_active_models,
+        }
+
+    # Configuration validation
+    def _validate_service_config(self, config: ConfigDict) -> bool:
+        """Validate model manager service configuration."""
+        try:
+            mm_config_dict = config.get("model_manager", {})
+            ModelManagerConfig(**mm_config_dict)
+            return True
+        except Exception as e:
+            self._logger.error(
+                "Model manager service configuration validation failed", error=str(e)
+            )
+            return False

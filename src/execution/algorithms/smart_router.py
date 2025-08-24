@@ -15,8 +15,14 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.config import Config
-from src.core.exceptions import ExecutionError, ValidationError
-from src.core.logging import get_logger
+from src.core.exceptions import (
+    ExchangeConnectionError,
+    ExchangeError,
+    ExchangeRateLimitError,
+    ExecutionError,
+    NetworkError,
+    ValidationError,
+)
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -27,13 +33,14 @@ from src.core.types import (
     OrderRequest,
 )
 
+# Import exchange interfaces
+from src.execution.exchange_interface import ExchangeFactoryInterface
+
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
+from src.utils import log_calls, time_execution
 
 from .base_algorithm import BaseAlgorithm
-
-logger = get_logger(__name__)
 
 
 class SmartOrderRouter(BaseAlgorithm):
@@ -127,7 +134,10 @@ class SmartOrderRouter(BaseAlgorithm):
     @time_execution
     @log_calls
     async def execute(
-        self, instruction: ExecutionInstruction, exchange_factory=None, risk_manager=None
+        self,
+        instruction: ExecutionInstruction,
+        exchange_factory: ExchangeFactoryInterface | None = None,
+        risk_manager=None,
     ) -> ExecutionResult:
         """
         Execute an order using Smart Order Router.
@@ -360,7 +370,10 @@ class SmartOrderRouter(BaseAlgorithm):
         return candidates
 
     async def _score_exchanges(
-        self, exchanges: list[str], instruction: ExecutionInstruction, exchange_factory
+        self,
+        exchanges: list[str],
+        instruction: ExecutionInstruction,
+        exchange_factory: ExchangeFactoryInterface,
     ) -> dict[str, float]:
         """
         Score exchanges based on multiple factors.
@@ -463,8 +476,18 @@ class SmartOrderRouter(BaseAlgorithm):
     async def _calculate_liquidity_score(self, exchange, symbol: str) -> float:
         """Calculate liquidity-based score for an exchange."""
         try:
-            # Get market data to assess liquidity
-            market_data = await exchange.get_market_data(symbol)
+            # Get market data to assess liquidity with proper error handling
+            try:
+                market_data = await exchange.get_market_data(symbol)
+            except ExchangeRateLimitError:
+                self.logger.warning(f"Rate limit hit for {exchange.exchange_name} on {symbol}")
+                return 0.2  # Very low score for rate limited exchange
+            except ExchangeConnectionError:
+                self.logger.warning(f"Connection error for {exchange.exchange_name} on {symbol}")
+                return 0.1  # Minimal score for connection issues
+            except ExchangeError as e:
+                self.logger.warning(f"Exchange error getting market data: {e}")
+                return 0.3  # Low score for exchange errors
 
             if not market_data or not market_data.bid or not market_data.ask:
                 return 0.3  # Low score for missing data
@@ -643,7 +666,45 @@ class SmartOrderRouter(BaseAlgorithm):
                     raise ExecutionError("Risk manager rejected smart router order")
 
             # Place order
-            order_response = await exchange.place_order(order)
+            # Place order with timeout and error handling
+            try:
+                # Add timeout wrapper
+                order_response = await asyncio.wait_for(
+                    exchange.place_order(order),
+                    timeout=30.0,  # 30 second timeout
+                )
+            except asyncio.TimeoutError:
+                self.logger.error(
+                    f"Timeout placing order on {route['exchange']}",
+                    exchange=route["exchange"],
+                    symbol=order.symbol,
+                )
+                # Mark route as failed due to timeout
+                execution_result.add_fill(
+                    price=order.price or Decimal("0"),
+                    quantity=Decimal("0"),
+                    timestamp=datetime.now(timezone.utc),
+                    order_id=f"timeout_{route['exchange']}",
+                )
+                return
+            except ExchangeError as e:
+                self.logger.error(
+                    f"Exchange error placing order on {route['exchange']}: {e}",
+                    exchange=route["exchange"],
+                    symbol=order.symbol,
+                    quantity=float(order.quantity),
+                )
+                # Mark route as failed and continue
+                execution_result.add_fill(
+                    price=order.price or Decimal("0"),
+                    quantity=Decimal("0"),
+                    timestamp=datetime.now(timezone.utc),
+                    order_id=f"failed_{route['exchange']}",
+                )
+                return
+            except NetworkError as e:
+                self.logger.error(f"Network error placing order on {route['exchange']}: {e}")
+                raise ExecutionError(f"Network error during smart routing: {e}")
 
             # Update execution result
             await self._update_execution_result(execution_result, child_order=order_response)
@@ -732,7 +793,27 @@ class SmartOrderRouter(BaseAlgorithm):
                     raise ExecutionError(f"Risk manager rejected order for {route['exchange']}")
 
             # Place order
-            order_response = await exchange.place_order(order)
+            # Place order with error handling
+            try:
+                order_response = await exchange.place_order(order)
+            except ExchangeError as e:
+                self.logger.error(
+                    f"Exchange error placing order on {route['exchange']}: {e}",
+                    exchange=route["exchange"],
+                    symbol=order.symbol,
+                    quantity=float(order.quantity),
+                )
+                # Mark route as failed and continue
+                execution_result.add_fill(
+                    price=order.price or Decimal("0"),
+                    quantity=Decimal("0"),
+                    timestamp=datetime.now(timezone.utc),
+                    order_id=f"failed_{route['exchange']}",
+                )
+                return
+            except NetworkError as e:
+                self.logger.error(f"Network error placing order on {route['exchange']}: {e}")
+                raise ExecutionError(f"Network error during smart routing: {e}")
 
             # Update execution result (thread-safe update)
             await self._update_execution_result(execution_result, child_order=order_response)

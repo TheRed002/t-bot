@@ -19,8 +19,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from src.base import BaseComponent
 from src.core.config import Config
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import DriftType, MarketData, QualityLevel, Signal
@@ -30,9 +30,6 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
-
 
 # QualityLevel and DriftType are now imported from core.types
 
@@ -61,7 +58,7 @@ class DriftAlert:
     metadata: dict[str, Any]
 
 
-class QualityMonitor:
+class QualityMonitor(BaseComponent):
     """
     Comprehensive data quality monitoring system.
 
@@ -76,6 +73,7 @@ class QualityMonitor:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.error_handler = ErrorHandler(config)
 
@@ -107,7 +105,7 @@ class QualityMonitor:
         # Alert tracking
         self.last_alert_time: dict[str, datetime] = {}
 
-        logger.info("QualityMonitor initialized", config=config)
+        self.logger.info("QualityMonitor initialized", config=config)
 
     @time_execution
     async def monitor_data_quality(self, data: MarketData) -> tuple[float, list[DriftAlert]]:
@@ -123,7 +121,7 @@ class QualityMonitor:
         try:
             # Handle None data
             if data is None:
-                logger.error("Cannot monitor None data")
+                self.logger.error("Cannot monitor None data")
                 return 0.0, []
 
             # Update distributions
@@ -152,14 +150,14 @@ class QualityMonitor:
 
             # Log monitoring results
             if quality_score < self.quality_thresholds["fair"]:
-                logger.warning(
+                self.logger.warning(
                     "Low data quality detected",
                     symbol=data.symbol,
                     quality_score=quality_score,
                     drift_alerts_count=len(drift_alerts),
                 )
             else:
-                logger.debug(
+                self.logger.debug(
                     "Data quality monitoring passed",
                     symbol=data.symbol,
                     quality_score=quality_score,
@@ -168,7 +166,7 @@ class QualityMonitor:
             return quality_score, drift_alerts
 
         except Exception as e:
-            logger.error("Data quality monitoring failed", symbol=data.symbol, error=str(e))
+            self.logger.error("Data quality monitoring failed", symbol=data.symbol, error=str(e))
             return 0.0, []
 
     @time_execution
@@ -202,14 +200,14 @@ class QualityMonitor:
                 self.monitoring_stats["drift_detected"] += len(drift_alerts)
 
             if quality_score < self.quality_thresholds["fair"]:
-                logger.warning(
+                self.logger.warning(
                     "Low signal quality detected",
                     signal_count=len(signals),
                     avg_confidence=avg_confidence,
                     quality_score=quality_score,
                 )
             else:
-                logger.debug(
+                self.logger.debug(
                     "Signal quality monitoring passed",
                     signal_count=len(signals),
                     quality_score=quality_score,
@@ -218,7 +216,7 @@ class QualityMonitor:
             return quality_score, drift_alerts
 
         except Exception as e:
-            logger.error("Signal quality monitoring failed", error=str(e))
+            self.logger.error("Signal quality monitoring failed", error=str(e))
             return 0.0, []
 
     @time_execution
@@ -304,11 +302,11 @@ class QualityMonitor:
             # Generate recommendations
             report["recommendations"] = await self._generate_recommendations(report)
 
-            logger.info("Quality report generated", report_summary=report)
+            self.logger.info("Quality report generated", report_summary=report)
             return report
 
         except Exception as e:
-            logger.error("Quality report generation failed", error=str(e))
+            self.logger.error("Quality report generation failed", error=str(e))
             return {
                 "timestamp": datetime.now(timezone.utc),
                 "error": str(e),
@@ -584,7 +582,7 @@ class QualityMonitor:
             return min(1.0, drift_score)
 
         except Exception as e:
-            logger.warning("Distribution drift calculation failed", error=str(e))
+            self.logger.warning("Distribution drift calculation failed", error=str(e))
             return 0.0
 
     async def _generate_recommendations(self, report: dict[str, Any]) -> list[str]:

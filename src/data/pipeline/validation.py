@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.core.config import Config
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import MarketData, ValidationLevel
@@ -29,9 +28,6 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
-
 
 # ValidationLevel is now imported from core.types
 
@@ -59,6 +55,7 @@ class PipelineValidator:
 
     def __init__(self, config: Config):
         """Initialize pipeline validator."""
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.error_handler = ErrorHandler(config)
 
@@ -71,7 +68,7 @@ class PipelineValidator:
             "last_validation_time": None,
         }
 
-        logger.info("PipelineValidator initialized")
+        self.logger.info("PipelineValidator initialized")
 
     @time_execution
     async def validate_pipeline_data(
@@ -111,7 +108,7 @@ class PipelineValidator:
             return is_valid, issues
 
         except Exception as e:
-            logger.error(f"Pipeline validation failed: {e!s}")
+            self.logger.error(f"Pipeline validation failed: {e!s}")
             self.stats["failed_validations"] += 1
 
             issue = PipelineValidationIssue(

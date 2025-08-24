@@ -16,54 +16,64 @@ from optuna.pruners import MedianPruner, SuccessiveHalvingPruner
 from optuna.samplers import TPESampler
 from sklearn.model_selection import cross_val_score
 
-from src.core.config import Config
+from src.core.base.service import BaseService
 from src.core.exceptions import ModelError, ValidationError
-from src.core.logging import get_logger
+from src.core.types.base import ConfigDict
 from src.ml.models.base_model import BaseModel
-from src.utils.decorators import log_calls, time_execution
+from src.utils.decorators import UnifiedDecorator
 
-logger = get_logger(__name__)
+# Initialize decorator instance
+dec = UnifiedDecorator()
 
 
-class HyperparameterOptimizer:
+class HyperparameterOptimizationService(BaseService):
     """
-    Hyperparameter optimization using Optuna.
+    Hyperparameter optimization service using Optuna.
 
-    This class provides comprehensive hyperparameter optimization capabilities
+    This service provides comprehensive hyperparameter optimization capabilities
     including study management, pruning, parallel execution, and result analysis.
 
     Attributes:
-        config: Application configuration
         studies: Dictionary of active studies
         optimization_history: History of optimization runs
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
         """
-        Initialize the hyperparameter optimizer.
+        Initialize the hyperparameter optimization service.
 
         Args:
-            config: Application configuration
+            config: Service configuration
+            correlation_id: Request correlation ID
         """
-        self.config = config
+        super().__init__(
+            name="HyperparameterOptimizationService",
+            config=config,
+            correlation_id=correlation_id,
+        )
+
+        # Service state
         self.studies: dict[str, optuna.Study] = {}
         self.optimization_history: list[dict[str, Any]] = []
 
-        # Configuration from ML config
-        self.n_trials = config.ml.optuna_n_trials
-        self.timeout_hours = config.ml.optuna_timeout_hours
-        self.pruning_enabled = config.ml.optuna_pruning_enabled
+        # Configuration with defaults
+        ml_config = self._config.get("ml", {})
+        self.n_trials = ml_config.get("optuna_n_trials", 100)
+        self.timeout_hours = ml_config.get("optuna_timeout_hours", 24)
+        self.pruning_enabled = ml_config.get("optuna_pruning_enabled", True)
 
-        logger.info(
-            "Hyperparameter optimizer initialized",
+        # Dependencies that will be resolved during startup
+        self.add_dependency("ModelFactory")
+
+        self._logger.info(
+            "Hyperparameter optimization service initialized",
             n_trials=self.n_trials,
             timeout_hours=self.timeout_hours,
             pruning_enabled=self.pruning_enabled,
         )
 
-    @time_execution
-    @log_calls
-    def optimize_model(
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def optimize_model(
         self,
         model_class: type,
         X_train: pd.DataFrame,
@@ -123,7 +133,7 @@ class HyperparameterOptimizer:
                 timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
                 study_name = f"{model_class.__name__}_{timestamp}"
 
-            logger.info(
+            self._logger.info(
                 "Starting hyperparameter optimization",
                 model_class=model_class.__name__,
                 study_name=study_name,
@@ -184,7 +194,7 @@ class HyperparameterOptimizer:
             self.studies[study_name] = study
             self.optimization_history.append(optimization_result)
 
-            logger.info(
+            self._logger.info(
                 "Hyperparameter optimization completed",
                 study_name=study_name,
                 best_value=best_value,
@@ -195,16 +205,15 @@ class HyperparameterOptimizer:
             return optimization_result
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Hyperparameter optimization failed",
                 model_class=model_class.__name__ if model_class else "unknown",
                 error=str(e),
             )
-            raise ModelError(f"Hyperparameter optimization failed: {e}") from e
+            raise ModelError(f"Hyperparameter optimization failed: {e}")
 
-    @time_execution
-    @log_calls
-    def multi_model_optimization(
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def multi_model_optimization(
         self,
         model_classes: list[type],
         X_train: pd.DataFrame,
@@ -233,7 +242,7 @@ class HyperparameterOptimizer:
 
         for i, model_class in enumerate(model_classes):
             try:
-                logger.info(
+                self._logger.info(
                     f"Optimizing model {i + 1}/{len(model_classes)}",
                     model_class=model_class.__name__,
                 )
@@ -244,7 +253,7 @@ class HyperparameterOptimizer:
                     param_space = parameter_spaces[model_class.__name__]
 
                 # Optimize model
-                result = self.optimize_model(
+                result = await self.optimize_model(
                     model_class,
                     X_train,
                     y_train,
@@ -257,7 +266,7 @@ class HyperparameterOptimizer:
                 results.append(result)
 
             except Exception as e:
-                logger.error(f"Failed to optimize {model_class.__name__}", error=str(e))
+                self._logger.error(f"Failed to optimize {model_class.__name__}", error=str(e))
                 results.append(
                     {"model_class": model_class.__name__, "error": str(e), "success": False}
                 )
@@ -267,7 +276,7 @@ class HyperparameterOptimizer:
         if successful_results:
             successful_results.sort(key=lambda x: x.get("best_value", float("-inf")), reverse=True)
 
-        logger.info(
+        self._logger.info(
             "Multi-model optimization completed",
             total_models=len(model_classes),
             successful_models=len(successful_results),
@@ -352,7 +361,8 @@ class HyperparameterOptimizer:
                         )
 
                 # Create model with sampled parameters
-                model = model_class(self.config, **params)
+                model_factory = self.resolve_dependency("ModelFactory")
+                model = model_factory.create_model(model_class.__name__, **params)
 
                 # Evaluate model
                 if X_val is not None and y_val is not None:
@@ -426,7 +436,7 @@ class HyperparameterOptimizer:
             except optuna.TrialPruned:
                 raise
             except Exception as e:
-                logger.warning(f"Trial failed: {e}")
+                self._logger.warning(f"Trial failed: {e}")
                 # Return worst possible score
                 return float("-inf") if trial.study.direction.name == "MAXIMIZE" else float("inf")
 
@@ -483,7 +493,8 @@ class HyperparameterOptimizer:
     ) -> BaseModel:
         """Create and train model with optimized parameters."""
         # Create model with best parameters
-        model = model_class(self.config, **best_params)
+        model_factory = self.resolve_dependency("ModelFactory")
+        model = model_factory.create_model(model_class.__name__, **best_params)
 
         # Train model
         if X_val is not None and y_val is not None:
@@ -527,7 +538,7 @@ class HyperparameterOptimizer:
             return plt.gcf()
 
         except ImportError:
-            logger.warning("Matplotlib not available for plotting")
+            self._logger.warning("Matplotlib not available for plotting")
             return None
 
     def plot_param_importances(self, study_name: str) -> Any | None:
@@ -548,15 +559,35 @@ class HyperparameterOptimizer:
             return plt.gcf()
 
         except ImportError:
-            logger.warning("Matplotlib not available for plotting")
+            self._logger.warning("Matplotlib not available for plotting")
             return None
 
     def get_optimization_history(self) -> list[dict[str, Any]]:
         """Get complete optimization history."""
         return self.optimization_history.copy()
 
+    async def _do_start(self) -> None:
+        """Start the service and resolve dependencies."""
+        await super()._do_start()
+        self._logger.info("Hyperparameter optimization service started successfully")
+
+    async def _do_stop(self) -> None:
+        """Stop the service and cleanup resources."""
+        await super()._do_stop()
+        self._logger.info("Hyperparameter optimization service stopped")
+
+    async def _service_health_check(self) -> "HealthStatus":
+        """Check service-specific health."""
+        from src.core.base.interfaces import HealthStatus
+
+        # Check if we have reasonable optimization history size
+        if len(self.optimization_history) > 1000:  # Too many entries might indicate memory issues
+            return HealthStatus.DEGRADED
+
+        return HealthStatus.HEALTHY
+
     def clear_studies(self) -> None:
         """Clear all studies and history."""
         self.studies.clear()
         self.optimization_history.clear()
-        logger.info("All studies and optimization history cleared")
+        self._logger.info("All studies and optimization history cleared")

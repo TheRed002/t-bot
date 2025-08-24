@@ -15,8 +15,7 @@ from typing import Any
 import numpy as np
 
 # From P-001 - Use structured logging
-from src.core.logging import get_logger
-
+# Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
 from src.core.types import (
     MarketData,
@@ -33,8 +32,6 @@ from src.strategies.base import BaseStrategy
 # From P-007A - Use decorators and validators
 from src.utils.decorators import time_execution
 from src.utils.helpers import calculate_atr, calculate_zscore
-
-logger = get_logger(__name__)
 
 
 class MeanReversionStrategy(BaseStrategy):
@@ -78,7 +75,7 @@ class MeanReversionStrategy(BaseStrategy):
         self.high_history: list[float] = []
         self.low_history: list[float] = []
 
-        logger.info(
+        self.logger.info(
             "Mean Reversion Strategy initialized",
             strategy=self.name,
             lookback_period=self.lookback_period,
@@ -101,13 +98,13 @@ class MeanReversionStrategy(BaseStrategy):
         try:
             # MANDATORY: Input validation
             if not data or not data.price:
-                logger.warning("Invalid market data received", strategy=self.name)
+                self.logger.warning("Invalid market data received", strategy=self.name)
                 return []
 
             # Validate price data
             price = float(data.price)
             if price <= 0:
-                logger.warning("Invalid price value", strategy=self.name, price=price)
+                self.logger.warning("Invalid price value", strategy=self.name, price=price)
                 return []
 
             # Update price history
@@ -115,7 +112,7 @@ class MeanReversionStrategy(BaseStrategy):
 
             # Check if we have enough data for calculations
             if len(self.price_history) < self.lookback_period:
-                logger.debug(
+                self.logger.debug(
                     "Insufficient price history for signal generation",
                     strategy=self.name,
                     current_length=len(self.price_history),
@@ -130,7 +127,9 @@ class MeanReversionStrategy(BaseStrategy):
 
             # Check volume filter if enabled
             if self.volume_filter and not self._check_volume_filter(data):
-                logger.debug("Volume filter rejected signal", strategy=self.name, z_score=z_score)
+                self.logger.debug(
+                    "Volume filter rejected signal", strategy=self.name, z_score=z_score
+                )
                 return []
 
             # Generate signals based on Z-score
@@ -157,7 +156,7 @@ class MeanReversionStrategy(BaseStrategy):
 
                 if await self.validate_signal(signal):
                     signals.append(signal)
-                    logger.info(
+                    self.logger.info(
                         "Mean reversion entry signal generated",
                         strategy=self.name,
                         symbol=data.symbol,
@@ -189,7 +188,7 @@ class MeanReversionStrategy(BaseStrategy):
 
                     if await self.validate_signal(signal):
                         signals.append(signal)
-                        logger.info(
+                        self.logger.info(
                             "Mean reversion exit signal generated",
                             strategy=self.name,
                             symbol=data.symbol,
@@ -201,7 +200,7 @@ class MeanReversionStrategy(BaseStrategy):
             return signals
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Signal generation failed",
                 strategy=self.name,
                 error=str(e),
@@ -247,12 +246,12 @@ class MeanReversionStrategy(BaseStrategy):
             z_score = calculate_zscore(self.price_history, self.lookback_period)
 
             # TODO: Remove in production - Debug logging
-            logger.debug(f"Z-score calculation result: {z_score}")
+            self.logger.debug(f"Z-score calculation result: {z_score}")
 
             return z_score
 
         except Exception as e:
-            logger.error("Z-score calculation failed", strategy=self.name, error=str(e))
+            self.logger.error("Z-score calculation failed", strategy=self.name, error=str(e))
             return None
 
     def _check_volume_filter(self, data: MarketData) -> bool:
@@ -284,7 +283,7 @@ class MeanReversionStrategy(BaseStrategy):
             return volume_ratio >= self.min_volume_ratio
 
         except Exception as e:
-            logger.error("Volume filter check failed", strategy=self.name, error=str(e))
+            self.logger.error("Volume filter check failed", strategy=self.name, error=str(e))
             return True  # Pass on error
 
     async def validate_signal(self, signal: Signal) -> bool:
@@ -301,7 +300,7 @@ class MeanReversionStrategy(BaseStrategy):
         try:
             # Basic signal validation
             if not signal or signal.confidence < self.config.min_confidence:
-                logger.debug(
+                self.logger.debug(
                     "Signal confidence below threshold",
                     strategy=self.name,
                     confidence=signal.confidence if signal else 0,
@@ -311,18 +310,18 @@ class MeanReversionStrategy(BaseStrategy):
 
             # Check if signal is too old (more than 5 minutes)
             if datetime.now(signal.timestamp.tzinfo) - signal.timestamp > timedelta(minutes=5):
-                logger.debug("Signal too old", strategy=self.name, signal_age_minutes=5)
+                self.logger.debug("Signal too old", strategy=self.name, signal_age_minutes=5)
                 return False
 
             # Validate signal metadata
             metadata = signal.metadata
             if "z_score" not in metadata:
-                logger.warning("Missing z_score in signal metadata", strategy=self.name)
+                self.logger.warning("Missing z_score in signal metadata", strategy=self.name)
                 return False
 
             z_score = metadata.get("z_score")
             if not isinstance(z_score, int | float):
-                logger.warning(
+                self.logger.warning(
                     "Invalid z_score type", strategy=self.name, z_score_type=type(z_score)
                 )
                 return False
@@ -330,7 +329,7 @@ class MeanReversionStrategy(BaseStrategy):
             # Additional validation for entry signals
             if metadata.get("signal_type") == "entry":
                 if abs(z_score) < self.entry_threshold:
-                    logger.debug(
+                    self.logger.debug(
                         "Entry signal z_score below threshold",
                         strategy=self.name,
                         z_score=z_score,
@@ -341,7 +340,7 @@ class MeanReversionStrategy(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error("Signal validation failed", strategy=self.name, error=str(e))
+            self.logger.error("Signal validation failed", strategy=self.name, error=str(e))
             return False
 
     def get_position_size(self, signal: Signal) -> Decimal:
@@ -375,7 +374,7 @@ class MeanReversionStrategy(BaseStrategy):
             max_size = Decimal(str(self.config.parameters.get("max_position_size_pct", 0.1)))
             position_size = min(position_size, max_size)
 
-            logger.debug(
+            self.logger.debug(
                 "Position size calculated",
                 strategy=self.name,
                 base_size=float(base_size),
@@ -387,7 +386,7 @@ class MeanReversionStrategy(BaseStrategy):
             return position_size
 
         except Exception as e:
-            logger.error("Position size calculation failed", strategy=self.name, error=str(e))
+            self.logger.error("Position size calculation failed", strategy=self.name, error=str(e))
             # Return minimum position size on error
             return Decimal(str(self.config.position_size_pct * 0.5))
 
@@ -413,7 +412,7 @@ class MeanReversionStrategy(BaseStrategy):
 
             # Exit if Z-score is within exit threshold
             if abs(z_score) <= self.exit_threshold:
-                logger.info(
+                self.logger.info(
                     "Exit signal triggered by Z-score",
                     strategy=self.name,
                     symbol=position.symbol,
@@ -439,7 +438,7 @@ class MeanReversionStrategy(BaseStrategy):
                     atr = calculate_atr(high_data, low_data, close_data, period=self.atr_period)
 
                     # TODO: Remove in production - Debug logging
-                    logger.debug(
+                    self.logger.debug(
                         f"ATR calculation result: {atr}, high_history_len: {len(self.high_history)}, "
                         f"low_history_len: {len(self.low_history)}, price_history_len: {len(self.price_history)}"
                     )
@@ -456,7 +455,7 @@ class MeanReversionStrategy(BaseStrategy):
                         if position.side.value == "buy":
                             stop_price = entry_price - stop_distance
                             if current_price <= stop_price:
-                                logger.info(
+                                self.logger.info(
                                     "Stop loss triggered",
                                     strategy=self.name,
                                     symbol=position.symbol,
@@ -468,7 +467,7 @@ class MeanReversionStrategy(BaseStrategy):
                         else:  # sell position
                             stop_price = entry_price + stop_distance
                             if current_price >= stop_price:
-                                logger.info(
+                                self.logger.info(
                                     "Stop loss triggered",
                                     strategy=self.name,
                                     symbol=position.symbol,
@@ -478,12 +477,12 @@ class MeanReversionStrategy(BaseStrategy):
                                 )
                                 return True
                 except Exception as e:
-                    logger.error("ATR calculation failed", strategy=self.name, error=str(e))
+                    self.logger.error("ATR calculation failed", strategy=self.name, error=str(e))
 
             return False
 
         except Exception as e:
-            logger.error("Exit check failed", strategy=self.name, error=str(e))
+            self.logger.error("Exit check failed", strategy=self.name, error=str(e))
             return False
 
     def get_strategy_info(self) -> dict[str, Any]:

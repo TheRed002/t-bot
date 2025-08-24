@@ -6,21 +6,25 @@ including database connectivity, exchange connections, ML models, and more.
 """
 
 import asyncio
+import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import text
 
+from src.base import BaseComponent
 from src.core.config import Config
-from src.core.logging import get_logger
-from src.database.connection import DatabaseConnectionManager
-from src.database.redis_client import RedisClient
+from src.database import RedisClient, get_async_session
 from src.exchanges.factory import ExchangeFactory
 
+# Module level logger
+logger = logging.getLogger(__name__)
 
-class ConnectionHealthMonitor:
+
+class ConnectionHealthMonitor(BaseComponent):
     """Mock connection health monitor for exchanges."""
 
     def __init__(self, exchange):
@@ -30,8 +34,6 @@ class ConnectionHealthMonitor:
         """Get health status for the exchange connection."""
         return {"status": "healthy", "latency_ms": 50, "rate_limit_remaining": 1000}
 
-
-logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -61,6 +63,30 @@ class ComponentHealth(BaseModel):
 _startup_time = time.time()
 
 
+def get_config_dependency() -> Config:
+    """
+    FastAPI dependency to get application configuration.
+
+    Returns:
+        Config: Application configuration instance
+    """
+    try:
+        from src.core.dependency_injection import get_container
+
+        config_service = get_container().get("ConfigService")
+        # Create legacy Config object from ConfigService
+        config = Config()
+        config.database = config_service.get_database_config()
+        config.exchange = config_service.get_exchange_config()
+        config.risk = config_service.get_risk_config()
+        return config
+    except (KeyError, AttributeError, ImportError):
+        # Final fallback to legacy method
+        from src.core.config import get_config
+
+        return get_config()
+
+
 async def check_database_health(config: Config) -> ComponentHealth:
     """
     Check database connectivity and health.
@@ -74,17 +100,18 @@ async def check_database_health(config: Config) -> ComponentHealth:
     start_time = time.time()
 
     try:
-        db_manager = DatabaseConnectionManager(config)
-
-        # Test basic connectivity
-        async with db_manager.get_connection() as conn:
-            result = await conn.fetchval("SELECT 1")
-
-            if result != 1:
+        # Test basic connectivity using async session
+        async for session in get_async_session():
+            # Simple query to test connection
+            result = await session.execute(text("SELECT 1"))
+            if result.scalar() != 1:
                 raise Exception("Database query returned unexpected result")
 
-        # Test connection pool health
-        pool_status = await db_manager.get_pool_status()
+            # Get pool status from session info
+            pool = session.bind.pool if hasattr(session.bind, "pool") else None
+            pool_size = pool.size() if pool else 0
+            pool_checked_out = pool.checked_out() if pool else 0
+            pool_overflow = pool.overflow() if pool else 0
 
         response_time = (time.time() - start_time) * 1000
 
@@ -94,9 +121,9 @@ async def check_database_health(config: Config) -> ComponentHealth:
             response_time_ms=response_time,
             last_check=datetime.now(timezone.utc),
             metadata={
-                "pool_size": pool_status.get("size", 0),
-                "pool_used": pool_status.get("used", 0),
-                "pool_free": pool_status.get("free", 0),
+                "pool_size": pool_size,
+                "pool_used": pool_checked_out,
+                "pool_overflow": pool_overflow,
             },
         )
 
@@ -126,9 +153,12 @@ async def check_redis_health(config: Config) -> ComponentHealth:
 
     try:
         redis_client = RedisClient(config)
+        await redis_client.connect()
 
         # Test basic connectivity
-        await redis_client.ping()
+        is_connected = await redis_client.ping()
+        if not is_connected:
+            raise Exception("Redis ping failed")
 
         # Test read/write operations
         test_key = "health_check_test"
@@ -145,6 +175,9 @@ async def check_redis_health(config: Config) -> ComponentHealth:
 
         response_time = (time.time() - start_time) * 1000
 
+        # Disconnect Redis client
+        await redis_client.disconnect()
+
         return ComponentHealth(
             status="healthy",
             message="Redis connection successful",
@@ -160,6 +193,13 @@ async def check_redis_health(config: Config) -> ComponentHealth:
     except Exception as e:
         response_time = (time.time() - start_time) * 1000
         logger.error(f"Redis health check failed: {e}")
+
+        # Try to disconnect Redis client if it was connected
+        try:
+            if "redis_client" in locals():
+                await redis_client.disconnect()
+        except Exception:
+            pass  # Ignore disconnect errors
 
         return ComponentHealth(
             status="unhealthy",
@@ -313,18 +353,12 @@ async def basic_health_check():
 
 
 @router.get("/health/detailed", response_model=HealthStatus)
-async def detailed_health_check(config: Config = None):
+async def detailed_health_check(config: Config = Depends(get_config_dependency)):
     """
     Detailed health check endpoint.
 
     Performs comprehensive health checks on all system components.
     """
-    if config is None:
-        # Fallback config for testing
-        from src.core.config import load_config
-
-        config = load_config()
-
     start_time = time.time()
     uptime = start_time - _startup_time
 

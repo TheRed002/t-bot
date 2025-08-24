@@ -1,449 +1,586 @@
 """
-Strategy factory for dynamic strategy instantiation and management.
+Strategy Factory - Dependency injection and strategy instantiation.
 
-This module provides the factory pattern for creating and managing strategy instances.
-It supports dynamic strategy creation, hot-swapping, and resource management.
+This module provides:
+- Strategy creation with dependency injection
+- Configuration validation
+- Service integration
+- Strategy registry management
 """
 
-import asyncio
-import importlib
 from typing import Any
 
-from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
-
-# MANDATORY: Import from P-001
-from src.core.types import StrategyStatus
-
-# MANDATORY: Import from P-003+
-from src.exchanges.base import BaseExchange
-
-# MANDATORY: Import from P-008+
-from src.risk_management.base import BaseRiskManager
-
-# MANDATORY: Import from P-011
-from src.strategies.base import BaseStrategy
-from src.strategies.dynamic.adaptive_momentum import AdaptiveMomentumStrategy
-from src.strategies.dynamic.volatility_breakout import VolatilityBreakoutStrategy
-from src.strategies.static.arbitrage_scanner import ArbitrageOpportunity
-from src.strategies.static.breakout import BreakoutStrategy
-
-# MANDATORY: Import from P-013 - Dynamic strategies
-from src.strategies.static.mean_reversion import MeanReversionStrategy
-from src.strategies.static.trend_following import TrendFollowingStrategy
-
-# MANDATORY: Import from P-007A
+from src.core.exceptions import StrategyError, ValidationError
+from src.core.types import StrategyConfig, StrategyType
+from src.error_handling import (
+    ErrorHandler,
+    ErrorSeverity,
+    get_global_error_handler,
+    with_error_context,
+    with_retry,
+)
+from src.strategies.interfaces import BaseStrategyInterface, StrategyFactoryInterface
+from src.strategies.service import StrategyService
+from src.strategies.validation import ValidationFramework
 from src.utils.decorators import time_execution
-from src.utils.validators import validate_strategy_config
-
-logger = get_logger(__name__)
 
 
-class StrategyFactory:
-    """Factory for creating and managing strategy instances."""
+class StrategyFactory(StrategyFactoryInterface):
+    """
+    Factory for creating strategies with proper dependency injection.
 
-    def __init__(self):
-        """Initialize strategy factory."""
-        self._strategies: dict[str, BaseStrategy] = {}
-        self._strategy_classes: dict[str, type[BaseStrategy]] = {}
-        self._risk_manager: BaseRiskManager | None = None
-        self._exchange: BaseExchange | None = None
+    Features:
+    - Dependency injection for all strategy dependencies
+    - Configuration validation before creation
+    - Service integration
+    - Strategy type validation
+    """
 
-        # Register built-in strategy classes
+    def __init__(
+        self,
+        strategy_service: StrategyService,
+        validation_framework: ValidationFramework | None = None,
+    ):
+        """
+        Initialize strategy factory.
+
+        Args:
+            strategy_service: Strategy service for dependency resolution
+            validation_framework: Optional validation framework
+        """
+        self._strategy_service = strategy_service
+        self._validation_framework = validation_framework
+        self._error_handler: ErrorHandler = get_global_error_handler()
+
+        # Registry of strategy types to their implementation classes
+        self._strategy_registry: dict[StrategyType, type] = {}
+
+        # Initialize built-in strategies
         self._register_builtin_strategies()
 
-        logger.info("Strategy factory initialized")
-
     def _register_builtin_strategies(self) -> None:
-        """Register built-in strategy classes."""
-        # Static strategies
-        self._register_strategy_class("mean_reversion", MeanReversionStrategy)
-        self._register_strategy_class("trend_following", TrendFollowingStrategy)
-        self._register_strategy_class("breakout", BreakoutStrategy)
-        self._register_strategy_class("arbitrage", ArbitrageOpportunity)
+        """Register built-in strategy types."""
+        try:
+            # Import dynamic strategies
+            from src.strategies.dynamic.adaptive_momentum import AdaptiveMomentumStrategy
+            from src.strategies.dynamic.volatility_breakout import VolatilityBreakoutStrategy
 
-        # Dynamic strategies (P-013)
-        self._register_strategy_class("adaptive_momentum", AdaptiveMomentumStrategy)
-        self._register_strategy_class("volatility_breakout", VolatilityBreakoutStrategy)
+            # Register dynamic strategy types
+            self._strategy_registry[StrategyType.MOMENTUM] = AdaptiveMomentumStrategy
+            self._strategy_registry[StrategyType.VOLATILITY_BREAKOUT] = VolatilityBreakoutStrategy
 
-        logger.info("Built-in strategies registered", static_count=4, dynamic_count=2)
+            # Import and register static strategies
+            try:
+                from src.strategies.static.arbitrage_scanner import ArbitrageOpportunity
 
-    def _register_strategy_class(self, name: str, strategy_class: type[BaseStrategy]) -> None:
-        """Register a strategy class.
+                self._strategy_registry[StrategyType.ARBITRAGE] = ArbitrageOpportunity
+            except ImportError:
+                pass
+
+            try:
+                from src.strategies.static.mean_reversion import MeanReversionStrategy
+
+                self._strategy_registry[StrategyType.MEAN_REVERSION] = MeanReversionStrategy
+            except ImportError:
+                pass
+
+            try:
+                from src.strategies.static.trend_following import TrendFollowingStrategy
+
+                self._strategy_registry[StrategyType.TREND_FOLLOWING] = TrendFollowingStrategy
+            except ImportError:
+                pass
+
+            try:
+                from src.strategies.static.market_making import MarketMakingStrategy
+
+                self._strategy_registry[StrategyType.MARKET_MAKING] = MarketMakingStrategy
+            except ImportError:
+                pass
+
+            try:
+                from src.strategies.static.breakout import BreakoutStrategy
+
+                self._strategy_registry[StrategyType.BREAKOUT] = BreakoutStrategy
+            except ImportError:
+                pass
+
+            try:
+                from src.strategies.static.cross_exchange_arbitrage import (
+                    CrossExchangeArbitrageStrategy,
+                )
+
+                self._strategy_registry[StrategyType.CROSS_EXCHANGE_ARBITRAGE] = (
+                    CrossExchangeArbitrageStrategy
+                )
+            except ImportError:
+                pass
+
+            try:
+                from src.strategies.static.triangular_arbitrage import TriangularArbitrageStrategy
+
+                self._strategy_registry[StrategyType.TRIANGULAR_ARBITRAGE] = (
+                    TriangularArbitrageStrategy
+                )
+            except ImportError:
+                pass
+
+            # Import and register hybrid strategies
+            try:
+                from src.strategies.hybrid.ensemble import EnsembleStrategy
+
+                self._strategy_registry[StrategyType.ENSEMBLE] = EnsembleStrategy
+            except ImportError:
+                pass
+
+            try:
+                from src.strategies.hybrid.fallback import FallbackStrategy
+
+                self._strategy_registry[StrategyType.FALLBACK] = FallbackStrategy
+            except ImportError:
+                pass
+
+            try:
+                from src.strategies.hybrid.rule_based_ai import RuleBasedAIStrategy
+
+                self._strategy_registry[StrategyType.RULE_BASED_AI] = RuleBasedAIStrategy
+            except ImportError:
+                pass
+
+        except ImportError:
+            # Log warning but don't fail - strategies will be registered manually
+            pass
+
+    def register_strategy_type(self, strategy_type: StrategyType, strategy_class: type) -> None:
+        """
+        Register a strategy type with its implementation class.
 
         Args:
-            name: Strategy name
-            strategy_class: Strategy class to register
+            strategy_type: Strategy type enum
+            strategy_class: Strategy implementation class
+
+        Raises:
+            StrategyError: If strategy type is already registered
         """
-        if not issubclass(strategy_class, BaseStrategy):
-            raise ValidationError(
-                f"Strategy class must inherit from BaseStrategy: {strategy_class}"
+        if strategy_type in self._strategy_registry:
+            raise StrategyError(f"Strategy type {strategy_type} already registered")
+
+        # Validate that class implements BaseStrategyInterface
+        if not issubclass(strategy_class, BaseStrategyInterface):
+            raise StrategyError(
+                f"Strategy class {strategy_class.__name__} must implement BaseStrategyInterface"
             )
 
-        self._strategy_classes[name] = strategy_class
-        logger.info("Strategy class registered", name=name, class_name=strategy_class.__name__)
+        self._strategy_registry[strategy_type] = strategy_class
 
     @time_execution
-    def create_strategy(self, strategy_name: str, config: dict[str, Any]) -> BaseStrategy:
-        """Create a strategy instance.
+    @with_error_context(operation="create_strategy")
+    @with_retry(max_attempts=3, base_delay=1.0)
+    async def create_strategy(
+        self, strategy_type: StrategyType, config: StrategyConfig
+    ) -> BaseStrategyInterface:
+        """
+        Create a strategy instance with full dependency injection.
 
         Args:
-            strategy_name: Name of the strategy to create
+            strategy_type: Type of strategy to create
             config: Strategy configuration
 
         Returns:
-            Strategy instance
+            Fully configured strategy instance
 
         Raises:
-            ValidationError: If strategy creation fails
+            StrategyError: If strategy creation fails
+            ValidationError: If configuration is invalid
         """
-        try:
-            # Validate configuration
-            validate_strategy_config(config)
-
-            # Get strategy class
-            strategy_class = self._get_strategy_class(strategy_name)
-            if not strategy_class:
-                raise ValidationError(f"Unknown strategy: {strategy_name}")
-
-            # Create strategy instance
-            strategy = strategy_class(config)
-
-            # Set dependencies if available
-            if self._risk_manager:
-                strategy.set_risk_manager(self._risk_manager)
-
-            if self._exchange:
-                strategy.set_exchange(self._exchange)
-
-            # Store strategy instance
-            self._strategies[strategy_name] = strategy
-
-            logger.info(
-                "Strategy created successfully",
-                name=strategy_name,
-                class_name=strategy_class.__name__,
+        # Validate strategy type is supported
+        if strategy_type not in self._strategy_registry:
+            raise StrategyError(
+                f"Unsupported strategy type: {strategy_type}. "
+                f"Supported types: {list(self._strategy_registry.keys())}"
             )
+
+        # Validate configuration
+        if not self.validate_strategy_requirements(strategy_type, config):
+            raise ValidationError(f"Invalid configuration for strategy type {strategy_type}")
+
+        # Get strategy class
+        strategy_class = self._strategy_registry[strategy_type]
+
+        try:
+            # Create strategy instance
+            strategy = strategy_class(config.model_dump())
+
+            # Inject dependencies
+            await self._inject_dependencies(strategy, config)
+
+            # Set validation framework if available
+            if self._validation_framework:
+                strategy.set_validation_framework(self._validation_framework)
+
+            # Initialize strategy
+            await strategy.initialize(config)
 
             return strategy
 
         except Exception as e:
-            logger.error("Strategy creation failed", strategy_name=strategy_name, error=str(e))
-            raise ValidationError(f"Strategy creation failed: {e!s}")
-
-    def _get_strategy_class(self, strategy_name: str) -> type[BaseStrategy] | None:
-        """Get strategy class by name.
-
-        Args:
-            strategy_name: Name of the strategy
-
-        Returns:
-            Strategy class or None if not found
-        """
-        # First check if already registered
-        if strategy_name in self._strategy_classes:
-            return self._strategy_classes[strategy_name]
-
-        # Try dynamic import from static strategies
-        try:
-            module = importlib.import_module(f"src.strategies.static.{strategy_name}")
-            strategy_class = getattr(
-                module, f"{strategy_name.title().replace('_', '')}Strategy", None
+            await self._error_handler.handle_error(
+                error=e,
+                context={
+                    "strategy_type": strategy_type.value,
+                    "config": config.model_dump(),
+                    "operation": "create_strategy",
+                },
+                severity=ErrorSeverity.CRITICAL,
             )
-            if strategy_class and issubclass(strategy_class, BaseStrategy):
-                return strategy_class
-        except (ImportError, AttributeError):
-            pass
+            raise StrategyError(f"Failed to create strategy {strategy_type}: {e!s}")
 
-        # Try dynamic import from dynamic strategies
+    async def _inject_dependencies(
+        self, strategy: BaseStrategyInterface, config: StrategyConfig
+    ) -> None:
+        """
+        Inject all required dependencies into strategy.
+
+        Args:
+            strategy: Strategy instance to inject into
+            config: Strategy configuration
+        """
         try:
-            module = importlib.import_module(f"src.strategies.dynamic.{strategy_name}")
-            strategy_class = getattr(
-                module, f"{strategy_name.title().replace('_', '')}Strategy", None
+            # Inject risk manager if required
+            if config.requires_risk_manager:
+                risk_manager = self._strategy_service.resolve_dependency("RiskManager")
+                strategy.set_risk_manager(risk_manager)
+
+            # Inject exchange if required
+            if config.requires_exchange:
+                exchange_factory = self._strategy_service.resolve_dependency("ExchangeFactory")
+                exchange = await exchange_factory.get_exchange(config.exchange_type)
+                strategy.set_exchange(exchange)
+
+            # Inject data service
+            try:
+                data_service = self._strategy_service.resolve_dependency("DataService")
+                strategy.set_data_service(data_service)
+            except Exception:
+                # Data service is optional for some strategies
+                pass
+
+        except Exception as e:
+            await self._error_handler.handle_error(
+                error=e,
+                context={
+                    "strategy": strategy.__class__.__name__,
+                    "config": config.model_dump(),
+                    "operation": "inject_dependencies",
+                },
+                severity=ErrorSeverity.HIGH,
             )
-            if strategy_class and issubclass(strategy_class, BaseStrategy):
-                return strategy_class
-        except (ImportError, AttributeError):
-            pass
+            raise StrategyError(f"Failed to inject dependencies: {e!s}")
 
-        return None
-
-    @time_execution
-    async def start_strategy(self, strategy_name: str) -> bool:
-        """Start a strategy.
-
-        Args:
-            strategy_name: Name of the strategy to start
+    def get_supported_strategies(self) -> list[StrategyType]:
+        """
+        Get list of supported strategy types.
 
         Returns:
-            True if strategy started successfully, False otherwise
+            List of supported strategy types
+        """
+        return list(self._strategy_registry.keys())
+
+    def validate_strategy_requirements(
+        self, strategy_type: StrategyType, config: StrategyConfig
+    ) -> bool:
+        """
+        Validate strategy requirements and configuration.
+
+        Args:
+            strategy_type: Strategy type to validate
+            config: Strategy configuration
+
+        Returns:
+            True if requirements are met
         """
         try:
-            strategy = self.get_strategy(strategy_name)
-            if not strategy:
-                logger.error("Strategy not found", strategy_name=strategy_name)
+            # Check if strategy type is supported
+            if strategy_type not in self._strategy_registry:
                 return False
 
-            # Start strategy
-            await strategy.start()
+            # Validate basic configuration
+            if not config.name or not config.strategy_id:
+                return False
 
-            logger.info("Strategy started successfully", strategy_name=strategy_name)
-            return True
+            # Validate strategy-specific requirements
+            return self._validate_strategy_specific_requirements(strategy_type, config)
 
-        except Exception as e:
-            logger.error("Strategy start failed", strategy_name=strategy_name, error=str(e))
+        except Exception:
             return False
 
-    @time_execution
-    async def stop_strategy(self, strategy_name: str) -> bool:
-        """Stop a strategy.
+    def _validate_strategy_specific_requirements(
+        self, strategy_type: StrategyType, config: StrategyConfig
+    ) -> bool:
+        """
+        Validate strategy-specific requirements.
 
         Args:
-            strategy_name: Name of the strategy to stop
+            strategy_type: Strategy type
+            config: Strategy configuration
 
         Returns:
-            True if strategy stopped successfully, False otherwise
+            True if strategy-specific requirements are met
         """
-        try:
-            strategy = self.get_strategy(strategy_name)
-            if not strategy:
-                logger.error("Strategy not found", strategy_name=strategy_name)
+        # Get required parameters for each strategy type
+        required_params = self._get_required_parameters(strategy_type)
+
+        # Check if all required parameters are present
+        for param in required_params:
+            if param not in config.parameters:
                 return False
 
-            # Stop strategy
-            await strategy.stop()
+        # Strategy-specific validation logic
+        if strategy_type == StrategyType.MOMENTUM:
+            return self._validate_momentum_strategy_config(config)
+        elif strategy_type == StrategyType.MEAN_REVERSION:
+            return self._validate_mean_reversion_strategy_config(config)
+        elif strategy_type == StrategyType.ARBITRAGE:
+            return self._validate_arbitrage_strategy_config(config)
+        elif strategy_type == StrategyType.VOLATILITY_BREAKOUT:
+            return self._validate_volatility_strategy_config(config)
 
-            logger.info("Strategy stopped successfully", strategy_name=strategy_name)
-            return True
+        return True
 
-        except Exception as e:
-            logger.error("Strategy stop failed", strategy_name=strategy_name, error=str(e))
-            return False
-
-    @time_execution
-    async def restart_strategy(self, strategy_name: str) -> bool:
-        """Restart a strategy.
+    def _get_required_parameters(self, strategy_type: StrategyType) -> list[str]:
+        """
+        Get required parameters for a strategy type.
 
         Args:
-            strategy_name: Name of the strategy to restart
+            strategy_type: Strategy type
 
         Returns:
-            True if strategy restarted successfully, False otherwise
+            List of required parameter names
         """
-        try:
-            # Stop strategy
-            if not await self.stop_strategy(strategy_name):
-                return False
-
-            # Wait a moment for cleanup
-            await asyncio.sleep(1)
-
-            # Start strategy
-            if not await self.start_strategy(strategy_name):
-                return False
-
-            logger.info("Strategy restarted successfully", strategy_name=strategy_name)
-            return True
-
-        except Exception as e:
-            logger.error("Strategy restart failed", strategy_name=strategy_name, error=str(e))
-            return False
-
-    def get_strategy(self, strategy_name: str) -> BaseStrategy | None:
-        """Get strategy instance by name.
-
-        Args:
-            strategy_name: Name of the strategy
-
-        Returns:
-            Strategy instance or None if not found
-        """
-        return self._strategies.get(strategy_name)
-
-    def get_all_strategies(self) -> dict[str, BaseStrategy]:
-        """Get all strategy instances.
-
-        Returns:
-            Dictionary of strategy instances
-        """
-        return self._strategies.copy()
-
-    def get_strategy_status(self, strategy_name: str) -> StrategyStatus | None:
-        """Get strategy status.
-
-        Args:
-            strategy_name: Name of the strategy
-
-        Returns:
-            Strategy status or None if not found
-        """
-        strategy = self.get_strategy(strategy_name)
-        return strategy.status if strategy else None
-
-    def get_strategy_performance(self, strategy_name: str) -> dict[str, Any] | None:
-        """Get strategy performance metrics.
-
-        Args:
-            strategy_name: Name of the strategy
-
-        Returns:
-            Performance metrics or None if not found
-        """
-        strategy = self.get_strategy(strategy_name)
-        return strategy.get_performance_summary() if strategy else None
-
-    def set_risk_manager(self, risk_manager: BaseRiskManager) -> None:
-        """Set risk manager for all strategies.
-
-        Args:
-            risk_manager: Risk manager instance
-        """
-        self._risk_manager = risk_manager
-
-        # Update existing strategies
-        for strategy in self._strategies.values():
-            strategy.set_risk_manager(risk_manager)
-
-        logger.info("Risk manager set for all strategies")
-
-    def set_exchange(self, exchange: BaseExchange) -> None:
-        """Set exchange for all strategies.
-
-        Args:
-            exchange: Exchange instance
-        """
-        self._exchange = exchange
-
-        # Update existing strategies
-        for strategy in self._strategies.values():
-            strategy.set_exchange(exchange)
-
-        logger.info("Exchange set for all strategies")
-
-    @time_execution
-    async def hot_swap_strategy(self, strategy_name: str, new_config: dict[str, Any]) -> bool:
-        """Hot-swap a strategy with new configuration.
-
-        Args:
-            strategy_name: Name of the strategy to swap
-            new_config: New configuration
-
-        Returns:
-            True if swap successful, False otherwise
-        """
-        try:
-            # Validate new configuration
-            validate_strategy_config(new_config)
-
-            # Get current strategy
-            current_strategy = self.get_strategy(strategy_name)
-            if not current_strategy:
-                logger.error("Strategy not found for hot swap", strategy_name=strategy_name)
-                return False
-
-            # Update the existing strategy's configuration
-            current_strategy.update_config(new_config)
-
-            logger.info(
-                "Strategy hot-swapped successfully",
-                strategy_name=strategy_name,
-                class_name=current_strategy.__class__.__name__,
-            )
-
-            return True
-
-        except Exception as e:
-            logger.error("Strategy hot-swap failed", strategy_name=strategy_name, error=str(e))
-            return False
-
-    def remove_strategy(self, strategy_name: str) -> bool:
-        """Remove a strategy.
-
-        Args:
-            strategy_name: Name of the strategy to remove
-
-        Returns:
-            True if strategy removed successfully, False otherwise
-        """
-        try:
-            if strategy_name not in self._strategies:
-                logger.warning("Strategy not found for removal", strategy_name=strategy_name)
-                return False
-
-            # Remove strategy instance
-            del self._strategies[strategy_name]
-
-            logger.info("Strategy removed successfully", strategy_name=strategy_name)
-            return True
-
-        except Exception as e:
-            logger.error("Strategy removal failed", strategy_name=strategy_name, error=str(e))
-            return False
-
-    @time_execution
-    async def shutdown_all_strategies(self) -> None:
-        """Shutdown all strategies."""
-        try:
-            shutdown_tasks = []
-
-            for strategy_name, strategy in self._strategies.items():
-                try:
-                    await strategy.stop()
-                    shutdown_tasks.append(strategy_name)
-                except Exception as e:
-                    logger.error(
-                        "Failed to shutdown strategy", strategy_name=strategy_name, error=str(e)
-                    )
-
-            # Clear all strategies
-            self._strategies.clear()
-
-            logger.info(
-                "All strategies shutdown",
-                shutdown_count=len(shutdown_tasks),
-                total_count=len(self._strategies),
-            )
-
-        except Exception as e:
-            logger.error("Strategy shutdown failed", error=str(e))
-
-    def get_strategy_summary(self) -> dict[str, Any]:
-        """Get summary of all strategies.
-
-        Returns:
-            Dictionary with strategy summary information
-        """
-        running_count = 0
-        stopped_count = 0
-        error_count = 0
-
-        for strategy in self._strategies.values():
-            if strategy.status == StrategyStatus.RUNNING:
-                running_count += 1
-            elif strategy.status == StrategyStatus.STOPPED:
-                stopped_count += 1
-            elif strategy.status == StrategyStatus.ERROR:
-                error_count += 1
-
-        summary = {
-            "total_strategies": len(self._strategies),
-            "running_strategies": running_count,
-            "stopped_strategies": stopped_count,
-            "error_strategies": error_count,
-            "strategies": {},
+        parameter_requirements = {
+            StrategyType.MOMENTUM: ["lookback_period", "momentum_threshold", "signal_strength"],
+            StrategyType.MEAN_REVERSION: [
+                "mean_period",
+                "deviation_threshold",
+                "reversion_strength",
+            ],
+            StrategyType.ARBITRAGE: ["exchanges", "min_profit_threshold", "max_exposure"],
+            StrategyType.VOLATILITY_BREAKOUT: [
+                "volatility_period",
+                "breakout_threshold",
+                "volume_confirmation",
+            ],
         }
 
-        for name, strategy in self._strategies.items():
-            strategy_info = {
-                "name": name,
-                "class": strategy.__class__.__name__,
-                "status": strategy.status.value,
-                "type": (
-                    strategy.config.strategy_type.value
-                    if hasattr(strategy.config, "strategy_type")
-                    else "unknown"
-                ),
-            }
-            summary["strategies"][name] = strategy_info
+        return parameter_requirements.get(strategy_type, [])
 
-        return summary
+    def _validate_momentum_strategy_config(self, config: StrategyConfig) -> bool:
+        """Validate momentum strategy specific configuration."""
+        params = config.parameters
+
+        # Validate lookback period
+        lookback = params.get("lookback_period", 0)
+        if not isinstance(lookback, int) or lookback < 5 or lookback > 200:
+            return False
+
+        # Validate momentum threshold
+        threshold = params.get("momentum_threshold", 0)
+        if not isinstance(threshold, int | float) or threshold < 0 or threshold > 1:
+            return False
+
+        return True
+
+    def _validate_mean_reversion_strategy_config(self, config: StrategyConfig) -> bool:
+        """Validate mean reversion strategy specific configuration."""
+        params = config.parameters
+
+        # Validate mean period
+        mean_period = params.get("mean_period", 0)
+        if not isinstance(mean_period, int) or mean_period < 10 or mean_period > 200:
+            return False
+
+        # Validate deviation threshold
+        deviation = params.get("deviation_threshold", 0)
+        if not isinstance(deviation, int | float) or deviation < 0.5 or deviation > 5.0:
+            return False
+
+        return True
+
+    def _validate_arbitrage_strategy_config(self, config: StrategyConfig) -> bool:
+        """Validate arbitrage strategy specific configuration."""
+        params = config.parameters
+
+        # Validate exchanges list
+        exchanges = params.get("exchanges", [])
+        if not isinstance(exchanges, list) or len(exchanges) < 2:
+            return False
+
+        # Validate profit threshold
+        profit_threshold = params.get("min_profit_threshold", 0)
+        if not isinstance(profit_threshold, int | float) or profit_threshold <= 0:
+            return False
+
+        return True
+
+    def _validate_volatility_strategy_config(self, config: StrategyConfig) -> bool:
+        """Validate volatility breakout strategy specific configuration."""
+        params = config.parameters
+
+        # Validate volatility period
+        vol_period = params.get("volatility_period", 0)
+        if not isinstance(vol_period, int) or vol_period < 5 or vol_period > 100:
+            return False
+
+        # Validate breakout threshold
+        breakout_threshold = params.get("breakout_threshold", 0)
+        if not isinstance(breakout_threshold, int | float) or breakout_threshold < 1.0:
+            return False
+
+        return True
+
+    async def create_strategy_with_validation(
+        self,
+        strategy_type: StrategyType,
+        config: StrategyConfig,
+        validate_dependencies: bool = True,
+    ) -> BaseStrategyInterface:
+        """
+        Create strategy with comprehensive validation.
+
+        Args:
+            strategy_type: Strategy type to create
+            config: Strategy configuration
+            validate_dependencies: Whether to validate dependency availability
+
+        Returns:
+            Validated strategy instance
+
+        Raises:
+            StrategyError: If creation or validation fails
+        """
+        # Validate configuration using validation framework
+        if self._validation_framework:
+            validation_result = await self._validation_framework.validate_strategy_config(config)
+            if not validation_result.is_valid:
+                raise ValidationError(
+                    f"Strategy configuration validation failed: {validation_result.errors}"
+                )
+
+        # Validate dependency availability if requested
+        if validate_dependencies:
+            if not await self._validate_dependency_availability(config):
+                raise StrategyError("Required dependencies are not available")
+
+        # Create strategy
+        strategy = await self.create_strategy(strategy_type, config)
+
+        # Final validation of created strategy
+        if not await self._validate_created_strategy(strategy):
+            raise StrategyError("Created strategy failed final validation")
+
+        return strategy
+
+    async def _validate_dependency_availability(self, config: StrategyConfig) -> bool:
+        """
+        Validate that all required dependencies are available.
+
+        Args:
+            config: Strategy configuration
+
+        Returns:
+            True if all dependencies are available
+        """
+        try:
+            if config.requires_risk_manager:
+                self._strategy_service.resolve_dependency("RiskManager")
+
+            if config.requires_exchange:
+                exchange_factory = self._strategy_service.resolve_dependency("ExchangeFactory")
+                if not exchange_factory.is_exchange_supported(config.exchange_type):
+                    return False
+
+            return True
+
+        except Exception:
+            return False
+
+    async def _validate_created_strategy(self, strategy: BaseStrategyInterface) -> bool:
+        """
+        Validate a created strategy instance.
+
+        Args:
+            strategy: Strategy instance to validate
+
+        Returns:
+            True if strategy is valid
+        """
+        try:
+            # Check that strategy has required properties
+            if not hasattr(strategy, "name") or not strategy.name:
+                return False
+
+            if not hasattr(strategy, "strategy_type"):
+                return False
+
+            if not hasattr(strategy, "status"):
+                return False
+
+            # Check that required methods are callable
+            required_methods = [
+                "generate_signals",
+                "validate_signal",
+                "get_position_size",
+                "should_exit",
+                "start",
+                "stop",
+                "initialize",
+            ]
+
+            for method_name in required_methods:
+                if not hasattr(strategy, method_name):
+                    return False
+                if not callable(getattr(strategy, method_name)):
+                    return False
+
+            return True
+
+        except Exception:
+            return False
+
+    def get_strategy_info(self, strategy_type: StrategyType) -> dict[str, Any]:
+        """
+        Get information about a strategy type.
+
+        Args:
+            strategy_type: Strategy type to get info for
+
+        Returns:
+            Strategy information dictionary
+        """
+        if strategy_type not in self._strategy_registry:
+            return {}
+
+        strategy_class = self._strategy_registry[strategy_type]
+        required_params = self._get_required_parameters(strategy_type)
+
+        return {
+            "strategy_type": strategy_type.value,
+            "class_name": strategy_class.__name__,
+            "module": strategy_class.__module__,
+            "required_parameters": required_params,
+            "supports_backtesting": True,  # All strategies support backtesting
+            "requires_risk_manager": True,
+            "requires_exchange": True,
+        }
+
+    def list_available_strategies(self) -> dict[str, Any]:
+        """
+        List all available strategies with their information.
+
+        Returns:
+            Dictionary mapping strategy types to their information
+        """
+        return {
+            strategy_type.value: self.get_strategy_info(strategy_type)
+            for strategy_type in self.get_supported_strategies()
+        }

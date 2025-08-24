@@ -399,7 +399,7 @@ class DatabaseSeeder:
 
             for i in range(10):
                 trade_time = base_time + timedelta(hours=i * 12)
-                is_profitable = i % 3 != 0  # 70% profitable trades
+                i % 3 != 0  # 70% profitable trades
 
                 trade = Trade(
                     id=str(uuid.uuid4()),
@@ -497,8 +497,6 @@ async def run_seed(config: Config | None = None) -> None:
 
 def main():
     """Main entry point for standalone execution."""
-    from src.core.config import Config
-
     config = Config()
     asyncio.run(run_seed(config))
 

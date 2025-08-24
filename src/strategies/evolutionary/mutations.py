@@ -12,8 +12,6 @@ import numpy as np
 
 from src.core.logging import get_logger
 
-logger = get_logger(__name__)
-
 
 class MutationOperator:
     """

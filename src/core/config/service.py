@@ -786,6 +786,23 @@ class ConfigService:
         if self._config is not None:
             return self._config.to_dict()
         return None
+    
+    def get_config_dict(self) -> dict[str, Any]:
+        """Get the currently loaded configuration as dictionary.
+        
+        This is an alias for get_loaded_config() for compatibility.
+        Returns empty dict if config is not loaded.
+        """
+        loaded = self.get_loaded_config()
+        return loaded if loaded is not None else {}
+    
+    def get_config(self) -> dict[str, Any]:
+        """Get the currently loaded configuration as dictionary.
+        
+        This is an alias for get_config_dict() for compatibility.
+        Returns empty dict if config is not loaded.
+        """
+        return self.get_config_dict()
 
 
 # Singleton instance for backward compatibility

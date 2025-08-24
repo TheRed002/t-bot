@@ -94,8 +94,30 @@ except ImportError:
     AsyncPGInstrumentor = RedisInstrumentor = SQLAlchemyInstrumentor = None
     get_excluded_urls = SpanAttributes = None
 
-from src.core.exceptions import MonitoringError
-from src.core.logging import get_logger
+try:
+    from src.core import MonitoringError, get_logger
+except ImportError:
+    # Fallback definitions
+    import logging
+
+    def get_logger(name: str):
+        """Fallback logger."""
+        return logging.getLogger(name)
+
+    class MonitoringError(Exception):
+        """Monitoring error fallback."""
+
+        def __init__(self, message: str, error_code: str = "MONITORING_000"):
+            super().__init__(message)
+            self.error_code = error_code
+
+
+from src.error_handling import (
+    ErrorContext,
+    get_global_error_handler,
+    with_error_context,
+    with_retry,
+)
 
 logger = get_logger(__name__)
 
@@ -151,7 +173,7 @@ class TradingTracer:
     attributes and metrics for financial analysis.
     """
 
-    def __init__(self, tracer: trace.Tracer):
+    def __init__(self, tracer):
         """
         Initialize trading tracer.
 
@@ -159,7 +181,7 @@ class TradingTracer:
             tracer: OpenTelemetry tracer instance
         """
         self._tracer = tracer
-        self._active_spans: dict[str, Span] = {}
+        self._active_spans: dict[str, Any] = {}
 
     @contextmanager
     def trace_order_execution(
@@ -274,9 +296,7 @@ class TradingTracer:
             span.set_attribute("operation.type", "market_data_processing")
             yield span
 
-    def add_trading_event(
-        self, span: Span, event_type: str, attributes: dict[str, Any] | None = None
-    ):
+    def add_trading_event(self, span, event_type: str, attributes: dict[str, Any] | None = None):
         """
         Add a trading-specific event to a span.
 
@@ -290,6 +310,8 @@ class TradingTracer:
         span.add_event(f"trading.{event_type}", event_attributes)
 
 
+@with_retry(max_attempts=3, backoff_factor=2.0, exceptions=(MonitoringError,))
+@with_error_context("telemetry_setup")
 def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
     """
     Setup OpenTelemetry instrumentation for the trading system.
@@ -304,6 +326,7 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
         MonitoringError: If telemetry setup fails
     """
     try:
+        error_handler = get_global_error_handler()
         # Create resource with service information
         resource_attributes = {
             "service.name": config.service_name,
@@ -339,6 +362,14 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
                     exporters.append(jaeger_exporter)
                     logger.info("Jaeger exporter configured")
                 except Exception as e:
+                    if error_handler:
+                        error_handler.handle_error_sync(
+                            e,
+                            ErrorContext(
+                                component="Telemetry",
+                                operation="configure_jaeger_exporter",
+                            ),
+                        )
                     logger.warning(f"Failed to configure Jaeger exporter: {e}")
 
             # OTLP exporter
@@ -348,6 +379,14 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
                     exporters.append(otlp_exporter)
                     logger.info("OTLP exporter configured")
                 except Exception as e:
+                    if error_handler:
+                        error_handler.handle_error_sync(
+                            e,
+                            ErrorContext(
+                                component="Telemetry",
+                                operation="configure_otlp_exporter",
+                            ),
+                        )
                     logger.warning(f"Failed to configure OTLP exporter: {e}")
 
             # Console exporter (for debugging)
@@ -383,7 +422,18 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
         return trading_tracer
 
     except Exception as e:
-        raise MonitoringError(f"Failed to setup OpenTelemetry: {e}")
+        if error_handler:
+            error_handler.handle_error_sync(
+                e,
+                ErrorContext(
+                    component="Telemetry",
+                    operation="setup_telemetry",
+                    service_name=config.service_name,
+                ),
+            )
+        raise MonitoringError(
+            f"Failed to setup OpenTelemetry: {e}", error_code="MONITORING_003"
+        ) from e
 
 
 def _setup_auto_instrumentation(config: OpenTelemetryConfig) -> None:

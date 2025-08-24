@@ -1,10 +1,12 @@
 """Dependency injection system to break circular dependencies."""
 
+from __future__ import annotations
+
 import inspect
 from collections.abc import Callable
 from functools import wraps
 from threading import Lock
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from src.core.exceptions import ComponentError, DependencyError
 from src.core.logging import get_logger
@@ -78,7 +80,7 @@ class DependencyContainer:
             Service instance
 
         Raises:
-            KeyError: If service not found
+            DependencyError: If service not found or instantiation fails
         """
         with self._lock:
             # Check if it's a direct service
@@ -137,23 +139,23 @@ class DependencyInjector:
     This eliminates circular dependencies and manual wiring.
     """
 
-    _instance: Optional["DependencyInjector"] = None
+    _instance: DependencyInjector | None = None
     _lock = Lock()
 
-    def __new__(cls):
-        """Singleton pattern."""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
+    def __new__(cls) -> DependencyInjector:
+        """Singleton pattern with proper thread safety."""
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self):
         """Initialize dependency injector."""
-        if not hasattr(self, "_initialized"):
-            self._container = DependencyContainer()
-            self._logger = logger
-            self._initialized = True
+        with self._lock:
+            if not hasattr(self, "_initialized"):
+                self._container = DependencyContainer()
+                self._logger = logger
+                self._initialized = True
 
     def register(self, name: str | None = None, singleton: bool = False):
         """
@@ -320,11 +322,15 @@ class DependencyInjector:
         self._container.clear()
 
     @classmethod
-    def get_instance(cls) -> "DependencyInjector":
+    def get_instance(cls) -> DependencyInjector:
         """Get singleton instance."""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
+
+    def get_container(self) -> DependencyContainer:
+        """Get the dependency container."""
+        return self._container
 
 
 # Global injector instance
@@ -373,4 +379,4 @@ services = ServiceLocator(injector)
 
 def get_container() -> DependencyContainer:
     """Get the global dependency container."""
-    return injector._container
+    return injector.get_container()

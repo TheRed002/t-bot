@@ -15,14 +15,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.core.config import Config
-
-# MANDATORY: Import from P-001 core framework
 from src.core.logging import get_logger
 
+# MANDATORY: Import from P-001 core framework
 # MANDATORY: Import from P-007A utils framework
 from src.utils.decorators import retry, time_execution
-
-logger = get_logger(__name__)
+from src.utils.decimal_utils import to_decimal
 
 
 @dataclass
@@ -41,8 +39,14 @@ class StateMonitor:
 
     def __init__(self, config: Config):
         self.config = config
-        self.state_monitoring_config = config.error_handling
-        self.validation_frequency = self.state_monitoring_config.state_validation_frequency
+        self.logger = get_logger(self.__class__.__module__)
+        # Create default state monitoring config if not present
+        self.state_monitoring_config = getattr(config, "error_handling", {
+            "state_validation_frequency": 60,
+            "max_state_drift_tolerance": 0.01,
+            "state_history_retention_days": 7
+        })
+        self.validation_frequency = self.state_monitoring_config.get("state_validation_frequency", 60)
         self.consistency_checks = [
             "portfolio_balance_sync",
             "position_quantity_sync",
@@ -50,8 +54,8 @@ class StateMonitor:
             "risk_limit_compliance",
         ]
         self.reconciliation_config = self.state_monitoring_config
-        self.auto_reconcile = self.reconciliation_config.auto_reconciliation_enabled
-        self.max_discrepancy = self.reconciliation_config.max_discrepancy_threshold
+        self.auto_reconcile = self.reconciliation_config.get("auto_reconciliation_enabled", True)
+        self.max_discrepancy = self.reconciliation_config.get("max_discrepancy_threshold", 0.01)
         self.force_sync_threshold = 0.05  # Default threshold
 
         # State tracking
@@ -64,7 +68,7 @@ class StateMonitor:
     async def validate_state_consistency(self, component: str = "all") -> StateValidationResult:
         """Validate state consistency for specified component or all components."""
 
-        logger.info("Starting state consistency validation", component=component)
+        self.logger.info("Starting state consistency validation", component=component)
 
         discrepancies = []
         is_consistent = True
@@ -81,7 +85,7 @@ class StateMonitor:
                         severity = max(severity, check_result["severity"])
 
                 except Exception as e:
-                    logger.error("State consistency check failed", check=check, error=str(e))
+                    self.logger.error("State consistency check failed", check=check, error=str(e))
                     is_consistent = False
                     discrepancies.append(
                         {"check": check, "error": str(e), "type": "validation_error"}
@@ -97,7 +101,9 @@ class StateMonitor:
                     severity = check_result["severity"]
 
             except Exception as e:
-                logger.error("Component state validation failed", component=component, error=str(e))
+                self.logger.error(
+                    "Component state validation failed", component=component, error=str(e)
+                )
                 is_consistent = False
                 discrepancies.append(
                     {"component": component, "error": str(e), "type": "validation_error"}
@@ -119,7 +125,7 @@ class StateMonitor:
         if len(self.state_history) > 1000:
             self.state_history = self.state_history[-1000:]
 
-        logger.info(
+        self.logger.info(
             "State consistency validation completed",
             component=component,
             is_consistent=is_consistent,
@@ -141,12 +147,12 @@ class StateMonitor:
         elif check_name == "risk_limit_compliance":
             return await self._check_risk_limit_compliance()
         else:
-            logger.warning("Unknown consistency check", check_name=check_name)
+            self.logger.warning("Unknown consistency check", check_name=check_name)
             return {"is_consistent": True, "discrepancies": [], "severity": "low"}
 
     async def _check_portfolio_balance_sync(self) -> dict[str, Any]:
         """Check if portfolio balances are synchronized across systems."""
-        from decimal import Decimal
+        # Using centralized decimal utilities from utils module
 
         from src.database.manager import DatabaseManager
         from src.database.redis_client import RedisClient
@@ -170,9 +176,9 @@ class StateMonitor:
                 for row in result:
                     key = f"{row.exchange}:{row.currency}"
                     db_balances[key] = {
-                        "available": Decimal(str(row.available)),
-                        "locked": Decimal(str(row.locked)),
-                        "total": Decimal(str(row.available)) + Decimal(str(row.locked)),
+                        "available": to_decimal(row.available),
+                        "locked": to_decimal(row.locked),
+                        "total": to_decimal(row.available) + to_decimal(row.locked),
                     }
 
             # Get balances from Redis cache
@@ -193,7 +199,7 @@ class StateMonitor:
             # Get balances from exchanges (if connected)
             exchange_balances = {}
             try:
-                for exchange_name in self.config.exchanges.keys():
+                for exchange_name in getattr(self.config, "exchange", {}).get("enabled_exchanges", []):
                     exchange = ExchangeFactory.create(exchange_name, self.config)
                     if hasattr(exchange, "get_account_balance"):
                         balance = await exchange.get_account_balance()
@@ -205,7 +211,7 @@ class StateMonitor:
                                 "total": Decimal(str(amounts.get("total", 0))),
                             }
             except Exception as e:
-                logger.warning(f"Could not fetch exchange balances: {e}")
+                self.logger.warning(f"Could not fetch exchange balances: {e}")
 
             # Compare balances across sources
             all_keys = (
@@ -260,7 +266,7 @@ class StateMonitor:
                                 "medium" if severity not in ["critical", "high"] else severity
                             )
 
-            logger.info(
+            self.logger.info(
                 f"Portfolio balance sync check completed. Found {len(discrepancies)} discrepancies"
             )
 
@@ -271,7 +277,7 @@ class StateMonitor:
             }
 
         except Exception as e:
-            logger.error("Portfolio balance sync check failed", error=str(e))
+            self.logger.error("Portfolio balance sync check failed", error=str(e))
             return {
                 "is_consistent": False,
                 "discrepancies": [{"error": str(e), "type": "balance_sync_error"}],
@@ -280,7 +286,7 @@ class StateMonitor:
 
     async def _check_position_quantity_sync(self) -> dict[str, Any]:
         """Check if position quantities are synchronized across systems."""
-        from decimal import Decimal
+        # Using centralized decimal utilities from utils module
 
         from src.database.manager import DatabaseManager
         from src.database.redis_client import RedisClient
@@ -327,7 +333,7 @@ class StateMonitor:
             # Get positions from exchanges (if connected)
             exchange_positions = {}
             try:
-                for exchange_name in self.config.exchanges.keys():
+                for exchange_name in getattr(self.config, "exchange", {}).get("enabled_exchanges", []):
                     exchange = ExchangeFactory.create(exchange_name, self.config)
                     if hasattr(exchange, "get_positions"):
                         positions = await exchange.get_positions()
@@ -338,7 +344,7 @@ class StateMonitor:
                                 "entry_price": Decimal(str(pos.entry_price)),
                             }
             except Exception as e:
-                logger.warning(f"Could not fetch exchange positions: {e}")
+                self.logger.warning(f"Could not fetch exchange positions: {e}")
 
             # Get positions from risk management system
             risk_positions = {}
@@ -350,7 +356,7 @@ class StateMonitor:
                         "entry_price": Decimal(str(pos_data.get("entry_price", 0))),
                     }
             except Exception as e:
-                logger.warning(f"Could not fetch risk positions: {e}")
+                self.logger.warning(f"Could not fetch risk positions: {e}")
 
             # Compare positions across sources
             all_keys = (
@@ -414,7 +420,7 @@ class StateMonitor:
                     elif qty_diff > Decimal("0.01"):
                         severity = "medium" if severity not in ["critical", "high"] else severity
 
-            logger.info(
+            self.logger.info(
                 f"Position quantity sync check completed. Found {len(discrepancies)} discrepancies"
             )
 
@@ -425,7 +431,7 @@ class StateMonitor:
             }
 
         except Exception as e:
-            logger.error("Position quantity sync check failed", error=str(e))
+            self.logger.error("Position quantity sync check failed", error=str(e))
             return {
                 "is_consistent": False,
                 "discrepancies": [{"error": str(e), "type": "position_sync_error"}],
@@ -451,7 +457,7 @@ class StateMonitor:
             # - Redis cache (P-002)
             # - Execution engine (P-020)
 
-            logger.info("Order status sync check completed")
+            self.logger.info("Order status sync check completed")
 
             return {
                 "is_consistent": is_consistent,
@@ -460,7 +466,7 @@ class StateMonitor:
             }
 
         except Exception as e:
-            logger.error("Order status sync check failed", error=str(e))
+            self.logger.error("Order status sync check failed", error=str(e))
             return {
                 "is_consistent": False,
                 "discrepancies": [{"error": str(e), "type": "order_sync_error"}],
@@ -469,7 +475,7 @@ class StateMonitor:
 
     async def _check_risk_limit_compliance(self) -> dict[str, Any]:
         """Check if risk limits are being complied with."""
-        from decimal import Decimal
+        # Using centralized decimal utilities from utils module
 
         from src.database.manager import DatabaseManager
         from src.risk_management.base import RiskManager
@@ -482,7 +488,7 @@ class StateMonitor:
 
             # Initialize risk management components
             risk_manager = RiskManager(self.config)
-            portfolio_limits = PortfolioLimits(self.config)
+            PortfolioLimits(self.config)
             db_manager = DatabaseManager(self.config)
 
             # Get current risk metrics
@@ -500,7 +506,7 @@ class StateMonitor:
                     position_value = Decimal(str(row.quantity)) * Decimal(
                         str(row.current_price or row.entry_price)
                     )
-                    max_position_size = Decimal(str(self.config.risk_management.max_position_size))
+                    max_position_size = Decimal(str(getattr(self.config, "risk", {}).get("max_position_size", 1000000)))
 
                     if position_value > max_position_size:
                         discrepancy = {
@@ -516,7 +522,7 @@ class StateMonitor:
 
             # Check portfolio exposure limits
             total_exposure = Decimal(str(risk_metrics.get("total_exposure", 0)))
-            max_exposure = Decimal(str(self.config.risk_management.max_portfolio_exposure))
+            max_exposure = Decimal(str(getattr(self.config, "risk", {}).get("max_portfolio_exposure", 100000)))
 
             if total_exposure > max_exposure:
                 discrepancy = {
@@ -531,7 +537,7 @@ class StateMonitor:
 
             # Check leverage limits
             current_leverage = Decimal(str(risk_metrics.get("current_leverage", 1)))
-            max_leverage = Decimal(str(self.config.risk_management.max_leverage))
+            max_leverage = Decimal(str(getattr(self.config, "risk", {}).get("max_leverage", 10)))
 
             if current_leverage > max_leverage:
                 discrepancy = {
@@ -547,7 +553,7 @@ class StateMonitor:
             # Check stop loss compliance
             async with db_manager.get_session() as session:
                 result = await session.execute(
-                    """SELECT COUNT(*) as count FROM positions 
+                    """SELECT COUNT(*) as count FROM positions
                        WHERE status = 'open' AND stop_loss_price IS NULL"""
                 )
                 positions_without_stop = result.scalar()
@@ -565,7 +571,7 @@ class StateMonitor:
 
             # Check maximum drawdown limits
             current_drawdown = Decimal(str(risk_metrics.get("current_drawdown", 0)))
-            max_drawdown = Decimal(str(self.config.risk_management.max_drawdown))
+            max_drawdown = Decimal(str(getattr(self.config, "risk", {}).get("max_drawdown", 0.20)))
 
             if abs(current_drawdown) > max_drawdown:
                 discrepancy = {
@@ -580,7 +586,7 @@ class StateMonitor:
 
             # Check daily loss limit
             daily_loss = Decimal(str(risk_metrics.get("daily_pnl", 0)))
-            max_daily_loss = Decimal(str(self.config.risk_management.max_daily_loss))
+            max_daily_loss = Decimal(str(getattr(self.config, "risk", {}).get("max_daily_loss", 1000)))
 
             if daily_loss < 0 and abs(daily_loss) > max_daily_loss:
                 discrepancy = {
@@ -595,7 +601,7 @@ class StateMonitor:
 
             # Check correlation limits
             correlation_risk = Decimal(str(risk_metrics.get("correlation_risk", 0)))
-            max_correlation = Decimal(str(self.config.risk_management.max_correlation_risk))
+            max_correlation = Decimal(str(getattr(self.config, "risk", {}).get("max_correlation_risk", 0.80)))
 
             if correlation_risk > max_correlation:
                 discrepancy = {
@@ -608,7 +614,7 @@ class StateMonitor:
                 if severity not in ["critical", "high"]:
                     severity = "medium"
 
-            logger.info(
+            self.logger.info(
                 f"Risk limit compliance check completed. Found {len(discrepancies)} violations"
             )
 
@@ -619,7 +625,7 @@ class StateMonitor:
             }
 
         except Exception as e:
-            logger.error("Risk limit compliance check failed", error=str(e))
+            self.logger.error("Risk limit compliance check failed", error=str(e))
             return {
                 "is_consistent": False,
                 "discrepancies": [{"error": str(e), "type": "risk_compliance_error"}],
@@ -629,21 +635,21 @@ class StateMonitor:
     async def reconcile_state(self, component: str, discrepancies: list[dict[str, Any]]) -> bool:
         """Attempt to reconcile state discrepancies."""
 
-        logger.info(
+        self.logger.info(
             "Attempting state reconciliation",
             component=component,
             discrepancy_count=len(discrepancies),
         )
 
         if not self.auto_reconcile:
-            logger.info("Auto-reconciliation disabled", component=component)
+            self.logger.info("Auto-reconciliation disabled", component=component)
             return False
 
         reconciliation_attempts = self.reconciliation_attempts.get(component, 0)
         max_attempts = 3
 
         if reconciliation_attempts >= max_attempts:
-            logger.warning(
+            self.logger.warning(
                 "Max reconciliation attempts reached",
                 component=component,
                 attempts=reconciliation_attempts,
@@ -662,25 +668,25 @@ class StateMonitor:
             elif component == "risk_limit_compliance":
                 success = await self._reconcile_risk_limits(discrepancies)
             else:
-                logger.warning("Unknown reconciliation component", component=component)
+                self.logger.warning("Unknown reconciliation component", component=component)
                 return False
 
             if success:
-                logger.info("State reconciliation successful", component=component)
+                self.logger.info("State reconciliation successful", component=component)
                 # Reset reconciliation attempts on success
                 self.reconciliation_attempts[component] = 0
             else:
-                logger.warning("State reconciliation failed", component=component)
+                self.logger.warning("State reconciliation failed", component=component)
 
             return success
 
         except Exception as e:
-            logger.error("State reconciliation error", component=component, error=str(e))
+            self.logger.error("State reconciliation error", component=component, error=str(e))
             return False
 
     async def _reconcile_portfolio_balances(self, discrepancies: list[dict[str, Any]]) -> bool:
         """Reconcile portfolio balance discrepancies."""
-        from decimal import Decimal
+        # Using centralized decimal utilities from utils module
 
         from src.database.influxdb_client import InfluxDBClientWrapper
         from src.database.manager import DatabaseManager
@@ -688,7 +694,7 @@ class StateMonitor:
         from src.exchanges.factory import ExchangeFactory
 
         try:
-            logger.info("Reconciling portfolio balances", discrepancy_count=len(discrepancies))
+            self.logger.info("Reconciling portfolio balances", discrepancy_count=len(discrepancies))
 
             db_manager = DatabaseManager(self.config)
             redis_client = RedisClient(self.config)
@@ -726,9 +732,9 @@ class StateMonitor:
                             # Update database
                             async with db_manager.get_session() as session:
                                 await session.execute(
-                                    """UPDATE balances 
-                                       SET available = :available, locked = :locked, 
-                                           updated_at = NOW() 
+                                    """UPDATE balances
+                                       SET available = :available, locked = :locked,
+                                           updated_at = NOW()
                                        WHERE exchange = :exchange AND currency = :currency""",
                                     {
                                         "available": float(true_balance["available"]),
@@ -764,13 +770,13 @@ class StateMonitor:
                             )
 
                             reconciled_count += 1
-                            logger.info(
+                            self.logger.info(
                                 f"Reconciled balance for {key}",
                                 true_balance=str(true_balance["total"]),
                             )
 
                 except Exception as e:
-                    logger.error(f"Failed to reconcile balance for {key}: {e}")
+                    self.logger.error(f"Failed to reconcile balance for {key}: {e}")
                     continue
 
             success = reconciled_count == len(
@@ -778,16 +784,18 @@ class StateMonitor:
             )
 
             if success:
-                logger.info(f"Successfully reconciled all {reconciled_count} balance discrepancies")
+                self.logger.info(
+                    f"Successfully reconciled all {reconciled_count} balance discrepancies"
+                )
             else:
-                logger.warning(
+                self.logger.warning(
                     f"Reconciled {reconciled_count} out of {len(discrepancies)} balance discrepancies"
                 )
 
             return success
 
         except Exception as e:
-            logger.error("Portfolio balance reconciliation failed", error=str(e))
+            self.logger.error("Portfolio balance reconciliation failed", error=str(e))
             return False
 
     async def _reconcile_position_quantities(self, discrepancies: list[dict[str, Any]]) -> bool:
@@ -799,7 +807,9 @@ class StateMonitor:
         from src.risk_management.base import RiskManager
 
         try:
-            logger.info("Reconciling position quantities", discrepancy_count=len(discrepancies))
+            self.logger.info(
+                "Reconciling position quantities", discrepancy_count=len(discrepancies)
+            )
 
             db_manager = DatabaseManager(self.config)
             redis_client = RedisClient(self.config)
@@ -839,13 +849,13 @@ class StateMonitor:
                             # Update database
                             async with db_manager.get_session() as session:
                                 await session.execute(
-                                    """UPDATE positions 
-                                       SET quantity = :quantity, 
+                                    """UPDATE positions
+                                       SET quantity = :quantity,
                                            current_price = :current_price,
-                                           updated_at = NOW() 
-                                       WHERE exchange = :exchange 
-                                         AND symbol = :symbol 
-                                         AND side = :side 
+                                           updated_at = NOW()
+                                       WHERE exchange = :exchange
+                                         AND symbol = :symbol
+                                         AND side = :side
                                          AND status = 'open'""",
                                     {
                                         "quantity": float(true_position.quantity),
@@ -880,7 +890,7 @@ class StateMonitor:
                             )
 
                             reconciled_count += 1
-                            logger.info(
+                            self.logger.info(
                                 f"Reconciled position for {key}",
                                 true_quantity=str(true_position.quantity),
                             )
@@ -888,12 +898,12 @@ class StateMonitor:
                             # Position closed on exchange, update local state
                             async with db_manager.get_session() as session:
                                 await session.execute(
-                                    """UPDATE positions 
-                                       SET status = 'closed', 
-                                           closed_at = NOW() 
-                                       WHERE exchange = :exchange 
-                                         AND symbol = :symbol 
-                                         AND side = :side 
+                                    """UPDATE positions
+                                       SET status = 'closed',
+                                           closed_at = NOW()
+                                       WHERE exchange = :exchange
+                                         AND symbol = :symbol
+                                         AND side = :side
                                          AND status = 'open'""",
                                     {"exchange": exchange_name, "symbol": symbol, "side": side},
                                 )
@@ -904,10 +914,10 @@ class StateMonitor:
                             await redis_client.delete(cache_key)
 
                             reconciled_count += 1
-                            logger.info(f"Marked position {key} as closed")
+                            self.logger.info(f"Marked position {key} as closed")
 
                 except Exception as e:
-                    logger.error(f"Failed to reconcile position for {key}: {e}")
+                    self.logger.error(f"Failed to reconcile position for {key}: {e}")
                     continue
 
             success = reconciled_count == len(
@@ -915,18 +925,18 @@ class StateMonitor:
             )
 
             if success:
-                logger.info(
+                self.logger.info(
                     f"Successfully reconciled all {reconciled_count} position discrepancies"
                 )
             else:
-                logger.warning(
+                self.logger.warning(
                     f"Reconciled {reconciled_count} out of {len(discrepancies)} position discrepancies"
                 )
 
             return success
 
         except Exception as e:
-            logger.error("Position quantity reconciliation failed", error=str(e))
+            self.logger.error("Position quantity reconciliation failed", error=str(e))
             return False
 
     async def _reconcile_order_statuses(self, discrepancies: list[dict[str, Any]]) -> bool:
@@ -937,7 +947,7 @@ class StateMonitor:
         from src.execution.order_manager import OrderManager
 
         try:
-            logger.info("Reconciling order statuses", discrepancy_count=len(discrepancies))
+            self.logger.info("Reconciling order statuses", discrepancy_count=len(discrepancies))
 
             db_manager = DatabaseManager(self.config)
             redis_client = RedisClient(self.config)
@@ -972,7 +982,7 @@ class StateMonitor:
                                 break
 
                 if not exchange_name:
-                    logger.warning(f"Could not determine exchange for order {order_id}")
+                    self.logger.warning(f"Could not determine exchange for order {order_id}")
                     continue
 
                 # Get truth from exchange
@@ -985,11 +995,11 @@ class StateMonitor:
                             # Update database
                             async with db_manager.get_session() as session:
                                 await session.execute(
-                                    """UPDATE orders 
-                                       SET status = :status, 
+                                    """UPDATE orders
+                                       SET status = :status,
                                            filled_quantity = :filled,
                                            remaining_quantity = :remaining,
-                                           updated_at = NOW() 
+                                           updated_at = NOW()
                                        WHERE order_id = :order_id""",
                                     {
                                         "status": true_order.status,
@@ -1025,7 +1035,7 @@ class StateMonitor:
                             )
 
                             reconciled_count += 1
-                            logger.info(
+                            self.logger.info(
                                 f"Reconciled order {order_id}",
                                 true_status=true_order.status,
                                 filled=str(true_order.filled_quantity),
@@ -1034,10 +1044,10 @@ class StateMonitor:
                             # Order not found on exchange, mark as cancelled/expired
                             async with db_manager.get_session() as session:
                                 await session.execute(
-                                    """UPDATE orders 
-                                       SET status = 'cancelled', 
-                                           updated_at = NOW() 
-                                       WHERE order_id = :order_id 
+                                    """UPDATE orders
+                                       SET status = 'cancelled',
+                                           updated_at = NOW()
+                                       WHERE order_id = :order_id
                                          AND status IN ('new', 'open', 'partially_filled')""",
                                     {"order_id": order_id},
                                 )
@@ -1051,10 +1061,10 @@ class StateMonitor:
                                 await redis_client.set(cache_key, cached, expiry=300)
 
                             reconciled_count += 1
-                            logger.info(f"Marked order {order_id} as cancelled")
+                            self.logger.info(f"Marked order {order_id} as cancelled")
 
                 except Exception as e:
-                    logger.error(f"Failed to reconcile order {order_id}: {e}")
+                    self.logger.error(f"Failed to reconcile order {order_id}: {e}")
                     continue
 
             relevant_discrepancies = [
@@ -1065,21 +1075,23 @@ class StateMonitor:
             success = reconciled_count == len(relevant_discrepancies)
 
             if success:
-                logger.info(f"Successfully reconciled all {reconciled_count} order discrepancies")
+                self.logger.info(
+                    f"Successfully reconciled all {reconciled_count} order discrepancies"
+                )
             else:
-                logger.warning(
+                self.logger.warning(
                     f"Reconciled {reconciled_count} out of {len(relevant_discrepancies)} order discrepancies"
                 )
 
             return success
 
         except Exception as e:
-            logger.error("Order status reconciliation failed", error=str(e))
+            self.logger.error("Order status reconciliation failed", error=str(e))
             return False
 
     async def _reconcile_risk_limits(self, discrepancies: list[dict[str, Any]]) -> bool:
         """Reconcile risk limit compliance issues."""
-        from decimal import Decimal
+        # Using centralized decimal utilities from utils module
 
         from src.database.manager import DatabaseManager
         from src.execution.order_manager import OrderManager
@@ -1087,7 +1099,7 @@ class StateMonitor:
         from src.risk_management.emergency_controls import EmergencyControls
 
         try:
-            logger.info("Reconciling risk limits", discrepancy_count=len(discrepancies))
+            self.logger.info("Reconciling risk limits", discrepancy_count=len(discrepancies))
 
             risk_manager = RiskManager(self.config)
             emergency_controls = EmergencyControls(self.config)
@@ -1154,8 +1166,8 @@ class StateMonitor:
                         async with db_manager.get_session() as session:
                             # Get positions without stop loss
                             result = await session.execute(
-                                """SELECT position_id, symbol, entry_price, side 
-                                   FROM positions 
+                                """SELECT position_id, symbol, entry_price, side
+                                   FROM positions
                                    WHERE status = 'open' AND stop_loss_price IS NULL"""
                             )
 
@@ -1171,8 +1183,8 @@ class StateMonitor:
 
                                 # Update position with stop loss
                                 await session.execute(
-                                    """UPDATE positions 
-                                       SET stop_loss_price = :stop_loss 
+                                    """UPDATE positions
+                                       SET stop_loss_price = :stop_loss
                                        WHERE position_id = :position_id""",
                                     {
                                         "stop_loss": float(stop_loss_price),
@@ -1218,12 +1230,12 @@ class StateMonitor:
                         reconciled_count += 1
 
                 except Exception as e:
-                    logger.error(f"Failed to reconcile {discrepancy_type}: {e}")
+                    self.logger.error(f"Failed to reconcile {discrepancy_type}: {e}")
                     continue
 
             # Log all critical actions
             if critical_actions_taken:
-                logger.critical(
+                self.logger.critical(
                     "Risk limit reconciliation actions taken", actions=critical_actions_taken
                 )
 
@@ -1236,22 +1248,24 @@ class StateMonitor:
             success = reconciled_count == len(discrepancies)
 
             if success:
-                logger.info(f"Successfully reconciled all {reconciled_count} risk limit violations")
+                self.logger.info(
+                    f"Successfully reconciled all {reconciled_count} risk limit violations"
+                )
             else:
-                logger.warning(
+                self.logger.warning(
                     f"Reconciled {reconciled_count} out of {len(discrepancies)} risk limit violations"
                 )
 
             return success
 
         except Exception as e:
-            logger.error("Risk limit reconciliation failed", error=str(e))
+            self.logger.error("Risk limit reconciliation failed", error=str(e))
             return False
 
     async def start_monitoring(self):
         """Start continuous state monitoring."""
 
-        logger.info("Starting state monitoring")
+        self.logger.info("Starting state monitoring")
 
         while True:
             try:
@@ -1259,7 +1273,7 @@ class StateMonitor:
                 result = await self.validate_state_consistency("all")
 
                 if not result.is_consistent:
-                    logger.warning(
+                    self.logger.warning(
                         "State inconsistency detected",
                         discrepancy_count=len(result.discrepancies),
                         severity=result.severity,
@@ -1276,7 +1290,7 @@ class StateMonitor:
                 await asyncio.sleep(self.validation_frequency)
 
             except Exception as e:
-                logger.error("State monitoring error", error=str(e))
+                self.logger.error("State monitoring error", error=str(e))
                 await asyncio.sleep(self.validation_frequency)
 
     def get_state_summary(self) -> dict[str, Any]:

@@ -6,27 +6,31 @@ import logging
 import time
 import traceback
 from collections.abc import Callable
-from datetime import datetime, timedelta
-from typing import Any, TypeVar
+from datetime import datetime, timedelta, timezone
+from typing import Any, ClassVar, ParamSpec, TypeVar, cast
 
-from src.base import BaseComponent
-from src.utils.validation import validator
+# Note: Validation should be done via dependency injection, not global import
 
+# Define proper type variables
+P = ParamSpec("P")
+T = TypeVar("T")
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-class UnifiedDecorator(BaseComponent):
+class UnifiedDecorator:
     """
     Single configurable decorator replacing multiple decorators.
     Provides retry, validation, logging, caching, and monitoring capabilities.
     """
 
     # Class-level cache storage
-    _cache: dict[str, dict[str, Any]] = {}
-    _cache_timestamps: dict[str, datetime] = {}
+    _cache: ClassVar[dict[str, Any]] = {}
+    _cache_timestamps: ClassVar[dict[str, datetime]] = {}
 
     @classmethod
-    def _get_cache_key(cls, func: Callable, args: tuple, kwargs: dict) -> str:
+    def _get_cache_key(
+        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> str:
         """Generate cache key from function and arguments."""
         func_name = f"{func.__module__}.{func.__name__}"
         # Create hashable key from args and kwargs
@@ -36,20 +40,27 @@ class UnifiedDecorator(BaseComponent):
 
     @classmethod
     def _cache_result(
-        cls, func: Callable, args: tuple, kwargs: dict, result: Any, ttl: int
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        result: Any,
+        ttl: int,
     ) -> None:
         """Cache function result with TTL."""
         key = cls._get_cache_key(func, args, kwargs)
         cls._cache[key] = result
-        cls._cache_timestamps[key] = datetime.utcnow() + timedelta(seconds=ttl)
+        cls._cache_timestamps[key] = datetime.now(timezone.utc) + timedelta(seconds=ttl)
 
     @classmethod
-    def _get_cached_result(cls, func: Callable, args: tuple, kwargs: dict) -> Any | None:
+    def _get_cached_result(
+        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Any | None:
         """Get cached result if still valid."""
         key = cls._get_cache_key(func, args, kwargs)
 
         if key in cls._cache:
-            if datetime.utcnow() < cls._cache_timestamps.get(key, datetime.min):
+            if datetime.now(timezone.utc) < cls._cache_timestamps.get(key, datetime.min):
                 return cls._cache[key]
             else:
                 # Cache expired, remove it
@@ -61,9 +72,9 @@ class UnifiedDecorator(BaseComponent):
     @classmethod
     async def _with_retry(
         cls,
-        func: Callable,
-        args: tuple,
-        kwargs: dict,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
         retry_times: int,
         retry_delay: float,
         logger: Any | None = None,
@@ -87,10 +98,13 @@ class UnifiedDecorator(BaseComponent):
                 if attempt < retry_times - 1:
                     await asyncio.sleep(retry_delay * (2**attempt))  # Exponential backoff
 
-        raise last_exception
+        if last_exception:
+            raise last_exception
+        else:
+            raise RuntimeError(f"Failed to execute {func.__name__} after {retry_times} attempts")
 
     @classmethod
-    def _record_metrics(cls, func: Callable, result: Any, execution_time: float) -> None:
+    def _record_metrics(cls, func: Callable[..., Any], result: Any, execution_time: float) -> None:
         """Record execution metrics (placeholder for actual metrics system)."""
         # This would integrate with your metrics system
         # For now, just log it using the base logger
@@ -98,7 +112,9 @@ class UnifiedDecorator(BaseComponent):
         base_logger.debug(f"Metrics: {func.__name__} completed in {execution_time:.3f}s")
 
     @classmethod
-    def _validate_args(cls, func: Callable, args: tuple, kwargs: dict) -> None:
+    def _validate_args(
+        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> None:
         """Validate function arguments based on annotations."""
         # Get function signature
         import inspect
@@ -110,22 +126,33 @@ class UnifiedDecorator(BaseComponent):
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
         except TypeError as e:
-            raise ValueError(f"Invalid arguments for {func.__name__}: {e}")
+            raise ValueError(f"Invalid arguments for {func.__name__}: {e}") from e
 
         # Validate based on type hints
         for param_name, param in sig.parameters.items():
             if param.annotation != param.empty:
                 value = bound.arguments.get(param_name)
 
-                # Special validation for common types
-                if "order" in param_name.lower() and isinstance(value, dict):
-                    validator.validate_order(value)
-                elif "price" in param_name.lower() and value is not None:
-                    validator.validate_price(value)
-                elif "quantity" in param_name.lower() and value is not None:
-                    validator.validate_quantity(value)
-                elif "symbol" in param_name.lower() and isinstance(value, str):
-                    validator.validate_symbol(value)
+                # Special validation for common types - lazy import to avoid circular deps
+                # NOTE: This is kept simple to avoid circular dependencies
+                # For full validation, use the ValidationService via dependency injection
+                if value is not None:
+                    try:
+                        # Basic type validation only
+                        if "price" in param_name.lower() or "quantity" in param_name.lower():
+                            if not isinstance(value, int | float):
+                                raise ValueError(
+                                    f"{param_name} must be numeric, got {type(value).__name__}"
+                                )
+                            if float(value) <= 0:
+                                raise ValueError(f"{param_name} must be positive")
+                        elif "symbol" in param_name.lower():
+                            if not isinstance(value, str) or not value.strip():
+                                raise ValueError(f"{param_name} must be a non-empty string")
+                    except Exception as validation_error:
+                        raise ValueError(
+                            f"Validation failed for {param_name}: {validation_error}"
+                        ) from validation_error
 
     @staticmethod
     def enhance(
@@ -139,7 +166,7 @@ class UnifiedDecorator(BaseComponent):
         cache_ttl: int = 60,
         monitor: bool = False,
         timeout: float | None = None,
-        fallback: Callable | None = None,
+        fallback: Callable[..., Any] | None = None,
     ) -> Callable[[F], F]:
         """
         Create a decorator with specified enhancements.
@@ -163,7 +190,7 @@ class UnifiedDecorator(BaseComponent):
 
         def decorator(func: F) -> F:
             @functools.wraps(func)
-            async def async_wrapper(*args, **kwargs):
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 logger = logging.getLogger(func.__module__) if log else None
                 start_time = time.time()
 
@@ -235,14 +262,23 @@ class UnifiedDecorator(BaseComponent):
                     raise
 
             @functools.wraps(func)
-            def sync_wrapper(*args, **kwargs):
+            def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 """Wrapper for synchronous functions."""
-                # For sync functions, run in event loop if needed
+                # For sync functions, check if we're in an async context
                 try:
-                    loop = asyncio.get_event_loop()
+                    # Try to get the running loop (Python 3.7+)
+                    loop = asyncio.get_running_loop()
+                    # If we're here, we're inside an event loop
+                    # Log warning as sync functions shouldn't be decorated with async features
+                    logger = logging.getLogger(func.__module__) if log else None
+                    if logger:
+                        logger.warning(
+                            f"Sync function {func.__name__} decorated with async features "
+                            "but called from async context. Consider using async version."
+                        )
                 except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                    # No running event loop - this is the normal case for sync functions
+                    pass
 
                 # For sync functions, just execute them directly with basic features
                 logger = logging.getLogger(func.__module__) if log else None
@@ -282,12 +318,19 @@ class UnifiedDecorator(BaseComponent):
                                 last_exception = e
                                 if logger:
                                     logger.warning(
-                                        f"Attempt {attempt + 1}/{retry_times} failed for {func.__name__}: {e}"
+                                        f"Attempt {attempt + 1}/{retry_times} failed "
+                                        f"for {func.__name__}: {e}"
                                     )
                                 if attempt < retry_times - 1:
                                     time.sleep(retry_delay * (2**attempt))
                         else:
-                            raise last_exception
+                            if last_exception:
+                                raise last_exception
+                            else:
+                                raise RuntimeError(
+                                    f"Failed to execute {func.__name__} after "
+                                    f"{retry_times} attempts"
+                                )
                     else:
                         result = func(*args, **kwargs)
 
@@ -321,18 +364,18 @@ class UnifiedDecorator(BaseComponent):
 
             # Return appropriate wrapper based on function type
             if asyncio.iscoroutinefunction(func):
-                return async_wrapper
+                return cast(F, async_wrapper)
             else:
-                return sync_wrapper
+                return cast(F, sync_wrapper)
 
         return decorator
 
     @classmethod
     async def _execute_with_retry(
         cls,
-        func: Callable,
-        args: tuple,
-        kwargs: dict,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
         retry: bool,
         retry_times: int,
         retry_delay: float,
@@ -353,43 +396,45 @@ dec = UnifiedDecorator
 
 
 # Simple decorator functions for common use cases
-def retry(max_attempts: int = 3, delay: float = 1.0, base_delay: float | None = None):
+def retry(
+    max_attempts: int = 3, delay: float = 1.0, base_delay: float | None = None
+) -> Callable[[F], F]:
     """Retry decorator with exponential backoff."""
     # Handle different parameter names for backward compatibility
     actual_delay = base_delay if base_delay is not None else delay
     return dec.enhance(retry=True, retry_times=max_attempts, retry_delay=actual_delay)
 
 
-def cached(ttl: int = 300):
+def cached(ttl: int = 300) -> Callable[[F], F]:
     """Cache decorator with TTL."""
     return dec.enhance(cache=True, cache_ttl=ttl)
 
 
-def validated():
+def validated() -> Callable[[F], F]:
     """Validation decorator."""
     return dec.enhance(validate=True)
 
 
-def logged(level: str = "info"):
+def logged(level: str = "info") -> Callable[[F], F]:
     """Logging decorator."""
     return dec.enhance(log=True, log_level=level)
 
 
-def monitored():
+def monitored() -> Callable[[F], F]:
     """Monitoring decorator."""
     return dec.enhance(monitor=True)
 
 
-def timeout(seconds: float):
+def timeout(seconds: float) -> Callable[[F], F]:
     """Timeout decorator."""
     return dec.enhance(timeout=seconds)
 
 
 # Helper function to create bare decorators that can be used without parentheses
-def _make_bare_decorator(decorator_func):
+def _make_bare_decorator(decorator_func: Callable[..., Callable[[F], F]]) -> Callable[..., Any]:
     """Create a decorator that can be used both with and without parentheses."""
 
-    def wrapper(func_or_args=None, **kwargs):
+    def wrapper(func_or_args: F | Any | None = None, **kwargs: Any) -> F | Callable[[F], F]:
         if func_or_args is None or callable(func_or_args):
             # Used as @decorator or @decorator(func)
             if func_or_args is None:
@@ -397,7 +442,10 @@ def _make_bare_decorator(decorator_func):
                 return decorator_func(**kwargs)
             else:
                 # Called without () - func_or_args is the function
-                return decorator_func()(func_or_args)
+                if callable(func_or_args):
+                    return decorator_func()(cast(F, func_or_args))
+                else:
+                    return decorator_func(**kwargs)
         else:
             # Called with arguments - return the decorator
             return decorator_func(func_or_args, **kwargs)
@@ -414,7 +462,7 @@ log_performance = _make_bare_decorator(lambda: monitored())
 api_throttle = _make_bare_decorator(lambda: monitored())
 
 
-def circuit_breaker(failure_threshold=5, recovery_timeout=60):
+def circuit_breaker(failure_threshold: int = 5, recovery_timeout: int = 60) -> Callable[[F], F]:
     return dec.enhance(retry=True, retry_times=failure_threshold)
 
 
@@ -428,7 +476,7 @@ cpu_usage = _make_bare_decorator(lambda: monitored())
 memory_usage = _make_bare_decorator(lambda: monitored())
 
 
-def robust():
+def robust() -> Callable[[F], F]:
     return dec.enhance(retry=True, retry_times=5, retry_delay=1.0)
 
 

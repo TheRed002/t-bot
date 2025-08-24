@@ -9,75 +9,186 @@ This module provides centralized Socket.IO management with:
 """
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import Any
 
 import socketio
 from socketio import AsyncNamespace, AsyncServer
 
-from src.core.logging import correlation_context, get_logger
+try:
+    from src.base import BaseComponent
+except ImportError:
+    # Fallback BaseComponent for import errors
+    import logging
 
-logger = get_logger(__name__)
+    class BaseComponent:
+        """Minimal BaseComponent fallback."""
+        def __init__(self):
+            self.logger = logging.getLogger(self.__class__.__module__)
+from src.core.exceptions import AuthenticationError
+from src.core.logging import correlation_context
+from src.error_handling import (
+    ConnectionManager,
+    ConnectionState,
+    ErrorSeverity,
+    with_error_context,
+)
+from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
 
 
 class TradingNamespace(AsyncNamespace):
     """Main namespace for trading-related Socket.IO events."""
 
-    def __init__(self, namespace: str = "/"):
+    def __init__(self, namespace: str = "/", jwt_handler=None):
         super().__init__(namespace)
         self.connected_clients: dict[str, dict[str, Any]] = {}
         self.authenticated_sessions: set[str] = set()
+        self.jwt_handler = jwt_handler
+        self.logger = logging.getLogger(self.__class__.__name__)
+
+        # Initialize connection manager for resilient connections
+        self.connection_manager = ConnectionManager(
+            max_reconnect_attempts=5,
+            reconnect_delay=1.0,
+            health_check_interval=30.0,
+        )
+        self.network_recovery = NetworkDisconnectionRecovery()
+
+        # Rate limiting: max connections per IP
+        self.connection_counts: dict[str, int] = {}
+        self.max_connections_per_ip = 10
 
     async def on_connect(
         self, sid: str, environ: dict[str, Any], auth: dict[str, Any] | None = None
     ):
-        """Handle client connection."""
-        logger.info(f"Client connected: {sid}")
+        """Handle client connection with security checks."""
+        # Get client IP for rate limiting
+        client_ip = environ.get("REMOTE_ADDR", "unknown")
+
+        # Register connection with connection manager
+        try:
+            await self.connection_manager.add_connection(
+                connection_id=sid,
+                connection_type="socketio",
+                metadata={"client_ip": client_ip, "namespace": self.namespace}
+            )
+            await self.connection_manager.update_state(sid, ConnectionState.CONNECTING)
+        except Exception as e:
+            self.logger.warning(f"Failed to register connection {sid} with manager: {e}")
+
+        # Rate limiting by IP
+        if client_ip != "unknown":
+            current_connections = self.connection_counts.get(client_ip, 0)
+            if current_connections >= self.max_connections_per_ip:
+                self.logger.warning(f"Connection limit exceeded for IP {client_ip}")
+                return False
+
+            self.connection_counts[client_ip] = current_connections + 1
+
+        self.logger.info(f"Client connected: {sid} from IP: {client_ip}")
 
         # Store client info
         self.connected_clients[sid] = {
             "connected_at": datetime.utcnow().isoformat(),
             "authenticated": False,
             "user_id": None,
+            "username": None,
+            "scopes": [],
             "subscriptions": set(),
+            "client_ip": client_ip,
         }
 
         # Check for authentication token
         if auth and "token" in auth:
-            # Validate token (simplified for now)
-            if await self._validate_token(auth["token"]):
-                self.connected_clients[sid]["authenticated"] = True
-                self.authenticated_sessions.add(sid)
-                await self.emit("authenticated", {"status": "success"}, room=sid)
-                logger.info(f"Client {sid} authenticated successfully")
-            else:
-                await self.emit(
-                    "authenticated", {"status": "failed", "error": "Invalid token"}, room=sid
-                )
+            try:
+                token_data = await self._validate_token(auth["token"])
+                if token_data:
+                    self.connected_clients[sid]["authenticated"] = True
+                    self.connected_clients[sid]["user_id"] = token_data["user_id"]
+                    self.connected_clients[sid]["username"] = token_data["username"]
+                    self.connected_clients[sid]["scopes"] = token_data["scopes"]
+                    self.authenticated_sessions.add(sid)
 
-        # Send welcome message
+                    await self.emit("authenticated", {"status": "success"}, room=sid)
+                    self.logger.info(f"Client {sid} authenticated as {token_data['username']}")
+
+                    # Update connection state to active after successful auth
+                    try:
+                        await self.connection_manager.update_state(sid, ConnectionState.ACTIVE)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to update connection state to active: {e}")
+                else:
+                    await self.emit("auth_error", {"error": "Invalid or expired token"}, room=sid)
+                    self.logger.warning(f"Authentication failed for client {sid}")
+            except Exception as e:
+                self.logger.error(f"Authentication error for client {sid}: {e}")
+                await self.emit("auth_error", {"error": "Authentication service error"}, room=sid)
+        else:
+            # No authentication provided - client must authenticate before using secured features
+            await self.emit(
+                "auth_required",
+                {
+                    "message": "Authentication required for secure features",
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+                room=sid,
+            )
+
+        # Send welcome message with limited info
         await self.emit(
             "welcome",
             {
                 "message": "Connected to T-Bot Trading System",
                 "timestamp": datetime.utcnow().isoformat(),
                 "version": "1.0.0",
+                "authenticated": self.connected_clients[sid]["authenticated"],
             },
             room=sid,
         )
 
         return True
 
+    @with_error_context(
+        operation="socketio_disconnect"
+    )
     async def on_disconnect(self, sid: str):
         """Handle client disconnection."""
-        logger.info(f"Client disconnected: {sid}")
+        self.logger.info(f"Client disconnected: {sid}")
 
-        # Clean up client data
+        # Update connection state in connection manager with error handling
+        try:
+            await self.connection_manager.update_state(sid, ConnectionState.DISCONNECTED)
+        except Exception as e:
+            self.logger.warning(f"Failed to update connection state for {sid}: {e}")
+
+        # Clean up client data and decrement connection count
         if sid in self.connected_clients:
+            client_data = self.connected_clients[sid]
+            client_ip = client_data.get("client_ip")
+
+            # Decrement connection count for IP
+            if client_ip and client_ip != "unknown":
+                current_count = self.connection_counts.get(client_ip, 0)
+                if current_count > 0:
+                    self.connection_counts[client_ip] = current_count - 1
+                    if self.connection_counts[client_ip] == 0:
+                        del self.connection_counts[client_ip]
+
             del self.connected_clients[sid]
+
         if sid in self.authenticated_sessions:
             self.authenticated_sessions.remove(sid)
 
+        # Remove connection from manager
+        try:
+            await self.connection_manager.remove_connection(sid)
+        except Exception as e:
+            self.logger.warning(f"Failed to remove connection {sid} from manager: {e}")
+
+    @with_error_context(
+        operation="socketio_authenticate"
+    )
     async def on_authenticate(self, sid: str, data: dict[str, Any]):
         """Handle authentication request."""
         token = data.get("token")
@@ -110,7 +221,7 @@ class TradingNamespace(AsyncNamespace):
             if channel in ["market_data", "bot_status", "portfolio", "alerts", "logs"]:
                 await self.enter_room(sid, channel)
                 self.connected_clients[sid]["subscriptions"].add(channel)
-                logger.info(f"Client {sid} subscribed to {channel}")
+                self.logger.info(f"Client {sid} subscribed to {channel}")
 
         await self.emit(
             "subscribed",
@@ -135,11 +246,16 @@ class TradingNamespace(AsyncNamespace):
             room=sid,
         )
 
-    async def on_ping(self, sid: str, data: dict[str, Any]):
+    async def on_ping(self, sid: str, data: dict[str, Any] | None = None):
         """Handle ping for connection health check."""
+        # Handle both cases: with and without data
+        latency = None
+        if data and isinstance(data, dict):
+            latency = data.get("timestamp")
+
         await self.emit(
             "pong",
-            {"timestamp": datetime.utcnow().isoformat(), "latency": data.get("timestamp")},
+            {"timestamp": datetime.utcnow().isoformat(), "latency": latency},
             room=sid,
         )
 
@@ -196,15 +312,54 @@ class TradingNamespace(AsyncNamespace):
 
         await self.emit("portfolio_data", portfolio_data, room=sid)
 
-    async def _validate_token(self, token: str) -> bool:
-        """Validate authentication token."""
-        # TODO: Implement proper JWT validation
-        # For now, accept any non-empty token in development mode
-        # In production, this should validate JWT tokens properly
-        return bool(token)
+    async def _validate_token(self, token: str) -> dict[str, Any] | None:
+        """Validate JWT authentication token."""
+        try:
+            if not self.jwt_handler:
+                self.logger.error("JWT handler not configured for WebSocket authentication")
+                return None
+
+            # Validate the JWT token
+            token_data = self.jwt_handler.validate_token(token)
+
+            if token_data:
+                return {
+                    "user_id": token_data.user_id,
+                    "username": token_data.username,
+                    "scopes": token_data.scopes,
+                    "expires_at": (
+                        token_data.expires_at.isoformat() if token_data.expires_at else None
+                    ),
+                }
+
+            return None
+
+        except AuthenticationError as e:
+            self.logger.warning(f"JWT token validation failed: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Token validation error: {e}")
+            return None
+
+    def _require_scope(self, sid: str, required_scope: str) -> bool:
+        """Check if authenticated client has required scope."""
+        if sid not in self.connected_clients:
+            return False
+
+        client = self.connected_clients[sid]
+        if not client["authenticated"]:
+            return False
+
+        user_scopes = client.get("scopes", [])
+
+        # Admin scope grants all permissions
+        if "admin" in user_scopes:
+            return True
+
+        return required_scope in user_scopes
 
 
-class SocketIOManager:
+class SocketIOManager(BaseComponent):
     """Manager for Socket.IO server and connections."""
 
     def __init__(self):
@@ -213,7 +368,7 @@ class SocketIOManager:
         self.background_tasks: list[asyncio.Task] = []
         self.is_running = False
 
-    def create_server(self, cors_allowed_origins: list[str] = None) -> AsyncServer:
+    def create_server(self, cors_allowed_origins: list[str] | None = None) -> AsyncServer:
         """Create and configure Socket.IO server."""
         if cors_allowed_origins is None:
             cors_allowed_origins = ["http://localhost:3000", "http://localhost:8000"]
@@ -221,7 +376,7 @@ class SocketIOManager:
         self.sio = socketio.AsyncServer(
             async_mode="asgi",
             cors_allowed_origins=cors_allowed_origins,
-            logger=logger,
+            logger=self.logger,
             engineio_logger=False,  # Reduce verbosity
             ping_timeout=60,
             ping_interval=25,
@@ -236,7 +391,7 @@ class SocketIOManager:
         # Generate correlation ID for server creation
         correlation_id = correlation_context.generate_correlation_id()
         with correlation_context.correlation_context(correlation_id):
-            logger.info("Socket.IO server created")
+            self.logger.info("Socket.IO server created")
         return self.sio
 
     def create_app(self):
@@ -266,7 +421,7 @@ class SocketIOManager:
             # Start portfolio updates
             self.background_tasks.append(asyncio.create_task(self._broadcast_portfolio_updates()))
 
-            logger.info("Background tasks started")
+            self.logger.info("Background tasks started")
 
     async def stop_background_tasks(self):
         """Stop all background tasks."""
@@ -282,7 +437,7 @@ class SocketIOManager:
                 await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
             self.background_tasks.clear()
-            logger.info("Background tasks stopped")
+            self.logger.info("Background tasks stopped")
 
     async def _broadcast_market_data(self):
         """Broadcast market data to subscribed clients."""
@@ -312,14 +467,14 @@ class SocketIOManager:
 
                     if self.sio:
                         await self.sio.emit("market_data", market_data, room="market_data")
-                        logger.debug('emitting event "market_data" to market_data [/]')
+                        self.logger.debug('emitting event "market_data" to market_data [/]')
 
                     await asyncio.sleep(5)  # Update every 5 seconds to reduce log volume
 
             except Exception as e:
                 correlation_id = correlation_context.generate_correlation_id()
                 with correlation_context.correlation_context(correlation_id):
-                    logger.error(f"Error broadcasting market data: {e}")
+                    self.logger.error(f"Error broadcasting market data: {e}")
                 await asyncio.sleep(5)
 
     async def _broadcast_bot_status(self):
@@ -350,14 +505,14 @@ class SocketIOManager:
 
                     if self.sio:
                         await self.sio.emit("bot_status", bot_status, room="bot_status")
-                        logger.debug('emitting event "bot_status" to bot_status [/]')
+                        self.logger.debug('emitting event "bot_status" to bot_status [/]')
 
                     await asyncio.sleep(5)  # Update every 5 seconds
 
             except Exception as e:
                 correlation_id = correlation_context.generate_correlation_id()
                 with correlation_context.correlation_context(correlation_id):
-                    logger.error(f"Error broadcasting bot status: {e}")
+                    self.logger.error(f"Error broadcasting bot status: {e}")
                 await asyncio.sleep(10)
 
     async def _broadcast_portfolio_updates(self):
@@ -381,14 +536,14 @@ class SocketIOManager:
 
                     if self.sio:
                         await self.sio.emit("portfolio_update", portfolio_update, room="portfolio")
-                        logger.debug('emitting event "portfolio_update" to portfolio [/]')
+                        self.logger.debug('emitting event "portfolio_update" to portfolio [/]')
 
                     await asyncio.sleep(10)  # Update every 10 seconds
 
             except Exception as e:
                 correlation_id = correlation_context.generate_correlation_id()
                 with correlation_context.correlation_context(correlation_id):
-                    logger.error(f"Error broadcasting portfolio updates: {e}")
+                    self.logger.error(f"Error broadcasting portfolio updates: {e}")
                 await asyncio.sleep(15)
 
     async def emit_to_user(self, user_id: str, event: str, data: Any):

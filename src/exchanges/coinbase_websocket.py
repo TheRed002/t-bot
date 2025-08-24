@@ -8,25 +8,30 @@ CRITICAL: This integrates with P-001 (core types, exceptions, config), P-002A (e
 and P-003 (base exchange interface) components.
 """
 
+import asyncio
+import base64
+import hashlib
+import hmac
+import json
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-# Coinbase-specific imports
-from coinbase.websocket import WSClient, WSClientConnectionClosedException, WSClientException
+# WebSocket imports
+import websockets
+from websockets.client import WebSocketClientProtocol
 
 from src.core.config import Config
 from src.core.exceptions import ExchangeConnectionError, ExchangeError
 from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
-from src.core.types import OrderBook, Ticker, Trade
+from src.core.types import OrderBook, OrderSide, Ticker, Trade
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-
-logger = get_logger(__name__)
 
 
 class CoinbaseWebSocketHandler:
@@ -52,10 +57,18 @@ class CoinbaseWebSocketHandler:
         # Coinbase-specific configuration
         self.api_key = config.exchanges.coinbase_api_key
         self.api_secret = config.exchanges.coinbase_api_secret
+        self.passphrase = getattr(config.exchanges, "coinbase_passphrase", "")
         self.sandbox = config.exchanges.coinbase_sandbox
 
-        # WebSocket client
-        self.ws_client: WSClient | None = None
+        # WebSocket URLs
+        if self.sandbox:
+            self.ws_url = "wss://ws-feed-public.sandbox.exchange.coinbase.com"
+        else:
+            self.ws_url = "wss://ws-feed.exchange.coinbase.com"
+
+        # WebSocket connection
+        self.ws: WebSocketClientProtocol | None = None
+        self._connection_lock = asyncio.Lock()
 
         # Stream management
         self.active_streams: dict[str, Any] = {}
@@ -63,60 +76,109 @@ class CoinbaseWebSocketHandler:
         self.connected = False
         self.last_heartbeat = None
 
+        # Connection state
+        self.reconnect_attempts = 0
+        self.max_reconnect_attempts = 10
+        self.base_reconnect_delay = 1  # Base delay in seconds
+        self.max_reconnect_delay = 60  # Max delay in seconds
+        self._shutdown = False
+
+        # Health monitoring
+        self.last_message_time = None
+        self.message_timeout = 60  # seconds
+        self._health_check_task: asyncio.Task | None = None
+
+        # Connection metrics
+        self._connection_start_time = None
+        self._total_messages_received = 0
+        self._total_reconnections = 0
+
         # Message queue for reconnection
         self.message_queue: list[dict] = []
         self.max_queue_size = 1000
 
-        logger.info(f"Initialized {exchange_name} WebSocket handler")
+        # Subscribed channels for reconnection
+        self.subscribed_channels: set[str] = set()
+        self._listener_task: asyncio.Task | None = None
+
+        # Initialize logger
+        self.logger = get_logger(f"coinbase.websocket.{exchange_name}")
+
+        self.logger.info(f"Initialized {exchange_name} WebSocket handler")
 
     async def connect(self) -> bool:
         """
-        Establish WebSocket connection to Coinbase.
+        Establish WebSocket connection to Coinbase with enhanced error handling.
 
         Returns:
             bool: True if connection successful, False otherwise
         """
-        try:
-            # Initialize WebSocket client
-            self.ws_client = WSClient(
-                api_key=self.api_key, api_secret=self.api_secret, sandbox=self.sandbox
-            )
+        async with self._connection_lock:
+            try:
+                if self._shutdown:
+                    return False
 
-            # Open connection
-            await self.ws_client.open()
+                self.logger.info(f"Connecting to {self.exchange_name} WebSocket: {self.ws_url}")
 
-            self.connected = True
-            self.last_heartbeat = datetime.now(timezone.utc)
+                # Connect to WebSocket
+                self.ws = await websockets.connect(
+                    self.ws_url, ping_interval=20, ping_timeout=10, close_timeout=10
+                )
 
-            logger.info(f"Successfully connected to {self.exchange_name} WebSocket")
-            return True
+                self.connected = True
+                self.reconnect_attempts = 0
+                self._connection_start_time = datetime.now(timezone.utc)
+                self.last_heartbeat = datetime.now(timezone.utc)
+                self.last_message_time = datetime.now(timezone.utc)
 
-        except (WSClientException, WSClientConnectionClosedException) as e:
-            logger.error(f"Failed to connect to {self.exchange_name} WebSocket: {e!s}")
-            self.connected = False
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected error connecting to {self.exchange_name} WebSocket: {e!s}")
-            self.connected = False
-            return False
+                # Start message listener
+                listener_task = asyncio.create_task(self._listen_messages())
+                # Store task to prevent garbage collection
+                self._listener_task = listener_task
+
+                # Start health monitoring
+                if not self._health_check_task or self._health_check_task.done():
+                    self._health_check_task = asyncio.create_task(self._health_monitor())
+
+                self.logger.info(f"Successfully connected to {self.exchange_name} WebSocket")
+                return True
+
+            except Exception as e:
+                self.logger.error(f"Failed to connect to {self.exchange_name} WebSocket: {e!s}")
+                self.connected = False
+                await self._schedule_reconnect()
+                return False
 
     async def disconnect(self) -> None:
-        """Disconnect from Coinbase WebSocket."""
-        try:
-            if self.ws_client:
-                await self.ws_client.close()
+        """Disconnect from Coinbase WebSocket with proper cleanup."""
+        async with self._connection_lock:
+            try:
+                self._shutdown = True
+                self.logger.info(f"Disconnecting from {self.exchange_name} WebSocket")
 
-            self.connected = False
-            self.active_streams.clear()
+                # Cancel health monitoring
+                if self._health_check_task and not self._health_check_task.done():
+                    self._health_check_task.cancel()
+                    try:
+                        await self._health_check_task
+                    except asyncio.CancelledError:
+                        pass
 
-            logger.info(f"Disconnected from {self.exchange_name} WebSocket")
+                # Close WebSocket connection
+                if self.ws and not self.ws.closed:
+                    await self.ws.close()
+                    self.ws = None
 
-        except (WSClientException, WSClientConnectionClosedException) as e:
-            logger.error(f"Error disconnecting from {self.exchange_name} WebSocket: {e!s}")
-        except Exception as e:
-            logger.error(
-                f"Unexpected error disconnecting from {self.exchange_name} WebSocket: {e!s}"
-            )
+                # Clear state
+                self.connected = False
+                self.active_streams.clear()
+                self.callbacks.clear()
+                self.subscribed_channels.clear()
+
+                self.logger.info(f"Successfully disconnected from {self.exchange_name} WebSocket")
+
+            except Exception as e:
+                self.logger.error(f"Error disconnecting from {self.exchange_name} WebSocket: {e!s}")
 
     async def subscribe_to_ticker(self, symbol: str, callback: Callable) -> None:
         """
@@ -127,31 +189,31 @@ class CoinbaseWebSocketHandler:
             callback: Callback function to handle ticker updates
         """
         try:
-            if not self.ws_client:
+            if not self.ws or self.ws.closed:
                 raise ExchangeConnectionError("WebSocket not connected")
 
-            # Subscribe to ticker channel
-            await self.ws_client.ticker(symbol, callback)
+            # Create subscription message
+            subscribe_msg = {"type": "subscribe", "product_ids": [symbol], "channels": ["ticker"]}
+
+            # Add authentication if available
+            if self.api_key and self.api_secret:
+                subscribe_msg.update(self._create_auth_headers())
+
+            # Send subscription
+            await self.ws.send(json.dumps(subscribe_msg))
 
             # Track subscription
-            stream_key = f"ticker_{symbol}"
-            self.active_streams[stream_key] = {
-                "type": "ticker",
-                "symbol": symbol,
-                "callback": callback,
-            }
+            channel_key = f"ticker_{symbol}"
+            self.subscribed_channels.add(channel_key)
 
-            if symbol not in self.callbacks:
-                self.callbacks[symbol] = []
-            self.callbacks[symbol].append(callback)
+            if channel_key not in self.callbacks:
+                self.callbacks[channel_key] = []
+            self.callbacks[channel_key].append(callback)
 
-            logger.info(f"Subscribed to ticker stream for {symbol}")
+            self.logger.info(f"Subscribed to ticker stream for {symbol}")
 
-        except (WSClientException, WSClientConnectionClosedException) as e:
-            logger.error(f"Failed to subscribe to ticker for {symbol}: {e!s}")
-            raise ExchangeError(f"Failed to subscribe to ticker: {e!s}")
         except Exception as e:
-            logger.error(f"Unexpected error subscribing to ticker for {symbol}: {e!s}")
+            self.logger.error(f"Failed to subscribe to ticker for {symbol}: {e!s}")
             raise ExchangeError(f"Failed to subscribe to ticker: {e!s}")
 
     async def subscribe_to_orderbook(self, symbol: str, callback: Callable) -> None:
@@ -163,31 +225,31 @@ class CoinbaseWebSocketHandler:
             callback: Callback function to handle order book updates
         """
         try:
-            if not self.ws_client:
+            if not self.ws or self.ws.closed:
                 raise ExchangeConnectionError("WebSocket not connected")
 
-            # Subscribe to level2 channel (order book)
-            await self.ws_client.level2(symbol, callback)
+            # Create subscription message
+            subscribe_msg = {"type": "subscribe", "product_ids": [symbol], "channels": ["level2"]}
+
+            # Add authentication if available
+            if self.api_key and self.api_secret:
+                subscribe_msg.update(self._create_auth_headers())
+
+            # Send subscription
+            await self.ws.send(json.dumps(subscribe_msg))
 
             # Track subscription
-            stream_key = f"orderbook_{symbol}"
-            self.active_streams[stream_key] = {
-                "type": "orderbook",
-                "symbol": symbol,
-                "callback": callback,
-            }
+            channel_key = f"level2_{symbol}"
+            self.subscribed_channels.add(channel_key)
 
-            if symbol not in self.callbacks:
-                self.callbacks[symbol] = []
-            self.callbacks[symbol].append(callback)
+            if channel_key not in self.callbacks:
+                self.callbacks[channel_key] = []
+            self.callbacks[channel_key].append(callback)
 
-            logger.info(f"Subscribed to order book stream for {symbol}")
+            self.logger.info(f"Subscribed to order book stream for {symbol}")
 
-        except (WSClientException, WSClientConnectionClosedException) as e:
-            logger.error(f"Failed to subscribe to order book for {symbol}: {e!s}")
-            raise ExchangeError(f"Failed to subscribe to order book: {e!s}")
         except Exception as e:
-            logger.error(f"Unexpected error subscribing to order book for {symbol}: {e!s}")
+            self.logger.error(f"Failed to subscribe to order book for {symbol}: {e!s}")
             raise ExchangeError(f"Failed to subscribe to order book: {e!s}")
 
     async def subscribe_to_trades(self, symbol: str, callback: Callable) -> None:
@@ -199,28 +261,31 @@ class CoinbaseWebSocketHandler:
             callback: Callback function to handle trade updates
         """
         try:
-            if not self.ws_client:
+            if not self.ws or self.ws.closed:
                 raise ExchangeConnectionError("WebSocket not connected")
 
-            # Subscribe to matches channel (trades)
-            await self.ws_client.matches(symbol, callback)
+            # Create subscription message
+            subscribe_msg = {"type": "subscribe", "product_ids": [symbol], "channels": ["matches"]}
+
+            # Add authentication if available
+            if self.api_key and self.api_secret:
+                subscribe_msg.update(self._create_auth_headers())
+
+            # Send subscription
+            await self.ws.send(json.dumps(subscribe_msg))
 
             # Track subscription
-            stream_key = f"trades_{symbol}"
-            self.active_streams[stream_key] = {
-                "type": "trades",
-                "symbol": symbol,
-                "callback": callback,
-            }
+            channel_key = f"matches_{symbol}"
+            self.subscribed_channels.add(channel_key)
 
-            if symbol not in self.callbacks:
-                self.callbacks[symbol] = []
-            self.callbacks[symbol].append(callback)
+            if channel_key not in self.callbacks:
+                self.callbacks[channel_key] = []
+            self.callbacks[channel_key].append(callback)
 
-            logger.info(f"Subscribed to trades stream for {symbol}")
+            self.logger.info(f"Subscribed to trades stream for {symbol}")
 
         except Exception as e:
-            logger.error(f"Failed to subscribe to trades for {symbol}: {e!s}")
+            self.logger.error(f"Failed to subscribe to trades for {symbol}: {e!s}")
             raise ExchangeError(f"Failed to subscribe to trades: {e!s}")
 
     async def subscribe_to_user_data(self, callback: Callable) -> None:
@@ -231,20 +296,31 @@ class CoinbaseWebSocketHandler:
             callback: Callback function to handle user data updates
         """
         try:
-            if not self.ws_client:
+            if not self.ws or self.ws.closed:
                 raise ExchangeConnectionError("WebSocket not connected")
 
-            # Subscribe to user channel
-            await self.ws_client.user(callback)
+            if not (self.api_key and self.api_secret):
+                raise ExchangeError("API credentials required for user data subscription")
+
+            # Create subscription message with authentication
+            subscribe_msg = {"type": "subscribe", "channels": ["user"]}
+            subscribe_msg.update(self._create_auth_headers())
+
+            # Send subscription
+            await self.ws.send(json.dumps(subscribe_msg))
 
             # Track subscription
-            stream_key = "user_data"
-            self.active_streams[stream_key] = {"type": "user_data", "callback": callback}
+            channel_key = "user"
+            self.subscribed_channels.add(channel_key)
 
-            logger.info("Subscribed to user data stream")
+            if channel_key not in self.callbacks:
+                self.callbacks[channel_key] = []
+            self.callbacks[channel_key].append(callback)
+
+            self.logger.info("Subscribed to user data stream")
 
         except Exception as e:
-            logger.error(f"Failed to subscribe to user data: {e!s}")
+            self.logger.error(f"Failed to subscribe to user data: {e!s}")
             raise ExchangeError(f"Failed to subscribe to user data: {e!s}")
 
     async def unsubscribe_from_stream(self, stream_key: str) -> bool:
@@ -259,29 +335,49 @@ class CoinbaseWebSocketHandler:
         """
         try:
             if stream_key not in self.active_streams:
-                logger.warning(f"Stream {stream_key} not found in active streams")
+                self.logger.warning(f"Stream {stream_key} not found in active streams")
                 return False
 
             stream_info = self.active_streams[stream_key]
 
-            # Unsubscribe based on stream type
+            # Build unsubscribe message based on stream type
+            unsubscribe_msg = {
+                "type": "unsubscribe",
+                "channels": []
+            }
+            
             if stream_info["type"] == "ticker":
-                await self.ws_client.ticker_unsubscribe(stream_info["symbol"])
+                unsubscribe_msg["channels"].append({
+                    "name": "ticker",
+                    "product_ids": [stream_info["symbol"]]
+                })
             elif stream_info["type"] == "orderbook":
-                await self.ws_client.level2_unsubscribe(stream_info["symbol"])
+                unsubscribe_msg["channels"].append({
+                    "name": "level2",
+                    "product_ids": [stream_info["symbol"]]
+                })
             elif stream_info["type"] == "trades":
-                await self.ws_client.matches_unsubscribe(stream_info["symbol"])
+                unsubscribe_msg["channels"].append({
+                    "name": "matches",
+                    "product_ids": [stream_info["symbol"]]
+                })
             elif stream_info["type"] == "user_data":
-                await self.ws_client.user_unsubscribe()
+                unsubscribe_msg["channels"].append({
+                    "name": "user",
+                    "product_ids": ["*"]
+                })
+            
+            # Send unsubscribe message
+            await self.ws.send(json.dumps(unsubscribe_msg))
 
             # Remove from tracking
             del self.active_streams[stream_key]
 
-            logger.info(f"Unsubscribed from {stream_key}")
+            self.logger.info(f"Unsubscribed from {stream_key}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to unsubscribe from {stream_key}: {e!s}")
+            self.logger.error(f"Failed to unsubscribe from {stream_key}: {e!s}")
             return False
 
     async def unsubscribe_all(self) -> None:
@@ -293,10 +389,10 @@ class CoinbaseWebSocketHandler:
             self.active_streams.clear()
             self.callbacks.clear()
 
-            logger.info("Unsubscribed from all streams")
+            self.logger.info("Unsubscribed from all streams")
 
         except Exception as e:
-            logger.error(f"Failed to unsubscribe from all streams: {e!s}")
+            self.logger.error(f"Failed to unsubscribe from all streams: {e!s}")
 
     async def handle_ticker_message(self, message: dict) -> None:
         """
@@ -324,10 +420,10 @@ class CoinbaseWebSocketHandler:
                     try:
                         await callback(ticker)
                     except Exception as e:
-                        logger.error(f"Error in ticker callback: {e!s}")
+                        self.logger.error(f"Error in ticker callback: {e!s}")
 
         except Exception as e:
-            logger.error(f"Error handling ticker message: {e!s}")
+            self.logger.error(f"Error handling ticker message: {e!s}")
 
     async def handle_orderbook_message(self, message: dict) -> None:
         """
@@ -358,10 +454,10 @@ class CoinbaseWebSocketHandler:
                     try:
                         await callback(order_book)
                     except Exception as e:
-                        logger.error(f"Error in order book callback: {e!s}")
+                        self.logger.error(f"Error in order book callback: {e!s}")
 
         except Exception as e:
-            logger.error(f"Error handling order book message: {e!s}")
+            self.logger.error(f"Error handling order book message: {e!s}")
 
     async def handle_trade_message(self, message: dict) -> None:
         """
@@ -391,10 +487,10 @@ class CoinbaseWebSocketHandler:
                     try:
                         await callback(trade)
                     except Exception as e:
-                        logger.error(f"Error in trade callback: {e!s}")
+                        self.logger.error(f"Error in trade callback: {e!s}")
 
         except Exception as e:
-            logger.error(f"Error handling trade message: {e!s}")
+            self.logger.error(f"Error handling trade message: {e!s}")
 
     async def handle_user_message(self, message: dict) -> None:
         """
@@ -420,10 +516,10 @@ class CoinbaseWebSocketHandler:
                     try:
                         await callback(message)
                     except Exception as e:
-                        logger.error(f"Error in user data callback: {e!s}")
+                        self.logger.error(f"Error in user data callback: {e!s}")
 
         except Exception as e:
-            logger.error(f"Error handling user message: {e!s}")
+            self.logger.error(f"Error handling user message: {e!s}")
 
     async def _handle_order_update(self, message: dict) -> None:
         """Handle order update message."""
@@ -431,10 +527,10 @@ class CoinbaseWebSocketHandler:
             order_id = message.get("order_id", "")
             status = message.get("status", "")
 
-            logger.info(f"Order {order_id} status updated to {status}")
+            self.logger.info(f"Order {order_id} status updated to {status}")
 
         except Exception as e:
-            logger.error(f"Error handling order update: {e!s}")
+            self.logger.error(f"Error handling order update: {e!s}")
 
     async def _handle_account_update(self, message: dict) -> None:
         """Handle account update message."""
@@ -442,48 +538,91 @@ class CoinbaseWebSocketHandler:
             account_id = message.get("account_id", "")
             _ = message.get("balance", {})
 
-            logger.info(f"Account {account_id} balance updated")
+            self.logger.info(f"Account {account_id} balance updated")
 
         except Exception as e:
-            logger.error(f"Error handling account update: {e!s}")
+            self.logger.error(f"Error handling account update: {e!s}")
 
     async def health_check(self) -> bool:
         """
-        Perform health check on WebSocket connection.
+        Perform comprehensive health check on WebSocket connection.
 
         Returns:
             bool: True if healthy, False otherwise
         """
         try:
-            if not self.ws_client or not self.connected:
+            if self._shutdown:
                 return False
 
-            # Check if connection is still alive
-            # Coinbase WebSocket doesn't have a specific health check method
-            # We'll rely on the connection state and last heartbeat
+            if not self.connected or not self.ws or self.ws.closed:
+                self.logger.debug("Health check failed: not connected")
+                return False
 
-            if self.last_heartbeat:
-                time_since_heartbeat = (
-                    datetime.now(timezone.utc) - self.last_heartbeat
+            # Check if we've received messages recently
+            if self.last_message_time:
+                time_since_last_message = (
+                    datetime.now(timezone.utc) - self.last_message_time
                 ).total_seconds()
-                if time_since_heartbeat > 60:  # 1 minute timeout
-                    logger.warning("WebSocket heartbeat timeout")
+
+                if time_since_last_message > self.message_timeout:
+                    self.logger.warning(
+                        f"Health check failed: no messages for {time_since_last_message:.1f}s"
+                    )
                     return False
 
             return True
 
         except Exception as e:
-            logger.warning(f"WebSocket health check failed: {e!s}")
+            self.logger.warning(f"WebSocket health check failed: {e!s}")
             return False
+
+    def get_connection_metrics(self) -> dict[str, Any]:
+        """
+        Get comprehensive connection metrics.
+
+        Returns:
+            Dict containing connection metrics
+        """
+        try:
+            uptime = None
+            if self._connection_start_time:
+                uptime = (datetime.now(timezone.utc) - self._connection_start_time).total_seconds()
+
+            time_since_last_message = None
+            if self.last_message_time:
+                time_since_last_message = (
+                    datetime.now(timezone.utc) - self.last_message_time
+                ).total_seconds()
+
+            return {
+                "exchange": self.exchange_name,
+                "connected": self.connected,
+                "uptime_seconds": uptime,
+                "total_messages_received": self._total_messages_received,
+                "total_reconnections": self._total_reconnections,
+                "reconnect_attempts": self.reconnect_attempts,
+                "max_reconnect_attempts": self.max_reconnect_attempts,
+                "subscribed_channels": len(self.subscribed_channels),
+                "time_since_last_message": time_since_last_message,
+                "message_timeout": self.message_timeout,
+                "health_status": "healthy" if self.connected else "unhealthy",
+                "channel_names": list(self.subscribed_channels),
+                "shutdown": self._shutdown,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except Exception as e:
+            self.logger.error(f"Failed to get connection metrics: {e!s}")
+            return {"error": str(e)}
 
     def is_connected(self) -> bool:
         """
-        Check if WebSocket is connected.
+        Check if WebSocket is connected and healthy.
 
         Returns:
             bool: True if connected, False otherwise
         """
-        return self.connected and self.ws_client is not None
+        return self.connected and self.ws is not None and not self.ws.closed and not self._shutdown
 
     def get_active_streams(self) -> dict[str, Any]:
         """
@@ -493,6 +632,354 @@ class CoinbaseWebSocketHandler:
             Dict[str, Any]: Dictionary of active streams
         """
         return self.active_streams.copy()
+
+    def _create_auth_headers(self) -> dict[str, str]:
+        """
+        Create authentication headers for WebSocket subscription.
+
+        Returns:
+            Dict containing authentication headers
+        """
+        timestamp = str(int(time.time()))
+        message = timestamp + "GET" + "/users/self/verify"
+
+        signature = base64.b64encode(
+            hmac.new(
+                base64.b64decode(self.api_secret), message.encode("utf-8"), hashlib.sha256
+            ).digest()
+        ).decode("utf-8")
+
+        return {
+            "signature": signature,
+            "key": self.api_key,
+            "passphrase": self.passphrase,
+            "timestamp": timestamp,
+        }
+
+    async def _listen_messages(self) -> None:
+        """
+        Listen for messages from WebSocket.
+        """
+        try:
+            while not self._shutdown and self.ws and not self.ws.closed:
+                try:
+                    message = await self.ws.recv()
+                    await self._handle_message(message)
+
+                except websockets.exceptions.ConnectionClosed:
+                    self.logger.warning("WebSocket connection closed")
+                    break
+                except Exception as e:
+                    self.logger.error(f"Error receiving message: {e!s}")
+
+        except Exception as e:
+            self.logger.error(f"Error in message listener: {e!s}")
+        finally:
+            if self.connected and not self._shutdown:
+                await self._handle_disconnect()
+
+    async def _handle_message(self, message: str) -> None:
+        """
+        Handle incoming WebSocket message.
+
+        Args:
+            message: Raw WebSocket message
+        """
+        try:
+            # Update last message time
+            self.last_message_time = datetime.now(timezone.utc)
+            self._total_messages_received += 1
+
+            data = json.loads(message)
+            message_type = data.get("type", "")
+
+            # Route message to appropriate handler
+            if message_type == "ticker":
+                await self._handle_ticker_message(data)
+            elif message_type == "l2update":
+                await self._handle_orderbook_message(data)
+            elif message_type == "match":
+                await self._handle_trade_message(data)
+            elif message_type in ["received", "open", "done", "change", "activate"]:
+                await self._handle_user_message(data)
+            elif message_type == "subscriptions":
+                self.logger.info(f"Subscription confirmation: {data}")
+            elif message_type == "error":
+                self.logger.error(f"WebSocket error: {data}")
+            else:
+                self.logger.debug(f"Unhandled message type: {message_type}")
+
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Failed to parse message: {e!s}")
+        except Exception as e:
+            self.logger.error(f"Error handling message: {e!s}")
+
+    async def _handle_ticker_message(self, data: dict) -> None:
+        """
+        Handle ticker message.
+
+        Args:
+            data: Ticker message data
+        """
+        try:
+            symbol = data.get("product_id", "")
+            channel_key = f"ticker_{symbol}"
+
+            if channel_key in self.callbacks:
+                # Convert to unified Ticker format
+                ticker = Ticker(
+                    symbol=symbol,
+                    bid=Decimal(str(data.get("best_bid", "0"))),
+                    ask=Decimal(str(data.get("best_ask", "0"))),
+                    last_price=Decimal(str(data.get("price", "0"))),
+                    volume_24h=Decimal(str(data.get("volume_24h", "0"))),
+                    price_change_24h=Decimal("0"),  # Not available in ticker
+                    timestamp=datetime.fromisoformat(data.get("time", "").replace("Z", "+00:00")),
+                )
+
+                # Call registered callbacks
+                for callback in self.callbacks[channel_key]:
+                    try:
+                        if asyncio.iscoroutinefunction(callback):
+                            await callback(ticker)
+                        else:
+                            callback(ticker)
+                    except Exception as e:
+                        self.logger.error(f"Error in ticker callback: {e!s}")
+
+        except Exception as e:
+            self.logger.error(f"Error handling ticker message: {e!s}")
+
+    async def _handle_orderbook_message(self, data: dict) -> None:
+        """
+        Handle order book message.
+
+        Args:
+            data: Order book message data
+        """
+        try:
+            symbol = data.get("product_id", "")
+            channel_key = f"level2_{symbol}"
+
+            if channel_key in self.callbacks:
+                # Convert to unified OrderBook format
+                changes = data.get("changes", [])
+                bids = []
+                asks = []
+
+                for change in changes:
+                    side, price, size = change
+                    price_decimal = Decimal(str(price))
+                    size_decimal = Decimal(str(size))
+
+                    if side == "buy":
+                        bids.append([price_decimal, size_decimal])
+                    else:
+                        asks.append([price_decimal, size_decimal])
+
+                order_book = OrderBook(
+                    symbol=symbol,
+                    bids=bids,
+                    asks=asks,
+                    timestamp=datetime.fromisoformat(data.get("time", "").replace("Z", "+00:00")),
+                )
+
+                # Call registered callbacks
+                for callback in self.callbacks[channel_key]:
+                    try:
+                        if asyncio.iscoroutinefunction(callback):
+                            await callback(order_book)
+                        else:
+                            callback(order_book)
+                    except Exception as e:
+                        self.logger.error(f"Error in orderbook callback: {e!s}")
+
+        except Exception as e:
+            self.logger.error(f"Error handling orderbook message: {e!s}")
+
+    async def _handle_trade_message(self, data: dict) -> None:
+        """
+        Handle trade message.
+
+        Args:
+            data: Trade message data
+        """
+        try:
+            symbol = data.get("product_id", "")
+            channel_key = f"matches_{symbol}"
+
+            if channel_key in self.callbacks:
+                # Convert to unified Trade format
+                trade = Trade(
+                    id=str(data.get("trade_id", "")),
+                    symbol=symbol,
+                    side=OrderSide.BUY if data.get("side") == "buy" else OrderSide.SELL,
+                    amount=Decimal(str(data.get("size", "0"))),
+                    price=Decimal(str(data.get("price", "0"))),
+                    timestamp=datetime.fromisoformat(data.get("time", "").replace("Z", "+00:00")),
+                    fee=Decimal("0"),
+                )
+
+                # Call registered callbacks
+                for callback in self.callbacks[channel_key]:
+                    try:
+                        if asyncio.iscoroutinefunction(callback):
+                            await callback(trade)
+                        else:
+                            callback(trade)
+                    except Exception as e:
+                        self.logger.error(f"Error in trade callback: {e!s}")
+
+        except Exception as e:
+            self.logger.error(f"Error handling trade message: {e!s}")
+
+    async def _handle_user_message(self, data: dict) -> None:
+        """
+        Handle user data message.
+
+        Args:
+            data: User data message
+        """
+        try:
+            channel_key = "user"
+
+            if channel_key in self.callbacks:
+                # Call registered callbacks
+                for callback in self.callbacks[channel_key]:
+                    try:
+                        if asyncio.iscoroutinefunction(callback):
+                            await callback(data)
+                        else:
+                            callback(data)
+                    except Exception as e:
+                        self.logger.error(f"Error in user data callback: {e!s}")
+
+        except Exception as e:
+            self.logger.error(f"Error handling user message: {e!s}")
+
+    async def _handle_disconnect(self) -> None:
+        """
+        Handle disconnection and prepare for reconnection.
+        """
+        self.connected = False
+        self._total_reconnections += 1
+
+        if not self._shutdown:
+            await self._schedule_reconnect()
+
+    async def _schedule_reconnect(self) -> None:
+        """
+        Schedule reconnection with exponential backoff.
+        """
+        if self._shutdown or self.reconnect_attempts >= self.max_reconnect_attempts:
+            if self.reconnect_attempts >= self.max_reconnect_attempts:
+                self.logger.error(
+                    f"Max reconnection attempts ({self.max_reconnect_attempts}) reached"
+                )
+            return
+
+        self.reconnect_attempts += 1
+
+        # Calculate exponential backoff delay
+        delay = min(
+            self.base_reconnect_delay * (2 ** (self.reconnect_attempts - 1)),
+            self.max_reconnect_delay,
+        )
+
+        self.logger.info(
+            f"Scheduling reconnection in {delay:.1f}s "
+            f"(attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})"
+        )
+
+        # Schedule reconnection
+        asyncio.create_task(self._reconnect_after_delay(delay))
+
+    async def _reconnect_after_delay(self, delay: float) -> None:
+        """
+        Reconnect after specified delay.
+
+        Args:
+            delay: Delay in seconds
+        """
+        try:
+            await asyncio.sleep(delay)
+
+            if self._shutdown:
+                return
+
+            self.logger.info("Attempting to reconnect...")
+
+            # Store current subscriptions for resubscription
+            channels_to_restore = self.subscribed_channels.copy()
+
+            # Attempt reconnection
+            if await self.connect():
+                self.logger.info("Reconnection successful, restoring subscriptions...")
+
+                # Restore subscriptions
+                for channel_key in channels_to_restore:
+                    try:
+                        callbacks = self.callbacks.get(channel_key, [])
+                        if not callbacks:
+                            continue
+
+                        # Parse channel key to determine subscription type
+                        if channel_key.startswith("ticker_"):
+                            symbol = channel_key.replace("ticker_", "")
+                            for callback in callbacks:
+                                await self.subscribe_to_ticker(symbol, callback)
+                        elif channel_key.startswith("level2_"):
+                            symbol = channel_key.replace("level2_", "")
+                            for callback in callbacks:
+                                await self.subscribe_to_orderbook(symbol, callback)
+                        elif channel_key.startswith("matches_"):
+                            symbol = channel_key.replace("matches_", "")
+                            for callback in callbacks:
+                                await self.subscribe_to_trades(symbol, callback)
+                        elif channel_key == "user":
+                            for callback in callbacks:
+                                await self.subscribe_to_user_data(callback)
+
+                    except Exception as e:
+                        self.logger.error(f"Failed to restore subscription {channel_key}: {e!s}")
+
+                self.logger.info("Subscription restoration completed")
+            else:
+                self.logger.error("Reconnection failed")
+
+        except Exception as e:
+            self.logger.error(f"Error during reconnection: {e!s}")
+
+    async def _health_monitor(self) -> None:
+        """
+        Monitor connection health and trigger reconnection if needed.
+        """
+        while not self._shutdown and self.connected:
+            try:
+                await asyncio.sleep(30)  # Check every 30 seconds
+
+                if self._shutdown:
+                    break
+
+                # Check if we've received messages recently
+                if self.last_message_time:
+                    time_since_last_message = (
+                        datetime.now(timezone.utc) - self.last_message_time
+                    ).total_seconds()
+
+                    if time_since_last_message > self.message_timeout:
+                        self.logger.warning(
+                            f"No messages received for {time_since_last_message:.1f}s, "
+                            "triggering health check reconnection"
+                        )
+                        self.connected = False
+                        await self._schedule_reconnect()
+                        break
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"Error in health monitor: {e!s}")
 
     async def __aenter__(self):
         """Async context manager entry."""

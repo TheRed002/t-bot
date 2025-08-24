@@ -17,7 +17,23 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.core.logging import get_logger
+import aiohttp
+
+try:
+    from src.core import get_logger
+except ImportError:
+    import logging
+
+    def get_logger(name: str):
+        """Fallback logger."""
+        return logging.getLogger(name)
+
+
+from src.error_handling import (
+    ErrorContext,
+    get_global_error_handler,
+    with_retry,
+)
 
 logger = get_logger(__name__)
 
@@ -30,9 +46,9 @@ class Panel:
     title: str
     type: str  # graph, stat, table, heatmap, etc.
     targets: list[dict[str, Any]]
-    gridPos: dict[str, int]  # {"x": 0, "y": 0, "w": 12, "h": 8}
+    gridPos: dict[str, int]  # {"x": 0, "y": 0, "w": 12, "h": 8}  # noqa: N815
     options: dict[str, Any] = field(default_factory=dict)
-    fieldConfig: dict[str, Any] = field(default_factory=dict)
+    fieldConfig: dict[str, Any] = field(default_factory=dict)  # noqa: N815
     datasource: str = "prometheus"
 
     def to_dict(self) -> dict[str, Any]:
@@ -211,7 +227,9 @@ class DashboardBuilder:
                     type="graph",
                     targets=[
                         {
-                            "expr": "histogram_quantile(0.95, sum(rate(tbot_exchange_api_response_time_seconds_bucket[5m])) by (le, exchange))",
+                            "expr": "histogram_quantile(0.95, sum(rate("
+                            "tbot_exchange_api_response_time_seconds_bucket[5m])) "
+                            "by (le, exchange))",
                             "refId": "A",
                             "legendFormat": "{{exchange}} 95th percentile",
                         }
@@ -639,17 +657,19 @@ class DashboardBuilder:
 class GrafanaDashboardManager:
     """Manager for Grafana dashboard operations."""
 
-    def __init__(self, grafana_url: str, api_key: str):
+    def __init__(self, grafana_url: str, api_key: str, error_handler=None):
         """
         Initialize Grafana dashboard manager.
 
         Args:
             grafana_url: Grafana server URL
             api_key: Grafana API key
+            error_handler: Error handler instance
         """
         self.grafana_url = grafana_url.rstrip("/")
         self.api_key = api_key
         self.builder = DashboardBuilder()
+        self._error_handler = error_handler or get_global_error_handler()
 
     async def deploy_all_dashboards(self) -> dict[str, bool]:
         """
@@ -675,11 +695,13 @@ class GrafanaDashboardManager:
                 else:
                     logger.error(f"Failed to deploy dashboard: {dashboard.title}")
             except Exception as e:
+                # Error already tracked in deploy_dashboard
                 logger.error(f"Error deploying dashboard {dashboard.title}: {e}")
                 results[dashboard.title] = False
 
         return results
 
+    @with_retry(max_attempts=3, backoff_factor=2.0)
     async def deploy_dashboard(self, dashboard: Dashboard) -> bool:
         """
         Deploy a single dashboard to Grafana.
@@ -690,8 +712,6 @@ class GrafanaDashboardManager:
         Returns:
             True if deployment was successful
         """
-        import aiohttp
-
         url = f"{self.grafana_url}/api/dashboards/db"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
@@ -708,11 +728,34 @@ class GrafanaDashboardManager:
                     else:
                         error_text = await response.text()
                         logger.error(f"Grafana API error {response.status}: {error_text}")
+
+                        # Track deployment failures
+                        if self._error_handler:
+                            await self._error_handler.handle_error(
+                                Exception(f"Grafana API error {response.status}: {error_text}"),
+                                ErrorContext(
+                                    component="GrafanaDashboardManager",
+                                    operation="deploy_dashboard",
+                                    dashboard_title=dashboard.title,
+                                    status_code=response.status,
+                                ),
+                            )
                         return False
 
         except Exception as e:
+            # Track deployment errors
+            if self._error_handler:
+                await self._error_handler.handle_error(
+                    e,
+                    ErrorContext(
+                        component="GrafanaDashboardManager",
+                        operation="deploy_dashboard",
+                        dashboard_title=dashboard.title,
+                        grafana_url=self.grafana_url,
+                    ),
+                )
             logger.error(f"Error deploying dashboard to Grafana: {e}")
-            return False
+            raise  # Let retry decorator handle it
 
     def export_dashboards_to_files(self, output_dir: str) -> None:
         """

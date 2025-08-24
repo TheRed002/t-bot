@@ -34,9 +34,10 @@ Refer to project documentation for migration guidelines.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, ClassVar
 
 
 class ErrorCategory(Enum):
@@ -95,8 +96,8 @@ class TradingBotError(Exception):
         suggested_action: str | None = None,
         context: dict[str, Any] | None = None,
         logger_name: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.error_code = error_code
@@ -116,28 +117,74 @@ class TradingBotError(Exception):
         # Log the error automatically
         self._log_error()
 
-    def _log_error(self) -> None:
-        """Log the error with appropriate level based on severity."""
-        logger = logging.getLogger(self.logger_name)
-
-        log_data = {
-            "error_code": self.error_code,
-            "category": self.category.value,
-            "severity": self.severity.value,
-            "retryable": self.retryable,
-            "details": self.details,
-            "context": self.context,
-            "timestamp": self.timestamp.isoformat(),
+    def _sanitize_sensitive_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Sanitize sensitive data before logging."""
+        sensitive_keys = {
+            "password",
+            "secret",
+            "key",
+            "token",
+            "api_key",
+            "private_key",
+            "access_token",
+            "refresh_token",
+            "authorization",
+            "auth",
+            "passphrase",
+            "credential",
+            "certificate",
+            "salt",
+            "hash",
         }
 
-        if self.severity == ErrorSeverity.CRITICAL:
-            logger.critical(f"{self.message} | {log_data}")
-        elif self.severity == ErrorSeverity.HIGH:
-            logger.error(f"{self.message} | {log_data}")
-        elif self.severity == ErrorSeverity.MEDIUM:
-            logger.warning(f"{self.message} | {log_data}")
-        else:
-            logger.info(f"{self.message} | {log_data}")
+        def sanitize_value(key: str, value: Any) -> Any:
+            """Recursively sanitize sensitive values."""
+            if isinstance(value, dict):
+                return {k: sanitize_value(k, v) for k, v in value.items()}
+            elif isinstance(value, list):
+                return [sanitize_value(key, item) for item in value]
+            elif isinstance(value, str) and any(
+                sensitive in key.lower() for sensitive in sensitive_keys
+            ):
+                # Keep first and last 2 chars for debugging
+                if len(value) > 4:
+                    return f"{value[:2]}***{value[-2:]}"
+                return "***"
+            return value
+
+        return {k: sanitize_value(k, v) for k, v in data.items()}
+
+    def _log_error(self) -> None:
+        """Log the error with appropriate level based on severity."""
+        # Prevent infinite recursion if logging fails
+        try:
+            logger = logging.getLogger(self.logger_name)
+
+            # Sanitize sensitive data before logging
+            log_data = self._sanitize_sensitive_data(
+                {
+                    "error_code": self.error_code,
+                    "category": self.category.value,
+                    "severity": self.severity.value,
+                    "retryable": self.retryable,
+                    "details": self.details,
+                    "context": self.context,
+                    "timestamp": self.timestamp.isoformat(),
+                }
+            )
+
+            if self.severity == ErrorSeverity.CRITICAL:
+                logger.critical(f"{self.message} | {log_data}")
+            elif self.severity == ErrorSeverity.HIGH:
+                logger.error(f"{self.message} | {log_data}")
+            elif self.severity == ErrorSeverity.MEDIUM:
+                logger.warning(f"{self.message} | {log_data}")
+            else:
+                logger.info(f"{self.message} | {log_data}")
+        except Exception:
+            # If logging fails, silently ignore to prevent infinite recursion
+            # The error will still be raised to the caller
+            pass
 
     def to_dict(self) -> dict[str, Any]:
         """Convert exception to dictionary for serialization."""
@@ -217,8 +264,8 @@ class ExchangeError(TradingBotError):
         endpoint: str | None = None,
         response_code: int | None = None,
         response_data: dict[str, Any] | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add exchange-specific context
         context = kwargs.get("context", {})
         context.update(
@@ -246,7 +293,7 @@ class ExchangeConnectionError(ExchangeError):
     SSL/TLS handshake failures, and general network connectivity problems.
     """
 
-    def __init__(self, message: str, exchange: str | None = None, **kwargs):
+    def __init__(self, message: str, exchange: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "EXCH_001")
         kwargs.setdefault("category", ErrorCategory.NETWORK)
         kwargs.setdefault("severity", ErrorSeverity.HIGH)
@@ -272,8 +319,8 @@ class ExchangeRateLimitError(ExchangeError):
         limit_type: str | None = None,
         current_usage: int | None = None,
         limit_value: int | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "EXCH_002")
         kwargs.setdefault("category", ErrorCategory.RATE_LIMIT)
         kwargs.setdefault("severity", ErrorSeverity.MEDIUM)
@@ -307,8 +354,8 @@ class ExchangeInsufficientFundsError(ExchangeError):
         required_amount: str | None = None,
         available_amount: str | None = None,
         currency: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "EXCH_003")
         kwargs.setdefault("category", ErrorCategory.BUSINESS_LOGIC)
         kwargs.setdefault("severity", ErrorSeverity.HIGH)
@@ -344,8 +391,8 @@ class ExchangeOrderError(ExchangeError):
         order_id: str | None = None,
         client_order_id: str | None = None,
         symbol: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "EXCH_004")
         kwargs.setdefault("category", ErrorCategory.BUSINESS_LOGIC)
         kwargs.setdefault("severity", ErrorSeverity.MEDIUM)
@@ -369,8 +416,8 @@ class ExchangeAuthenticationError(ExchangeError):
     """
 
     def __init__(
-        self, message: str, exchange: str | None = None, auth_type: str | None = None, **kwargs
-    ):
+        self, message: str, exchange: str | None = None, auth_type: str | None = None, **kwargs: Any
+    ) -> None:
         kwargs.setdefault("error_code", "EXCH_005")
         kwargs.setdefault("category", ErrorCategory.PERMISSION)
         kwargs.setdefault("severity", ErrorSeverity.HIGH)
@@ -389,7 +436,7 @@ class ExchangeAuthenticationError(ExchangeError):
 class InvalidOrderError(ExchangeOrderError):
     """Invalid order parameters."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "EXCH_006")
         kwargs.setdefault(
             "suggested_action", "Validate all order parameters against exchange rules"
@@ -418,8 +465,8 @@ class RiskManagementError(TradingBotError):
         threshold_value: float | None = None,
         strategy_id: str | None = None,
         position_id: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add risk-specific context
         context = kwargs.get("context", {})
         context.update(
@@ -455,8 +502,8 @@ class PositionLimitError(RiskManagementError):
         requested_amount: float | None = None,
         limit_amount: float | None = None,
         symbol: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "RISK_001")
         kwargs.setdefault("severity", ErrorSeverity.HIGH)
         kwargs.setdefault("suggested_action", "Reduce position size or close existing positions")
@@ -488,8 +535,8 @@ class DrawdownLimitError(RiskManagementError):
         current_drawdown: float | None = None,
         max_drawdown: float | None = None,
         drawdown_type: str = "absolute",  # "absolute", "relative", "daily"
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "RISK_002")
         kwargs.setdefault("severity", ErrorSeverity.CRITICAL)
         kwargs.setdefault("suggested_action", "Implement emergency stop or reduce position sizes")
@@ -519,8 +566,8 @@ class RiskCalculationError(RiskManagementError):
         message: str,
         calculation_type: str | None = None,
         input_data: dict[str, Any] | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "RISK_003")
         kwargs.setdefault("category", ErrorCategory.SYSTEM)
         kwargs.setdefault("severity", ErrorSeverity.HIGH)
@@ -549,8 +596,8 @@ class CapitalAllocationError(RiskManagementError):
         requested_allocation: float | None = None,
         available_capital: float | None = None,
         allocation_type: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "RISK_004")
         kwargs.setdefault("suggested_action", "Review capital allocation rules and available funds")
 
@@ -561,6 +608,41 @@ class CapitalAllocationError(RiskManagementError):
                 "requested_allocation": requested_allocation,
                 "available_capital": available_capital,
                 "allocation_type": allocation_type,
+            }
+        )
+        kwargs["context"] = context
+
+        super().__init__(message, **kwargs)
+
+
+class AllocationError(RiskManagementError):
+    """Portfolio allocation errors.
+
+    Raised when portfolio allocation operations fail, including strategy
+    allocation, rebalancing, or position sizing issues.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        allocation_type: str | None = None,
+        requested_amount: float | None = None,
+        available_amount: float | None = None,
+        strategy_name: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        kwargs.setdefault("error_code", "RISK_004")
+        kwargs.setdefault("severity", ErrorSeverity.HIGH)
+        kwargs.setdefault("suggested_action", "Check capital availability and allocation limits")
+
+        # Add allocation-specific context
+        context = kwargs.get("context", {})
+        context.update(
+            {
+                "allocation_type": allocation_type,
+                "requested_amount": requested_amount,
+                "available_amount": available_amount,
+                "strategy_name": strategy_name,
             }
         )
         kwargs["context"] = context
@@ -581,8 +663,8 @@ class CircuitBreakerTriggeredError(RiskManagementError):
         trigger_metric: str | None = None,
         cooldown_period: int | None = None,
         affected_strategies: list[str] | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "RISK_005")
         kwargs.setdefault("severity", ErrorSeverity.CRITICAL)
         kwargs.setdefault("suggested_action", "Wait for cooldown period or manual intervention")
@@ -613,8 +695,8 @@ class EmergencyStopError(RiskManagementError):
         message: str,
         stop_type: str | None = None,
         failure_reason: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "RISK_006")
         kwargs.setdefault("severity", ErrorSeverity.CRITICAL)
         kwargs.setdefault("retryable", True)
@@ -650,8 +732,8 @@ class DataError(TradingBotError):
         data_type: str | None = None,
         pipeline_stage: str | None = None,
         record_count: int | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add data-specific context
         context = kwargs.get("context", {})
         context.update(
@@ -683,8 +765,8 @@ class DataValidationError(DataError):
         validation_rule: str | None = None,
         invalid_fields: list[str] | None = None,
         sample_data: dict[str, Any] | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "DATA_001")
         kwargs.setdefault("category", ErrorCategory.VALIDATION)
         kwargs.setdefault("suggested_action", "Review data format and validation rules")
@@ -716,8 +798,8 @@ class DataSourceError(DataError):
         source_type: str | None = None,
         endpoint: str | None = None,
         status_code: int | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "DATA_002")
         kwargs.setdefault("category", ErrorCategory.NETWORK)
         kwargs.setdefault("retryable", True)
@@ -750,8 +832,8 @@ class DataProcessingError(DataError):
         message: str,
         processing_step: str | None = None,
         input_data_sample: dict[str, Any] | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "DATA_003")
         kwargs.setdefault("retryable", True)
         kwargs.setdefault("suggested_action", "Review processing logic and input data quality")
@@ -777,8 +859,8 @@ class DataCorruptionError(DataError):
         affected_records: int | None = None,
         checksum_expected: str | None = None,
         checksum_actual: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "DATA_004")
         kwargs.setdefault("severity", ErrorSeverity.CRITICAL)
         kwargs.setdefault("retryable", False)
@@ -813,8 +895,8 @@ class DataQualityError(DataError):
         quality_metric: str | None = None,
         quality_score: float | None = None,
         threshold: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "DATA_005")
         kwargs.setdefault("suggested_action", "Review data quality metrics and sources")
 
@@ -851,8 +933,8 @@ class ModelError(TradingBotError):
         model_name: str | None = None,
         model_version: str | None = None,
         model_type: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add model-specific context
         context = kwargs.get("context", {})
         context.update(
@@ -874,8 +956,12 @@ class ModelLoadError(ModelError):
     """
 
     def __init__(
-        self, message: str, model_path: str | None = None, file_size: int | None = None, **kwargs
-    ):
+        self,
+        message: str,
+        model_path: str | None = None,
+        file_size: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "MODEL_001")
         kwargs.setdefault("retryable", True)
         kwargs.setdefault("suggested_action", "Verify model file exists and is accessible")
@@ -897,11 +983,11 @@ class ModelInferenceError(ModelError):
     def __init__(
         self,
         message: str,
-        input_shape: tuple | None = None,
-        expected_shape: tuple | None = None,
+        input_shape: tuple[int, ...] | None = None,
+        expected_shape: tuple[int, ...] | None = None,
         inference_time: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "MODEL_002")
         kwargs.setdefault("retryable", True)
         kwargs.setdefault("suggested_action", "Validate input data format and model state")
@@ -933,8 +1019,8 @@ class ModelDriftError(ModelError):
         current_performance: float | None = None,
         baseline_performance: float | None = None,
         drift_threshold: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "MODEL_003")
         kwargs.setdefault("severity", ErrorSeverity.CRITICAL)
         kwargs.setdefault("retryable", False)
@@ -967,8 +1053,8 @@ class ModelTrainingError(ModelError):
         training_stage: str | None = None,
         epoch: int | None = None,
         loss_value: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "MODEL_004")
         kwargs.setdefault("suggested_action", "Review training data and hyperparameters")
 
@@ -992,8 +1078,8 @@ class ModelValidationError(ModelError):
         validation_metric: str | None = None,
         actual_score: float | None = None,
         required_score: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "MODEL_005")
         kwargs.setdefault("suggested_action", "Improve model or adjust validation criteria")
 
@@ -1031,8 +1117,8 @@ class ValidationError(TradingBotError):
         field_value: Any | None = None,
         expected_type: str | None = None,
         validation_rule: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add validation-specific context
         context = kwargs.get("context", {})
         context.update(
@@ -1064,8 +1150,8 @@ class ConfigurationError(ValidationError):
         message: str,
         config_file: str | None = None,
         config_section: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "VALID_001")
         kwargs.setdefault("category", ErrorCategory.CONFIGURATION)
         kwargs.setdefault("suggested_action", "Review and correct configuration file")
@@ -1090,8 +1176,8 @@ class SchemaValidationError(ValidationError):
         schema_name: str | None = None,
         schema_version: str | None = None,
         failed_constraints: list[str] | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "VALID_002")
         kwargs.setdefault("suggested_action", "Validate data against schema definition")
 
@@ -1120,10 +1206,10 @@ class InputValidationError(ValidationError):
         message: str,
         parameter_name: str | None = None,
         parameter_value: Any | None = None,
-        valid_range: tuple | None = None,
+        valid_range: tuple[Any, Any] | None = None,
         valid_values: list[Any] | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "VALID_003")
         kwargs.setdefault("suggested_action", "Correct input parameters and retry")
 
@@ -1153,8 +1239,8 @@ class BusinessRuleValidationError(ValidationError):
         message: str,
         rule_name: str | None = None,
         rule_description: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "VALID_004")
         kwargs.setdefault("category", ErrorCategory.BUSINESS_LOGIC)
         kwargs.setdefault("suggested_action", "Review business rules and adjust operation")
@@ -1185,8 +1271,8 @@ class ExecutionError(TradingBotError):
         order_id: str | None = None,
         symbol: str | None = None,
         execution_algorithm: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add execution-specific context
         context = kwargs.get("context", {})
         context.update(
@@ -1204,7 +1290,7 @@ class ExecutionError(TradingBotError):
 class OrderRejectionError(ExecutionError):
     """Order rejected by exchange."""
 
-    def __init__(self, message: str, rejection_reason: str | None = None, **kwargs):
+    def __init__(self, message: str, rejection_reason: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "EXEC_004")
         kwargs.setdefault("suggested_action", "Review rejection reason and adjust order parameters")
 
@@ -1229,8 +1315,8 @@ class SlippageError(ExecutionError):
         actual_price: float | None = None,
         slippage_pct: float | None = None,
         slippage_threshold: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "EXEC_001")
         kwargs.setdefault("suggested_action", "Review market conditions and execution strategy")
 
@@ -1260,8 +1346,8 @@ class ExecutionTimeoutError(ExecutionError):
         message: str,
         timeout_duration: int | None = None,
         elapsed_time: int | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "EXEC_002")
         kwargs.setdefault("retryable", True)
         kwargs.setdefault("suggested_action", "Cancel order and retry with adjusted parameters")
@@ -1286,8 +1372,8 @@ class ExecutionPartialFillError(ExecutionError):
         requested_quantity: float | None = None,
         filled_quantity: float | None = None,
         remaining_quantity: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "EXEC_003")
         kwargs.setdefault("suggested_action", "Handle partial fill according to strategy rules")
 
@@ -1325,8 +1411,8 @@ class NetworkError(TradingBotError):
         host: str | None = None,
         port: int | None = None,
         protocol: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add network-specific context
         context = kwargs.get("context", {})
         context.update({"host": host, "port": port, "protocol": protocol})
@@ -1347,7 +1433,7 @@ class ConnectionError(NetworkError):
     Covers TCP connection failures, socket errors, and connection refused.
     """
 
-    def __init__(self, message: str, connection_type: str | None = None, **kwargs):
+    def __init__(self, message: str, connection_type: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "NET_001")
         kwargs.setdefault("suggested_action", "Check network connectivity and target availability")
 
@@ -1370,8 +1456,8 @@ class TimeoutError(NetworkError):
         message: str,
         timeout_duration: int | None = None,
         operation_type: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "NET_002")
         kwargs.setdefault("suggested_action", "Increase timeout or check network latency")
 
@@ -1395,8 +1481,8 @@ class WebSocketError(NetworkError):
         websocket_state: str | None = None,
         close_code: int | None = None,
         close_reason: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "NET_003")
         kwargs.setdefault("suggested_action", "Reconnect WebSocket with backoff strategy")
 
@@ -1431,8 +1517,8 @@ class StateConsistencyError(TradingBotError):
         error_code: str = "STATE_000",
         state_component: str | None = None,
         state_version: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add state-specific context
         context = kwargs.get("context", {})
         context.update({"state_component": state_component, "state_version": state_version})
@@ -1448,7 +1534,7 @@ class StateConsistencyError(TradingBotError):
 class StateError(StateConsistencyError):
     """General state management errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "STATE_001")
         super().__init__(message, **kwargs)
 
@@ -1456,7 +1542,7 @@ class StateError(StateConsistencyError):
 class StateCorruptionError(StateConsistencyError):
     """State data corruption detected."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "STATE_002")
         kwargs.setdefault("severity", ErrorSeverity.CRITICAL)
         kwargs.setdefault("retryable", False)
@@ -1467,7 +1553,7 @@ class StateCorruptionError(StateConsistencyError):
 class StateLockError(StateConsistencyError):
     """State lock acquisition failures."""
 
-    def __init__(self, message: str, lock_name: str | None = None, **kwargs):
+    def __init__(self, message: str, lock_name: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "STATE_003")
         kwargs.setdefault("retryable", True)
         kwargs.setdefault("retry_after", 1)
@@ -1482,7 +1568,7 @@ class StateLockError(StateConsistencyError):
 class SynchronizationError(StateConsistencyError):
     """Real-time synchronization errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "STATE_004")
         kwargs.setdefault("retryable", True)
         super().__init__(message, **kwargs)
@@ -1491,7 +1577,7 @@ class SynchronizationError(StateConsistencyError):
 class ConflictError(StateConsistencyError):
     """State conflict errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "STATE_005")
         kwargs.setdefault("suggested_action", "Resolve conflicts and retry operation")
         super().__init__(message, **kwargs)
@@ -1515,8 +1601,8 @@ class SecurityError(TradingBotError):
         error_code: str = "SEC_000",
         user_id: str | None = None,
         resource: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add security-specific context
         context = kwargs.get("context", {})
         context.update({"user_id": user_id, "resource": resource})
@@ -1536,7 +1622,7 @@ class AuthenticationError(SecurityError):
     Raised for invalid credentials, expired tokens, or authentication failures.
     """
 
-    def __init__(self, message: str, auth_method: str | None = None, **kwargs):
+    def __init__(self, message: str, auth_method: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "SEC_001")
         kwargs.setdefault("suggested_action", "Verify credentials and authentication method")
 
@@ -1550,7 +1636,7 @@ class AuthenticationError(SecurityError):
 class AuthorizationError(SecurityError):
     """Authorization and permission failures."""
 
-    def __init__(self, message: str, required_permission: str | None = None, **kwargs):
+    def __init__(self, message: str, required_permission: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "SEC_002")
         kwargs.setdefault("suggested_action", "Request appropriate permissions")
 
@@ -1564,7 +1650,7 @@ class AuthorizationError(SecurityError):
 class EncryptionError(SecurityError):
     """Encryption and decryption failures."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "SEC_003")
         kwargs.setdefault("severity", ErrorSeverity.CRITICAL)
         super().__init__(message, **kwargs)
@@ -1573,7 +1659,7 @@ class EncryptionError(SecurityError):
 class TokenValidationError(SecurityError):
     """Token validation and parsing failures."""
 
-    def __init__(self, message: str, token_type: str | None = None, **kwargs):
+    def __init__(self, message: str, token_type: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "SEC_004")
 
         context = kwargs.get("context", {})
@@ -1591,7 +1677,7 @@ class TokenValidationError(SecurityError):
 class StrategyError(TradingBotError):
     """Base class for all strategy-related errors."""
 
-    def __init__(self, message: str, strategy_id: str | None = None, **kwargs):
+    def __init__(self, message: str, strategy_id: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "STRAT_000")
         kwargs.setdefault("category", ErrorCategory.BUSINESS_LOGIC)
         kwargs.setdefault("logger_name", "strategy")
@@ -1606,7 +1692,7 @@ class StrategyError(TradingBotError):
 class StrategyConfigurationError(StrategyError):
     """Strategy configuration errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "STRAT_001")
         kwargs.setdefault("category", ErrorCategory.CONFIGURATION)
         super().__init__(message, **kwargs)
@@ -1615,7 +1701,7 @@ class StrategyConfigurationError(StrategyError):
 class SignalGenerationError(StrategyError):
     """Signal generation failures."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "STRAT_002")
         super().__init__(message, **kwargs)
 
@@ -1623,7 +1709,7 @@ class SignalGenerationError(StrategyError):
 class ArbitrageError(StrategyError):
     """Arbitrage strategy errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "STRAT_003")
         super().__init__(message, **kwargs)
 
@@ -1631,7 +1717,7 @@ class ArbitrageError(StrategyError):
 class BacktestError(TradingBotError):
     """Backtesting operation errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "BACKTEST_001")
         kwargs.setdefault("category", ErrorCategory.BUSINESS_LOGIC)
         kwargs.setdefault("severity", ErrorSeverity.MEDIUM)
@@ -1646,7 +1732,7 @@ class BacktestError(TradingBotError):
 class DatabaseError(TradingBotError):
     """Base class for all database-related errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "DB_000")
         kwargs.setdefault("category", ErrorCategory.SYSTEM)
         kwargs.setdefault("logger_name", "database")
@@ -1656,7 +1742,7 @@ class DatabaseError(TradingBotError):
 class DatabaseConnectionError(DatabaseError):
     """Database connection failures."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "DB_001")
         kwargs.setdefault("retryable", True)
         kwargs.setdefault("retry_after", 5)
@@ -1666,7 +1752,7 @@ class DatabaseConnectionError(DatabaseError):
 class DatabaseQueryError(DatabaseError):
     """Database query failures."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "DB_002")
         super().__init__(message, **kwargs)
 
@@ -1676,10 +1762,10 @@ class DatabaseQueryError(DatabaseError):
 # =============================================================================
 
 
-class CircuitBreakerOpen(TradingBotError):
+class CircuitBreakerOpenError(TradingBotError):
     """Circuit breaker is open due to too many failures."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "CB_001")
         kwargs.setdefault("category", ErrorCategory.SYSTEM)
         kwargs.setdefault("severity", ErrorSeverity.HIGH)
@@ -1687,10 +1773,10 @@ class CircuitBreakerOpen(TradingBotError):
         super().__init__(message, **kwargs)
 
 
-class MaxRetriesExceeded(TradingBotError):
+class MaxRetriesExceededError(TradingBotError):
     """Maximum retry attempts exceeded."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "RETRY_001")
         kwargs.setdefault("category", ErrorCategory.SYSTEM)
         kwargs.setdefault("retryable", False)
@@ -1735,7 +1821,9 @@ class ExchangeErrorMapper:
     """
 
     # Binance error code mappings (comprehensive)
-    BINANCE_ERRORS = {
+    BINANCE_ERRORS: ClassVar[
+        dict[int, tuple[str, type[TradingBotError]] | type[TradingBotError]]
+    ] = {
         -1000: ("UNKNOWN", ExchangeError),
         -1001: ("DISCONNECTED", ExchangeConnectionError),
         -1002: ("UNAUTHORIZED", ExchangeAuthenticationError),
@@ -1753,7 +1841,7 @@ class ExchangeErrorMapper:
     }
 
     # Coinbase error mappings
-    COINBASE_ERRORS = {
+    COINBASE_ERRORS: ClassVar[dict[str, type[TradingBotError]]] = {
         "authentication_error": ExchangeAuthenticationError,
         "invalid_request": InvalidOrderError,
         "rate_limit": ExchangeRateLimitError,
@@ -1763,7 +1851,7 @@ class ExchangeErrorMapper:
     }
 
     # OKX error code mappings
-    OKX_ERRORS = {
+    OKX_ERRORS: ClassVar[dict[str, tuple[str, type[TradingBotError]]]] = {
         "1": ("Operation failed", ExchangeError),
         "2": ("Bulk operation partially succeeded", ExchangeError),
         "50000": ("Service temporarily unavailable", NetworkError),
@@ -1922,7 +2010,8 @@ class ExchangeErrorMapper:
             or str(error_data)
         )
 
-        error_data.get("code") or error_data.get("error_code") or "UNKNOWN"
+        # Note: error code could be extracted here if needed for future use
+        # error_code = error_data.get("code") or error_data.get("error_code") or "UNKNOWN"
 
         # Try to detect error type from message
         message_lower = message.lower()
@@ -1972,8 +2061,6 @@ class ExchangeErrorMapper:
                 pass
 
         # Try to extract from message
-        import re
-
         message = str(error_data)
         match = re.search(r"(\d+)\s*seconds?", message, re.IGNORECASE)
         if match:
@@ -1995,7 +2082,7 @@ class ComponentError(TradingBotError):
     dependency injection, and resource management errors.
     """
 
-    def __init__(self, message: str, component_name: str | None = None, **kwargs):
+    def __init__(self, message: str, component_name: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "COMP_000")
         kwargs.setdefault("category", ErrorCategory.SYSTEM)
         kwargs.setdefault("logger_name", "component")
@@ -2010,7 +2097,7 @@ class ComponentError(TradingBotError):
 class ServiceError(ComponentError):
     """Service layer errors for BaseService implementations."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "SERV_000")
         super().__init__(message, **kwargs)
 
@@ -2018,7 +2105,7 @@ class ServiceError(ComponentError):
 class RepositoryError(ComponentError):
     """Repository layer errors for BaseRepository implementations."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "REPO_000")
         super().__init__(message, **kwargs)
 
@@ -2026,7 +2113,7 @@ class RepositoryError(ComponentError):
 class FactoryError(ComponentError):
     """Factory pattern errors for BaseFactory implementations."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "FACT_000")
         super().__init__(message, **kwargs)
 
@@ -2034,7 +2121,7 @@ class FactoryError(ComponentError):
 class DependencyError(ComponentError):
     """Dependency injection and resolution errors."""
 
-    def __init__(self, message: str, dependency_name: str | None = None, **kwargs):
+    def __init__(self, message: str, dependency_name: str | None = None, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "DEP_000")
 
         context = kwargs.get("context", {})
@@ -2047,7 +2134,7 @@ class DependencyError(ComponentError):
 class HealthCheckError(ComponentError):
     """Health check system errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "HEALTH_000")
         super().__init__(message, **kwargs)
 
@@ -2055,7 +2142,7 @@ class HealthCheckError(ComponentError):
 class CircuitBreakerError(ComponentError):
     """Circuit breaker pattern errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "CB_000")
         super().__init__(message, **kwargs)
 
@@ -2063,7 +2150,7 @@ class CircuitBreakerError(ComponentError):
 class EventError(ComponentError):
     """Event system errors for BaseEventEmitter."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "EVENT_000")
         super().__init__(message, **kwargs)
 
@@ -2072,8 +2159,12 @@ class EntityNotFoundError(DatabaseError):
     """Entity not found in repository."""
 
     def __init__(
-        self, message: str, entity_type: str | None = None, entity_id: str | None = None, **kwargs
-    ):
+        self,
+        message: str,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "DB_003")
         kwargs.setdefault("retryable", False)
 
@@ -2087,7 +2178,7 @@ class EntityNotFoundError(DatabaseError):
 class CreationError(FactoryError):
     """Factory creation errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "FACT_001")
         super().__init__(message, **kwargs)
 
@@ -2095,7 +2186,7 @@ class CreationError(FactoryError):
 class RegistrationError(FactoryError):
     """Factory registration errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "FACT_002")
         super().__init__(message, **kwargs)
 
@@ -2103,7 +2194,7 @@ class RegistrationError(FactoryError):
 class EventHandlerError(EventError):
     """Event handler execution errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "EVENT_001")
         super().__init__(message, **kwargs)
 
@@ -2111,7 +2202,7 @@ class EventHandlerError(EventError):
 class MonitoringError(ComponentError):
     """Monitoring and metrics collection errors."""
 
-    def __init__(self, message: str, **kwargs):
+    def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "MONITORING_001")
         kwargs.setdefault("severity", "medium")
         super().__init__(message, **kwargs)
@@ -2136,8 +2227,8 @@ class OptimizationError(TradingBotError):
         optimization_algorithm: str | None = None,
         parameters: dict[str, Any] | None = None,
         optimization_stage: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add optimization-specific context
         context = kwargs.get("context", {})
         context.update(
@@ -2164,9 +2255,9 @@ class ParameterValidationError(OptimizationError):
         message: str,
         parameter_name: str | None = None,
         parameter_value: Any | None = None,
-        parameter_bounds: tuple | None = None,
-        **kwargs,
-    ):
+        parameter_bounds: tuple[Any, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "OPT_001")
         kwargs.setdefault("category", ErrorCategory.VALIDATION)
         kwargs.setdefault("suggested_action", "Review parameter bounds and values")
@@ -2194,8 +2285,8 @@ class OptimizationTimeoutError(OptimizationError):
         timeout_duration: int | None = None,
         elapsed_time: int | None = None,
         completed_iterations: int | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "OPT_002")
         kwargs.setdefault("retryable", True)
         kwargs.setdefault("suggested_action", "Increase timeout or reduce parameter space")
@@ -2224,8 +2315,8 @@ class ConvergenceError(OptimizationError):
         current_value: float | None = None,
         threshold_value: float | None = None,
         iterations_completed: int | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "OPT_003")
         kwargs.setdefault("suggested_action", "Adjust convergence criteria or increase iterations")
 
@@ -2254,8 +2345,8 @@ class OverfittingError(OptimizationError):
         training_score: float | None = None,
         validation_score: float | None = None,
         overfitting_threshold: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "OPT_004")
         kwargs.setdefault("severity", ErrorSeverity.HIGH)
         kwargs.setdefault("suggested_action", "Reduce model complexity or increase training data")
@@ -2284,8 +2375,8 @@ class GeneticAlgorithmError(OptimizationError):
         generation: int | None = None,
         population_size: int | None = None,
         fitness_value: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "OPT_005")
         kwargs.setdefault("optimization_algorithm", "genetic_algorithm")
 
@@ -2311,8 +2402,8 @@ class HyperparameterOptimizationError(OptimizationError):
         message: str,
         optimization_method: str | None = None,
         parameter_space: dict[str, Any] | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "OPT_006")
         kwargs.setdefault("optimization_algorithm", "hyperparameter")
 
@@ -2345,8 +2436,8 @@ class PerformanceError(TradingBotError):
         performance_metric: str | None = None,
         expected_value: float | None = None,
         actual_value: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         # Add performance specific context
         context = kwargs.get("context", {})
         context.update(
@@ -2375,8 +2466,8 @@ class CacheError(PerformanceError):
         cache_level: str | None = None,
         cache_key: str | None = None,
         operation: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "PERF_001")
         kwargs.setdefault("suggested_action", "Check cache configuration and connectivity")
 
@@ -2397,8 +2488,8 @@ class MemoryOptimizationError(PerformanceError):
         memory_usage_mb: float | None = None,
         memory_limit_mb: float | None = None,
         gc_stats: dict[str, Any] | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "PERF_002")
         kwargs.setdefault("severity", ErrorSeverity.HIGH)
         kwargs.setdefault(
@@ -2428,8 +2519,8 @@ class DatabaseOptimizationError(PerformanceError):
         query_time_ms: float | None = None,
         query_limit_ms: float | None = None,
         affected_query: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "PERF_003")
         kwargs.setdefault("severity", ErrorSeverity.HIGH)
         kwargs.setdefault("suggested_action", "Check database indexes and query optimization")
@@ -2458,8 +2549,8 @@ class ConnectionPoolError(PerformanceError):
         active_connections: int | None = None,
         wait_time_ms: float | None = None,
         exchange: str | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "PERF_004")
         kwargs.setdefault("suggested_action", "Adjust connection pool configuration")
 
@@ -2487,8 +2578,8 @@ class ProfilingError(PerformanceError):
         profiler_type: str | None = None,
         operation_name: str | None = None,
         profiling_duration_ms: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "PERF_005")
         kwargs.setdefault("suggested_action", "Check profiling configuration and target operations")
 
@@ -2519,7 +2610,7 @@ def create_error_from_dict(error_dict: dict[str, Any]) -> TradingBotError:
     exception_type = error_dict.get("exception_type", "TradingBotError")
 
     # Map to appropriate exception class
-    exception_classes = {
+    exception_classes: dict[str, type[TradingBotError]] = {
         "ExchangeError": ExchangeError,
         "RiskManagementError": RiskManagementError,
         "DataError": DataError,
@@ -2527,7 +2618,7 @@ def create_error_from_dict(error_dict: dict[str, Any]) -> TradingBotError:
         # Add more mappings as needed
     }
 
-    exception_class = exception_classes.get(exception_type, TradingBotError)
+    exception_class: type[TradingBotError] = exception_classes.get(exception_type, TradingBotError)
 
     return exception_class(
         error_dict.get("message", "Unknown error"),
@@ -2538,14 +2629,28 @@ def create_error_from_dict(error_dict: dict[str, Any]) -> TradingBotError:
 
 
 def is_retryable_error(error: Exception) -> bool:
-    """Check if an error is retryable."""
+    """Check if an error is retryable.
+
+    Args:
+        error: The exception to check
+
+    Returns:
+        True if error is retryable, False otherwise
+    """
     if isinstance(error, TradingBotError):
         return error.retryable
     return False
 
 
 def get_retry_delay(error: Exception) -> int | None:
-    """Get recommended retry delay for an error."""
+    """Get recommended retry delay for an error.
+
+    Args:
+        error: The exception to check
+
+    Returns:
+        Retry delay in seconds if available, None otherwise
+    """
     if isinstance(error, TradingBotError):
         return error.retry_after
     return None

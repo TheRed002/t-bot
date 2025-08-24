@@ -1,36 +1,111 @@
 """
-State Management module for the T-Bot trading system.
+Enterprise-Grade State Management System for T-Bot Trading Platform.
 
-This module provides comprehensive state management capabilities including:
-- P-018: State persistence and recovery system
-- P-023: Trade lifecycle management
-- P-024: Quality controls and validation
-- P-025: Real-time state synchronization
+This module provides a comprehensive, production-ready state management solution with:
+- Enterprise-grade StateService architecture with dependency injection
+- Database abstraction layer eliminating direct DB access
+- Comprehensive state recovery and audit trail system
+- Real-time monitoring and health checks
+- Factory pattern for service composition
+- Full compliance with trading system reliability requirements
 
-The state management system ensures:
-- Consistent state across all bot components
-- Crash recovery and state persistence
-- Trade lifecycle tracking and quality metrics
-- Real-time synchronization and conflict resolution
+Core Architecture:
+- StateService: Central state coordination with DatabaseService integration
+- StateRecoveryManager: Point-in-time recovery and audit trails
+- StateMonitoringService: Health monitoring and performance metrics
+- StateServiceFactory: Dependency injection and service composition
+- StateServiceRegistry: Singleton management and lifecycle control
 
-Components:
-- StateManager: Core state management and persistence
-- TradeLifecycleManager: Trade state transitions and tracking
-- QualityController: Pre/post-trade validation and scoring
-- StateSyncManager: Real-time synchronization and conflict resolution
-- CheckpointManager: State checkpointing and recovery
+Key Features:
+✅ Eliminates all direct database access violations
+✅ Enterprise-grade recovery and audit capabilities
+✅ Comprehensive health monitoring and alerting
+✅ Dependency injection for testability
+✅ Performance optimization and SLA compliance
+✅ Trading-specific state handling (bots, positions, orders)
+✅ Real-time state synchronization with conflict resolution
+✅ Complete validation framework with business rules
 """
 
+# Core state management services
+# Legacy components (backward compatibility)
 from .checkpoint_manager import CheckpointManager
-from .quality_controller import QualityController
-from .state_manager import StateManager
-from .state_sync_manager import StateSyncManager
-from .trade_lifecycle_manager import TradeLifecycleManager
 
+# Enterprise components
+from .factory import (
+    StateServiceFactory,
+    StateServiceRegistry,
+    create_default_state_service,
+    create_test_state_service,
+    get_state_service,
+)
+from .monitoring import (
+    Alert,
+    AlertSeverity,
+    HealthCheck,
+    HealthStatus,
+    Metric,
+    MetricType,
+    PerformanceReport,
+    StateMonitoringService,
+)
+from .quality_controller import QualityController
+from .recovery import (
+    AuditEntry,
+    AuditEventType,
+    CorruptionReport,
+    RecoveryOperation,
+    RecoveryPoint,
+    RecoveryStatus,
+    StateRecoveryManager,
+)
+
+# Core consolidated state management
+from .state_service import StatePriority, StateService, StateType
+from .state_validator import StateValidator
+
+# Trading-specific components
+from .trade_lifecycle_manager import TradeEvent, TradeLifecycleManager
+
+# Public API exports
 __all__ = [
+    "Alert",
+    "AlertSeverity",
+    "AuditEntry",
+    "AuditEventType",
+    # Legacy compatibility
     "CheckpointManager",
+    "CorruptionReport",
+    "HealthCheck",
+    "HealthStatus",
+    "Metric",
+    "MetricType",
+    "PerformanceReport",
     "QualityController",
-    "StateManager",
-    "StateSyncManager",
+    "RecoveryOperation",
+    "RecoveryPoint",
+    "RecoveryStatus",
+    # Monitoring and health checks
+    "StateMonitoringService",
+    "StatePriority",
+    # Recovery and audit system
+    "StateRecoveryManager",
+    # Core StateService API
+    "StateService",
+    # Enterprise factory and registry
+    "StateServiceFactory",
+    "StateServiceRegistry",
+    "StateType",
+    "StateValidator",
+    # Trading components
+    "TradeEvent",
     "TradeLifecycleManager",
+    "create_default_state_service",
+    "create_test_state_service",
+    "get_state_service",
 ]
+
+# Version information
+__version__ = "2.0.0"
+__author__ = "T-Bot Development Team"
+__description__ = "Enterprise-grade state management system with full database service integration"

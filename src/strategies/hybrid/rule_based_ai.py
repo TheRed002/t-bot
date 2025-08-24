@@ -23,8 +23,8 @@ from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 
 from src.core.exceptions import StrategyError
-from src.core.logging import get_logger
 
+from src.core.logging import get_logger
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
 
@@ -36,8 +36,6 @@ from src.strategies.base import BaseStrategy
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
 
 
 class TechnicalRuleEngine:
@@ -213,6 +211,7 @@ class AIPredictor:
         self.feature_window = config.get("feature_window", 50)
         self.retrain_frequency = config.get("retrain_frequency", 100)
         self.prediction_count = 0
+        self.logger = get_logger(__name__)
 
         # Performance tracking
         self.predictions_made = []
@@ -283,7 +282,7 @@ class AIPredictor:
     async def train_model(self, training_data: list[dict[str, Any]]) -> None:
         """Train the ML model with historical data."""
         if len(training_data) < 50:
-            logger.warning("Insufficient training data for AI model")
+            self.logger.warning("Insufficient training data for AI model")
             return
 
         try:
@@ -300,7 +299,7 @@ class AIPredictor:
                     y.append(1 if data_point["future_return"] > 0 else 0)
 
             if len(X) < 10:
-                logger.warning("Insufficient valid features for training")
+                self.logger.warning("Insufficient valid features for training")
                 return
 
             X = np.array(X)
@@ -317,7 +316,7 @@ class AIPredictor:
             y_pred = self.model.predict(X_scaled)
             accuracy = accuracy_score(y, y_pred)
 
-            logger.info(
+            self.logger.info(
                 "AI model trained successfully",
                 training_samples=len(X),
                 accuracy=accuracy,
@@ -325,7 +324,7 @@ class AIPredictor:
             )
 
         except Exception as e:
-            logger.error("Error training AI model", error=str(e))
+            self.logger.error("Error training AI model", error=str(e))
             raise StrategyError(f"AI model training failed: {e}")
 
     async def predict(
@@ -375,7 +374,7 @@ class AIPredictor:
             }
 
         except Exception as e:
-            logger.error("Error making AI prediction", error=str(e))
+            self.logger.error("Error making AI prediction", error=str(e))
             return {
                 "direction": SignalDirection.HOLD,
                 "confidence": 0.0,
@@ -454,7 +453,7 @@ class RuleBasedAIStrategy(BaseStrategy):
             "hybrid": {"wins": 0, "losses": 0, "total": 0},
         }
 
-        logger.info(
+        self.logger.info(
             "RuleBasedAI strategy initialized",
             rule_weight=self.rule_weight,
             ai_weight=self.ai_weight,
@@ -481,7 +480,7 @@ class RuleBasedAIStrategy(BaseStrategy):
 
             # Need sufficient data for analysis
             if len(self.price_history[symbol]) < 50:
-                logger.debug("Insufficient price history for signal generation", symbol=symbol)
+                self.logger.debug("Insufficient price history for signal generation", symbol=symbol)
                 return []
 
             # Get market regime
@@ -523,7 +522,7 @@ class RuleBasedAIStrategy(BaseStrategy):
             return []
 
         except Exception as e:
-            logger.error("Error generating hybrid signals", symbol=data.symbol, error=str(e))
+            self.logger.error("Error generating hybrid signals", symbol=data.symbol, error=str(e))
             return []
 
     async def _resolve_conflicts(
@@ -609,7 +608,7 @@ class RuleBasedAIStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error("Error resolving signal conflicts", error=str(e))
+            self.logger.error("Error resolving signal conflicts", error=str(e))
             return None
 
     def _weighted_average_resolution(
@@ -680,7 +679,9 @@ class RuleBasedAIStrategy(BaseStrategy):
         try:
             # Basic signal validation
             if signal.confidence < self.min_confidence_threshold:
-                logger.warning("Signal confidence below threshold", confidence=signal.confidence)
+                self.logger.warning(
+                    "Signal confidence below threshold", confidence=signal.confidence
+                )
                 return False
 
             if signal.direction == SignalDirection.HOLD:
@@ -688,20 +689,20 @@ class RuleBasedAIStrategy(BaseStrategy):
 
             # Validate metadata exists
             if not signal.metadata:
-                logger.warning("Signal missing metadata")
+                self.logger.warning("Signal missing metadata")
                 return False
 
             # Check for required metadata fields
             required_fields = ["rule_direction", "ai_direction", "resolution_method"]
             for field in required_fields:
                 if field not in signal.metadata:
-                    logger.warning("Signal missing required metadata field", field=field)
+                    self.logger.warning("Signal missing required metadata field", field=field)
                     return False
 
             return True
 
         except Exception as e:
-            logger.error("Error validating hybrid signal", error=str(e))
+            self.logger.error("Error validating hybrid signal", error=str(e))
             return False
 
     def get_position_size(self, signal: Signal) -> Decimal:
@@ -733,7 +734,7 @@ class RuleBasedAIStrategy(BaseStrategy):
             return max(min_size, min(max_size, final_size))
 
         except Exception as e:
-            logger.error("Error calculating position size", error=str(e))
+            self.logger.error("Error calculating position size", error=str(e))
             return Decimal("0.01")  # Default 1%
 
     def should_exit(self, position: Position, data: MarketData) -> bool:
@@ -750,12 +751,12 @@ class RuleBasedAIStrategy(BaseStrategy):
 
             # Stop loss
             if pnl_pct <= -self.config.stop_loss_pct:
-                logger.info("Stop loss triggered", symbol=position.symbol, pnl_pct=pnl_pct)
+                self.logger.info("Stop loss triggered", symbol=position.symbol, pnl_pct=pnl_pct)
                 return True
 
             # Take profit
             if pnl_pct >= self.config.take_profit_pct:
-                logger.info("Take profit triggered", symbol=position.symbol, pnl_pct=pnl_pct)
+                self.logger.info("Take profit triggered", symbol=position.symbol, pnl_pct=pnl_pct)
                 return True
 
             # Additional hybrid-based exit logic
@@ -778,7 +779,7 @@ class RuleBasedAIStrategy(BaseStrategy):
                 if opposing_signals:
                     opposing_strength = sum(s["confidence"] * s["weight"] for s in opposing_signals)
                     if opposing_strength > 0.6:  # Strong opposing signal
-                        logger.info(
+                        self.logger.info(
                             "Hybrid exit signal triggered",
                             symbol=position.symbol,
                             opposing_strength=opposing_strength,
@@ -788,12 +789,12 @@ class RuleBasedAIStrategy(BaseStrategy):
             return False
 
         except Exception as e:
-            logger.error("Error in exit decision", symbol=position.symbol, error=str(e))
+            self.logger.error("Error in exit decision", symbol=position.symbol, error=str(e))
             return False
 
     async def _on_start(self) -> None:
         """Initialize strategy components on start."""
-        logger.info("Starting RuleBasedAI hybrid strategy")
+        self.logger.info("Starting RuleBasedAI hybrid strategy")
 
         # If we have historical data, train the AI model
         if len(self.signal_history) > 50:
@@ -831,10 +832,10 @@ class RuleBasedAIStrategy(BaseStrategy):
 
             if len(training_data) > 20:
                 await self.ai_predictor.train_model(training_data)
-                logger.info("AI model retrained", training_samples=len(training_data))
+                self.logger.info("AI model retrained", training_samples=len(training_data))
 
         except Exception as e:
-            logger.error("Error retraining AI model", error=str(e))
+            self.logger.error("Error retraining AI model", error=str(e))
 
     def adjust_component_weights(self) -> None:
         """Dynamically adjust weights based on component performance."""
@@ -873,7 +874,7 @@ class RuleBasedAIStrategy(BaseStrategy):
                     self.rule_weight /= total_weight
                     self.ai_weight /= total_weight
 
-                    logger.info(
+                    self.logger.info(
                         "Component weights adjusted",
                         rule_weight=self.rule_weight,
                         ai_weight=self.ai_weight,
@@ -882,7 +883,7 @@ class RuleBasedAIStrategy(BaseStrategy):
                     )
 
         except Exception as e:
-            logger.error("Error adjusting component weights", error=str(e))
+            self.logger.error("Error adjusting component weights", error=str(e))
 
     def get_strategy_statistics(self) -> dict[str, Any]:
         """Get comprehensive strategy statistics."""

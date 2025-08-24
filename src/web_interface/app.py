@@ -6,35 +6,149 @@ middleware, routes, and dependencies for the trading system web interface.
 """
 
 from contextlib import asynccontextmanager
+from typing import Any
 
 import socketio
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+# Import BaseComponent directly for better error visibility
+try:
+    from src.base import BaseComponent
+except ImportError as e:
+    # Fallback to a minimal BaseComponent implementation
+    import logging
+
+    class BaseComponent:
+        """Minimal BaseComponent fallback for import errors."""
+        def __init__(self):
+            self.logger = logging.getLogger(self.__class__.__module__)
+
+    # Log the import error
+    logging.error(f"Failed to import BaseComponent from src.base: {e}")
 from src.core.config import Config
-from src.core.logging import correlation_context, get_logger
-from src.monitoring.alerting import AlertManager, NotificationConfig, set_global_alert_manager
-from src.monitoring.metrics import MetricsCollector
-from src.monitoring.performance import PerformanceProfiler, set_global_profiler
-from src.monitoring.telemetry import (
+from src.core.logging import correlation_context
+from src.monitoring import (
+    AlertManager,
+    MetricsCollector,
+    NotificationConfig,
     OpenTelemetryConfig,
+    PerformanceProfiler,
     instrument_fastapi,
+    set_global_alert_manager,
+    set_global_profiler,
     set_global_trading_tracer,
     setup_telemetry,
 )
+
+# New unified architecture imports
+from src.web_interface.auth import get_auth_manager, initialize_auth_manager
+from src.web_interface.facade import get_api_facade, get_service_registry
+
+# Import middleware
 from src.web_interface.middleware.auth import AuthMiddleware
+from src.web_interface.middleware.correlation import CorrelationMiddleware
+from src.web_interface.middleware.decimal_precision import (
+    DecimalPrecisionMiddleware,
+    DecimalValidationMiddleware,
+)
 from src.web_interface.middleware.error_handler import ErrorHandlerMiddleware
 from src.web_interface.middleware.rate_limit import RateLimitMiddleware
-from src.web_interface.security.auth import init_auth
+from src.web_interface.middleware.security import SecurityMiddleware
 
-logger = get_logger(__name__)
+# Import JWT handler at module level
+try:
+    from src.web_interface.security.jwt_handler import JWTHandler
+except ImportError as e:
+    JWTHandler = None
+    BaseComponent().logger.error(f"Failed to import JWTHandler: {e}")
+# Global instances with thread safety
+import threading
 
-# Global instances
+from src.web_interface.services import (
+    BotManagementServiceImpl,
+    MarketDataServiceImpl,
+    PortfolioServiceImpl,
+    RiskManagementServiceImpl,
+    StrategyServiceImpl,
+    TradingServiceImpl,
+)
+from src.web_interface.versioning import VersioningMiddleware, VersionRoutingMiddleware
+from src.web_interface.websockets import get_unified_websocket_manager
+
 app_config: Config = None
 bot_orchestrator = None
 execution_engine = None
 model_manager = None
 _monitoring_setup_done = False
+_services_initialized = False
+_services_lock = threading.Lock()
+
+
+async def _initialize_services():
+    """Initialize service layer and facade."""
+    global _services_initialized
+
+    with _services_lock:
+        if _services_initialized:
+            return
+
+        # Initialize authentication manager
+        if app_config and hasattr(app_config, "security"):
+            auth_config = {
+                "jwt": {
+                    "secret_key": app_config.security.secret_key,
+                    "algorithm": getattr(app_config.security, "jwt_algorithm", "HS256"),
+                    "access_token_expire_minutes": getattr(app_config.security, "jwt_expire_minutes", 30),
+                    "refresh_token_expire_days": getattr(app_config.security, "refresh_token_expire_days", 7),
+                },
+                "session": {"timeout_minutes": getattr(app_config.security, "session_timeout_minutes", 60)},
+            }
+        else:
+            raise RuntimeError("Security configuration is required for authentication")
+
+        initialize_auth_manager(auth_config)
+
+        # Initialize service implementations
+        registry = get_service_registry()
+
+        # Register service implementations
+        if execution_engine:
+            registry.register_service("trading", TradingServiceImpl(execution_engine))
+        if bot_orchestrator:
+            registry.register_service("bot_management", BotManagementServiceImpl(bot_orchestrator))
+
+        registry.register_service("market_data", MarketDataServiceImpl())
+        registry.register_service("portfolio", PortfolioServiceImpl())
+        registry.register_service("risk_management", RiskManagementServiceImpl())
+        registry.register_service("strategies", StrategyServiceImpl())
+
+        # Initialize API facade
+        facade = get_api_facade()
+        await facade.initialize()
+
+        # Connect API endpoints to services for backward compatibility
+        await _connect_api_endpoints_to_services(registry)
+
+        _services_initialized = True
+
+
+async def _connect_api_endpoints_to_services(registry):
+    """Connect API endpoints to registered services for backward compatibility."""
+    try:
+        # Connect bot management API to the bot management service
+        if registry.has_service("bot_management"):
+            bot_mgmt_service = registry.get_service("bot_management")
+            # Import here to avoid circular imports
+            from src.web_interface.api import bot_management
+            bot_management.set_bot_service(bot_mgmt_service)
+            BaseComponent().logger.info("Connected bot management API to service")
+
+        # Add other API connections here as needed
+        # Example: trading API, portfolio API, etc.
+
+    except Exception as e:
+        BaseComponent().logger.error(f"Error connecting API endpoints to services: {e}")
 
 
 @asynccontextmanager
@@ -45,86 +159,99 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown of the trading system components.
     """
     # Startup
-    # Generate correlation ID for startup sequence
     startup_correlation_id = correlation_context.generate_correlation_id()
     with correlation_context.correlation_context(startup_correlation_id):
-        logger.info("Starting T-Bot web interface")
+        BaseComponent().logger.info("Starting T-Bot web interface with unified architecture")
 
     try:
-        # Initialize authentication system
-        init_auth(app_config)
+        # Initialize service layer
+        await _initialize_services()
 
-        # Start Socket.IO background tasks
-        try:
-            from src.web_interface.socketio_manager import socketio_manager
-
-            await socketio_manager.start_background_tasks()
-            with correlation_context.correlation_context(startup_correlation_id):
-                logger.info("Socket.IO background tasks started")
-        except Exception as e:
-            with correlation_context.correlation_context(startup_correlation_id):
-                logger.error(f"Failed to start Socket.IO background tasks: {e}")
+        # Initialize unified WebSocket manager
+        websocket_manager = get_unified_websocket_manager()
+        await websocket_manager.start()
+        with correlation_context.correlation_context(startup_correlation_id):
+            BaseComponent().logger.info("Unified WebSocket manager started")
 
         # Initialize trading system components
         if bot_orchestrator:
             await bot_orchestrator.start()
             with correlation_context.correlation_context(startup_correlation_id):
-                logger.info("Bot orchestrator started")
+                BaseComponent().logger.info("Bot orchestrator started")
 
         if execution_engine:
             await execution_engine.start()
             with correlation_context.correlation_context(startup_correlation_id):
-                logger.info("Execution engine started")
+                BaseComponent().logger.info("Execution engine started")
 
         with correlation_context.correlation_context(startup_correlation_id):
-            logger.info("T-Bot web interface startup completed")
+            BaseComponent().logger.info("T-Bot web interface startup completed")
 
         yield
 
     finally:
         # Shutdown
-        # Generate correlation ID for shutdown sequence
         shutdown_correlation_id = correlation_context.generate_correlation_id()
         with correlation_context.correlation_context(shutdown_correlation_id):
-            logger.info("Shutting down T-Bot web interface")
+            BaseComponent().logger.info("Shutting down T-Bot web interface")
 
         try:
             # Stop trading system components
             if execution_engine:
                 await execution_engine.stop()
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    logger.info("Execution engine stopped")
+                    BaseComponent().logger.info("Execution engine stopped")
 
             if bot_orchestrator:
                 await bot_orchestrator.stop()
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    logger.info("Bot orchestrator stopped")
+                    BaseComponent().logger.info("Bot orchestrator stopped")
 
-            # Stop Socket.IO background tasks
+            # Stop unified WebSocket manager
+            websocket_manager = get_unified_websocket_manager()
+            await websocket_manager.stop()
+            with correlation_context.correlation_context(shutdown_correlation_id):
+                BaseComponent().logger.info("Unified WebSocket manager stopped")
+
+            # Cleanup API facade and service registry
             try:
-                from src.web_interface.socketio_manager import socketio_manager
-
-                await socketio_manager.stop_background_tasks()
+                facade = get_api_facade()
+                await facade.cleanup()
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    logger.info("Socket.IO background tasks stopped")
+                    BaseComponent().logger.info("API facade cleaned up")
             except Exception as e:
                 with correlation_context.correlation_context(shutdown_correlation_id):
-                    logger.error(f"Failed to stop Socket.IO background tasks: {e}")
+                    BaseComponent().logger.error(f"Error cleaning up API facade: {e}")
+
+            try:
+                registry = get_service_registry()
+                # Cleanup all registered services
+                for service_name in registry.get_all_service_names():
+                    service = registry.get_service(service_name)
+                    if hasattr(service, "cleanup"):
+                        await service.cleanup()
+                # Clear all services using the cleanup method
+                await registry.cleanup_all()
+                with correlation_context.correlation_context(shutdown_correlation_id):
+                    BaseComponent().logger.info("Service registry cleaned up")
+            except Exception as e:
+                with correlation_context.correlation_context(shutdown_correlation_id):
+                    BaseComponent().logger.error(f"Error cleaning up service registry: {e}")
 
             with correlation_context.correlation_context(shutdown_correlation_id):
-                logger.info("T-Bot web interface shutdown completed")
+                BaseComponent().logger.info("T-Bot web interface shutdown completed")
 
         except Exception as e:
             with correlation_context.correlation_context(shutdown_correlation_id):
-                logger.error(f"Error during shutdown: {e}")
+                BaseComponent().logger.error(f"Error during shutdown: {e}")
 
 
 def create_app(
     config: Config,
-    bot_orchestrator_instance=None,
-    execution_engine_instance=None,
-    model_manager_instance=None,
-):
+    bot_orchestrator_instance: Any | None = None,
+    execution_engine_instance: Any | None = None,
+    model_manager_instance: Any | None = None,
+) -> Any:
     """
     Create and configure FastAPI application with Socket.IO.
 
@@ -196,43 +323,57 @@ def create_app(
     # 1. Error handling (outermost)
     fastapi_app.add_middleware(ErrorHandlerMiddleware, debug=web_config.get("debug", False))
 
-    # 1.5. Correlation ID middleware for request tracking
-    from src.web_interface.middleware.correlation import CorrelationMiddleware
+    # 2. API Versioning - must be early in the chain
+    fastapi_app.add_middleware(VersioningMiddleware)
+    fastapi_app.add_middleware(VersionRoutingMiddleware)
 
+    # 3. Correlation ID middleware for request tracking
     fastapi_app.add_middleware(CorrelationMiddleware)
 
-    # 2. Security middleware
-    from src.web_interface.middleware.security import SecurityMiddleware
+    # 4. Security middleware
+    fastapi_app.add_middleware(SecurityMiddleware, enable_csp=True, enable_input_validation=False)
 
-    fastapi_app.add_middleware(SecurityMiddleware, enable_csp=True, enable_input_validation=True)
+    # 5. Connection pooling for performance
+    try:
+        from src.web_interface.middleware.connection_pool import (
+            ConnectionPoolMiddleware,
+            set_global_pool_manager,
+        )
+        connection_pool_middleware = ConnectionPoolMiddleware(fastapi_app, config)
+        fastapi_app.add_middleware(ConnectionPoolMiddleware, config=config)
+        set_global_pool_manager(connection_pool_middleware.pool_manager)
+    except Exception as e:
+        error_msg = f"Connection pool middleware setup failed: {e}"
+        BaseComponent().logger.error(error_msg)
+        # In production, connection pooling is critical for performance
+        if getattr(config, "environment", "development") == "production":
+            raise RuntimeError(error_msg)
 
-    # 2. Connection pooling for performance
-    from src.web_interface.middleware.connection_pool import (
-        ConnectionPoolMiddleware,
-        set_global_pool_manager,
-    )
+    # 6. Decimal precision middleware for financial data integrity
+    try:
+        fastapi_app.add_middleware(DecimalValidationMiddleware)
+        fastapi_app.add_middleware(DecimalPrecisionMiddleware)
+    except Exception as e:
+        BaseComponent().logger.warning(f"Decimal precision middleware setup failed: {e}")
 
-    connection_pool_middleware = ConnectionPoolMiddleware(fastapi_app, config)
-    fastapi_app.add_middleware(ConnectionPoolMiddleware, config=config)
-    set_global_pool_manager(connection_pool_middleware.pool_manager)
+    # 7. Rate limiting
+    try:
+        fastapi_app.add_middleware(RateLimitMiddleware, config=config)
+    except Exception as e:
+        BaseComponent().logger.warning(f"Rate limiting middleware setup failed: {e}")
 
-    # 3. Decimal precision middleware for financial data integrity
-    from src.web_interface.middleware.decimal_precision import (
-        DecimalPrecisionMiddleware,
-        DecimalValidationMiddleware,
-    )
+    # 8. Authentication middleware
+    try:
+        if JWTHandler is None:
+            raise ImportError("JWTHandler not available")
 
-    fastapi_app.add_middleware(DecimalValidationMiddleware)
-    fastapi_app.add_middleware(DecimalPrecisionMiddleware)
-
-    # 4. Rate limiting
-    fastapi_app.add_middleware(RateLimitMiddleware, config=config)
-
-    # 5. Authentication (innermost)
-    from src.web_interface.security.jwt_handler import JWTHandler
-
-    jwt_handler = JWTHandler(config)
-    fastapi_app.add_middleware(AuthMiddleware, jwt_handler=jwt_handler)
+        jwt_handler = JWTHandler(config)
+        fastapi_app.add_middleware(AuthMiddleware, jwt_handler=jwt_handler)
+    except Exception as e:
+        BaseComponent().logger.error(f"Auth middleware setup failed - authentication disabled: {e}")
+        # This is critical - should not continue without auth in production
+        if config.environment == "production":
+            raise RuntimeError("Cannot start without authentication in production")
 
     # Add routes
     _register_routes(fastapi_app)
@@ -243,22 +384,22 @@ def create_app(
     # Setup monitoring infrastructure
     _setup_monitoring(fastapi_app, config)
 
-    # Create Socket.IO server and wrap FastAPI app
-    from src.web_interface.socketio_manager import socketio_manager
+    # Create unified WebSocket server and wrap FastAPI app
+    websocket_manager = get_unified_websocket_manager()
 
     # Create Socket.IO server with CORS configuration
     cors_origins = cors_config.get("allow_origins", ["http://localhost:3000"])
-    socketio_manager.create_server(cors_allowed_origins=cors_origins)
+    websocket_manager.create_server(cors_allowed_origins=cors_origins)
 
     # Wrap FastAPI app with Socket.IO
     combined_app = socketio.ASGIApp(
-        socketio_manager.sio, other_asgi_app=fastapi_app, socketio_path="/socket.io/"
+        websocket_manager.sio, other_asgi_app=fastapi_app, socketio_path="/socket.io/"
     )
 
     # Generate correlation ID for app creation completion
     app_creation_correlation_id = correlation_context.generate_correlation_id()
     with correlation_context.correlation_context(app_creation_correlation_id):
-        logger.info("FastAPI application with Socket.IO created and configured")
+        BaseComponent().logger.info("FastAPI application with unified WebSocket manager created")
     return combined_app
 
 
@@ -274,99 +415,125 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
-        return {"status": "healthy", "service": "t-bot-api", "version": "1.0.0"}
+        health_status = {
+            "status": "healthy",
+            "service": "t-bot-api",
+            "version": "2.0.0",
+            "architecture": "unified",
+            "components": {}
+        }
+
+        try:
+            facade = get_api_facade()
+            if hasattr(facade, "health_check"):
+                health_status["components"]["api_facade"] = facade.health_check()
+            else:
+                health_status["components"]["api_facade"] = {"status": "available"}
+        except Exception as e:
+            health_status["components"]["api_facade"] = {"status": "error", "error": str(e)}
+
+        try:
+            auth_manager = get_auth_manager()
+            if hasattr(auth_manager, "get_user_stats"):
+                health_status["components"]["auth_manager"] = auth_manager.get_user_stats()
+            else:
+                health_status["components"]["auth_manager"] = {"status": "available"}
+        except Exception as e:
+            health_status["components"]["auth_manager"] = {"status": "error", "error": str(e)}
+
+        try:
+            websocket_manager = get_unified_websocket_manager()
+            if hasattr(websocket_manager, "get_connection_stats"):
+                health_status["components"]["websocket_connections"] = websocket_manager.get_connection_stats()
+            else:
+                health_status["components"]["websocket_connections"] = {"status": "available"}
+        except Exception as e:
+            health_status["components"]["websocket_connections"] = {"status": "error", "error": str(e)}
+
+        # If any component is in error, mark overall status as degraded
+        if any(comp.get("status") == "error" for comp in health_status["components"].values()):
+            health_status["status"] = "degraded"
+
+        return health_status
 
     # Root endpoint
     @app.get("/")
     async def root():
         """Root endpoint with API information."""
         return {
-            "message": "T-Bot Trading System API",
-            "version": "1.0.0",
+            "message": "T-Bot Trading System API - Unified Architecture",
+            "version": "2.0.0",
+            "api_versions": ["v1", "v1.1", "v2"],
+            "default_version": "v2",
             "docs": "/docs",
             "redoc": "/redoc",
             "health": "/health",
+            "versioning": {
+                "header": "X-API-Version",
+                "path": "/api/v{version}/...",
+                "query": "?api_version=v{version}",
+            },
         }
 
-    # Authentication routes
-    try:
-        from src.web_interface.api.auth import router as auth_router
+    # API version info endpoint
+    @app.get("/api/versions")
+    async def api_versions():
+        """Get API version information."""
+        from src.web_interface.versioning import get_version_manager
 
-        app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
-    except ImportError as e:
-        logger.warning(f"Failed to import auth router: {e}")
+        version_manager = get_version_manager()
+        versions = version_manager.list_versions()
 
-    # Bot management routes
-    try:
-        from src.web_interface.api.bot_management import router as bot_router
+        return {
+            "versions": [
+                {
+                    "version": v.version,
+                    "status": v.status.value,
+                    "features": list(v.features),
+                    "release_date": v.release_date.isoformat() if v.release_date else None,
+                    "deprecation_date": (
+                        v.deprecation_date.isoformat() if v.deprecation_date else None
+                    ),
+                }
+                for v in versions
+            ],
+            "default": version_manager.get_default_version().version,
+            "latest": version_manager.get_latest_version().version,
+        }
 
-        app.include_router(bot_router, prefix="/api/bots", tags=["Bot Management"])
-    except ImportError as e:
-        logger.warning(f"Failed to import bot management router: {e}")
+    # Register all API routers
+    routers = [
+        ("src.web_interface.api.auth", "router", "/auth", ["Authentication"]),
+        ("src.web_interface.api.bot_management", "router", "/api/bots", ["Bot Management"]),
+        ("src.web_interface.api.portfolio", "router", "/api/portfolio", ["Portfolio"]),
+        ("src.web_interface.api.trading", "router", "/api/trading", ["Trading"]),
+        ("src.web_interface.api.strategies", "router", "/api/strategies", ["Strategies"]),
+        ("src.web_interface.api.risk", "router", "/api/risk", ["Risk Management"]),
+        ("src.web_interface.api.ml_models", "router", "/api/ml", ["Machine Learning"]),
+        ("src.web_interface.api.monitoring", "router", "/api/monitoring", ["Monitoring"]),
+        ("src.web_interface.api.playground", "router", "/api/playground", ["Playground"]),
+        ("src.web_interface.api.optimization", "router", "/api/optimization", ["Optimization"]),
+    ]
 
-    # Portfolio routes
-    try:
-        from src.web_interface.api.portfolio import router as portfolio_router
+    # Track critical routers that must be available
+    critical_routers = {"src.web_interface.api.auth", "src.web_interface.api.bot_management", "src.web_interface.api.trading"}
+    failed_critical = []
 
-        app.include_router(portfolio_router, prefix="/api/portfolio", tags=["Portfolio"])
-    except ImportError as e:
-        logger.warning(f"Failed to import portfolio router: {e}")
+    for module_path, router_name, prefix, tags in routers:
+        try:
+            import importlib
+            module = importlib.import_module(module_path)
+            router = getattr(module, router_name)
+            app.include_router(router, prefix=prefix, tags=tags)
+            BaseComponent().logger.debug(f"Registered router: {module_path}")
+        except (ImportError, AttributeError) as e:
+            BaseComponent().logger.error(f"Failed to import {module_path}: {e}")
+            if module_path in critical_routers:
+                failed_critical.append(module_path)
 
-    # Trading routes
-    try:
-        from src.web_interface.api.trading import router as trading_router
-
-        app.include_router(trading_router, prefix="/api/trading", tags=["Trading"])
-    except ImportError as e:
-        logger.warning(f"Failed to import trading router: {e}")
-
-    # Strategy routes
-    try:
-        from src.web_interface.api.strategies import router as strategy_router
-
-        app.include_router(strategy_router, prefix="/api/strategies", tags=["Strategies"])
-    except ImportError as e:
-        logger.warning(f"Failed to import strategies router: {e}")
-
-    # Risk management routes
-    try:
-        from src.web_interface.api.risk import router as risk_router
-
-        app.include_router(risk_router, prefix="/api/risk", tags=["Risk Management"])
-    except ImportError as e:
-        logger.warning(f"Failed to import risk router: {e}")
-
-    # ML model routes
-    try:
-        from src.web_interface.api.ml_models import router as ml_router
-
-        app.include_router(ml_router, prefix="/api/ml", tags=["Machine Learning"])
-    except ImportError as e:
-        logger.warning(f"Failed to import ML models router: {e}")
-
-    # Monitoring routes
-    try:
-        from src.web_interface.api.monitoring import router as monitoring_router
-
-        app.include_router(monitoring_router, prefix="/api/monitoring", tags=["Monitoring"])
-    except ImportError as e:
-        logger.warning(f"Failed to import monitoring router: {e}")
-
-    # Playground routes
-    try:
-        from src.web_interface.api.playground import router as playground_router
-
-        app.include_router(playground_router, prefix="/api/playground", tags=["Playground"])
-    except ImportError as e:
-        logger.warning(f"Failed to import playground router: {e}")
-
-    # Optimization routes
-    try:
-        from src.web_interface.api.optimization import router as optimization_router
-
-        app.include_router(optimization_router, prefix="/api/optimization", tags=["Optimization"])
-    except ImportError as e:
-        logger.warning(f"Failed to import optimization router: {e}")
+    # If any critical routers failed, raise an error
+    if failed_critical:
+        raise RuntimeError(f"Critical routers failed to load: {', '.join(failed_critical)}")
 
     # Don't add Socket.IO here - it will be wrapped around the entire app
     pass
@@ -394,14 +561,14 @@ def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
     global _monitoring_setup_done
 
     if _monitoring_setup_done:
-        logger.debug("Monitoring infrastructure already setup, skipping")
+        BaseComponent().logger.debug("Monitoring infrastructure already setup, skipping")
         return
 
     try:
         # Generate correlation ID for monitoring setup
         monitoring_correlation_id = correlation_context.generate_correlation_id()
         with correlation_context.correlation_context(monitoring_correlation_id):
-            logger.info("Setting up monitoring infrastructure")
+            BaseComponent().logger.info("Setting up monitoring infrastructure")
 
         # Setup OpenTelemetry tracing
         try:
@@ -416,33 +583,31 @@ def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
             set_global_trading_tracer(trading_tracer)
             instrument_fastapi(fastapi_app, telemetry_config)
             with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.info("OpenTelemetry tracing configured")
+                BaseComponent().logger.info("OpenTelemetry tracing configured")
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.warning(f"Failed to setup OpenTelemetry: {e}")
+                BaseComponent().logger.warning(f"Failed to setup OpenTelemetry: {e}")
 
         # Setup metrics collection
         try:
             metrics_collector = MetricsCollector()
-            # Store globally for access
-            import src.monitoring.metrics
-
-            src.monitoring.metrics._global_collector = metrics_collector
+            # Use proper setter function instead of direct access
+            set_metrics_collector(metrics_collector)
             with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.info("Prometheus metrics collector configured")
+                BaseComponent().logger.info("Prometheus metrics collector configured")
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.warning(f"Failed to setup metrics collector: {e}")
+                BaseComponent().logger.warning(f"Failed to setup metrics collector: {e}")
 
         # Setup performance profiler
         try:
             profiler = PerformanceProfiler(enable_memory_tracking=True, enable_cpu_profiling=True)
             set_global_profiler(profiler)
             with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.info("Performance profiler configured")
+                BaseComponent().logger.info("Performance profiler configured")
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.warning(f"Failed to setup performance profiler: {e}")
+                BaseComponent().logger.warning(f"Failed to setup performance profiler: {e}")
 
         # Setup alert manager
         try:
@@ -455,122 +620,21 @@ def _setup_monitoring(fastapi_app: FastAPI, config: Config) -> None:
             alert_manager = AlertManager(notification_config)
             set_global_alert_manager(alert_manager)
             with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.info("Alert manager configured")
+                BaseComponent().logger.info("Alert manager configured")
         except Exception as e:
             with correlation_context.correlation_context(monitoring_correlation_id):
-                logger.warning(f"Failed to setup alert manager: {e}")
+                BaseComponent().logger.warning(f"Failed to setup alert manager: {e}")
 
         with correlation_context.correlation_context(monitoring_correlation_id):
-            logger.info("Monitoring infrastructure setup completed")
+            BaseComponent().logger.info("Monitoring infrastructure setup completed")
         _monitoring_setup_done = True
 
     except Exception as e:
         with correlation_context.correlation_context(monitoring_correlation_id):
-            logger.error(f"Error setting up monitoring infrastructure: {e}")
+            BaseComponent().logger.error(f"Error setting up monitoring infrastructure: {e}")
 
 
-# API route placeholders (will be implemented in the next steps)
-def create_auth_router():
-    """Create authentication router - placeholder."""
-    from fastapi import APIRouter
-
-    router = APIRouter()
-
-    @router.get("/status")
-    async def auth_status():
-        return {"status": "auth router placeholder"}
-
-    return router
-
-
-def create_bot_router():
-    """Create bot management router - placeholder."""
-    from fastapi import APIRouter
-
-    router = APIRouter()
-
-    @router.get("/")
-    async def list_bots():
-        return {"bots": [], "message": "bot router placeholder"}
-
-    return router
-
-
-def create_portfolio_router():
-    """Create portfolio router - placeholder."""
-    from fastapi import APIRouter
-
-    router = APIRouter()
-
-    @router.get("/summary")
-    async def portfolio_summary():
-        return {"summary": {}, "message": "portfolio router placeholder"}
-
-    return router
-
-
-def create_trading_router():
-    """Create trading router - placeholder."""
-    from fastapi import APIRouter
-
-    router = APIRouter()
-
-    @router.get("/orders")
-    async def list_orders():
-        return {"orders": [], "message": "trading router placeholder"}
-
-    return router
-
-
-def create_strategy_router():
-    """Create strategy router - placeholder."""
-    from fastapi import APIRouter
-
-    router = APIRouter()
-
-    @router.get("/")
-    async def list_strategies():
-        return {"strategies": [], "message": "strategy router placeholder"}
-
-    return router
-
-
-def create_risk_router():
-    """Create risk management router - placeholder."""
-    from fastapi import APIRouter
-
-    router = APIRouter()
-
-    @router.get("/metrics")
-    async def risk_metrics():
-        return {"metrics": {}, "message": "risk router placeholder"}
-
-    return router
-
-
-def create_ml_router():
-    """Create ML model router - placeholder."""
-    from fastapi import APIRouter
-
-    router = APIRouter()
-
-    @router.get("/models")
-    async def list_models():
-        return {"models": [], "message": "ml router placeholder"}
-
-    return router
-
-
-# Store router creators for dynamic import
-ROUTER_CREATORS = {
-    "auth": create_auth_router,
-    "bot_management": create_bot_router,
-    "portfolio": create_portfolio_router,
-    "trading": create_trading_router,
-    "strategies": create_strategy_router,
-    "risk": create_risk_router,
-    "ml_models": create_ml_router,
-}
+# Router creators removed - using direct imports instead
 
 
 # Module-level app instance variables - DO NOT CREATE APP HERE
@@ -585,7 +649,9 @@ def get_app():
 
     # Prevent multiple simultaneous app creation
     if _app_creation_in_progress:
-        logger.warning("App creation already in progress, returning None to prevent duplication")
+        BaseComponent().logger.warning(
+            "App creation already in progress, returning None to prevent duplication"
+        )
         return None
 
     if _app_instance is None:
@@ -594,18 +660,20 @@ def get_app():
             # Generate correlation ID for app creation
             app_creation_correlation_id = correlation_context.generate_correlation_id()
             with correlation_context.correlation_context(app_creation_correlation_id):
-                logger.info("Creating single application instance")
+                BaseComponent().logger.info("Creating single application instance")
             _app_config_instance = Config()
             _app_instance = create_app(_app_config_instance)
             with correlation_context.correlation_context(app_creation_correlation_id):
-                logger.info("Module-level combined FastAPI+Socket.IO app created successfully")
+                BaseComponent().logger.info(
+                    "Module-level combined FastAPI+Socket.IO app created successfully"
+                )
         except Exception as e:
             app_error_correlation_id = correlation_context.generate_correlation_id()
             with correlation_context.correlation_context(app_error_correlation_id):
-                logger.error(f"Failed to create module-level app: {e}")
+                BaseComponent().logger.error(f"Failed to create module-level app: {e}")
                 # Create a minimal app as fallback
                 _app_instance = FastAPI(title="T-Bot Trading System API (Fallback)")
-                logger.warning("Created fallback FastAPI app")
+                BaseComponent().logger.warning("Created fallback FastAPI app")
         finally:
             _app_creation_in_progress = False
 
@@ -618,21 +686,38 @@ def _get_app_lazy():
     return get_app()
 
 
-# Create a property-like access for the app
-class AppProxy:
+# Lazy app creation for ASGI servers
+_lazy_app = None
+
+def get_asgi_app():
+    """Get or create ASGI app for deployment."""
+    global _lazy_app
+    if _lazy_app is None:
+        _lazy_app = get_app()
+    return _lazy_app
+
+# Export app for ASGI servers - uvicorn expects 'app' variable
+# Use a lazy getter property to ensure app is created when accessed
+class LazyApp:
+    """Lazy app wrapper that creates app on first access."""
+
     def __getattr__(self, name):
-        app_instance = get_app()
-        if app_instance is None:
-            raise RuntimeError("Application instance is not available")
-        return getattr(app_instance, name)
+        """Create and return app on first attribute access."""
+        return getattr(get_asgi_app(), name)
 
+    def __call__(self, *args, **kwargs):
+        """Create and call app on first invocation."""
+        return get_asgi_app()(*args, **kwargs)
 
-app = AppProxy()
+app = LazyApp()
 
 
 # Run the server when executed directly
 if __name__ == "__main__":
     import uvicorn
+
+    # Create app instance for running
+    app_instance = get_asgi_app()
 
     # Get port from config or use default
     try:
@@ -645,6 +730,6 @@ if __name__ == "__main__":
         port = 8000
     host = "0.0.0.0"
 
-    logger.info(f"Starting web server on {host}:{port}")
+    BaseComponent().logger.info(f"Starting web server on {host}:{port}")
 
-    uvicorn.run("src.web_interface.app:app", host=host, port=port, reload=True, log_level="info")
+    uvicorn.run(app_instance, host=host, port=port, reload=False, log_level="info")

@@ -15,7 +15,6 @@ from decimal import Decimal
 
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -29,13 +28,14 @@ from src.core.types import (
     OrderType,
 )
 
+# Import exchange interfaces
+from src.execution.exchange_interface import ExchangeFactoryInterface
+
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
+from src.utils import log_calls, time_execution
 
 from .base_algorithm import BaseAlgorithm
-
-logger = get_logger(__name__)
 
 
 class IcebergAlgorithm(BaseAlgorithm):
@@ -124,7 +124,10 @@ class IcebergAlgorithm(BaseAlgorithm):
     @time_execution
     @log_calls
     async def execute(
-        self, instruction: ExecutionInstruction, exchange_factory=None, risk_manager=None
+        self,
+        instruction: ExecutionInstruction,
+        exchange_factory: ExchangeFactoryInterface | None = None,
+        risk_manager=None,
     ) -> ExecutionResult:
         """
         Execute an order using Iceberg algorithm.
@@ -317,7 +320,11 @@ class IcebergAlgorithm(BaseAlgorithm):
                 if execution_result.status == ExecutionStatus.CANCELLED:
                     if current_order_id:
                         try:
-                            await exchange.cancel_order(current_order_id)
+                            cancel_success = await exchange.cancel_order(current_order_id)
+                            if not cancel_success:
+                                self.logger.warning(
+                                    f"Cancel order returned False for {current_order_id}"
+                                )
                         except Exception as e:
                             self.logger.warning(f"Failed to cancel order during cancellation: {e}")
                     break
@@ -448,6 +455,14 @@ class IcebergAlgorithm(BaseAlgorithm):
                     break
 
                 try:
+                    # Check exchange health before making API call
+                    if not await exchange.health_check():
+                        self.logger.warning(
+                            f"Exchange {exchange.exchange_name} unhealthy, waiting..."
+                        )
+                        await asyncio.sleep(self.fill_monitoring_interval * 2)
+                        continue
+
                     # Get current order status
                     order_status = await exchange.get_order_status(order_id)
 

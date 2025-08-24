@@ -26,19 +26,14 @@ from okx.api import Trade as OKXTrade
 
 from src.core.config import Config
 from src.core.exceptions import ExchangeError, ExchangeInsufficientFundsError, ValidationError
-from src.core.logging import get_logger
 
+# Logger is provided by BaseExchange (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.utils.helpers import normalize_price, round_to_precision
-
-# MANDATORY: Import from P-007A (utils)
-from src.utils.validators import validate_order_request
-
-logger = get_logger(__name__)
+from src.utils import normalize_price, round_to_precision, ValidationFramework
 
 
 class OKXOrderManager:
@@ -75,7 +70,7 @@ class OKXOrderManager:
         # Initialize error handling
         self.error_handler = ErrorHandler(config.error_handling)
 
-        logger.info("Initialized OKX order manager")
+        self.logger.info("Initialized OKX order manager")
 
     async def place_order(self, order: OrderRequest) -> OrderResponse:
         """
@@ -93,7 +88,7 @@ class OKXOrderManager:
         """
         try:
             # Validate order request using utils validators
-            if not validate_order_request(order):
+            if not ValidationFramework.validate_order(order.__dict__):
                 raise ValidationError("Order validation failed using utils validators")
 
             # Additional OKX-specific validation
@@ -123,11 +118,11 @@ class OKXOrderManager:
                 "fills": [],
             }
 
-            logger.info(f"Successfully placed order on OKX: {order_response.id}")
+            self.logger.info(f"Successfully placed order on OKX: {order_response.id}")
             return order_response
 
         except Exception as e:
-            logger.error(f"Failed to place order on OKX: {e!s}")
+            self.logger.error(f"Failed to place order on OKX: {e!s}")
             if isinstance(e, ExchangeError | ValidationError):
                 raise
             raise ExchangeError(f"Failed to place order on OKX: {e!s}")
@@ -147,7 +142,7 @@ class OKXOrderManager:
             result = self.trade_client.cancel_order(ordId=order_id)
 
             if result.get("code") != "0":
-                logger.warning(
+                self.logger.warning(
                     f"Failed to cancel order {order_id}: {result.get('msg', 'Unknown error')}"
                 )
                 return False
@@ -156,11 +151,11 @@ class OKXOrderManager:
             if order_id in self.active_orders:
                 del self.active_orders[order_id]
 
-            logger.info(f"Successfully cancelled order on OKX: {order_id}")
+            self.logger.info(f"Successfully cancelled order on OKX: {order_id}")
             return True
 
         except Exception as e:
-            logger.error(f"Failed to cancel order {order_id} on OKX: {e!s}")
+            self.logger.error(f"Failed to cancel order {order_id} on OKX: {e!s}")
             return False
 
     async def get_order_status(self, order_id: str) -> OrderStatus:
@@ -178,7 +173,7 @@ class OKXOrderManager:
             result = self.trade_client.get_order_details(ordId=order_id)
 
             if result.get("code") != "0":
-                logger.warning(
+                self.logger.warning(
                     f"Failed to get order status for {order_id}: "
                     f"{result.get('msg', 'Unknown error')}"
                 )
@@ -190,7 +185,7 @@ class OKXOrderManager:
             return self._convert_okx_status_to_order_status(status)
 
         except Exception as e:
-            logger.error(f"Failed to get order status for {order_id} on OKX: {e!s}")
+            self.logger.error(f"Failed to get order status for {order_id} on OKX: {e!s}")
             return OrderStatus.UNKNOWN
 
     async def get_order_fills(self, order_id: str) -> list[OrderResponse]:
@@ -208,7 +203,7 @@ class OKXOrderManager:
             result = self.trade_client.get_order_details(ordId=order_id)
 
             if result.get("code") != "0":
-                logger.warning(
+                self.logger.warning(
                     f"Failed to get order fills for {order_id}: "
                     f"{result.get('msg', 'Unknown error')}"
                 )
@@ -235,11 +230,11 @@ class OKXOrderManager:
                 )
                 trades.append(order_fill)
 
-            logger.debug(f"Retrieved {len(trades)} fills for order {order_id}")
+            self.logger.debug(f"Retrieved {len(trades)} fills for order {order_id}")
             return trades
 
         except Exception as e:
-            logger.error(f"Failed to get order fills for {order_id} on OKX: {e!s}")
+            self.logger.error(f"Failed to get order fills for {order_id} on OKX: {e!s}")
             return []
 
     async def place_stop_loss_order(
@@ -270,7 +265,7 @@ class OKXOrderManager:
             return await self.place_order(stop_order)
 
         except Exception as e:
-            logger.error(f"Failed to place stop-loss order on OKX: {e!s}")
+            self.logger.error(f"Failed to place stop-loss order on OKX: {e!s}")
             raise ExchangeError(f"Failed to place stop-loss order on OKX: {e!s}")
 
     async def place_take_profit_order(
@@ -301,7 +296,7 @@ class OKXOrderManager:
             return await self.place_order(tp_order)
 
         except Exception as e:
-            logger.error(f"Failed to place take-profit order on OKX: {e!s}")
+            self.logger.error(f"Failed to place take-profit order on OKX: {e!s}")
             raise ExchangeError(f"Failed to place take-profit order on OKX: {e!s}")
 
     async def place_oco_order(
@@ -330,11 +325,11 @@ class OKXOrderManager:
             self.active_orders[stop_order.id]["oco_group"] = oco_group_id
             self.active_orders[tp_order.id]["oco_group"] = oco_group_id
 
-            logger.info(f"Placed OCO orders: stop={stop_order.id}, tp={tp_order.id}")
+            self.logger.info(f"Placed OCO orders: stop={stop_order.id}, tp={tp_order.id}")
             return [stop_order, tp_order]
 
         except Exception as e:
-            logger.error(f"Failed to place OCO order on OKX: {e!s}")
+            self.logger.error(f"Failed to place OCO order on OKX: {e!s}")
             raise ExchangeError(f"Failed to place OCO order on OKX: {e!s}")
 
     def calculate_fee(self, order: OrderRequest, is_maker: bool = False) -> Decimal:
@@ -356,11 +351,11 @@ class OKXOrderManager:
             order_value = order.quantity * (order.price or Decimal("0"))
             fee = order_value * fee_rate
 
-            logger.debug(f"Calculated fee for order: {fee} (rate: {fee_rate})")
+            self.logger.debug(f"Calculated fee for order: {fee} (rate: {fee_rate})")
             return fee
 
         except Exception as e:
-            logger.error(f"Failed to calculate fee: {e!s}")
+            self.logger.error(f"Failed to calculate fee: {e!s}")
             return Decimal("0")
 
     def _validate_order_request(self, order: OrderRequest) -> None:
@@ -394,10 +389,10 @@ class OKXOrderManager:
             if "-" not in order.symbol:
                 raise ValidationError(f"Invalid symbol format for OKX: {order.symbol}")
 
-            logger.debug(f"Order validation passed for {order.symbol}")
+            self.logger.debug(f"Order validation passed for {order.symbol}")
 
         except Exception as e:
-            logger.error(f"Order validation failed: {e!s}")
+            self.logger.error(f"Order validation failed: {e!s}")
             raise ValidationError(f"Order validation failed: {e!s}")
 
     def _convert_order_to_okx(self, order: OrderRequest) -> dict[str, Any]:
@@ -551,7 +546,7 @@ class OKXOrderManager:
     def clear_order_history(self) -> None:
         """Clear order history."""
         self.order_history.clear()
-        logger.info("Cleared order history")
+        self.logger.info("Cleared order history")
 
     def get_fee_rates(self) -> dict[str, Decimal]:
         """
@@ -572,4 +567,4 @@ class OKXOrderManager:
         """
         self.maker_fee_rate = maker_rate
         self.taker_fee_rate = taker_rate
-        logger.info(f"Updated fee rates: maker={maker_rate}, taker={taker_rate}")
+        self.logger.info(f"Updated fee rates: maker={maker_rate}, taker={taker_rate}")

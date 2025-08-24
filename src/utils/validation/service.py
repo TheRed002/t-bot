@@ -60,16 +60,13 @@ from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from src.core.exceptions import (
     ErrorCategory,
     ValidationError as TradingValidationError,
 )
-from src.core.types.base import (
-    BaseValidatedModel,
-    ValidationLevel,
-)
+from src.core.types import ValidationLevel
 
 from .core import ValidationFramework
 
@@ -94,7 +91,7 @@ class ValidationType(Enum):
     TRADE_DATA = "trade_data"
 
 
-class ValidationContext(BaseValidatedModel):
+class ValidationContext(BaseModel):
     """Context information for validation operations."""
 
     exchange: str | None = Field(None, description="Exchange name for context-specific validation")
@@ -115,7 +112,7 @@ class ValidationContext(BaseValidatedModel):
         return hashlib.md5(context_str.encode()).hexdigest()
 
 
-class ValidationDetail(BaseValidatedModel):
+class ValidationDetail(BaseModel):
     """Detailed validation information."""
 
     field: str = Field(..., description="Field that was validated")
@@ -129,7 +126,7 @@ class ValidationDetail(BaseValidatedModel):
     suggestion: str | None = Field(None, description="Suggested fix")
 
 
-class ValidationResult(BaseValidatedModel):
+class ValidationResult(BaseModel):
     """Comprehensive validation result."""
 
     is_valid: bool = Field(..., description="Whether validation passed")
@@ -770,9 +767,12 @@ class ValidationService:
                 else:
                     # Store normalized value
                     if field_result.normalized_value is not None:
-                        if not hasattr(result, "normalized_data"):
-                            result.normalized_data = {}
-                        result.normalized_data[field_name] = field_result.normalized_value
+                        # Use the result's normalized_value field directly
+                        if result.normalized_value is None:
+                            result.normalized_value = {}
+                        if not isinstance(result.normalized_value, dict):
+                            result.normalized_value = {}
+                        result.normalized_value[field_name] = field_result.normalized_value
 
         # Business logic validations
         if result.is_valid:
@@ -972,7 +972,7 @@ class ValidationService:
                 *[task for _, task in tasks], return_exceptions=True
             )
 
-            for (validation_name, _), task_result in zip(tasks, completed_tasks, strict=False):
+            for (validation_name, _), task_result in zip(tasks, completed_tasks):
                 if isinstance(task_result, Exception):
                     error_result = ValidationResult(
                         is_valid=False,
@@ -1023,6 +1023,31 @@ class ValidationService:
     def register_custom_rule(self, rule: ValidationRule) -> None:
         """Register a custom validation rule."""
         self.registry.register(rule)
+
+    # Simple validation utility methods
+    def validate_decimal(self, value: Any) -> Any:
+        """
+        Validate and convert value to Decimal.
+        
+        Args:
+            value: Value to validate
+            
+        Returns:
+            Decimal value
+            
+        Raises:
+            ValidationError: If value cannot be converted to Decimal
+        """
+        from decimal import Decimal, InvalidOperation
+        from src.core.exceptions import ValidationError
+        
+        if isinstance(value, Decimal):
+            return value
+            
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError) as e:
+            raise ValidationError(f"Invalid decimal value: {value}") from e
 
     def get_validation_stats(self) -> dict[str, Any]:
         """Get validation service statistics."""

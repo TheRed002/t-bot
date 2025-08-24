@@ -14,8 +14,7 @@ from typing import Any
 import numpy as np
 
 # From P-001 - Use structured logging
-from src.core.logging import get_logger
-
+# Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
 from src.core.types import (
     MarketData,
@@ -32,8 +31,6 @@ from src.strategies.base import BaseStrategy
 # From P-007A - Use decorators and validators
 from src.utils.decorators import time_execution
 from src.utils.helpers import calculate_atr
-
-logger = get_logger(__name__)
 
 
 class BreakoutStrategy(BaseStrategy):
@@ -86,7 +83,7 @@ class BreakoutStrategy(BaseStrategy):
         self.resistance_levels: list[float] = []
         self.last_breakout_time: datetime | None = None
 
-        logger.info(
+        self.logger.info(
             "Breakout Strategy initialized",
             strategy=self.name,
             lookback_period=self.lookback_period,
@@ -109,13 +106,13 @@ class BreakoutStrategy(BaseStrategy):
         try:
             # MANDATORY: Input validation
             if not data or not data.price:
-                logger.warning("Invalid market data received", strategy=self.name)
+                self.logger.warning("Invalid market data received", strategy=self.name)
                 return []
 
             # Validate price data
             price = float(data.price)
             if price <= 0:
-                logger.warning("Invalid price value", strategy=self.name, price=price)
+                self.logger.warning("Invalid price value", strategy=self.name, price=price)
                 return []
 
             # Update price history
@@ -123,7 +120,7 @@ class BreakoutStrategy(BaseStrategy):
 
             # Check if we have enough data for calculations
             if len(self.price_history) < self.lookback_period:
-                logger.debug(
+                self.logger.debug(
                     "Insufficient price history for signal generation",
                     strategy=self.name,
                     current_length=len(self.price_history),
@@ -136,7 +133,7 @@ class BreakoutStrategy(BaseStrategy):
 
             # Check for consolidation period
             consolidation_met = self._check_consolidation_period()
-            logger.debug(
+            self.logger.debug(
                 "Consolidation check result",
                 strategy=self.name,
                 consolidation_met=consolidation_met,
@@ -144,7 +141,7 @@ class BreakoutStrategy(BaseStrategy):
                 price_history_length=len(self.price_history),
             )
             if not consolidation_met:
-                logger.debug(
+                self.logger.debug(
                     "Consolidation period not met",
                     strategy=self.name,
                     required_periods=self.consolidation_periods,
@@ -178,7 +175,7 @@ class BreakoutStrategy(BaseStrategy):
             return signals
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Signal generation failed",
                 strategy=self.name,
                 error=str(e),
@@ -237,7 +234,7 @@ class BreakoutStrategy(BaseStrategy):
             self.support_levels = sorted(list(set(support_levels)))
 
         except Exception as e:
-            logger.error("Support/resistance update failed", strategy=self.name, error=str(e))
+            self.logger.error("Support/resistance update failed", strategy=self.name, error=str(e))
 
     def _check_consolidation_period(self) -> bool:
         """Check if price has been consolidating for required periods.
@@ -262,7 +259,7 @@ class BreakoutStrategy(BaseStrategy):
             consolidation_threshold = avg_price * 0.02
             is_consolidating = price_range <= consolidation_threshold
 
-            logger.debug(
+            self.logger.debug(
                 "Consolidation check details",
                 strategy=self.name,
                 recent_prices_count=len(recent_prices),
@@ -275,7 +272,7 @@ class BreakoutStrategy(BaseStrategy):
             return is_consolidating
 
         except Exception as e:
-            logger.error("Consolidation check failed", strategy=self.name, error=str(e))
+            self.logger.error("Consolidation check failed", strategy=self.name, error=str(e))
             return False
 
     def _check_resistance_breakout(self, data: MarketData) -> dict[str, Any] | None:
@@ -291,7 +288,7 @@ class BreakoutStrategy(BaseStrategy):
             current_price = float(data.price)
             current_volume = float(data.volume) if data.volume else 0.0
 
-            logger.debug(
+            self.logger.debug(
                 "Checking resistance breakout",
                 strategy=self.name,
                 current_price=current_price,
@@ -303,7 +300,7 @@ class BreakoutStrategy(BaseStrategy):
             # Check each resistance level
             for resistance in self.resistance_levels:
                 breakout_price = resistance * (1 + self.breakout_threshold)
-                logger.debug(
+                self.logger.debug(
                     "Checking resistance level",
                     resistance=resistance,
                     breakout_price=breakout_price,
@@ -327,7 +324,7 @@ class BreakoutStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error("Resistance breakout check failed", strategy=self.name, error=str(e))
+            self.logger.error("Resistance breakout check failed", strategy=self.name, error=str(e))
             return None
 
     def _check_support_breakout(self, data: MarketData) -> dict[str, Any] | None:
@@ -359,7 +356,7 @@ class BreakoutStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error("Support breakout check failed", strategy=self.name, error=str(e))
+            self.logger.error("Support breakout check failed", strategy=self.name, error=str(e))
             return None
 
     def _check_volume_confirmation(self, current_volume: float) -> bool:
@@ -390,7 +387,7 @@ class BreakoutStrategy(BaseStrategy):
             return bool(volume_ratio >= self.volume_multiplier)
 
         except Exception as e:
-            logger.error("Volume confirmation check failed", strategy=self.name, error=str(e))
+            self.logger.error("Volume confirmation check failed", strategy=self.name, error=str(e))
             return True  # Pass on error
 
     def _check_false_breakout(self, data: MarketData) -> dict[str, Any] | None:
@@ -429,7 +426,7 @@ class BreakoutStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error("False breakout check failed", strategy=self.name, error=str(e))
+            self.logger.error("False breakout check failed", strategy=self.name, error=str(e))
             return None
 
     async def _generate_bullish_breakout_signal(
@@ -485,7 +482,7 @@ class BreakoutStrategy(BaseStrategy):
 
             if await self.validate_signal(signal):
                 self.last_breakout_time = data.timestamp
-                logger.info(
+                self.logger.info(
                     "Bullish breakout signal generated",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -498,7 +495,7 @@ class BreakoutStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Bullish breakout signal generation failed", strategy=self.name, error=str(e)
             )
             return None
@@ -558,7 +555,7 @@ class BreakoutStrategy(BaseStrategy):
 
             if await self.validate_signal(signal):
                 self.last_breakout_time = data.timestamp
-                logger.info(
+                self.logger.info(
                     "Bearish breakout signal generated",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -571,7 +568,7 @@ class BreakoutStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Bearish breakout signal generation failed", strategy=self.name, error=str(e)
             )
             return None
@@ -610,7 +607,7 @@ class BreakoutStrategy(BaseStrategy):
             )
 
             if await self.validate_signal(signal):
-                logger.info(
+                self.logger.info(
                     "False breakout exit signal generated",
                     strategy=self.name,
                     symbol=data.symbol,
@@ -622,7 +619,7 @@ class BreakoutStrategy(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "False breakout exit signal generation failed", strategy=self.name, error=str(e)
             )
             return None
@@ -641,7 +638,7 @@ class BreakoutStrategy(BaseStrategy):
         try:
             # Basic signal validation
             if not signal or signal.confidence < self.config.min_confidence:
-                logger.debug(
+                self.logger.debug(
                     "Signal confidence below threshold",
                     strategy=self.name,
                     confidence=signal.confidence if signal else 0,
@@ -652,13 +649,13 @@ class BreakoutStrategy(BaseStrategy):
             # Check if signal is too old (more than 5 minutes for breakout
             # signals)
             if datetime.now(signal.timestamp.tzinfo) - signal.timestamp > timedelta(minutes=5):
-                logger.debug("Signal too old", strategy=self.name, signal_age_minutes=5)
+                self.logger.debug("Signal too old", strategy=self.name, signal_age_minutes=5)
                 return False
 
             # Validate signal metadata
             metadata = signal.metadata
             if "signal_type" not in metadata:
-                logger.warning("Missing signal_type in signal metadata", strategy=self.name)
+                self.logger.warning("Missing signal_type in signal metadata", strategy=self.name)
                 return False
 
             # Additional validation for breakout entry signals
@@ -671,13 +668,15 @@ class BreakoutStrategy(BaseStrategy):
                 ]
                 for field in required_fields:
                     if field not in metadata:
-                        logger.warning(f"Missing {field} in signal metadata", strategy=self.name)
+                        self.logger.warning(
+                            f"Missing {field} in signal metadata", strategy=self.name
+                        )
                         return False
 
                 # Validate breakout price
                 breakout_price = metadata.get("breakout_price")
                 if breakout_price is None or breakout_price <= 0:
-                    logger.warning(
+                    self.logger.warning(
                         "Invalid breakout price", strategy=self.name, breakout_price=breakout_price
                     )
                     return False
@@ -685,7 +684,7 @@ class BreakoutStrategy(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error("Signal validation failed", strategy=self.name, error=str(e))
+            self.logger.error("Signal validation failed", strategy=self.name, error=str(e))
             return False
 
     def get_position_size(self, signal: Signal) -> Decimal:
@@ -721,7 +720,7 @@ class BreakoutStrategy(BaseStrategy):
             max_size = Decimal(str(self.config.parameters.get("max_position_size_pct", 0.1)))
             position_size = min(position_size, max_size)
 
-            logger.debug(
+            self.logger.debug(
                 "Position size calculated",
                 strategy=self.name,
                 base_size=float(base_size),
@@ -733,7 +732,7 @@ class BreakoutStrategy(BaseStrategy):
             return position_size
 
         except Exception as e:
-            logger.error("Position size calculation failed", strategy=self.name, error=str(e))
+            self.logger.error("Position size calculation failed", strategy=self.name, error=str(e))
             # Return minimum position size on error
             return Decimal(str(self.config.position_size_pct * 0.5))
 
@@ -774,7 +773,7 @@ class BreakoutStrategy(BaseStrategy):
                     if position.side.value == "buy":
                         stop_price = entry_price - stop_distance
                         if current_price <= stop_price:
-                            logger.info(
+                            self.logger.info(
                                 "ATR stop loss triggered",
                                 strategy=self.name,
                                 symbol=position.symbol,
@@ -786,7 +785,7 @@ class BreakoutStrategy(BaseStrategy):
                     else:  # sell position
                         stop_price = entry_price + stop_distance
                         if current_price >= stop_price:
-                            logger.info(
+                            self.logger.info(
                                 "ATR stop loss triggered",
                                 strategy=self.name,
                                 symbol=position.symbol,
@@ -802,7 +801,7 @@ class BreakoutStrategy(BaseStrategy):
                 current_price = float(position.current_price)
 
                 if position.side.value == "buy" and current_price >= target_price:
-                    logger.info(
+                    self.logger.info(
                         "Target price reached",
                         strategy=self.name,
                         symbol=position.symbol,
@@ -811,7 +810,7 @@ class BreakoutStrategy(BaseStrategy):
                     )
                     return True
                 elif position.side.value == "sell" and current_price <= target_price:
-                    logger.info(
+                    self.logger.info(
                         "Target price reached",
                         strategy=self.name,
                         symbol=position.symbol,
@@ -823,7 +822,7 @@ class BreakoutStrategy(BaseStrategy):
             return False
 
         except Exception as e:
-            logger.error("Exit check failed", strategy=self.name, error=str(e))
+            self.logger.error("Exit check failed", strategy=self.name, error=str(e))
             return False
 
     def get_strategy_info(self) -> dict[str, Any]:

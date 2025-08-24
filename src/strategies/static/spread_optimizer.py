@@ -14,15 +14,12 @@ from typing import Any
 
 import numpy as np
 
-from src.core.logging import get_logger
-
+# Logger is provided by BaseStrategy (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, OrderBook
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
-
-logger = get_logger(__name__)
 
 
 class SpreadOptimizer:
@@ -82,7 +79,7 @@ class SpreadOptimizer:
         self.imbalance_adjustments = 0
         self.competitor_adjustments = 0
 
-        logger.info(
+        self.logger.info(
             "Spread Optimizer initialized",
             volatility_multiplier=self.volatility_multiplier,
             imbalance_threshold=self.imbalance_threshold,
@@ -146,7 +143,7 @@ class SpreadOptimizer:
 
             self.optimization_count += 1
 
-            logger.debug(
+            self.logger.debug(
                 "Spread optimization completed",
                 base_spread=float(base_spread),
                 volatility_adjustment=float(volatility_adjustment),
@@ -160,7 +157,7 @@ class SpreadOptimizer:
             return optimized_spread
 
         except Exception as e:
-            logger.error("Spread optimization failed", error=str(e))
+            self.logger.error("Spread optimization failed", error=str(e))
             return base_spread
 
     @time_execution
@@ -195,7 +192,7 @@ class SpreadOptimizer:
 
             self.volatility_adjustments += 1
 
-            logger.debug(
+            self.logger.debug(
                 "Volatility adjustment calculated",
                 volatility=volatility,
                 adjustment=float(adjustment),
@@ -205,7 +202,7 @@ class SpreadOptimizer:
             return Decimal(str(adjustment))
 
         except Exception as e:
-            logger.error("Volatility adjustment calculation failed", error=str(e))
+            self.logger.error("Volatility adjustment calculation failed", error=str(e))
             return Decimal("0")
 
     @time_execution
@@ -245,7 +242,7 @@ class SpreadOptimizer:
 
                 self.imbalance_adjustments += 1
 
-                logger.debug(
+                self.logger.debug(
                     "Imbalance adjustment calculated",
                     imbalance_ratio=imbalance_ratio,
                     adjustment=float(adjustment),
@@ -258,7 +255,7 @@ class SpreadOptimizer:
             return Decimal("0")
 
         except Exception as e:
-            logger.error("Imbalance adjustment calculation failed", error=str(e))
+            self.logger.error("Imbalance adjustment calculation failed", error=str(e))
             return Decimal("0")
 
     @time_execution
@@ -302,7 +299,7 @@ class SpreadOptimizer:
 
             self.competitor_adjustments += 1
 
-            logger.debug(
+            self.logger.debug(
                 "Competitor adjustment calculated",
                 avg_competitor_spread=avg_competitor_spread,
                 current_spread=current_spread,
@@ -313,7 +310,7 @@ class SpreadOptimizer:
             return Decimal(str(adjustment))
 
         except Exception as e:
-            logger.error("Competitor adjustment calculation failed", error=str(e))
+            self.logger.error("Competitor adjustment calculation failed", error=str(e))
             return Decimal("0")
 
     @time_execution
@@ -340,7 +337,7 @@ class SpreadOptimizer:
                 adjustment = spread_volatility * self.impact_multiplier
                 adjustment = min(adjustment, 0.003)  # Max 0.3% adjustment
 
-                logger.debug(
+                self.logger.debug(
                     "Impact adjustment calculated",
                     spread_volatility=spread_volatility,
                     adjustment=float(adjustment),
@@ -352,7 +349,7 @@ class SpreadOptimizer:
             return Decimal("0")
 
         except Exception as e:
-            logger.error("Impact adjustment calculation failed", error=str(e))
+            self.logger.error("Impact adjustment calculation failed", error=str(e))
             return Decimal("0")
 
     def _update_history(self, market_data: MarketData) -> None:
@@ -389,7 +386,7 @@ class SpreadOptimizer:
                     self.volatility_history = self.volatility_history[-50:]
 
         except Exception as e:
-            logger.error("History update failed", error=str(e))
+            self.logger.error("History update failed", error=str(e))
 
     @time_execution
     async def calculate_optimal_spread(
@@ -425,7 +422,7 @@ class SpreadOptimizer:
             bid_spread = optimized_spread / Decimal("2")
             ask_spread = optimized_spread / Decimal("2")
 
-            logger.debug(
+            self.logger.debug(
                 "Optimal spreads calculated",
                 base_spread=float(base_spread),
                 optimized_spread=float(optimized_spread),
@@ -436,7 +433,7 @@ class SpreadOptimizer:
             return bid_spread, ask_spread
 
         except Exception as e:
-            logger.error("Optimal spread calculation failed", error=str(e))
+            self.logger.error("Optimal spread calculation failed", error=str(e))
             # Return default spreads
             default_spread = Decimal("0.001")  # 0.1%
             return default_spread / Decimal("2"), default_spread / Decimal("2")
@@ -457,7 +454,7 @@ class SpreadOptimizer:
             if len(self.volatility_history) > 0:
                 recent_volatility = np.mean(self.volatility_history[-5:])
                 if recent_volatility > self.max_volatility * 0.8:
-                    logger.info(
+                    self.logger.info(
                         "Spread widening due to high volatility", volatility=recent_volatility
                     )
                     return True
@@ -467,7 +464,7 @@ class SpreadOptimizer:
                 recent_spreads = self.spread_history[-5:]
                 avg_recent_spread = np.mean(recent_spreads)
                 if avg_recent_spread > float(self.max_spread) * 0.8:
-                    logger.info(
+                    self.logger.info(
                         "Spread widening due to wide recent spreads", avg_spread=avg_recent_spread
                     )
                     return True
@@ -479,7 +476,7 @@ class SpreadOptimizer:
                 max_change = np.max(np.abs(price_changes))
 
                 if max_change > 0.01:  # 1% price change
-                    logger.info(
+                    self.logger.info(
                         "Spread widening due to rapid price movements", max_change=max_change
                     )
                     return True
@@ -487,7 +484,7 @@ class SpreadOptimizer:
             return False
 
         except Exception as e:
-            logger.error("Spread widening check failed", error=str(e))
+            self.logger.error("Spread widening check failed", error=str(e))
             return False
 
     def get_optimization_summary(self) -> dict[str, Any]:
@@ -514,5 +511,5 @@ class SpreadOptimizer:
             }
 
         except Exception as e:
-            logger.error("Optimization summary generation failed", error=str(e))
+            self.logger.error("Optimization summary generation failed", error=str(e))
             return {}

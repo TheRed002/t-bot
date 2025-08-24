@@ -21,10 +21,55 @@ from src.core.logging import get_logger
 from src.core.types import BotConfiguration, BotPriority, BotType, TradingMode
 
 # MANDATORY: Import from P-002A (error handling)
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import get_global_error_handler
+from src.error_handling.decorators import (
+    with_circuit_breaker,
+    with_error_context,
+    with_fallback,
+    with_retry,
+)
 
 # MANDATORY: Import from P-007A (utils)
-from src.utils.decorators import log_calls, time_execution
+try:
+    from src.utils.decorators import log_calls, time_execution
+
+    # Validate imported decorators are callable
+    if not callable(log_calls):
+        raise ImportError(f"log_calls is not callable: {type(log_calls)}")
+    if not callable(time_execution):
+        raise ImportError(f"time_execution is not callable: {type(time_execution)}")
+
+except ImportError as e:
+    # Fallback if decorators module is not available
+    import functools
+    import logging
+    import time
+
+    def log_calls(func):
+        """Fallback decorator that just logs function calls."""
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            logger = logging.getLogger(func.__module__)
+            logger.info(f"Calling {func.__name__}")
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    def time_execution(func):
+        """Fallback decorator that times function execution."""
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            start = time.time()
+            result = func(*args, **kwargs)
+            logger = logging.getLogger(func.__module__)
+            logger.info(f"{func.__name__} took {time.time() - start:.3f}s")
+            return result
+
+        return wrapper
+
+    logging.getLogger(__name__).warning(f"Failed to import decorators, using fallback: {e}")
 
 # Import other bot management components
 
@@ -49,9 +94,9 @@ class BotLifecycle:
         Args:
             config: Application configuration
         """
+        self._logger = get_logger(self.__class__.__module__)  # Initialize BaseComponent
         self.config = config
-        self.logger = get_logger(f"{__name__}.BotLifecycle")
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = get_global_error_handler()
 
         # Lifecycle tracking
         self.bot_lifecycles: dict[str, dict[str, Any]] = {}
@@ -90,7 +135,7 @@ class BotLifecycle:
             "last_lifecycle_action": None,
         }
 
-        self.logger.info("Bot lifecycle manager initialized")
+        self._logger.info("Bot lifecycle manager initialized")
 
     def _initialize_bot_templates(self) -> None:
         """Initialize built-in bot templates."""
@@ -99,7 +144,7 @@ class BotLifecycle:
                 "name": "Simple Strategy Bot",
                 "description": "Basic single-strategy trading bot",
                 "default_config": {
-                    "bot_type": BotType.STRATEGY,
+                    "bot_type": BotType.TRADING,
                     "priority": BotPriority.NORMAL,
                     "max_concurrent_positions": 3,
                     "risk_percentage": 0.02,
@@ -193,6 +238,7 @@ class BotLifecycle:
         }
 
     @log_calls
+    @with_error_context(component="bot_lifecycle", operation="start")
     async def start(self) -> None:
         """
         Start the bot lifecycle manager.
@@ -200,24 +246,20 @@ class BotLifecycle:
         Raises:
             ExecutionError: If startup fails
         """
-        try:
-            if self.is_running:
-                self.logger.warning("Bot lifecycle manager is already running")
-                return
+        if self.is_running:
+            self._logger.warning("Bot lifecycle manager is already running")
+            return
 
-            self.logger.info("Starting bot lifecycle manager")
+        self._logger.info("Starting bot lifecycle manager")
 
-            # Start lifecycle monitoring task
-            self.lifecycle_task = asyncio.create_task(self._lifecycle_loop())
+        # Start lifecycle monitoring task
+        self.lifecycle_task = asyncio.create_task(self._lifecycle_loop())
 
-            self.is_running = True
-            self.logger.info("Bot lifecycle manager started successfully")
-
-        except Exception as e:
-            self.logger.error(f"Failed to start bot lifecycle manager: {e}")
-            raise ExecutionError(f"Bot lifecycle manager startup failed: {e}")
+        self.is_running = True
+        self._logger.info("Bot lifecycle manager started successfully")
 
     @log_calls
+    @with_error_context(component="bot_lifecycle", operation="stop")
     async def stop(self) -> None:
         """
         Stop the bot lifecycle manager.
@@ -225,29 +267,29 @@ class BotLifecycle:
         Raises:
             ExecutionError: If shutdown fails
         """
-        try:
-            if not self.is_running:
-                self.logger.warning("Bot lifecycle manager is not running")
-                return
+        if not self.is_running:
+            self._logger.warning("Bot lifecycle manager is not running")
+            return
 
-            self.logger.info("Stopping bot lifecycle manager")
-            self.is_running = False
+        self._logger.info("Stopping bot lifecycle manager")
+        self.is_running = False
 
-            # Stop lifecycle monitoring task
-            if self.lifecycle_task:
-                self.lifecycle_task.cancel()
+        # Stop lifecycle monitoring task with proper cleanup
+        if self.lifecycle_task:
+            self.lifecycle_task.cancel()
+            try:
+                await self.lifecycle_task
+            except asyncio.CancelledError:
+                pass
 
-            # Clear state
-            self.bot_lifecycles.clear()
+        # Clear state
+        self.bot_lifecycles.clear()
 
-            self.logger.info("Bot lifecycle manager stopped successfully")
+        self._logger.info("Bot lifecycle manager stopped successfully")
 
-        except Exception as e:
-            self.logger.error(f"Failed to stop bot lifecycle manager: {e}")
-            raise ExecutionError(f"Bot lifecycle manager shutdown failed: {e}")
-
-    @time_execution
     @log_calls
+    @time_execution
+    @with_error_context(component="bot_lifecycle", operation="create_bot_from_template")
     async def create_bot_from_template(
         self,
         template_name: str,
@@ -271,58 +313,56 @@ class BotLifecycle:
             ValidationError: If template or configuration is invalid
             ExecutionError: If creation fails
         """
-        try:
-            # Validate template exists
-            if template_name not in self.bot_templates:
-                raise ValidationError(f"Template not found: {template_name}")
+        # Validate template exists
+        if template_name not in self.bot_templates:
+            raise ValidationError(f"Template not found: {template_name}")
 
-            template = self.bot_templates[template_name]
+        template = self.bot_templates[template_name]
 
-            # Validate required fields are provided
-            for field in template["required_fields"]:
-                if field not in custom_config:
-                    raise ValidationError(f"Required field missing: {field}")
+        # Validate required fields are provided
+        for field in template["required_fields"]:
+            if field not in custom_config:
+                raise ValidationError(f"Required field missing: {field}")
 
-            # Generate unique bot ID
-            bot_id = f"{template_name}_{uuid.uuid4().hex[:8]}"
+        # Generate unique bot ID
+        bot_id = f"{template_name}_{uuid.uuid4().hex[:8]}"
 
-            # Merge template defaults with custom config
-            merged_config = {
-                **template["default_config"],
-                **custom_config,
-                "bot_id": bot_id,
-                "bot_name": bot_name,
-            }
+        # Merge template defaults with custom config
+        merged_config = {
+            **template["default_config"],
+            **custom_config,
+            "bot_id": bot_id,
+            "bot_name": bot_name,
+        }
 
-            # Create bot configuration
-            bot_config = BotConfiguration(**merged_config)
+        # Create bot configuration
+        bot_config = BotConfiguration(**merged_config)
 
-            # Initialize lifecycle tracking
-            await self._initialize_bot_lifecycle(bot_id, template_name, deployment_strategy)
+        # Initialize lifecycle tracking
+        await self._initialize_bot_lifecycle(bot_id, template_name, deployment_strategy)
 
-            # Record lifecycle event
-            await self._record_lifecycle_event(
-                bot_id, "created", {"template": template_name, "strategy": deployment_strategy}
-            )
+        # Record lifecycle event
+        await self._record_lifecycle_event(
+            bot_id, "created", {"template": template_name, "strategy": deployment_strategy}
+        )
 
-            self.lifecycle_stats["bots_created"] += 1
-            self.lifecycle_stats["last_lifecycle_action"] = datetime.now(timezone.utc)
+        self.lifecycle_stats["bots_created"] += 1
+        self.lifecycle_stats["last_lifecycle_action"] = datetime.now(timezone.utc)
 
-            self.logger.info(
-                "Bot created from template",
-                bot_id=bot_id,
-                template=template_name,
-                bot_name=bot_name,
-                deployment_strategy=deployment_strategy,
-            )
+        self._logger.info(
+            "Bot created from template",
+            bot_id=bot_id,
+            template=template_name,
+            bot_name=bot_name,
+            deployment_strategy=deployment_strategy,
+        )
 
-            return bot_config
-
-        except Exception as e:
-            self.logger.error(f"Failed to create bot from template: {e}")
-            raise
+        return bot_config
 
     @log_calls
+    @with_error_context(component="bot_lifecycle", operation="deploy_bot")
+    @with_retry(max_attempts=3, base_delay=2.0, exceptions=(ExecutionError, ValidationError))
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
     async def deploy_bot(
         self,
         bot_config: BotConfiguration,
@@ -343,26 +383,26 @@ class BotLifecycle:
         Raises:
             ExecutionError: If deployment fails
         """
+        bot_id = bot_config.bot_id
+
+        if bot_id not in self.bot_lifecycles:
+            await self._initialize_bot_lifecycle(bot_id, "unknown", "immediate")
+
+        lifecycle = self.bot_lifecycles[bot_id]
+        strategy = lifecycle["deployment_strategy"]
+
+        self._logger.info(
+            "Starting bot deployment",
+            bot_id=bot_id,
+            strategy=strategy,
+            bot_type=bot_config.bot_type.value,
+        )
+
+        # Update lifecycle state
+        lifecycle["deployment_state"] = "deploying"
+        lifecycle["deployment_started"] = datetime.now(timezone.utc)
+
         try:
-            bot_id = bot_config.bot_id
-
-            if bot_id not in self.bot_lifecycles:
-                await self._initialize_bot_lifecycle(bot_id, "unknown", "immediate")
-
-            lifecycle = self.bot_lifecycles[bot_id]
-            strategy = lifecycle["deployment_strategy"]
-
-            self.logger.info(
-                "Starting bot deployment",
-                bot_id=bot_id,
-                strategy=strategy,
-                bot_type=bot_config.bot_type.value,
-            )
-
-            # Update lifecycle state
-            lifecycle["deployment_state"] = "deploying"
-            lifecycle["deployment_started"] = datetime.now(timezone.utc)
-
             # Execute deployment strategy
             deployment_func = self.deployment_strategies.get(strategy, self._deploy_immediate)
             success = await deployment_func(bot_config, orchestrator, deployment_options or {})
@@ -386,22 +426,21 @@ class BotLifecycle:
 
             self.lifecycle_stats["last_lifecycle_action"] = datetime.now(timezone.utc)
 
-            self.logger.info(
+            self._logger.info(
                 "Bot deployment completed", bot_id=bot_id, success=success, strategy=strategy
             )
 
             return success
 
-        except Exception as e:
-            self.logger.error(f"Bot deployment failed: {e}", bot_id=bot_config.bot_id)
-
-            if bot_config.bot_id in self.bot_lifecycles:
-                self.bot_lifecycles[bot_config.bot_id]["deployment_state"] = "error"
-
+        except (ExecutionError, ValidationError) as e:
+            self._logger.error(f"Bot deployment failed: {e}", bot_id=bot_id)
+            lifecycle["deployment_state"] = "error"
             self.lifecycle_stats["failed_deployments"] += 1
-            raise ExecutionError(f"Bot deployment failed: {e}")
+            raise
 
     @log_calls
+    @with_error_context(component="bot_lifecycle", operation="terminate_bot")
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=30)
     async def terminate_bot(
         self, bot_id: str, orchestrator, graceful: bool = True, reason: str = "user_request"
     ) -> bool:
@@ -420,23 +459,23 @@ class BotLifecycle:
         Raises:
             ExecutionError: If termination fails
         """
+        self._logger.info(
+            "Starting bot termination", bot_id=bot_id, graceful=graceful, reason=reason
+        )
+
+        # Update lifecycle state
+        if bot_id in self.bot_lifecycles:
+            lifecycle = self.bot_lifecycles[bot_id]
+            lifecycle["termination_state"] = "terminating"
+            lifecycle["termination_started"] = datetime.now(timezone.utc)
+            lifecycle["termination_reason"] = reason
+
+        # Record termination event
+        await self._record_lifecycle_event(
+            bot_id, "termination_started", {"graceful": graceful, "reason": reason}
+        )
+
         try:
-            self.logger.info(
-                "Starting bot termination", bot_id=bot_id, graceful=graceful, reason=reason
-            )
-
-            # Update lifecycle state
-            if bot_id in self.bot_lifecycles:
-                lifecycle = self.bot_lifecycles[bot_id]
-                lifecycle["termination_state"] = "terminating"
-                lifecycle["termination_started"] = datetime.now(timezone.utc)
-                lifecycle["termination_reason"] = reason
-
-            # Record termination event
-            await self._record_lifecycle_event(
-                bot_id, "termination_started", {"graceful": graceful, "reason": reason}
-            )
-
             if graceful:
                 # Graceful shutdown procedure
                 success = await self._graceful_termination(bot_id, orchestrator)
@@ -465,21 +504,22 @@ class BotLifecycle:
 
             self.lifecycle_stats["last_lifecycle_action"] = datetime.now(timezone.utc)
 
-            self.logger.info(
+            self._logger.info(
                 "Bot termination completed", bot_id=bot_id, success=success, graceful=graceful
             )
 
             return success
 
-        except Exception as e:
-            self.logger.error(f"Bot termination failed: {e}", bot_id=bot_id)
-
+        except ExecutionError as e:
+            self._logger.error(f"Bot termination failed: {e}", bot_id=bot_id)
             if bot_id in self.bot_lifecycles:
                 self.bot_lifecycles[bot_id]["termination_state"] = "error"
-
-            raise ExecutionError(f"Bot termination failed: {e}")
+            raise
 
     @log_calls
+    @with_error_context(component="bot_lifecycle", operation="restart_bot")
+    @with_retry(max_attempts=3, base_delay=1.0, backoff_factor=2.0, exceptions=(ExecutionError,))
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=120)
     async def restart_bot(self, bot_id: str, orchestrator, reason: str = "manual_restart") -> bool:
         """
         Restart a bot instance with automatic recovery attempts.
@@ -495,71 +535,62 @@ class BotLifecycle:
         Raises:
             ExecutionError: If restart fails
         """
-        try:
-            self.logger.info("Starting bot restart", bot_id=bot_id, reason=reason)
+        self._logger.info("Starting bot restart", bot_id=bot_id, reason=reason)
 
-            # Record restart event
-            await self._record_lifecycle_event(bot_id, "restart_started", {"reason": reason})
+        # Record restart event
+        await self._record_lifecycle_event(bot_id, "restart_started", {"reason": reason})
 
-            # Attempt restart with retries
-            for attempt in range(1, self.restart_max_attempts + 1):
-                try:
-                    self.logger.info(
-                        f"Bot restart attempt {attempt}/{self.restart_max_attempts}", bot_id=bot_id
+        # Attempt restart with retries
+        for attempt in range(1, self.restart_max_attempts + 1):
+            try:
+                self._logger.info(
+                    f"Bot restart attempt {attempt}/{self.restart_max_attempts}", bot_id=bot_id
+                )
+
+                # Stop bot gracefully
+                stop_success = await orchestrator.stop_bot(bot_id)
+                if not stop_success:
+                    self._logger.warning(
+                        f"Failed to stop bot on restart attempt {attempt}", bot_id=bot_id
                     )
 
-                    # Stop bot gracefully
-                    stop_success = await orchestrator.stop_bot(bot_id)
-                    if not stop_success:
-                        self.logger.warning(
-                            f"Failed to stop bot on restart attempt {attempt}", bot_id=bot_id
-                        )
+                # Wait before restart
+                await asyncio.sleep(self.restart_delay_seconds)
 
-                    # Wait before restart
-                    await asyncio.sleep(self.restart_delay_seconds)
+                # Start bot
+                start_success = await orchestrator.start_bot(bot_id)
 
-                    # Start bot
-                    start_success = await orchestrator.start_bot(bot_id)
+                if start_success:
+                    self.lifecycle_stats["successful_restarts"] += 1
 
-                    if start_success:
-                        self.lifecycle_stats["successful_restarts"] += 1
+                    await self._record_lifecycle_event(
+                        bot_id, "restarted", {"attempt": attempt, "success": True}
+                    )
 
-                        await self._record_lifecycle_event(
-                            bot_id, "restarted", {"attempt": attempt, "success": True}
-                        )
+                    self._logger.info(f"Bot restart successful on attempt {attempt}", bot_id=bot_id)
 
-                        self.logger.info(
-                            f"Bot restart successful on attempt {attempt}", bot_id=bot_id
-                        )
+                    return True
 
-                        return True
+            except ExecutionError as e:
+                self._logger.warning(f"Bot restart attempt {attempt} failed: {e}", bot_id=bot_id)
 
-                except Exception as e:
-                    self.logger.warning(f"Bot restart attempt {attempt} failed: {e}", bot_id=bot_id)
+                if attempt < self.restart_max_attempts:
+                    await asyncio.sleep(self.restart_delay_seconds * attempt)  # Exponential backoff
 
-                    if attempt < self.restart_max_attempts:
-                        await asyncio.sleep(
-                            self.restart_delay_seconds * attempt
-                        )  # Exponential backoff
+        # All restart attempts failed
+        self.lifecycle_stats["failed_restarts"] += 1
 
-            # All restart attempts failed
-            self.lifecycle_stats["failed_restarts"] += 1
+        await self._record_lifecycle_event(
+            bot_id, "restart_failed", {"attempts": self.restart_max_attempts, "success": False}
+        )
 
-            await self._record_lifecycle_event(
-                bot_id, "restart_failed", {"attempts": self.restart_max_attempts, "success": False}
-            )
+        self._logger.error(
+            f"Bot restart failed after {self.restart_max_attempts} attempts", bot_id=bot_id
+        )
 
-            self.logger.error(
-                f"Bot restart failed after {self.restart_max_attempts} attempts", bot_id=bot_id
-            )
+        return False
 
-            return False
-
-        except Exception as e:
-            self.logger.error(f"Bot restart procedure failed: {e}", bot_id=bot_id)
-            self.lifecycle_stats["failed_restarts"] += 1
-            raise ExecutionError(f"Bot restart failed: {e}")
-
+    @with_fallback(default_value={"error": "Lifecycle summary unavailable"})
     async def get_lifecycle_summary(self) -> dict[str, Any]:
         """Get comprehensive lifecycle management summary."""
         try:
@@ -621,10 +652,12 @@ class BotLifecycle:
                 },
             }
 
-        except Exception as e:
-            self.logger.error(f"Failed to generate lifecycle summary: {e}")
-            return {"error": str(e)}
+        except (KeyError, ValueError, TypeError) as e:
+            self._logger.error(f"Failed to generate lifecycle summary: {e}")
+            await self.error_handler.handle_error(e, {"component": "lifecycle_summary"}, "medium")
+            return {"error": "Unable to generate lifecycle summary"}
 
+    @with_fallback(default_value=None)
     async def get_bot_lifecycle_details(self, bot_id: str) -> dict[str, Any] | None:
         """
         Get detailed lifecycle information for a specific bot.
@@ -724,8 +757,8 @@ class BotLifecycle:
 
             return True
 
-        except Exception as e:
-            self.logger.error(f"Immediate deployment failed: {e}")
+        except (ExecutionError, ValidationError) as e:
+            self._logger.error(f"Immediate deployment failed: {e}")
             return False
 
     async def _deploy_staged(
@@ -745,8 +778,8 @@ class BotLifecycle:
 
             return True
 
-        except Exception as e:
-            self.logger.error(f"Staged deployment failed: {e}")
+        except (ExecutionError, ValidationError) as e:
+            self._logger.error(f"Staged deployment failed: {e}")
             return False
 
     async def _deploy_blue_green(
@@ -779,7 +812,7 @@ class BotLifecycle:
             # Phase 1: Pause new trading
             pause_success = await orchestrator.pause_bot(bot_id)
             if not pause_success:
-                self.logger.warning(
+                self._logger.warning(
                     "Failed to pause bot during graceful termination", bot_id=bot_id
                 )
 
@@ -796,8 +829,8 @@ class BotLifecycle:
 
             return False
 
-        except Exception as e:
-            self.logger.error(f"Graceful termination failed: {e}", bot_id=bot_id)
+        except ExecutionError as e:
+            self._logger.error(f"Graceful termination failed: {e}", bot_id=bot_id)
             return False
 
     async def _immediate_termination(self, bot_id: str, orchestrator) -> bool:
@@ -811,8 +844,8 @@ class BotLifecycle:
                 # Force delete even if stop failed
                 return await orchestrator.delete_bot(bot_id, force=True)
 
-        except Exception as e:
-            self.logger.error(f"Immediate termination failed: {e}", bot_id=bot_id)
+        except ExecutionError as e:
+            self._logger.error(f"Immediate termination failed: {e}", bot_id=bot_id)
             return False
 
     async def _lifecycle_loop(self) -> None:
@@ -832,12 +865,12 @@ class BotLifecycle:
                     # Wait for next cycle
                     await asyncio.sleep(300)  # 5 minutes
 
-                except Exception as e:
-                    self.logger.error(f"Lifecycle loop error: {e}")
+                except (ExecutionError, ValidationError) as e:
+                    self._logger.error(f"Lifecycle loop error: {e}")
                     await asyncio.sleep(60)
 
         except asyncio.CancelledError:
-            self.logger.info("Lifecycle monitoring cancelled")
+            self._logger.info("Lifecycle monitoring cancelled")
 
     async def _cleanup_old_events(self) -> None:
         """Clean up old lifecycle events."""
@@ -852,7 +885,7 @@ class BotLifecycle:
 
         cleaned_count = initial_count - len(self.lifecycle_events)
         if cleaned_count > 0:
-            self.logger.debug(f"Cleaned up {cleaned_count} old lifecycle events")
+            self._logger.debug(f"Cleaned up {cleaned_count} old lifecycle events")
 
     async def _monitor_lifecycle_health(self) -> None:
         """Monitor health of lifecycle operations."""
@@ -865,7 +898,7 @@ class BotLifecycle:
                 if deployment_started:
                     deployment_age = (current_time - deployment_started).total_seconds()
                     if deployment_age > 600:  # 10 minutes
-                        self.logger.warning(
+                        self._logger.warning(
                             "Long-running deployment detected",
                             bot_id=bot_id,
                             deployment_age_seconds=deployment_age,

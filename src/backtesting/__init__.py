@@ -19,6 +19,8 @@ from .engine import BacktestConfig, BacktestEngine, BacktestResult
 from .metrics import BacktestMetrics, MetricsCalculator
 from .simulator import SimulationConfig, TradeSimulator
 
+# Note: BacktestService import disabled temporarily due to service dependencies
+
 __all__ = [
     "BacktestConfig",
     # Core engine
@@ -38,6 +40,9 @@ __all__ = [
     "TradeSimulator",
     # Analysis
     "WalkForwardAnalyzer",
+    # Service Layer (temporarily disabled)
+    # "BacktestService",
+    # "BacktestRequest",
 ]
 
 # Version information

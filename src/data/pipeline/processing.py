@@ -22,7 +22,6 @@ from typing import Any
 
 from src.core.config import Config
 from src.core.exceptions import DataError
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import MarketData, ProcessingStep
@@ -33,10 +32,7 @@ from src.error_handling.error_handler import ErrorHandler
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
 from src.utils.helpers import calculate_percentage_change
-from src.utils.validators import validate_price, validate_quantity
-
-logger = get_logger(__name__)
-
+from src.utils.validators import ValidationFramework
 
 # ProcessingStep is now imported from core.types
 
@@ -81,8 +77,8 @@ class DataProcessor:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
-        self.error_handler = ErrorHandler(config)
 
         # Processing configuration
         processing_config = getattr(config, "data_processing", {})
@@ -138,7 +134,7 @@ class DataProcessor:
             ProcessingStep.FILTER: self._filter_data,
         }
 
-        logger.info("DataProcessor initialized")
+        self.logger.info("DataProcessor initialized")
 
     @time_execution
     async def process_market_data(
@@ -166,7 +162,7 @@ class DataProcessor:
                     processed_data = await self.processors[step](processed_data, "market_data")
                     steps_applied.append(step.value)
                 else:
-                    logger.warning(f"Unknown processing step: {step}")
+                    self.logger.warning(f"Unknown processing step: {step}")
 
             processing_time = (datetime.now() - start_time).total_seconds()
 
@@ -197,14 +193,14 @@ class DataProcessor:
                 success=True,
             )
 
-            logger.debug(
+            self.logger.debug(
                 f"Market data processed successfully for {data.symbol if data else 'unknown'}"
             )
             return result
 
         except Exception as e:
             self.stats["failed_processed"] += 1
-            logger.error(f"Market data processing failed: {e!s}")
+            self.logger.error(f"Market data processing failed: {e!s}")
 
             return ProcessingResult(
                 original_data=data,
@@ -243,11 +239,11 @@ class DataProcessor:
 
                 results.append(result)
 
-            logger.info(f"Batch processing completed: {len(results)} items processed")
+            self.logger.info(f"Batch processing completed: {len(results)} items processed")
             return results
 
         except Exception as e:
-            logger.error(f"Batch processing failed: {e!s}")
+            self.logger.error(f"Batch processing failed: {e!s}")
             raise DataError(f"Batch processing failed: {e!s}")
 
     async def _process_generic_data(
@@ -314,7 +310,7 @@ class DataProcessor:
                 return data
 
         except Exception as e:
-            logger.error(f"Data normalization failed: {e!s}")
+            self.logger.error(f"Data normalization failed: {e!s}")
             return data
 
     def _normalize_price(self, price: Decimal) -> Decimal:
@@ -394,7 +390,7 @@ class DataProcessor:
                 return data
 
         except Exception as e:
-            logger.error(f"Data enrichment failed: {e!s}")
+            self.logger.error(f"Data enrichment failed: {e!s}")
             return data
 
     async def _aggregate_data(self, data: Any, data_type: str) -> Any:
@@ -433,7 +429,7 @@ class DataProcessor:
             return data
 
         except Exception as e:
-            logger.error(f"Data aggregation failed: {e!s}")
+            self.logger.error(f"Data aggregation failed: {e!s}")
             return data
 
     def _calculate_aggregations(self, window: list[MarketData]) -> dict[str, float]:
@@ -469,7 +465,7 @@ class DataProcessor:
             return aggregations
 
         except Exception as e:
-            logger.error(f"Aggregation calculation failed: {e!s}")
+            self.logger.error(f"Aggregation calculation failed: {e!s}")
             return {}
 
     async def _transform_data(self, data: Any, data_type: str) -> Any:
@@ -480,7 +476,7 @@ class DataProcessor:
             return data
 
         except Exception as e:
-            logger.error(f"Data transformation failed: {e!s}")
+            self.logger.error(f"Data transformation failed: {e!s}")
             return data
 
     async def _validate_data(self, data: Any, data_type: str) -> Any:
@@ -495,14 +491,20 @@ class DataProcessor:
                 validation_errors = []
 
                 # Price validation
-                if data.price and not validate_price(data.price):
-                    is_valid = False
-                    validation_errors.append("Invalid price")
+                if data.price:
+                    try:
+                        ValidationFramework.validate_price(data.price)
+                    except ValueError as e:
+                        is_valid = False
+                        validation_errors.append(f"Invalid price: {str(e)}")
 
                 # Volume validation
-                if data.volume and not validate_quantity(data.volume):
-                    is_valid = False
-                    validation_errors.append("Invalid volume")
+                if data.volume:
+                    try:
+                        ValidationFramework.validate_quantity(data.volume)
+                    except ValueError as e:
+                        is_valid = False
+                        validation_errors.append(f"Invalid volume: {str(e)}")
 
                 # Symbol validation
                 if not data.symbol or len(data.symbol) < 3:
@@ -510,7 +512,7 @@ class DataProcessor:
                     validation_errors.append("Invalid symbol")
 
                 if not is_valid:
-                    logger.warning(f"Data validation failed: {validation_errors}")
+                    self.logger.warning(f"Data validation failed: {validation_errors}")
                     # Could raise exception or mark data as invalid
                     if not hasattr(data, "metadata"):
                         data.metadata = {}
@@ -519,7 +521,7 @@ class DataProcessor:
             return data
 
         except Exception as e:
-            logger.error(f"Data validation failed: {e!s}")
+            self.logger.error(f"Data validation failed: {e!s}")
             return data
 
     async def _filter_data(self, data: Any, data_type: str) -> Any:
@@ -530,7 +532,7 @@ class DataProcessor:
             return data
 
         except Exception as e:
-            logger.error(f"Data filtering failed: {e!s}")
+            self.logger.error(f"Data filtering failed: {e!s}")
             return data
 
     async def get_aggregated_data(self, symbol: str, exchange: str | None = None) -> dict[str, Any]:
@@ -558,7 +560,7 @@ class DataProcessor:
                 return results
 
         except Exception as e:
-            logger.error(f"Failed to get aggregated data for {symbol}: {e!s}")
+            self.logger.error(f"Failed to get aggregated data for {symbol}: {e!s}")
             return {}
 
     def get_processing_statistics(self) -> dict[str, Any]:
@@ -591,17 +593,17 @@ class DataProcessor:
         try:
             self.data_windows.clear()
             self.aggregated_data.clear()
-            logger.info("Data windows and aggregations reset")
+            self.logger.info("Data windows and aggregations reset")
 
         except Exception as e:
-            logger.error(f"Failed to reset data windows: {e!s}")
+            self.logger.error(f"Failed to reset data windows: {e!s}")
             raise DataError(f"Failed to reset data windows: {e!s}")
 
     async def cleanup(self) -> None:
         """Cleanup data processor resources."""
         try:
             await self.reset_windows()
-            logger.info("DataProcessor cleanup completed")
+            self.logger.info("DataProcessor cleanup completed")
 
         except Exception as e:
-            logger.error(f"Error during DataProcessor cleanup: {e!s}")
+            self.logger.error(f"Error during DataProcessor cleanup: {e!s}")

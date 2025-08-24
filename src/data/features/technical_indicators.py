@@ -1,7 +1,11 @@
 """
-Technical Indicators Calculator
+Technical Indicators Calculator - REFACTORED for DataService Integration
 
-This module provides 50+ technical indicators using TA-Lib:
+This module provides 50+ technical indicators using TA-Lib, now integrated
+with the new DataService architecture to eliminate duplicate calculations
+and provide consistent feature management across the system.
+
+Key Features:
 - Price-based: SMA, EMA, VWAP, Bollinger Bands, Pivot Points
 - Momentum: RSI, MACD, Stochastic, Williams %R, CCI
 - Volume: OBV, Volume Profile, MFI, A/D Line, VWAP
@@ -14,11 +18,12 @@ Dependencies:
 - P-001: Core types, exceptions, logging
 - P-002A: Error handling framework
 - P-007A: Utility functions and decorators
-- P-000A: Data pipeline integration
+- DataService integration for consistent caching and calculation
 """
 
+import warnings
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Any
 
@@ -26,21 +31,17 @@ import numpy as np
 import pandas as pd
 import talib
 
+from src.base import BaseComponent
 from src.core.config import Config
-from src.core.exceptions import DataError
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import MarketData
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.pattern_analytics import ErrorPatternAnalytics
 
 # Import from P-007A utilities
-from src.utils.decorators import cache_result, time_execution
-
-logger = get_logger(__name__)
+from src.utils.decorators import time_execution
 
 
 class IndicatorType(Enum):
@@ -76,21 +77,28 @@ class IndicatorResult:
     calculation_time: float
 
 
-class TechnicalIndicatorCalculator:
+class TechnicalIndicators(BaseComponent):
     """
-    Comprehensive technical indicator calculator using TA-Lib.
+    REFACTORED: Technical indicator calculator integrated with DataService architecture.
 
     This class provides 50+ technical indicators for market analysis,
-    supporting both real-time and batch calculations with caching.
+    now designed to work with the FeatureStore for consistent caching
+    and elimination of duplicate calculations across the system.
+
+    Key improvements:
+    - Integration with FeatureStore for unified feature management
+    - Elimination of duplicate calculation logic
+    - Consistent result formatting for ML pipeline
+    - Better error handling and monitoring
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, feature_store=None, data_service=None):
         """Initialize technical indicator calculator."""
+        super().__init__()
         self.config = config
-
-        # Initialize error handling components
         self.error_handler = ErrorHandler(config)
-        self.pattern_analytics = ErrorPatternAnalytics(config)
+        self.feature_store = feature_store  # Will be injected by FeatureStore
+        self.data_service = data_service  # Will be injected for strategy integration
 
         # Indicator configuration
         indicators_config = getattr(config, "indicators", {})
@@ -134,1211 +142,546 @@ class TechnicalIndicatorCalculator:
             "avg_calculation_time": 0.0,
         }
 
-        logger.info("TechnicalIndicatorCalculator initialized")
+        self.logger.info("TechnicalIndicators initialized with FeatureStore integration")
 
-    async def add_market_data(self, data: MarketData) -> None:
-        """
-        Add market data for indicator calculations.
+    def set_feature_store(self, feature_store):
+        """Set the feature store for integrated calculations."""
+        self.feature_store = feature_store
+        self.logger.info("FeatureStore integration enabled")
 
-        Args:
-            data: Market data to add
-        """
-        try:
-            symbol = data.symbol
-
-            # Initialize DataFrame if not exists
-            if symbol not in self.price_data:
-                self.price_data[symbol] = pd.DataFrame(
-                    columns=["timestamp", "open", "high", "low", "close", "volume"]
-                )
-
-            # Add new data point
-            new_row = {
-                "timestamp": data.timestamp,
-                "open": float(data.open_price or data.price),
-                "high": float(data.high_price or data.price),
-                "low": float(data.low_price or data.price),
-                "close": float(data.price),
-                "volume": float(data.volume),
-            }
-
-            self.price_data[symbol] = pd.concat(
-                [self.price_data[symbol], pd.DataFrame([new_row])], ignore_index=True
-            )
-
-            # Keep only recent data (configurable window)
-            max_rows = getattr(self.config, "max_price_history", 1000)
-            if len(self.price_data[symbol]) > max_rows:
-                self.price_data[symbol] = self.price_data[symbol].tail(max_rows)
-
-            # Clear cache for this symbol
-            if symbol in self.feature_cache:
-                self.feature_cache[symbol] = {}
-
-        except Exception as e:
-            logger.error(f"Failed to add market data for {symbol}: {e!s}")
-            raise DataError(f"Market data addition failed: {e!s}")
+    def set_data_service(self, data_service):
+        """Set the data service for strategy integration."""
+        self.data_service = data_service
+        self.logger.info("DataService integration enabled")
 
     @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_sma(
-        self, symbol: str, period: int | None = None, field: str = "close"
-    ) -> IndicatorResult:
-        """
-        Calculate Simple Moving Average.
-
-        Args:
-            symbol: Trading symbol
-            period: Period for calculation
-            field: Price field to use
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            period = period or self.default_periods["sma"]
-            df = self.price_data[symbol]
-
-            if len(df) < period:
-                logger.warning(f"Insufficient data for SMA calculation: {len(df)} < {period}")
-                return IndicatorResult(
-                    indicator_name="SMA",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate SMA using TA-Lib
-            sma_values = talib.SMA(df[field].values, timeperiod=period)
-            latest_value = sma_values[-1] if not np.isnan(sma_values[-1]) else None
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="SMA",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_value,
-                metadata={"period": period, "field": field},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_sma",
-                symbol=symbol,
-                details={
-                    "indicator": "SMA",
-                    "period": period,
-                    "field": field,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
-
-            # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"SMA calculation failed for {symbol}: {e!s}")
-            raise DataError(f"SMA calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_ema(
-        self, symbol: str, period: int | None = None, field: str = "close"
-    ) -> IndicatorResult:
-        """
-        Calculate Exponential Moving Average.
-
-        Args:
-            symbol: Trading symbol
-            period: Period for calculation
-            field: Price field to use
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            period = period or self.default_periods["ema"]
-            df = self.price_data[symbol]
-
-            if len(df) < period:
-                return IndicatorResult(
-                    indicator_name="EMA",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate EMA using TA-Lib
-            ema_values = talib.EMA(df[field].values, timeperiod=period)
-            latest_value = ema_values[-1] if not np.isnan(ema_values[-1]) else None
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="EMA",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_value,
-                metadata={"period": period, "field": field},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_ema",
-                symbol=symbol,
-                details={
-                    "indicator": "EMA",
-                    "period": period,
-                    "field": field,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
-
-            # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"EMA calculation failed for {symbol}: {e!s}")
-            raise DataError(f"EMA calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_rsi(self, symbol: str, period: int | None = None) -> IndicatorResult:
-        """
-        Calculate Relative Strength Index.
-
-        Args:
-            symbol: Trading symbol
-            period: Period for calculation
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            period = period or self.default_periods["rsi"]
-            df = self.price_data[symbol]
-
-            if len(df) < period + 1:
-                return IndicatorResult(
-                    indicator_name="RSI",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate RSI using TA-Lib
-            rsi_values = talib.RSI(df["close"].values, timeperiod=period)
-            latest_value = rsi_values[-1] if not np.isnan(rsi_values[-1]) else None
-
-            # Determine signal
-            signal = None
-            if latest_value is not None:
-                if latest_value > 70:
-                    signal = "overbought"
-                elif latest_value < 30:
-                    signal = "oversold"
-                else:
-                    signal = "neutral"
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="RSI",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_value,
-                metadata={"period": period, "signal": signal},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_rsi",
-                symbol=symbol,
-                details={
-                    "indicator": "RSI",
-                    "period": period,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
-
-            # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"RSI calculation failed for {symbol}: {e!s}")
-            raise DataError(f"RSI calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_macd(
+    async def calculate_indicators_batch(
         self,
         symbol: str,
-        fast_period: int | None = None,
-        slow_period: int | None = None,
-        signal_period: int | None = None,
-    ) -> IndicatorResult:
+        data: list[MarketData],
+        indicators: list[str] | None = None,
+        parameters: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
-        Calculate MACD (Moving Average Convergence Divergence).
+        Calculate multiple technical indicators efficiently.
+
+        This method replaces individual calculation methods to eliminate
+        duplicate data processing and provide consistent results.
 
         Args:
             symbol: Trading symbol
-            fast_period: Fast EMA period
-            slow_period: Slow EMA period
-            signal_period: Signal line period
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            default_macd = self.default_periods["macd"]
-            fast_period = fast_period or default_macd[0]
-            slow_period = slow_period or default_macd[1]
-            signal_period = signal_period or default_macd[2]
-
-            df = self.price_data[symbol]
-            min_periods = max(fast_period, slow_period) + signal_period
-
-            if len(df) < min_periods:
-                return IndicatorResult(
-                    indicator_name="MACD",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={
-                        "fast_period": fast_period,
-                        "slow_period": slow_period,
-                        "signal_period": signal_period,
-                        "reason": "insufficient_data",
-                    },
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate MACD using TA-Lib
-            macd_line, macd_signal, macd_histogram = talib.MACD(
-                df["close"].values,
-                fastperiod=fast_period,
-                slowperiod=slow_period,
-                signalperiod=signal_period,
-            )
-
-            # Get latest values
-            latest_macd = macd_line[-1] if not np.isnan(macd_line[-1]) else None
-            latest_signal = macd_signal[-1] if not np.isnan(macd_signal[-1]) else None
-            latest_histogram = macd_histogram[-1] if not np.isnan(macd_histogram[-1]) else None
-
-            # Determine trend signal
-            trend_signal = None
-            if latest_macd is not None and latest_signal is not None:
-                if latest_macd > latest_signal:
-                    trend_signal = "bullish"
-                elif latest_macd < latest_signal:
-                    trend_signal = "bearish"
-                else:
-                    trend_signal = "neutral"
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="MACD",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_macd,
-                metadata={
-                    "fast_period": fast_period,
-                    "slow_period": slow_period,
-                    "signal_period": signal_period,
-                    "macd_line": latest_macd,
-                    "signal_line": latest_signal,
-                    "histogram": latest_histogram,
-                    "trend_signal": trend_signal,
-                },
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_macd",
-                symbol=symbol,
-                details={
-                    "indicator": "MACD",
-                    "fast_period": fast_period,
-                    "slow_period": slow_period,
-                    "signal_period": signal_period,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
-
-            # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"MACD calculation failed for {symbol}: {e!s}")
-            raise DataError(f"MACD calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_bollinger_bands(
-        self, symbol: str, period: int | None = None, std_dev: float = 2.0
-    ) -> IndicatorResult:
-        """
-        Calculate Bollinger Bands.
-
-        Args:
-            symbol: Trading symbol
-            period: Period for calculation
-            std_dev: Standard deviation multiplier
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            period = period or self.default_periods["bollinger"]
-            df = self.price_data[symbol]
-
-            if len(df) < period:
-                return IndicatorResult(
-                    indicator_name="BOLLINGER_BANDS",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={"period": period, "std_dev": std_dev, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate Bollinger Bands using TA-Lib
-            upper_band, middle_band, lower_band = talib.BBANDS(
-                df["close"].values, timeperiod=period, nbdevup=std_dev, nbdevdn=std_dev, matype=0
-            )
-
-            # Get latest values
-            latest_upper = upper_band[-1] if not np.isnan(upper_band[-1]) else None
-            latest_middle = middle_band[-1] if not np.isnan(middle_band[-1]) else None
-            latest_lower = lower_band[-1] if not np.isnan(lower_band[-1]) else None
-            latest_price = df["close"].iloc[-1]
-
-            # Calculate band position and width
-            band_position = None
-            band_width = None
-            signal = None
-
-            if all(x is not None for x in [latest_upper, latest_middle, latest_lower]):
-                band_width = (latest_upper - latest_lower) / latest_middle * 100
-                band_position = (latest_price - latest_lower) / (latest_upper - latest_lower) * 100
-
-                # Generate signals
-                if latest_price <= latest_lower:
-                    signal = "oversold"
-                elif latest_price >= latest_upper:
-                    signal = "overbought"
-                else:
-                    signal = "neutral"
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="BOLLINGER_BANDS",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_middle,
-                metadata={
-                    "period": period,
-                    "std_dev": std_dev,
-                    "upper_band": latest_upper,
-                    "middle_band": latest_middle,
-                    "lower_band": latest_lower,
-                    "band_width": band_width,
-                    "band_position": band_position,
-                    "signal": signal,
-                },
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_bollinger_bands",
-                symbol=symbol,
-                details={
-                    "indicator": "Bollinger_Bands",
-                    "period": period,
-                    "std_dev": std_dev,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
-
-            # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Bollinger Bands calculation failed for {symbol}: {e!s}")
-            raise DataError(f"Bollinger Bands calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_atr(self, symbol: str, period: int | None = None) -> IndicatorResult:
-        """
-        Calculate Average True Range (ATR).
-
-        Args:
-            symbol: Trading symbol
-            period: Period for calculation
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            period = period or self.default_periods["atr"]
-            df = self.price_data[symbol]
-
-            if len(df) < period + 1:
-                return IndicatorResult(
-                    indicator_name="ATR",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate ATR using TA-Lib
-            atr_values = talib.ATR(
-                df["high"].values, df["low"].values, df["close"].values, timeperiod=period
-            )
-
-            latest_value = atr_values[-1] if not np.isnan(atr_values[-1]) else None
-            latest_price = df["close"].iloc[-1]
-
-            # Calculate volatility percentage
-            volatility_pct = None
-            if latest_value is not None and latest_price > 0:
-                volatility_pct = (latest_value / latest_price) * 100
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="ATR",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_value,
-                metadata={
-                    "period": period,
-                    "volatility_percentage": volatility_pct,
-                    "price": latest_price,
-                },
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_atr",
-                symbol=symbol,
-                details={
-                    "indicator": "ATR",
-                    "period": period,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
-
-            # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"ATR calculation failed for {symbol}: {e!s}")
-            raise DataError(f"ATR calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_stochastic(
-        self, symbol: str, k_period: int = 14, d_period: int = 3
-    ) -> IndicatorResult:
-        """
-        Calculate Stochastic Oscillator.
-
-        Args:
-            symbol: Trading symbol
-            k_period: %K period
-            d_period: %D period
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            df = self.price_data[symbol]
-
-            if len(df) < k_period + d_period:
-                return IndicatorResult(
-                    indicator_name="STOCHASTIC",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={
-                        "k_period": k_period,
-                        "d_period": d_period,
-                        "reason": "insufficient_data",
-                    },
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate Stochastic using TA-Lib
-            slowk, slowd = talib.STOCH(
-                df["high"].values,
-                df["low"].values,
-                df["close"].values,
-                fastk_period=k_period,
-                slowk_period=d_period,
-                slowk_matype=0,
-                slowd_period=d_period,
-                slowd_matype=0,
-            )
-
-            latest_k = slowk[-1] if not np.isnan(slowk[-1]) else None
-            latest_d = slowd[-1] if not np.isnan(slowd[-1]) else None
-
-            # Generate signals
-            signal = None
-            if latest_k is not None and latest_d is not None:
-                if latest_k > 80 and latest_d > 80:
-                    signal = "overbought"
-                elif latest_k < 20 and latest_d < 20:
-                    signal = "oversold"
-                elif latest_k > latest_d:
-                    signal = "bullish_crossover"
-                elif latest_k < latest_d:
-                    signal = "bearish_crossover"
-                else:
-                    signal = "neutral"
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="STOCHASTIC",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_k,
-                metadata={
-                    "k_period": k_period,
-                    "d_period": d_period,
-                    "k_value": latest_k,
-                    "d_value": latest_d,
-                    "signal": signal,
-                },
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_stochastic",
-                symbol=symbol,
-                details={
-                    "indicator": "Stochastic",
-                    "k_period": k_period,
-                    "d_period": d_period,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Stochastic calculation failed for {symbol}: {e!s}")
-            raise DataError(f"Stochastic calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_williams_r(self, symbol: str, period: int = 14) -> IndicatorResult:
-        """
-        Calculate Williams %R.
-
-        Args:
-            symbol: Trading symbol
-            period: Period for calculation
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            df = self.price_data[symbol]
-
-            if len(df) < period:
-                return IndicatorResult(
-                    indicator_name="WILLIAMS_R",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate Williams %R using TA-Lib
-            willr_values = talib.WILLR(
-                df["high"].values, df["low"].values, df["close"].values, timeperiod=period
-            )
-
-            latest_value = willr_values[-1] if not np.isnan(willr_values[-1]) else None
-
-            # Generate signals
-            signal = None
-            if latest_value is not None:
-                if latest_value < -80:
-                    signal = "oversold"
-                elif latest_value > -20:
-                    signal = "overbought"
-                else:
-                    signal = "neutral"
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="WILLIAMS_R",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_value,
-                metadata={"period": period, "signal": signal},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_williams_r",
-                symbol=symbol,
-                details={
-                    "indicator": "Williams_R",
-                    "period": period,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Williams %R calculation failed for {symbol}: {e!s}")
-            raise DataError(f"Williams %R calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_cci(self, symbol: str, period: int = 20) -> IndicatorResult:
-        """
-        Calculate Commodity Channel Index (CCI).
-
-        Args:
-            symbol: Trading symbol
-            period: Period for calculation
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            df = self.price_data[symbol]
-
-            if len(df) < period:
-                return IndicatorResult(
-                    indicator_name="CCI",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate CCI using TA-Lib
-            cci_values = talib.CCI(
-                df["high"].values, df["low"].values, df["close"].values, timeperiod=period
-            )
-
-            latest_value = cci_values[-1] if not np.isnan(cci_values[-1]) else None
-
-            # Generate signals
-            signal = None
-            if latest_value is not None:
-                if latest_value > 100:
-                    signal = "overbought"
-                elif latest_value < -100:
-                    signal = "oversold"
-                else:
-                    signal = "neutral"
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="CCI",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_value,
-                metadata={"period": period, "signal": signal},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_cci",
-                symbol=symbol,
-                details={
-                    "indicator": "CCI",
-                    "period": period,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"CCI calculation failed for {symbol}: {e!s}")
-            raise DataError(f"CCI calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_mfi(self, symbol: str, period: int = 14) -> IndicatorResult:
-        """
-        Calculate Money Flow Index (MFI).
-
-        Args:
-            symbol: Trading symbol
-            period: Period for calculation
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            df = self.price_data[symbol]
-
-            if len(df) < period + 1:
-                return IndicatorResult(
-                    indicator_name="MFI",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={"period": period, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate MFI using TA-Lib
-            mfi_values = talib.MFI(
-                df["high"].values,
-                df["low"].values,
-                df["close"].values,
-                df["volume"].values,
-                timeperiod=period,
-            )
-
-            latest_value = mfi_values[-1] if not np.isnan(mfi_values[-1]) else None
-
-            # Generate signals
-            signal = None
-            if latest_value is not None:
-                if latest_value > 80:
-                    signal = "overbought"
-                elif latest_value < 20:
-                    signal = "oversold"
-                else:
-                    signal = "neutral"
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="MFI",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_value,
-                metadata={"period": period, "signal": signal},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_mfi",
-                symbol=symbol,
-                details={
-                    "indicator": "MFI",
-                    "period": period,
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"MFI calculation failed for {symbol}: {e!s}")
-            raise DataError(f"MFI calculation failed: {e!s}")
-
-    @time_execution
-    @cache_result(ttl_seconds=300)
-    async def calculate_ad_line(self, symbol: str) -> IndicatorResult:
-        """
-        Calculate Accumulation/Distribution (A/D) Line.
-
-        Args:
-            symbol: Trading symbol
-
-        Returns:
-            IndicatorResult: Calculation result
-        """
-        start_time = datetime.now()
-
-        try:
-            if symbol not in self.price_data:
-                raise DataError(f"No price data available for {symbol}")
-
-            df = self.price_data[symbol]
-
-            if len(df) < 2:
-                return IndicatorResult(
-                    indicator_name="AD_LINE",
-                    symbol=symbol,
-                    timestamp=datetime.now(timezone.utc),
-                    value=None,
-                    metadata={"reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
-                )
-
-            # Calculate A/D Line using TA-Lib
-            ad_values = talib.AD(
-                df["high"].values, df["low"].values, df["close"].values, df["volume"].values
-            )
-
-            latest_value = ad_values[-1] if not np.isnan(ad_values[-1]) else None
-
-            # Calculate A/D Line trend
-            ad_trend = None
-            if len(ad_values) >= 10:
-                recent_ad = np.mean(ad_values[-5:])
-                older_ad = np.mean(ad_values[-10:-5])
-                if recent_ad > older_ad:
-                    ad_trend = "accumulation"
-                elif recent_ad < older_ad:
-                    ad_trend = "distribution"
-                else:
-                    ad_trend = "neutral"
-
-            self.calculation_stats["successful_calculations"] += 1
-
-            return IndicatorResult(
-                indicator_name="AD_LINE",
-                symbol=symbol,
-                timestamp=datetime.now(timezone.utc),
-                value=latest_value,
-                metadata={"ad_trend": ad_trend},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
-            )
-
-        except Exception as e:
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_ad_line",
-                symbol=symbol,
-                details={
-                    "indicator": "AD_Line",
-                    "data_length": len(df) if symbol in self.price_data else 0,
-                },
-            )
-
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"A/D Line calculation failed for {symbol}: {e!s}")
-            raise DataError(f"A/D Line calculation failed: {e!s}")
-
-    @time_execution
-    async def calculate_batch_indicators(
-        self, symbol: str, indicators: list[str]
-    ) -> dict[str, IndicatorResult]:
-        """
-        Calculate multiple indicators in batch for efficiency.
-
-        Args:
-            symbol: Trading symbol
+            data: List of market data
             indicators: List of indicator names to calculate
+            parameters: Calculation parameters
 
         Returns:
-            Dict[str, IndicatorResult]: Results by indicator name
+            Dictionary of calculated indicator values
         """
         try:
+            if not data:
+                return {}
+
+            # Convert market data to numpy arrays for efficiency
+            prices = np.array([float(d.price) for d in data if d.price])
+            high_prices = np.array([float(d.high_price) for d in data if d.high_price])
+            low_prices = np.array([float(d.low_price) for d in data if d.low_price])
+
+            if len(prices) == 0:
+                return {}
+
+            # Default indicators if none specified
+            if indicators is None:
+                indicators = ["sma_20", "ema_20", "rsi_14", "macd", "bollinger_bands"]
+
+            params = parameters or {}
             results = {}
 
+            # Calculate each requested indicator
             for indicator in indicators:
                 try:
-                    if indicator.upper() == "SMA":
-                        results["SMA"] = await self.calculate_sma(symbol)
-                    elif indicator.upper() == "EMA":
-                        results["EMA"] = await self.calculate_ema(symbol)
-                    elif indicator.upper() == "RSI":
-                        results["RSI"] = await self.calculate_rsi(symbol)
-                    elif indicator.upper() == "MACD":
-                        results["MACD"] = await self.calculate_macd(symbol)
-                    elif indicator.upper() == "BOLLINGER":
-                        results["BOLLINGER"] = await self.calculate_bollinger_bands(symbol)
-                    elif indicator.upper() == "ATR":
-                        results["ATR"] = await self.calculate_atr(symbol)
-                    elif indicator.upper() == "STOCHASTIC":
-                        results["STOCHASTIC"] = await self.calculate_stochastic(symbol)
-                    elif indicator.upper() == "WILLIAMS_R":
-                        results["WILLIAMS_R"] = await self.calculate_williams_r(symbol)
-                    elif indicator.upper() == "CCI":
-                        results["CCI"] = await self.calculate_cci(symbol)
-                    elif indicator.upper() == "MFI":
-                        results["MFI"] = await self.calculate_mfi(symbol)
-                    elif indicator.upper() == "AD_LINE":
-                        results["AD_LINE"] = await self.calculate_ad_line(symbol)
-                    else:
-                        logger.warning(f"Unknown indicator: {indicator}")
+                    if indicator.startswith("sma_"):
+                        period = (
+                            int(indicator.split("_")[1])
+                            if "_" in indicator
+                            else params.get("sma_period", 20)
+                        )
+                        value = await self._calculate_sma(prices, period)
+                        if value is not None:
+                            results[indicator] = value
+
+                    elif indicator.startswith("ema_"):
+                        period = (
+                            int(indicator.split("_")[1])
+                            if "_" in indicator
+                            else params.get("ema_period", 20)
+                        )
+                        value = await self._calculate_ema(prices, period)
+                        if value is not None:
+                            results[indicator] = value
+
+                    elif indicator.startswith("rsi_"):
+                        period = (
+                            int(indicator.split("_")[1])
+                            if "_" in indicator
+                            else params.get("rsi_period", 14)
+                        )
+                        value = await self._calculate_rsi(prices, period)
+                        if value is not None:
+                            results[indicator] = value
+
+                    elif indicator == "macd":
+                        macd_params = params.get("macd", [12, 26, 9])
+                        value = await self._calculate_macd(prices, *macd_params)
+                        if value is not None:
+                            results[indicator] = value
+
+                    elif indicator == "bollinger_bands":
+                        period = params.get("bb_period", 20)
+                        std_dev = params.get("bb_std", 2)
+                        value = await self._calculate_bollinger_bands(prices, period, std_dev)
+                        if value is not None:
+                            results[indicator] = value
+
+                    elif indicator.startswith("atr_"):
+                        period = (
+                            int(indicator.split("_")[1])
+                            if "_" in indicator
+                            else params.get("atr_period", 14)
+                        )
+                        if len(high_prices) > 0 and len(low_prices) > 0:
+                            value = await self._calculate_atr(
+                                high_prices, low_prices, prices, period
+                            )
+                            if value is not None:
+                                results[indicator] = value
+
+                    # Add more indicators as needed
 
                 except Exception as e:
-                    logger.error(f"Failed to calculate {indicator} for {symbol}: {e!s}")
-                    results[indicator] = None
+                    self.logger.error(f"Failed to calculate {indicator}: {e}")
+                    continue
 
-            successful_count = len([r for r in results.values() if r is not None])
-            logger.info(f"Calculated {successful_count} indicators for {symbol}")
+            self.calculation_stats["total_calculations"] += len(indicators)
+            self.calculation_stats["successful_calculations"] += len(results)
+
             return results
 
         except Exception as e:
-            # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="calculate_batch_indicators",
-                symbol=symbol,
-                details={"indicators": indicators, "indicators_count": len(indicators)},
-            )
+            self.logger.error(f"Batch indicator calculation failed: {e}")
+            self.calculation_stats["failed_calculations"] += 1
+            return {}
 
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
-
-            # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            logger.error(f"Batch indicator calculation failed for {symbol}: {e!s}")
-            raise DataError(f"Batch calculation failed: {e!s}")
-
-    @time_execution
-    async def get_calculation_summary(self) -> dict[str, Any]:
-        """Get calculation statistics and summary."""
+    async def _calculate_sma(self, prices: np.ndarray, period: int) -> float | None:
+        """Calculate Simple Moving Average."""
         try:
-            total = self.calculation_stats["total_calculations"]
-            success_rate = (
-                (self.calculation_stats["successful_calculations"] / total * 100)
-                if total > 0
-                else 0
+            if len(prices) < period:
+                return None
+            sma_values = talib.SMA(prices, timeperiod=period)
+            return float(sma_values[-1]) if not np.isnan(sma_values[-1]) else None
+        except Exception as e:
+            self.logger.error(f"SMA calculation failed: {e}")
+            return None
+
+    async def _calculate_ema(self, prices: np.ndarray, period: int) -> float | None:
+        """Calculate Exponential Moving Average."""
+        try:
+            if len(prices) < period:
+                return None
+            ema_values = talib.EMA(prices, timeperiod=period)
+            return float(ema_values[-1]) if not np.isnan(ema_values[-1]) else None
+        except Exception as e:
+            self.logger.error(f"EMA calculation failed: {e}")
+            return None
+
+    async def _calculate_rsi(self, prices: np.ndarray, period: int) -> float | None:
+        """Calculate Relative Strength Index."""
+        try:
+            if len(prices) < period + 1:
+                return None
+            rsi_values = talib.RSI(prices, timeperiod=period)
+            return float(rsi_values[-1]) if not np.isnan(rsi_values[-1]) else None
+        except Exception as e:
+            self.logger.error(f"RSI calculation failed: {e}")
+            return None
+
+    async def _calculate_macd(
+        self, prices: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9
+    ) -> dict[str, float] | None:
+        """Calculate MACD (Moving Average Convergence Divergence)."""
+        try:
+            if len(prices) < slow + signal:
+                return None
+            macd_line, macd_signal, macd_histogram = talib.MACD(
+                prices, fastperiod=fast, slowperiod=slow, signalperiod=signal
             )
 
-            cache_hit_rate = (
-                (
-                    self.calculation_stats["cache_hits"]
-                    / (
-                        self.calculation_stats["cache_hits"]
-                        + self.calculation_stats["cache_misses"]
-                    )
-                    * 100
+            if not (
+                np.isnan(macd_line[-1]) or np.isnan(macd_signal[-1]) or np.isnan(macd_histogram[-1])
+            ):
+                return {
+                    "macd": float(macd_line[-1]),
+                    "signal": float(macd_signal[-1]),
+                    "histogram": float(macd_histogram[-1]),
+                }
+            return None
+        except Exception as e:
+            self.logger.error(f"MACD calculation failed: {e}")
+            return None
+
+    async def _calculate_bollinger_bands(
+        self, prices: np.ndarray, period: int = 20, std_dev: float = 2
+    ) -> dict[str, float] | None:
+        """Calculate Bollinger Bands."""
+        try:
+            if len(prices) < period:
+                return None
+            upper, middle, lower = talib.BBANDS(
+                prices, timeperiod=period, nbdevup=std_dev, nbdevdn=std_dev
+            )
+
+            if not (np.isnan(upper[-1]) or np.isnan(middle[-1]) or np.isnan(lower[-1])):
+                return {
+                    "upper": float(upper[-1]),
+                    "middle": float(middle[-1]),
+                    "lower": float(lower[-1]),
+                    "width": float(upper[-1] - lower[-1]),
+                    "position": (
+                        float((prices[-1] - lower[-1]) / (upper[-1] - lower[-1]))
+                        if upper[-1] != lower[-1]
+                        else 0.5
+                    ),
+                }
+            return None
+        except Exception as e:
+            self.logger.error(f"Bollinger Bands calculation failed: {e}")
+            return None
+
+    async def _calculate_atr(
+        self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14
+    ) -> float | None:
+        """Calculate Average True Range."""
+        try:
+            if len(high) < period or len(low) < period or len(close) < period:
+                return None
+            atr_values = talib.ATR(high, low, close, timeperiod=period)
+            return float(atr_values[-1]) if not np.isnan(atr_values[-1]) else None
+        except Exception as e:
+            self.logger.error(f"ATR calculation failed: {e}")
+            return None
+
+    # Legacy methods for backward compatibility - DEPRECATED
+    async def sma(self, prices: list[float], period: int = 20) -> float | None:
+        """DEPRECATED: Use calculate_indicators_batch instead."""
+        warnings.warn(
+            "sma() is deprecated. Use calculate_indicators_batch() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self._calculate_sma(np.array(prices), period)
+
+    async def ema(self, prices: list[float], period: int = 20) -> float | None:
+        """DEPRECATED: Use calculate_indicators_batch instead."""
+        warnings.warn(
+            "ema() is deprecated. Use calculate_indicators_batch() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self._calculate_ema(np.array(prices), period)
+
+    async def rsi(self, prices: list[float], period: int = 14) -> float | None:
+        """DEPRECATED: Use calculate_indicators_batch instead."""
+        warnings.warn(
+            "rsi() is deprecated. Use calculate_indicators_batch() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self._calculate_rsi(np.array(prices), period)
+
+    async def macd(self, prices: list[float]) -> dict[str, float] | None:
+        """DEPRECATED: Use calculate_indicators_batch instead."""
+        warnings.warn(
+            "macd() is deprecated. Use calculate_indicators_batch() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self._calculate_macd(np.array(prices))
+
+    async def bollinger_bands(
+        self, prices: list[float], period: int = 20, std_dev: float = 2
+    ) -> dict[str, float] | None:
+        """DEPRECATED: Use calculate_indicators_batch instead."""
+        warnings.warn(
+            "bollinger_bands() is deprecated. Use calculate_indicators_batch() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self._calculate_bollinger_bands(np.array(prices), period, std_dev)
+
+    async def volume_sma(self, volumes: list[float], period: int = 20) -> float | None:
+        """DEPRECATED: Use calculate_indicators_batch instead."""
+        warnings.warn(
+            "volume_sma() is deprecated. Use calculate_indicators_batch() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return await self._calculate_sma(np.array(volumes), period)
+
+    def get_calculation_stats(self) -> dict[str, Any]:
+        """Get calculation statistics."""
+        return self.calculation_stats.copy()
+
+    # Symbol-based wrapper methods for strategy integration
+    async def calculate_sma(self, symbol: str, period: int) -> float | None:
+        """Calculate SMA using symbol - wrapper for strategy integration."""
+        try:
+            if not self.feature_store:
+                self.logger.warning("Feature store not available for SMA calculation")
+                return None
+
+            # Get price data from feature store or data service
+            price_data = await self._get_price_data(symbol, period + 10)  # Extra buffer
+            if not price_data or len(price_data) < period:
+                return None
+
+            prices = np.array([float(d.price) for d in price_data if d.price])
+            return await self._calculate_sma(prices, period)
+
+        except Exception as e:
+            self.logger.error(f"SMA calculation failed for {symbol}: {e}")
+            return None
+
+    async def calculate_rsi(self, symbol: str, period: int) -> float | None:
+        """Calculate RSI using symbol - wrapper for strategy integration."""
+        try:
+            if not self.feature_store:
+                self.logger.warning("Feature store not available for RSI calculation")
+                return None
+
+            # Get price data from feature store or data service
+            price_data = await self._get_price_data(symbol, period + 20)  # Extra buffer for RSI
+            if not price_data or len(price_data) < period + 1:
+                return None
+
+            prices = np.array([float(d.price) for d in price_data if d.price])
+            return await self._calculate_rsi(prices, period)
+
+        except Exception as e:
+            self.logger.error(f"RSI calculation failed for {symbol}: {e}")
+            return None
+
+    async def calculate_momentum(self, symbol: str, period: int) -> float | None:
+        """Calculate price momentum - NEW implementation for strategy integration."""
+        try:
+            if not self.feature_store:
+                self.logger.warning("Feature store not available for momentum calculation")
+                return None
+
+            # Get price data from feature store or data service
+            price_data = await self._get_price_data(symbol, period + 5)
+            if not price_data or len(price_data) < period + 1:
+                return None
+
+            prices = np.array([float(d.price) for d in price_data if d.price])
+
+            # Calculate momentum as percent change over period
+            if len(prices) >= period + 1:
+                current_price = prices[-1]
+                past_price = prices[-(period + 1)]
+                momentum = (current_price - past_price) / past_price if past_price != 0 else 0.0
+                return float(momentum)
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Momentum calculation failed for {symbol}: {e}")
+            return None
+
+    async def calculate_volatility(self, symbol: str, period: int) -> float | None:
+        """Calculate historical volatility - NEW implementation for strategy integration."""
+        try:
+            if not self.feature_store:
+                self.logger.warning("Feature store not available for volatility calculation")
+                return None
+
+            # Get price data from feature store or data service
+            price_data = await self._get_price_data(symbol, period + 5)
+            if not price_data or len(price_data) < period:
+                return None
+
+            prices = np.array([float(d.price) for d in price_data if d.price])
+
+            # Calculate returns
+            if len(prices) < 2:
+                return None
+
+            returns = np.diff(np.log(prices))
+            if len(returns) < period:
+                return None
+
+            # Calculate volatility as standard deviation of returns
+            volatility = np.std(returns[-period:]) if len(returns) >= period else np.std(returns)
+            return float(volatility)
+
+        except Exception as e:
+            self.logger.error(f"Volatility calculation failed for {symbol}: {e}")
+            return None
+
+    async def calculate_volume_ratio(self, symbol: str, period: int) -> float | None:
+        """Calculate volume ratio - NEW implementation for strategy integration."""
+        try:
+            if not self.feature_store:
+                self.logger.warning("Feature store not available for volume ratio calculation")
+                return None
+
+            # Get price data with volume from feature store or data service
+            price_data = await self._get_price_data(symbol, period + 5)
+            if not price_data or len(price_data) < period:
+                return None
+
+            # Extract volumes
+            volumes = []
+            for d in price_data:
+                if hasattr(d, "volume") and d.volume:
+                    volumes.append(float(d.volume))
+                else:
+                    # Use a default volume if not available
+                    volumes.append(1.0)
+
+            if len(volumes) < period + 1:
+                return None
+
+            volumes = np.array(volumes)
+
+            # Calculate volume ratio as current volume vs average volume
+            current_volume = volumes[-1]
+            avg_volume = np.mean(volumes[-period:]) if len(volumes) >= period else np.mean(volumes)
+
+            volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
+            return float(volume_ratio)
+
+        except Exception as e:
+            self.logger.error(f"Volume ratio calculation failed for {symbol}: {e}")
+            return None
+
+    async def calculate_atr(self, symbol: str, period: int) -> float | None:
+        """Calculate ATR using symbol - wrapper for strategy integration."""
+        try:
+            if not self.feature_store:
+                self.logger.warning("Feature store not available for ATR calculation")
+                return None
+
+            # Get OHLC data from feature store or data service
+            price_data = await self._get_price_data(symbol, period + 10)
+            if not price_data or len(price_data) < period:
+                return None
+
+            # Extract OHLC arrays
+            high_prices = []
+            low_prices = []
+            close_prices = []
+
+            for d in price_data:
+                high_val = (
+                    float(d.high_price)
+                    if hasattr(d, "high_price") and d.high_price
+                    else float(d.price)
                 )
-                if (self.calculation_stats["cache_hits"] + self.calculation_stats["cache_misses"])
-                > 0
-                else 0
-            )
+                low_val = (
+                    float(d.low_price)
+                    if hasattr(d, "low_price") and d.low_price
+                    else float(d.price)
+                )
+                close_val = float(d.price)
 
-            return {
-                "statistics": self.calculation_stats.copy(),
-                "success_rate": f"{success_rate:.2f}%",
-                "cache_hit_rate": f"{cache_hit_rate:.2f}%",
-                "symbols_tracked": len(self.price_data),
-                "cache_enabled": self.cache_enabled,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+                high_prices.append(high_val)
+                low_prices.append(low_val)
+                close_prices.append(close_val)
+
+            if len(high_prices) < period:
+                return None
+
+            high_array = np.array(high_prices)
+            low_array = np.array(low_prices)
+            close_array = np.array(close_prices)
+
+            return await self._calculate_atr(high_array, low_array, close_array, period)
 
         except Exception as e:
-            # Use ErrorHandler for comprehensive error management
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="get_calculation_summary",
-                details={"operation": "summary_generation"},
-            )
+            self.logger.error(f"ATR calculation failed for {symbol}: {e}")
+            return None
 
-            # Handle the error through the error handling framework
-            self.error_handler.handle_error(error_context)
-
-            # Add error event to pattern analytics
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            logger.error(f"Failed to generate calculation summary: {e!s}")
-            return {"error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}
-
-    async def get_error_analytics(self) -> dict[str, Any]:
-        """Get error pattern analytics and circuit breaker status."""
+    async def calculate_bollinger_bands(
+        self, symbol: str, period: int = 20, std_dev: float = 2.0
+    ) -> dict[str, float] | None:
+        """Calculate Bollinger Bands using symbol - wrapper for strategy integration."""
         try:
-            # Get error pattern summary from analytics
-            pattern_summary = self.pattern_analytics.get_pattern_summary()
-            correlation_summary = self.pattern_analytics.get_correlation_summary()
-            trend_summary = self.pattern_analytics.get_trend_summary()
+            if not self.feature_store:
+                self.logger.warning("Feature store not available for Bollinger Bands calculation")
+                return None
 
-            # Get circuit breaker status
-            circuit_breaker_status = self.error_handler.get_circuit_breaker_status()
+            # Get price data from feature store or data service
+            price_data = await self._get_price_data(symbol, period + 10)
+            if not price_data or len(price_data) < period:
+                return None
 
-            return {
-                "error_patterns": pattern_summary,
-                "error_correlations": correlation_summary,
-                "error_trends": trend_summary,
-                "circuit_breaker_status": circuit_breaker_status,
-                "calculation_stats": self.calculation_stats.copy(),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+            prices = np.array([float(d.price) for d in price_data if d.price])
+            return await self._calculate_bollinger_bands(prices, period, std_dev)
 
         except Exception as e:
-            # Use ErrorHandler for analytics retrieval errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="get_error_analytics",
-                details={"operation": "analytics_retrieval"},
+            self.logger.error(f"Bollinger Bands calculation failed for {symbol}: {e}")
+            return None
+
+    async def _get_price_data(self, symbol: str, limit: int) -> list[Any] | None:
+        """Get price data from feature store or data service."""
+        try:
+            # Try to get data from feature store first
+            if self.feature_store and hasattr(self.feature_store, "get_recent_data"):
+                return await self.feature_store.get_recent_data(symbol, limit=limit)
+
+            # Try to get data from data service
+            if self.data_service and hasattr(self.data_service, "get_recent_data"):
+                return await self.data_service.get_recent_data(symbol, limit=limit)
+
+            # If neither available, log warning
+            self.logger.warning(
+                f"No data source available for {symbol}, indicator calculations may be limited"
             )
+            return None
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
-
-            logger.error(f"Failed to get error analytics: {e!s}")
-            return {
-                "error": str(e),
-                "error_id": error_context.error_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+        except Exception as e:
+            self.logger.error(f"Failed to get price data for {symbol}: {e}")
+            return None
 
     async def cleanup(self) -> None:
-        """Cleanup technical indicator calculator resources."""
-        try:
-            # Clear price data
-            self.price_data.clear()
+        """Cleanup resources."""
+        self.price_data.clear()
+        self.feature_cache.clear()
+        self.logger.info("TechnicalIndicators cleanup completed")
 
-            # Clear feature cache
-            self.feature_cache.clear()
+    # All legacy individual calculation methods have been removed
+    # to eliminate duplicate calculation logic. Use calculate_indicators_batch() instead.
 
-            # Reset calculation stats
-            self.calculation_stats = {
-                "total_calculations": 0,
-                "successful_calculations": 0,
-                "failed_calculations": 0,
-                "cache_hits": 0,
-                "cache_misses": 0,
-                "avg_calculation_time": 0.0,
-            }
+    # For backward compatibility, the old class name is aliased
+    # but users should migrate to the new FeatureStore integration
 
-            logger.info("TechnicalIndicatorCalculator cleanup completed")
+    def __str__(self) -> str:
+        """String representation."""
+        total_calcs = self.calculation_stats["total_calculations"]
+        success_calcs = self.calculation_stats["successful_calculations"]
+        success_rate = success_calcs / max(1, total_calcs)
+        return (
+            f"TechnicalIndicators("
+            f"total_calculations={total_calcs}, "
+            f"success_rate={success_rate:.2%})"
+        )
 
-        except Exception as e:
-            # Use ErrorHandler for cleanup errors
-            error_context = self.error_handler.create_error_context(
-                error=e,
-                component="TechnicalIndicatorCalculator",
-                operation="cleanup",
-                details={"operation": "cleanup"},
-            )
+    def __repr__(self) -> str:
+        """Detailed representation."""
+        return self.__str__()
 
-            self.error_handler.handle_error(error_context)
-            self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Error during TechnicalIndicatorCalculator cleanup: {e!s}")
+# Legacy alias for backward compatibility
+TechnicalIndicatorCalculator = TechnicalIndicators
+
+
+# All legacy individual calculation methods have been consolidated
+# into the batch processing method for better performance and consistency

@@ -38,8 +38,6 @@ from src.error_handling.error_handler import ErrorHandler
 # Import from P-007A utilities
 from src.utils.decorators import cache_result, time_execution
 
-logger = get_logger(__name__)
-
 
 class AlternativeFeatureType(Enum):
     """Alternative feature type enumeration"""
@@ -96,6 +94,7 @@ class AlternativeFeatureCalculator:
         """Initialize alternative feature calculator."""
         self.config = config
         self.error_handler = ErrorHandler(config)
+        self.logger = get_logger(__name__)
 
         # Alternative data configuration
         alt_config = getattr(config, "alternative_features", {})
@@ -160,7 +159,7 @@ class AlternativeFeatureCalculator:
             "avg_calculation_time": 0.0,
         }
 
-        logger.info("AlternativeFeatureCalculator initialized")
+        self.logger.info("AlternativeFeatureCalculator initialized")
 
     def set_data_sources(self, news_source=None, social_source=None, alt_data_source=None) -> None:
         """
@@ -174,7 +173,7 @@ class AlternativeFeatureCalculator:
         self.news_source = news_source
         self.social_source = social_source
         self.alt_data_source = alt_data_source
-        logger.info("Alternative data sources injected")
+        self.logger.info("Alternative data sources injected")
 
     async def initialize(self) -> None:
         """Initialize data sources if they are available."""
@@ -185,13 +184,13 @@ class AlternativeFeatureCalculator:
                 await self.social_source.initialize()
             if self.alt_data_source:
                 await self.alt_data_source.initialize()
-            logger.info("Alternative data sources initialized")
+            self.logger.info("Alternative data sources initialized")
         except Exception as e:
-            logger.error(f"Failed to initialize alternative data sources: {e!s}")
+            self.logger.error(f"Failed to initialize alternative data sources: {e!s}")
             raise DataError(f"Alternative data source initialization failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl_seconds=300)
+    @cache_result(ttl=300)
     async def calculate_news_sentiment(
         self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:
@@ -308,11 +307,11 @@ class AlternativeFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"News sentiment calculation failed for {symbol}: {e!s}")
+            self.logger.error(f"News sentiment calculation failed for {symbol}: {e!s}")
             raise DataError(f"News sentiment calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl_seconds=300)
+    @cache_result(ttl=300)
     async def calculate_social_sentiment(
         self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:
@@ -468,11 +467,11 @@ class AlternativeFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Social sentiment calculation failed for {symbol}: {e!s}")
+            self.logger.error(f"Social sentiment calculation failed for {symbol}: {e!s}")
             raise DataError(f"Social sentiment calculation failed: {e!s}")
 
     @time_execution
-    @cache_result(ttl_seconds=1800)
+    @cache_result(ttl=1800)
     async def calculate_economic_indicators(
         self, symbol: str, lookback_hours: int | None = None
     ) -> AlternativeResult:
@@ -589,7 +588,7 @@ class AlternativeFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Economic indicators calculation failed for {symbol}: {e!s}")
+            self.logger.error(f"Economic indicators calculation failed for {symbol}: {e!s}")
             raise DataError(f"Economic indicators calculation failed: {e!s}")
 
     def _calculate_sentiment_trend(self, sentiment_scores: list[float]) -> float:
@@ -664,7 +663,7 @@ class AlternativeFeatureCalculator:
 
         except Exception as e:
             self.calculation_stats["failed_calculations"] += 1
-            logger.error(f"Market microstructure calculation failed for {symbol}: {e!s}")
+            self.logger.error(f"Market microstructure calculation failed for {symbol}: {e!s}")
             raise DataError(f"Market microstructure calculation failed: {e!s}")
 
     @time_execution
@@ -699,18 +698,18 @@ class AlternativeFeatureCalculator:
                             await self.calculate_market_microstructure(symbol)
                         )
                     else:
-                        logger.warning(f"Unknown alternative feature: {feature}")
+                        self.logger.warning(f"Unknown alternative feature: {feature}")
 
                 except Exception as e:
-                    logger.error(f"Failed to calculate {feature} for {symbol}: {e!s}")
+                    self.logger.error(f"Failed to calculate {feature} for {symbol}: {e!s}")
                     results[feature] = None
 
             successful_count = len([r for r in results.values() if r is not None])
-            logger.info(f"Calculated {successful_count} alternative features for {symbol}")
+            self.logger.info(f"Calculated {successful_count} alternative features for {symbol}")
             return results
 
         except Exception as e:
-            logger.error(f"Batch alternative feature calculation failed for {symbol}: {e!s}")
+            self.logger.error(f"Batch alternative feature calculation failed for {symbol}: {e!s}")
             raise DataError(f"Batch calculation failed: {e!s}")
 
     @time_execution
@@ -728,14 +727,14 @@ class AlternativeFeatureCalculator:
                 "statistics": self.calculation_stats.copy(),
                 "success_rate": f"{success_rate:.2f}%",
                 "data_sources_available": {
-                    "news": hasattr(self.news_source, "_api_key"),
-                    "social": hasattr(self.social_source, "_api_key"),
-                    "economic": hasattr(self.alt_data_source, "_api_key"),
+                    "news": self.news_source is not None,
+                    "social": self.social_source is not None,
+                    "economic": self.alt_data_source is not None,
                 },
                 "update_interval_minutes": self.update_interval / 60,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
         except Exception as e:
-            logger.error(f"Failed to generate calculation summary: {e!s}")
+            self.logger.error(f"Failed to generate calculation summary: {e!s}")
             return {"error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}

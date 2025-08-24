@@ -1,13 +1,26 @@
 """
-Risk Metrics Calculator for P-008 Risk Management Framework.
+Risk Metrics Calculator - DEPRECATED.
 
-This module calculates comprehensive risk metrics including:
-- Value at Risk (VaR)
+DEPRECATED: This module is deprecated in favor of RiskService.
+The new RiskService (src/risk_management/service.py) provides all risk metrics
+functionality with:
+- DatabaseService integration (no direct DB access)
+- StateService integration for state management
+- Comprehensive caching layer with Redis
+- Enhanced error handling with circuit breakers
+- Real-time risk monitoring and alerts
+
+This module is maintained for backward compatibility only.
+New implementations should use RiskService.calculate_risk_metrics() directly.
+
+Legacy risk metrics (now in RiskService):
+- Value at Risk (VaR) with multiple time horizons
 - Expected Shortfall (Conditional VaR)
-- Maximum Drawdown
-- Sharpe Ratio
-- Current Drawdown
-- Risk Level Assessment
+- Maximum Drawdown with historical analysis
+- Sharpe Ratio with proper annualization
+- Current Drawdown from peak
+- Risk Level Assessment with dynamic thresholds
+- Portfolio Beta and Correlation Risk
 
 CRITICAL: This integrates with P-001 (types, exceptions, config),
 P-002A (error handling), and P-007A (utils) components.
@@ -15,53 +28,87 @@ P-002A (error handling), and P-007A (utils) components.
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from src.core.config import Config
+from src.core.base.component import BaseComponent
+from src.core.config.main import Config
 from src.core.exceptions import RiskManagementError, ValidationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, Position, RiskLevel, RiskMetrics
 
+# Type checking imports to avoid circular dependencies
+if TYPE_CHECKING:
+    from src.database.service import DatabaseService
+
 # MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import ErrorHandler
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
 
-logger = get_logger(__name__)
 
-
-class RiskCalculator:
+class RiskCalculator(BaseComponent):
     """
-    Risk metrics calculator for portfolio risk assessment.
+    DEPRECATED: Risk metrics calculator for portfolio risk assessment.
+
+    This class is deprecated in favor of RiskService which provides:
+    - Enterprise-grade service architecture
+    - DatabaseService integration (no direct DB access)
+    - Enhanced caching with Redis
+    - Real-time monitoring and alerting
+    - State management integration
 
     This class calculates comprehensive risk metrics to assess
     portfolio risk and determine appropriate risk levels.
+
+    DEPRECATED METHODS -> USE RiskService INSTEAD:
+    - calculate_risk_metrics() -> RiskService.calculate_risk_metrics()
+    - _calculate_var() -> Built into RiskService with caching
+    - _calculate_expected_shortfall() -> Built into RiskService
+    - _calculate_max_drawdown() -> Built into RiskService with history
+    - _calculate_sharpe_ratio() -> Built into RiskService
+    - _determine_risk_level() -> Built into RiskService with alerts
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, database_service: "DatabaseService | None" = None):
         """
-        Initialize risk calculator with configuration.
+        Initialize DEPRECATED risk calculator with configuration.
+
+        DEPRECATED: Use RiskService.calculate_risk_metrics() directly.
 
         Args:
             config: Application configuration containing risk settings
+            database_service: Database service for data access (not used in legacy mode)
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
         self.risk_config = config.risk
         self.error_handler = ErrorHandler(config)
-        self.logger = logger.bind(component="risk_calculator")
+        # Note: logger is a property from BaseComponent, no need to bind
 
-        # Historical data for calculations
+        # Database service integration (optional for backward compatibility)
+        self.database_service = database_service
+
+        # DEPRECATED: Historical data for calculations
+        # NOTE: RiskService handles this with proper caching and state management
         self.portfolio_values: list[float] = []
         self.portfolio_returns: list[float] = []
         self.position_returns: dict[str, list[float]] = {}
         self.position_prices: dict[str, list[float]] = {}
 
-        self.logger.info("Risk calculator initialized")
+        if database_service:
+            self.logger.warning(
+                "RiskCalculator initialized with DatabaseService - "
+                "consider migrating to RiskService for full integration"
+            )
+        else:
+            self.logger.warning(
+                "DEPRECATED RiskCalculator initialized in legacy mode - "
+                "migrate to RiskService for enterprise features"
+            )
 
     @time_execution
     async def calculate_risk_metrics(
@@ -164,14 +211,18 @@ class RiskCalculator:
         """
         portfolio_value = Decimal("0")
 
-        for position, market in zip(positions, market_data, strict=False):
-            if position.symbol == market.symbol:
-                # Update position with current price
-                position.current_price = market.price
-                position.unrealized_pnl = position.quantity * (market.price - position.entry_price)
+        # Create symbol-indexed market data for safe lookups
+        market_by_symbol = {md.symbol: md for md in market_data}
+
+        for position in positions:
+            market = market_by_symbol.get(position.symbol)
+            if market and position.symbol == market.symbol:
+                # Calculate values without modifying position object
+                current_price = market.price
+                unrealized_pnl = position.quantity * (current_price - position.entry_price)
 
                 # Add position value to portfolio
-                position_value = position.quantity * market.price
+                position_value = position.quantity * current_price
                 portfolio_value += position_value
 
         return portfolio_value
@@ -228,14 +279,18 @@ class RiskCalculator:
         # VaR = portfolio_value * volatility * sqrt(days) * z_score
         confidence_level = self.risk_config.var_confidence_level
 
-        # Z-score for confidence level (95% = 1.645, 99% = 2.326)
-        if confidence_level == 0.95:
+        # Z-score for confidence level (90% = 1.282, 95% = 1.645, 99% = 2.326)
+        if confidence_level == 0.90:
+            z_score = 1.282
+        elif confidence_level == 0.95:
             z_score = 1.645
         elif confidence_level == 0.99:
             z_score = 2.326
         else:
-            # Interpolate for other confidence levels
-            z_score = 1.645 + (confidence_level - 0.95) * (2.326 - 1.645) / 0.04
+            # Use scipy.stats.norm.ppf for accurate z-score calculation
+            from scipy.stats import norm
+
+            z_score = norm.ppf(confidence_level)
 
         # Formula: VaR = portfolio_value * (volatility * sqrt(days) * z_score)
         var_percentage = daily_volatility * np.sqrt(days) * z_score

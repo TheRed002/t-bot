@@ -34,25 +34,8 @@ def normalize_symbol(symbol: str) -> str:
     return sanitized
 
 
-def format_price(price: float, precision: int = 8) -> str:
-    """
-    Format price for display.
-
-    Args:
-        price: Price value
-        precision: Number of decimal places
-
-    Returns:
-        Formatted price string
-    """
-    if precision < 0:
-        raise ValidationError("Precision must be non-negative")
-
-    if precision == 0:
-        return str(int(price))
-
-    format_str = f"{{:.{precision}f}}"
-    return format_str.format(price).rstrip("0").rstrip(".")
+# Note: format_price is available in formatters module
+# from src.utils.formatters import format_price
 
 
 def parse_trading_pair(pair: str) -> tuple[str, str]:
@@ -186,16 +169,5 @@ def truncate(text: str, max_length: int, suffix: str = "...") -> str:
     return text[: max_length - len(suffix)] + suffix
 
 
-def format_percentage(value: float, decimals: int = 2) -> str:
-    """
-    Format value as percentage string.
-
-    Args:
-        value: Value to format (0.05 = 5%)
-        decimals: Number of decimal places
-
-    Returns:
-        Formatted percentage string
-    """
-    percentage = value * 100
-    return f"{percentage:.{decimals}f}%"
+# Note: format_percentage is available in formatters module
+# from src.utils.formatters import format_percentage

@@ -24,17 +24,19 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from src.core.logging import get_logger
-from src.monitoring.alerting import (
+from src.monitoring import (
     AlertManager,
     AlertRule,
     AlertSeverity,
     AlertStatus,
+    MetricsCollector,
     NotificationChannel,
+    PerformanceProfiler,
     get_alert_manager,
+    get_metrics_collector,
+    get_performance_profiler,
+    get_trading_tracer,
 )
-from src.monitoring.metrics import MetricsCollector, get_metrics_collector
-from src.monitoring.performance import PerformanceProfiler, get_performance_profiler
-from src.monitoring.telemetry import get_trading_tracer
 from src.web_interface.security.auth import get_current_user, require_permissions
 
 logger = get_logger(__name__)
@@ -116,26 +118,65 @@ class MemoryReportResponse(BaseModel):
 # Dependency functions
 async def get_metrics_collector_dep() -> MetricsCollector:
     """Get metrics collector dependency."""
-    collector = get_metrics_collector()
-    if not collector:
-        raise HTTPException(status_code=503, detail="Metrics collector not available")
-    return collector
+    try:
+        collector = get_metrics_collector()
+        if not collector:
+            logger.warning("Metrics collector not initialized - service unavailable")
+            raise HTTPException(
+                status_code=503,
+                detail="Metrics collector service is not available. Please check monitoring setup."
+            )
+        return collector
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get metrics collector: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error accessing metrics collector"
+        )
 
 
 async def get_alert_manager_dep() -> AlertManager:
     """Get alert manager dependency."""
-    manager = get_alert_manager()
-    if not manager:
-        raise HTTPException(status_code=503, detail="Alert manager not available")
-    return manager
+    try:
+        manager = get_alert_manager()
+        if not manager:
+            logger.warning("Alert manager not initialized - service unavailable")
+            raise HTTPException(
+                status_code=503,
+                detail="Alert manager service is not available. Please check monitoring setup."
+            )
+        return manager
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get alert manager: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error accessing alert manager"
+        )
 
 
 async def get_profiler_dep() -> PerformanceProfiler:
     """Get performance profiler dependency."""
-    profiler = get_performance_profiler()
-    if not profiler:
-        raise HTTPException(status_code=503, detail="Performance profiler not available")
-    return profiler
+    try:
+        profiler = get_performance_profiler()
+        if not profiler:
+            logger.warning("Performance profiler not initialized - service unavailable")
+            raise HTTPException(
+                status_code=503,
+                detail="Performance profiler service is not available. Please check monitoring setup."
+            )
+        return profiler
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get performance profiler: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error accessing performance profiler"
+        )
 
 
 # Health and Status Endpoints
@@ -273,7 +314,8 @@ async def metrics_json(
         timeframe: Timeframe in minutes for metrics aggregation
     """
     try:
-        metrics_data = profiler.get_performance_summary(timeframe)
+        # Get performance summary (doesn't take timeframe parameter)
+        metrics_data = profiler.get_performance_summary()
 
         return MetricsResponse(
             metrics=metrics_data, timestamp=datetime.now(), timeframe_minutes=timeframe
@@ -297,7 +339,18 @@ async def performance_stats(
         timeframe: Timeframe in minutes for performance data
     """
     try:
-        stats = profiler.get_performance_summary(timeframe)
+        # Get the performance summary
+        summary = profiler.get_performance_summary()
+        
+        # Transform the data to match PerformanceStatsResponse structure
+        stats = {
+            "timeframe_minutes": timeframe,
+            "function_performance": summary.get("latency_stats", {}),
+            "query_performance": {},  # Would need database-specific metrics
+            "cache_performance": {},  # Would need cache-specific metrics
+            "system_resources": summary.get("system_resources", {})
+        }
+        
         return PerformanceStatsResponse(**stats)
 
     except Exception as e:
@@ -305,23 +358,44 @@ async def performance_stats(
         raise HTTPException(status_code=500, detail="Failed to get performance stats")
 
 
-@router.get("/performance/memory", response_model=MemoryReportResponse)
+@router.get("/performance/memory")
 async def memory_report(
     user=Depends(require_permissions(["monitoring.read"])),
     profiler: PerformanceProfiler = Depends(get_profiler_dep),
 ):
     """
-    Get detailed memory usage report.
+    Get system resource statistics including memory usage.
 
     Requires monitoring.read permission.
     """
     try:
-        report = profiler.get_memory_usage_report()
+        # Use actual existing method
+        resource_stats = profiler.get_system_resource_stats()
+        gc_stats = profiler.get_gc_stats()
 
-        if "error" in report:
-            raise HTTPException(status_code=500, detail=report["error"])
+        if not resource_stats:
+            raise HTTPException(
+                status_code=503,
+                detail="Resource statistics not available. Monitoring may not be started."
+            )
 
-        return MemoryReportResponse(**report)
+        return {
+            "memory": {
+                "rss_mb": resource_stats.memory_rss / (1024 * 1024) if resource_stats else 0,
+                "vms_mb": resource_stats.memory_vms / (1024 * 1024) if resource_stats else 0,
+                "percent": resource_stats.memory_percent if resource_stats else 0,
+            },
+            "cpu": {
+                "percent": resource_stats.cpu_percent if resource_stats else 0,
+            },
+            "gc_stats": {
+                "count": gc_stats.count if gc_stats else {},
+                "collected": gc_stats.collected if gc_stats else {},
+                "uncollectable": gc_stats.uncollectable if gc_stats else {},
+                "collections_per_second": gc_stats.collections_per_second if gc_stats else {},
+            } if gc_stats else None,
+            "timestamp": datetime.now(),
+        }
 
     except HTTPException:
         raise
@@ -330,71 +404,55 @@ async def memory_report(
         raise HTTPException(status_code=500, detail="Failed to get memory report")
 
 
-@router.post("/performance/optimize")
-async def optimize_performance(
+@router.post("/performance/reset-metrics")
+async def reset_performance_metrics(
     user=Depends(require_permissions(["monitoring.write"])),
     profiler: PerformanceProfiler = Depends(get_profiler_dep),
 ):
     """
-    Trigger performance optimization operations.
+    Reset performance metrics.
 
     Requires monitoring.write permission.
     """
     try:
-        result = profiler.optimize_memory()
-
-        if "error" in result:
-            raise HTTPException(status_code=500, detail=result["error"])
+        profiler.reset_metrics()
 
         return {
-            "message": "Performance optimization completed",
-            "results": result,
+            "message": "Performance metrics reset successfully",
             "timestamp": datetime.now(),
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Performance optimization failed: {e}")
-        raise HTTPException(status_code=500, detail="Performance optimization failed")
+        logger.error(f"Failed to reset performance metrics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to reset performance metrics")
 
 
-@router.get("/performance/slow-queries")
-async def slow_queries(
-    limit: int = Query(10, description="Maximum number of slow queries to return"),
+@router.get("/performance/database-queries")
+async def database_query_stats(
     user=Depends(require_permissions(["monitoring.read"])),
     profiler: PerformanceProfiler = Depends(get_profiler_dep),
 ):
     """
-    Get slow database queries.
-
-    Args:
-        limit: Maximum number of queries to return
+    Get database query statistics.
 
     Requires monitoring.read permission.
     """
     try:
-        slow_queries = profiler.get_slow_queries(limit)
+        # Get performance summary which includes database stats
+        summary = profiler.get_performance_summary()
+
+        database_stats = {}
+        if "database" in summary:
+            database_stats = summary["database"]
 
         return {
-            "slow_queries": [
-                {
-                    "query": query.query,
-                    "execution_time": query.execution_time,
-                    "rows_affected": query.rows_affected,
-                    "database": query.database,
-                    "timestamp": query.timestamp,
-                    "trace_id": query.trace_id,
-                }
-                for query in slow_queries
-            ],
-            "count": len(slow_queries),
+            "database_queries": database_stats,
             "timestamp": datetime.now(),
         }
 
     except Exception as e:
-        logger.error(f"Failed to get slow queries: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get slow queries")
+        logger.error(f"Failed to get database query stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get database query stats")
 
 
 # Alert Management Endpoints
@@ -619,18 +677,24 @@ async def start_monitoring(user=Depends(require_permissions(["monitoring.write"]
         if collector:
             await collector.start_collection()
             results["metrics_collection"] = "started"
+        else:
+            results["metrics_collection"] = "not available"
 
         # Start alert manager
         alert_manager = get_alert_manager()
         if alert_manager:
             await alert_manager.start()
             results["alert_manager"] = "started"
+        else:
+            results["alert_manager"] = "not available"
 
         # Start performance profiler
         profiler = get_performance_profiler()
         if profiler:
-            await profiler.start_monitoring()
+            await profiler.start()
             results["performance_profiler"] = "started"
+        else:
+            results["performance_profiler"] = "not available"
 
         return {
             "message": "Monitoring services started",
@@ -658,18 +722,24 @@ async def stop_monitoring(user=Depends(require_permissions(["monitoring.write"])
         if collector:
             await collector.stop_collection()
             results["metrics_collection"] = "stopped"
+        else:
+            results["metrics_collection"] = "not available"
 
         # Stop alert manager
         alert_manager = get_alert_manager()
         if alert_manager:
             await alert_manager.stop()
             results["alert_manager"] = "stopped"
+        else:
+            results["alert_manager"] = "not available"
 
         # Stop performance profiler
         profiler = get_performance_profiler()
         if profiler:
-            await profiler.stop_monitoring()
+            await profiler.stop()
             results["performance_profiler"] = "stopped"
+        else:
+            results["performance_profiler"] = "not available"
 
         return {
             "message": "Monitoring services stopped",

@@ -27,8 +27,8 @@ from decimal import Decimal
 from typing import Any
 
 from src.backtesting.engine import BacktestEngine, BacktestResult
+from src.base import BaseComponent
 from src.core.exceptions import OptimizationError, ValidationError
-from src.core.logging import get_logger
 from src.core.types import StrategyConfig, StrategyType, TradingMode
 from src.optimization.analysis import ResultsAnalyzer
 from src.optimization.bayesian import BayesianConfig, BayesianOptimizer
@@ -38,10 +38,8 @@ from src.optimization.parameter_space import ParameterSpace, ParameterSpaceBuild
 from src.risk_management.risk_manager import RiskManager
 from src.strategies.factory import StrategyFactory
 
-logger = get_logger(__name__)
 
-
-class OptimizationIntegration:
+class OptimizationIntegration(BaseComponent):
     """
     Main integration class for optimization with T-Bot systems.
 
@@ -63,6 +61,7 @@ class OptimizationIntegration:
             risk_manager: Risk manager for constraint validation
             strategy_factory: Strategy factory for creating strategy instances
         """
+        super().__init__()  # Initialize BaseComponent
         self.backtesting_engine = backtesting_engine
         self.risk_manager = risk_manager
         self.strategy_factory = strategy_factory or StrategyFactory()
@@ -70,7 +69,7 @@ class OptimizationIntegration:
         # Results analyzer
         self.results_analyzer = ResultsAnalyzer()
 
-        logger.info("OptimizationIntegration initialized")
+        self.logger.info("OptimizationIntegration initialized")
 
     async def optimize_strategy(
         self,
@@ -97,7 +96,7 @@ class OptimizationIntegration:
         Returns:
             Comprehensive optimization results
         """
-        logger.info(
+        self.logger.info(
             "Starting strategy optimization",
             strategy=strategy_name,
             method=optimization_method,
@@ -135,7 +134,7 @@ class OptimizationIntegration:
             optimization_result, parameter_space, objective_function
         )
 
-        logger.info(
+        self.logger.info(
             "Strategy optimization completed",
             strategy=strategy_name,
             optimal_value=float(optimization_result.optimal_objective_value),
@@ -201,7 +200,7 @@ class OptimizationIntegration:
                     return self._simulate_strategy_performance(parameters)
 
             except Exception as e:
-                logger.error(f"Strategy evaluation failed: {e!s}")
+                self.logger.error(f"Strategy evaluation failed: {e!s}")
                 # Return poor performance for failed evaluations
                 return {
                     "total_return": -0.1,
@@ -269,7 +268,7 @@ class OptimizationIntegration:
             }
 
         except Exception as e:
-            logger.error(f"Failed to extract performance metrics: {e!s}")
+            self.logger.error(f"Failed to extract performance metrics: {e!s}")
             return {
                 "total_return": 0.0,
                 "sharpe_ratio": 0.0,
@@ -420,7 +419,7 @@ class OptimizationIntegration:
             return analysis
 
         except Exception as e:
-            logger.error(f"Results analysis failed: {e!s}")
+            self.logger.error(f"Results analysis failed: {e!s}")
             return {"error": str(e)}
 
 

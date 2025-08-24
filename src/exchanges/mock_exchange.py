@@ -26,7 +26,13 @@ from src.exchanges.base import BaseExchange
 class MockExchange(BaseExchange):
     """Mock exchange for development and testing without real API keys."""
 
-    def __init__(self, config, exchange_id: str = "mock"):
+    def __init__(
+        self, 
+        config, 
+        exchange_id: str = "mock", 
+        state_service=None, 
+        trade_lifecycle_manager=None
+    ):
         """Initialize mock exchange."""
         # Import Config here to avoid circular imports
         from src.core.config import Config
@@ -38,12 +44,10 @@ class MockExchange(BaseExchange):
             config_obj = config
 
         # Skip API key validation for mock mode
-        super().__init__(config_obj, exchange_id)
+        super().__init__(config_obj, exchange_id, state_service, trade_lifecycle_manager)
 
         # Initialize logger
-        from src.core.logging import get_logger
-
-        self.logger = get_logger(__name__)
+        # Logger is provided by BaseExchange (via BaseComponent)
 
         # Set exchange_id for compatibility
         self.exchange_id = exchange_id

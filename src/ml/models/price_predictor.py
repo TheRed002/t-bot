@@ -17,7 +17,6 @@ from sklearn.preprocessing import StandardScaler
 
 from src.core.config import Config
 from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
 from src.ml.models.base_model import BaseModel
 from src.utils.gpu_utils import gpu_manager
 
@@ -43,8 +42,6 @@ try:
     CUML_AVAILABLE = True
 except ImportError:
     CUML_AVAILABLE = False
-
-logger = get_logger(__name__)
 
 
 class PricePredictor(BaseModel):
@@ -96,7 +93,7 @@ class PricePredictor(BaseModel):
             }
         )
 
-        logger.info(
+        self.logger.info(
             "Price predictor initialized",
             model_name=model_name,
             algorithm=algorithm,
@@ -114,12 +111,12 @@ class PricePredictor(BaseModel):
 
         # Log GPU availability
         if gpu_manager.gpu_available:
-            logger.info(f"GPU acceleration available for {self.algorithm} model")
+            self.logger.info(f"GPU acceleration available for {self.algorithm} model")
 
         if self.algorithm == "linear":
             # Use GPU-accelerated version if available
             if CUML_AVAILABLE and gpu_manager.gpu_available:
-                logger.info("Using cuML LinearRegression with GPU acceleration")
+                self.logger.info("Using cuML LinearRegression with GPU acceleration")
                 return cuLinearRegression(**params)
             return LinearRegression(**params)
 
@@ -136,7 +133,7 @@ class PricePredictor(BaseModel):
 
             # Use GPU-accelerated version if available
             if CUML_AVAILABLE and gpu_manager.gpu_available:
-                logger.info("Using cuML RandomForestRegressor with GPU acceleration")
+                self.logger.info("Using cuML RandomForestRegressor with GPU acceleration")
                 # Adjust parameters for cuML
                 cuml_params = default_params.copy()
                 cuml_params.pop("min_samples_split", None)
@@ -162,7 +159,7 @@ class PricePredictor(BaseModel):
                 default_params.update(
                     {"tree_method": "gpu_hist", "predictor": "gpu_predictor", "gpu_id": 0}
                 )
-                logger.info("Using XGBoost with GPU acceleration")
+                self.logger.info("Using XGBoost with GPU acceleration")
 
             default_params.update(params)
             return xgb.XGBRegressor(**default_params)
@@ -186,7 +183,7 @@ class PricePredictor(BaseModel):
             # Add GPU parameters if available
             if gpu_manager.gpu_available:
                 default_params.update({"device": "gpu", "gpu_platform_id": 0, "gpu_device_id": 0})
-                logger.info("Using LightGBM with GPU acceleration")
+                self.logger.info("Using LightGBM with GPU acceleration")
 
             default_params.update(params)
             return lgb.LGBMRegressor(**default_params)
@@ -205,7 +202,7 @@ class PricePredictor(BaseModel):
 
         # Handle missing values
         if X.isnull().any().any():
-            logger.warning("Missing values found in features, filling with forward fill")
+            self.logger.warning("Missing values found in features, filling with forward fill")
             X = X.fillna(method="ffill").fillna(method="bfill").fillna(0)
 
         # Handle infinite values
@@ -217,7 +214,7 @@ class PricePredictor(BaseModel):
                 try:
                     X[col] = pd.to_numeric(X[col], errors="coerce")
                 except:
-                    logger.warning(f"Could not convert column {col} to numeric, dropping")
+                    self.logger.warning(f"Could not convert column {col} to numeric, dropping")
                     X = X.drop(columns=[col])
 
         # Fill any remaining NaN values from conversion
@@ -232,7 +229,7 @@ class PricePredictor(BaseModel):
 
         # Handle missing values
         if y.isnull().any():
-            logger.warning("Missing values found in targets, filling with forward fill")
+            self.logger.warning("Missing values found in targets, filling with forward fill")
             y = y.fillna(method="ffill").fillna(method="bfill").fillna(0)
 
         # Handle infinite values
@@ -282,7 +279,7 @@ class PricePredictor(BaseModel):
             return metrics
 
         except Exception as e:
-            logger.error(f"Failed to calculate metrics: {e}")
+            self.logger.error(f"Failed to calculate metrics: {e}")
             return {
                 "mae": float("inf"),
                 "mse": float("inf"),

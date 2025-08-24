@@ -1,0 +1,11 @@
+"""
+Database models package - imports consolidated models from models/ directory.
+
+This module serves as the main entry point for all database models,
+importing them from the structured models/ directory to avoid duplication.
+"""
+
+# Import the consolidated base from the models package
+
+# Import all models through the __init__.py to ensure proper loading order
+from .models import *  # noqa: F403

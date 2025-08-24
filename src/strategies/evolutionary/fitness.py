@@ -4,12 +4,10 @@ Fitness Evaluation for Evolutionary Strategies.
 This module provides fitness functions for evaluating trading strategy performance.
 """
 
+import logging
 from abc import ABC, abstractmethod
 
 from src.backtesting.engine import BacktestResult
-from src.core.logging import get_logger
-
-logger = get_logger(__name__)
 
 
 class FitnessFunction(ABC):
@@ -131,10 +129,11 @@ class FitnessEvaluator:
         self.fitness_function = fitness_function or CompositeFitness()
         self.objectives = objectives or ["sharpe_ratio", "total_return"]
 
-        logger.info(
-            "FitnessEvaluator initialized",
-            function=self.fitness_function.__class__.__name__,
-            objectives=self.objectives,
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+
+        self.logger.info(
+            f"FitnessEvaluator initialized with function {self.fitness_function.__class__.__name__} and objectives {self.objectives}"
         )
 
     def evaluate(self, result: BacktestResult) -> float:
@@ -156,7 +155,7 @@ class FitnessEvaluator:
             return fitness
 
         except Exception as e:
-            logger.error("Fitness evaluation failed", error=str(e))
+            self.logger.error(f"Fitness evaluation failed: {e!s}")
             return -float("inf")
 
     def evaluate_multi_objective(self, result: BacktestResult) -> dict[str, float]:
@@ -187,7 +186,7 @@ class FitnessEvaluator:
             elif objective == "sortino_ratio":
                 objectives[objective] = result.sortino_ratio
             else:
-                logger.warning(f"Unknown objective: {objective}")
+                self.logger.warning(f"Unknown objective: {objective}")
                 objectives[objective] = 0.0
 
         return objectives
@@ -275,6 +274,7 @@ class AdaptiveFitness(FitnessFunction):
         """Set current market regime."""
         if regime in self.regime_weights:
             self.market_regime = regime
+            logger = logging.getLogger(__name__)
             logger.info(f"Market regime set to: {regime}")
 
     def calculate(self, result: BacktestResult) -> float:

@@ -68,10 +68,14 @@ def format_currency(amount: float, currency: str = "USD", precision: int = 2) ->
 
     # Convert to Decimal for precise formatting
     decimal_amount = Decimal(str(amount))
-    formatted_amount = decimal_amount.quantize(
-        Decimal(f"0.{'0' * (precision - 1)}1") if precision > 0 else Decimal("1"),
-        rounding=ROUND_HALF_UP,
-    )
+    
+    # Create quantizer based on precision
+    if precision > 0:
+        quantizer = Decimal(10) ** -precision
+    else:
+        quantizer = Decimal("1")
+    
+    formatted_amount = decimal_amount.quantize(quantizer, rounding=ROUND_HALF_UP)
 
     # Format with thousands separators
     formatted = f"{formatted_amount:,.{precision}f}"
@@ -168,9 +172,10 @@ def format_quantity(quantity: float, symbol: str) -> str:
 
     # Convert to Decimal for precise formatting
     decimal_qty = Decimal(str(quantity))
-    formatted_qty = decimal_qty.quantize(
-        Decimal(f"0.{'0' * (precision - 1)}1"), rounding=ROUND_HALF_UP
-    )
+    
+    # Create quantizer based on precision
+    quantizer = Decimal(10) ** -precision
+    formatted_qty = decimal_qty.quantize(quantizer, rounding=ROUND_HALF_UP)
 
     return f"{formatted_qty:,.{precision}f}"
 
@@ -204,9 +209,10 @@ def format_price(price: float, symbol: str) -> str:
 
     # Convert to Decimal for precise formatting
     decimal_price = Decimal(str(price))
-    formatted_price = decimal_price.quantize(
-        Decimal(f"0.{'0' * (precision - 1)}1"), rounding=ROUND_HALF_UP
-    )
+    
+    # Create quantizer based on precision
+    quantizer = Decimal(10) ** -precision
+    formatted_price = decimal_price.quantize(quantizer, rounding=ROUND_HALF_UP)
 
     return f"{formatted_price:,.{precision}f}"
 

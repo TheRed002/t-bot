@@ -9,9 +9,17 @@ layer and will be used by all subsequent prompts for robust error handling.
 """
 
 from .connection_manager import ConnectionManager, ConnectionState
-from .decorators import with_circuit_breaker, with_fallback, with_retry
-from .error_handler import ErrorContext, ErrorHandler, ErrorSeverity
-from .pattern_analytics import ErrorPattern, ErrorPatternAnalytics
+from .context import ErrorSeverity
+from .decorators import (
+    FallbackStrategy,
+    with_circuit_breaker,
+    with_error_context,
+    with_fallback,
+    with_retry,
+)
+from .error_handler import ErrorContext, ErrorHandler
+from .global_handler import get_global_error_handler
+from .pattern_analytics import ErrorPatternAnalytics
 from .recovery_scenarios import (
     APIRateLimitRecovery,
     DataFeedInterruptionRecovery,
@@ -19,31 +27,29 @@ from .recovery_scenarios import (
     NetworkDisconnectionRecovery,
     OrderRejectionRecovery,
     PartialFillRecovery,
+    RecoveryScenario,
 )
 from .state_monitor import StateMonitor
 
 __all__ = [
     "APIRateLimitRecovery",
-    # Connection management
     "ConnectionManager",
     "ConnectionState",
     "DataFeedInterruptionRecovery",
     "ErrorContext",
-    # Core error handling
     "ErrorHandler",
-    "ErrorPattern",
-    # Pattern analytics
     "ErrorPatternAnalytics",
     "ErrorSeverity",
     "ExchangeMaintenanceRecovery",
+    "FallbackStrategy",
     "NetworkDisconnectionRecovery",
     "OrderRejectionRecovery",
-    # Recovery scenarios
     "PartialFillRecovery",
-    # State monitoring
+    "RecoveryScenario",
     "StateMonitor",
-    # Decorators
+    "get_global_error_handler",
     "with_circuit_breaker",
+    "with_error_context",
     "with_fallback",
     "with_retry",
 ]

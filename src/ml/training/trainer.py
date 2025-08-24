@@ -11,16 +11,14 @@ from typing import Any
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-from src.core.config import Config
+from src.core.base.service import BaseService
 from src.core.exceptions import ModelError, ValidationError
-from src.core.logging import get_logger
-from src.ml.feature_engineering import FeatureEngineer
+from src.core.types.base import ConfigDict
 from src.ml.models.base_model import BaseModel
-from src.ml.registry.artifact_store import ArtifactStore
-from src.ml.registry.model_registry import ModelRegistry
-from src.utils.decorators import log_calls, memory_usage, time_execution
+from src.utils.decorators import UnifiedDecorator
 
-logger = get_logger(__name__)
+# Initialize decorator instance
+dec = UnifiedDecorator()
 
 
 class TrainingPipeline:
@@ -39,8 +37,8 @@ class TrainingPipeline:
         Args:
             steps: List of (name, transformer) tuples
         """
+        # Note: This is a utility class, not a component
         self.steps = steps
-        self.fitted = False
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "TrainingPipeline":
         """Fit all pipeline steps."""
@@ -73,44 +71,53 @@ class TrainingPipeline:
         return self.fit(X, y).transform(X)
 
 
-class Trainer:
+class TrainingService(BaseService):
     """
-    Training orchestration system for ML models.
+    Training orchestration service for ML models.
 
-    This class provides comprehensive training orchestration including data preparation,
+    This service provides comprehensive training orchestration including data preparation,
     feature engineering, model training, validation, and result tracking with integration
     to the model registry and artifact store.
 
     Attributes:
-        config: Application configuration
-        feature_engineer: Feature engineering instance
+        feature_engineer: Feature engineering service instance
         model_registry: Model registry instance
         artifact_store: Artifact store instance
         training_history: History of training runs
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: ConfigDict | None = None, correlation_id: str | None = None):
         """
-        Initialize the trainer.
+        Initialize the training service.
 
         Args:
-            config: Application configuration
+            config: Service configuration
+            correlation_id: Request correlation ID
         """
-        self.config = config
-        self.feature_engineer = FeatureEngineer(config)
-        self.model_registry = ModelRegistry(config)
-        self.artifact_store = ArtifactStore(config)
+        super().__init__(
+            name="TrainingService",
+            config=config,
+            correlation_id=correlation_id,
+        )
 
-        # Training state
+        # Service state
         self.training_history: list[dict[str, Any]] = []
         self.current_run_id: str | None = None
 
-        logger.info("Trainer initialized successfully")
+        # Dependencies that will be resolved during startup
+        self.add_dependency("FeatureEngineeringService")
+        self.add_dependency("ModelRegistry")
+        self.add_dependency("ArtifactStore")
 
-    @time_execution
-    @memory_usage
-    @log_calls
-    def train_model(
+        # Configuration with defaults
+        ml_config = self._config.get("ml", {})
+        self.max_features = ml_config.get("max_features", 100)
+
+        self._logger.info("Training service initialized successfully")
+
+    @dec.enhance(monitor=True)
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def train_model(
         self,
         model: BaseModel,
         market_data: pd.DataFrame,
@@ -160,7 +167,7 @@ class Trainer:
             if target_column not in market_data.columns:
                 raise ValidationError(f"Target column '{target_column}' not found in data")
 
-            logger.info(
+            self._logger.info(
                 "Starting model training",
                 model_name=model.model_name,
                 symbol=symbol,
@@ -235,7 +242,7 @@ class Trainer:
 
             self.training_history.append(training_result)
 
-            logger.info(
+            self._logger.info(
                 "Model training completed successfully",
                 model_name=model.model_name,
                 symbol=symbol,
@@ -246,18 +253,17 @@ class Trainer:
             return training_result
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Model training failed",
                 model_name=model.model_name,
                 symbol=symbol,
                 run_id=self.current_run_id,
                 error=str(e),
             )
-            raise ModelError(f"Training failed for {model.model_name}: {e}") from e
+            raise ModelError(f"Training failed for {model.model_name}: {e}")
 
-    @time_execution
-    @log_calls
-    def batch_train_models(
+    @dec.enhance(log=True, monitor=True, log_level="info")
+    async def batch_train_models(
         self,
         models: list[BaseModel],
         market_data: pd.DataFrame,
@@ -282,17 +288,19 @@ class Trainer:
 
         for i, model in enumerate(models):
             try:
-                logger.info(f"Training model {i + 1}/{len(models)}", model_name=model.model_name)
+                self._logger.info(
+                    f"Training model {i + 1}/{len(models)}", model_name=model.model_name
+                )
 
-                result = self.train_model(model, market_data, target_column, symbol, **kwargs)
+                result = await self.train_model(model, market_data, target_column, symbol, **kwargs)
                 results.append(result)
 
             except Exception as e:
-                logger.error(f"Failed to train model {model.model_name}", error=str(e))
+                self._logger.error(f"Failed to train model {model.model_name}", error=str(e))
                 # Continue with other models
                 results.append({"model_name": model.model_name, "error": str(e), "success": False})
 
-        logger.info(
+        self._logger.info(
             "Batch training completed",
             total_models=len(models),
             successful_models=sum(1 for r in results if r.get("success", True)),
@@ -304,11 +312,12 @@ class Trainer:
         self, market_data: pd.DataFrame, symbol: str, feature_types: list[str] | None, run_id: str
     ) -> pd.DataFrame:
         """Prepare features for training."""
-        logger.info("Preparing features", symbol=symbol, run_id=run_id)
+        self._logger.info("Preparing features", symbol=symbol, run_id=run_id)
 
-        features_df = self.feature_engineer.create_features(market_data, symbol, feature_types)
+        feature_engineer = self.resolve_dependency("FeatureEngineeringService")
+        features_df = feature_engineer.create_features(market_data, symbol, feature_types)
 
-        logger.info(
+        self._logger.info(
             "Features prepared",
             feature_count=len(features_df.columns),
             data_points=len(features_df),
@@ -335,7 +344,7 @@ class Trainer:
         features_aligned = features_aligned[valid_mask]
         targets_aligned = targets_aligned[valid_mask]
 
-        logger.info(
+        self._logger.info(
             "Data aligned",
             aligned_samples=len(features_aligned),
             original_features=len(features_df),
@@ -367,7 +376,7 @@ class Trainer:
             X_train_val, y_train_val, test_size=val_size_adjusted, random_state=42, stratify=None
         )
 
-        logger.info(
+        self._logger.info(
             "Data split completed",
             train_samples=len(X_train),
             val_samples=len(X_val),
@@ -396,13 +405,14 @@ class Trainer:
 
         # Feature selection
         if feature_selection:
-            X_train_selected, selected_features = self.feature_engineer.select_features(
-                X_train, y_train, k_features=min(self.config.ml.max_features, len(X_train.columns))
+            feature_engineer = self.resolve_dependency("FeatureEngineeringService")
+            X_train_selected, selected_features = feature_engineer.select_features(
+                X_train, y_train, k_features=min(self.max_features, len(X_train.columns))
             )
             X_val_selected = X_val[selected_features]
             X_test_selected = X_test[selected_features]
 
-            logger.info(
+            self._logger.info(
                 "Feature selection completed",
                 original_features=len(X_train.columns),
                 selected_features=len(selected_features),
@@ -412,17 +422,18 @@ class Trainer:
 
         # Preprocessing
         if preprocessing:
-            X_train_processed = self.feature_engineer.preprocess_features(
+            feature_engineer = self.resolve_dependency("FeatureEngineeringService")
+            X_train_processed = feature_engineer.preprocess_features(
                 X_train_selected, fit_scalers=True
             )
-            X_val_processed = self.feature_engineer.preprocess_features(
+            X_val_processed = feature_engineer.preprocess_features(
                 X_val_selected, fit_scalers=False
             )
-            X_test_processed = self.feature_engineer.preprocess_features(
+            X_test_processed = feature_engineer.preprocess_features(
                 X_test_selected, fit_scalers=False
             )
 
-            logger.info("Feature preprocessing completed")
+            self._logger.info("Feature preprocessing completed")
         else:
             X_train_processed, X_val_processed, X_test_processed = (
                 X_train_selected,
@@ -443,7 +454,7 @@ class Trainer:
         X_train, y_train = train_data
         X_val, y_val = val_data
 
-        logger.info("Training model", model_name=model.model_name)
+        self._logger.info("Training model", model_name=model.model_name)
 
         # Train model
         metrics = model.train(X_train, y_train, validation_data=(X_val, y_val), **kwargs)
@@ -456,7 +467,7 @@ class Trainer:
         """Evaluate the trained model."""
         X_test, y_test = test_data
 
-        logger.info("Evaluating model", model_name=model.model_name)
+        self._logger.info("Evaluating model", model_name=model.model_name)
 
         # Evaluate model
         test_metrics = model.evaluate(X_test, y_test)
@@ -479,7 +490,8 @@ class Trainer:
             train_df = X_train.copy()
             train_df["target"] = y_train
 
-            self.artifact_store.store_artifact(
+            artifact_store = self.resolve_dependency("ArtifactStore")
+            artifact_store.store_artifact(
                 train_df, "data", f"{symbol}_train_data", self.current_run_id, "1.0.0"
             )
 
@@ -488,7 +500,7 @@ class Trainer:
             val_df = X_val.copy()
             val_df["target"] = y_val
 
-            self.artifact_store.store_artifact(
+            artifact_store.store_artifact(
                 val_df, "data", f"{symbol}_val_data", self.current_run_id, "1.0.0"
             )
 
@@ -497,59 +509,61 @@ class Trainer:
             test_df = X_test.copy()
             test_df["target"] = y_test
 
-            self.artifact_store.store_artifact(
+            artifact_store.store_artifact(
                 test_df, "data", f"{symbol}_test_data", self.current_run_id, "1.0.0"
             )
 
             # Save metrics
-            self.artifact_store.store_artifact(
+            artifact_store.store_artifact(
                 metrics, "report", f"{symbol}_training_metrics", self.current_run_id, "1.0.0"
             )
 
             # Save feature transformers if available
-            if hasattr(self.feature_engineer, "scalers") and self.feature_engineer.scalers:
-                self.artifact_store.store_artifact(
-                    self.feature_engineer.scalers,
+            feature_engineer = self.resolve_dependency("FeatureEngineeringService")
+            if hasattr(feature_engineer, "scalers") and feature_engineer.scalers:
+                artifact_store.store_artifact(
+                    feature_engineer.scalers,
                     "transformer",
                     f"{symbol}_scalers",
                     self.current_run_id,
                     "1.0.0",
                 )
 
-            if hasattr(self.feature_engineer, "selectors") and self.feature_engineer.selectors:
-                self.artifact_store.store_artifact(
-                    self.feature_engineer.selectors,
+            if hasattr(feature_engineer, "selectors") and feature_engineer.selectors:
+                artifact_store.store_artifact(
+                    feature_engineer.selectors,
                     "transformer",
                     f"{symbol}_selectors",
                     self.current_run_id,
                     "1.0.0",
                 )
 
-            logger.info("Training artifacts saved successfully")
+            self._logger.info("Training artifacts saved successfully")
 
         except Exception as e:
-            logger.warning(f"Failed to save training artifacts: {e}")
+            self._logger.warning(f"Failed to save training artifacts: {e}")
 
     def _register_trained_model(
         self, model: BaseModel, metrics: dict[str, float], symbol: str
     ) -> str | None:
         """Register the trained model."""
         try:
-            model_id = self.model_registry.register_model(
+            model_registry = self.resolve_dependency("ModelRegistry")
+            model_id = model_registry.register_model(
                 model,
                 description=f"Model trained on {symbol} data",
                 tags={"symbol": symbol, "run_id": self.current_run_id},
                 stage="development",
             )
 
-            logger.info(
+            self._logger.info(
                 "Model registered successfully", model_id=model_id, model_name=model.model_name
             )
 
             return model_id
 
         except Exception as e:
-            logger.warning(f"Failed to register model: {e}")
+            self._logger.warning(f"Failed to register model: {e}")
             return None
 
     def get_training_history(self) -> list[dict[str, Any]]:
@@ -603,7 +617,27 @@ class Trainer:
 
         return best_result
 
+    async def _do_start(self) -> None:
+        """Start the service and resolve dependencies."""
+        await super()._do_start()
+        self._logger.info("Training service started successfully")
+
+    async def _do_stop(self) -> None:
+        """Stop the service and cleanup resources."""
+        await super()._do_stop()
+        self._logger.info("Training service stopped")
+
+    async def _service_health_check(self) -> "HealthStatus":
+        """Check service-specific health."""
+        from src.core.base.interfaces import HealthStatus
+
+        # Check if we have reasonable training history size
+        if len(self.training_history) > 1000:  # Too many entries might indicate memory issues
+            return HealthStatus.DEGRADED
+
+        return HealthStatus.HEALTHY
+
     def clear_history(self) -> None:
         """Clear training history."""
         self.training_history.clear()
-        logger.info("Training history cleared")
+        self._logger.info("Training history cleared")

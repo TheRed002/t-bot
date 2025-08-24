@@ -5,23 +5,23 @@ This module provides core authentication functions including user verification,
 token creation, and dependency injection for protected endpoints.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.core.config import Config
 from src.core.exceptions import AuthenticationError
 from src.core.logging import get_logger
+from src.database.connection import get_async_session
+from src.database.models.user import User as DBUser
+from src.database.repository.user import UserRepository
 
 from .jwt_handler import JWTHandler
 
 logger = get_logger(__name__)
-
-# Global instances (initialized by app startup)
-jwt_handler: JWTHandler | None = None
-security = HTTPBearer()
 
 
 class UserInDB(BaseModel):
@@ -63,37 +63,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
-# Mock user database (in production, use actual database)
-fake_users_db = {
-    "admin": UserInDB(
-        user_id="admin-001",
-        username="admin",
-        email="admin@tbot.com",
-        hashed_password="$2b$12$diZlgLA2DcrQ2Cp.Lz1kguQCUQhBAT5mSz0vA6K6MbDXN53xh9znO",  # "admin123"
-        scopes=["admin", "read", "write", "trade", "manage"],
-    ),
-    "trader1": UserInDB(
-        user_id="trader-001",
-        username="trader1",
-        email="trader1@tbot.com",
-        hashed_password="$2b$12$7QoizNw7ijo8jEGoj.8yWufWwk3TiZ3pphr4pT3crSwveLtqFhOra",  # "trader123"
-        scopes=["read", "write", "trade"],
-    ),
-    "viewer": UserInDB(
-        user_id="viewer-001",
-        username="viewer",
-        email="viewer@tbot.com",
-        hashed_password="$2b$12$lpTFplMihx..tSMw1mvxFeOHYt5tETNiZw78O4jAnK5BrhJOf7zYG",  # "viewer123"
-        scopes=["read"],
-    ),
-    "demo": UserInDB(
-        user_id="demo-001",
-        username="demo",
-        email="demo@tbot.com",
-        hashed_password="$2b$12$0VeXXrvNNvs6Ykjw3v9UtePRPY88fJZb2IPuHcaNHnH3LPAbCOFXa",  # "demo123"
-        scopes=["read", "write"],
-    ),
-}
+# Global instances (initialized by app startup)
+jwt_handler: JWTHandler | None = None
+security = HTTPBearer()
+
+# Async session maker for database operations
+_session_factory: async_sessionmaker | None = None
 
 
 def init_auth(config: Config) -> None:
@@ -103,14 +78,37 @@ def init_auth(config: Config) -> None:
     Args:
         config: Application configuration
     """
-    global jwt_handler
+    global jwt_handler, _session_factory
     jwt_handler = JWTHandler(config)
+
+    # Initialize async session factory for database operations
+    try:
+        # The session factory will be provided by the database connection manager
+        # We just mark that auth is initialized - actual sessions come from get_async_session()
+        logger.info("Authentication system initialized (using global async session manager)")
+    except Exception as e:
+        logger.error(f"Failed to initialize authentication: {e}")
+
     logger.info("Authentication system initialized")
 
 
-def get_user(username: str) -> UserInDB | None:
+def _convert_db_user_to_user_in_db(db_user: DBUser) -> UserInDB:
+    """Convert database User model to UserInDB."""
+    return UserInDB(
+        user_id=str(db_user.id),
+        username=db_user.username,
+        email=db_user.email,
+        hashed_password=db_user.password_hash,
+        is_active=db_user.is_active,
+        scopes=db_user.scopes if db_user.scopes else ["read"],
+        created_at=db_user.created_at.isoformat() if db_user.created_at else None,
+        last_login=db_user.last_login_at.isoformat() if db_user.last_login_at else None,
+    )
+
+
+async def get_user(username: str) -> UserInDB | None:
     """
-    Get user by username.
+    Get user by username from database.
 
     Args:
         username: Username to lookup
@@ -118,12 +116,24 @@ def get_user(username: str) -> UserInDB | None:
     Returns:
         UserInDB: User data or None if not found
     """
-    return fake_users_db.get(username)
+    try:
+        async with get_async_session() as session:
+            user_repo = UserRepository(session)
+            db_user = await user_repo.get_by_username(username)
+
+            if not db_user or not db_user.is_active:
+                return None
+
+            return _convert_db_user_to_user_in_db(db_user)
+
+    except Exception as e:
+        logger.error(f"Database error getting user {username}: {e}")
+        return None
 
 
-def authenticate_user(username: str, password: str) -> UserInDB | None:
+async def authenticate_user(username: str, password: str) -> UserInDB | None:
     """
-    Authenticate user credentials.
+    Authenticate user credentials with security measures.
 
     Args:
         username: Username
@@ -133,21 +143,57 @@ def authenticate_user(username: str, password: str) -> UserInDB | None:
         UserInDB: Authenticated user or None if authentication fails
     """
     try:
-        user = get_user(username)
-        if not user:
-            logger.warning("Authentication failed: user not found", username=username)
-            return None
+        async with get_async_session() as session:
+            user_repo = UserRepository(session)
+            db_user = await user_repo.get_by_username(username)
 
-        if not user.is_active:
-            logger.warning("Authentication failed: user inactive", username=username)
-            return None
+            if not db_user:
+                logger.warning("Authentication failed: user not found", username=username)
+                return None
 
-        if not jwt_handler.verify_password(password, user.hashed_password):
-            logger.warning("Authentication failed: invalid password", username=username)
-            return None
+            # Check if account is locked
+            if db_user.locked_until and datetime.now(timezone.utc) < db_user.locked_until:
+                logger.warning("Authentication failed: account locked", username=username)
+                return None
 
-        logger.info("User authenticated successfully", username=username)
-        return user
+            # Check if user is active
+            if not db_user.is_active:
+                logger.warning("Authentication failed: user inactive", username=username)
+                return None
+
+            # Verify password
+            if not jwt_handler.verify_password(password, db_user.password_hash):
+                logger.warning("Authentication failed: invalid password", username=username)
+
+                # Increment failed login attempts
+                db_user.failed_login_attempts = (db_user.failed_login_attempts or 0) + 1
+
+                # Lock account after 5 failed attempts for 15 minutes
+                if db_user.failed_login_attempts >= 5:
+                    db_user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+                    logger.warning(
+                        f"Account locked due to {db_user.failed_login_attempts} failed attempts",
+                        username=username,
+                    )
+
+                # Update user
+                await user_repo.update(db_user)
+                await session.commit()
+
+                return None
+
+            # Reset failed attempts on successful login
+            db_user.failed_login_attempts = 0
+            db_user.locked_until = None
+            db_user.last_login_at = datetime.now(timezone.utc)
+
+            # Update user
+            await user_repo.update(db_user)
+            await session.commit()
+
+            user_in_db = _convert_db_user_to_user_in_db(db_user)
+            logger.info("User authenticated successfully", username=username)
+            return user_in_db
 
     except Exception as e:
         logger.error(f"Authentication error: {e}", username=username)
@@ -192,7 +238,7 @@ def create_access_token(user: UserInDB, expires_delta: timedelta | None = None) 
 
     except Exception as e:
         logger.error(f"Token creation failed: {e}", username=user.username)
-        raise AuthenticationError(f"Token creation failed: {e}")
+        raise AuthenticationError(f"Token creation failed: {e}") from e
 
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
@@ -219,7 +265,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         token_data = jwt_handler.validate_token(credentials.credentials)
 
         # Get user from database
-        user = get_user(token_data.username)
+        user = await get_user(token_data.username)
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
@@ -240,14 +286,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
     except Exception as e:
         logger.error(f"User authentication failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
 
 async def get_current_user_with_scopes(required_scopes: list[str]):
@@ -323,7 +369,7 @@ async def get_trading_user(current_user: User = Depends(get_current_user)) -> Us
     return current_user
 
 
-def create_user(
+async def create_user(
     username: str, email: str, password: str, scopes: list[str] | None = None
 ) -> UserInDB:
     """
@@ -342,46 +388,65 @@ def create_user(
         ValueError: If user creation fails
     """
     try:
-        if username in fake_users_db:
-            raise ValueError(f"User {username} already exists")
-
         if not jwt_handler:
             raise ValueError("Authentication system not initialized")
 
-        # Hash password
-        hashed_password = jwt_handler.hash_password(password)
+        async with get_async_session() as session:
+            user_repo = UserRepository(session)
 
-        # Create user
-        user = UserInDB(
-            user_id=f"{username}-{len(fake_users_db) + 1:03d}",
-            username=username,
-            email=email,
-            hashed_password=hashed_password,
-            scopes=scopes or ["read"],
-        )
+            # Check if user exists
+            existing_user = await user_repo.get_by_username(username)
+            if existing_user:
+                raise ValueError(f"User {username} already exists")
 
-        # Store in database
-        fake_users_db[username] = user
+            # Hash password
+            hashed_password = jwt_handler.hash_password(password)
 
-        logger.info("User created successfully", username=username, scopes=user.scopes)
-        return user
+            # Create user in database
+            new_user = DBUser(
+                username=username,
+                email=email,
+                password_hash=hashed_password,
+                scopes=scopes or ["read"],
+                is_active=True,
+                is_verified=False,
+            )
+
+            created_user = await user_repo.create(new_user)
+            await session.commit()
+
+            user_in_db = _convert_db_user_to_user_in_db(created_user)
+            logger.info("User created successfully", username=username, scopes=user_in_db.scopes)
+            return user_in_db
 
     except Exception as e:
         logger.error(f"User creation failed: {e}", username=username)
-        raise ValueError(f"User creation failed: {e}")
+        raise ValueError(f"User creation failed: {e}") from e
 
 
-def get_auth_summary() -> dict:
+async def get_auth_summary() -> dict:
     """
     Get authentication system summary.
 
     Returns:
         dict: Authentication system status
     """
+    try:
+        total_users = 0
+        active_users = 0
+
+        async with get_async_session() as session:
+            user_repo = UserRepository(session)
+            all_users = await user_repo.get_all()
+            total_users = len(all_users)
+            active_users = sum(1 for user in all_users if user.is_active)
+    except Exception as e:
+        logger.error(f"Failed to get user stats: {e}")
+
     return {
         "initialized": jwt_handler is not None,
-        "total_users": len(fake_users_db),
-        "active_users": sum(1 for user in fake_users_db.values() if user.is_active),
+        "total_users": total_users,
+        "active_users": active_users,
         "jwt_handler": jwt_handler.get_security_summary() if jwt_handler else None,
         "available_scopes": ["read", "write", "trade", "manage", "admin"],
         "security_features": [
@@ -390,6 +455,7 @@ def get_auth_summary() -> dict:
             "scope_based_authorization",
             "token_refresh",
             "token_revocation",
+            "account_lockout",
         ],
     }
 

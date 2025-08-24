@@ -25,9 +25,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-# Type alias for Pydantic configuration
-ConfigDict = ConfigDict
-
 
 class TradingMode(Enum):
     """Trading mode enumeration for different execution environments.
@@ -429,5 +426,4 @@ class BaseValidatedModel(BaseModel):
         use_enum_values=True,
         validate_assignment=True,
         arbitrary_types_allowed=True,
-        json_encoders={datetime: lambda v: v.isoformat() if v else None},
     )

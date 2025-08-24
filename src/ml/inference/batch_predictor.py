@@ -11,72 +11,101 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from pydantic import BaseModel, Field
 
-from src.core.config import Config
+from src.core.base.service import BaseService
 from src.core.exceptions import ValidationError
-from src.core.logging import get_logger
-from src.database.connection import get_sync_session
-from src.database.models import MLPrediction
-from src.ml.feature_engineering import FeatureEngineer
-from src.ml.models.base_model import BaseModel
-from src.ml.registry.model_registry import ModelRegistry
-from src.utils.decorators import log_calls, time_execution
+from src.core.types.base import ConfigDict
+from src.utils.decorators import UnifiedDecorator
 
-logger = get_logger(__name__)
+# Initialize decorator instance
+dec = UnifiedDecorator()
 
 
-class BatchPredictor:
+class BatchPredictorConfig(BaseModel):
+    """Configuration for batch predictor service."""
+
+    batch_size: int = Field(default=1000, description="Number of samples to process per batch")
+    max_workers: int = Field(default=4, description="Maximum number of parallel workers")
+    use_multiprocessing: bool = Field(
+        default=False, description="Use multiprocessing for CPU-bound tasks"
+    )
+    chunk_size: int = Field(default=10000, description="Chunk size for large datasets")
+    max_memory_mb: int = Field(default=1024, description="Maximum memory usage in MB")
+    save_to_database: bool = Field(default=True, description="Save predictions to database")
+    enable_confidence_scores: bool = Field(default=True, description="Calculate confidence scores")
+
+
+class BatchPredictorService(BaseService):
     """
     Batch prediction system for efficient processing of large datasets.
 
-    This class provides optimized batch prediction capabilities with memory
+    This service provides optimized batch prediction capabilities with memory
     management, parallel processing, and database integration for storing
-    results.
+    results using proper service patterns without direct database access.
 
-    Attributes:
-        config: Application configuration
-        model_registry: Model registry for loading models
-        feature_engineer: Feature engineering pipeline
-        batch_size: Number of samples to process per batch
-        max_workers: Maximum number of parallel workers
-        use_multiprocessing: Whether to use multiprocessing for CPU-bound tasks
+    All data operations go through DataService dependency.
     """
 
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        config: ConfigDict | None = None,
+        correlation_id: str | None = None,
+    ):
         """
-        Initialize the batch predictor.
+        Initialize the batch predictor service.
 
         Args:
-            config: Application configuration
+            config: Service configuration
+            correlation_id: Request correlation ID
         """
-        self.config = config
-        self.model_registry = ModelRegistry(config)
-        self.feature_engineer = FeatureEngineer(config)
+        super().__init__(
+            name="BatchPredictorService",
+            config=config,
+            correlation_id=correlation_id,
+        )
 
-        # Batch processing configuration
-        self.batch_size = config.ml.batch_size
-        self.max_workers = config.ml.max_workers
-        self.use_multiprocessing = config.ml.use_multiprocessing
-        self.chunk_size = config.ml.chunk_size
+        # Parse batch predictor configuration
+        bp_config_dict = (config or {}).get("batch_predictor", {})
+        self.bp_config = BatchPredictorConfig(**bp_config_dict)
+
+        # Service dependencies - resolved during startup
+        self.data_service: Any = None
+        self.model_registry: Any = None
+        self.feature_engineering_service: Any = None
 
         # Memory management
-        self.max_memory_mb = config.ml.max_memory_mb
         self.memory_threshold = 0.8  # Use 80% of available memory
 
         # Performance tracking
         self.prediction_count = 0
         self.total_processing_time = 0.0
 
-        logger.info(
-            "Batch predictor initialized",
-            batch_size=self.batch_size,
-            max_workers=self.max_workers,
-            use_multiprocessing=self.use_multiprocessing,
-            max_memory_mb=self.max_memory_mb,
+        # Add required dependencies
+        self.add_dependency("DataService")
+        self.add_dependency("ModelRegistry")
+        self.add_dependency("FeatureEngineeringService")
+
+    async def _do_start(self) -> None:
+        """Start the batch predictor service."""
+        await super()._do_start()
+
+        # Resolve dependencies
+        self.data_service = self.resolve_dependency("DataService")
+        self.model_registry = self.resolve_dependency("ModelRegistry")
+        self.feature_engineering_service = self.resolve_dependency("FeatureEngineeringService")
+
+        self._logger.info(
+            "Batch predictor service started successfully",
+            config=self.bp_config.dict(),
+            dependencies_resolved=3,
         )
 
-    @time_execution
-    @log_calls
+    async def _do_stop(self) -> None:
+        """Stop the batch predictor service."""
+        await super()._do_stop()
+
+    @dec.enhance(log=True, monitor=True, log_level="info")
     async def predict_batch(
         self,
         model_name: str,
@@ -113,7 +142,7 @@ class BatchPredictor:
             # Calculate optimal batch size based on memory
             optimal_batch_size = self._calculate_optimal_batch_size(data)
 
-            logger.info(
+            self._logger.info(
                 "Starting batch prediction",
                 model_name=model_name,
                 data_points=len(data),
@@ -128,19 +157,29 @@ class BatchPredictor:
             for batch_data in self._create_batches(data, optimal_batch_size):
                 batch_count += 1
 
-                # Create features for batch
-                features = self.feature_engineer.create_features(batch_data, symbol, feature_types)
+                # Create features for batch using FeatureEngineeringService
+                feature_request = {
+                    "market_data": batch_data.to_dict("records"),
+                    "symbol": symbol,
+                    "feature_types": feature_types,
+                    "enable_selection": False,
+                    "enable_preprocessing": True,
+                }
+                feature_response = await self.feature_engineering_service.compute_features(
+                    feature_request
+                )
+                features_df = pd.DataFrame(feature_response.feature_set.features)
 
                 # Make predictions
                 batch_predictions = await self._predict_batch_chunk(
-                    model, features, batch_data.index
+                    model, features_df, batch_data.index
                 )
 
                 predictions.append(batch_predictions)
 
                 # Log progress
                 if batch_count % 10 == 0:
-                    logger.info(
+                    self._logger.info(
                         "Batch processing progress",
                         completed_batches=batch_count,
                         total_predictions=len(predictions) * optimal_batch_size,
@@ -156,8 +195,8 @@ class BatchPredictor:
             result_df["symbol"] = symbol
             result_df["prediction_timestamp"] = datetime.utcnow()
 
-            # Save to database if requested
-            if save_to_db:
+            # Save to database if requested (using DataService)
+            if save_to_db and self.bp_config.save_to_database:
                 await self._save_predictions_to_db(result_df, model_name, symbol)
 
             # Save to file if requested
@@ -167,7 +206,7 @@ class BatchPredictor:
             # Update performance metrics
             self.prediction_count += len(result_df)
 
-            logger.info(
+            self._logger.info(
                 "Batch prediction completed",
                 model_name=model_name,
                 total_predictions=len(result_df),
@@ -178,13 +217,12 @@ class BatchPredictor:
             return result_df
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Batch prediction failed", model_name=model_name, symbol=symbol, error=str(e)
             )
-            raise ValidationError(f"Batch prediction failed: {e}") from e
+            raise ValidationError(f"Batch prediction failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     async def predict_multiple_symbols(
         self,
         model_name: str,
@@ -211,7 +249,7 @@ class BatchPredictor:
             if not data_dict:
                 raise ValidationError("Data dictionary cannot be empty")
 
-            logger.info(
+            self._logger.info(
                 "Starting multi-symbol batch prediction",
                 model_name=model_name,
                 symbol_count=len(data_dict),
@@ -239,7 +277,7 @@ class BatchPredictor:
                         result = await task
                         results[symbol] = result
                     except Exception as e:
-                        logger.error("Symbol prediction failed", symbol=symbol, error=str(e))
+                        self._logger.error("Symbol prediction failed", symbol=symbol, error=str(e))
                         # Continue with other symbols
                         results[symbol] = pd.DataFrame()
 
@@ -258,12 +296,12 @@ class BatchPredictor:
                         )
                         results[symbol] = result
                     except Exception as e:
-                        logger.error("Symbol prediction failed", symbol=symbol, error=str(e))
+                        self._logger.error("Symbol prediction failed", symbol=symbol, error=str(e))
                         results[symbol] = pd.DataFrame()
 
             successful_symbols = [s for s, r in results.items() if not r.empty]
 
-            logger.info(
+            self._logger.info(
                 "Multi-symbol batch prediction completed",
                 model_name=model_name,
                 total_symbols=len(data_dict),
@@ -274,13 +312,12 @@ class BatchPredictor:
             return results
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Multi-symbol batch prediction failed", model_name=model_name, error=str(e)
             )
-            raise ValidationError(f"Multi-symbol prediction failed: {e}") from e
+            raise ValidationError(f"Multi-symbol prediction failed: {e}")
 
-    @time_execution
-    @log_calls
+    @dec.enhance(log=True, monitor=True, log_level="info")
     async def backfill_predictions(
         self,
         model_name: str,
@@ -306,7 +343,7 @@ class BatchPredictor:
             ValidationError: If backfill fails
         """
         try:
-            logger.info(
+            self._logger.info(
                 "Starting prediction backfill",
                 model_name=model_name,
                 symbol=symbol,
@@ -332,7 +369,7 @@ class BatchPredictor:
                 output_file=None,
             )
 
-            logger.info(
+            self._logger.info(
                 "Prediction backfill completed",
                 model_name=model_name,
                 symbol=symbol,
@@ -342,10 +379,10 @@ class BatchPredictor:
             return predictions
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Prediction backfill failed", model_name=model_name, symbol=symbol, error=str(e)
             )
-            raise ValidationError(f"Prediction backfill failed: {e}") from e
+            raise ValidationError(f"Prediction backfill failed: {e}")
 
     async def _load_model(self, model_name: str) -> BaseModel:
         """Load model from registry."""
@@ -359,8 +396,8 @@ class BatchPredictor:
             return model
 
         except Exception as e:
-            logger.error(f"Failed to load model {model_name}: {e}")
-            raise ValidationError(f"Model loading failed: {e}") from e
+            self._logger.error(f"Failed to load model {model_name}: {e}")
+            raise ValidationError(f"Model loading failed: {e}")
 
     def _calculate_optimal_batch_size(self, data: pd.DataFrame) -> int:
         """Calculate optimal batch size based on data size and memory."""
@@ -372,15 +409,15 @@ class BatchPredictor:
             )
 
             # Calculate maximum rows that fit in memory
-            available_memory = self.max_memory_mb * 1024 * 1024 * self.memory_threshold
+            available_memory = self.bp_config.max_memory_mb * 1024 * 1024 * self.memory_threshold
             max_rows = int(available_memory / memory_per_row)
 
             # Use the smaller of configured batch size or memory-based limit
-            optimal_size = min(self.batch_size, max_rows, len(data))
+            optimal_size = min(self.bp_config.batch_size, max_rows, len(data))
 
-            logger.debug(
+            self._logger.debug(
                 "Calculated optimal batch size",
-                configured_batch_size=self.batch_size,
+                configured_batch_size=self.bp_config.batch_size,
                 memory_based_limit=max_rows,
                 data_size=len(data),
                 optimal_size=optimal_size,
@@ -389,8 +426,8 @@ class BatchPredictor:
             return max(1, optimal_size)  # Ensure at least 1
 
         except Exception as e:
-            logger.warning(f"Failed to calculate optimal batch size: {e}")
-            return min(self.batch_size, len(data))
+            self._logger.warning(f"Failed to calculate optimal batch size: {e}")
+            return min(self.bp_config.batch_size, len(data))
 
     def _create_batches(self, data: pd.DataFrame, batch_size: int):
         """Create data batches for processing."""
@@ -408,8 +445,8 @@ class BatchPredictor:
             # Create result DataFrame
             result = pd.DataFrame(predictions, index=indices, columns=["prediction"])
 
-            # Add confidence scores if available
-            if hasattr(model, "predict_proba"):
+            # Add confidence scores if available and enabled
+            if self.bp_config.enable_confidence_scores and hasattr(model, "predict_proba"):
                 try:
                     probabilities = model.predict_proba(features)
                     if probabilities.shape[1] >= 2:
@@ -422,47 +459,45 @@ class BatchPredictor:
             return result
 
         except Exception as e:
-            logger.error(f"Batch chunk prediction failed: {e}")
+            self._logger.error(f"Batch chunk prediction failed: {e}")
             # Return empty predictions with same index
             return pd.DataFrame({"prediction": np.nan, "confidence": 0.0}, index=indices)
 
     async def _save_predictions_to_db(
         self, predictions: pd.DataFrame, model_name: str, symbol: str
     ):
-        """Save predictions to database."""
+        """Save predictions to database using DataService."""
         try:
-            with get_sync_session() as session:
-                prediction_records = []
+            prediction_data = []
 
-                for idx, row in predictions.iterrows():
-                    record = MLPrediction(
-                        model_name=model_name,
-                        symbol=symbol,
-                        timestamp=idx,
-                        prediction_value=(
-                            float(row["prediction"]) if not pd.isna(row["prediction"]) else None
-                        ),
-                        confidence_score=(
-                            float(row["confidence"]) if not pd.isna(row["confidence"]) else None
-                        ),
-                        features_hash=hash(str(row.to_dict())),  # Simple hash of features
-                        prediction_timestamp=datetime.utcnow(),
-                    )
-                    prediction_records.append(record)
+            for idx, row in predictions.iterrows():
+                prediction_record = {
+                    "model_name": model_name,
+                    "symbol": symbol,
+                    "timestamp": idx.isoformat() if hasattr(idx, "isoformat") else str(idx),
+                    "prediction_value": (
+                        float(row["prediction"]) if not pd.isna(row["prediction"]) else None
+                    ),
+                    "confidence_score": (
+                        float(row["confidence"]) if not pd.isna(row["confidence"]) else None
+                    ),
+                    "features_hash": hash(str(row.to_dict())),  # Simple hash of features
+                    "prediction_timestamp": datetime.utcnow().isoformat(),
+                }
+                prediction_data.append(prediction_record)
 
-                # Batch insert
-                session.bulk_save_objects(prediction_records)
-                session.commit()
+            # Save through DataService
+            await self.data_service.save_ml_predictions(prediction_data)
 
-                logger.info(
-                    "Predictions saved to database",
-                    model_name=model_name,
-                    symbol=symbol,
-                    count=len(prediction_records),
-                )
+            self._logger.info(
+                "Predictions saved to database",
+                model_name=model_name,
+                symbol=symbol,
+                count=len(prediction_data),
+            )
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Failed to save predictions to database",
                 model_name=model_name,
                 symbol=symbol,
@@ -486,12 +521,12 @@ class BatchPredictor:
                 # Default to CSV
                 predictions.to_csv(file_path.with_suffix(".csv"))
 
-            logger.info(
+            self._logger.info(
                 "Predictions saved to file", output_file=str(file_path), count=len(predictions)
             )
 
         except Exception as e:
-            logger.error(
+            self._logger.error(
                 "Failed to save predictions to file", output_file=output_file, error=str(e)
             )
 
@@ -502,7 +537,7 @@ class BatchPredictor:
         try:
             # This would integrate with your data loading system
             # For now, return empty DataFrame as placeholder
-            logger.warning(
+            self._logger.warning(
                 "Historical data loading not implemented",
                 symbol=symbol,
                 start_date=start_date,
@@ -513,8 +548,8 @@ class BatchPredictor:
             return pd.DataFrame()
 
         except Exception as e:
-            logger.error("Failed to load historical data", symbol=symbol, error=str(e))
-            raise ValidationError(f"Historical data loading failed: {e}") from e
+            self._logger.error("Failed to load historical data", symbol=symbol, error=str(e))
+            raise ValidationError(f"Historical data loading failed: {e}")
 
     def get_performance_stats(self) -> dict[str, Any]:
         """Get performance statistics for the batch predictor."""
@@ -526,9 +561,9 @@ class BatchPredictor:
             "total_predictions": self.prediction_count,
             "total_processing_time": self.total_processing_time,
             "average_processing_time_per_prediction": avg_processing_time,
-            "configured_batch_size": self.batch_size,
-            "max_workers": self.max_workers,
-            "use_multiprocessing": self.use_multiprocessing,
+            "configured_batch_size": self.bp_config.batch_size,
+            "max_workers": self.bp_config.max_workers,
+            "use_multiprocessing": self.bp_config.use_multiprocessing,
         }
 
     def reset_performance_stats(self):
@@ -536,4 +571,46 @@ class BatchPredictor:
         self.prediction_count = 0
         self.total_processing_time = 0.0
 
-        logger.info("Performance statistics reset")
+        self._logger.info("Performance statistics reset")
+
+    # Service Health and Metrics
+    async def _service_health_check(self) -> "HealthStatus":
+        """Batch predictor service specific health check."""
+        from src.core.base.interfaces import HealthStatus
+
+        try:
+            # Check dependencies
+            if not all([self.data_service, self.model_registry, self.feature_engineering_service]):
+                return HealthStatus.UNHEALTHY
+
+            return HealthStatus.HEALTHY
+
+        except Exception as e:
+            self._logger.error("Batch predictor service health check failed", error=str(e))
+            return HealthStatus.UNHEALTHY
+
+    def get_batch_predictor_metrics(self) -> dict[str, Any]:
+        """Get batch predictor service metrics."""
+        return {
+            "total_predictions": self.prediction_count,
+            "total_processing_time": self.total_processing_time,
+            "configured_batch_size": self.bp_config.batch_size,
+            "max_workers": self.bp_config.max_workers,
+            "max_memory_mb": self.bp_config.max_memory_mb,
+            "use_multiprocessing": self.bp_config.use_multiprocessing,
+            "save_to_database": self.bp_config.save_to_database,
+            "enable_confidence_scores": self.bp_config.enable_confidence_scores,
+        }
+
+    # Configuration validation
+    def _validate_service_config(self, config: ConfigDict) -> bool:
+        """Validate batch predictor service configuration."""
+        try:
+            bp_config_dict = config.get("batch_predictor", {})
+            BatchPredictorConfig(**bp_config_dict)
+            return True
+        except Exception as e:
+            self._logger.error(
+                "Batch predictor service configuration validation failed", error=str(e)
+            )
+            return False

@@ -14,8 +14,8 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.exceptions import ArbitrageError, ValidationError
-from src.core.logging import get_logger
 
+# Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
 from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
 
@@ -37,8 +37,6 @@ from src.utils.validators import (
 # From P-008+ - Use risk management
 
 # From P-003+ - Use exchange interfaces
-
-logger = get_logger(__name__)
 
 
 class ArbitrageOpportunity(BaseStrategy):
@@ -84,7 +82,7 @@ class ArbitrageOpportunity(BaseStrategy):
         self.opportunities_found = 0
         self.execution_success_rate = 0.0
 
-        logger.info(
+        self.logger.info(
             "Arbitrage opportunity scanner initialized",
             strategy=self.name,
             exchanges=self.exchanges,
@@ -116,7 +114,7 @@ class ArbitrageOpportunity(BaseStrategy):
 
             # TODO: Remove in production - Debug logging
             if signals:
-                logger.debug(
+                self.logger.debug(
                     "Arbitrage opportunities found",
                     strategy=self.name,
                     opportunity_count=len(signals),
@@ -126,7 +124,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return signals
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Arbitrage opportunity scanning failed",
                 strategy=self.name,
                 symbol=data.symbol,
@@ -163,7 +161,9 @@ class ArbitrageOpportunity(BaseStrategy):
             return prioritized_signals
 
         except Exception as e:
-            logger.error("Arbitrage opportunity scanning failed", strategy=self.name, error=str(e))
+            self.logger.error(
+                "Arbitrage opportunity scanning failed", strategy=self.name, error=str(e)
+            )
             return []
 
     async def _scan_cross_exchange_opportunities(self) -> list[Signal]:
@@ -249,7 +249,7 @@ class ArbitrageOpportunity(BaseStrategy):
                         signals.append(signal)
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Cross-exchange opportunity scanning failed", strategy=self.name, error=str(e)
             )
 
@@ -266,20 +266,33 @@ class ArbitrageOpportunity(BaseStrategy):
 
         try:
             for path in self.triangular_paths:
-                # Ensure we have prices for all pairs in the path
-                if not all(pair in self.pair_prices for pair in path):
+                # Ensure we have prices for all pairs in the path from any exchange
+                available_prices = {}
+                for pair in path:
+                    for exchange in self.exchanges:
+                        if (
+                            exchange in self.exchange_prices
+                            and pair in self.exchange_prices[exchange]
+                        ):
+                            available_prices[pair] = self.exchange_prices[exchange][pair]
+                            break
+
+                if not all(pair in available_prices for pair in path):
                     continue
 
                 # Extract prices for the three pairs
                 pair1, pair2, pair3 = path
-                price1 = self.pair_prices[pair1]
-                price2 = self.pair_prices[pair2]
-                price3 = self.pair_prices[pair3]
+                price1 = available_prices[pair1]
+                price2 = available_prices[pair2]
+                price3 = available_prices[pair3]
 
                 # Calculate triangular arbitrage
-                btc_usdt_rate = price1.price
-                eth_btc_rate = price2.price
-                eth_usdt_rate = price3.price
+                btc_usdt_rate = price1.price if price1.price else (price1.ask or price1.bid)
+                eth_btc_rate = price2.price if price2.price else (price2.ask or price2.bid)
+                eth_usdt_rate = price3.price if price3.price else (price3.ask or price3.bid)
+
+                if not all([btc_usdt_rate, eth_btc_rate, eth_usdt_rate]):
+                    continue
 
                 # Calculate triangular conversion
                 start_usdt = btc_usdt_rate
@@ -324,7 +337,9 @@ class ArbitrageOpportunity(BaseStrategy):
                     signals.append(signal)
 
         except Exception as e:
-            logger.error("Triangular opportunity scanning failed", strategy=self.name, error=str(e))
+            self.logger.error(
+                "Triangular opportunity scanning failed", strategy=self.name, error=str(e)
+            )
 
         return signals
 
@@ -373,7 +388,7 @@ class ArbitrageOpportunity(BaseStrategy):
             # Validate final result
             validate_decimal(total_fees)
 
-            logger.debug(
+            self.logger.debug(
                 "Cross-exchange fee calculation completed",
                 strategy=self.name,
                 buy_price=format_currency(buy_price),
@@ -387,7 +402,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return total_fees
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Cross-exchange fee calculation failed",
                 strategy=self.name,
                 buy_price=float(buy_price),
@@ -451,7 +466,7 @@ class ArbitrageOpportunity(BaseStrategy):
             # Validate final result
             validate_decimal(total_fees)
 
-            logger.debug(
+            self.logger.debug(
                 "Triangular fee calculation completed",
                 strategy=self.name,
                 rate1=format_currency(rate1),
@@ -470,7 +485,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return total_fees
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular fee calculation failed",
                 strategy=self.name,
                 rate1=float(rate1),
@@ -531,7 +546,7 @@ class ArbitrageOpportunity(BaseStrategy):
             elif priority > 1000:  # Reasonable upper limit
                 priority = 1000
 
-            logger.debug(
+            self.logger.debug(
                 "Priority calculation completed",
                 strategy=self.name,
                 profit_percentage=format_percentage(profit_percentage),
@@ -544,7 +559,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return priority
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Priority calculation failed",
                 strategy=self.name,
                 profit_percentage=profit_percentage,
@@ -575,7 +590,7 @@ class ArbitrageOpportunity(BaseStrategy):
             # Log top opportunities
             if limited_signals:
                 top_opportunity = limited_signals[0]
-                logger.info(
+                self.logger.info(
                     "Top arbitrage opportunity",
                     strategy=self.name,
                     symbol=top_opportunity.symbol,
@@ -587,7 +602,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return limited_signals
 
         except Exception as e:
-            logger.error("Opportunity prioritization failed", strategy=self.name, error=str(e))
+            self.logger.error("Opportunity prioritization failed", strategy=self.name, error=str(e))
             return signals[: self.max_opportunities]  # Return first N on error
 
     async def validate_signal(self, signal: Signal) -> bool:
@@ -653,7 +668,9 @@ class ArbitrageOpportunity(BaseStrategy):
             return True
 
         except Exception as e:
-            logger.error("Arbitrage signal validation failed", strategy=self.name, error=str(e))
+            self.logger.error(
+                "Arbitrage signal validation failed", strategy=self.name, error=str(e)
+            )
             return False
 
     @log_errors
@@ -726,7 +743,7 @@ class ArbitrageOpportunity(BaseStrategy):
             validate_decimal(position_size)
             validate_quantity(position_size, "position_size")
 
-            logger.debug(
+            self.logger.debug(
                 "Arbitrage scanner position size calculated",
                 strategy=self.name,
                 base_size=format_currency(base_size),
@@ -740,7 +757,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return position_size
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Arbitrage scanner position size calculation failed",
                 strategy=self.name,
                 signal_confidence=signal.confidence if signal else None,
@@ -770,7 +787,7 @@ class ArbitrageOpportunity(BaseStrategy):
             position_age = (datetime.now() - position.timestamp).total_seconds() * 1000
 
             if position_age > execution_timeout:
-                logger.info(
+                self.logger.info(
                     "Arbitrage position timeout",
                     strategy=self.name,
                     symbol=position.symbol,
@@ -809,7 +826,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return False
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Exit condition check failed",
                 strategy=self.name,
                 symbol=position.symbol,
@@ -854,7 +871,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return Decimal("0")
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Cross-exchange spread calculation failed",
                 strategy=self.name,
                 symbol=symbol,
@@ -873,20 +890,30 @@ class ArbitrageOpportunity(BaseStrategy):
             Signal if opportunity exists, None otherwise
         """
         try:
-            # Ensure we have prices for all pairs in the path
-            if not all(pair in self.pair_prices for pair in path):
+            # Ensure we have prices for all pairs in the path from any exchange
+            available_prices = {}
+            for pair in path:
+                for exchange in self.exchanges:
+                    if exchange in self.exchange_prices and pair in self.exchange_prices[exchange]:
+                        available_prices[pair] = self.exchange_prices[exchange][pair]
+                        break
+
+            if not all(pair in available_prices for pair in path):
                 return None
 
             # Extract prices for the three pairs
             pair1, pair2, pair3 = path
-            price1 = self.pair_prices[pair1]
-            price2 = self.pair_prices[pair2]
-            price3 = self.pair_prices[pair3]
+            price1 = available_prices[pair1]
+            price2 = available_prices[pair2]
+            price3 = available_prices[pair3]
 
             # Calculate triangular arbitrage
-            btc_usdt_rate = price1.price
-            eth_btc_rate = price2.price
-            eth_usdt_rate = price3.price
+            btc_usdt_rate = price1.price if price1.price else (price1.ask or price1.bid)
+            eth_btc_rate = price2.price if price2.price else (price2.ask or price2.bid)
+            eth_usdt_rate = price3.price if price3.price else (price3.ask or price3.bid)
+
+            if not all([btc_usdt_rate, eth_btc_rate, eth_usdt_rate]):
+                return None
 
             # Calculate triangular conversion
             start_usdt = btc_usdt_rate
@@ -920,7 +947,7 @@ class ArbitrageOpportunity(BaseStrategy):
             return None
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Triangular path check failed", strategy=self.name, path=path, error=str(e)
             )
             return None
@@ -955,7 +982,7 @@ class ArbitrageOpportunity(BaseStrategy):
                 pass
 
             # Log trade result
-            logger.info(
+            self.logger.info(
                 "Arbitrage opportunity trade completed",
                 strategy=self.name,
                 symbol=trade_result.get("symbol"),
@@ -965,4 +992,4 @@ class ArbitrageOpportunity(BaseStrategy):
             )
 
         except Exception as e:
-            logger.error("Post-trade processing failed", strategy=self.name, error=str(e))
+            self.logger.error("Post-trade processing failed", strategy=self.name, error=str(e))

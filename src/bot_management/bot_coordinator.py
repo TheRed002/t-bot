@@ -16,15 +16,44 @@ from decimal import Decimal
 from typing import Any
 
 from src.core.config import Config
-from src.core.exceptions import ExecutionError, ValidationError
+from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.core.types import BotConfiguration, OrderSide
 
 # MANDATORY: Import from P-002A (error handling)
-from src.error_handling.error_handler import ErrorHandler
+from src.error_handling import (
+    get_global_error_handler,
+    with_circuit_breaker,
+    with_error_context,
+    with_fallback,
+    with_retry,
+)
 
 # MANDATORY: Import from P-007A (utils)
-from src.utils.decorators import log_calls
+try:
+    from src.utils.decorators import log_calls
+
+    # Validate imported decorators are callable
+    if not callable(log_calls):
+        raise ImportError(f"log_calls is not callable: {type(log_calls)}")
+
+except ImportError as e:
+    # Fallback if decorators module is not available
+    import functools
+    import logging
+
+    def log_calls(func):
+        """Fallback decorator that just logs function calls."""
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            logger = logging.getLogger(func.__module__)
+            logger.info(f"Calling {func.__name__}")
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    logging.getLogger(__name__).warning(f"Failed to import decorators, using fallback: {e}")
 
 
 class BotCoordinator:
@@ -47,15 +76,20 @@ class BotCoordinator:
         Args:
             config: Application configuration
         """
+        self._logger = get_logger(self.__class__.__module__)
         self.config = config
-        self.logger = get_logger(f"{__name__}.BotCoordinator")
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = get_global_error_handler()
 
         # Bot registry and status tracking
         self.registered_bots: dict[str, BotConfiguration] = {}
         self.bot_positions: dict[str, dict[str, Any]] = {}  # bot_id -> symbol -> position info
         self.shared_signals: list[dict[str, Any]] = []
         self.arbitrage_opportunities: list[dict[str, Any]] = []
+
+        # Locks for thread-safe operations
+        self._registry_lock = asyncio.Lock()
+        self._position_lock = asyncio.Lock()
+        self._signal_lock = asyncio.Lock()
 
         # Coordination state
         self.is_running = False
@@ -86,9 +120,10 @@ class BotCoordinator:
             "last_coordination_time": None,
         }
 
-        self.logger.info("Bot coordinator initialized")
+        self._logger.info("Bot coordinator initialized")
 
     @log_calls
+    @with_error_context(component="bot_coordinator", operation="start")
     async def start(self) -> None:
         """
         Start the bot coordinator.
@@ -96,25 +131,21 @@ class BotCoordinator:
         Raises:
             ExecutionError: If startup fails
         """
-        try:
-            if self.is_running:
-                self.logger.warning("Bot coordinator is already running")
-                return
+        if self.is_running:
+            self._logger.warning("Bot coordinator is already running")
+            return
 
-            self.logger.info("Starting bot coordinator")
+        self._logger.info("Starting bot coordinator")
 
-            # Start coordination tasks
-            self.coordination_task = asyncio.create_task(self._coordination_loop())
-            self.signal_distribution_task = asyncio.create_task(self._signal_distribution_loop())
+        # Start coordination tasks
+        self.coordination_task = asyncio.create_task(self._coordination_loop())
+        self.signal_distribution_task = asyncio.create_task(self._signal_distribution_loop())
 
-            self.is_running = True
-            self.logger.info("Bot coordinator started successfully")
-
-        except Exception as e:
-            self.logger.error(f"Failed to start bot coordinator: {e}")
-            raise ExecutionError(f"Bot coordinator startup failed: {e}")
+        self.is_running = True
+        self._logger.info("Bot coordinator started successfully")
 
     @log_calls
+    @with_error_context(component="bot_coordinator", operation="stop")
     async def stop(self) -> None:
         """
         Stop the bot coordinator.
@@ -122,34 +153,38 @@ class BotCoordinator:
         Raises:
             ExecutionError: If shutdown fails
         """
-        try:
-            if not self.is_running:
-                self.logger.warning("Bot coordinator is not running")
-                return
+        if not self.is_running:
+            self._logger.warning("Bot coordinator is not running")
+            return
 
-            self.logger.info("Stopping bot coordinator")
-            self.is_running = False
+        self._logger.info("Stopping bot coordinator")
+        self.is_running = False
 
-            # Stop coordination tasks
-            if self.coordination_task:
-                self.coordination_task.cancel()
+        # Stop coordination tasks with proper cleanup
+        tasks_to_cancel = []
+        if self.coordination_task:
+            self.coordination_task.cancel()
+            tasks_to_cancel.append(self.coordination_task)
 
-            if self.signal_distribution_task:
-                self.signal_distribution_task.cancel()
+        if self.signal_distribution_task:
+            self.signal_distribution_task.cancel()
+            tasks_to_cancel.append(self.signal_distribution_task)
 
-            # Clear state
-            self.registered_bots.clear()
-            self.bot_positions.clear()
-            self.shared_signals.clear()
-            self.arbitrage_opportunities.clear()
+        # Wait for tasks to complete cancellation
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
 
-            self.logger.info("Bot coordinator stopped successfully")
+        # Clear state
+        self.registered_bots.clear()
+        self.bot_positions.clear()
+        self.shared_signals.clear()
+        self.arbitrage_opportunities.clear()
 
-        except Exception as e:
-            self.logger.error(f"Failed to stop bot coordinator: {e}")
-            raise ExecutionError(f"Bot coordinator shutdown failed: {e}")
+        self._logger.info("Bot coordinator stopped successfully")
 
     @log_calls
+    @with_error_context(component="bot_coordinator", operation="register_bot")
+    @with_retry(max_attempts=3, base_delay=1.0)
     async def register_bot(self, bot_id: str, bot_config: BotConfiguration) -> None:
         """
         Register a bot with the coordinator.
@@ -161,7 +196,7 @@ class BotCoordinator:
         Raises:
             ValidationError: If registration is invalid
         """
-        try:
+        async with self._registry_lock:
             if bot_id in self.registered_bots:
                 raise ValidationError(f"Bot already registered: {bot_id}")
 
@@ -171,29 +206,27 @@ class BotCoordinator:
             # Initialize position tracking
             self.bot_positions[bot_id] = {}
 
-            # Initialize exchange usage tracking for bot's exchanges
-            for exchange in bot_config.exchanges:
-                if exchange not in self.exchange_usage:
-                    self.exchange_usage[exchange] = {
-                        "active_bots": 0,
-                        "total_positions": 0,
-                        "api_calls_per_minute": 0,
-                    }
-                self.exchange_usage[exchange]["active_bots"] += 1
+        # Initialize exchange usage tracking for bot's exchanges
+        for exchange in bot_config.exchanges:
+            if exchange not in self.exchange_usage:
+                self.exchange_usage[exchange] = {
+                    "active_bots": 0,
+                    "total_positions": 0,
+                    "api_calls_per_minute": 0,
+                }
+            self.exchange_usage[exchange]["active_bots"] += 1
 
-            self.logger.info(
-                "Bot registered with coordinator",
-                bot_id=bot_id,
-                bot_type=bot_config.bot_type.value,
-                exchanges=bot_config.exchanges,
-                symbols=bot_config.symbols,
-            )
-
-        except Exception as e:
-            self.logger.error(f"Failed to register bot: {e}", bot_id=bot_id)
-            raise
+        self._logger.info(
+            "Bot registered with coordinator",
+            bot_id=bot_id,
+            bot_type=bot_config.bot_type.value,
+            exchanges=bot_config.exchanges,
+            symbols=bot_config.symbols,
+        )
 
     @log_calls
+    @with_error_context(component="bot_coordinator", operation="unregister_bot")
+    @with_retry(max_attempts=2, base_delay=0.5)
     async def unregister_bot(self, bot_id: str) -> None:
         """
         Unregister a bot from the coordinator.
@@ -201,37 +234,35 @@ class BotCoordinator:
         Args:
             bot_id: Bot identifier
         """
-        try:
-            if bot_id not in self.registered_bots:
-                self.logger.warning("Bot not registered", bot_id=bot_id)
-                return
+        if bot_id not in self.registered_bots:
+            self._logger.warning("Bot not registered", bot_id=bot_id)
+            return
 
-            bot_config = self.registered_bots[bot_id]
+        bot_config = self.registered_bots[bot_id]
 
-            # Update exchange usage tracking
-            for exchange in bot_config.exchanges:
-                if exchange in self.exchange_usage:
-                    self.exchange_usage[exchange]["active_bots"] -= 1
-                    if self.exchange_usage[exchange]["active_bots"] <= 0:
-                        del self.exchange_usage[exchange]
+        # Update exchange usage tracking
+        for exchange in bot_config.exchanges:
+            if exchange in self.exchange_usage:
+                self.exchange_usage[exchange]["active_bots"] -= 1
+                if self.exchange_usage[exchange]["active_bots"] <= 0:
+                    del self.exchange_usage[exchange]
 
-            # Remove position tracking
-            if bot_id in self.bot_positions:
-                # Update symbol exposure tracking
-                for symbol, position in self.bot_positions[bot_id].items():
-                    await self._update_symbol_exposure(symbol, position, remove=True)
+        # Remove position tracking
+        if bot_id in self.bot_positions:
+            # Update symbol exposure tracking
+            for symbol, position in self.bot_positions[bot_id].items():
+                await self._update_symbol_exposure(symbol, position, remove=True)
 
-                del self.bot_positions[bot_id]
+            del self.bot_positions[bot_id]
 
-            # Remove from registry
-            del self.registered_bots[bot_id]
+        # Remove from registry
+        del self.registered_bots[bot_id]
 
-            self.logger.info("Bot unregistered from coordinator", bot_id=bot_id)
-
-        except Exception as e:
-            self.logger.error(f"Failed to unregister bot: {e}", bot_id=bot_id)
+        self._logger.info("Bot unregistered from coordinator", bot_id=bot_id)
 
     @log_calls
+    @with_error_context(component="bot_coordinator", operation="report_position_change")
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=30)
     async def report_position_change(
         self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal, price: Decimal
     ) -> dict[str, Any]:
@@ -251,53 +282,50 @@ class BotCoordinator:
         Raises:
             ValidationError: If report is invalid
         """
-        try:
-            if bot_id not in self.registered_bots:
-                raise ValidationError(f"Bot not registered: {bot_id}")
+        if bot_id not in self.registered_bots:
+            raise ValidationError(f"Bot not registered: {bot_id}")
 
-            # Update position tracking
-            position_key = f"{symbol}_{side.value}"
+        # Update position tracking
+        position_key = f"{symbol}_{side.value}"
 
-            if bot_id not in self.bot_positions:
-                self.bot_positions[bot_id] = {}
+        if bot_id not in self.bot_positions:
+            self.bot_positions[bot_id] = {}
 
-            position_info = {
-                "symbol": symbol,
-                "side": side.value,
-                "quantity": quantity,
-                "price": price,
-                "timestamp": datetime.now(timezone.utc),
-                "value": quantity * price,
-            }
+        position_info = {
+            "symbol": symbol,
+            "side": side.value,
+            "quantity": quantity,
+            "price": price,
+            "timestamp": datetime.now(timezone.utc),
+            "value": quantity * price,
+        }
 
-            # Store previous position for exposure calculation
-            previous_position = self.bot_positions[bot_id].get(position_key)
-            self.bot_positions[bot_id][position_key] = position_info
+        # Store previous position for exposure calculation
+        previous_position = self.bot_positions[bot_id].get(position_key)
+        self.bot_positions[bot_id][position_key] = position_info
 
-            # Update symbol exposure tracking
-            await self._update_symbol_exposure(symbol, position_info, previous_position)
+        # Update symbol exposure tracking
+        await self._update_symbol_exposure(symbol, position_info, previous_position)
 
-            # Check for conflicts and risks
-            coordination_response = await self._analyze_position_change(
-                bot_id, symbol, side, quantity, price
-            )
+        # Check for conflicts and risks
+        coordination_response = await self._analyze_position_change(
+            bot_id, symbol, side, quantity, price
+        )
 
-            self.logger.debug(
-                "Position change reported",
-                bot_id=bot_id,
-                symbol=symbol,
-                side=side.value,
-                quantity=float(quantity),
-                conflicts=len(coordination_response.get("conflicts", [])),
-            )
+        self._logger.debug(
+            "Position change reported",
+            bot_id=bot_id,
+            symbol=symbol,
+            side=side.value,
+            quantity=float(quantity),
+            conflicts=len(coordination_response.get("conflicts", [])),
+        )
 
-            return coordination_response
-
-        except Exception as e:
-            self.logger.error(f"Failed to report position change: {e}", bot_id=bot_id)
-            raise
+        return coordination_response
 
     @log_calls
+    @with_error_context(component="bot_coordinator", operation="share_signal")
+    @with_retry(max_attempts=3, base_delay=0.5)
     async def share_signal(
         self, bot_id: str, signal_data: dict[str, Any], target_bots: list[str] | None = None
     ) -> int:
@@ -315,52 +343,49 @@ class BotCoordinator:
         Raises:
             ValidationError: If signal is invalid
         """
-        try:
-            if bot_id not in self.registered_bots:
-                raise ValidationError(f"Bot not registered: {bot_id}")
+        if bot_id not in self.registered_bots:
+            raise ValidationError(f"Bot not registered: {bot_id}")
 
-            # Validate signal data
-            required_fields = ["symbol", "direction", "confidence", "timestamp"]
-            for field in required_fields:
-                if field not in signal_data:
-                    raise ValidationError(f"Signal missing required field: {field}")
+        # Validate signal data
+        required_fields = ["symbol", "direction", "confidence", "timestamp"]
+        for field in required_fields:
+            if field not in signal_data:
+                raise ValidationError(f"Signal missing required field: {field}")
 
-            # Create signal entry
-            signal_entry = {
-                "signal_id": str(uuid.uuid4()),
-                "source_bot": bot_id,
-                "signal_data": signal_data,
-                "target_bots": target_bots or list(self.registered_bots.keys()),
-                "created_at": datetime.now(timezone.utc),
-                "expires_at": datetime.now(timezone.utc)
-                + timedelta(minutes=self.signal_retention_minutes),
-            }
+        # Create signal entry
+        signal_entry = {
+            "signal_id": str(uuid.uuid4()),
+            "source_bot": bot_id,
+            "signal_data": signal_data,
+            "target_bots": target_bots or list(self.registered_bots.keys()),
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": datetime.now(timezone.utc)
+            + timedelta(minutes=self.signal_retention_minutes),
+        }
 
-            # Add to shared signals
-            self.shared_signals.append(signal_entry)
+        # Add to shared signals
+        self.shared_signals.append(signal_entry)
 
-            # Update metrics
-            self.coordination_metrics["signals_distributed"] += 1
+        # Update metrics
+        self.coordination_metrics["signals_distributed"] += 1
 
-            # Count actual target recipients (exclude source bot if present)
-            target_count = len([bot for bot in signal_entry["target_bots"] if bot != bot_id])
+        # Count actual target recipients (exclude source bot if present)
+        target_count = len([bot for bot in signal_entry["target_bots"] if bot != bot_id])
 
-            self.logger.info(
-                "Signal shared with coordination network",
-                source_bot=bot_id,
-                signal_id=signal_entry["signal_id"],
-                symbol=signal_data["symbol"],
-                direction=signal_data["direction"],
-                target_count=target_count,
-            )
+        self._logger.info(
+            "Signal shared with coordination network",
+            source_bot=bot_id,
+            signal_id=signal_entry["signal_id"],
+            symbol=signal_data["symbol"],
+            direction=signal_data["direction"],
+            target_count=target_count,
+        )
 
-            return target_count
-
-        except Exception as e:
-            self.logger.error(f"Failed to share signal: {e}", bot_id=bot_id)
-            raise
+        return target_count
 
     @log_calls
+    @with_error_context(component="bot_coordinator", operation="get_shared_signals")
+    @with_fallback(default_value=[])
     async def get_shared_signals(self, bot_id: str) -> list[dict[str, Any]]:
         """
         Get shared signals for a specific bot.
@@ -371,42 +396,38 @@ class BotCoordinator:
         Returns:
             list: List of relevant shared signals
         """
-        try:
-            if bot_id not in self.registered_bots:
-                return []
-
-            relevant_signals = []
-            current_time = datetime.now(timezone.utc)
-
-            for signal in self.shared_signals:
-                # Skip expired signals
-                if current_time > signal["expires_at"]:
-                    continue
-
-                # Skip signals from the same bot
-                if signal["source_bot"] == bot_id:
-                    continue
-
-                # Check if bot is a target
-                if bot_id in signal["target_bots"]:
-                    relevant_signals.append(
-                        {
-                            "signal_id": signal["signal_id"],
-                            "source_bot": signal["source_bot"],
-                            "signal_data": signal["signal_data"],
-                            "created_at": signal["created_at"].isoformat(),
-                            "age_minutes": (current_time - signal["created_at"]).total_seconds()
-                            / 60,
-                        }
-                    )
-
-            return relevant_signals
-
-        except Exception as e:
-            self.logger.error(f"Failed to get shared signals: {e}", bot_id=bot_id)
+        if bot_id not in self.registered_bots:
             return []
 
+        relevant_signals = []
+        current_time = datetime.now(timezone.utc)
+
+        for signal in self.shared_signals:
+            # Skip expired signals
+            if current_time > signal["expires_at"]:
+                continue
+
+            # Skip signals from the same bot
+            if signal["source_bot"] == bot_id:
+                continue
+
+            # Check if bot is a target
+            if bot_id in signal["target_bots"]:
+                relevant_signals.append(
+                    {
+                        "signal_id": signal["signal_id"],
+                        "source_bot": signal["source_bot"],
+                        "signal_data": signal["signal_data"],
+                        "created_at": signal["created_at"].isoformat(),
+                        "age_minutes": (current_time - signal["created_at"]).total_seconds() / 60,
+                    }
+                )
+
+        return relevant_signals
+
     @log_calls
+    @with_error_context(component="bot_coordinator", operation="check_cross_bot_risk")
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60)
     async def check_cross_bot_risk(
         self, bot_id: str, symbol: str, side: OrderSide, quantity: Decimal
     ) -> dict[str, Any]:
@@ -422,137 +443,147 @@ class BotCoordinator:
         Returns:
             dict: Risk assessment with recommendations
         """
-        try:
-            self.coordination_metrics["cross_bot_risk_checks"] += 1
+        self.coordination_metrics["cross_bot_risk_checks"] += 1
 
-            risk_assessment = {
-                "approved": True,
-                "risk_level": "low",
-                "warnings": [],
-                "recommendations": [],
-                "max_safe_quantity": quantity,
-            }
+        risk_assessment = {
+            "approved": True,
+            "risk_level": "low",
+            "warnings": [],
+            "recommendations": [],
+            "max_safe_quantity": quantity,
+        }
 
-            # Check symbol exposure limits
-            current_exposure = self.symbol_exposure.get(symbol, {}).get(side.value, Decimal("0"))
-            proposed_total = current_exposure + quantity
+        # Check symbol exposure limits
+        self._check_symbol_exposure_limits(risk_assessment, symbol, side, quantity)
 
-            if proposed_total > self.max_symbol_exposure:
-                risk_assessment["approved"] = False
-                risk_assessment["risk_level"] = "high"
-                risk_assessment["warnings"].append(
-                    f"Proposed order would exceed max symbol exposure: {float(proposed_total)} > {float(self.max_symbol_exposure)}"
-                )
-                risk_assessment["max_safe_quantity"] = max(
-                    Decimal("0"), self.max_symbol_exposure - current_exposure
-                )
+        # Check for position concentration
+        self._check_position_concentration(risk_assessment, bot_id, symbol)
 
-            # Check for position concentration
-            bot_symbol_positions = 0
-            for _pos_key, position in self.bot_positions.get(bot_id, {}).items():
-                if position["symbol"] == symbol:
-                    bot_symbol_positions += 1
+        # Check for conflicting positions from other bots
+        self._check_conflicting_positions(risk_assessment, bot_id, symbol, side, quantity)
 
-            if bot_symbol_positions >= 3:  # More than 3 positions in same symbol
-                risk_assessment["risk_level"] = "medium"
-                risk_assessment["warnings"].append(
-                    f"High position concentration in {symbol}: {bot_symbol_positions} positions"
-                )
+        # Generate recommendations
+        self._generate_risk_recommendations(risk_assessment)
 
-            # Check for conflicting positions from other bots
-            conflicting_bots = []
-            for other_bot_id, positions in self.bot_positions.items():
-                if other_bot_id == bot_id:
-                    continue
+        return risk_assessment
 
-                for _pos_key, position in positions.items():
-                    if (
-                        position["symbol"] == symbol
-                        and position["side"] != side.value
-                        and position["quantity"] > quantity * Decimal("0.5")
-                    ):  # Significant opposing position
-                        conflicting_bots.append(
-                            {
-                                "bot_id": other_bot_id,
-                                "side": position["side"],
-                                "quantity": float(position["quantity"]),
-                            }
-                        )
+    def _check_symbol_exposure_limits(
+        self, risk_assessment: dict[str, Any], symbol: str, side: OrderSide, quantity: Decimal
+    ) -> None:
+        """Check if proposed order would exceed symbol exposure limits."""
+        current_exposure = self.symbol_exposure.get(symbol, {}).get(side.value, Decimal("0"))
+        proposed_total = current_exposure + quantity
 
-            if conflicting_bots:
-                risk_assessment["risk_level"] = "medium"
-                risk_assessment["warnings"].append(
-                    f"Conflicting positions detected from {len(conflicting_bots)} other bots"
-                )
-                risk_assessment["conflicting_bots"] = conflicting_bots
-
-            # Generate recommendations
-            if risk_assessment["risk_level"] == "high":
-                risk_assessment["recommendations"].append("Consider reducing position size")
-                risk_assessment["recommendations"].append(
-                    "Coordinate with other bots before executing"
-                )
-            elif risk_assessment["risk_level"] == "medium":
-                risk_assessment["recommendations"].append("Monitor position closely")
-                risk_assessment["recommendations"].append("Consider exit strategy")
-
-            return risk_assessment
-
-        except Exception as e:
-            self.logger.error(f"Cross-bot risk check failed: {e}", bot_id=bot_id)
-            return {
-                "approved": False,
-                "risk_level": "unknown",
-                "warnings": [f"Risk check failed: {e}"],
-                "recommendations": ["Manual review required"],
-                "max_safe_quantity": Decimal("0"),
-            }
-
-    async def get_coordination_summary(self) -> dict[str, Any]:
-        """Get comprehensive coordination status summary."""
-        try:
-            # Calculate current exposures
-            total_exposures = {}
-            for symbol, sides in self.symbol_exposure.items():
-                total_exposures[symbol] = {
-                    "buy_exposure": float(sides.get("buy", Decimal("0"))),
-                    "sell_exposure": float(sides.get("sell", Decimal("0"))),
-                    "net_exposure": float(
-                        sides.get("buy", Decimal("0")) - sides.get("sell", Decimal("0"))
-                    ),
-                }
-
-            # Get active signals count
-            current_time = datetime.now(timezone.utc)
-            active_signals = len(
-                [s for s in self.shared_signals if current_time <= s["expires_at"]]
+        if proposed_total > self.max_symbol_exposure:
+            risk_assessment["approved"] = False
+            risk_assessment["risk_level"] = "high"
+            risk_assessment["warnings"].append(
+                f"Proposed order would exceed max symbol exposure: "
+                f"{float(proposed_total)} > {float(self.max_symbol_exposure)}"
+            )
+            risk_assessment["max_safe_quantity"] = max(
+                Decimal("0"), self.max_symbol_exposure - current_exposure
             )
 
-            return {
-                "coordination_status": {
-                    "is_running": self.is_running,
-                    "registered_bots": len(self.registered_bots),
-                    "active_positions": sum(
-                        len(positions) for positions in self.bot_positions.values()
-                    ),
-                    "active_signals": active_signals,
-                    "arbitrage_opportunities": len(self.arbitrage_opportunities),
-                },
-                "symbol_exposures": total_exposures,
-                "exchange_usage": self.exchange_usage,
-                "coordination_metrics": {
-                    **self.coordination_metrics,
-                    "last_coordination_time": (
-                        self.coordination_metrics["last_coordination_time"].isoformat()
-                        if self.coordination_metrics["last_coordination_time"]
-                        else None
-                    ),
-                },
+    def _check_position_concentration(
+        self, risk_assessment: dict[str, Any], bot_id: str, symbol: str
+    ) -> None:
+        """Check for position concentration in the same symbol."""
+        bot_symbol_positions = 0
+        for _pos_key, position in self.bot_positions.get(bot_id, {}).items():
+            if position["symbol"] == symbol:
+                bot_symbol_positions += 1
+
+        if bot_symbol_positions >= 3:  # More than 3 positions in same symbol
+            risk_assessment["risk_level"] = "medium"
+            risk_assessment["warnings"].append(
+                f"High position concentration in {symbol}: {bot_symbol_positions} positions"
+            )
+
+    def _check_conflicting_positions(
+        self,
+        risk_assessment: dict[str, Any],
+        bot_id: str,
+        symbol: str,
+        side: OrderSide,
+        quantity: Decimal,
+    ) -> None:
+        """Check for conflicting positions from other bots."""
+        conflicting_bots = []
+        for other_bot_id, positions in self.bot_positions.items():
+            if other_bot_id == bot_id:
+                continue
+
+            for _pos_key, position in positions.items():
+                if (
+                    position["symbol"] == symbol
+                    and position["side"] != side.value
+                    and position["quantity"] > quantity * Decimal("0.5")
+                ):  # Significant opposing position
+                    conflicting_bots.append(
+                        {
+                            "bot_id": other_bot_id,
+                            "side": position["side"],
+                            "quantity": float(position["quantity"]),
+                        }
+                    )
+
+        if conflicting_bots:
+            risk_assessment["risk_level"] = "medium"
+            risk_assessment["warnings"].append(
+                f"Conflicting positions detected from {len(conflicting_bots)} other bots"
+            )
+            risk_assessment["conflicting_bots"] = conflicting_bots
+
+    def _generate_risk_recommendations(self, risk_assessment: dict[str, Any]) -> None:
+        """Generate recommendations based on risk level."""
+        if risk_assessment["risk_level"] == "high":
+            risk_assessment["recommendations"].append("Consider reducing position size")
+            risk_assessment["recommendations"].append("Coordinate with other bots before executing")
+        elif risk_assessment["risk_level"] == "medium":
+            risk_assessment["recommendations"].append("Monitor position closely")
+            risk_assessment["recommendations"].append("Consider exit strategy")
+
+    @with_error_context(component="bot_coordinator", operation="get_coordination_summary")
+    @with_fallback(default_value={"error": "Failed to generate coordination summary"})
+    async def get_coordination_summary(self) -> dict[str, Any]:
+        """Get comprehensive coordination status summary."""
+        # Calculate current exposures
+        total_exposures = {}
+        for symbol, sides in self.symbol_exposure.items():
+            total_exposures[symbol] = {
+                "buy_exposure": float(sides.get("buy", Decimal("0"))),
+                "sell_exposure": float(sides.get("sell", Decimal("0"))),
+                "net_exposure": float(
+                    sides.get("buy", Decimal("0")) - sides.get("sell", Decimal("0"))
+                ),
             }
 
-        except Exception as e:
-            self.logger.error(f"Failed to generate coordination summary: {e}")
-            return {"error": str(e)}
+        # Get active signals count
+        current_time = datetime.now(timezone.utc)
+        active_signals = len([s for s in self.shared_signals if current_time <= s["expires_at"]])
+
+        return {
+            "coordination_status": {
+                "is_running": self.is_running,
+                "registered_bots": len(self.registered_bots),
+                "active_positions": sum(
+                    len(positions) for positions in self.bot_positions.values()
+                ),
+                "active_signals": active_signals,
+                "arbitrage_opportunities": len(self.arbitrage_opportunities),
+            },
+            "symbol_exposures": total_exposures,
+            "exchange_usage": self.exchange_usage,
+            "coordination_metrics": {
+                **self.coordination_metrics,
+                "last_coordination_time": (
+                    self.coordination_metrics["last_coordination_time"].isoformat()
+                    if self.coordination_metrics["last_coordination_time"]
+                    else None
+                ),
+            },
+        }
 
     async def _coordination_loop(self) -> None:
         """Main coordination monitoring loop."""
@@ -578,12 +609,21 @@ class BotCoordinator:
                     # Wait for next cycle
                     await asyncio.sleep(self.coordination_interval)
 
+                except (asyncio.TimeoutError, ConnectionError) as e:
+                    self._logger.warning(f"Coordination loop network error: {e}")
+                    await asyncio.sleep(10)
+                except ValidationError as e:
+                    self._logger.error(f"Coordination loop validation error: {e}")
+                    await asyncio.sleep(5)
                 except Exception as e:
-                    self.logger.error(f"Coordination loop error: {e}")
+                    self._logger.error(f"Coordination loop unexpected error: {e}")
+                    await self.error_handler.handle_error(
+                        e, {"component": "bot_coordinator", "operation": "coordination_loop"}
+                    )
                     await asyncio.sleep(10)
 
         except asyncio.CancelledError:
-            self.logger.info("Coordination monitoring cancelled")
+            self._logger.info("Coordination monitoring cancelled")
 
     async def _signal_distribution_loop(self) -> None:
         """Signal distribution and processing loop."""
@@ -602,12 +642,21 @@ class BotCoordinator:
                     # Wait for next cycle
                     await asyncio.sleep(5)  # More frequent for signal processing
 
+                except (asyncio.TimeoutError, ConnectionError) as e:
+                    self._logger.warning(f"Signal distribution loop network error: {e}")
+                    await asyncio.sleep(10)
+                except ValidationError as e:
+                    self._logger.error(f"Signal distribution loop validation error: {e}")
+                    await asyncio.sleep(5)
                 except Exception as e:
-                    self.logger.error(f"Signal distribution loop error: {e}")
+                    self._logger.error(f"Signal distribution loop unexpected error: {e}")
+                    await self.error_handler.handle_error(
+                        e, {"component": "bot_coordinator", "operation": "signal_distribution_loop"}
+                    )
                     await asyncio.sleep(10)
 
         except asyncio.CancelledError:
-            self.logger.info("Signal distribution cancelled")
+            self._logger.info("Signal distribution cancelled")
 
     async def _update_symbol_exposure(
         self,
@@ -705,15 +754,20 @@ class BotCoordinator:
                 # Placeholder for actual arbitrage detection logic
                 pass
 
+        except (ConnectionError, TimeoutError) as e:
+            self._logger.warning(f"Arbitrage detection network error: {e}")
+        except ValidationError as e:
+            self._logger.error(f"Arbitrage detection validation error: {e}")
         except Exception as e:
-            self.logger.warning(f"Arbitrage detection error: {e}")
+            self._logger.error(f"Arbitrage detection unexpected error: {e}")
+            await self.error_handler.handle_error(
+                e, {"component": "bot_coordinator", "operation": "arbitrage_detection"}
+            )
 
     async def _detect_position_conflicts(self) -> None:
         """Detect and attempt to resolve position conflicts."""
         try:
             conflicts_resolved = 0
-
-            # Analyze all bot positions for conflicts
             symbols_analyzed = set()
 
             for _bot_id, positions in self.bot_positions.items():
@@ -722,40 +776,54 @@ class BotCoordinator:
                     if symbol in symbols_analyzed:
                         continue
 
-                    # Check this symbol across all bots
-                    buy_exposure = Decimal("0")
-                    sell_exposure = Decimal("0")
-
-                    for _check_bot_id, check_positions in self.bot_positions.items():
-                        for _check_pos_key, check_position in check_positions.items():
-                            if check_position["symbol"] == symbol:
-                                if check_position["side"] == "buy":
-                                    buy_exposure += check_position["quantity"]
-                                else:
-                                    sell_exposure += check_position["quantity"]
-
-                    # Check for excessive opposing positions
-                    if buy_exposure > 0 and sell_exposure > 0:
-                        conflict_ratio = min(buy_exposure, sell_exposure) / max(
-                            buy_exposure, sell_exposure
-                        )
-                        if conflict_ratio > 0.5:  # Significant opposing positions
-                            self.logger.warning(
-                                "Position conflict detected",
-                                symbol=symbol,
-                                buy_exposure=float(buy_exposure),
-                                sell_exposure=float(sell_exposure),
-                                conflict_ratio=float(conflict_ratio),
-                            )
-                            conflicts_resolved += 1
+                    # Analyze symbol for conflicts
+                    conflict_detected = await self._analyze_symbol_conflicts(symbol)
+                    if conflict_detected:
+                        conflicts_resolved += 1
 
                     symbols_analyzed.add(symbol)
 
             if conflicts_resolved > 0:
                 self.coordination_metrics["conflicts_resolved"] += conflicts_resolved
 
+        except (ConnectionError, TimeoutError) as e:
+            self._logger.warning(f"Position conflict detection network error: {e}")
+        except ValidationError as e:
+            self._logger.error(f"Position conflict detection validation error: {e}")
         except Exception as e:
-            self.logger.warning(f"Position conflict detection error: {e}")
+            self._logger.error(f"Position conflict detection unexpected error: {e}")
+            await self.error_handler.handle_error(
+                e, {"component": "bot_coordinator", "operation": "position_conflict_detection"}
+            )
+
+    async def _analyze_symbol_conflicts(self, symbol: str) -> bool:
+        """Analyze a specific symbol for position conflicts across bots."""
+        buy_exposure = Decimal("0")
+        sell_exposure = Decimal("0")
+
+        # Calculate exposures across all bots for this symbol
+        for _check_bot_id, check_positions in self.bot_positions.items():
+            for _check_pos_key, check_position in check_positions.items():
+                if check_position["symbol"] == symbol:
+                    if check_position["side"] == "buy":
+                        buy_exposure += check_position["quantity"]
+                    else:
+                        sell_exposure += check_position["quantity"]
+
+        # Check for excessive opposing positions
+        if buy_exposure > 0 and sell_exposure > 0:
+            conflict_ratio = min(buy_exposure, sell_exposure) / max(buy_exposure, sell_exposure)
+            if conflict_ratio > 0.5:  # Significant opposing positions
+                self._logger.warning(
+                    "Position conflict detected",
+                    symbol=symbol,
+                    buy_exposure=float(buy_exposure),
+                    sell_exposure=float(sell_exposure),
+                    conflict_ratio=float(conflict_ratio),
+                )
+                return True
+
+        return False
 
     async def _cleanup_expired_signals(self) -> None:
         """Clean up expired shared signals."""
@@ -768,7 +836,7 @@ class BotCoordinator:
 
         cleaned_count = initial_count - len(self.shared_signals)
         if cleaned_count > 0:
-            self.logger.debug(f"Cleaned up {cleaned_count} expired signals")
+            self._logger.debug(f"Cleaned up {cleaned_count} expired signals")
 
     async def _update_exchange_metrics(self) -> None:
         """Update exchange usage metrics."""
@@ -802,7 +870,7 @@ class BotCoordinator:
         # Log symbols with multiple signals
         for symbol, signals in symbol_signals.items():
             if len(signals) > 1:
-                self.logger.debug(
+                self._logger.debug(
                     "Multiple signals detected for symbol",
                     symbol=symbol,
                     signal_count=len(signals),
@@ -824,7 +892,7 @@ class BotCoordinator:
         ]
 
         if priority_signals:
-            self.logger.debug("Processing priority signals", count=len(priority_signals))
+            self._logger.debug("Processing priority signals", count=len(priority_signals))
 
     async def _update_signal_statistics(self) -> None:
         """Update signal distribution statistics."""
@@ -838,7 +906,7 @@ class BotCoordinator:
                 signal_sources[source] = signal_sources.get(source, 0) + 1
 
         if signal_sources:
-            self.logger.debug(
+            self._logger.debug(
                 "Signal distribution statistics", active_signals_by_source=signal_sources
             )
 
@@ -852,13 +920,13 @@ class BotCoordinator:
         if bot_id not in self.bot_positions:
             self.bot_positions[bot_id] = {}
         self.bot_positions[bot_id][symbol] = position_data
-        self.logger.debug(f"Updated position for bot {bot_id} on {symbol}")
+        self._logger.debug(f"Updated position for bot {bot_id} on {symbol}")
 
     async def remove_bot_position(self, bot_id: str, symbol: str) -> None:
         """Remove bot position data (stub implementation)."""
         if bot_id in self.bot_positions and symbol in self.bot_positions[bot_id]:
             del self.bot_positions[bot_id][symbol]
-            self.logger.debug(f"Removed position for bot {bot_id} on {symbol}")
+            self._logger.debug(f"Removed position for bot {bot_id} on {symbol}")
 
     async def check_position_conflicts(self, symbol: str) -> list[dict[str, Any]]:
         """Check for position conflicts on a symbol (stub implementation)."""
@@ -909,7 +977,7 @@ class BotCoordinator:
 
     async def emergency_coordination(self, emergency_type: str, action: str) -> None:
         """Handle emergency coordination (stub implementation)."""
-        self.logger.warning(f"Emergency coordination triggered: {emergency_type} -> {action}")
+        self._logger.warning(f"Emergency coordination triggered: {emergency_type} -> {action}")
 
         # Add emergency signal to all bots
         emergency_signal = {

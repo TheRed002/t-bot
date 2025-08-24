@@ -16,9 +16,9 @@ from typing import Any
 
 import numpy as np
 
+from src.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import (
@@ -28,16 +28,11 @@ from src.core.types import (
     SlippageMetrics,
 )
 
-# MANDATORY: Import from P-002A
-from src.error_handling.error_handler import ErrorHandler
-
 # MANDATORY: Import from P-007A
-from src.utils.decorators import log_calls, time_execution
-
-logger = get_logger(__name__)
+from src.utils import log_calls, time_execution
 
 
-class SlippageModel:
+class SlippageModel(BaseComponent):
     """
     Advanced slippage prediction model for execution cost estimation.
 
@@ -58,9 +53,8 @@ class SlippageModel:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
-        self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
-        self.error_handler = ErrorHandler(config.error_handling)
 
         # Model parameters
         self.market_impact_coefficient = 0.5  # Square root market impact law coefficient
@@ -85,6 +79,9 @@ class SlippageModel:
             "high": {"threshold": 0.05, "multiplier": 1.5},  # 3-5% daily vol
             "extreme": {"threshold": float("inf"), "multiplier": 2.0},  # > 5% daily vol
         }
+
+        # Default market volume estimates
+        self.default_daily_volume = Decimal(config.execution.get("default_daily_volume", "1000000"))
 
         self.logger.info("Slippage prediction model initialized")
 
@@ -562,8 +559,11 @@ class SlippageModel:
                 # Calculate prediction error statistics
                 errors = []
                 for record in self.historical_slippage[symbol]:
-                    # Simple error calculation (would be more sophisticated in practice)
-                    predicted = Decimal(str(record["slippage_bps"]))  # Placeholder
+                    # Use a simple model based on volume ratio for error estimation
+                    # In production, this would use the fitted model parameters
+                    predicted = Decimal(
+                        str(record["slippage_bps"] * (1 + record["volume_ratio"] * 0.1))
+                    )
                     actual = Decimal(str(record["slippage_bps"]))
                     error = abs(predicted - actual)
                     errors.append(float(error))

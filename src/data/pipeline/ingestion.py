@@ -21,9 +21,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from src.base import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
-from src.core.logging import get_logger
 
 # Import from P-001 core components
 from src.core.types import IngestionMode, MarketData, PipelineStatus, Ticker
@@ -46,9 +46,6 @@ from src.error_handling.recovery_scenarios import (
 
 # Import from P-007A utilities
 from src.utils.decorators import retry
-
-logger = get_logger(__name__)
-
 
 # IngestionMode and PipelineStatus are now imported from core.types
 
@@ -81,7 +78,7 @@ class IngestionMetrics:
     last_update_time: datetime
 
 
-class DataIngestionPipeline:
+class DataIngestionPipeline(BaseComponent):
     """
     Comprehensive data ingestion pipeline for multi-source data collection.
 
@@ -96,9 +93,8 @@ class DataIngestionPipeline:
         Args:
             config: Application configuration
         """
+        super().__init__()  # Initialize BaseComponent
         self.config = config
-
-        # Initialize error handling components
         self.error_handler = ErrorHandler(config)
         self.recovery_scenario = DataFeedInterruptionRecovery(config)
         self.network_recovery = NetworkDisconnectionRecovery(config)
@@ -163,7 +159,7 @@ class DataIngestionPipeline:
         self.error_count = 0
         self.last_error_time = None
 
-        logger.info("DataIngestionPipeline initialized", config=config)
+        self.logger.info("DataIngestionPipeline initialized", config=config)
 
     async def initialize(self) -> None:
         """Initialize data sources and connections."""
@@ -232,7 +228,7 @@ class DataIngestionPipeline:
                     },
                 )
 
-            logger.info("DataIngestionPipeline initialized successfully")
+            self.logger.info("DataIngestionPipeline initialized successfully")
 
         except Exception as e:
             # Use ErrorHandler for initialization errors
@@ -243,17 +239,17 @@ class DataIngestionPipeline:
                 details={"stage": "initialization", "sources": self.ingestion_config.sources},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to initialize DataIngestionPipeline: {e!s}")
+            self.logger.error(f"Failed to initialize DataIngestionPipeline: {e!s}")
             raise DataSourceError(f"Pipeline initialization failed: {e!s}")
 
     async def start(self) -> None:
         """Start the data ingestion pipeline."""
         try:
             if self.status == PipelineStatus.RUNNING:
-                logger.warning("Pipeline is already running")
+                self.logger.warning("Pipeline is already running")
                 return
 
             # Check connection health before starting
@@ -265,7 +261,7 @@ class DataIngestionPipeline:
             ]
 
             if unhealthy_connections:
-                logger.warning(f"Unhealthy connections detected: {unhealthy_connections}")
+                self.logger.warning(f"Unhealthy connections detected: {unhealthy_connections}")
                 # Attempt to reconnect unhealthy connections
                 for conn_id in unhealthy_connections:
                     await self.connection_manager.reconnect_connection(conn_id)
@@ -285,7 +281,7 @@ class DataIngestionPipeline:
             # Start metrics collection task
             self.active_tasks["metrics_collector"] = asyncio.create_task(self._collect_metrics())
 
-            logger.info("DataIngestionPipeline started successfully")
+            self.logger.info("DataIngestionPipeline started successfully")
 
         except Exception as e:
             # Use ErrorHandler for start errors
@@ -296,11 +292,11 @@ class DataIngestionPipeline:
                 details={"stage": "startup", "mode": self.ingestion_config.mode.value},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.status = PipelineStatus.ERROR
-            logger.error(f"Failed to start DataIngestionPipeline: {e!s}")
+            self.logger.error(f"Failed to start DataIngestionPipeline: {e!s}")
             raise DataSourceError(f"Pipeline start failed: {e!s}")
 
     async def _start_real_time_ingestion(self) -> None:
@@ -313,21 +309,21 @@ class DataIngestionPipeline:
                     self.active_tasks[task_name] = asyncio.create_task(
                         self._ingest_market_data_real_time(symbol)
                     )
-                logger.info("Real-time market data ingestion started")
+                self.logger.info("Real-time market data ingestion started")
 
             # News data real-time ingestion
             if self.news_data_source:
                 self.active_tasks["news_data"] = asyncio.create_task(
                     self._ingest_news_data_real_time()
                 )
-                logger.info("Real-time news data ingestion started")
+                self.logger.info("Real-time news data ingestion started")
 
             # Social media real-time ingestion
             if self.social_media_source:
                 self.active_tasks["social_media"] = asyncio.create_task(
                     self._ingest_social_data_real_time()
                 )
-                logger.info("Real-time social media ingestion started")
+                self.logger.info("Real-time social media ingestion started")
 
         except Exception as e:
             # Use ErrorHandler for real-time ingestion start errors
@@ -345,10 +341,10 @@ class DataIngestionPipeline:
                 },
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to start real-time ingestion: {e!s}")
+            self.logger.error(f"Failed to start real-time ingestion: {e!s}")
             raise
 
     async def _start_batch_ingestion(self) -> None:
@@ -359,14 +355,14 @@ class DataIngestionPipeline:
                 self.active_tasks["alternative_data"] = asyncio.create_task(
                     self._ingest_alternative_data_batch()
                 )
-                logger.info("Batch alternative data ingestion started")
+                self.logger.info("Batch alternative data ingestion started")
 
             # Historical market data batch ingestion
             if self.market_data_source:
                 self.active_tasks["historical_market_data"] = asyncio.create_task(
                     self._ingest_historical_market_data()
                 )
-                logger.info("Batch historical market data ingestion started")
+                self.logger.info("Batch historical market data ingestion started")
 
         except Exception as e:
             # Use ErrorHandler for batch ingestion start errors
@@ -384,10 +380,10 @@ class DataIngestionPipeline:
                 },
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to start batch ingestion: {e!s}")
+            self.logger.error(f"Failed to start batch ingestion: {e!s}")
             raise
 
     @retry(max_attempts=3, base_delay=1.0)
@@ -401,7 +397,7 @@ class DataIngestionPipeline:
                 callback=lambda ticker: self._handle_market_data(ticker, symbol),
             )
 
-            logger.info(f"Started real-time market data ingestion for {symbol}")
+            self.logger.info(f"Started real-time market data ingestion for {symbol}")
 
             # Keep the task alive
             while self.status == PipelineStatus.RUNNING:
@@ -417,10 +413,10 @@ class DataIngestionPipeline:
                 details={"data_type": "market_data", "mode": "real_time", "exchange": "binance"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Real-time market data ingestion failed for {symbol}: {e!s}")
+            self.logger.error(f"Real-time market data ingestion failed for {symbol}: {e!s}")
             self.metrics.failed_ingestions += 1
             raise
 
@@ -452,10 +448,10 @@ class DataIngestionPipeline:
                         details={"data_type": "news_data", "mode": "real_time"},
                     )
 
-                    self.error_handler.handle_error(error_context)
+                    await self.error_handler.handle_error(e, error_context)
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                    logger.warning(f"News data ingestion failed: {e!s}")
+                    self.logger.warning(f"News data ingestion failed: {e!s}")
                     self.metrics.failed_ingestions += 1
                     await asyncio.sleep(60)  # Wait before retry
 
@@ -468,10 +464,10 @@ class DataIngestionPipeline:
                 details={"data_type": "news_data", "mode": "real_time", "severity": "fatal"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Fatal error in news data ingestion: {e!s}")
+            self.logger.error(f"Fatal error in news data ingestion: {e!s}")
 
     async def _ingest_social_data_real_time(self) -> None:
         """Ingest real-time social media data."""
@@ -500,10 +496,10 @@ class DataIngestionPipeline:
                         details={"data_type": "social_media", "mode": "real_time"},
                     )
 
-                    self.error_handler.handle_error(error_context)
+                    await self.error_handler.handle_error(e, error_context)
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                    logger.warning(f"Social media data ingestion failed: {e!s}")
+                    self.logger.warning(f"Social media data ingestion failed: {e!s}")
                     self.metrics.failed_ingestions += 1
                     await asyncio.sleep(60)  # Wait before retry
 
@@ -516,10 +512,10 @@ class DataIngestionPipeline:
                 details={"data_type": "social_media", "mode": "real_time", "severity": "fatal"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Fatal error in social media data ingestion: {e!s}")
+            self.logger.error(f"Fatal error in social media data ingestion: {e!s}")
 
     async def _ingest_alternative_data_batch(self) -> None:
         """Ingest alternative data in batch mode."""
@@ -535,7 +531,7 @@ class DataIngestionPipeline:
                         self._add_to_buffer("alternative_data", data_point)
 
                     self.metrics.successful_ingestions += len(economic_data)
-                    logger.info(f"Ingested {len(economic_data)} alternative data points")
+                    self.logger.info(f"Ingested {len(economic_data)} alternative data points")
 
                     # Run once per day
                     await asyncio.sleep(24 * 60 * 60)  # 24 hours
@@ -549,10 +545,10 @@ class DataIngestionPipeline:
                         details={"data_type": "alternative_data", "mode": "batch"},
                     )
 
-                    self.error_handler.handle_error(error_context)
+                    await self.error_handler.handle_error(e, error_context)
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                    logger.warning(f"Alternative data ingestion failed: {e!s}")
+                    self.logger.warning(f"Alternative data ingestion failed: {e!s}")
                     self.metrics.failed_ingestions += 1
                     await asyncio.sleep(60 * 60)  # Wait 1 hour before retry
 
@@ -565,10 +561,10 @@ class DataIngestionPipeline:
                 details={"data_type": "alternative_data", "mode": "batch", "severity": "fatal"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Fatal error in alternative data ingestion: {e!s}")
+            self.logger.error(f"Fatal error in alternative data ingestion: {e!s}")
 
     async def _ingest_historical_market_data(self) -> None:
         """Ingest historical market data in batch mode."""
@@ -592,7 +588,7 @@ class DataIngestionPipeline:
                         self._add_to_buffer("market_data", data_point)
 
                     self.metrics.successful_ingestions += len(historical_data)
-                    logger.info(
+                    self.logger.info(
                         f"Ingested {len(historical_data)} historical data points for {symbol}"
                     )
 
@@ -611,10 +607,10 @@ class DataIngestionPipeline:
                         },
                     )
 
-                    self.error_handler.handle_error(error_context)
+                    await self.error_handler.handle_error(e, error_context)
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                    logger.warning(f"Failed to ingest historical data for {symbol}: {e!s}")
+                    self.logger.warning(f"Failed to ingest historical data for {symbol}: {e!s}")
                     self.metrics.failed_ingestions += 1
                     continue
 
@@ -627,10 +623,10 @@ class DataIngestionPipeline:
                 details={"data_type": "market_data", "mode": "batch", "severity": "fatal"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Historical market data ingestion failed: {e!s}")
+            self.logger.error(f"Historical market data ingestion failed: {e!s}")
             raise
 
     def _handle_market_data(self, ticker: Ticker, symbol: str) -> None:
@@ -667,10 +663,12 @@ class DataIngestionPipeline:
                         details={"data_type": "market_data", "callback_type": "market_data"},
                     )
 
-                    self.error_handler.handle_error(error_context)
+                    # Note: handle_error is async but this function is sync
+                    # TODO: Consider making this function async or using asyncio.create_task()
+                    # self.error_handler.handle_error(e, error_context)
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                    logger.warning(f"Market data callback failed: {e!s}")
+                    self.logger.warning(f"Market data callback failed: {e!s}")
 
         except Exception as e:
             # Use ErrorHandler for market data handling errors
@@ -682,10 +680,12 @@ class DataIngestionPipeline:
                 details={"data_type": "market_data", "stage": "data_handling"},
             )
 
-            self.error_handler.handle_error(error_context)
+            # Note: handle_error is async but this function is sync
+            # TODO: Consider making this function async or using asyncio.create_task()
+            # self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to handle market data for {symbol}: {e!s}")
+            self.logger.error(f"Failed to handle market data for {symbol}: {e!s}")
             self.metrics.failed_ingestions += 1
 
     def _add_to_buffer(self, source: str, data: Any) -> None:
@@ -720,10 +720,12 @@ class DataIngestionPipeline:
                 },
             )
 
-            self.error_handler.handle_error(error_context)
+            # Note: handle_error is async but this function is sync
+            # TODO: Consider making this function async or using asyncio.create_task()
+            # self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to add data to buffer {source}: {e!s}")
+            self.logger.error(f"Failed to add data to buffer {source}: {e!s}")
 
     async def _process_buffers(self) -> None:
         """Process data buffers and persist to storage."""
@@ -737,7 +739,9 @@ class DataIngestionPipeline:
                             self.data_buffers[source] = buffer[self.ingestion_config.batch_size :]
 
                             # Process batch (placeholder for storage integration)
-                            logger.debug(f"Processing batch of {len(batch)} items from {source}")
+                            self.logger.debug(
+                                f"Processing batch of {len(batch)} items from {source}"
+                            )
 
                             # Update metrics
                             self.metrics.total_records_processed += len(batch)
@@ -755,10 +759,12 @@ class DataIngestionPipeline:
                                 },
                             )
 
-                            self.error_handler.handle_error(error_context)
+                            await self.error_handler.handle_error(e, error_context)
                             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                            logger.error(f"Failed to process buffer batch from {source}: {e!s}")
+                            self.logger.error(
+                                f"Failed to process buffer batch from {source}: {e!s}"
+                            )
 
                 await asyncio.sleep(1)  # Check buffers every second
 
@@ -771,10 +777,10 @@ class DataIngestionPipeline:
                 details={"stage": "buffer_processing", "severity": "fatal"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Fatal error in buffer processing: {e!s}")
+            self.logger.error(f"Fatal error in buffer processing: {e!s}")
 
     async def _collect_metrics(self) -> None:
         """Collect and update pipeline metrics."""
@@ -817,10 +823,10 @@ class DataIngestionPipeline:
                         details={"stage": "metrics_collection"},
                     )
 
-                    self.error_handler.handle_error(error_context)
+                    await self.error_handler.handle_error(e, error_context)
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
-                    logger.warning(f"Metrics collection failed: {e!s}")
+                    self.logger.warning(f"Metrics collection failed: {e!s}")
                     await asyncio.sleep(60)  # Wait before retry
 
         except Exception as e:
@@ -832,19 +838,19 @@ class DataIngestionPipeline:
                 details={"stage": "metrics_collection", "severity": "fatal"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Fatal error in metrics collection: {e!s}")
+            self.logger.error(f"Fatal error in metrics collection: {e!s}")
 
     async def pause(self) -> None:
         """Pause the data ingestion pipeline."""
         try:
             if self.status == PipelineStatus.RUNNING:
                 self.status = PipelineStatus.PAUSED
-                logger.info("DataIngestionPipeline paused")
+                self.logger.info("DataIngestionPipeline paused")
             else:
-                logger.warning("Pipeline is not running, cannot pause")
+                self.logger.warning("Pipeline is not running, cannot pause")
 
         except Exception as e:
             # Use ErrorHandler for pause errors
@@ -855,19 +861,19 @@ class DataIngestionPipeline:
                 details={"current_status": self.status.value},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to pause pipeline: {e!s}")
+            self.logger.error(f"Failed to pause pipeline: {e!s}")
 
     async def resume(self) -> None:
         """Resume the data ingestion pipeline."""
         try:
             if self.status == PipelineStatus.PAUSED:
                 self.status = PipelineStatus.RUNNING
-                logger.info("DataIngestionPipeline resumed")
+                self.logger.info("DataIngestionPipeline resumed")
             else:
-                logger.warning("Pipeline is not paused, cannot resume")
+                self.logger.warning("Pipeline is not paused, cannot resume")
 
         except Exception as e:
             # Use ErrorHandler for resume errors
@@ -878,10 +884,10 @@ class DataIngestionPipeline:
                 details={"current_status": self.status.value},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to resume pipeline: {e!s}")
+            self.logger.error(f"Failed to resume pipeline: {e!s}")
 
     async def stop(self) -> None:
         """Stop the data ingestion pipeline."""
@@ -914,10 +920,10 @@ class DataIngestionPipeline:
                 if self.alternative_data_source:
                     await self.alternative_data_source.cleanup()
 
-                logger.info("DataIngestionPipeline stopped successfully")
+                self.logger.info("DataIngestionPipeline stopped successfully")
 
             else:
-                logger.warning("Pipeline is not running, cannot stop")
+                self.logger.warning("Pipeline is not running, cannot stop")
 
         except Exception as e:
             # Use ErrorHandler for stop errors
@@ -931,19 +937,19 @@ class DataIngestionPipeline:
                 },
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to stop pipeline: {e!s}")
+            self.logger.error(f"Failed to stop pipeline: {e!s}")
 
     def register_callback(self, data_type: str, callback: Callable[[Any], None]) -> None:
         """Register a callback for data updates."""
         try:
             if data_type in self.data_callbacks:
                 self.data_callbacks[data_type].append(callback)
-                logger.info(f"Registered callback for {data_type}")
+                self.logger.info(f"Registered callback for {data_type}")
             else:
-                logger.warning(f"Unknown data type: {data_type}")
+                self.logger.warning(f"Unknown data type: {data_type}")
 
         except Exception as e:
             # Use ErrorHandler for callback registration errors
@@ -954,10 +960,12 @@ class DataIngestionPipeline:
                 details={"data_type": data_type, "callback_type": type(callback).__name__},
             )
 
-            self.error_handler.handle_error(error_context)
+            # Note: handle_error is async but this function is sync
+            # TODO: Consider making this function async or using asyncio.create_task()
+            # self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to register callback for {data_type}: {e!s}")
+            self.logger.error(f"Failed to register callback for {data_type}: {e!s}")
 
     def get_status(self) -> dict[str, Any]:
         """Get pipeline status and metrics."""
@@ -1009,10 +1017,12 @@ class DataIngestionPipeline:
                 details={"operation": "status_retrieval"},
             )
 
-            self.error_handler.handle_error(error_context)
+            # Note: handle_error is async but this function is sync
+            # TODO: Consider making this function async or using asyncio.create_task()
+            # self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Failed to get pipeline status: {e!s}")
+            self.logger.error(f"Failed to get pipeline status: {e!s}")
             return {
                 "error": str(e),
                 "error_id": error_context.error_id,
@@ -1036,7 +1046,7 @@ class DataIngestionPipeline:
             # Clear active tasks
             self.active_tasks.clear()
 
-            logger.info("DataIngestionPipeline cleanup completed")
+            self.logger.info("DataIngestionPipeline cleanup completed")
 
         except Exception as e:
             # Use ErrorHandler for cleanup errors
@@ -1047,7 +1057,7 @@ class DataIngestionPipeline:
                 details={"operation": "cleanup"},
             )
 
-            self.error_handler.handle_error(error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
-            logger.error(f"Error during pipeline cleanup: {e!s}")
+            self.logger.error(f"Error during pipeline cleanup: {e!s}")

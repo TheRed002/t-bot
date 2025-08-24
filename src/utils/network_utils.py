@@ -51,13 +51,14 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
         ValidationError: If connection fails
     """
     try:
-        start_time = asyncio.get_event_loop().time()
+        loop = asyncio.get_running_loop()
+        start_time = loop.time()
 
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port), timeout=timeout
         )
 
-        end_time = asyncio.get_event_loop().time()
+        end_time = loop.time()
         latency_ms = (end_time - start_time) * 1000
 
         writer.close()
@@ -111,7 +112,9 @@ async def ping_host(host: str, count: int = 3, port: int = 80) -> dict[str, Any]
         return {"host": host, "success": False, "error": str(e)}
 
 
-async def check_multiple_hosts(hosts: list, timeout: float = 5.0) -> dict[str, bool]:
+async def check_multiple_hosts(
+    hosts: list[tuple[str, int]], timeout: float = 5.0
+) -> dict[str, bool]:
     """
     Check connectivity to multiple hosts in parallel.
 
@@ -200,9 +203,10 @@ async def wait_for_service(
     Returns:
         True if service became available, False if timeout
     """
-    start_time = asyncio.get_event_loop().time()
+    loop = asyncio.get_running_loop()
+    start_time = loop.time()
 
-    while asyncio.get_event_loop().time() - start_time < max_wait:
+    while loop.time() - start_time < max_wait:
         if await test_connection(host, port, timeout=2.0):
             logger.info(f"Service {host}:{port} is now available")
             return True

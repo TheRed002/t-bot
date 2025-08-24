@@ -14,15 +14,11 @@ import yaml
 
 from src.core.exceptions import ConfigurationError
 from src.core.logging import get_logger
-
 # MANDATORY: Import from P-001
 from src.core.types import StrategyConfig, StrategyType
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
-from src.utils.validators import validate_strategy_config
-
-logger = get_logger(__name__)
 
 
 class StrategyConfigurationManager:
@@ -36,11 +32,14 @@ class StrategyConfigurationManager:
         """
         self.config_dir = Path(config_dir)
         self.config_dir.mkdir(parents=True, exist_ok=True)
+        self.logger = get_logger(__name__)
 
         # Default configurations for different strategy types
         self._default_configs = self._initialize_default_configs()
 
-        logger.info("Strategy configuration manager initialized", config_dir=str(self.config_dir))
+        self.logger.info(
+            "Strategy configuration manager initialized", config_dir=str(self.config_dir)
+        )
 
     def _initialize_default_configs(self) -> dict[str, dict[str, Any]]:
         """Initialize default configurations for different strategy types.
@@ -124,7 +123,7 @@ class StrategyConfigurationManager:
             config_file = self.config_dir / f"{strategy_name}.yaml"
             if config_file.exists():
                 config_data = self._load_config_file(config_file)
-                logger.info(
+                self.logger.info(
                     "Loaded strategy config from file",
                     strategy_name=strategy_name,
                     config_file=str(config_file),
@@ -132,10 +131,7 @@ class StrategyConfigurationManager:
             else:
                 # Use default configuration
                 config_data = self._get_default_config(strategy_name)
-                logger.info("Using default strategy config", strategy_name=strategy_name)
-
-            # Validate configuration
-            validate_strategy_config(config_data)
+                self.logger.info("Using default strategy config", strategy_name=strategy_name)
 
             # Create config object
             config = StrategyConfig(**config_data)
@@ -143,7 +139,7 @@ class StrategyConfigurationManager:
             return config
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Failed to load strategy config", strategy_name=strategy_name, error=str(e)
             )
             raise ConfigurationError(f"Failed to load configuration for {strategy_name}: {e!s}")
@@ -214,12 +210,12 @@ class StrategyConfigurationManager:
             with open(config_file, "w") as f:
                 yaml.dump(config_dict, f, default_flow_style=False, indent=2)
 
-            logger.info(
+            self.logger.info(
                 "Strategy config saved", strategy_name=strategy_name, config_file=str(config_file)
             )
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Failed to save strategy config", strategy_name=strategy_name, error=str(e)
             )
             raise ConfigurationError(f"Failed to save configuration for {strategy_name}: {e!s}")
@@ -235,10 +231,11 @@ class StrategyConfigurationManager:
             True if valid, False otherwise
         """
         try:
-            validate_strategy_config(config)
+            # Basic validation - let Pydantic handle it
+            StrategyConfig(**config)
             return True
         except Exception as e:
-            logger.warning("Configuration validation failed", error=str(e))
+            self.logger.warning("Configuration validation failed", error=str(e))
             return False
 
     def get_available_strategies(self) -> list[str]:
@@ -300,7 +297,7 @@ class StrategyConfigurationManager:
                     # Save updated config
                     updated_config = StrategyConfig(**config_dict)
                     self.save_strategy_config(strategy_name, updated_config)
-                    logger.info(
+                    self.logger.info(
                         "Config parameter updated",
                         strategy_name=strategy_name,
                         parameter=parameter,
@@ -308,14 +305,14 @@ class StrategyConfigurationManager:
                     )
                     return True
                 else:
-                    logger.error(
+                    self.logger.error(
                         "Invalid configuration after parameter update",
                         strategy_name=strategy_name,
                         parameter=parameter,
                     )
                     return False
             else:
-                logger.error(
+                self.logger.error(
                     "Parameter not found in config",
                     strategy_name=strategy_name,
                     parameter=parameter,
@@ -323,7 +320,7 @@ class StrategyConfigurationManager:
                 return False
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Failed to update config parameter",
                 strategy_name=strategy_name,
                 parameter=parameter,
@@ -361,14 +358,11 @@ class StrategyConfigurationManager:
                 }
             )
 
-            # Validate configuration
-            validate_strategy_config(config_data)
-
             # Create and save configuration
             config = StrategyConfig(**config_data)
             self.save_strategy_config(strategy_name, config)
 
-            logger.info(
+            self.logger.info(
                 "Strategy config created",
                 strategy_name=strategy_name,
                 strategy_type=(
@@ -379,7 +373,7 @@ class StrategyConfigurationManager:
             return config
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Failed to create strategy config", strategy_name=strategy_name, error=str(e)
             )
             raise ConfigurationError(f"Failed to create configuration for {strategy_name}: {e!s}")
@@ -397,20 +391,20 @@ class StrategyConfigurationManager:
             config_file = self.config_dir / f"{strategy_name}.yaml"
             if config_file.exists():
                 config_file.unlink()
-                logger.info(
+                self.logger.info(
                     "Strategy config deleted",
                     strategy_name=strategy_name,
                     config_file=str(config_file),
                 )
                 return True
             else:
-                logger.warning(
+                self.logger.warning(
                     "Strategy config file not found for deletion", strategy_name=strategy_name
                 )
                 return False
 
         except Exception as e:
-            logger.error(
+            self.logger.error(
                 "Failed to delete strategy config", strategy_name=strategy_name, error=str(e)
             )
             return False

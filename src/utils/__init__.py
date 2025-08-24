@@ -60,6 +60,14 @@ from .constants import (
     TIMEOUTS,
     TRADING_PAIRS,
 )
+from .decimal_utils import (
+    ONE,
+    ZERO,
+    clamp_decimal,
+    format_decimal,
+    safe_divide,
+    to_decimal,
+)
 from .decorators import (
     UnifiedDecorator,
     api_throttle,
@@ -78,6 +86,7 @@ from .decorators import (
     rate_limit,
     redis_cache,
     retry,
+    robust,
     time_execution,
     timeout,
     ttl_cache,
@@ -135,6 +144,7 @@ from .helpers import (
     parse_trading_pair,
     ping_host,
     round_to_precision,
+    round_to_precision_decimal,
     # File operations
     safe_read_file,
     safe_write_file,
@@ -144,20 +154,25 @@ from .helpers import (
     test_connection,
 )
 from .validation import (
+    # Framework and service exports
+    ValidationFramework,
+    ValidationService,
+    validate_batch,
+    validate_exchange_credentials,
     # Core validation exports
     validate_order,
     validate_price,
     validate_quantity,
-    validate_symbol,
-    validate_exchange_credentials,
     validate_risk_parameters,
     validate_strategy_params,
+    validate_symbol,
     validate_timeframe,
-    validate_batch,
-    # Framework and service exports
-    ValidationFramework,
-    ValidationService,
     validator,
+)
+from .validators import (
+    # Standalone validation functions for backward compatibility
+    validate_decimal,
+    validate_positive_number,
 )
 
 __all__ = [
@@ -174,6 +189,7 @@ __all__ = [
     "MARKET_HOURS",
     "MAXIMUM_AMOUNTS",
     "MINIMUM_AMOUNTS",
+    "ONE",
     "PRECISION_LEVELS",
     "RATE_LIMITS",
     "SETTLEMENT_TIMES",
@@ -181,8 +197,14 @@ __all__ = [
     "THRESHOLDS",
     "TIMEOUTS",
     "TRADING_PAIRS",
+    "ZERO",
+    "UnifiedDecorator",
+    # Validation framework
+    "ValidationFramework",
+    "ValidationService",
     "api_throttle",
     "cache_result",
+    "cached",
     "calculate_correlation",
     "calculate_max_drawdown",
     # Helpers
@@ -190,15 +212,18 @@ __all__ = [
     "calculate_var",
     "calculate_volatility",
     "circuit_breaker",
+    "clamp_decimal",
     "convert_currency",
     "convert_timezone",
     "cpu_usage",
+    "dec",
     "format_api_response",
     "format_chart_data",
     "format_correlation_id",
     "format_csv_data",
     # Formatters
     "format_currency",
+    "format_decimal",
     "format_error_response",
     "format_excel_data",
     "format_indicator_data",
@@ -221,8 +246,10 @@ __all__ = [
     "log_calls",
     "log_errors",
     "log_performance",
+    "logged",
     "measure_latency",
     "memory_usage",
+    "monitored",
     "normalize_price",
     "parse_datetime",
     "parse_trading_pair",
@@ -230,7 +257,10 @@ __all__ = [
     "rate_limit",
     "redis_cache",
     "retry",
+    "robust",
     "round_to_precision",
+    "round_to_precision_decimal",
+    "safe_divide",
     "safe_read_file",
     "safe_write_file",
     "sanitize_symbol",
@@ -238,23 +268,24 @@ __all__ = [
     # Decorators
     "time_execution",
     "timeout",
+    "to_decimal",
     "ttl_cache",
     "type_check",
+    "validate_batch",
+    "validate_decimal",
+    "validate_exchange_credentials",
     "validate_input",
-    "validate_output",
     # Validators - core validation exports
     "validate_order",
+    "validate_output",
+    "validate_positive_number",
     "validate_price",
     "validate_quantity",
-    "validate_symbol",
-    "validate_exchange_credentials",
     "validate_risk_parameters",
     "validate_strategy_params",
+    "validate_symbol",
     "validate_timeframe",
-    "validate_batch",
-    # Validation framework
-    "ValidationFramework",
-    "ValidationService",
+    "validated",
     "validator",
 ]
 

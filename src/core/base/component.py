@@ -9,7 +9,7 @@ health checks, and monitoring capabilities.
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.core.base.interfaces import (
@@ -153,7 +153,7 @@ class BaseComponent(
         """Get component uptime in seconds."""
         if not self._start_time:
             return 0.0
-        end_time = self._stop_time or datetime.utcnow()
+        end_time = self._stop_time or datetime.now(timezone.utc)
         return (end_time - self._start_time).total_seconds()
 
     # Lifecycle Management
@@ -173,7 +173,7 @@ class BaseComponent(
             return
 
         self._is_starting = True
-        self._start_time = datetime.utcnow()
+        self._start_time = datetime.now(timezone.utc)
 
         try:
             self._logger.info("Starting component", name=self._name)
@@ -219,7 +219,7 @@ class BaseComponent(
             return
 
         self._is_stopping = True
-        self._stop_time = datetime.utcnow()
+        self._stop_time = datetime.now(timezone.utc)
 
         try:
             self._logger.info("Stopping component", name=self._name)
@@ -273,7 +273,7 @@ class BaseComponent(
             HealthCheckResult: Current health status
         """
         self._metrics["health_check_count"] += 1
-        check_time = datetime.utcnow()
+        check_time = datetime.now(timezone.utc)
 
         try:
             # Basic health checks
@@ -352,9 +352,9 @@ class BaseComponent(
         """
         try:
             # Basic responsiveness test
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
             await asyncio.sleep(0.001)  # Minimal async operation
-            response_time = (datetime.utcnow() - start_time).total_seconds()
+            response_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             if response_time > 1.0:  # More than 1 second is concerning
                 return HealthCheckResult(

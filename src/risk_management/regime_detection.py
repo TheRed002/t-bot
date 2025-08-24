@@ -13,8 +13,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.core.base.component import BaseComponent
 from src.core.exceptions import RiskManagementError
-from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, MarketRegime, RegimeChangeEvent
@@ -23,10 +23,8 @@ from src.core.types import MarketData, MarketRegime, RegimeChangeEvent
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
 
-logger = get_logger(__name__)
 
-
-class MarketRegimeDetector:
+class MarketRegimeDetector(BaseComponent):
     """
     Market regime detection and classification system.
 
@@ -36,7 +34,7 @@ class MarketRegimeDetector:
 
     def __init__(self, config: dict[str, Any]):
         """Initialize market regime detector with configuration."""
-        self.config = config
+        super().__init__()  # Initialize BaseComponent
         self.volatility_window = config.get("volatility_window", 20)
         self.trend_window = config.get("trend_window", 50)
         self.correlation_window = config.get("correlation_window", 30)
@@ -54,8 +52,8 @@ class MarketRegimeDetector:
 
         # Correlation thresholds
         self.correlation_thresholds = {
-            MarketRegime.LOW_CORRELATION: 0.3,
-            MarketRegime.HIGH_CORRELATION: 0.7,
+            "low_correlation": 0.3,
+            "high_correlation": 0.7,
         }
 
         # State tracking
@@ -64,7 +62,7 @@ class MarketRegimeDetector:
         self.price_data: dict[str, list[float]] = {}
         self.last_update = datetime.now()
 
-        logger.info(
+        self.logger.info(
             "Market regime detector initialized",
             volatility_window=self.volatility_window,
             trend_window=self.trend_window,
@@ -84,7 +82,7 @@ class MarketRegimeDetector:
         """
         try:
             if len(price_data) < self.volatility_window:
-                logger.warning(
+                self.logger.warning(
                     "Insufficient data for volatility regime detection",
                     symbol=symbol,
                     data_points=len(price_data),
@@ -105,7 +103,7 @@ class MarketRegimeDetector:
             else:
                 regime = MarketRegime.HIGH_VOLATILITY
 
-            logger.debug(
+            self.logger.debug(
                 "Volatility regime detected",
                 symbol=symbol,
                 volatility=volatility,
@@ -115,7 +113,7 @@ class MarketRegimeDetector:
             return regime
 
         except Exception as e:
-            logger.error("Error detecting volatility regime", symbol=symbol, error=str(e))
+            self.logger.error("Error detecting volatility regime", symbol=symbol, error=str(e))
             raise RiskManagementError(f"Volatility regime detection failed: {e!s}")
 
     @time_execution
@@ -132,7 +130,7 @@ class MarketRegimeDetector:
         """
         try:
             if len(price_data) < self.trend_window:
-                logger.warning(
+                self.logger.warning(
                     "Insufficient data for trend regime detection",
                     symbol=symbol,
                     data_points=len(price_data),
@@ -157,7 +155,7 @@ class MarketRegimeDetector:
             else:
                 regime = MarketRegime.TRENDING_DOWN
 
-            logger.debug(
+            self.logger.debug(
                 "Trend regime detected",
                 symbol=symbol,
                 slope=slope,
@@ -168,7 +166,7 @@ class MarketRegimeDetector:
             return regime
 
         except Exception as e:
-            logger.error("Error detecting trend regime", symbol=symbol, error=str(e))
+            self.logger.error("Error detecting trend regime", symbol=symbol, error=str(e))
             raise RiskManagementError(f"Trend regime detection failed: {e!s}")
 
     @time_execution
@@ -187,7 +185,7 @@ class MarketRegimeDetector:
         """
         try:
             if len(symbols) < 2:
-                logger.warning("Insufficient symbols for correlation regime detection")
+                self.logger.warning("Insufficient symbols for correlation regime detection")
                 return MarketRegime.LOW_CORRELATION
 
             # Calculate returns for all symbols
@@ -203,11 +201,11 @@ class MarketRegimeDetector:
                     returns_dict[symbol] = returns
                     min_length = min(min_length, len(returns))
                 else:
-                    logger.warning(f"Insufficient data for symbol {symbol}")
+                    self.logger.warning(f"Insufficient data for symbol {symbol}")
                     return MarketRegime.LOW_CORRELATION
 
             if min_length < 10:  # Minimum data requirement
-                logger.warning("Insufficient data for correlation analysis")
+                self.logger.warning("Insufficient data for correlation analysis")
                 return MarketRegime.LOW_CORRELATION
 
             # Align returns to same length
@@ -229,14 +227,14 @@ class MarketRegimeDetector:
             else:
                 regime = MarketRegime.LOW_CORRELATION
 
-            logger.debug(
+            self.logger.debug(
                 "Correlation regime detected", avg_correlation=avg_correlation, regime=regime.value
             )
 
             return regime
 
         except Exception as e:
-            logger.error("Error detecting correlation regime", error=str(e))
+            self.logger.error("Error detecting correlation regime", error=str(e))
             raise RiskManagementError(f"Correlation regime detection failed: {e!s}")
 
     @time_execution
@@ -252,7 +250,7 @@ class MarketRegimeDetector:
         """
         try:
             if not market_data:
-                logger.warning("No market data provided for regime detection")
+                self.logger.warning("No market data provided for regime detection")
                 return MarketRegime.MEDIUM_VOLATILITY
 
             # Group data by symbol
@@ -289,7 +287,7 @@ class MarketRegimeDetector:
             return comprehensive_regime
 
         except Exception as e:
-            logger.error("Error in comprehensive regime detection", error=str(e))
+            self.logger.error("Error in comprehensive regime detection", error=str(e))
             raise RiskManagementError(f"Comprehensive regime detection failed: {e!s}")
 
     def _combine_regimes(
@@ -374,7 +372,7 @@ class MarketRegimeDetector:
                 self.regime_history.append(event)
                 self.current_regime = new_regime
 
-                logger.warning(
+                self.logger.warning(
                     "Market regime change detected",
                     from_regime=event.from_regime.value,
                     to_regime=new_regime.value,
@@ -382,7 +380,7 @@ class MarketRegimeDetector:
                 )
 
                 # TODO: Remove in production - Debug logging
-                logger.debug("Regime change event created", event_data=event.model_dump())
+                self.logger.debug("Regime change event created", event_data=event.model_dump())
 
     def _calculate_change_confidence(self, new_regime: MarketRegime) -> float:
         """

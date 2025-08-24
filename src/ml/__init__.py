@@ -18,11 +18,11 @@ Dependencies:
 - P-007A: Utility decorators
 """
 
-from .feature_engineering import FeatureEngineer
-from .model_manager import ModelManager
+from .feature_engineering import FeatureEngineeringService
+from .model_manager import ModelManagerService
 
 __version__ = "1.0.0"
 __all__ = [
-    "FeatureEngineer",
-    "ModelManager",
+    "FeatureEngineeringService",
+    "ModelManagerService",
 ]
