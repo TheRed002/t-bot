@@ -359,14 +359,7 @@ class TestMetricsCalculator:
         assert isinstance(rolling_df, pd.DataFrame)
         assert len(rolling_df) == 2
     
-    @patch('src.backtesting.metrics.stats')
-    def test_scipy_import_error_handling(self, mock_stats, calculator, sample_daily_returns):
-        """Test handling of scipy import errors."""
-        mock_stats.skew.side_effect = ImportError("scipy not available")
-        mock_stats.kurtosis.side_effect = ImportError("scipy not available")
-        
-        with pytest.raises(ImportError):
-            calculator._calculate_risk_metrics(sample_daily_returns, 10000.0)
+    # Removed scipy import error test as scipy is now imported at module level
     
     def test_numerical_precision_with_decimals(self, calculator):
         """Test numerical precision with Decimal types."""

@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T-Bot Strategy Playground - Complete Edition</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0a0a0a;
+            color: #ffffff;
+            overflow: hidden;
+        }
+        
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        /* Top Toolbar */
+        .top-toolbar {
+            background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border-bottom: 2px solid #2196f3;
+            box-shadow: 0 2px 10px rgba(33, 150, 243, 0.3);
+            flex-wrap: wrap;
+            min-height: 60px;
+        }
+        
+        .toolbar-section {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        
+        .toolbar-section.config {
+            flex: 1;
+            justify-content: center;
+            min-width: 300px;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #00d2ff 0%, #3a7bd5 100%);
+            color: white;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #f857a6 0%, #ff5858 100%);
+            color: white;
+        }
+        
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .btn-duplicate {
+            background: linear-gradient(135deg, #9333ea 0%, #c026d3 100%);
+            color: white;
+        }
+        
+        .input-field {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        /* Main Content */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        /* Left Sidebar */
+        .sidebar {
+            width: 280px;
+            background: #141414;
+            border-right: 1px solid #333;
+            overflow-y: auto;
+            padding: 10px;
+            transition: transform 0.3s ease;
+            position: relative;
+            z-index: 10;
+        }
+        
+        .sidebar-toggle {
+            display: none;
+            position: fixed;
+            top: 80px;
+            left: 10px;
+            z-index: 20;
+            background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            font-size: 20px;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        
+        @media (max-width: 1024px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 60px;
+                bottom: 0;
+                transform: translateX(-100%);
+                box-shadow: 2px 0 10px rgba(0,0,0,0.5);
+            }
+            
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            
+            .sidebar-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+        }
+        
+        .sidebar-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #2196f3;
+            padding: 10px;
+            background: rgba(33, 150, 243, 0.1);
+            border-radius: 6px;
+            text-align: center;
+        }
+        
+        .component-category {
+            margin-bottom: 10px;
+        }
+        
+        .category-header {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.3s;
+        }
+        
+        .category-header:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .category-header.active {
+            background: rgba(33, 150, 243, 0.2);
+        }
+        
+        .category-title {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .category-arrow {
+            transition: transform 0.3s;
+        }
+        
+        .category-arrow.expanded {
+            transform: rotate(90deg);
+        }
+        
+        .category-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            padding: 0 5px;
+        }
+        
+        .category-content.expanded {
+            max-height: 800px;
+            padding: 10px 5px;
+            overflow-y: auto;
+        }
+        
+        .component-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 8px 12px;
+            margin: 4px 0;
+            border-radius: 6px;
+            cursor: move;
+            transition: all 0.3s;
+            font-size: 12px;
+            border-left: 3px solid transparent;
+        }
+        
+        .component-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(5px);
+        }
+        
+        /* Component colors by type */
+        .component-item.data-source { border-left-color: #4CAF50; }
+        .component-item.technical { border-left-color: #2196F3; }
+        .component-item.ml { border-left-color: #FF9800; }
+        .component-item.risk { border-left-color: #f44336; }
+        .component-item.execution { border-left-color: #9C27B0; }
+        .component-item.portfolio { border-left-color: #00BCD4; }
+        .component-item.monitoring { border-left-color: #FFC107; }
+        .component-item.strategy { border-left-color: #E91E63; }
+        
+        /* Canvas Area */
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background: 
+                radial-gradient(circle at 20% 50%, rgba(33, 150, 243, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(156, 39, 176, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 80%, rgba(0, 188, 212, 0.1) 0%, transparent 50%),
+                #0a0a0a;
+            background-size: cover;
+            overflow: auto;
+        }
+        
+        .canvas {
+            width: 100%;
+            min-height: 100%;
+            position: relative;
+            background-image: 
+                radial-gradient(circle, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+            background-size: 20px 20px;
+            padding: 40px 20px;
+        }
+        
+        /* Pipeline Container - Responsive Grid */
+        .pipeline-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 30px;
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* Responsive breakpoints */
+        @media (min-width: 1400px) {
+            .pipeline-container {
+                grid-template-columns: repeat(7, 1fr);
+            }
+        }
+        
+        @media (min-width: 1200px) and (max-width: 1399px) {
+            .pipeline-container {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+        
+        @media (min-width: 900px) and (max-width: 1199px) {
+            .pipeline-container {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+        
+        @media (min-width: 600px) and (max-width: 899px) {
+            .pipeline-container {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        @media (max-width: 599px) {
+            .pipeline-container {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Stage Container */
+        .stage-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            position: relative;
+        }
+        
+        /* Shape Nodes */
+        .shape-node {
+            width: 100%;
+            max-width: 180px;
+            height: 100px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 12px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            border: 2px solid transparent;
+            background: linear-gradient(135deg, var(--color-1) 0%, var(--color-2) 100%);
+        }
+        
+        .shape-node:hover {
+            transform: translateY(-5px) scale(1.05);
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .shape-node.selected {
+            border-color: #fff;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.5);
+        }
+        
+        /* Different colors for different stages */
+        .shape-node.data-source {
+            --color-1: #4CAF50;
+            --color-2: #45a049;
+        }
+        
+        .shape-node.feature-engineering {
+            --color-1: #2196F3;
+            --color-2: #1976D2;
+        }
+        
+        .shape-node.strategy {
+            --color-1: #FF9800;
+            --color-2: #F57C00;
+        }
+        
+        .shape-node.position-sizing {
+            --color-1: #9C27B0;
+            --color-2: #7B1FA2;
+        }
+        
+        .shape-node.risk-management {
+            --color-1: #f44336;
+            --color-2: #d32f2f;
+        }
+        
+        .shape-node.execution {
+            --color-1: #00BCD4;
+            --color-2: #0097A7;
+        }
+        
+        .shape-node.monitoring {
+            --color-1: #FFC107;
+            --color-2: #FFA000;
+        }
+        
+        .node-icon {
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        
+        .node-title {
+            font-size: 13px;
+            font-weight: 600;
+            text-align: center;
+            padding: 0 10px;
+        }
+        
+        /* Connection Arrows - Responsive */
+        .connection-arrow {
+            position: absolute;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 20px;
+            z-index: 1;
+        }
+        
+        /* Curved connection for row ends */
+        .connection-curve {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            display: none;
+            pointer-events: none;
+        }
+        
+        .connection-curve::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: none;
+            border-left: none;
+            border-radius: 0 0 20px 0;
+        }
+        
+        .connection-curve::after {
+            content: '↓';
+            position: absolute;
+            bottom: -5px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 20px;
+        }
+        
+        /* Horizontal arrows for wide screens (7 columns) */
+        @media (min-width: 1400px) {
+            .connection-arrow.horizontal {
+                right: -25px;
+                top: 35px;
+                display: flex;
+            }
+            .connection-arrow.vertical {
+                display: none;
+            }
+            .connection-curve {
+                display: none;
+            }
+            /* Hide arrow for last item */
+            .stage-container:last-child .connection-arrow {
+                display: none;
+            }
+        }
+        
+        /* 4 column layout */
+        @media (min-width: 1200px) and (max-width: 1399px) {
+            .connection-arrow.horizontal {
+                right: -25px;
+                top: 35px;
+                display: flex;
+            }
+            .connection-arrow.vertical {
+                display: none;
+            }
+            /* Show vertical arrow at end of each row (4th, but not 8th as it's last) */
+            .stage-container:nth-child(4n):not(:last-child) .connection-arrow.horizontal {
+                display: none;
+            }
+            .stage-container:nth-child(4n):not(:last-child) .connection-curve {
+                display: block;
+                right: -20px;
+                bottom: -50px;
+            }
+            /* Hide arrow for last item */
+            .stage-container:last-child .connection-arrow {
+                display: none;
+            }
+        }
+        
+        /* 3 column layout */
+        @media (min-width: 900px) and (max-width: 1199px) {
+            .connection-arrow.horizontal {
+                right: -25px;
+                top: 35px;
+                display: flex;
+            }
+            .connection-arrow.vertical {
+                display: none;
+            }
+            /* Show vertical arrow at end of each row (3rd, 6th) */
+            .stage-container:nth-child(3n):not(:last-child) .connection-arrow.horizontal {
+                display: none;
+            }
+            .stage-container:nth-child(3n):not(:last-child) .connection-curve {
+                display: block;
+                right: -20px;
+                bottom: -50px;
+            }
+            /* Hide arrow for last item */
+            .stage-container:last-child .connection-arrow {
+                display: none;
+            }
+        }
+        
+        /* 2 column layout */
+        @media (min-width: 600px) and (max-width: 899px) {
+            .connection-arrow.horizontal {
+                right: -25px;
+                top: 35px;
+                display: flex;
+            }
+            .connection-arrow.vertical {
+                display: none;
+            }
+            /* Show vertical arrow at end of each row (2nd, 4th, 6th) */
+            .stage-container:nth-child(2n):not(:last-child) .connection-arrow.horizontal {
+                display: none;
+            }
+            .stage-container:nth-child(2n):not(:last-child) .connection-curve {
+                display: block;
+                right: -20px;
+                bottom: -50px;
+            }
+            /* Hide arrow for last item */
+            .stage-container:last-child .connection-arrow {
+                display: none;
+            }
+        }
+        
+        /* Single column layout */
+        @media (max-width: 599px) {
+            .connection-arrow.horizontal {
+                display: none;
+            }
+            .connection-arrow.vertical {
+                bottom: -45px;
+                left: 50%;
+                transform: translateX(-50%) rotate(90deg);
+                display: flex;
+            }
+            .connection-curve {
+                display: none;
+            }
+            /* Hide arrow for last item */
+            .stage-container:last-child .connection-arrow {
+                display: none;
+            }
+        }
+        
+        /* Parameter Summary */
+        .param-summary {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 10px;
+            width: 100%;
+            max-width: 200px;
+            font-size: 11px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .param-summary-title {
+            font-weight: 600;
+            color: #2196f3;
+            margin-bottom: 6px;
+            font-size: 12px;
+        }
+        
+        .param-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 3px 0;
+            padding: 2px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        
+        .param-item:last-child {
+            border-bottom: none;
+        }
+        
+        .param-label {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 10px;
+        }
+        
+        .param-value {
+            color: #fff;
+            font-weight: 500;
+            font-size: 10px;
+            text-align: right;
+        }
+        
+        /* Right Panel */
+        .right-panel {
+            width: 320px;
+            background: #141414;
+            border-left: 1px solid #333;
+            padding: 20px;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+        }
+        
+        @media (max-width: 1200px) {
+            .right-panel {
+                position: fixed;
+                right: 0;
+                top: 60px;
+                bottom: 0;
+                transform: translateX(100%);
+                z-index: 10;
+                box-shadow: -2px 0 10px rgba(0,0,0,0.5);
+            }
+            
+            .right-panel.open {
+                transform: translateX(0);
+            }
+        }
+        
+        .panel-toggle {
+            display: none;
+            position: fixed;
+            top: 80px;
+            right: 10px;
+            z-index: 20;
+            background: linear-gradient(135deg, #9c27b0 0%, #7b1fa2 100%);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            font-size: 20px;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        
+        @media (max-width: 1200px) {
+            .panel-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+        }
+        
+        .panel-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #2196f3;
+        }
+        
+        .config-section {
+            margin-bottom: 25px;
+        }
+        
+        .config-section-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .config-item {
+            margin-bottom: 15px;
+        }
+        
+        .config-label {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 5px;
+        }
+        
+        .config-input {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            color: white;
+            font-size: 14px;
+        }
+        
+        .config-select {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 6px;
+            color: white;
+            font-size: 14px;
+        }
+        
+        .config-select option {
+            background: #1a1a1a;
+        }
+        
+        .config-slider {
+            width: 100%;
+            margin-top: 5px;
+        }
+        
+        .slider-value {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: 5px;
+        }
+        
+        /* Notification */
+        .notification {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+            display: none;
+            animation: slideIn 0.3s ease-out;
+            z-index: 1000;
+        }
+        
+        .notification.show {
+            display: block;
+        }
+        
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            .top-toolbar {
+                padding: 10px;
+                gap: 10px;
+            }
+            
+            .btn {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+            
+            .btn span:last-child {
+                display: none;
+            }
+            
+            .toolbar-section.config {
+                min-width: 100%;
+                order: 3;
+            }
+            
+            .canvas {
+                padding: 20px 10px;
+            }
+            
+            .pipeline-container {
+                padding: 15px;
+                gap: 20px;
+            }
+            
+            .shape-node {
+                height: 90px;
+            }
+            
+            .node-icon {
+                font-size: 24px;
+            }
+            
+            .node-title {
+                font-size: 12px;
+            }
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Toolbar -->
+        <div class="top-toolbar">
+            <div class="toolbar-section">
+                <button class="btn btn-primary">
+                    <span>🚀</span> <span>New Strategy</span>
+                </button>
+                <button class="btn btn-success">
+                    <span>▶</span> <span>Backtest</span>
+                </button>
+                <button class="btn btn-success">
+                    <span>🎯</span> <span>Live Trade</span>
+                </button>
+                <button class="btn btn-danger">
+                    <span>⏹</span> <span>Stop All</span>
+                </button>
+                <button class="btn btn-secondary">
+                    <span>💾</span> <span>Save</span>
+                </button>
+                <button class="btn btn-secondary">
+                    <span>📁</span> <span>Load</span>
+                </button>
+            </div>
+            
+            <div class="toolbar-section config">
+                <label style="font-size: 14px; margin-right: 10px;">Mode:</label>
+                <select class="input-field">
+                    <option>Paper Trading</option>
+                    <option>Backtesting</option>
+                    <option>Live Trading</option>
+                    <option>Simulation</option>
+                </select>
+                
+                <label style="font-size: 14px; margin: 0 10px;">Exchange:</label>
+                <select class="input-field">
+                    <option>Binance</option>
+                    <option>OKX</option>
+                    <option>Coinbase</option>
+                    <option>All Exchanges</option>
+                </select>
+                
+                <label style="font-size: 14px; margin: 0 10px;">Timeframe:</label>
+                <select class="input-field">
+                    <option>1m</option>
+                    <option>5m</option>
+                    <option>15m</option>
+                    <option>30m</option>
+                    <option>1h</option>
+                    <option>4h</option>
+                    <option>1d</option>
+                </select>
+            </div>
+            
+            <div class="toolbar-section">
+                <button class="btn btn-duplicate" onclick="showNotification()">
+                    <span>📋</span> <span>Duplicate</span>
+                </button>
+                <button class="btn btn-secondary">
+                    <span>📊</span> <span>Analytics</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Mobile Toggle Buttons -->
+        <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">☰</button>
+        <button class="panel-toggle" id="panelToggle" onclick="togglePanel()">⚙</button>
+        
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Left Sidebar - Components -->
+            <div class="sidebar" id="sidebar">
+                <div class="sidebar-title">📦 Strategy Components</div>
+                
+                <!-- Data Sources -->
+                <div class="component-category">
+                    <div class="category-header" onclick="toggleCategory(this)">
+                        <div class="category-title">
+                            <span>📊</span> Data Sources
+                        </div>
+                        <span class="category-arrow">▶</span>
+                    </div>
+                    <div class="category-content">
+                        <div class="component-item data-source" draggable="true">Market Data Feed</div>
+                        <div class="component-item data-source" draggable="true">Order Book Data</div>
+                        <div class="component-item data-source" draggable="true">Trade History</div>
+                        <div class="component-item data-source" draggable="true">News Feed</div>
+                        <div class="component-item data-source" draggable="true">Social Sentiment</div>
+                        <div class="component-item data-source" draggable="true">Alternative Data</div>
+                        <div class="component-item data-source" draggable="true">Economic Calendar</div>
+                        <div class="component-item data-source" draggable="true">Blockchain Data</div>
+                        <div class="component-item data-source" draggable="true">Whale Alerts</div>
+                        <div class="component-item data-source" draggable="true">Fear & Greed Index</div>
+                    </div>
+                </div>
+                
+                <!-- Strategy Types -->
+                <div class="component-category">
+                    <div class="category-header" onclick="toggleCategory(this)">
+                        <div class="category-title">
+                            <span>🎯</span> Strategy Types
+                        </div>
+                        <span class="category-arrow">▶</span>
+                    </div>
+                    <div class="category-content">
+                        <div class="component-item strategy" draggable="true">Mean Reversion</div>
+                        <div class="component-item strategy" draggable="true">Trend Following</div>
+                        <div class="component-item strategy" draggable="true">Breakout Strategy</div>
+                        <div class="component-item strategy" draggable="true">Arbitrage</div>
+                        <div class="component-item strategy" draggable="true">Triangular Arbitrage</div>
+                        <div class="component-item strategy" draggable="true">Statistical Arbitrage</div>
+                        <div class="component-item strategy" draggable="true">Market Making</div>
+                        <div class="component-item strategy" draggable="true">Scalping</div>
+                        <div class="component-item strategy" draggable="true">Swing Trading</div>
+                        <div class="component-item strategy" draggable="true">Grid Trading</div>
+                        <div class="component-item strategy" draggable="true">DCA Strategy</div>
+                        <div class="component-item strategy" draggable="true">Volatility Trading</div>
+                        <div class="component-item strategy" draggable="true">Pairs Trading</div>
+                        <div class="component-item strategy" draggable="true">Momentum Strategy</div>
+                        <div class="component-item strategy" draggable="true">Hybrid Adaptive</div>
+                    </div>
+                </div>
+                
+                <!-- Technical Indicators -->
+                <div class="component-category">
+                    <div class="category-header" onclick="toggleCategory(this)">
+                        <div class="category-title">
+                            <span>📈</span> Technical Indicators
+                        </div>
+                        <span class="category-arrow">▶</span>
+                    </div>
+                    <div class="category-content">
+                        <div class="component-item technical" draggable="true">SMA (Simple MA)</div>
+                        <div class="component-item technical" draggable="true">EMA (Exponential MA)</div>
+                        <div class="component-item technical" draggable="true">RSI</div>
+                        <div class="component-item technical" draggable="true">MACD</div>
+                        <div class="component-item technical" draggable="true">Bollinger Bands</div>
+                        <div class="component-item technical" draggable="true">Stochastic</div>
+                        <div class="component-item technical" draggable="true">Fibonacci Retracement</div>
+                        <div class="component-item technical" draggable="true">Volume Profile</div>
+                        <div class="component-item technical" draggable="true">ATR (Average True Range)</div>
+                        <div class="component-item technical" draggable="true">Ichimoku Cloud</div>
+                        <div class="component-item technical" draggable="true">Williams %R</div>
+                        <div class="component-item technical" draggable="true">CCI</div>
+                        <div class="component-item technical" draggable="true">OBV (On Balance Volume)</div>
+                        <div class="component-item technical" draggable="true">VWAP</div>
+                        <div class="component-item technical" draggable="true">Pivot Points</div>
+                        <div class="component-item technical" draggable="true">ADX</div>
+                        <div class="component-item technical" draggable="true">Parabolic SAR</div>
+                        <div class="component-item technical" draggable="true">Keltner Channels</div>
+                        <div class="component-item technical" draggable="true">Donchian Channels</div>
+                        <div class="component-item technical" draggable="true">SuperTrend</div>
+                    </div>
+                </div>
+                
+                <!-- ML Models -->
+                <div class="component-category">
+                    <div class="category-header" onclick="toggleCategory(this)">
+                        <div class="category-title">
+                            <span>🤖</span> ML/AI Models
+                        </div>
+                        <span class="category-arrow">▶</span>
+                    </div>
+                    <div class="category-content">
+                        <div class="component-item ml" draggable="true">LSTM Predictor</div>
+                        <div class="component-item ml" draggable="true">GRU Network</div>
+                        <div class="component-item ml" draggable="true">Transformer Model</div>
+                        <div class="component-item ml" draggable="true">Random Forest</div>
+                        <div class="component-item ml" draggable="true">XGBoost Classifier</div>
+                        <div class="component-item ml" draggable="true">Neural Network</div>
+                        <div class="component-item ml" draggable="true">Deep Q-Learning</div>
+                        <div class="component-item ml" draggable="true">PPO (RL Agent)</div>
+                        <div class="component-item ml" draggable="true">A3C Agent</div>
+                        <div class="component-item ml" draggable="true">Sentiment Analysis</div>
+                        <div class="component-item ml" draggable="true">Pattern Recognition</div>
+                        <div class="component-item ml" draggable="true">Anomaly Detection</div>
+                        <div class="component-item ml" draggable="true">Time Series Forecast</div>
+                        <div class="component-item ml" draggable="true">Ensemble Model</div>
+                        <div class="component-item ml" draggable="true">Genetic Algorithm</div>
+                        <div class="component-item ml" draggable="true">Neuroevolution</div>
+                        <div class="component-item ml" draggable="true">AutoML Pipeline</div>
+                        <div class="component-item ml" draggable="true">GANs for Synthesis</div>
+                    </div>
+                </div>
+                
+                <!-- Risk Management -->
+                <div class="component-category">
+                    <div class="category-header" onclick="toggleCategory(this)">
+                        <div class="category-title">
+                            <span>🛡️</span> Risk Management
+                        </div>
+                        <span class="category-arrow">▶</span>
+                    </div>
+                    <div class="category-content">
+                        <div class="component-item risk" draggable="true">Stop Loss (Fixed %)</div>
+                        <div class="component-item risk" draggable="true">Trailing Stop Loss</div>
+                        <div class="component-item risk" draggable="true">ATR-Based Stops</div>
+                        <div class="component-item risk" draggable="true">Take Profit Targets</div>
+                        <div class="component-item risk" draggable="true">Position Sizer</div>
+                        <div class="component-item risk" draggable="true">Kelly Criterion</div>
+                        <div class="component-item risk" draggable="true">Risk/Reward Ratio</div>
+                        <div class="component-item risk" draggable="true">VaR Calculator</div>
+                        <div class="component-item risk" draggable="true">Expected Shortfall</div>
+                        <div class="component-item risk" draggable="true">Drawdown Monitor</div>
+                        <div class="component-item risk" draggable="true">Correlation Analyzer</div>
+                        <div class="component-item risk" draggable="true">Exposure Manager</div>
+                        <div class="component-item risk" draggable="true">Circuit Breakers</div>
+                        <div class="component-item risk" draggable="true">Daily Loss Limit</div>
+                        <div class="component-item risk" draggable="true">Volatility Filter</div>
+                        <div class="component-item risk" draggable="true">Sharpe Optimizer</div>
+                        <div class="component-item risk" draggable="true">Dynamic Hedging</div>
+                        <div class="component-item risk" draggable="true">Portfolio Insurance</div>
+                        <div class="component-item risk" draggable="true">ML Risk Predictor</div>
+                    </div>
+                </div>
+                
+                <!-- Execution -->
+                <div class="component-category">
+                    <div class="category-header" onclick="toggleCategory(this)">
+                        <div class="category-title">
+                            <span>⚡</span> Order Execution
+                        </div>
+                        <span class="category-arrow">▶</span>
+                    </div>
+                    <div class="category-content">
+                        <div class="component-item execution" draggable="true">Market Order</div>
+                        <div class="component-item execution" draggable="true">Limit Order</div>
+                        <div class="component-item execution" draggable="true">Stop Order</div>
+                        <div class="component-item execution" draggable="true">Stop-Limit Order</div>
+                        <div class="component-item execution" draggable="true">TWAP Engine</div>
+                        <div class="component-item execution" draggable="true">VWAP Engine</div>
+                        <div class="component-item execution" draggable="true">Iceberg Orders</div>
+                        <div class="component-item execution" draggable="true">Smart Order Router</div>
+                        <div class="component-item execution" draggable="true">Slippage Model</div>
+                        <div class="component-item execution" draggable="true">Order Splitter</div>
+                        <div class="component-item execution" draggable="true">Best Execution</div>
+                        <div class="component-item execution" draggable="true">Dark Pool Access</div>
+                        <div class="component-item execution" draggable="true">Adaptive Execution</div>
+                        <div class="component-item execution" draggable="true">Sniper Orders</div>
+                        <div class="component-item execution" draggable="true">Fill or Kill</div>
+                        <div class="component-item execution" draggable="true">Good Till Cancel</div>
+                    </div>
+                </div>
+                
+                <!-- Portfolio Management -->
+                <div class="component-category">
+                    <div class="category-header" onclick="toggleCategory(this)">
+                        <div class="category-title">
+                            <span>💼</span> Portfolio Management
+                        </div>
+                        <span class="category-arrow">▶</span>
+                    </div>
+                    <div class="category-content">
+                        <div class="component-item portfolio" draggable="true">Asset Allocator</div>
+                        <div class="component-item portfolio" draggable="true">Rebalancer</div>
+                        <div class="component-item portfolio" draggable="true">Diversification Engine</div>
+                        <div class="component-item portfolio" draggable="true">Risk Parity</div>
+                        <div class="component-item portfolio" draggable="true">Black-Litterman</div>
+                        <div class="component-item portfolio" draggable="true">Mean-Variance Optimizer</div>
+                        <div class="component-item portfolio" draggable="true">Capital Allocator</div>
+                        <div class="component-item portfolio" draggable="true">Multi-Strategy Manager</div>
+                        <div class="component-item portfolio" draggable="true">Performance Tracker</div>
+                        <div class="component-item portfolio" draggable="true">Tax Optimizer</div>
+                    </div>
+                </div>
+                
+                <!-- Monitoring & Alerts -->
+                <div class="component-category">
+                    <div class="category-header" onclick="toggleCategory(this)">
+                        <div class="category-title">
+                            <span>🔔</span> Monitoring & Alerts
+                        </div>
+                        <span class="category-arrow">▶</span>
+                    </div>
+                    <div class="category-content">
+                        <div class="component-item monitoring" draggable="true">P&L Monitor</div>
+                        <div class="component-item monitoring" draggable="true">Performance Metrics</div>
+                        <div class="component-item monitoring" draggable="true">Trade Logger</div>
+                        <div class="component-item monitoring" draggable="true">Alert System</div>
+                        <div class="component-item monitoring" draggable="true">Telegram Notifier</div>
+                        <div class="component-item monitoring" draggable="true">Email Alerts</div>
+                        <div class="component-item monitoring" draggable="true">Discord Webhook</div>
+                        <div class="component-item monitoring" draggable="true">Health Monitor</div>
+                        <div class="component-item monitoring" draggable="true">Latency Tracker</div>
+                        <div class="component-item monitoring" draggable="true">Error Handler</div>
+                        <div class="component-item monitoring" draggable="true">Audit Logger</div>
+                        <div class="component-item monitoring" draggable="true">Compliance Reporter</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Canvas Area -->
+            <div class="canvas-container">
+                <div class="canvas">
+                    <div class="pipeline-container">
+                        <!-- Data Source Stage -->
+                        <div class="stage-container">
+                            <div class="shape-node data-source selected">
+                                <div class="node-icon">📊</div>
+                                <div class="node-title">Data Source</div>
+                                <div class="connection-arrow horizontal">→</div>
+                                <div class="connection-arrow vertical">→</div>
+                                <div class="connection-curve"></div>
+                            </div>
+                            <div class="param-summary">
+                                <div class="param-summary-title">Configuration</div>
+                                <div class="param-item">
+                                    <span class="param-label">Type:</span>
+                                    <span class="param-value">Market + Order Book</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Exchange:</span>
+                                    <span class="param-value">Binance</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Symbols:</span>
+                                    <span class="param-value">BTC, ETH, SOL</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Interval:</span>
+                                    <span class="param-value">5m</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Feature Engineering Stage -->
+                        <div class="stage-container">
+                            <div class="shape-node feature-engineering">
+                                <div class="node-icon">🔧</div>
+                                <div class="node-title">Features</div>
+                                <div class="connection-arrow horizontal">→</div>
+                                <div class="connection-arrow vertical">→</div>
+                                <div class="connection-curve"></div>
+                            </div>
+                            <div class="param-summary">
+                                <div class="param-summary-title">Indicators</div>
+                                <div class="param-item">
+                                    <span class="param-label">Technical:</span>
+                                    <span class="param-value">RSI, MACD, BB</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">MA Periods:</span>
+                                    <span class="param-value">20, 50, 200</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Volume:</span>
+                                    <span class="param-value">OBV, VWAP</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Custom:</span>
+                                    <span class="param-value">ML Features</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Strategy Stage -->
+                        <div class="stage-container">
+                            <div class="shape-node strategy">
+                                <div class="node-icon">🎯</div>
+                                <div class="node-title">Strategy</div>
+                                <div class="connection-arrow horizontal">→</div>
+                                <div class="connection-arrow vertical">→</div>
+                                <div class="connection-curve"></div>
+                            </div>
+                            <div class="param-summary">
+                                <div class="param-summary-title">Hybrid Strategy</div>
+                                <div class="param-item">
+                                    <span class="param-label">Type:</span>
+                                    <span class="param-value">Trend + ML</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Entry:</span>
+                                    <span class="param-value">MA Cross + AI</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Exit:</span>
+                                    <span class="param-value">Dynamic TP/SL</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Confidence:</span>
+                                    <span class="param-value">Min 65%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Position Sizing Stage -->
+                        <div class="stage-container">
+                            <div class="shape-node position-sizing">
+                                <div class="node-icon">💰</div>
+                                <div class="node-title">Position Size</div>
+                                <div class="connection-arrow horizontal">→</div>
+                                <div class="connection-arrow vertical">→</div>
+                                <div class="connection-curve"></div>
+                            </div>
+                            <div class="param-summary">
+                                <div class="param-summary-title">Adaptive Sizing</div>
+                                <div class="param-item">
+                                    <span class="param-label">Method:</span>
+                                    <span class="param-value">Kelly + Vol</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Base Size:</span>
+                                    <span class="param-value">2% Capital</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Max Size:</span>
+                                    <span class="param-value">5% Capital</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Leverage:</span>
+                                    <span class="param-value">3x Max</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Risk Management Stage -->
+                        <div class="stage-container">
+                            <div class="shape-node risk-management">
+                                <div class="node-icon">🛡️</div>
+                                <div class="node-title">Risk Mgmt</div>
+                                <div class="connection-arrow horizontal">→</div>
+                                <div class="connection-arrow vertical">→</div>
+                                <div class="connection-curve"></div>
+                            </div>
+                            <div class="param-summary">
+                                <div class="param-summary-title">AI-Powered</div>
+                                <div class="param-item">
+                                    <span class="param-label">Stop Loss:</span>
+                                    <span class="param-value">ATR x1.5</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Take Profit:</span>
+                                    <span class="param-value">R:R 1:3</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Max DD:</span>
+                                    <span class="param-value">10%</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Correlation:</span>
+                                    <span class="param-value"><60%</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Execution Stage -->
+                        <div class="stage-container">
+                            <div class="shape-node execution">
+                                <div class="node-icon">⚡</div>
+                                <div class="node-title">Execution</div>
+                                <div class="connection-arrow horizontal">→</div>
+                                <div class="connection-arrow vertical">→</div>
+                                <div class="connection-curve"></div>
+                            </div>
+                            <div class="param-summary">
+                                <div class="param-summary-title">Smart Order</div>
+                                <div class="param-item">
+                                    <span class="param-label">Type:</span>
+                                    <span class="param-value">TWAP</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Slippage:</span>
+                                    <span class="param-value">0.05%</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Split:</span>
+                                    <span class="param-value">5 Orders</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Timeout:</span>
+                                    <span class="param-value">30s</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Monitoring Stage -->
+                        <div class="stage-container">
+                            <div class="shape-node monitoring">
+                                <div class="node-icon">📊</div>
+                                <div class="node-title">Monitor</div>
+                            </div>
+                            <div class="param-summary">
+                                <div class="param-summary-title">Live Metrics</div>
+                                <div class="param-item">
+                                    <span class="param-label">P&L:</span>
+                                    <span class="param-value">+$5,234</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Win Rate:</span>
+                                    <span class="param-value">72%</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Sharpe:</span>
+                                    <span class="param-value">2.15</span>
+                                </div>
+                                <div class="param-item">
+                                    <span class="param-label">Trades:</span>
+                                    <span class="param-value">342</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Panel - Configuration -->
+            <div class="right-panel" id="rightPanel">
+                <div class="panel-title">⚙️ Data Source Configuration</div>
+                
+                <div class="config-section">
+                    <div class="config-section-title">Exchange Settings</div>
+                    <div class="config-item">
+                        <div class="config-label">Primary Exchange</div>
+                        <select class="config-select">
+                            <option>Binance</option>
+                            <option>OKX</option>
+                            <option>Coinbase Pro</option>
+                            <option>Kraken</option>
+                            <option>Multiple Exchanges</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">Trading Pairs</div>
+                        <input type="text" class="config-input" value="BTC/USDT, ETH/USDT, SOL/USDT">
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">Data Interval</div>
+                        <select class="config-select">
+                            <option>1m</option>
+                            <option selected>5m</option>
+                            <option>15m</option>
+                            <option>30m</option>
+                            <option>1h</option>
+                            <option>4h</option>
+                            <option>1d</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">Historical Lookback</div>
+                        <input type="text" class="config-input" value="30 days">
+                    </div>
+                </div>
+                
+                <div class="config-section">
+                    <div class="config-section-title">Risk Parameters</div>
+                    <div class="config-item">
+                        <div class="config-label">Risk Mode</div>
+                        <select class="config-select">
+                            <option>Static</option>
+                            <option>Dynamic</option>
+                            <option selected>AI-Powered</option>
+                            <option>Hybrid Adaptive</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">Max Risk Per Trade (%)</div>
+                        <input type="range" class="config-slider" min="0.5" max="5" value="2" step="0.5">
+                        <div class="slider-value">
+                            <span>0.5%</span>
+                            <span>2.0%</span>
+                            <span>5.0%</span>
+                        </div>
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">Max Portfolio Exposure (%)</div>
+                        <input type="range" class="config-slider" min="10" max="100" value="20" step="10">
+                        <div class="slider-value">
+                            <span>10%</span>
+                            <span>20%</span>
+                            <span>100%</span>
+                        </div>
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">Circuit Breakers</div>
+                        <select class="config-select">
+                            <option selected>Enabled - All Types</option>
+                            <option>Daily Loss Only</option>
+                            <option>Drawdown Only</option>
+                            <option>Correlation Only</option>
+                            <option>Disabled</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="config-section">
+                    <div class="config-section-title">ML Model Settings</div>
+                    <div class="config-item">
+                        <div class="config-label">Model Type</div>
+                        <select class="config-select">
+                            <option>XGBoost</option>
+                            <option>LSTM Network</option>
+                            <option selected>Ensemble (Multi-Model)</option>
+                            <option>Transformer</option>
+                            <option>Reinforcement Learning</option>
+                        </select>
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">Confidence Threshold (%)</div>
+                        <input type="range" class="config-slider" min="50" max="90" value="65" step="5">
+                        <div class="slider-value">
+                            <span>50%</span>
+                            <span>65%</span>
+                            <span>90%</span>
+                        </div>
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">Retrain Frequency</div>
+                        <select class="config-select">
+                            <option>Hourly</option>
+                            <option selected>Daily</option>
+                            <option>Weekly</option>
+                            <option>On Performance Decay</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="config-section">
+                    <div class="config-section-title">Strategy Actions</div>
+                    <button class="btn btn-primary" style="width: 100%; margin-bottom: 10px;">
+                        💾 Save Configuration
+                    </button>
+                    <button class="btn btn-success" style="width: 100%; margin-bottom: 10px;">
+                        📊 Run Backtest
+                    </button>
+                    <button class="btn btn-success" style="width: 100%; margin-bottom: 10px;">
+                        🎯 Deploy Live
+                    </button>
+                    <button class="btn btn-secondary" style="width: 100%;">
+                        📈 View Analytics
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Notification -->
+    <div class="notification" id="notification">
+        ✨ Strategy duplicated successfully!
+    </div>
+    
+    <script>
+        // Toggle category expansion
+        function toggleCategory(header) {
+            const content = header.nextElementSibling;
+            const arrow = header.querySelector('.category-arrow');
+            
+            header.classList.toggle('active');
+            content.classList.toggle('expanded');
+            arrow.classList.toggle('expanded');
+        }
+        
+        // Toggle sidebar on mobile
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('open');
+            
+            // Close right panel if open
+            const rightPanel = document.getElementById('rightPanel');
+            if (rightPanel.classList.contains('open')) {
+                rightPanel.classList.remove('open');
+            }
+        }
+        
+        // Toggle right panel on mobile
+        function togglePanel() {
+            const rightPanel = document.getElementById('rightPanel');
+            rightPanel.classList.toggle('open');
+            
+            // Close sidebar if open
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar.classList.contains('open')) {
+                sidebar.classList.remove('open');
+            }
+        }
+        
+        // Show notification
+        function showNotification() {
+            const notification = document.getElementById('notification');
+            notification.classList.add('show');
+            
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => {
+                    notification.classList.remove('show');
+                    notification.style.animation = '';
+                }, 300);
+            }, 3000);
+        }
+        
+        // Handle shape node clicks
+        document.querySelectorAll('.shape-node').forEach(node => {
+            node.addEventListener('click', function() {
+                // Remove selected class from all nodes
+                document.querySelectorAll('.shape-node').forEach(n => {
+                    n.classList.remove('selected');
+                });
+                // Add selected class to clicked node
+                this.classList.add('selected');
+                
+                // Update right panel based on selected node
+                const nodeTitle = this.querySelector('.node-title').textContent;
+                const panelTitle = document.querySelector('.panel-title');
+                const configSections = document.querySelectorAll('.config-section');
+                
+                // Update panel title
+                panelTitle.textContent = `⚙️ ${nodeTitle} Configuration`;
+                
+                // Update visible sections based on selected stage
+                // This would be expanded to show different config options per stage
+                
+                // On mobile, automatically open the right panel
+                if (window.innerWidth <= 1200) {
+                    document.getElementById('rightPanel').classList.add('open');
+                }
+            });
+        });
+        
+        // Handle drag and drop
+        let draggedElement = null;
+        
+        document.querySelectorAll('.component-item').forEach(item => {
+            item.addEventListener('dragstart', function(e) {
+                draggedElement = this;
+                this.style.opacity = '0.5';
+                e.dataTransfer.effectAllowed = 'copy';
+            });
+            
+            item.addEventListener('dragend', function(e) {
+                this.style.opacity = '';
+            });
+        });
+        
+        // Canvas drop handling
+        const canvas = document.querySelector('.canvas');
+        canvas.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        });
+        
+        canvas.addEventListener('drop', function(e) {
+            e.preventDefault();
+            if (draggedElement) {
+                console.log('Dropped:', draggedElement.textContent);
+                // Here would add logic to create new pipeline stage
+                draggedElement = null;
+            }
+        });
+        
+        // Close sidebars when clicking outside on mobile
+        document.addEventListener('click', function(e) {
+            if (window.innerWidth <= 1200) {
+                const sidebar = document.getElementById('sidebar');
+                const rightPanel = document.getElementById('rightPanel');
+                const sidebarToggle = document.getElementById('sidebarToggle');
+                const panelToggle = document.getElementById('panelToggle');
+                
+                if (!sidebar.contains(e.target) && !sidebarToggle.contains(e.target) && sidebar.classList.contains('open')) {
+                    sidebar.classList.remove('open');
+                }
+                
+                if (!rightPanel.contains(e.target) && !panelToggle.contains(e.target) && rightPanel.classList.contains('open')) {
+                    rightPanel.classList.remove('open');
+                }
+            }
+        });
+        
+        // Update slider values in real-time
+        document.querySelectorAll('.config-slider').forEach(slider => {
+            slider.addEventListener('input', function() {
+                const valueDisplay = this.nextElementSibling.children[1];
+                if (valueDisplay) {
+                    valueDisplay.textContent = this.value + (this.step < 1 ? '%' : '%');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

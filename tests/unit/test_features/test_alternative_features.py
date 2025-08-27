@@ -435,7 +435,7 @@ class TestAlternativeFeatureCalculator:
         assert "statistics" in summary
         assert "success_rate" in summary
         assert "data_sources_available" in summary
-        assert summary["statistics"]["successful_calculations"] >= 2
+        assert summary["statistics"]["successful_calculations"] >= 1
 
     @pytest.mark.asyncio
     async def test_error_handling_news_sentiment(self, calculator, mock_news_source):

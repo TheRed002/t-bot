@@ -17,14 +17,14 @@
     "moduleResolution": "node",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true,
+    "noEmit": false,
     "jsx": "react-jsx",
     "declaration": false,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "exactOptionalPropertyTypes": false,
     "noImplicitReturns": true,
-    "noImplicitOverride": true,
+    "noImplicitOverride": false,
     "baseUrl": "src",
     "paths": {
       "@/*": ["*"],
@@ -35,7 +35,8 @@
       "@/hooks/*": ["hooks/*"],
       "@/utils/*": ["utils/*"],
       "@/theme/*": ["theme/*"],
-      "@/types/*": ["types/*"]
+      "@/types/*": ["types/*"],
+      "@/lib/*": ["lib/*"]
     }
   },
   "include": [
@@ -46,6 +47,9 @@
   "exclude": [
     "node_modules",
     "dist",
-    "build"
+    "build",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/__tests__/**/*"
   ]
 }

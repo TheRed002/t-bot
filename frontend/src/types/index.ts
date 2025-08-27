@@ -5,12 +5,28 @@
 
 // Authentication types
 export interface User {
-  id: string;
+  user_id: string;
   username: string;
   email: string;
-  isActive: boolean;
-  createdAt: string;
+  full_name?: string;
+  is_active: boolean;
+  status: UserStatus;
+  roles: string[];
+  scopes: string[];
   preferences?: UserPreferences;
+  created_at: string;
+  last_login?: string;
+  allocated_capital?: number;
+  max_daily_loss?: number;
+  risk_level?: string;
+}
+
+export enum UserStatus {
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+  SUSPENDED = 'suspended',
+  LOCKED = 'locked',
+  PENDING_VERIFICATION = 'pending_verification'
 }
 
 export interface UserPreferences {
@@ -28,44 +44,160 @@ export interface NotificationSettings {
   systemUpdates: boolean;
 }
 
+export interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+}
+
+export interface LoginCredentials {
+  username: string;
+  password: string;
+  remember_me?: boolean;
+}
+
+export interface LoginResponse {
+  success: boolean;
+  message: string;
+  user: User;
+  tokens: AuthTokens;
+}
+
+export interface RefreshTokenResponse {
+  success: boolean;
+  message: string;
+  user: User;
+  tokens: AuthTokens;
+}
+
 export interface AuthState {
   user: User | null;
-  token: string | null;
+  tokens: AuthTokens | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isRefreshing: boolean;
   error: string | null;
+  rememberMe: boolean;
+  sessionExpiresAt: number | null;
 }
 
-// Bot Management types
+// Bot Management types - Backend Compatible
+
+/**
+ * Backend BotStatus enum values.
+ * Maps directly to Python BotStatus enum in core.types.bot
+ */
+export enum BotStatus {
+  INITIALIZING = 'initializing',
+  READY = 'ready',
+  RUNNING = 'running',
+  PAUSED = 'paused',
+  STOPPING = 'stopping',
+  STOPPED = 'stopped',
+  ERROR = 'error',
+  MAINTENANCE = 'maintenance'
+}
+
+/**
+ * Backend BotType enum values.
+ * Maps directly to Python BotType enum in core.types.bot
+ */
+export enum BotType {
+  TRADING = 'trading',
+  ARBITRAGE = 'arbitrage',
+  MARKET_MAKING = 'market_making',
+  LIQUIDATION = 'liquidation',
+  REBALANCING = 'rebalancing',
+  DATA_COLLECTION = 'data_collection',
+  MONITORING = 'monitoring',
+  TESTING = 'testing'
+}
+
+/**
+ * Backend BotPriority enum values.
+ * Maps directly to Python BotPriority enum in core.types.bot
+ */
+export enum BotPriority {
+  CRITICAL = 'critical',
+  HIGH = 'high',
+  NORMAL = 'normal',
+  LOW = 'low',
+  IDLE = 'idle'
+}
+
+/**
+ * Bot configuration matching backend BotConfiguration model.
+ * Maps directly to Python BotConfiguration in core.types.bot
+ */
+export interface BotConfiguration {
+  bot_id: string;
+  bot_name: string;  // Backend uses bot_name, not name
+  bot_type: BotType;
+  strategy_name: StrategyType;  // Backend uses strategy_name with StrategyType enum
+  exchanges: string[];
+  symbols: string[];
+  allocated_capital: number;
+  risk_percentage: number;
+  priority: BotPriority;
+  auto_start: boolean;
+  strategy_config: Record<string, any>;  // Backend uses strategy_config
+  created_at: string;
+  updated_at?: string;
+}
+
+/**
+ * Bot metrics matching backend BotMetrics model.
+ * Maps directly to Python BotMetrics in core.types.bot
+ */
+export interface BotMetrics {
+  bot_id: string;
+  uptime_seconds: number;
+  total_trades: number;
+  successful_trades: number;  // Backend uses successful_trades, not winningTrades
+  failed_trades: number;     // Backend uses failed_trades, not losingTrades
+  total_pnl: number;
+  cpu_usage_percent: number;
+  memory_usage_mb: number;
+  win_rate: number;         // Calculated field: successful_trades / total_trades
+  health_score: number;
+  timestamp: string;
+}
+
+/**
+ * Bot instance interface matching backend structure.
+ * Uses backend field names for consistency
+ */
 export interface BotInstance {
-  id: string;
-  name: string;
+  bot_id: string;           // Backend uses bot_id, not id
+  bot_name: string;         // Backend uses bot_name, not name
   userId: string;
-  strategyType: string;
+  strategy_name: StrategyType;    // Backend uses strategy_name with StrategyType enum
   exchange: string;
   status: BotStatus;
-  config: BotConfig;
+  config: BotConfiguration;
   createdAt: string;
   updatedAt: string;
-  performance?: BotPerformance;
+  metrics?: BotMetrics;     // Changed from performance to metrics
 }
 
-export type BotStatus = 'stopped' | 'running' | 'paused' | 'error' | 'pending';
-
-export interface BotConfig {
-  symbol: string;
-  baseAmount: number;
+// Legacy type aliases for backward compatibility
+/** @deprecated Use BotConfiguration instead */
+export interface BotConfig extends Omit<BotConfiguration, 'bot_id' | 'bot_name' | 'strategy_name' | 'exchanges' | 'symbols' | 'allocated_capital' | 'risk_percentage' | 'priority' | 'auto_start' | 'strategy_config' | 'created_at' | 'updated_at'> {
+  symbol: string;          // Legacy single symbol
+  baseAmount: number;      // Legacy field name
   maxPosition: number;
-  riskPercentage: number;
+  riskPercentage: number;  // Legacy camelCase
   stopLoss?: number;
   takeProfit?: number;
-  strategyParams: Record<string, any>;
+  strategyParams: Record<string, any>;  // Legacy field name
 }
 
+/** @deprecated Use BotMetrics instead */
 export interface BotPerformance {
   totalTrades: number;
-  winningTrades: number;
-  losingTrades: number;
+  winningTrades: number;   // Legacy field name
+  losingTrades: number;    // Legacy field name
   totalPnl: number;
   winRate: number;
   maxDrawdown: number;
@@ -74,9 +206,70 @@ export interface BotPerformance {
   lastTradeAt?: string;
 }
 
+/**
+ * Bot summary response from backend API.
+ * Maps directly to BotSummaryResponse in web_interface.api.bot_management
+ */
+export interface BotSummaryResponse {
+  bot_id: string;
+  bot_name: string;
+  status: string;
+  allocated_capital: number;
+  current_pnl?: number;
+  total_trades?: number;
+  win_rate?: number;
+  last_trade?: string;
+  uptime?: string;
+}
+
+/**
+ * Bot list response from backend API.
+ * Maps directly to BotListResponse in web_interface.api.bot_management
+ */
+export interface BotListResponse {
+  bots: BotSummaryResponse[];
+  total: number;
+  running: number;
+  stopped: number;
+  error: number;
+}
+
+/**
+ * Bot creation request matching backend API.
+ * Maps directly to CreateBotRequest in web_interface.api.bot_management
+ */
+export interface CreateBotRequest {
+  bot_name: string;
+  bot_type: BotType;
+  strategy_name: StrategyType;
+  exchanges: string[];
+  symbols: string[];
+  allocated_capital: number;
+  risk_percentage: number;
+  priority?: BotPriority;
+  auto_start?: boolean;
+  configuration?: Record<string, any>;
+}
+
+/**
+ * Bot update request matching backend API.
+ * Maps directly to UpdateBotRequest in web_interface.api.bot_management
+ */
+export interface UpdateBotRequest {
+  bot_name?: string;
+  allocated_capital?: number;
+  risk_percentage?: number;
+  priority?: BotPriority;
+  configuration?: Record<string, any>;
+}
+
+/**
+ * Frontend bot state management
+ */
 export interface BotState {
   bots: BotInstance[];
   selectedBot: BotInstance | null;
+  botList?: BotListResponse;  // Backend response structure
   isLoading: boolean;
   error: string | null;
   filters: BotFilters;
@@ -118,8 +311,17 @@ export interface PortfolioSummary {
   totalValue: number;
   totalPnl: number;
   dailyPnl: number;
+  dailyPnlPercentage: number;
+  weeklyPnl: number;
+  weeklyPnlPercentage: number;
+  monthlyPnl: number;
+  monthlyPnlPercentage: number;
   positions: Position[];
   balances: Balance[];
+  openOrders: number;
+  winRate: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
   lastUpdated: string;
 }
 
@@ -174,18 +376,301 @@ export interface Order {
 
 export type OrderStatus = 'pending' | 'open' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected';
 
-// Strategy types
+// Complete Strategy Type System - Backend Compatible
+
+/**
+ * Complete strategy type enumeration matching backend StrategyType.
+ * Maps directly to Python StrategyType enum in core.types.strategy
+ */
+export enum StrategyType {
+  // Static Strategies
+  MEAN_REVERSION = 'mean_reversion',
+  MOMENTUM = 'momentum', 
+  ARBITRAGE = 'arbitrage',
+  MARKET_MAKING = 'market_making',
+  TREND_FOLLOWING = 'trend_following',
+  PAIRS_TRADING = 'pairs_trading',
+  STATISTICAL_ARBITRAGE = 'statistical_arbitrage',
+  BREAKOUT = 'breakout',
+  CROSS_EXCHANGE_ARBITRAGE = 'cross_exchange_arbitrage',
+  TRIANGULAR_ARBITRAGE = 'triangular_arbitrage',
+  
+  // Dynamic Strategies
+  VOLATILITY_BREAKOUT = 'volatility_breakout',
+  
+  // Hybrid Strategies
+  ENSEMBLE = 'ensemble',
+  FALLBACK = 'fallback',
+  RULE_BASED_AI = 'rule_based_ai',
+  
+  // Custom
+  CUSTOM = 'custom'
+}
+
+/**
+ * Strategy categories for organization and filtering.
+ */
+export enum StrategyCategory {
+  STATIC = 'static',
+  DYNAMIC = 'dynamic', 
+  HYBRID = 'hybrid',
+  EVOLUTIONARY = 'evolutionary',
+  CUSTOM = 'custom'
+}
+
+/**
+ * Strategy operational status matching backend.
+ */
+export enum StrategyStatus {
+  INACTIVE = 'inactive',
+  STARTING = 'starting',
+  ACTIVE = 'active',
+  PAUSED = 'paused',
+  STOPPING = 'stopping',
+  STOPPED = 'stopped',
+  ERROR = 'error'
+}
+
+/**
+ * Risk levels for strategies.
+ */
+export enum RiskLevel {
+  CONSERVATIVE = 'conservative',
+  MODERATE = 'moderate',
+  AGGRESSIVE = 'aggressive',
+  EXPERIMENTAL = 'experimental'
+}
+
+/**
+ * Position sizing methods.
+ */
+export enum PositionSizeMethod {
+  FIXED = 'fixed',
+  PERCENTAGE = 'percentage',
+  KELLY_CRITERION = 'kelly_criterion',
+  RISK_PARITY = 'risk_parity',
+  VOLATILITY_ADJUSTED = 'volatility_adjusted'
+}
+
+/**
+ * Capital allocation strategies.
+ */
+export enum AllocationStrategy {
+  EQUAL_WEIGHT = 'equal_weight',
+  RISK_PARITY = 'risk_parity',
+  MARKET_CAP = 'market_cap',
+  MOMENTUM = 'momentum',
+  MEAN_REVERSION = 'mean_reversion',
+  CUSTOM = 'custom'
+}
+
+/**
+ * Parameter validation types.
+ */
+export type ParameterType = 'number' | 'string' | 'boolean' | 'select' | 'multi_select' | 'range' | 'percentage' | 'currency' | 'timeframe';
+
+/**
+ * Strategy parameter definition with comprehensive validation.
+ */
+export interface StrategyParameterDefinition {
+  name: string;
+  displayName: string;
+  type: ParameterType;
+  value: any;
+  defaultValue: any;
+  description: string;
+  required: boolean;
+  
+  // Validation rules
+  validation?: {
+    min?: number;
+    max?: number;
+    step?: number;
+    pattern?: string;
+    customValidator?: (value: any) => string | null;
+  };
+  
+  // For select/multi_select types
+  options?: Array<{
+    label: string;
+    value: any;
+    description?: string;
+    disabled?: boolean;
+  }>;
+  
+  // Conditional display
+  dependsOn?: {
+    parameter: string;
+    value: any;
+    condition?: 'equals' | 'not_equals' | 'greater_than' | 'less_than' | 'in' | 'not_in';
+  };
+  
+  // Parameter grouping
+  group?: string;
+  order?: number;
+  
+  // Help and documentation
+  helpText?: string;
+  tooltipText?: string;
+  docUrl?: string;
+}
+
+/**
+ * Risk management configuration.
+ */
+export interface RiskConfiguration {
+  maxDrawdownPercentage: number;
+  maxRiskPerTrade: number;
+  stopLossPercentage?: number;
+  takeProfitPercentage?: number;
+  positionSizeMethod: PositionSizeMethod;
+  maxPositions: number;
+  correlationLimit: number;
+  volatilityLimit?: number;
+  
+  // Circuit breakers
+  enableCircuitBreaker: boolean;
+  dailyLossLimit?: number;
+  weeklyLossLimit?: number;
+  consecutiveLossLimit?: number;
+  
+  // Position sizing parameters
+  positionSizeConfig: {
+    fixedAmount?: number;
+    percentageOfCapital?: number;
+    kellyFraction?: number;
+    maxKellyFraction?: number;
+    riskParityConfig?: {
+      lookbackPeriod: number;
+      rebalanceFrequency: string;
+    };
+  };
+}
+
+/**
+ * Strategy template from backend configuration templates.
+ */
+export interface StrategyTemplate {
+  id: string;
+  name: string;
+  displayName: string;
+  strategyType: StrategyType;
+  category: StrategyCategory;
+  description: string;
+  riskLevel: RiskLevel;
+  
+  // Requirements
+  minimumCapital: number;
+  supportedExchanges: string[];
+  supportedSymbols: string[];
+  recommendedTimeframes: string[];
+  
+  // Parameters
+  parameters: StrategyParameterDefinition[];
+  riskConfiguration: RiskConfiguration;
+  
+  // Backtesting configuration
+  backtestingConfig?: {
+    enabled: boolean;
+    startDate: string;
+    endDate: string;
+    initialCapital: number;
+    commission: number;
+    slippage: number;
+  };
+  
+  // Performance monitoring
+  monitoringConfig?: {
+    enabled: boolean;
+    alertThresholds: {
+      drawdownPercentage: number;
+      consecutiveLosses: number;
+      dailyPnlThreshold: number;
+    };
+    reportingFrequency: string;
+  };
+  
+  // Template metadata
+  version: string;
+  author: string;
+  createdAt: string;
+  updatedAt?: string;
+  tags: string[];
+  isProduction: boolean;
+}
+
+/**
+ * Strategy configuration for deployment.
+ */
+export interface StrategyConfiguration {
+  id?: string;
+  templateId: string;
+  name: string;
+  strategyType: StrategyType;
+  status: StrategyStatus;
+  
+  // Deployment settings
+  exchanges: string[];
+  symbols: string[];
+  timeframes: string[];
+  
+  // Capital allocation
+  allocatedCapital: number;
+  allocationStrategy: AllocationStrategy;
+  
+  // Parameters (with resolved values)
+  parameters: Record<string, any>;
+  riskConfiguration: RiskConfiguration;
+  
+  // Execution settings
+  executionConfig: {
+    maxSlippagePercentage: number;
+    orderTimeoutSeconds: number;
+    retryAttempts: number;
+    fillStrategy: 'market' | 'limit' | 'smart';
+  };
+  
+  // Monitoring
+  monitoringEnabled: boolean;
+  
+  // Metadata
+  createdAt: string;
+  updatedAt?: string;
+  createdBy: string;
+  lastModifiedBy?: string;
+}
+
+/**
+ * Updated Strategy interface with enhanced typing.
+ */
 export interface Strategy {
   id: string;
   name: string;
-  type: string;
+  strategyType: StrategyType;
+  category: StrategyCategory;
+  status: StrategyStatus;
   description: string;
-  parameters: StrategyParameter[];
+  
+  // Template reference
+  templateId?: string;
+  template?: StrategyTemplate;
+  
+  // Configuration
+  configuration: StrategyConfiguration;
+  
+  // Performance data
+  performance?: StrategyPerformance;
+  
+  // Metadata
   isActive: boolean;
   createdAt: string;
-  performance?: StrategyPerformance;
+  updatedAt?: string;
 }
 
+/**
+ * Legacy parameter interface for backward compatibility.
+ * @deprecated Use StrategyParameterDefinition instead
+ */
 export interface StrategyParameter {
   name: string;
   type: 'number' | 'string' | 'boolean' | 'select';
@@ -229,25 +714,81 @@ export interface LivePerformance {
   lastTradeAt?: string;
 }
 
+/**
+ * Enhanced strategy state management.
+ */
 export interface StrategyState {
+  // Templates
+  templates: StrategyTemplate[];
+  templatesLoading: boolean;
+  templatesError: string | null;
+  
+  // Strategies
   strategies: Strategy[];
   selectedStrategy: Strategy | null;
+  
+  // Configuration
+  activeConfiguration: StrategyConfiguration | null;
+  configurationHistory: StrategyConfiguration[];
+  
+  // Backtesting
   backtestResults: BacktestResult[];
-  isLoading: boolean;
   isBacktesting: boolean;
+  backtestProgress?: number;
+  
+  // UI State
+  isLoading: boolean;
   error: string | null;
+  
+  // Filters
+  filters: StrategyFilters;
 }
 
-// Risk Management types
+/**
+ * Strategy filtering options.
+ */
+export interface StrategyFilters {
+  category?: StrategyCategory[];
+  strategyType?: StrategyType[];
+  status?: StrategyStatus[];
+  riskLevel?: RiskLevel[];
+  exchange?: string[];
+  searchTerm?: string;
+  sortBy?: 'name' | 'performance' | 'created_at' | 'risk_level';
+  sortOrder?: 'asc' | 'desc';
+}
+
+// Enhanced Risk Management types
 export interface RiskMetrics {
   portfolioValue: number;
   totalExposure: number;
   maxDrawdown: number;
+  currentDrawdown: number;
   var95: number; // Value at Risk 95%
   var99: number; // Value at Risk 99%
+  expectedShortfall: number; // Conditional VaR
   sharpeRatio: number;
+  sortinoRatio: number;
+  calmarRatio: number;
   correlation: Record<string, number>;
   beta: number;
+  
+  // Position-level metrics
+  positionMetrics: {
+    totalPositions: number;
+    longPositions: number;
+    shortPositions: number;
+    netExposure: number;
+    grossExposure: number;
+  };
+  
+  // Risk attribution
+  riskAttribution: {
+    byStrategy: Record<string, number>;
+    byExchange: Record<string, number>;
+    byAsset: Record<string, number>;
+  };
+  
   lastUpdated: string;
 }
 
@@ -394,6 +935,12 @@ export interface ErrorDetails {
   timestamp: string;
 }
 
+export interface AuthError {
+  type: 'INVALID_CREDENTIALS' | 'ACCOUNT_LOCKED' | 'TOKEN_EXPIRED' | 'NETWORK_ERROR' | 'UNKNOWN_ERROR';
+  message: string;
+  details?: any;
+}
+
 // Form types
 export interface FormField {
   name: string;
@@ -421,38 +968,74 @@ export interface ChartConfig {
 }
 
 // Playground types for testing strategies and configurations
+/**
+ * Enhanced playground configuration with strategy template integration.
+ */
 export interface PlaygroundConfiguration {
   id?: string;
   name: string;
   description?: string;
+  
+  // Strategy configuration
+  strategyTemplate: {
+    templateId: string;
+    strategyType: StrategyType;
+    parameters: Record<string, any>;
+  };
+  
+  // Market configuration
   symbols: string[];
+  timeframe: TimeInterval;
+  
+  // Position sizing (updated to match PositionSizeMethod)
   positionSizing: {
-    type: 'fixed' | 'percentage' | 'kelly_criterion';
+    method: PositionSizeMethod;
     value: number;
     maxPositions: number;
+    // Kelly Criterion specific
+    kellyFraction?: number;
+    maxKellyFraction?: number;
+    // Risk parity specific
+    lookbackPeriod?: number;
   };
+  
   tradingSide: 'long' | 'short' | 'both';
+  
+  // Risk settings (updated to match RiskConfiguration)
   riskSettings: {
     stopLossPercentage: number;
     takeProfitPercentage: number;
     maxDrawdownPercentage: number;
     maxRiskPerTrade: number;
+    correlationLimit: number;
+    enableCircuitBreaker: boolean;
+    dailyLossLimit?: number;
   };
+  
+  // Portfolio settings (updated to match AllocationStrategy)
   portfolioSettings: {
     maxPositions: number;
-    allocationStrategy: 'equal_weight' | 'risk_parity' | 'market_cap' | 'custom';
+    allocationStrategy: AllocationStrategy;
     rebalanceFrequency: 'daily' | 'weekly' | 'monthly' | 'never';
+    // Custom allocation weights
+    customWeights?: Record<string, number>;
   };
-  strategy: {
+  
+  // Legacy strategy field for backward compatibility
+  /** @deprecated Use strategyTemplate instead */
+  strategy?: {
     type: string;
     parameters: Record<string, any>;
   };
+  
+  // ML model configuration
   model?: {
     type: string;
     version: string;
     parameters: Record<string, any>;
   };
-  timeframe: TimeInterval;
+  
+  // Metadata
   createdAt?: string;
   updatedAt?: string;
 }
@@ -524,31 +1107,102 @@ export interface PlaygroundLog {
   data?: Record<string, any>;
 }
 
+/**
+ * Enhanced playground state with strategy template integration.
+ */
 export interface PlaygroundState {
+  // Strategy templates
+  availableTemplates: StrategyTemplate[];
+  templatesLoading: boolean;
+  
+  // Configurations
   configurations: PlaygroundConfiguration[];
   activeConfiguration: PlaygroundConfiguration | null;
+  configurationHistory: PlaygroundConfiguration[];
+  
+  // Executions
   executions: PlaygroundExecution[];
   activeExecution: PlaygroundExecution | null;
   comparisonExecutions: PlaygroundExecution[];
+  
+  // A/B Testing
+  abTests: StrategyABTest[];
+  activeABTest: StrategyABTest | null;
+  
+  // Presets
+  presets: PlaygroundPreset[];
+  presetsLoading: boolean;
+  
+  // UI State
   isLoading: boolean;
   error: string | null;
+  
+  // Filters
   filters: {
     status?: PlaygroundExecution['status'][];
     mode?: PlaygroundExecution['mode'][];
+    strategyType?: StrategyType[];
+    riskLevel?: RiskLevel[];
     dateRange?: DateRange;
+    performanceRange?: {
+      minReturn?: number;
+      maxReturn?: number;
+      minSharpe?: number;
+      maxSharpe?: number;
+    };
+  };
+  
+  // Optimization state
+  optimization: {
+    isOptimizing: boolean;
+    optimizationProgress: number;
+    currentGeneration?: number;
+    bestConfiguration?: PlaygroundConfiguration;
+    optimizationHistory: Array<{
+      generation: number;
+      bestFitness: number;
+      averageFitness: number;
+      configuration: PlaygroundConfiguration;
+    }>;
   };
 }
 
+/**
+ * Enhanced playground preset with strategy template integration.
+ */
 export interface PlaygroundPreset {
   id: string;
   name: string;
   description: string;
-  category: 'conservative' | 'moderate' | 'aggressive' | 'experimental';
+  category: RiskLevel; // Use RiskLevel instead of string literals
+  
+  // Strategy template reference
+  strategyTemplateId: string;
+  strategyType: StrategyType;
+  
+  // Configuration
   configuration: PlaygroundConfiguration;
+  
+  // Performance data
+  performanceMetrics?: {
+    backtestPeriod: string;
+    totalReturn: number;
+    sharpeRatio: number;
+    maxDrawdown: number;
+    winRate: number;
+    volatility: number;
+  };
+  
+  // Metadata
   author: string;
   rating?: number;
   downloads: number;
+  tags: string[];
+  isVerified: boolean;
+  
+  // Timestamps
   createdAt: string;
+  updatedAt?: string;
 }
 
 // Advanced playground features
@@ -591,6 +1245,77 @@ export interface ParameterOptimization {
   sensitivity?: number;
 }
 
+/**
+ * Enhanced A/B testing with strategy template comparison.
+ */
+export interface StrategyABTest {
+  id: string;
+  name: string;
+  description?: string;
+  
+  // Strategy configurations
+  configurations: {
+    control: {
+      templateId: string;
+      configuration: PlaygroundConfiguration;
+    };
+    treatment: {
+      templateId: string;
+      configuration: PlaygroundConfiguration;
+    };
+  };
+  
+  // Test executions
+  executions: {
+    control: PlaygroundExecution;
+    treatment: PlaygroundExecution;
+  };
+  
+  // Statistical results
+  results?: {
+    significanceLevel: number;
+    pValue: number;
+    confidenceInterval: [number, number];
+    winner: 'control' | 'treatment' | 'inconclusive';
+    effect: {
+      magnitude: number;
+      direction: 'positive' | 'negative';
+      metric: string;
+    };
+    detailedMetrics: {
+      control: PlaygroundMetrics;
+      treatment: PlaygroundMetrics;
+      comparison: {
+        returnDifference: number;
+        sharpeDifference: number;
+        drawdownDifference: number;
+        winRateDifference: number;
+      };
+    };
+  };
+  
+  // Test configuration
+  testConfig: {
+    primaryMetric: 'total_return' | 'sharpe_ratio' | 'calmar_ratio' | 'sortino_ratio';
+    minSampleSize: number;
+    maxDurationDays: number;
+    significanceThreshold: number;
+    stopEarlyOnSignificance: boolean;
+  };
+  
+  status: 'setup' | 'running' | 'completed' | 'failed' | 'stopped';
+  
+  // Metadata
+  createdBy: string;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+/**
+ * Legacy ABTest interface for backward compatibility.
+ * @deprecated Use StrategyABTest instead
+ */
 export interface ABTest {
   id: string;
   name: string;
@@ -617,8 +1342,100 @@ export interface ABTest {
   createdAt: string;
 }
 
+// Strategy Template API Response Types
+
+/**
+ * API response for strategy template list.
+ */
+export interface StrategyTemplateListResponse {
+  templates: StrategyTemplate[];
+  categories: StrategyCategory[];
+  total: number;
+  filters: {
+    categories: Array<{ value: StrategyCategory; label: string; count: number }>;
+    riskLevels: Array<{ value: RiskLevel; label: string; count: number }>;
+    exchanges: Array<{ value: string; label: string; count: number }>;
+  };
+}
+
+/**
+ * API response for individual strategy template.
+ */
+export interface StrategyTemplateResponse {
+  template: StrategyTemplate;
+  relatedTemplates?: StrategyTemplate[];
+  performanceMetrics?: {
+    backtestResults: BacktestResult[];
+    livePerformance?: {
+      totalReturn: number;
+      sharpeRatio: number;
+      maxDrawdown: number;
+      winRate: number;
+    };
+  };
+}
+
+/**
+ * Strategy template validation response.
+ */
+export interface TemplateValidationResponse {
+  isValid: boolean;
+  errors: Array<{
+    parameter: string;
+    message: string;
+    severity: 'error' | 'warning' | 'info';
+  }>;
+  warnings: Array<{
+    parameter: string;
+    message: string;
+    recommendation?: string;
+  }>;
+  estimatedCapitalRequirement: number;
+  riskAssessment: {
+    riskScore: number;
+    riskLevel: RiskLevel;
+    riskFactors: string[];
+  };
+}
+
+/**
+ * Strategy deployment request.
+ */
+export interface StrategyDeploymentRequest {
+  templateId: string;
+  name: string;
+  configuration: {
+    exchanges: string[];
+    symbols: string[];
+    allocatedCapital: number;
+    parameters: Record<string, any>;
+    riskConfiguration: RiskConfiguration;
+  };
+  autoStart: boolean;
+}
+
+/**
+ * Strategy deployment response.
+ */
+export interface StrategyDeploymentResponse {
+  strategyId: string;
+  deploymentId: string;
+  status: 'deployed' | 'starting' | 'error';
+  configuration: StrategyConfiguration;
+  estimatedStartTime?: string;
+  validationResults: TemplateValidationResponse;
+}
+
 // Export commonly used utility types
 export type LoadingState = 'idle' | 'loading' | 'succeeded' | 'failed';
 export type SortDirection = 'asc' | 'desc';
 export type DateRange = { start: string; end: string };
 export type TimeInterval = '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '1d' | '1w';
+
+// Strategy-specific utility types
+export type StrategyParameterValue = string | number | boolean | string[] | number[];
+export type ValidationRule = (value: any, allValues?: Record<string, any>) => string | null;
+export type ParameterDependency = {
+  parameter: string;
+  condition: (value: any) => boolean;
+};

@@ -5,23 +5,17 @@
 
 import React, { useMemo, useCallback } from 'react';
 import {
-  Box,
-  Paper,
-  Typography,
-  ToggleButton,
-  ToggleButtonGroup,
-  IconButton,
-  Tooltip,
-  CircularProgress,
-  Alert,
-} from '@mui/material';
-import {
-  Fullscreen,
-  FullscreenExit,
-  Refresh,
+  Maximize,
+  Minimize,
+  RefreshCw,
   Settings,
   TrendingUp,
-} from '@mui/icons-material';
+} from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { cn } from '@/lib/utils';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -31,12 +25,8 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip as ChartTooltip,
-  Legend,
-  ReferenceLine,
 } from 'recharts';
 import { motion } from 'framer-motion';
-import { colors } from '@/theme/colors';
-import { tradingTheme } from '@/theme';
 
 interface PriceData {
   timestamp: number;
@@ -112,36 +102,27 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   if (!data) return null;
 
   return (
-    <Paper
-      sx={{
-        p: 2,
-        backgroundColor: 'background.paper',
-        border: '1px solid',
-        borderColor: 'divider',
-        borderRadius: 1,
-        boxShadow: 3,
-      }}
-    >
-      <Typography variant="caption" color="text.secondary" gutterBottom>
+    <Card className="p-3 bg-background border border-border rounded-lg shadow-lg">
+      <p className="text-xs text-muted-foreground mb-2">
         {new Date(label).toLocaleString()}
-      </Typography>
+      </p>
       
       {data.open !== undefined && (
-        <Box>
-          <Typography variant="body2">O: {formatPrice(data.open)}</Typography>
-          <Typography variant="body2">H: {formatPrice(data.high)}</Typography>
-          <Typography variant="body2">L: {formatPrice(data.low)}</Typography>
-          <Typography variant="body2">C: {formatPrice(data.close)}</Typography>
-          <Typography variant="body2">V: {formatVolume(data.volume)}</Typography>
-        </Box>
+        <div className="space-y-1">
+          <p className="text-sm">O: {formatPrice(data.open)}</p>
+          <p className="text-sm">H: {formatPrice(data.high)}</p>
+          <p className="text-sm">L: {formatPrice(data.low)}</p>
+          <p className="text-sm">C: {formatPrice(data.close)}</p>
+          <p className="text-sm">V: {formatVolume(data.volume)}</p>
+        </div>
       )}
       
       {data.price !== undefined && (
-        <Typography variant="body2">
+        <p className="text-sm">
           Price: {formatPrice(data.price)}
-        </Typography>
+        </p>
       )}
-    </Paper>
+    </Card>
   );
 };
 
@@ -155,8 +136,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   onRefresh,
   onSettingsClick,
   height = 400,
-  showVolume = true,
-  showIndicators = false,
   fullscreen = false,
   onFullscreenToggle,
   chartType = 'line',
@@ -182,7 +161,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   }, [data]);
 
   const handleTimeframeChange = useCallback((
-    event: React.MouseEvent<HTMLElement>,
+    _event: React.MouseEvent<HTMLElement>,
     newTimeframe: string | null,
   ) => {
     if (newTimeframe && onTimeframeChange) {
@@ -191,7 +170,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   }, [onTimeframeChange]);
 
   const handleChartTypeChange = useCallback((
-    event: React.MouseEvent<HTMLElement>,
+    _event: React.MouseEvent<HTMLElement>,
     newType: string | null,
   ) => {
     if (newType && onChartTypeChange) {
@@ -202,62 +181,56 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   const renderChart = () => {
     if (loading) {
       return (
-        <Box
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          height={height - 100}
+        <div
+          className="flex items-center justify-center"
+          style={{ height: height - 100 }}
         >
-          <CircularProgress />
-        </Box>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
       );
     }
 
     if (error) {
       return (
-        <Box
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          height={height - 100}
+        <div
+          className="flex items-center justify-center"
+          style={{ height: height - 100 }}
         >
-          <Alert severity="error" sx={{ maxWidth: 400 }}>
-            {error}
+          <Alert className="max-w-sm">
+            <AlertDescription>{error}</AlertDescription>
           </Alert>
-        </Box>
+        </div>
       );
     }
 
     if (!chartData.length) {
       return (
-        <Box
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-          height={height - 100}
+        <div
+          className="flex items-center justify-center"
+          style={{ height: height - 100 }}
         >
-          <Typography color="text.secondary">
+          <p className="text-muted-foreground">
             No data available
-          </Typography>
-        </Box>
+          </p>
+        </div>
       );
     }
 
     return (
       <ResponsiveContainer width="100%" height={height - 100}>
         <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={colors.border.divider} />
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
           <XAxis 
             dataKey="time" 
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 12, fill: colors.text.secondary }}
+            tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
           />
           <YAxis 
             domain={['dataMin - 5', 'dataMax + 5']}
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 12, fill: colors.text.secondary }}
+            tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
             tickFormatter={(value) => formatPrice(value, 0)}
           />
           <ChartTooltip content={<CustomTooltip />} />
@@ -266,10 +239,10 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             <Line
               type="monotone"
               dataKey="displayPrice"
-              stroke={colors.chart.line1}
+              stroke="hsl(var(--primary))"
               strokeWidth={2}
               dot={false}
-              activeDot={{ r: 4, fill: colors.chart.line1 }}
+              activeDot={{ r: 4, fill: 'hsl(var(--primary))' }}
             />
           )}
           
@@ -277,7 +250,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             <Area
               type="monotone"
               dataKey="displayPrice"
-              stroke={colors.chart.line1}
+              stroke="hsl(var(--primary))"
               strokeWidth={2}
               fill={`url(#areaGradient)`}
               fillOpacity={0.3}
@@ -286,8 +259,8 @@ export const PriceChart: React.FC<PriceChartProps> = ({
 
           <defs>
             <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={colors.chart.line1} stopOpacity={0.8} />
-              <stop offset="95%" stopColor={colors.chart.line1} stopOpacity={0.1} />
+              <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8} />
+              <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.1} />
             </linearGradient>
           </defs>
         </ComposedChart>
@@ -296,128 +269,127 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <Paper
-        sx={{
-          height: fullscreen ? '100vh' : height,
-          display: 'flex',
-          flexDirection: 'column',
-          position: fullscreen ? 'fixed' : 'relative',
-          top: fullscreen ? 0 : 'auto',
-          left: fullscreen ? 0 : 'auto',
-          right: fullscreen ? 0 : 'auto',
-          bottom: fullscreen ? 0 : 'auto',
-          zIndex: fullscreen ? 1300 : 'auto',
-          backgroundColor: 'background.paper',
-        }}
+    <TooltipProvider>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
       >
-        {/* Header */}
-        <Box
-          p={2}
-          display="flex"
-          justifyContent="space-between"
-          alignItems="center"
-          borderBottom="1px solid"
-          borderColor="divider"
-        >
-          <Box display="flex" alignItems="center" gap={2}>
-            <Box>
-              <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                {symbol}
-              </Typography>
-              {priceChange && (
-                <Box display="flex" alignItems="center" gap={1}>
-                  <Typography variant="h5" sx={{ fontFamily: 'monospace' }}>
-                    {formatPrice(priceChange.currentPrice)}
-                  </Typography>
-                  <Box display="flex" alignItems="center" gap={0.5}>
-                    {priceChange.change > 0 ? (
-                      <TrendingUp sx={{ fontSize: 16, color: colors.financial.profit }} />
-                    ) : (
-                      <TrendingUp sx={{ fontSize: 16, color: colors.financial.loss, transform: 'rotate(180deg)' }} />
+        <Card className={cn(
+          "flex flex-col bg-background",
+          fullscreen ? "fixed inset-0 z-50" : "relative"
+        )} style={{ height: fullscreen ? '100vh' : height }}>
+          {/* Header */}
+          <div className="flex justify-between items-center p-4 border-b border-border">
+            <div className="flex items-center gap-4">
+              <div>
+                <h2 className="text-lg font-semibold">{symbol}</h2>
+                {priceChange && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl font-mono">
+                      {formatPrice(priceChange.currentPrice)}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <TrendingUp 
+                        className={cn(
+                          "h-4 w-4",
+                          priceChange.change >= 0 ? "text-green-500" : "text-red-500 rotate-180"
+                        )}
+                      />
+                      <span className={cn(
+                        "text-sm font-mono",
+                        priceChange.change >= 0 ? "text-green-500" : "text-red-500"
+                      )}>
+                        {priceChange.change >= 0 ? '+' : ''}
+                        {formatPrice(priceChange.change)} ({priceChange.changePercent.toFixed(2)}%)
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Chart type selector */}
+              <div className="flex border rounded-md">
+                {chartTypes.map((type, index) => (
+                  <Button
+                    key={type.value}
+                    variant={chartType === type.value ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => handleChartTypeChange({} as any, type.value)}
+                    className={cn(
+                      index === 0 ? 'rounded-r-none' : 
+                      index === chartTypes.length - 1 ? 'rounded-l-none' : 'rounded-none border-x-0'
                     )}
-                    <Typography
-                      variant="body2"
-                      sx={{
-                        color: tradingTheme.getPriceChangeColor(priceChange.change),
-                        fontFamily: 'monospace',
-                      }}
-                    >
-                      {priceChange.change >= 0 ? '+' : ''}
-                      {formatPrice(priceChange.change)} ({priceChange.changePercent.toFixed(2)}%)
-                    </Typography>
-                  </Box>
-                </Box>
+                  >
+                    {type.label}
+                  </Button>
+                ))}
+              </div>
+
+              {/* Timeframe selector */}
+              <div className="flex border rounded-md">
+                {timeframes.map((tf, index) => (
+                  <Button
+                    key={tf.value}
+                    variant={timeframe === tf.value ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => handleTimeframeChange({} as any, tf.value)}
+                    className={cn(
+                      "px-2",
+                      index === 0 ? 'rounded-r-none' : 
+                      index === timeframes.length - 1 ? 'rounded-l-none' : 'rounded-none border-x-0'
+                    )}
+                  >
+                    {tf.label}
+                  </Button>
+                ))}
+              </div>
+
+              {/* Action buttons */}
+              {onRefresh && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" onClick={onRefresh}>
+                      <RefreshCw className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Refresh</TooltipContent>
+                </Tooltip>
               )}
-            </Box>
-          </Box>
 
-          <Box display="flex" alignItems="center" gap={1}>
-            {/* Chart type selector */}
-            <ToggleButtonGroup
-              value={chartType}
-              exclusive
-              onChange={handleChartTypeChange}
-              size="small"
-            >
-              {chartTypes.map((type) => (
-                <ToggleButton key={type.value} value={type.value}>
-                  {type.label}
-                </ToggleButton>
-              ))}
-            </ToggleButtonGroup>
+              {onSettingsClick && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" onClick={onSettingsClick}>
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Settings</TooltipContent>
+                </Tooltip>
+              )}
 
-            {/* Timeframe selector */}
-            <ToggleButtonGroup
-              value={timeframe}
-              exclusive
-              onChange={handleTimeframeChange}
-              size="small"
-            >
-              {timeframes.map((tf) => (
-                <ToggleButton key={tf.value} value={tf.value}>
-                  {tf.label}
-                </ToggleButton>
-              ))}
-            </ToggleButtonGroup>
+              {onFullscreenToggle && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" onClick={onFullscreenToggle}>
+                      {fullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>{fullscreen ? "Exit Fullscreen" : "Fullscreen"}</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+          </div>
 
-            {/* Action buttons */}
-            {onRefresh && (
-              <Tooltip title="Refresh">
-                <IconButton onClick={onRefresh} size="small">
-                  <Refresh />
-                </IconButton>
-              </Tooltip>
-            )}
-
-            {onSettingsClick && (
-              <Tooltip title="Settings">
-                <IconButton onClick={onSettingsClick} size="small">
-                  <Settings />
-                </IconButton>
-              </Tooltip>
-            )}
-
-            {onFullscreenToggle && (
-              <Tooltip title={fullscreen ? "Exit Fullscreen" : "Fullscreen"}>
-                <IconButton onClick={onFullscreenToggle} size="small">
-                  {fullscreen ? <FullscreenExit /> : <Fullscreen />}
-                </IconButton>
-              </Tooltip>
-            )}
-          </Box>
-        </Box>
-
-        {/* Chart area */}
-        <Box flex={1} position="relative">
-          {renderChart()}
-        </Box>
-      </Paper>
-    </motion.div>
+          {/* Chart area */}
+          <div className="flex-1 relative">
+            {renderChart()}
+          </div>
+        </Card>
+      </motion.div>
+    </TooltipProvider>
   );
 };
 

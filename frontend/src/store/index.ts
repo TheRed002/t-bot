@@ -19,7 +19,6 @@ import playgroundReducer from './slices/playgroundSlice';
 
 // Import middleware
 import { authMiddleware } from './middleware/authMiddleware';
-import { websocketMiddleware } from './middleware/websocketMiddleware';
 import { errorMiddleware } from './middleware/errorMiddleware';
 
 // Configure the store
@@ -56,7 +55,6 @@ export const store = configureStore({
       },
     })
       .concat(authMiddleware)
-      .concat(websocketMiddleware)
       .concat(errorMiddleware),
   
   devTools: process.env.NODE_ENV !== 'production',
@@ -73,16 +71,144 @@ export type AppDispatch = typeof store.dispatch;
 export const useAppDispatch = () => useDispatch<AppDispatch>();
 export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
 
-// Export action creators and selectors
-export * from './slices/authSlice';
-export * from './slices/botSlice';
-export * from './slices/portfolioSlice';
-export * from './slices/strategySlice';
-export * from './slices/riskSlice';
-export * from './slices/marketSlice';
-export * from './slices/uiSlice';
-export * from './slices/websocketSlice';
-export * from './slices/playgroundSlice';
+// Export action creators and selectors with namespacing to avoid conflicts
+export {
+  // Auth slice
+  loginUser,
+  registerUser,
+  logoutUser,
+  refreshToken,
+  fetchUserProfile,
+  updateUserProfile,
+  clearError as clearAuthError
+} from './slices/authSlice';
+
+export {
+  // Bot slice
+  fetchBots,
+  fetchBotById,
+  createBot,
+  updateBot,
+  deleteBot,
+  startBot,
+  stopBot,
+  pauseBot,
+  clearError as clearBotError,
+  setSelectedBot,
+  updateFilters as updateBotFilters,
+  clearFilters as clearBotFilters
+} from './slices/botSlice';
+
+export {
+  // Portfolio slice
+  fetchPortfolioSummary,
+  fetchPositions,
+  fetchBalances,
+  updateFilters as updatePortfolioFilters,
+  clearError as clearPortfolioError,
+  selectPortfolioState
+} from './slices/portfolioSlice';
+
+export {
+  // Strategy slice
+  fetchStrategies,
+  runBacktest,
+  deployStrategy,
+  updateStrategy,
+  clearError as clearStrategyError,
+  setSelectedStrategy,
+  selectStrategies,
+  selectSelectedStrategy,
+  selectStrategyLoading,
+  selectStrategyError
+} from './slices/strategySlice';
+
+export {
+  // Risk slice
+  fetchRiskMetrics,
+  updateRiskMetrics,
+  addAlert,
+  clearError as clearRiskError
+} from './slices/riskSlice';
+
+export {
+  // Market slice
+  updateMarketData,
+  updateCandlestickData,
+  updateOrderBook,
+  addToWatchlist,
+  removeFromWatchlist
+} from './slices/marketSlice';
+
+export {
+  // UI slice
+  toggleSidebar,
+  setSidebarCollapsed,
+  openModal,
+  closeModal,
+  addNotification,
+  removeNotification,
+  clearNotifications,
+  setTheme
+} from './slices/uiSlice';
+
+export {
+  // WebSocket slice
+  connect as connectWebSocket,
+  connected as connectedWebSocket,
+  disconnect as disconnectWebSocket,
+  error as websocketError,
+  heartbeat as websocketHeartbeat,
+  messageReceived as websocketMessageReceived
+} from './slices/websocketSlice';
+
+export {
+  // Playground slice actions
+  fetchConfigurations,
+  saveConfiguration,
+  deleteConfiguration,
+  startExecution,
+  controlExecution,
+  fetchExecutions,
+  fetchExecutionLogs,
+  fetchExecutionTrades,
+  createABTest,
+  runABTest,
+  startBatchOptimization,
+  fetchPresets,
+  setActiveConfiguration,
+  updateConfigurationField,
+  resetActiveConfiguration,
+  setActiveExecution,
+  updateExecutionProgress,
+  updateExecutionStatus,
+  addExecutionLog,
+  updateExecutionMetrics,
+  addExecutionTrade,
+  addToComparison,
+  removeFromComparison,
+  clearComparison,
+  setFilters as setPlaygroundFilters,
+  updateFilter as updatePlaygroundFilter,
+  clearFilters as clearPlaygroundFilters,
+  clearError as clearPlaygroundError,
+  setError as setPlaygroundError,
+  resetPlaygroundState,
+  // Playground slice selectors
+  selectPlaygroundState,
+  selectConfigurations as selectPlaygroundConfigurations,
+  selectActiveConfiguration,
+  selectExecutions,
+  selectActiveExecution,
+  selectComparisonExecutions,
+  selectPlaygroundIsLoading as selectPlaygroundLoading,
+  selectPlaygroundError,
+  selectPlaygroundFilters,
+  selectCompletedExecutions,
+  selectRunningExecutions,
+  selectFilteredExecutions,
+  selectBestPerformingExecution
+} from './slices/playgroundSlice';
 
 // Export store instance
 export default store;

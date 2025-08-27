@@ -13,7 +13,7 @@ import PlaygroundPage from '../PlaygroundPage';
 import playgroundReducer from '@/store/slices/playgroundSlice';
 import uiReducer from '@/store/slices/uiSlice';
 import authReducer from '@/store/slices/authSlice';
-import theme from '@/theme';
+import { theme } from '@/theme';
 
 // Mock the child components to simplify testing
 jest.mock('../components/ConfigurationPanel', () => {
@@ -141,11 +141,23 @@ const createMockStore = (initialState = {}) => {
         isLoading: false
       },
       auth: {
-        user: { id: '1', username: 'testuser', email: 'test@example.com', isActive: true, createdAt: '2023-01-01' },
-        token: 'test-token',
+        user: { 
+          user_id: '1', 
+          username: 'testuser', 
+          email: 'test@example.com', 
+          is_active: true, 
+          status: 'active' as any,
+          roles: ['user'],
+          scopes: ['read', 'write'],
+          created_at: '2023-01-01T00:00:00Z'
+        },
+        tokens: { access_token: 'test-token', refresh_token: 'refresh-token', token_type: 'Bearer', expires_in: 3600 },
         isAuthenticated: true,
         isLoading: false,
-        error: null
+        isRefreshing: false,
+        error: null,
+        rememberMe: false,
+        sessionExpiresAt: null
       },
       ...initialState
     }

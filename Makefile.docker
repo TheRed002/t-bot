@@ -35,7 +35,7 @@ dev-build: ## Build development images
 .PHONY: dev-up
 dev-up: ## Start development environment
 	@echo "$(BLUE)Starting development environment...$(RESET)"
-	./scripts/docker-dev.sh
+	./scripts/development/docker-dev.sh
 
 .PHONY: dev-down
 dev-down: ## Stop development environment
@@ -59,7 +59,7 @@ dev-shell-%: ## Open shell in service container (e.g., make dev-shell-backend)
 
 .PHONY: dev-health
 dev-health: ## Check development environment health
-	./scripts/health-check.sh
+	./scripts/system/health-check.sh
 
 ##@ Production Commands
 
@@ -71,7 +71,7 @@ prod-build: ## Build production images
 .PHONY: prod-up
 prod-up: ## Start production environment
 	@echo "$(BLUE)Starting production environment...$(RESET)"
-	./scripts/docker-prod.sh
+	./scripts/deployment/docker-prod.sh
 
 .PHONY: prod-down
 prod-down: ## Stop production environment
@@ -95,7 +95,7 @@ prod-shell-%: ## Open shell in production service container
 
 .PHONY: prod-health
 prod-health: ## Check production environment health
-	./scripts/health-check.sh --prod
+	./scripts/system/health-check.sh --prod
 
 ##@ Database Commands
 
@@ -112,12 +112,12 @@ db-migrate-prod: ## Run production database migrations
 .PHONY: db-backup
 db-backup: ## Backup development database
 	@echo "$(BLUE)Backing up development database...$(RESET)"
-	./scripts/backup-db.sh
+	./scripts/maintenance/backup-db.sh
 
 .PHONY: db-backup-prod
 db-backup-prod: ## Backup production database
 	@echo "$(BLUE)Backing up production database...$(RESET)"
-	./scripts/backup-db.sh --prod
+	./scripts/maintenance/backup-db.sh --prod
 
 .PHONY: db-shell
 db-shell: ## Open PostgreSQL shell (development)

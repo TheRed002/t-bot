@@ -5,46 +5,26 @@
 
 import React, { useState, useMemo } from 'react';
 import {
-  Card,
-  CardContent,
-  Typography,
-  Box,
-  Chip,
-  IconButton,
-  Button,
-  Switch,
-  FormControlLabel,
-  Tooltip,
-  Alert,
-  Divider,
-  LinearProgress,
-  Menu,
-  MenuItem,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-} from '@mui/material';
-import {
-  PlayArrow,
+  Play,
   Pause,
-  Stop,
+  Square,
   Edit,
-  Delete,
-  Settings,
-  Assessment,
-  MoreVert,
-  TrendingUp,
-  TrendingDown,
-  Security,
-  Speed,
-  Timeline,
-  Warning,
-} from '@mui/icons-material';
+  Trash2,
+  BarChart3,
+  MoreVertical,
+} from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
-import { tradingTheme } from '@/theme';
-import { colors } from '@/theme/colors';
 
 export interface Bot {
   id: string;
@@ -99,28 +79,28 @@ const formatPercentage = (value: number): string => {
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'running':
-      return colors.status.online;
+      return 'bg-green-600';
     case 'paused':
-      return colors.status.warning;
+      return 'bg-yellow-600';
     case 'stopped':
-      return colors.status.offline;
+      return 'bg-gray-600';
     case 'error':
-      return colors.status.error;
+      return 'bg-red-600';
     default:
-      return colors.status.info;
+      return 'bg-blue-600';
   }
 };
 
 const getRiskColor = (risk: string) => {
   switch (risk) {
     case 'low':
-      return colors.financial.profit;
+      return 'text-green-600 border-green-600';
     case 'medium':
-      return colors.financial.warning;
+      return 'text-yellow-600 border-yellow-600';
     case 'high':
-      return colors.financial.loss;
+      return 'text-red-600 border-red-600';
     default:
-      return colors.status.info;
+      return 'text-blue-600 border-blue-600';
   }
 };
 
@@ -153,18 +133,15 @@ export const BotCard: React.FC<BotCardProps> = ({
     pnlPercent,
     trades,
     winRate,
-    created,
     lastActivity,
     riskLevel,
     leverage,
-    maxDrawdown,
     sharpeRatio,
-    description,
     version,
     isActive,
   } = bot;
 
-  const pnlColor = tradingTheme.getPriceChangeColor(pnl);
+  const pnlColor = pnl >= 0 ? 'text-green-500' : 'text-red-500';
   const statusColor = getStatusColor(status);
   const riskColor = getRiskColor(riskLevel);
 
@@ -240,227 +217,181 @@ export const BotCard: React.FC<BotCardProps> = ({
         transition={{ duration: 0.2 }}
         whileHover={{ scale: 1.02 }}
       >
-        <Card
-          sx={{
-            position: 'relative',
-            backgroundColor: 'background.paper',
-            border: '1px solid',
-            borderColor: hasError ? 'error.main' : 'divider',
-            borderLeftWidth: '4px',
-            borderLeftColor: statusColor,
-            opacity: isActive ? 1 : 0.7,
-            '&:hover': {
-              boxShadow: 3,
-            },
-          }}
-        >
-          <CardContent sx={{ p: compact ? 2 : 3 }}>
+        <Card className={cn(
+          "relative transition-shadow hover:shadow-lg border-l-4",
+          hasError ? "border-red-500" : "border-gray-200",
+          statusColor.replace('bg-', 'border-l-'),
+          isActive ? "opacity-100" : "opacity-70"
+        )}>
+          <CardContent className={compact ? 'p-4' : 'p-6'}>
             {/* Header */}
-            <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={2}>
-              <Box flex={1}>
-                <Box display="flex" alignItems="center" gap={1} mb={1}>
-                  <Typography 
-                    variant={compact ? "h6" : "h5"} 
-                    sx={{ fontWeight: 600, cursor: 'pointer' }}
+            <div className="flex justify-between items-start mb-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <h3 
+                    className={cn(
+                      "font-semibold cursor-pointer hover:text-primary",
+                      compact ? "text-lg" : "text-xl"
+                    )}
                     onClick={handleViewDetails}
                   >
                     {name}
-                  </Typography>
+                  </h3>
                   
-                  <Chip
-                    label={status.toUpperCase()}
-                    size="small"
-                    sx={{
-                      backgroundColor: statusColor,
-                      color: 'white',
-                      fontWeight: 600,
-                      minWidth: 60,
-                    }}
-                  />
+                  <Badge className={cn(
+                    "text-white font-semibold min-w-[60px] justify-center",
+                    statusColor
+                  )}>
+                    {status.toUpperCase()}
+                  </Badge>
                   
-                  <Chip
-                    label={riskLevel.toUpperCase()}
-                    size="small"
-                    variant="outlined"
-                    sx={{
-                      borderColor: riskColor,
-                      color: riskColor,
-                    }}
-                  />
-                </Box>
+                  <Badge variant="outline" className={riskColor}>
+                    {riskLevel.toUpperCase()}
+                  </Badge>
+                </div>
 
-                <Typography variant="body2" color="text.secondary" gutterBottom>
+                <p className="text-sm text-muted-foreground mb-1">
                   {strategy} • {exchange} • {symbol}
-                </Typography>
+                </p>
 
                 {version && (
-                  <Typography variant="caption" color="text.secondary">
+                  <p className="text-xs text-muted-foreground">
                     v{version}
-                  </Typography>
+                  </p>
                 )}
-              </Box>
+              </div>
 
               {showActions && (
-                <Box display="flex" alignItems="center" gap={0.5}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={isActive}
-                        onChange={(e) => handleToggleActive(e.target.checked)}
-                        size="small"
-                      />
-                    }
-                    label=""
-                    sx={{ m: 0 }}
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={isActive}
+                    onCheckedChange={handleToggleActive}
                   />
                   
-                  <IconButton size="small" onClick={handleMenuOpen}>
-                    <MoreVert />
-                  </IconButton>
-                </Box>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={handleEdit}>
+                        <Edit className="w-4 h-4 mr-2" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setDeleteDialog(true)}>
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={handleViewDetails}>
+                        <BarChart3 className="w-4 h-4 mr-2" />
+                        View Details
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               )}
-            </Box>
+            </div>
 
             {/* Error Alert */}
             {hasError && (
-              <Alert severity="error" sx={{ mb: 2, fontSize: '0.75rem' }}>
-                Bot encountered an error. Check logs for details.
+              <Alert className="mb-4 text-xs">
+                <AlertDescription>
+                  Bot encountered an error. Check logs for details.
+                </AlertDescription>
               </Alert>
             )}
 
             {/* Performance Metrics */}
-            <Box display="flex" flexDirection={compact ? 'column' : 'row'} gap={2} mb={2}>
+            <div className={cn(
+              "flex gap-4 mb-4",
+              compact ? "flex-col" : "flex-row"
+            )}>
               {/* Left Column */}
-              <Box flex={1}>
-                <Box display="flex" justifyContent="space-between" mb={1}>
-                  <Typography variant="body2" color="text.secondary">
-                    Balance
-                  </Typography>
-                  <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                    {formatCurrency(balance)}
-                  </Typography>
-                </Box>
+              <div className="flex-1 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Balance</span>
+                  <span className="text-sm font-mono">{formatCurrency(balance)}</span>
+                </div>
 
-                <Box display="flex" justifyContent="space-between" mb={1}>
-                  <Typography variant="body2" color="text.secondary">
-                    P&L
-                  </Typography>
-                  <Box textAlign="right">
-                    <Typography 
-                      variant="body2" 
-                      sx={{ 
-                        fontFamily: 'monospace',
-                        color: pnlColor,
-                        fontWeight: 600,
-                      }}
-                    >
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">P&L</span>
+                  <div className="text-right">
+                    <div className={cn(
+                      "text-sm font-mono font-semibold",
+                      pnlColor
+                    )}>
                       {formatCurrency(pnl)}
-                    </Typography>
-                    <Typography 
-                      variant="caption" 
-                      sx={{ 
-                        color: pnlColor,
-                        fontFamily: 'monospace',
-                      }}
-                    >
+                    </div>
+                    <div className={cn(
+                      "text-xs font-mono",
+                      pnlColor
+                    )}>
                       {formatPercentage(pnlPercent)}
-                    </Typography>
-                  </Box>
-                </Box>
+                    </div>
+                  </div>
+                </div>
 
-                <Box display="flex" justifyContent="space-between" mb={1}>
-                  <Typography variant="body2" color="text.secondary">
-                    Trades
-                  </Typography>
-                  <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                    {trades.toLocaleString()}
-                  </Typography>
-                </Box>
-              </Box>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Trades</span>
+                  <span className="text-sm font-mono">{trades.toLocaleString()}</span>
+                </div>
+              </div>
 
               {/* Right Column */}
               {!compact && (
-                <Box flex={1}>
-                  <Box display="flex" justifyContent="space-between" mb={1}>
-                    <Typography variant="body2" color="text.secondary">
-                      Win Rate
-                    </Typography>
-                    <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                      {winRate.toFixed(1)}%
-                    </Typography>
-                  </Box>
+                <div className="flex-1 space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Win Rate</span>
+                    <span className="text-sm font-mono">{winRate.toFixed(1)}%</span>
+                  </div>
 
-                  <Box display="flex" justifyContent="space-between" mb={1}>
-                    <Typography variant="body2" color="text.secondary">
-                      Leverage
-                    </Typography>
-                    <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                      {leverage}x
-                    </Typography>
-                  </Box>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Leverage</span>
+                    <span className="text-sm font-mono">{leverage}x</span>
+                  </div>
 
-                  <Box display="flex" justifyContent="space-between" mb={1}>
-                    <Typography variant="body2" color="text.secondary">
-                      Sharpe Ratio
-                    </Typography>
-                    <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                      {sharpeRatio.toFixed(2)}
-                    </Typography>
-                  </Box>
-                </Box>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">Sharpe Ratio</span>
+                    <span className="text-sm font-mono">{sharpeRatio.toFixed(2)}</span>
+                  </div>
+                </div>
               )}
-            </Box>
+            </div>
 
             {/* Activity Indicator */}
-            <Box mb={2}>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                <Typography variant="caption" color="text.secondary">
+            <div className="mb-4">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs text-muted-foreground">
                   Last Activity: {timeSinceLastActivity}
-                </Typography>
+                </span>
                 {isRunning && (
-                  <Box display="flex" alignItems="center" gap={0.5}>
-                    <Box
-                      sx={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        backgroundColor: statusColor,
-                        animation: 'pulse 2s infinite',
-                      }}
-                    />
-                    <Typography variant="caption" color="text.secondary">
-                      Active
-                    </Typography>
-                  </Box>
+                  <div className="flex items-center gap-1">
+                    <div className={cn(
+                      "w-2 h-2 rounded-full animate-pulse",
+                      statusColor
+                    )} />
+                    <span className="text-xs text-muted-foreground">Active</span>
+                  </div>
                 )}
-              </Box>
+              </div>
 
               {isRunning && (
-                <LinearProgress 
-                  variant="indeterminate" 
-                  sx={{ 
-                    height: 2,
-                    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                    '& .MuiLinearProgress-bar': {
-                      backgroundColor: statusColor,
-                    },
-                  }} 
-                />
+                <Progress value={undefined} className="h-0.5" />
               )}
-            </Box>
+            </div>
 
             {/* Control Buttons */}
             {showActions && (
-              <Box display="flex" gap={1}>
+              <div className="flex gap-2 flex-wrap">
                 {isStopped && (
                   <Button
-                    size="small"
-                    variant="contained"
-                    color="success"
-                    startIcon={<PlayArrow />}
+                    size="sm"
+                    className="bg-green-600 hover:bg-green-700"
                     onClick={handleStart}
                     disabled={!isActive}
                   >
+                    <Play className="w-4 h-4 mr-1" />
                     Start
                   </Button>
                 )}
@@ -468,21 +399,21 @@ export const BotCard: React.FC<BotCardProps> = ({
                 {isRunning && (
                   <>
                     <Button
-                      size="small"
-                      variant="outlined"
-                      color="warning"
-                      startIcon={<Pause />}
+                      size="sm"
+                      variant="outline"
+                      className="text-yellow-600 border-yellow-200 hover:bg-yellow-50"
                       onClick={handlePause}
                     >
+                      <Pause className="w-4 h-4 mr-1" />
                       Pause
                     </Button>
                     <Button
-                      size="small"
-                      variant="outlined"
-                      color="error"
-                      startIcon={<Stop />}
+                      size="sm"
+                      variant="outline"
+                      className="text-red-600 border-red-200 hover:bg-red-50"
                       onClick={handleStop}
                     >
+                      <Square className="w-4 h-4 mr-1" />
                       Stop
                     </Button>
                   </>
@@ -491,97 +422,86 @@ export const BotCard: React.FC<BotCardProps> = ({
                 {isPaused && (
                   <>
                     <Button
-                      size="small"
-                      variant="contained"
-                      color="success"
-                      startIcon={<PlayArrow />}
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700"
                       onClick={handleStart}
                       disabled={!isActive}
                     >
+                      <Play className="w-4 h-4 mr-1" />
                       Resume
                     </Button>
                     <Button
-                      size="small"
-                      variant="outlined"
-                      color="error"
-                      startIcon={<Stop />}
+                      size="sm"
+                      variant="outline"
+                      className="text-red-600 border-red-200 hover:bg-red-50"
                       onClick={handleStop}
                     >
+                      <Square className="w-4 h-4 mr-1" />
                       Stop
                     </Button>
                   </>
                 )}
 
                 <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<Assessment />}
+                  size="sm"
+                  variant="outline"
                   onClick={handleViewDetails}
                 >
+                  <BarChart3 className="w-4 h-4 mr-1" />
                   Details
                 </Button>
-              </Box>
+              </div>
             )}
           </CardContent>
         </Card>
       </motion.div>
 
-      {/* Context Menu */}
-      <Menu
-        anchorEl={menuAnchor}
-        open={Boolean(menuAnchor)}
-        onClose={handleMenuClose}
-      >
-        <MenuItem onClick={handleEdit}>
-          <Edit sx={{ mr: 1 }} />
-          Edit
-        </MenuItem>
-        <MenuItem onClick={() => setDeleteDialog(true)}>
-          <Delete sx={{ mr: 1 }} />
-          Delete
-        </MenuItem>
-        <MenuItem onClick={handleViewDetails}>
-          <Assessment sx={{ mr: 1 }} />
-          View Details
-        </MenuItem>
-      </Menu>
-
       {/* Edit Dialog */}
-      <Dialog open={editDialog} onClose={() => setEditDialog(false)}>
-        <DialogTitle>Edit Bot</DialogTitle>
+      <Dialog open={editDialog} onOpenChange={setEditDialog}>
         <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="Bot Name"
-            fullWidth
-            variant="outlined"
-            value={editName}
-            onChange={(e) => setEditName(e.target.value)}
-          />
+          <DialogHeader>
+            <DialogTitle>Edit Bot</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="botName">Bot Name</Label>
+              <Input
+                id="botName"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Enter bot name"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveEdit}>
+              Save
+            </Button>
+          </DialogFooter>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditDialog(false)}>Cancel</Button>
-          <Button onClick={handleSaveEdit} variant="contained">
-            Save
-          </Button>
-        </DialogActions>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialog} onClose={() => setDeleteDialog(false)}>
-        <DialogTitle>Delete Bot</DialogTitle>
+      <Dialog open={deleteDialog} onOpenChange={setDeleteDialog}>
         <DialogContent>
-          <Typography>
+          <DialogHeader>
+            <DialogTitle>Delete Bot</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
             Are you sure you want to delete the bot "{name}"? This action cannot be undone.
-          </Typography>
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialog(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              Delete
+            </Button>
+          </DialogFooter>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialog(false)}>Cancel</Button>
-          <Button onClick={handleDelete} color="error" variant="contained">
-            Delete
-          </Button>
-        </DialogActions>
       </Dialog>
     </>
   );

@@ -1,0 +1,287 @@
+# Multi-stage Dockerfile for T-Bot Background Workers
+# Handles ML training, data processing, and background tasks
+
+# ==============================================================================
+# Base Stage - Optimized for compute-intensive background tasks
+# ==============================================================================
+FROM python:3.10.12-alpine as base
+
+LABEL maintainer="T-Bot Trading Team" \
+      version="1.0" \
+      description="T-Bot Background Workers - ML Training and Data Processing" \
+      security.scan="enabled"
+
+# Create non-root user for workers
+RUN addgroup -g 1003 -S worker && \
+    adduser -u 1003 -S worker -G worker -h /home/worker -s /bin/sh
+
+# Environment variables optimized for background processing
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    # Worker-specific optimizations
+    WORKER_CONCURRENCY=4 \
+    WORKER_MAX_TASKS_PER_CHILD=1000 \
+    WORKER_MAX_MEMORY_PER_CHILD=512000 \
+    OMP_NUM_THREADS=2 \
+    NUMEXPR_MAX_THREADS=2
+
+# Install system dependencies for ML and data processing
+RUN apk add --no-cache --virtual .build-deps \
+        gcc \
+        g++ \
+        gfortran \
+        musl-dev \
+        libffi-dev \
+        openssl-dev \
+        python3-dev \
+        postgresql-dev \
+        openblas-dev \
+        lapack-dev \
+        freetype-dev \
+        libpng-dev \
+        jpeg-dev \
+        tiff-dev \
+        linux-headers \
+        make \
+        cmake \
+        pkgconfig \
+    && apk add --no-cache \
+        libpq \
+        libstdc++ \
+        openblas \
+        lapack \
+        freetype \
+        libpng \
+        jpeg \
+        tiff \
+        ca-certificates \
+        tzdata \
+        dumb-init \
+        redis \
+    && update-ca-certificates
+
+# Install specialized ML libraries from source for optimal performance
+RUN pip install --no-cache-dir \
+        cython \
+        numpy \
+        scipy
+
+# ==============================================================================
+# Builder Stage - ML and data processing dependencies
+# ==============================================================================
+FROM base as builder
+
+WORKDIR /build
+
+# Copy requirements and extract ML/data processing specific packages
+COPY requirements.txt .
+
+# Create optimized requirements for workers
+RUN grep -E "(scikit-learn|pandas|numpy|scipy|lightgbm|xgboost|joblib|celery|redis)" requirements.txt > worker-requirements.txt || \
+    echo "scikit-learn>=1.3.0" >> worker-requirements.txt && \
+    echo "pandas>=2.0.0" >> worker-requirements.txt && \
+    echo "lightgbm>=4.0.0" >> worker-requirements.txt && \
+    echo "celery>=5.3.0" >> worker-requirements.txt && \
+    echo "redis>=4.5.0" >> worker-requirements.txt
+
+# Create virtual environment optimized for ML workloads
+RUN python -m venv /opt/venv && \
+    chmod -R 755 /opt/venv
+
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install ML dependencies with optimizations
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install -r requirements.txt && \
+    pip install -r worker-requirements.txt
+
+# Verify critical ML packages installation
+RUN python -c "import sklearn, pandas, lightgbm; print('ML packages verified')"
+
+# ==============================================================================
+# Production Stage - Background workers runtime
+# ==============================================================================
+FROM base as production
+
+# Copy virtual environment
+COPY --from=builder --chown=root:root /opt/venv /opt/venv
+RUN chmod -R 755 /opt/venv && \
+    chown -R worker:worker /opt/venv
+
+WORKDIR /app
+
+# Create worker-specific directory structure
+RUN mkdir -p \
+    /app/logs/workers \
+    /app/logs/ml \
+    /app/logs/data_processing \
+    /app/data/raw \
+    /app/data/processed \
+    /app/data/features \
+    /app/data/training \
+    /app/models/training \
+    /app/models/artifacts \
+    /app/models/registry \
+    /app/state/tasks \
+    /app/state/checkpoints \
+    /app/monitoring/workers \
+    /app/tmp/processing \
+    /run/workers \
+    && chown -R worker:worker /app /run/workers \
+    && chmod -R 750 /app \
+    && chmod -R 700 /app/logs /app/state /app/tmp
+
+# Copy application code focusing on ML and data processing
+COPY --chown=worker:worker --chmod=640 src/ml/ ./src/ml/
+COPY --chown=worker:worker --chmod=640 src/data/ ./src/data/
+COPY --chown=worker:worker --chmod=640 src/backtesting/ ./src/backtesting/
+COPY --chown=worker:worker --chmod=640 src/optimization/ ./src/optimization/
+COPY --chown=worker:worker --chmod=640 src/strategies/evolutionary/ ./src/strategies/evolutionary/
+COPY --chown=worker:worker --chmod=640 src/core/ ./src/core/
+COPY --chown=worker:worker --chmod=640 src/utils/ ./src/utils/
+COPY --chown=worker:worker --chmod=640 config/ ./config/
+
+# Copy worker configuration files
+COPY --chown=worker:worker --chmod=640 scripts/worker_* ./scripts/
+
+# Remove build dependencies to reduce attack surface
+RUN apk del .build-deps && \
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+
+# Security hardening
+USER worker
+
+# Set worker-specific resource limits
+ENV CELERY_WORKER_CONCURRENCY=4 \
+    CELERY_WORKER_PREFETCH_MULTIPLIER=1 \
+    CELERY_TASK_SOFT_TIME_LIMIT=1800 \
+    CELERY_TASK_TIME_LIMIT=3600 \
+    CELERY_WORKER_MAX_TASKS_PER_CHILD=100
+
+# Operational labels
+LABEL operational.service="workers" \
+      operational.tier="background" \
+      compute.intensive="true" \
+      ml.enabled="true"
+
+# Expose monitoring port
+EXPOSE 8004
+
+# Worker-specific health check
+HEALTHCHECK --interval=60s --timeout=30s --start-period=120s --retries=3 \
+    CMD python -c "from celery import current_app; current_app.control.inspect().active() or exit(1)"
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+
+# Production command for Celery workers
+CMD ["celery", "-A", "src.ml.training.trainer", "worker", \
+     "--loglevel=info", \
+     "--concurrency=4", \
+     "--prefetch-multiplier=1", \
+     "--max-tasks-per-child=100", \
+     "--time-limit=3600", \
+     "--soft-time-limit=1800"]
+
+# ==============================================================================
+# ML Training Stage - Specialized for model training workloads
+# ==============================================================================
+FROM production as ml-training
+
+USER root
+
+# Install additional ML and visualization tools
+RUN apk add --no-cache \
+        graphviz \
+        graphviz-dev
+
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir \
+        tensorboard \
+        mlflow \
+        optuna \
+        hyperopt \
+        shap \
+        eli5 \
+        matplotlib \
+        seaborn \
+        plotly
+
+USER worker
+
+# Set ML training specific environment
+ENV ML_TRAINING_MODE=true \
+    MLFLOW_TRACKING_URI=http://mlflow:5000 \
+    OPTUNA_DB_URL=postgresql://optuna:optuna@postgresql:5432/optuna
+
+# ML training command
+CMD ["python", "-m", "src.ml.training.trainer", "--mode", "training", "--distributed", "true"]
+
+# ==============================================================================
+# Data Processing Stage - Optimized for ETL operations
+# ==============================================================================
+FROM production as data-processing
+
+USER root
+
+# Install data processing tools
+RUN apk add --no-cache \
+        curl \
+        jq \
+        unzip
+
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir \
+        apache-airflow \
+        dask \
+        distributed \
+        prefect
+
+USER worker
+
+# Set data processing environment
+ENV DATA_PROCESSING_MODE=true \
+    DASK_SCHEDULER_ADDRESS=tcp://dask-scheduler:8786 \
+    PREFECT_API_URL=http://prefect:4200/api
+
+# Data processing command
+CMD ["python", "-m", "src.data.pipeline.data_pipeline", "--mode", "processing", "--distributed", "true"]
+
+# ==============================================================================
+# Development Stage
+# ==============================================================================
+FROM ml-training as development
+
+USER root
+
+# Install development and debugging tools
+RUN apk add --no-cache \
+        vim \
+        htop \
+        strace \
+        gdb \
+        valgrind
+
+# Install development packages
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir \
+        pytest \
+        pytest-cov \
+        pytest-xdist \
+        pytest-benchmark \
+        ipython \
+        jupyter \
+        memory-profiler \
+        py-spy \
+        line-profiler
+
+USER worker
+
+# Development command with debugging capabilities
+CMD ["celery", "-A", "src.ml.training.trainer", "worker", \
+     "--loglevel=debug", \
+     "--concurrency=2", \
+     "--prefetch-multiplier=1"]

@@ -12,13 +12,13 @@ export const portfolioAPI = {
   },
 
   // Get positions
-  getPositions: async (filters?: PortfolioFilters) => {
+  getPositions: async (filters?: Partial<PortfolioFilters>) => {
     const params = filters ? { ...filters } : {};
     return api.get<Position[]>('/portfolio/positions', { params });
   },
 
   // Get balances
-  getBalances: async (filters?: PortfolioFilters) => {
+  getBalances: async (filters?: Partial<PortfolioFilters>) => {
     const params = filters ? { ...filters } : {};
     return api.get<Balance[]>('/portfolio/balances', { params });
   },

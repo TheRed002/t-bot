@@ -1,4 +1,5 @@
 const path = require('path');
+const webpack = require('webpack');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 
@@ -29,6 +30,7 @@ module.exports = (env, argv) => {
         '@/utils': path.resolve(__dirname, 'src/utils'),
         '@/theme': path.resolve(__dirname, 'src/theme'),
         '@/types': path.resolve(__dirname, 'src/types'),
+        '@/lib': path.resolve(__dirname, 'src/lib'),
       },
     },
 
@@ -44,6 +46,7 @@ module.exports = (env, argv) => {
           use: [
             isDevelopment ? 'style-loader' : MiniCssExtractPlugin.loader,
             'css-loader',
+            'postcss-loader',
           ],
         },
         {
@@ -64,6 +67,14 @@ module.exports = (env, argv) => {
     },
 
     plugins: [
+      new webpack.DefinePlugin({
+        'process.env': {
+          NODE_ENV: JSON.stringify(isDevelopment ? 'development' : 'production'),
+          REACT_APP_API_URL: JSON.stringify(process.env.REACT_APP_API_URL || 'http://localhost:8000'),
+          REACT_APP_WS_URL: JSON.stringify(process.env.REACT_APP_WS_URL || 'ws://localhost:8000'),
+        },
+      }),
+      
       new HtmlWebpackPlugin({
         template: './public/index.html',
         inject: true,
@@ -128,18 +139,23 @@ module.exports = (env, argv) => {
           warnings: false,
         },
       },
-      proxy: {
-        '/api': {
+      proxy: [
+        {
+          context: ['/api', '/auth', '/docs', '/openapi.json', '/health'],
           target: 'http://localhost:8000',
           changeOrigin: true,
           secure: false,
+          logLevel: 'debug',
         },
-        '/ws': {
-          target: 'ws://localhost:8000',
+        {
+          context: ['/socket.io'],
+          target: 'http://localhost:8000',
           ws: true,
           changeOrigin: true,
+          secure: false,
+          logLevel: 'debug',
         },
-      },
+      ],
     },
 
     devtool: isDevelopment ? 'eval-source-map' : 'source-map',

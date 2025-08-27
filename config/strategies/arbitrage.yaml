@@ -1,61 +1,31 @@
 # Arbitrage Strategy Configuration
-# This file contains configuration for all arbitrage-related strategies
+# This file contains configuration for arbitrage strategies
 
-strategies:
-  # Cross-exchange arbitrage strategy
-  cross_exchange_arbitrage:
-    enabled: true
-    name: "cross_exchange_arbitrage"
-    strategy_type: "arbitrage"
-    symbols: ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT"]
-    timeframe: "1m"  # High frequency for arbitrage
-    min_confidence: 0.7
-    max_positions: 5
-    position_size_pct: 0.01  # 1% - smaller for arbitrage
-    stop_loss_pct: 0.005     # 0.5% - tight stop loss
-    take_profit_pct: 0.01    # 1% - quick profit taking
-    
-    # Arbitrage-specific parameters
+strategy:
+  name: "arbitrage"
+  strategy_type: "arbitrage"
+  enabled: true
+  symbols: ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT"]
+  timeframe: "1m"  # High frequency for arbitrage
+  min_confidence: 0.7
+  max_positions: 5
+  position_size_pct: 0.01  # 1% - smaller for arbitrage
+  stop_loss_pct: 0.005     # 0.5% - tight stop loss
+  take_profit_pct: 0.01    # 1% - quick profit taking
+  
+  # Arbitrage-specific parameters
+  parameters:
     min_profit_threshold: 0.001  # 0.1% minimum profit after fees
     max_execution_time: 500      # 500ms maximum execution time
     exchanges: ["binance", "okx", "coinbase"]
     latency_threshold: 100       # 100ms latency threshold
     slippage_limit: 0.0005      # 0.05% slippage limit
     max_open_arbitrages: 5
-    
-    # Risk parameters
-    max_position_size: 0.1       # 10% max position size
-    max_daily_trades: 1000       # Maximum trades per day
-    max_daily_loss: 0.02         # 2% maximum daily loss
-    
-    # Execution parameters
     order_type: "market"         # Market orders for speed
     partial_fill_timeout: 1000   # 1 second partial fill timeout
-    
-    # Monitoring parameters
     enable_latency_monitoring: true
     enable_slippage_monitoring: true
     enable_profit_tracking: true
-
-  # Triangular arbitrage strategy
-  triangular_arbitrage:
-    enabled: true
-    name: "triangular_arbitrage"
-    strategy_type: "arbitrage"
-    symbols: ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
-    timeframe: "1m"
-    min_confidence: 0.8
-    max_positions: 3
-    position_size_pct: 0.005     # 0.5% - smaller for triangular
-    stop_loss_pct: 0.003         # 0.3% - very tight stop loss
-    take_profit_pct: 0.008       # 0.8% - quick profit taking
-    
-    # Triangular-specific parameters
-    min_profit_threshold: 0.001  # 0.1% minimum profit after fees
-    max_execution_time: 500      # 500ms maximum execution time
-    exchange: "binance"          # Single exchange for triangular
-    slippage_limit: 0.0003       # 0.03% slippage limit (tighter)
-    max_open_arbitrages: 3
     
     # Triangular paths
     triangular_paths:
@@ -63,141 +33,78 @@ strategies:
       - ["BTCUSDT", "BNBBTC", "BNBUSDT"]
       - ["BTCUSDT", "ADABTC", "ADAUSDT"]
       - ["ETHUSDT", "BNBETH", "BNBUSDT"]
-    
-    # Risk parameters
-    max_position_size: 0.05      # 5% max position size
-    max_daily_trades: 500        # Maximum trades per day
-    max_daily_loss: 0.015        # 1.5% maximum daily loss
-    
-    # Execution parameters
-    order_type: "market"
-    partial_fill_timeout: 800    # 800ms partial fill timeout
-    
-    # Monitoring parameters
-    enable_latency_monitoring: true
-    enable_slippage_monitoring: true
-    enable_profit_tracking: true
 
-  # Arbitrage opportunity scanner
-  arbitrage_scanner:
+# Risk management settings
+risk_management:
+  max_total_arbitrage_exposure: 0.2    # 20% total arbitrage exposure
+  max_per_symbol_exposure: 0.05        # 5% per symbol
+  max_per_exchange_exposure: 0.1       # 10% per exchange
+  max_daily_arbitrage_loss: 0.03       # 3% maximum daily loss
+  max_concurrent_arbitrages: 15        # Maximum concurrent arbitrages
+  max_position_size: 0.1               # 10% max position size
+  max_daily_trades: 1000               # Maximum trades per day
+  max_daily_loss: 0.02                 # 2% maximum daily loss
+
+# Execution settings
+execution:
+  default_order_type: "market"
+  enable_smart_order_routing: true
+  enable_partial_fill_handling: true
+  enable_slippage_protection: true
+  max_slippage_per_trade: 0.001        # 0.1% maximum slippage
+
+# Exchange settings
+exchanges:
+  binance:
     enabled: true
-    name: "arbitrage_scanner"
-    strategy_type: "arbitrage"
-    symbols: ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT", "LINKUSDT"]
-    timeframe: "1m"
-    min_confidence: 0.6
-    max_positions: 10
-    position_size_pct: 0.008     # 0.8% position size
-    stop_loss_pct: 0.004         # 0.4% stop loss
-    take_profit_pct: 0.012       # 1.2% take profit
+    priority: 1
+    max_orders_per_second: 10
+    max_orders_per_minute: 1200
     
-    # Scanner-specific parameters
-    scan_interval: 100           # 100ms scan interval
-    min_profit_threshold: 0.001  # 0.1% minimum profit
-    max_opportunities: 10        # Maximum opportunities to track
-    exchanges: ["binance", "okx", "coinbase"]
+  okx:
+    enabled: true
+    priority: 2
+    max_orders_per_second: 20
+    max_orders_per_minute: 600
     
-    # Triangular paths for scanner
-    triangular_paths:
-      - ["BTCUSDT", "ETHBTC", "ETHUSDT"]
-      - ["BTCUSDT", "BNBBTC", "BNBUSDT"]
-      - ["BTCUSDT", "ADABTC", "ADAUSDT"]
-      - ["ETHUSDT", "BNBETH", "BNBUSDT"]
-      - ["BTCUSDT", "DOTBTC", "DOTUSDT"]
-      - ["BTCUSDT", "LINKBTC", "LINKUSDT"]
-    
-    # Risk parameters
-    max_position_size: 0.08      # 8% max position size
-    max_daily_trades: 2000       # Maximum trades per day
-    max_daily_loss: 0.025        # 2.5% maximum daily loss
-    
-    # Execution parameters
-    order_type: "market"
-    partial_fill_timeout: 1200   # 1.2 second partial fill timeout
-    
-    # Monitoring parameters
-    enable_latency_monitoring: true
-    enable_slippage_monitoring: true
-    enable_profit_tracking: true
-    enable_opportunity_tracking: true
+  coinbase:
+    enabled: true
+    priority: 3
+    max_orders_per_second: 15
+    max_orders_per_minute: 600
 
-# Global arbitrage settings
-arbitrage_global:
-  # Exchange settings
-  exchanges:
-    binance:
-      enabled: true
-      priority: 1
-      max_orders_per_second: 10
-      max_orders_per_minute: 1200
-      
-    okx:
-      enabled: true
-      priority: 2
-      max_orders_per_second: 20
-      max_orders_per_minute: 600
-      
-    coinbase:
-      enabled: true
-      priority: 3
-      max_orders_per_second: 15
-      max_orders_per_minute: 600
+# Monitoring settings
+monitoring:
+  enable_real_time_monitoring: true
+  enable_performance_tracking: true
+  enable_latency_tracking: true
+  enable_profit_tracking: true
+  enable_risk_tracking: true
   
-  # Risk management
-  risk_management:
-    max_total_arbitrage_exposure: 0.2    # 20% total arbitrage exposure
-    max_per_symbol_exposure: 0.05        # 5% per symbol
-    max_per_exchange_exposure: 0.1       # 10% per exchange
-    max_daily_arbitrage_loss: 0.03       # 3% maximum daily loss
-    max_concurrent_arbitrages: 15        # Maximum concurrent arbitrages
-    
-  # Execution settings
-  execution:
-    default_order_type: "market"
-    enable_smart_order_routing: true
-    enable_partial_fill_handling: true
-    enable_slippage_protection: true
-    max_slippage_per_trade: 0.001        # 0.1% maximum slippage
-    
-  # Monitoring settings
-  monitoring:
-    enable_real_time_monitoring: true
-    enable_performance_tracking: true
-    enable_latency_tracking: true
-    enable_profit_tracking: true
-    enable_risk_tracking: true
-    
-    # Alert thresholds
-    alert_thresholds:
-      max_latency_ms: 200
-      max_slippage_pct: 0.002
-      min_profit_threshold: 0.0005
-      max_daily_loss_pct: 0.02
-      
-  # Performance optimization
-  performance:
-    enable_parallel_execution: true
-    enable_connection_pooling: true
-    enable_rate_limit_optimization: true
-    enable_memory_optimization: true
-    
-    # Caching settings
-    cache_settings:
-      price_cache_ttl: 1000      # 1 second
-      order_cache_ttl: 5000      # 5 seconds
-      balance_cache_ttl: 30000   # 30 seconds
-      
-  # Logging settings
-  logging:
-    enable_detailed_logging: true
-    enable_performance_logging: true
-    enable_error_logging: true
-    enable_audit_logging: true
-    
-    # Log levels
-    log_levels:
-      cross_exchange_arbitrage: "INFO"
-      triangular_arbitrage: "INFO"
-      arbitrage_scanner: "INFO"
-      execution_engine: "DEBUG"
-      risk_management: "INFO"
+  # Alert thresholds
+  alert_thresholds:
+    max_latency_ms: 200
+    max_slippage_pct: 0.002
+    min_profit_threshold: 0.0005
+    max_daily_loss_pct: 0.02
+
+# Performance optimization
+performance:
+  enable_parallel_execution: true
+  enable_connection_pooling: true
+  enable_rate_limit_optimization: true
+  enable_memory_optimization: true
+  
+  # Caching settings
+  cache_settings:
+    price_cache_ttl: 1000      # 1 second
+    order_cache_ttl: 5000      # 5 seconds
+    balance_cache_ttl: 30000   # 30 seconds
+
+# Logging settings
+logging:
+  enable_detailed_logging: true
+  enable_performance_logging: true
+  enable_error_logging: true
+  enable_audit_logging: true
+  log_level: "INFO"

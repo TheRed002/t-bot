@@ -1,0 +1,459 @@
+# Testing Environment Configuration - T-Bot Trading System
+# This configuration is optimized for automated testing and CI/CD pipelines
+
+environment: testing
+debug: false
+app_name: "t-bot-trading-system-test"
+app_version: "1.0.0-test"
+log_level: "WARNING"  # Reduced logging for faster tests
+
+# Database Configuration - In-Memory/Test Databases
+database:
+  # PostgreSQL - Test Database (preferably in-memory or dedicated test DB)
+  DB_HOST: "${TEST_POSTGRES_HOST:-localhost}"
+  DB_PORT: 5433  # Different port to avoid conflicts
+  DB_NAME: "tbot_test"
+  DB_USER: "${TEST_POSTGRES_USER:-tbot_test}"
+  DB_PASSWORD: "${TEST_POSTGRES_PASSWORD:-test_password}"
+  postgresql_pool_size: 2  # Minimal pool for testing
+  postgresql_max_overflow: 2
+  postgresql_pool_timeout: 10
+  postgresql_pool_recycle: 300
+  postgresql_pool_pre_ping: false
+  postgresql_echo: false  # Disable SQL logging in tests
+  postgresql_ssl_mode: "disable"
+  
+  # Redis - Test Database
+  REDIS_HOST: "${TEST_REDIS_HOST:-localhost}"
+  REDIS_PORT: 6380  # Different port for testing
+  REDIS_PASSWORD: null
+  REDIS_DB: 15  # Use high DB number to avoid conflicts
+  redis_ssl: false
+  redis_connection_pool_size: 2
+  redis_connection_pool_timeout: 1
+  redis_socket_connect_timeout: 1
+  redis_socket_timeout: 1
+  redis_health_check_interval: 300
+  
+  # InfluxDB - Test Database
+  INFLUXDB_HOST: "${TEST_INFLUXDB_HOST:-localhost}"
+  INFLUXDB_PORT: 8087  # Different port for testing
+  INFLUXDB_TOKEN: "test_token_not_secret"
+  INFLUXDB_ORG: "tbot-test"
+  INFLUXDB_BUCKET: "test_data"
+  influxdb_ssl: false
+  influxdb_timeout: 5000  # Short timeout for tests
+  influxdb_retries: 1
+  influxdb_retry_interval: 100
+
+# Security Configuration - Testing (Minimal security for speed)
+security:
+  # JWT Configuration - Fast for testing
+  secret_key: "test_jwt_secret_key_not_for_production"
+  jwt_algorithm: "HS256"
+  jwt_expire_minutes: 60
+  jwt_refresh_expire_hours: 2
+  
+  # Encryption Configuration - Simple for testing
+  encryption_key: "test_encryption_key_32_chars_long"
+  encryption_algorithm: "AES-256-GCM"
+  key_derivation_salt: "test_salt_16char"
+  
+  # API Security - Permissive for testing
+  cors_origins: ["*"]
+  cors_allow_credentials: true
+  cors_allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+  cors_allow_headers: ["*"]
+  
+  # Rate Limiting - Disabled for testing speed
+  rate_limit_per_minute: 1000000
+  rate_limit_burst: 100000
+  rate_limit_redis_key_prefix: "rate_limit:test:"
+  
+  # Session Security - Minimal for testing
+  secure_cookies: false
+  cookie_samesite: "Lax"
+  cookie_httponly: false
+  session_timeout_minutes: 60
+  max_sessions_per_user: 100
+
+# Error Handling Configuration - Minimal retries for fast tests
+error_handling:
+  circuit_breaker_failure_threshold: 2
+  circuit_breaker_recovery_timeout: 5
+  circuit_breaker_half_open_max_calls: 1
+  max_retry_attempts: 1  # Minimal retries for test speed
+  retry_backoff_factor: 1.0
+  retry_max_delay: 1
+  pattern_detection_enabled: false
+  correlation_analysis_enabled: false
+  predictive_alerts_enabled: false
+  state_validation_frequency: 3600  # Infrequent validation
+  auto_reconciliation_enabled: false
+  max_discrepancy_threshold: 0.5
+  partial_fill_min_percentage: 0.1
+  network_max_offline_duration: 10
+  data_feed_max_staleness: 5
+  order_rejection_max_retries: 1
+  error_notification_webhook: null
+  critical_error_email_list: []
+
+# Exchange Configuration - Mock/Test APIs
+exchanges:
+  default_timeout: 5  # Short timeout for tests
+  max_retries: 1
+  connection_pool_size: 1
+  
+  # Mock exchange credentials
+  binance_api_key: "test_binance_key"
+  binance_api_secret: "test_binance_secret"
+  binance_testnet: true
+  binance_base_url: "http://localhost:8081/mock-binance"  # Mock server
+  binance_websocket_url: "ws://localhost:8081/mock-binance-ws"
+  
+  okx_api_key: "test_okx_key"
+  okx_api_secret: "test_okx_secret"
+  okx_passphrase: "test_passphrase"
+  okx_sandbox: true
+  okx_base_url: "http://localhost:8082/mock-okx"
+  okx_websocket_url: "ws://localhost:8082/mock-okx-ws"
+  
+  coinbase_api_key: "test_coinbase_key"
+  coinbase_api_secret: "test_coinbase_secret"
+  coinbase_sandbox: true
+  coinbase_base_url: "http://localhost:8083/mock-coinbase"
+  coinbase_websocket_url: "ws://localhost:8083/mock-coinbase-ws"
+  
+  # No rate limits for testing
+  rate_limits:
+    binance:
+      orders_per_second: 1000
+      requests_per_minute: 100000
+      websocket_connections: 100
+    okx:
+      orders_per_second: 1000
+      requests_per_minute: 100000
+      websocket_connections: 100
+    coinbase:
+      orders_per_second: 1000
+      requests_per_minute: 100000
+      websocket_connections: 100
+  
+  supported_exchanges: ["binance", "okx", "coinbase"]
+
+# Risk Management - Testing Settings (Permissive for test scenarios)
+risk:
+  default_position_size_method: "fixed_amount"
+  default_position_size_pct: 0.1  # 10% for visible test results
+  max_position_size_pct: 1.0  # 100% allowed in tests
+  max_total_positions: 100
+  max_positions_per_symbol: 10
+  max_portfolio_exposure: 1.0
+  max_sector_exposure: 1.0
+  max_correlation_exposure: 1.0
+  max_leverage: 10.0
+  max_daily_loss_pct: 1.0  # No limits in testing
+  max_drawdown_pct: 1.0
+  var_confidence_level: 0.8
+  kelly_lookback_days: 5  # Short for fast tests
+  kelly_max_fraction: 1.0
+  volatility_window: 5
+  volatility_target: 0.1
+  var_calculation_window: 10
+  drawdown_calculation_window: 10
+  correlation_calculation_window: 10
+  emergency_close_positions: false
+  emergency_recovery_timeout_hours: 1
+  emergency_manual_override_enabled: true
+  stop_loss_buffer_pct: 0.0
+
+# Capital Management - Testing Settings
+capital_management:
+  base_currency: "USDT"
+  total_capital: 100000.0  # Fixed amount for consistent tests
+  emergency_reserve_pct: 0.0  # No reserve for testing
+  allocation_strategy: "equal_weight"
+  rebalance_frequency_hours: 1
+  min_allocation_pct: 0.0
+  max_allocation_pct: 1.0
+  max_exchange_allocation_pct: 1.0
+  min_exchange_balance: 0.0
+  max_daily_reallocation_pct: 1.0
+  fund_flow_cooldown_minutes: 0  # No cooldown in tests
+  min_deposit_amount: 0.0
+  min_withdrawal_amount: 0.0
+  max_withdrawal_pct: 1.0
+  
+  supported_currencies:
+    - "USDT"
+    - "BTC"
+    - "ETH"
+  
+  hedging_enabled: false  # Simplified for testing
+  hedging_threshold: 1.0
+  hedge_ratio: 0.0
+  
+  withdrawal_rules:
+    profit_only:
+      enabled: false
+    maintain_minimum:
+      enabled: false
+    performance_based:
+      enabled: false
+    daily_limit:
+      enabled: false
+    approval_required:
+      enabled: false
+  
+  auto_compound_enabled: false
+  auto_compound_frequency: "never"
+  profit_threshold: 0.0
+  max_daily_loss_pct: 1.0
+  max_weekly_loss_pct: 1.0
+  max_monthly_loss_pct: 1.0
+  profit_lock_pct: 0.0
+  
+  per_strategy_minimum:
+    mean_reversion: 0.0
+    trend_following: 0.0
+    ml_strategy: 0.0
+    arbitrage: 0.0
+    market_making: 0.0
+  
+  exchange_allocation_weights:
+    binance: 1.0
+    okx: 0.0
+    coinbase: 0.0
+
+# Strategy Management - Testing Settings
+strategies:
+  max_concurrent_strategies: 50  # Allow many for testing
+  strategy_restart_delay: 0  # No delay in tests
+  performance_window_days: 1
+  default_min_confidence: 0.0  # No confidence requirements
+  default_position_size: 0.1
+  default_stop_loss: 0.0  # No stop losses in tests
+  default_take_profit: 0.0  # No take profits in tests
+  enable_hot_reload: false  # Disabled for test stability
+  config_check_interval: 3600  # Infrequent checks
+  min_win_rate: 0.0
+  min_sharpe_ratio: -100.0
+  max_drawdown_threshold: 10.0
+  performance_evaluation_frequency: 24
+  auto_disable_poor_performers: false
+  performance_alert_threshold: 0.0
+
+# Machine Learning Configuration - Testing (Minimal/Mock)
+ml:
+  model_registry_path: "./test_data/ml/registry"
+  artifact_store_path: "./test_data/ml/artifacts"
+  model_cache_size: 1
+  default_train_test_split: 0.8
+  default_validation_split: 0.1
+  max_training_time_hours: 0.1  # 6 minutes max for tests
+  feature_selection_threshold: 0.0
+  max_features: 10  # Very few features for fast tests
+  feature_cache_ttl_hours: 1
+  optuna_n_trials: 2  # Minimal trials for tests
+  optuna_timeout_hours: 0.1  # 6 minutes
+  optuna_pruning_enabled: false
+  cross_validation_folds: 2
+  validation_frequency_days: 1
+  performance_degradation_threshold: 1.0
+  drift_detection_enabled: false
+  drift_check_frequency_hours: 24
+  drift_threshold: 1.0
+  inference_batch_size: 10
+  prediction_cache_ttl_minutes: 1
+  model_warmup_enabled: false
+  
+  supported_model_types:
+    - "price_predictor"
+  
+  # Very permissive thresholds for testing
+  min_accuracy_threshold: 0.0
+  min_precision_threshold: 0.0
+  min_recall_threshold: 0.0
+  min_f1_threshold: 0.0
+  validation_threshold: 0.0
+  
+  # Minimal resources for testing
+  max_memory_gb: 1.0
+  max_cpu_cores: 1
+  gpu_enabled: false
+  max_memory_mb: 512
+  max_workers: 1
+  use_multiprocessing: false
+  batch_size: 10
+  chunk_size: 5
+
+# Logging Configuration - Testing (Minimal)
+logging:
+  level: "WARNING"  # Only warnings and errors
+  format: "simple"
+  handlers:
+    - type: "memory"  # In-memory logging for tests
+      level: "WARNING"
+    - type: "file"
+      filename: "./test_logs/test.log"
+      max_size: "1MB"
+      backup_count: 1
+      level: "ERROR"
+  
+  filter_patterns: []  # No filtering in tests
+  retention_days: 1
+  archive_after_days: 0
+
+# Monitoring and Metrics - Testing (Minimal)
+monitoring:
+  enabled: false  # Disabled for test performance
+  metrics_port: 9091
+  health_check_port: 8081
+  
+  prometheus:
+    enabled: false
+  
+  health_checks:
+    database:
+      enabled: false
+    exchanges:
+      enabled: false
+    redis:
+      enabled: false
+  
+  alerts:
+    error_rate_threshold: 1.0
+    response_time_threshold: 60000
+    memory_usage_threshold: 1.0
+    cpu_usage_threshold: 1.0
+    disk_usage_threshold: 1.0
+    position_size_deviation_threshold: 10.0
+    profit_loss_threshold: -1000000.0
+    drawdown_alert_threshold: 10.0
+    daily_volume_threshold: 0.0
+
+# Performance Configuration - Testing (Minimal resources)
+performance:
+  database_connection_pool:
+    min_size: 1
+    max_size: 2
+    acquire_timeout: 5
+    idle_timeout: 60
+  
+  cache:
+    default_ttl: 10
+    max_size: 100
+    strategy:
+      price_data_ttl: 5
+      market_data_ttl: 5
+      portfolio_data_ttl: 10
+  
+  websocket:
+    max_connections: 5
+    ping_interval: 300
+    ping_timeout: 30
+    close_timeout: 5
+    max_message_size: 1024
+    compression: false
+    heartbeat_interval: 300
+  
+  celery:
+    broker_url: "memory://"  # In-memory broker for tests
+    result_backend: "cache+memory://"
+    worker_concurrency: 1
+    task_time_limit: 30
+    task_soft_time_limit: 25
+    worker_prefetch_multiplier: 1
+    task_acks_late: false
+    worker_disable_rate_limits: true
+
+# Backup and Recovery Configuration - Testing (Disabled)
+backup:
+  enabled: false
+
+# Compliance and Audit Configuration - Testing (Disabled)
+compliance:
+  audit_logging:
+    enabled: false
+  data_retention:
+    trade_data_years: 0
+    user_data_years: 0
+    log_data_years: 0
+  regulatory_reporting:
+    enabled: false
+  access_control:
+    multi_factor_authentication: false
+    password_policy:
+      min_length: 1
+      require_uppercase: false
+      require_lowercase: false
+      require_numbers: false
+      require_symbols: false
+      max_age_days: 3650
+    session_management:
+      concurrent_sessions: 1000
+      idle_timeout_minutes: 1440
+      absolute_timeout_hours: 24
+
+# Testing-Specific Configuration
+testing:
+  # Test database settings
+  use_transaction_rollback: true  # Rollback after each test
+  reset_database_between_tests: true
+  use_in_memory_cache: true
+  
+  # Mock settings
+  mock_external_apis: true
+  mock_websockets: true
+  mock_file_system: false
+  mock_time: false  # Can be enabled for time-sensitive tests
+  
+  # Test data settings
+  fixture_path: "./tests/fixtures"
+  test_data_path: "./test_data"
+  generate_test_data: false  # Use pre-generated test data
+  
+  # Performance settings for tests
+  parallel_test_execution: true
+  max_test_workers: 4
+  test_timeout_seconds: 30
+  
+  # Coverage settings
+  coverage_enabled: true
+  coverage_threshold: 80.0  # Minimum coverage percentage
+  coverage_fail_under: true
+  
+  # Pytest settings
+  pytest_markers:
+    - "unit: Unit tests"
+    - "integration: Integration tests" 
+    - "e2e: End-to-end tests"
+    - "slow: Slow running tests"
+    - "fast: Fast running tests"
+  
+  # Test categories
+  test_categories:
+    unit_tests:
+      path: "tests/unit"
+      timeout: 10
+      parallel: true
+    integration_tests:
+      path: "tests/integration"
+      timeout: 60
+      parallel: false
+    performance_tests:
+      path: "tests/performance"
+      timeout: 300
+      parallel: false
+  
+  # CI/CD specific settings
+  ci_mode: true  # When running in CI/CD
+  fail_fast: false  # Continue running tests even if some fail
+  verbose_output: false  # Reduce output in CI
+  generate_test_reports: true
+  test_report_formats: ["junit", "html", "json"]
+  
+  # Test isolation settings
+  isolate_tests: true
+  cleanup_after_tests: true
+  preserve_test_artifacts: false

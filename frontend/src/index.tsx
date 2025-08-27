@@ -8,14 +8,15 @@ import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { ThemeProvider } from '@mui/material/styles';
-import { CssBaseline } from '@mui/material';
 import { BrowserRouter } from 'react-router-dom';
+import { Toaster } from 'sonner';
 
 import App from './App';
 import { store } from '@/store';
 import { queryClient } from '@/services/queryClient';
-import { extendedTheme } from '@/theme';
+
+// Import global styles
+import './styles/globals.css';
 
 // Error boundary for the entire app
 class ErrorBoundary extends React.Component<
@@ -38,34 +39,15 @@ class ErrorBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: '100vh',
-          backgroundColor: '#0a0e1a',
-          color: '#ffffff',
-          fontFamily: 'Inter, sans-serif',
-          textAlign: 'center',
-          padding: '20px',
-        }}>
-          <h1>T-Bot System Error</h1>
-          <p>Something went wrong with the trading system.</p>
-          <p style={{ fontSize: '14px', color: '#8892a0', marginTop: '10px' }}>
+        <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-5">
+          <h1 className="text-3xl font-bold mb-4">T-Bot System Error</h1>
+          <p className="text-muted-foreground mb-2">Something went wrong with the trading system.</p>
+          <p className="text-sm text-muted-foreground mb-6">
             {this.state.error?.message}
           </p>
           <button
             onClick={() => window.location.reload()}
-            style={{
-              marginTop: '20px',
-              padding: '10px 20px',
-              backgroundColor: '#1c96ff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-            }}
+            className="px-6 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
           >
             Reload Application
           </button>
@@ -91,12 +73,27 @@ root.render(
     <ErrorBoundary>
       <Provider store={store}>
         <QueryClientProvider client={queryClient}>
-          <ThemeProvider theme={extendedTheme}>
-            <CssBaseline />
-            <BrowserRouter>
-              <App />
-            </BrowserRouter>
-          </ThemeProvider>
+          <BrowserRouter 
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
+            <App />
+            <Toaster
+              position="top-right"
+              expand={false}
+              richColors
+              theme="dark"
+              toastOptions={{
+                style: {
+                  background: 'hsl(var(--card))',
+                  color: 'hsl(var(--card-foreground))',
+                  border: '1px solid hsl(var(--border))',
+                },
+              }}
+            />
+          </BrowserRouter>
           {process.env.NODE_ENV === 'development' && (
             <ReactQueryDevtools initialIsOpen={false} />
           )}

@@ -1,0 +1,167 @@
+# Multi-stage Dockerfile for T-Bot WebSocket Service
+# High-performance WebSocket handler for real-time market data
+
+# ==============================================================================
+# Base Stage - Optimized for high-performance WebSocket operations
+# ==============================================================================
+FROM python:3.10.12-alpine as base
+
+LABEL maintainer="T-Bot Trading Team" \
+      version="1.0" \
+      description="T-Bot WebSocket Service - High Performance Real-time Data" \
+      security.scan="enabled"
+
+# Create non-root user for security
+RUN addgroup -g 1002 -S websocket && \
+    adduser -u 1002 -S websocket -G websocket -h /home/websocket -s /bin/sh
+
+# Environment variables optimized for WebSocket performance
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    # WebSocket-specific optimizations
+    WEBSOCKET_MAX_SIZE=16777216 \
+    WEBSOCKET_MAX_QUEUE=32 \
+    WEBSOCKET_PING_INTERVAL=20 \
+    WEBSOCKET_PING_TIMEOUT=10 \
+    WEBSOCKET_CLOSE_TIMEOUT=10
+
+# Install minimal system dependencies for WebSocket operations
+RUN apk add --no-cache --virtual .build-deps \
+        gcc \
+        g++ \
+        musl-dev \
+        libffi-dev \
+        openssl-dev \
+        python3-dev \
+    && apk add --no-cache \
+        libstdc++ \
+        openssl \
+        ca-certificates \
+        tzdata \
+        dumb-init \
+    && update-ca-certificates
+
+# ==============================================================================
+# Builder Stage - WebSocket-specific dependencies
+# ==============================================================================
+FROM base as builder
+
+WORKDIR /build
+
+# Copy WebSocket-specific requirements
+COPY requirements.txt .
+
+# Filter WebSocket-related packages for optimized build
+RUN grep -E "(websockets|socketio|aiohttp|uvloop|asyncio)" requirements.txt > websocket-requirements.txt || \
+    echo "websockets>=11.0.0" >> websocket-requirements.txt && \
+    echo "python-socketio>=5.8.0" >> websocket-requirements.txt && \
+    echo "aiohttp>=3.8.0" >> websocket-requirements.txt && \
+    echo "uvloop>=0.17.0" >> websocket-requirements.txt
+
+# Create optimized virtual environment
+RUN python -m venv /opt/venv && \
+    chmod -R 755 /opt/venv
+
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install WebSocket dependencies with performance optimizations
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install uvloop cython && \
+    pip install -r requirements.txt && \
+    pip install -r websocket-requirements.txt
+
+# ==============================================================================
+# Production Stage - Minimal WebSocket service runtime
+# ==============================================================================
+FROM base as production
+
+# Copy virtual environment
+COPY --from=builder --chown=root:root /opt/venv /opt/venv
+RUN chmod -R 755 /opt/venv && \
+    chown -R websocket:websocket /opt/venv
+
+WORKDIR /app
+
+# Create WebSocket-specific directory structure
+RUN mkdir -p \
+    /app/logs/websocket \
+    /app/logs/connections \
+    /app/logs/market_data \
+    /app/data/streams \
+    /app/data/cache \
+    /app/state/connections \
+    /app/monitoring/websocket \
+    /run/websocket \
+    && chown -R websocket:websocket /app /run/websocket \
+    && chmod -R 750 /app \
+    && chmod -R 700 /app/logs /app/state
+
+# Copy application code focusing on WebSocket components
+COPY --chown=websocket:websocket --chmod=640 src/web_interface/websockets/ ./src/web_interface/websockets/
+COPY --chown=websocket:websocket --chmod=640 src/exchanges/websocket/ ./src/exchanges/websocket/
+COPY --chown=websocket:websocket --chmod=640 src/exchanges/websocket_pool.py ./src/exchanges/
+COPY --chown=websocket:websocket --chmod=640 src/exchanges/unified_websocket_manager.py ./src/exchanges/
+COPY --chown=websocket:websocket --chmod=640 src/core/ ./src/core/
+COPY --chown=websocket:websocket --chmod=640 src/utils/ ./src/utils/
+COPY --chown=websocket:websocket --chmod=640 config/ ./config/
+
+# Remove build dependencies
+RUN apk del .build-deps && \
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+
+# Security hardening
+USER websocket
+
+# Set WebSocket service resource limits
+ENV WEBSOCKET_WORKERS=4 \
+    WEBSOCKET_MAX_CONNECTIONS=10000 \
+    WEBSOCKET_BUFFER_SIZE=65536 \
+    WEBSOCKET_HEARTBEAT_INTERVAL=30
+
+# Operational labels
+LABEL operational.service="websocket" \
+      operational.tier="realtime" \
+      performance.connections="10000" \
+      performance.latency="sub-ms"
+
+# Expose WebSocket ports
+EXPOSE 8002 8003
+
+# WebSocket-specific health check
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD python -c "import asyncio, websockets; asyncio.run(websockets.connect('ws://localhost:8002/health').close())" || exit 1
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+
+# Production command with uvloop for maximum performance
+CMD ["python", "-c", "import uvloop; uvloop.install(); from src.web_interface.websockets.unified_manager import run_websocket_server; run_websocket_server()"]
+
+# ==============================================================================
+# Development Stage
+# ==============================================================================
+FROM production as development
+
+USER root
+
+# Install debugging tools
+RUN apk add --no-cache \
+        netcat-openbsd \
+        tcpdump \
+        strace \
+        curl
+
+# Install development packages
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir \
+        websocket-client \
+        pytest-asyncio \
+        pytest-websocket
+
+USER websocket
+
+# Development command with debugging
+CMD ["python", "-c", "import uvloop; uvloop.install(); from src.web_interface.websockets.unified_manager import run_websocket_server; run_websocket_server(debug=True)"]

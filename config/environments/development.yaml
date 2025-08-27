@@ -1,0 +1,530 @@
+# Development Environment Configuration - T-Bot Trading System
+# This configuration is optimized for local development with debugging enabled
+
+environment: development
+debug: true
+app_name: "t-bot-trading-system-dev"
+app_version: "1.0.0-dev"
+log_level: "DEBUG"
+
+# Database Configuration - Development (Local)
+database:
+  # PostgreSQL - Local Development
+  DB_HOST: "${POSTGRES_HOST:-localhost}"
+  DB_PORT: 5432
+  DB_NAME: "tbot_development"
+  DB_USER: "${POSTGRES_USER:-tbot_dev}"
+  DB_PASSWORD: "${POSTGRES_PASSWORD:-dev_password}"
+  postgresql_pool_size: 5
+  postgresql_max_overflow: 10
+  postgresql_pool_timeout: 30
+  postgresql_pool_recycle: 3600
+  postgresql_pool_pre_ping: true
+  postgresql_echo: true  # Enable SQL logging for debugging
+  postgresql_ssl_mode: "disable"
+  
+  # Redis - Local Development
+  REDIS_HOST: "${REDIS_HOST:-localhost}"
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: null  # No password for local development
+  REDIS_DB: 0
+  redis_ssl: false
+  redis_connection_pool_size: 10
+  redis_connection_pool_timeout: 5
+  redis_socket_connect_timeout: 5
+  redis_socket_timeout: 5
+  redis_health_check_interval: 120
+  
+  # InfluxDB - Local Development
+  INFLUXDB_HOST: "${INFLUXDB_HOST:-localhost}"
+  INFLUXDB_PORT: 8086
+  INFLUXDB_TOKEN: "${INFLUXDB_TOKEN:-dev_token_12345}"
+  INFLUXDB_ORG: "tbot-dev"
+  INFLUXDB_BUCKET: "trading_data_dev"
+  influxdb_ssl: false
+  influxdb_timeout: 30000
+  influxdb_retries: 3
+  influxdb_retry_interval: 1000
+
+# Security Configuration - Development (Relaxed)
+security:
+  # JWT Configuration - Simple for development
+  secret_key: "dev_jwt_secret_key_not_for_production_use_only"
+  jwt_algorithm: "HS256"
+  jwt_expire_minutes: 240  # 4 hours for development convenience
+  jwt_refresh_expire_hours: 168  # 1 week
+  
+  # Encryption Configuration - Simple for development
+  encryption_key: "dev_encryption_key_32_chars_long"
+  encryption_algorithm: "AES-256-GCM"
+  key_derivation_salt: "dev_salt_16_chars"
+  
+  # API Security - Very permissive for development
+  cors_origins:
+    - "*"  # Allow all origins in development
+  cors_allow_credentials: true
+  cors_allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH", "HEAD"]
+  cors_allow_headers: ["*"]
+  
+  # Rate Limiting - Very permissive
+  rate_limit_per_minute: 10000
+  rate_limit_burst: 1000
+  rate_limit_redis_key_prefix: "rate_limit:dev:"
+  
+  # Session Security - Very relaxed
+  secure_cookies: false  # HTTP allowed in development
+  cookie_samesite: "Lax"
+  cookie_httponly: true
+  session_timeout_minutes: 480  # 8 hours for development
+  max_sessions_per_user: 20  # Multiple sessions for testing
+
+# Error Handling Configuration - Verbose for debugging
+error_handling:
+  circuit_breaker_failure_threshold: 3
+  circuit_breaker_recovery_timeout: 15
+  circuit_breaker_half_open_max_calls: 2
+  max_retry_attempts: 2
+  retry_backoff_factor: 1.2
+  retry_max_delay: 60
+  pattern_detection_enabled: false  # Disabled for cleaner dev logs
+  correlation_analysis_enabled: false
+  predictive_alerts_enabled: false
+  state_validation_frequency: 120  # Less frequent validation
+  auto_reconciliation_enabled: false  # Manual reconciliation in dev
+  max_discrepancy_threshold: 0.1  # More permissive
+  partial_fill_min_percentage: 0.5
+  network_max_offline_duration: 600  # 10 minutes
+  data_feed_max_staleness: 60  # 1 minute staleness allowed
+  order_rejection_max_retries: 10  # Many retries for debugging
+  error_notification_webhook: null  # No webhook in development
+  critical_error_email_list: []  # No emails in development
+
+# Exchange Configuration - Testnet/Sandbox APIs with relaxed limits
+exchanges:
+  default_timeout: 60  # Long timeout for debugging
+  max_retries: 10  # Many retries for development
+  connection_pool_size: 3
+  
+  # Binance Testnet - Development
+  binance_api_key: "${BINANCE_TESTNET_API_KEY:-}"
+  binance_api_secret: "${BINANCE_TESTNET_API_SECRET:-}"
+  binance_testnet: true
+  binance_base_url: "https://testnet.binance.vision"
+  binance_websocket_url: "wss://testnet.binance.vision"
+  
+  # OKX Demo Trading - Development
+  okx_api_key: "${OKX_DEMO_API_KEY:-}"
+  okx_api_secret: "${OKX_DEMO_API_SECRET:-}"
+  okx_passphrase: "${OKX_DEMO_PASSPHRASE:-}"
+  okx_sandbox: true
+  okx_base_url: "https://www.okx.com"
+  okx_websocket_url: "wss://wspap.okx.com:8443"
+  
+  # Coinbase Sandbox - Development
+  coinbase_api_key: "${COINBASE_SANDBOX_API_KEY:-}"
+  coinbase_api_secret: "${COINBASE_SANDBOX_API_SECRET:-}"
+  coinbase_sandbox: true
+  coinbase_base_url: "https://api-public.sandbox.exchange.coinbase.com"
+  coinbase_websocket_url: "wss://ws-feed-public.sandbox.exchange.coinbase.com"
+  
+  # Very permissive rate limits for development
+  rate_limits:
+    binance:
+      orders_per_second: 50
+      requests_per_minute: 5000
+      websocket_connections: 10
+      weight_per_minute: 20000
+    okx:
+      orders_per_second: 100
+      requests_per_minute: 2000
+      websocket_connections: 10
+      weight_per_minute: 10000
+    coinbase:
+      orders_per_second: 50
+      requests_per_minute: 1000
+      websocket_connections: 10
+  
+  supported_exchanges: ["binance", "okx", "coinbase"]
+
+# Risk Management - Development Settings (Very permissive)
+risk:
+  default_position_size_method: "fixed_percentage"
+  default_position_size_pct: 0.05  # 5% position size for testing
+  max_position_size_pct: 0.5  # 50% max position for testing
+  max_total_positions: 20  # Many positions for testing
+  max_positions_per_symbol: 5  # Multiple positions per symbol
+  max_portfolio_exposure: 0.95  # 95% max exposure
+  max_sector_exposure: 0.8  # 80% max per sector
+  max_correlation_exposure: 0.8  # 80% max correlated exposure
+  max_leverage: 5.0  # High leverage for testing
+  max_daily_loss_pct: 0.2  # 20% daily loss limit
+  max_drawdown_pct: 0.5  # 50% max drawdown
+  var_confidence_level: 0.9  # 90% VaR confidence
+  kelly_lookback_days: 10  # Short lookback for quick testing
+  kelly_max_fraction: 0.5  # High Kelly fraction for testing
+  volatility_window: 10
+  volatility_target: 0.05  # 5% daily volatility target
+  var_calculation_window: 50  # Shorter window for development
+  drawdown_calculation_window: 50
+  correlation_calculation_window: 30
+  emergency_close_positions: false  # Don't auto-close in development
+  emergency_recovery_timeout_hours: 1
+  emergency_manual_override_enabled: true
+  stop_loss_buffer_pct: 0.01  # 1% buffer
+
+# Capital Management - Development Settings
+capital_management:
+  base_currency: "USDT"
+  total_capital: "${DEV_CAPITAL:-10000.0}"  # Small capital for development
+  emergency_reserve_pct: 0.1  # 10% emergency reserve
+  allocation_strategy: "equal_weight"  # Simple allocation
+  rebalance_frequency_hours: 1  # Hourly rebalancing for testing
+  min_allocation_pct: 0.01  # 1% minimum allocation
+  max_allocation_pct: 0.8  # 80% maximum allocation
+  max_exchange_allocation_pct: 1.0  # 100% on single exchange OK
+  min_exchange_balance: 10.0  # Low minimum balance
+  max_daily_reallocation_pct: 1.0  # 100% reallocation allowed
+  fund_flow_cooldown_minutes: 1  # 1 minute cooldown
+  min_deposit_amount: 10.0
+  min_withdrawal_amount: 1.0
+  max_withdrawal_pct: 1.0  # 100% withdrawal allowed
+  
+  supported_currencies:
+    - "USDT"
+    - "USDC"
+    - "BTC"
+    - "ETH"
+    - "BNB"
+    - "ADA"  # Additional for testing
+    - "DOT"
+    - "SOL"
+  
+  hedging_enabled: false  # Disabled for simplicity
+  hedging_threshold: 1.0  # Very high threshold
+  hedge_ratio: 0.0  # No hedging
+  
+  withdrawal_rules:
+    profit_only:
+      enabled: false  # All withdrawals allowed
+    maintain_minimum:
+      enabled: false  # No minimum requirements
+    performance_based:
+      enabled: false
+    daily_limit:
+      enabled: false  # No daily limits
+    approval_required:
+      enabled: false  # No approval required
+  
+  auto_compound_enabled: false  # Disabled for testing
+  auto_compound_frequency: "never"
+  profit_threshold: 0.0
+  max_daily_loss_pct: 1.0  # No daily loss limits
+  max_weekly_loss_pct: 1.0
+  max_monthly_loss_pct: 1.0
+  profit_lock_pct: 0.0  # No profit locking
+  
+  per_strategy_minimum:
+    mean_reversion: 100.0
+    trend_following: 200.0
+    ml_strategy: 500.0
+    arbitrage: 1000.0
+    market_making: 2000.0
+  
+  exchange_allocation_weights:
+    binance: 0.6
+    okx: 0.25
+    coinbase: 0.15
+
+# Strategy Management - Development Settings
+strategies:
+  max_concurrent_strategies: 20  # Many strategies for testing
+  strategy_restart_delay: 10  # Quick restart for development
+  performance_window_days: 3  # Short evaluation window
+  default_min_confidence: 0.3  # Low confidence threshold
+  default_position_size: 0.05
+  default_stop_loss: 0.05  # 5% stop loss
+  default_take_profit: 0.1  # 10% take profit
+  enable_hot_reload: true  # Enabled for development
+  config_check_interval: 10  # Frequent checks
+  min_win_rate: 0.0  # No minimum win rate
+  min_sharpe_ratio: -10.0  # Very low Sharpe ratio allowed
+  max_drawdown_threshold: 1.0  # No drawdown limits
+  performance_evaluation_frequency: 1  # Every hour
+  auto_disable_poor_performers: false  # Keep poor performers for debugging
+  performance_alert_threshold: 0.0  # No performance alerts
+
+# Database Service Configuration - Development
+database_service:
+  cache_enabled: true
+  cache_ttl_seconds: 60  # Short cache for development
+  slow_query_threshold_seconds: 0.5  # Lower threshold for development debugging
+  query_cache_max_size: 500  # Smaller cache for development
+  connection_pool_monitoring_enabled: true
+  performance_metrics_enabled: true
+
+# Bot Management Service Configuration - Development
+bot_management_service:
+  max_concurrent_bots: 10  # Fewer bots for development
+  max_capital_allocation: 50000  # Lower capital for development
+  heartbeat_timeout_seconds: 120  # Shorter timeout for faster feedback
+  health_check_interval_seconds: 30  # More frequent health checks
+  bot_startup_timeout_seconds: 60  # Shorter startup timeout
+  bot_shutdown_timeout_seconds: 30  # Shorter shutdown timeout
+
+# State Management Service Configuration - Development  
+state_management_service:
+  sync_interval_seconds: 30  # More frequent sync for development
+  cleanup_interval_seconds: 1800  # More frequent cleanup (30 minutes)
+  state_ttl_seconds: 7200  # Shorter TTL (2 hours) for development
+  validation_interval_seconds: 60  # More frequent validation
+  snapshot_interval_seconds: 600  # More frequent snapshots (10 minutes)
+  max_state_versions: 5  # Fewer versions for development
+
+# Exchange Health Monitoring Configuration - Development
+exchange_health:
+  health_check_interval_seconds: 15  # More frequent health checks
+  unhealthy_threshold: 2  # Lower threshold for faster detection
+  recovery_check_interval_seconds: 30  # Faster recovery checks
+  timeout_seconds: 5  # Shorter timeout for development
+
+# Machine Learning Configuration - Development
+ml:
+  model_registry_path: "${DEV_ML_MODELS_PATH:-./data/ml/dev/registry}"
+  artifact_store_path: "${DEV_ML_ARTIFACTS_PATH:-./data/ml/dev/artifacts}"
+  model_cache_size: 3  # Small cache for development
+  default_train_test_split: 0.7  # Smaller training set for speed
+  default_validation_split: 0.2
+  max_training_time_hours: 1  # Quick training for development
+  feature_selection_threshold: 0.001  # Low threshold for more features
+  max_features: 100  # Fewer features for speed
+  feature_cache_ttl_hours: 1  # Short cache for development
+  optuna_n_trials: 10  # Few trials for speed
+  optuna_timeout_hours: 1
+  optuna_pruning_enabled: true
+  cross_validation_folds: 2  # Few folds for speed
+  validation_frequency_days: 1
+  performance_degradation_threshold: 0.5  # Very permissive
+  drift_detection_enabled: false  # Disabled for development
+  drift_check_frequency_hours: 24
+  drift_threshold: 1.0  # Very permissive
+  inference_batch_size: 100  # Small batches
+  prediction_cache_ttl_minutes: 1  # Short cache
+  model_warmup_enabled: false  # Disabled for faster startup
+  
+  supported_model_types:
+    - "price_predictor"
+    - "direction_classifier"
+    - "volatility_forecaster"
+    - "regime_detector"
+  
+  # Very permissive model thresholds for development
+  min_accuracy_threshold: 0.3
+  min_precision_threshold: 0.3
+  min_recall_threshold: 0.3
+  min_f1_threshold: 0.3
+  validation_threshold: 0.3
+  
+  # Resource Limits - Development
+  max_memory_gb: 4.0
+  max_cpu_cores: 2
+  gpu_enabled: false
+  max_memory_mb: 2048
+  max_workers: 2
+  use_multiprocessing: false
+  batch_size: 100
+  chunk_size: 10
+
+# Logging Configuration - Development (Very verbose)
+logging:
+  level: "DEBUG"
+  format: "colored"  # Colored output for console
+  handlers:
+    - type: "console"
+      level: "DEBUG"
+      format: "colored"
+    - type: "rotating_file"
+      filename: "./logs/development.log"
+      max_size: "10MB"
+      backup_count: 3
+      level: "DEBUG"
+  
+  # Minimal filtering for development debugging
+  filter_patterns:
+    - "password"
+  
+  # Short retention for development
+  retention_days: 7
+  archive_after_days: 1
+
+# Monitoring and Metrics - Development (Basic)
+monitoring:
+  enabled: true
+  metrics_port: 9090
+  health_check_port: 8080
+  
+  # Prometheus Configuration - Basic
+  prometheus:
+    enabled: true
+    endpoint: "/metrics"
+    namespace: "tbot_dev"
+    labels:
+      environment: "development"
+      service: "trading-bot"
+      developer: "${USER:-dev}"
+  
+  # Health Checks - Basic
+  health_checks:
+    database:
+      enabled: true
+      timeout: 30
+      interval: 120
+    exchanges:
+      enabled: true
+      timeout: 30
+      interval: 120
+    redis:
+      enabled: true
+      timeout: 10
+      interval: 120
+  
+  # Very permissive alerting thresholds
+  alerts:
+    error_rate_threshold: 0.5  # 50% error rate
+    response_time_threshold: 10000  # 10 seconds
+    memory_usage_threshold: 0.9  # 90% memory usage
+    cpu_usage_threshold: 0.9  # 90% CPU usage
+    disk_usage_threshold: 0.9  # 90% disk usage
+    
+    # Trading-Specific Alerts - Very permissive
+    position_size_deviation_threshold: 1.0  # 100% deviation allowed
+    profit_loss_threshold: -10000.0  # $10K loss threshold
+    drawdown_alert_threshold: 1.0  # 100% drawdown alert
+    daily_volume_threshold: 1000.0  # $1K daily volume
+
+# Performance Configuration - Development (Relaxed)
+performance:
+  # Connection Pooling - Small pools for development
+  database_connection_pool:
+    min_size: 1
+    max_size: 5
+    acquire_timeout: 60
+    idle_timeout: 600
+  
+  # Caching Configuration - Short TTL for development
+  cache:
+    default_ttl: 60  # 1 minute
+    max_size: 1000
+    strategy:
+      price_data_ttl: 30
+      market_data_ttl: 15
+      portfolio_data_ttl: 60
+  
+  # WebSocket Configuration - Basic
+  websocket:
+    max_connections: 10
+    ping_interval: 60
+    ping_timeout: 30
+    close_timeout: 30
+    max_message_size: 65536
+    compression: false  # Disabled for easier debugging
+    heartbeat_interval: 60
+  
+  # Background Task Configuration - Single worker
+  celery:
+    broker_url: "redis://localhost:6379/1"
+    result_backend: "redis://localhost:6379/2"
+    worker_concurrency: 1
+    task_time_limit: 300  # 5 minutes
+    task_soft_time_limit: 240  # 4 minutes
+    worker_prefetch_multiplier: 1
+    task_acks_late: true
+    worker_disable_rate_limits: true  # Disabled for development
+
+# Backup and Recovery Configuration - Development (Minimal)
+backup:
+  enabled: false  # Disabled in development
+  schedule:
+    database_backup: "0 6 * * 0"  # Weekly backup
+  
+  retention:
+    daily_backups: 1
+    weekly_backups: 1
+    monthly_backups: 0
+  
+  storage:
+    type: "local"
+    path: "./data/backups/dev"
+    encryption: false
+    compression: false
+  
+  disaster_recovery:
+    rpo_minutes: 1440  # 24 hours
+    rto_minutes: 1440  # 24 hours
+
+# Compliance and Audit Configuration - Development (Minimal)
+compliance:
+  audit_logging:
+    enabled: false  # Disabled in development
+    log_level: "none"
+    storage: "none"
+    retention_years: 0
+    encryption: false
+  
+  data_retention:
+    trade_data_years: 1
+    user_data_years: 1
+    log_data_years: 1
+    backup_data_years: 0
+  
+  regulatory_reporting:
+    enabled: false  # Disabled in development
+  
+  access_control:
+    multi_factor_authentication: false
+    password_policy:
+      min_length: 4
+      require_uppercase: false
+      require_lowercase: false
+      require_numbers: false
+      require_symbols: false
+      max_age_days: 365  # 1 year
+    session_management:
+      concurrent_sessions: 50  # Many sessions for testing
+      idle_timeout_minutes: 480  # 8 hours
+      absolute_timeout_hours: 24  # 24 hours
+
+# Development-Specific Settings
+development:
+  # Auto-reload settings
+  auto_reload_enabled: true
+  auto_reload_paths:
+    - "./src"
+    - "./config"
+  auto_reload_extensions:
+    - ".py"
+    - ".yaml"
+    - ".json"
+  
+  # Debug settings
+  debug_toolbar_enabled: true
+  profile_requests: true
+  log_sql_queries: true
+  
+  # Testing settings
+  run_integration_tests: false
+  mock_external_apis: true
+  fast_startup_mode: true
+  skip_ml_model_loading: true
+  
+  # Data generation for testing
+  generate_mock_data: true
+  mock_data_days: 30
+  mock_data_symbols: ["BTCUSDT", "ETHUSDT", "ADAUSDT"]
+  
+  # Feature flags for development
+  feature_flags:
+    new_strategy_engine: true
+    enhanced_risk_management: false
+    ml_predictions: false
+    advanced_charts: true
+    paper_trading_only: true

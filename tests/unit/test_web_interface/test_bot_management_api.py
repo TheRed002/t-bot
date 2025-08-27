@@ -19,13 +19,13 @@ class TestBotManagementAPI:
         """Test successful bot creation."""
         bot_data = {
             "bot_name": "Test Trading Bot",
-            "bot_type": "trading",
+            "bot_type": "strategy",  # Fixed: use valid enum value
             "strategy_name": "trend_following",
             "exchanges": ["binance"],
             "symbols": ["BTCUSDT"],
-            "allocated_capital": 10000.0,
+            "allocated_capital": "10000.0",  # Use string for Decimal
             "risk_percentage": 0.02,
-            "priority": "medium",
+            "priority": "normal",  # Fixed: use valid enum value
             "auto_start": False,
             "configuration": {}
         }
@@ -61,11 +61,11 @@ class TestBotManagementAPI:
         """Test bot creation with validation errors."""
         invalid_bot_data = {
             "bot_name": "",  # Empty name
-            "bot_type": "trading",
+            "bot_type": "strategy",  # Fixed: use valid enum value
             "strategy_name": "trend_following",
             "exchanges": [],  # Empty exchanges
             "symbols": ["BTCUSDT"],
-            "allocated_capital": -1000.0,  # Negative capital
+            "allocated_capital": "-1000.0",  # Negative capital (string for Decimal)
             "risk_percentage": 0.02
         }
         
@@ -319,7 +319,7 @@ class TestBotManagementAPI:
         bot_id = "bot_001"
         update_data = {
             "bot_name": "Updated Bot Name",
-            "allocated_capital": 15000.0,
+            "allocated_capital": "15000.0",  # Use string for Decimal
             "risk_percentage": 0.03
         }
         
@@ -338,14 +338,15 @@ class TestBotManagementAPI:
                 mock_get_user.return_value = mock_user
                 
                 # Mock bot instance
+                from unittest.mock import MagicMock
                 mock_bot_instance = AsyncMock()
-                mock_config = AsyncMock()
+                mock_config = MagicMock()
                 mock_config.bot_name = "Old Bot Name"
                 mock_config.allocated_capital = Decimal("10000")
                 mock_config.risk_percentage = 0.02
                 
-                mock_bot_instance.get_bot_config.return_value = mock_config
-                mock_bot_instance.update_configuration = AsyncMock()
+                mock_bot_instance.get_bot_config = MagicMock(return_value=mock_config)
+                mock_bot_instance.update_configuration = AsyncMock(return_value=None)
                 
                 mock_orchestrator.bot_instances = {bot_id: mock_bot_instance}
                 
@@ -430,8 +431,13 @@ class TestBotManagementAPI:
 
     def test_bot_orchestrator_not_available(self, test_client, auth_headers):
         """Test API behavior when bot orchestrator is not available."""
-        with patch('src.web_interface.api.bot_management.get_trading_user') as mock_get_user:
-            with patch('src.web_interface.api.bot_management.bot_orchestrator', None):
+        # First set the bot orchestrator to None
+        from src.web_interface.api import bot_management
+        original_orchestrator = bot_management.bot_orchestrator
+        bot_management.set_bot_orchestrator(None)
+        
+        try:
+            with patch('src.web_interface.api.bot_management.get_trading_user') as mock_get_user:
                 from src.web_interface.security.auth import User
                 
                 mock_user = User(
@@ -445,11 +451,11 @@ class TestBotManagementAPI:
                 
                 bot_data = {
                     "bot_name": "Test Bot",
-                    "bot_type": "trading",
+                    "bot_type": "strategy",  # Fixed: use valid enum value
                     "strategy_name": "trend_following",
                     "exchanges": ["binance"],
                     "symbols": ["BTCUSDT"],
-                    "allocated_capital": 10000.0,
+                    "allocated_capital": "10000.0",  # Use string for Decimal
                     "risk_percentage": 0.02
                 }
                 
@@ -458,3 +464,6 @@ class TestBotManagementAPI:
                                           headers=auth_headers)
                 
                 assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        finally:
+            # Restore the original orchestrator
+            bot_management.set_bot_orchestrator(original_orchestrator)

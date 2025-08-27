@@ -8,132 +8,20 @@ and provide the expected functionality.
 
 import asyncio
 import time
+from datetime import datetime, timedelta
 
 import pytest
 
 from src.core.exceptions import TimeoutError, ValidationError
 from src.utils.decorators import (
-    api_throttle,
-    cache_result,
-    circuit_breaker,
-    cpu_usage,
-    log_calls,
-    log_errors,
-    log_performance,
-    memory_usage,
-    rate_limit,
-    redis_cache,
+    UnifiedDecorator,
+    cached,
+    logged,
+    monitored,
     retry,
-    time_execution,
     timeout,
-    type_check,
-    validate_input,
-    validate_output,
+    validated,
 )
-
-
-class TestTimeExecution:
-    """Test the time_execution decorator."""
-
-    @pytest.mark.asyncio
-    async def test_time_execution_async_success(self):
-        """Test time_execution with successful async function."""
-
-        @time_execution
-        async def test_func():
-            await asyncio.sleep(0.01)
-            return "success"
-
-        result = await test_func()
-        assert result == "success"
-
-    @pytest.mark.asyncio
-    async def test_time_execution_async_error(self):
-        """Test time_execution with async function that raises error."""
-
-        @time_execution
-        async def test_func():
-            await asyncio.sleep(0.01)
-            raise ValueError("test error")
-
-        with pytest.raises(ValueError, match="test error"):
-            await test_func()
-
-    def test_time_execution_sync_success(self):
-        """Test time_execution with successful sync function."""
-
-        @time_execution
-        def test_func():
-            time.sleep(0.01)
-            return "success"
-
-        result = test_func()
-        assert result == "success"
-
-    def test_time_execution_sync_error(self):
-        """Test time_execution with sync function that raises error."""
-
-        @time_execution
-        def test_func():
-            time.sleep(0.01)
-            raise ValueError("test error")
-
-        with pytest.raises(ValueError, match="test error"):
-            test_func()
-
-
-class TestMemoryUsage:
-    """Test the memory_usage decorator."""
-
-    @pytest.mark.asyncio
-    async def test_memory_usage_async(self):
-        """Test memory_usage with async function."""
-
-        @memory_usage
-        async def test_func():
-            await asyncio.sleep(0.01)
-            return "success"
-
-        result = await test_func()
-        assert result == "success"
-
-    def test_memory_usage_sync(self):
-        """Test memory_usage with sync function."""
-
-        @memory_usage
-        def test_func():
-            time.sleep(0.01)
-            return "success"
-
-        result = test_func()
-        assert result == "success"
-
-
-class TestCpuUsage:
-    """Test the cpu_usage decorator."""
-
-    @pytest.mark.asyncio
-    async def test_cpu_usage_async(self):
-        """Test cpu_usage with async function."""
-
-        @cpu_usage
-        async def test_func():
-            await asyncio.sleep(0.01)
-            return "success"
-
-        result = await test_func()
-        assert result == "success"
-
-    def test_cpu_usage_sync(self):
-        """Test cpu_usage with sync function."""
-
-        @cpu_usage
-        def test_func():
-            time.sleep(0.01)
-            return "success"
-
-        result = test_func()
-        assert result == "success"
 
 
 class TestRetry:
@@ -155,7 +43,7 @@ class TestRetry:
         """Test retry with async function that succeeds after failures."""
         call_count = 0
 
-        @retry(max_attempts=3, base_delay=0.01)
+        @retry(max_attempts=3, delay=0.01)
         async def test_func():
             nonlocal call_count
             call_count += 1
@@ -171,7 +59,7 @@ class TestRetry:
     async def test_retry_async_max_attempts_exceeded(self):
         """Test retry with async function that always fails."""
 
-        @retry(max_attempts=2, base_delay=0.01)
+        @retry(max_attempts=2, delay=0.01)
         async def test_func():
             raise ValueError("permanent error")
 
@@ -192,7 +80,7 @@ class TestRetry:
         """Test retry with sync function that succeeds after failures."""
         call_count = 0
 
-        @retry(max_attempts=3, base_delay=0.01)
+        @retry(max_attempts=3, delay=0.01)
         def test_func():
             nonlocal call_count
             call_count += 1
@@ -203,70 +91,6 @@ class TestRetry:
         result = test_func()
         assert result == "success"
         assert call_count == 3
-
-
-class TestCircuitBreaker:
-    """Test the circuit_breaker decorator."""
-
-    @pytest.mark.asyncio
-    async def test_circuit_breaker_async_success(self):
-        """Test circuit_breaker with async function that succeeds."""
-
-        @circuit_breaker(failure_threshold=2, recovery_timeout=0.1)
-        async def test_func():
-            return "success"
-
-        result = await test_func()
-        assert result == "success"
-
-    @pytest.mark.asyncio
-    async def test_circuit_breaker_async_opens_circuit(self):
-        """Test circuit_breaker with async function that opens circuit."""
-
-        @circuit_breaker(failure_threshold=2, recovery_timeout=0.1)
-        async def test_func():
-            raise ValueError("test error")
-
-        # First failure
-        with pytest.raises(ValueError):
-            await test_func()
-
-        # Second failure - should open circuit
-        with pytest.raises(ValueError):
-            await test_func()
-
-        # Third call - circuit should be open
-        with pytest.raises(TimeoutError):
-            await test_func()
-
-    def test_circuit_breaker_sync_success(self):
-        """Test circuit_breaker with sync function that succeeds."""
-
-        @circuit_breaker(failure_threshold=2, recovery_timeout=0.1)
-        def test_func():
-            return "success"
-
-        result = test_func()
-        assert result == "success"
-
-    def test_circuit_breaker_sync_opens_circuit(self):
-        """Test circuit_breaker with sync function that opens circuit."""
-
-        @circuit_breaker(failure_threshold=2, recovery_timeout=0.1)
-        def test_func():
-            raise ValueError("test error")
-
-        # First failure
-        with pytest.raises(ValueError):
-            test_func()
-
-        # Second failure - should open circuit
-        with pytest.raises(ValueError):
-            test_func()
-
-        # Third call - circuit should be open
-        with pytest.raises(TimeoutError):
-            test_func()
 
 
 class TestTimeout:
@@ -293,11 +117,11 @@ class TestTimeout:
             await asyncio.sleep(0.1)
             return "success"
 
-        with pytest.raises(TimeoutError):
+        with pytest.raises(asyncio.TimeoutError):
             await test_func()
 
-    def test_timeout_sync_warning(self):
-        """Test timeout with sync function (should log warning)."""
+    def test_timeout_sync_success(self):
+        """Test timeout with sync function."""
 
         @timeout(1.0)
         def test_func():
@@ -307,15 +131,15 @@ class TestTimeout:
         assert result == "success"
 
 
-class TestCacheResult:
-    """Test the cache_result decorator."""
+class TestCached:
+    """Test the cached decorator."""
 
     @pytest.mark.asyncio
-    async def test_cache_result_async(self):
-        """Test cache_result with async function."""
+    async def test_cached_async(self):
+        """Test cached with async function."""
         call_count = 0
 
-        @cache_result(ttl_seconds=1.0)
+        @cached(ttl=1)
         async def test_func():
             nonlocal call_count
             call_count += 1
@@ -331,21 +155,19 @@ class TestCacheResult:
         assert result2 == "result_1"
         assert call_count == 1
 
-    def test_cache_result_sync(self):
-        """Test cache_result with sync function."""
+    def test_cached_sync(self):
+        """Test cached with sync function."""
         call_count = 0
 
-        @cache_result(ttl_seconds=1.0)
+        @cached(ttl=1)
         def test_func():
             nonlocal call_count
             call_count += 1
             return f"result_{call_count}"
 
         # Clear any existing cache
-        from src.utils.decorators import _cache, _cache_timestamps
-
-        _cache.clear()
-        _cache_timestamps.clear()
+        UnifiedDecorator._cache.clear()
+        UnifiedDecorator._cache_timestamps.clear()
 
         # First call
         result1 = test_func()
@@ -358,39 +180,14 @@ class TestCacheResult:
         assert call_count == 1  # Function should not be called again
 
 
-class TestRedisCache:
-    """Test the redis_cache decorator."""
+class TestLogged:
+    """Test the logged decorator."""
 
     @pytest.mark.asyncio
-    async def test_redis_cache_async(self):
-        """Test redis_cache with async function."""
+    async def test_logged_async_success(self):
+        """Test logged with async function that succeeds."""
 
-        @redis_cache(ttl_seconds=1.0)
-        async def test_func():
-            return "success"
-
-        result = await test_func()
-        assert result == "success"
-
-    def test_redis_cache_sync(self):
-        """Test redis_cache with sync function."""
-
-        @redis_cache(ttl_seconds=1.0)
-        def test_func():
-            return "success"
-
-        result = test_func()
-        assert result == "success"
-
-
-class TestLogCalls:
-    """Test the log_calls decorator."""
-
-    @pytest.mark.asyncio
-    async def test_log_calls_async_success(self):
-        """Test log_calls with async function that succeeds."""
-
-        @log_calls
+        @logged(level="info")
         async def test_func():
             return "success"
 
@@ -398,30 +195,30 @@ class TestLogCalls:
         assert result == "success"
 
     @pytest.mark.asyncio
-    async def test_log_calls_async_error(self):
-        """Test log_calls with async function that raises error."""
+    async def test_logged_async_error(self):
+        """Test logged with async function that raises error."""
 
-        @log_calls
+        @logged(level="error")
         async def test_func():
             raise ValueError("test error")
 
         with pytest.raises(ValueError, match="test error"):
             await test_func()
 
-    def test_log_calls_sync_success(self):
-        """Test log_calls with sync function that succeeds."""
+    def test_logged_sync_success(self):
+        """Test logged with sync function that succeeds."""
 
-        @log_calls
+        @logged(level="debug")
         def test_func():
             return "success"
 
         result = test_func()
         assert result == "success"
 
-    def test_log_calls_sync_error(self):
-        """Test log_calls with sync function that raises error."""
+    def test_logged_sync_error(self):
+        """Test logged with sync function that raises error."""
 
-        @log_calls
+        @logged(level="warning")
         def test_func():
             raise ValueError("test error")
 
@@ -429,14 +226,58 @@ class TestLogCalls:
             test_func()
 
 
-class TestLogPerformance:
-    """Test the log_performance decorator."""
+class TestValidated:
+    """Test the validated decorator."""
 
     @pytest.mark.asyncio
-    async def test_log_performance_async_success(self):
-        """Test log_performance with async function that succeeds."""
+    async def test_validated_async_valid_args(self):
+        """Test validated with async function and valid arguments."""
 
-        @log_performance
+        @validated()
+        async def test_func(price: float, quantity: float):
+            return price * quantity
+
+        result = await test_func(100.0, 2.0)
+        assert result == 200.0
+
+    @pytest.mark.asyncio
+    async def test_validated_async_invalid_order(self):
+        """Test validated with async function and valid order data."""
+
+        @validated()
+        async def test_func(order: dict):
+            return order
+
+        # Test with valid order data (all required fields)
+        valid_order = {
+            'symbol': 'BTC/USDT',
+            'type': 'LIMIT',
+            'side': 'BUY',
+            'price': 50000.0,
+            'quantity': 1.0
+        }
+        result = await test_func(valid_order)
+        assert result == valid_order
+
+    def test_validated_sync_valid_args(self):
+        """Test validated with sync function and valid arguments."""
+
+        @validated()
+        def test_func(symbol: str):
+            return f"Trading {symbol}"
+
+        result = test_func("BTC/USDT")
+        assert result == "Trading BTC/USDT"
+
+
+class TestMonitored:
+    """Test the monitored decorator."""
+
+    @pytest.mark.asyncio
+    async def test_monitored_async(self):
+        """Test monitored with async function."""
+
+        @monitored()
         async def test_func():
             await asyncio.sleep(0.01)
             return "success"
@@ -444,347 +285,249 @@ class TestLogPerformance:
         result = await test_func()
         assert result == "success"
 
-    @pytest.mark.asyncio
-    async def test_log_performance_async_error(self):
-        """Test log_performance with async function that raises error."""
+    def test_monitored_sync(self):
+        """Test monitored with sync function."""
 
-        @log_performance
+        @monitored()
+        def test_func():
+            time.sleep(0.01)
+            return "success"
+
+        result = test_func()
+        assert result == "success"
+
+
+class TestUnifiedDecorator:
+    """Test the UnifiedDecorator class with combined features."""
+
+    @pytest.mark.asyncio
+    async def test_combined_retry_and_log(self):
+        """Test combining retry and logging features."""
+        call_count = 0
+
+        @UnifiedDecorator.enhance(retry=True, retry_times=3, retry_delay=0.01, log=True, log_level="info")
+        async def test_func():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise ValueError("temporary error")
+            return "success"
+
+        result = await test_func()
+        assert result == "success"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_combined_cache_and_validate(self):
+        """Test combining cache and validation features."""
+
+        @UnifiedDecorator.enhance(cache=True, cache_ttl=1, validate=True)
+        async def test_func(price: float):
+            return price * 2
+
+        # First call
+        result1 = await test_func(100.0)
+        assert result1 == 200.0
+
+        # Second call - should use cache
+        result2 = await test_func(100.0)
+        assert result2 == 200.0
+
+    @pytest.mark.asyncio
+    async def test_combined_timeout_and_monitor(self):
+        """Test combining timeout and monitoring features."""
+
+        @UnifiedDecorator.enhance(timeout=1.0, monitor=True)
         async def test_func():
             await asyncio.sleep(0.01)
-            raise ValueError("test error")
-
-        with pytest.raises(ValueError, match="test error"):
-            await test_func()
-
-    def test_log_performance_sync_success(self):
-        """Test log_performance with sync function that succeeds."""
-
-        @log_performance
-        def test_func():
-            time.sleep(0.01)
-            return "success"
-
-        result = test_func()
-        assert result == "success"
-
-    def test_log_performance_sync_error(self):
-        """Test log_performance with sync function that raises error."""
-
-        @log_performance
-        def test_func():
-            time.sleep(0.01)
-            raise ValueError("test error")
-
-        with pytest.raises(ValueError, match="test error"):
-            test_func()
-
-
-class TestLogErrors:
-    """Test the log_errors decorator."""
-
-    @pytest.mark.asyncio
-    async def test_log_errors_async_success(self):
-        """Test log_errors with async function that succeeds."""
-
-        @log_errors
-        async def test_func():
             return "success"
 
         result = await test_func()
         assert result == "success"
 
-    @pytest.mark.asyncio
-    async def test_log_errors_async_error(self):
-        """Test log_errors with async function that raises error."""
+    def test_combined_all_features_sync(self):
+        """Test combining all features with sync function."""
 
-        @log_errors
+        @UnifiedDecorator.enhance(
+            retry=True,
+            retry_times=2,
+            retry_delay=0.01,
+            validate=True,
+            log=True,
+            log_level="debug",
+            cache=True,
+            cache_ttl=1,
+            monitor=True,
+        )
+        def test_func(value: float):
+            if value <= 0:
+                raise ValueError("Value must be positive")
+            return value * 2
+
+        # First call
+        result1 = test_func(10.0)
+        assert result1 == 20.0
+
+        # Second call - should use cache
+        result2 = test_func(10.0)
+        assert result2 == 20.0
+
+    @pytest.mark.asyncio
+    async def test_fallback_function(self):
+        """Test decorator with fallback function."""
+
+        async def fallback_func(*args, **kwargs):
+            return "fallback_result"
+
+        @UnifiedDecorator.enhance(retry=True, retry_times=1, fallback=fallback_func)
         async def test_func():
-            raise ValueError("test error")
-
-        with pytest.raises(ValueError, match="test error"):
-            await test_func()
-
-    def test_log_errors_sync_success(self):
-        """Test log_errors with sync function that succeeds."""
-
-        @log_errors
-        def test_func():
-            return "success"
-
-        result = test_func()
-        assert result == "success"
-
-    def test_log_errors_sync_error(self):
-        """Test log_errors with sync function that raises error."""
-
-        @log_errors
-        def test_func():
-            raise ValueError("test error")
-
-        with pytest.raises(ValueError, match="test error"):
-            test_func()
-
-
-class TestValidateInput:
-    """Test the validate_input decorator."""
-
-    @pytest.mark.asyncio
-    async def test_validate_input_async_success(self):
-        """Test validate_input with async function that passes validation."""
-
-        def validation_func(*args, **kwargs):
-            if len(args) > 0 and args[0] == "valid":
-                return True
-            raise ValidationError("Invalid input")
-
-        @validate_input(validation_func)
-        async def test_func(value):
-            return f"processed_{value}"
-
-        result = await test_func("valid")
-        assert result == "processed_valid"
-
-    @pytest.mark.asyncio
-    async def test_validate_input_async_validation_fails(self):
-        """Test validate_input with async function that fails validation."""
-
-        def validation_func(*args, **kwargs):
-            raise ValidationError("Invalid input")
-
-        @validate_input(validation_func)
-        async def test_func(value):
-            return f"processed_{value}"
-
-        with pytest.raises(ValidationError, match="Invalid input"):
-            await test_func("invalid")
-
-    def test_validate_input_sync_success(self):
-        """Test validate_input with sync function that passes validation."""
-
-        def validation_func(*args, **kwargs):
-            if len(args) > 0 and args[0] == "valid":
-                return True
-            raise ValidationError("Invalid input")
-
-        @validate_input(validation_func)
-        def test_func(value):
-            return f"processed_{value}"
-
-        result = test_func("valid")
-        assert result == "processed_valid"
-
-    def test_validate_input_sync_validation_fails(self):
-        """Test validate_input with sync function that fails validation."""
-
-        def validation_func(*args, **kwargs):
-            raise ValidationError("Invalid input")
-
-        @validate_input(validation_func)
-        def test_func(value):
-            return f"processed_{value}"
-
-        with pytest.raises(ValidationError, match="Invalid input"):
-            test_func("invalid")
-
-
-class TestValidateOutput:
-    """Test the validate_output decorator."""
-
-    @pytest.mark.asyncio
-    async def test_validate_output_async_success(self):
-        """Test validate_output with async function that passes validation."""
-
-        def validation_func(result):
-            if result == "valid_result":
-                return True
-            raise ValidationError("Invalid output")
-
-        @validate_output(validation_func)
-        async def test_func():
-            return "valid_result"
+            raise ValueError("always fails")
 
         result = await test_func()
-        assert result == "valid_result"
+        assert result == "fallback_result"
 
-    @pytest.mark.asyncio
-    async def test_validate_output_async_validation_fails(self):
-        """Test validate_output with async function that fails validation."""
+    def test_cache_expiration(self):
+        """Test cache expiration after TTL."""
+        call_count = 0
 
-        def validation_func(result):
-            raise ValidationError("Invalid output")
-
-        @validate_output(validation_func)
-        async def test_func():
-            return "invalid_result"
-
-        with pytest.raises(ValidationError, match="Invalid output"):
-            await test_func()
-
-    def test_validate_output_sync_success(self):
-        """Test validate_output with sync function that passes validation."""
-
-        def validation_func(result):
-            if result == "valid_result":
-                return True
-            raise ValidationError("Invalid output")
-
-        @validate_output(validation_func)
+        @cached(ttl=0)  # Immediate expiration
         def test_func():
-            return "valid_result"
+            nonlocal call_count
+            call_count += 1
+            return f"result_{call_count}"
 
-        result = test_func()
-        assert result == "valid_result"
+        # Clear cache first
+        UnifiedDecorator._cache.clear()
+        UnifiedDecorator._cache_timestamps.clear()
 
-    def test_validate_output_sync_validation_fails(self):
-        """Test validate_output with sync function that fails validation."""
-
-        def validation_func(result):
-            raise ValidationError("Invalid output")
-
-        @validate_output(validation_func)
-        def test_func():
-            return "invalid_result"
-
-        with pytest.raises(ValidationError, match="Invalid output"):
-            test_func()
-
-
-class TestTypeCheck:
-    """Test the type_check decorator."""
-
-    @pytest.mark.asyncio
-    async def test_type_check_async_success(self):
-        """Test type_check with async function that has correct types."""
-
-        @type_check
-        async def test_func(value: str) -> str:
-            return f"processed_{value}"
-
-        result = await test_func("test")
-        assert result == "processed_test"
-
-    @pytest.mark.asyncio
-    async def test_type_check_async_type_mismatch(self):
-        """Test type_check with async function that has type mismatch."""
-
-        @type_check
-        async def test_func(value: str) -> str:
-            return f"processed_{value}"
-
-        with pytest.raises(ValidationError):
-            await test_func(123)  # Should be string
-
-    def test_type_check_sync_success(self):
-        """Test type_check with sync function that has correct types."""
-
-        @type_check
-        def test_func(value: str) -> str:
-            return f"processed_{value}"
-
-        result = test_func("test")
-        assert result == "processed_test"
-
-    def test_type_check_sync_type_mismatch(self):
-        """Test type_check with sync function that has type mismatch."""
-
-        @type_check
-        def test_func(value: str) -> str:
-            return f"processed_{value}"
-
-        with pytest.raises(ValidationError):
-            test_func(123)  # Should be string
-
-
-class TestRateLimit:
-    """Test the rate_limit decorator."""
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_async_success(self):
-        """Test rate_limit with async function that doesn't exceed limits."""
-
-        @rate_limit(max_calls=5, time_window=1.0)
-        async def test_func():
-            return "success"
-
-        # Make multiple calls within limit
-        results = []
-        for _ in range(3):
-            result = await test_func()
-            results.append(result)
-
-        assert all(r == "success" for r in results)
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_async_exceeds_limit(self):
-        """Test rate_limit with async function that exceeds limits."""
-
-        @rate_limit(max_calls=2, time_window=1.0)
-        async def test_func():
-            return "success"
-
-        # First two calls should succeed
-        result1 = await test_func()
-        result2 = await test_func()
-        assert result1 == "success"
-        assert result2 == "success"
-
-        # Third call should be delayed but eventually succeed
-        result3 = await test_func()
-        assert result3 == "success"
-
-    def test_rate_limit_sync_success(self):
-        """Test rate_limit with sync function that doesn't exceed limits."""
-
-        @rate_limit(max_calls=5, time_window=1.0)
-        def test_func():
-            return "success"
-
-        # Make multiple calls within limit
-        results = []
-        for _ in range(3):
-            result = test_func()
-            results.append(result)
-
-        assert all(r == "success" for r in results)
-
-    def test_rate_limit_sync_exceeds_limit(self):
-        """Test rate_limit with sync function that exceeds limits."""
-
-        @rate_limit(max_calls=2, time_window=1.0)
-        def test_func():
-            return "success"
-
-        # First two calls should succeed
+        # First call
         result1 = test_func()
+        assert result1 == "result_1"
+        assert call_count == 1
+
+        # Wait a bit to ensure expiration
+        time.sleep(0.1)
+
+        # Second call - cache should be expired
         result2 = test_func()
-        assert result1 == "success"
-        assert result2 == "success"
-
-        # Third call should be delayed but eventually succeed
-        result3 = test_func()
-        assert result3 == "success"
-
-
-class TestApiThrottle:
-    """Test the api_throttle decorator."""
+        assert result2 == "result_2"
+        assert call_count == 2
 
     @pytest.mark.asyncio
-    async def test_api_throttle_async(self):
-        """Test api_throttle with async function."""
+    async def test_validation_with_special_params(self):
+        """Test validation with special parameter names."""
 
-        @api_throttle(max_calls=5, time_window=1.0)
+        @validated()
+        async def test_func(order: dict, price: float, quantity: float, symbol: str):
+            return {
+                'order': order,
+                'price': price,
+                'quantity': quantity,
+                'symbol': symbol
+            }
+
+        result = await test_func(
+            order={'type': 'LIMIT', 'side': 'BUY', 'symbol': 'BTC/USDT', 'price': 50000.0, 'quantity': 1.0},
+            price=50000.0,
+            quantity=1.0,
+            symbol='BTC/USDT'
+        )
+
+        assert result['price'] == 50000.0
+        assert result['quantity'] == 1.0
+        assert result['symbol'] == 'BTC/USDT'
+
+    def test_sync_wrapper_in_running_loop(self):
+        """Test sync wrapper behavior when event loop is running."""
+
+        @retry(max_attempts=1)
+        def test_func():
+            return "success"
+
+        # This should work even if called from within an async context
+        result = test_func()
+        assert result == "success"
+
+
+class TestDecoratorErrorHandling:
+    """Test error handling in decorators."""
+
+    @pytest.mark.asyncio
+    async def test_validation_error_handling(self):
+        """Test handling of validation errors."""
+
+        @validated()
+        async def test_func(price: float):
+            return price
+
+        # Test with invalid price (handled by validation)
+        result = await test_func(100.0)
+        assert result == 100.0
+
+    @pytest.mark.asyncio
+    async def test_retry_with_different_exceptions(self):
+        """Test retry behavior with different exception types."""
+        call_count = 0
+
+        @retry(max_attempts=3, delay=0.01)
         async def test_func():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ConnectionError("connection failed")
+            elif call_count == 2:
+                raise TimeoutError("timeout occurred")
             return "success"
 
         result = await test_func()
         assert result == "success"
+        assert call_count == 3
 
-    def test_api_throttle_sync(self):
-        """Test api_throttle with sync function."""
+    def test_cache_key_generation(self):
+        """Test cache key generation for different arguments."""
 
-        @api_throttle(max_calls=5, time_window=1.0)
-        def test_func():
-            return "success"
+        @cached(ttl=1)
+        def test_func(a, b, c=None):
+            return f"{a}_{b}_{c}"
 
-        result = test_func()
-        assert result == "success"
+        # Clear cache
+        UnifiedDecorator._cache.clear()
+        UnifiedDecorator._cache_timestamps.clear()
+
+        # Different arguments should generate different cache keys
+        result1 = test_func(1, 2)
+        result2 = test_func(1, 3)
+        result3 = test_func(1, 2, c="test")
+
+        assert result1 == "1_2_None"
+        assert result2 == "1_3_None"
+        assert result3 == "1_2_test"
+
+    @pytest.mark.asyncio
+    async def test_timeout_with_cleanup(self):
+        """Test timeout decorator properly cleans up on timeout."""
+
+        @timeout(0.01)
+        async def test_func():
+            try:
+                await asyncio.sleep(1.0)
+                return "should_not_return"
+            except asyncio.CancelledError:
+                # Cleanup code
+                raise  # Re-raise the cancellation
+
+        # The timeout may raise asyncio.TimeoutError or asyncio.CancelledError
+        with pytest.raises((asyncio.TimeoutError, asyncio.CancelledError)):
+            await test_func()
+
+    def test_monitor_metrics_recording(self):
+        """Test that monitor decorator records metrics."""
+
+        @monitored()
+        def test_func(value):
+            time.sleep(0.01)
+            return value * 2
+
+        result = test_func(10)
+        assert result == 20
+        # Metrics should be recorded (check via logging in actual implementation)

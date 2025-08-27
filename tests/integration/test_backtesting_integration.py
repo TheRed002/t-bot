@@ -20,9 +20,10 @@ import pandas as pd
 
 from src.backtesting.engine import BacktestEngine, BacktestConfig
 from src.backtesting.metrics import MetricsCalculator
-from src.strategies.base import BaseStrategy
-from src.core.types import SignalDirection, OrderSide
+from src.strategies.base import BaseStrategy, StrategyType
+from src.core.types import SignalDirection, OrderSide, Signal, Position, MarketData
 from src.database.manager import DatabaseManager
+from decimal import Decimal
 
 
 class SimpleMovingAverageStrategy(BaseStrategy):
@@ -65,6 +66,50 @@ class SimpleMovingAverageStrategy(BaseStrategy):
             return SignalDirection.SELL  # Bearish crossover
         else:
             return SignalDirection.HOLD
+    
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Get the strategy type."""
+        return StrategyType.TREND_FOLLOWING
+    
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
+        """Internal signal generation implementation."""
+        # Convert MarketData to DataFrame for processing
+        df = pd.DataFrame([data.__dict__])
+        signal_direction = await self.generate_signal(data.symbol, df)
+        
+        if signal_direction != SignalDirection.HOLD:
+            signal = Signal(
+                strategy_name=self.name,
+                symbol=data.symbol,
+                direction=signal_direction,
+                confidence=0.8,
+                timestamp=data.timestamp
+            )
+            return [signal]
+        return []
+    
+    async def validate_signal(self, signal: Signal) -> bool:
+        """Validate signal before execution."""
+        # Basic validation for test
+        return signal.confidence > 0.5
+    
+    def get_position_size(self, signal: Signal) -> Decimal:
+        """Calculate position size for signal."""
+        # Simple fixed position size for test
+        return Decimal("0.1")
+    
+    def should_exit(self, position: Position, data: MarketData) -> bool:
+        """Determine if position should be closed."""
+        # Simple exit logic for test - exit after 5% profit or 2% loss
+        current_price = data.close
+        entry_price = position.entry_price
+        pnl_pct = ((current_price - entry_price) / entry_price) * 100
+        
+        if position.side == OrderSide.BUY:
+            return pnl_pct >= 5 or pnl_pct <= -2
+        else:  # SELL position
+            return pnl_pct <= -5 or pnl_pct >= 2
 
 
 @pytest.mark.integration
@@ -90,6 +135,10 @@ class TestBacktestingIntegration:
         """Create test strategy."""
         return SimpleMovingAverageStrategy(
             name="TestMAStrategy",
+            strategy_id="test-ma-strategy",
+            strategy_type=StrategyType.TREND_FOLLOWING,
+            symbol="BTCUSDT",
+            timeframe="1h",
             short_period=10,
             long_period=20,
             position_size_pct=0.1
@@ -530,7 +579,7 @@ class TestBacktestingDatabaseIntegration:
         
         # Use real database manager
         from src.database.manager import DatabaseManager
-        db_manager = DatabaseManager(clean_database)
+        db_manager = DatabaseManager()
         
         # Insert some test data
         await db_manager.execute("""

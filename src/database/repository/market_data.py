@@ -25,24 +25,24 @@ class MarketDataRepository(DatabaseRepository[MarketDataRecord, str]):
 
     async def get_by_symbol(self, symbol: str) -> list[MarketDataRecord]:
         """Get market data by symbol."""
-        return await self.get_all(filters={"symbol": symbol}, order_by="-timestamp")
+        return await self.get_all(filters={"symbol": symbol}, order_by="-data_timestamp")
 
     async def get_by_exchange(self, exchange: str) -> list[MarketDataRecord]:
         """Get market data by exchange."""
-        return await self.get_all(filters={"exchange": exchange}, order_by="-timestamp")
+        return await self.get_all(filters={"exchange": exchange}, order_by="-data_timestamp")
 
     async def get_by_symbol_and_exchange(
         self, symbol: str, exchange: str
     ) -> list[MarketDataRecord]:
         """Get market data by symbol and exchange."""
         return await self.get_all(
-            filters={"symbol": symbol, "exchange": exchange}, order_by="-timestamp"
+            filters={"symbol": symbol, "exchange": exchange}, order_by="-data_timestamp"
         )
 
     async def get_latest_price(self, symbol: str, exchange: str) -> MarketDataRecord | None:
         """Get latest price data."""
         records = await self.get_all(
-            filters={"symbol": symbol, "exchange": exchange}, order_by="-timestamp", limit=1
+            filters={"symbol": symbol, "exchange": exchange}, order_by="-data_timestamp", limit=1
         )
         return records[0] if records else None
 
@@ -54,9 +54,9 @@ class MarketDataRepository(DatabaseRepository[MarketDataRecord, str]):
             filters={
                 "symbol": symbol,
                 "exchange": exchange,
-                "timestamp": {"gte": start_time, "lte": end_time},
+                "data_timestamp": {"gte": start_time, "lte": end_time},
             },
-            order_by="timestamp",
+            order_by="data_timestamp",
         )
 
     async def get_recent_data(
@@ -65,31 +65,28 @@ class MarketDataRepository(DatabaseRepository[MarketDataRecord, str]):
         """Get recent market data."""
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
         return await self.get_all(
-            filters={"symbol": symbol, "exchange": exchange, "timestamp": {"gte": since}},
-            order_by="-timestamp",
+            filters={"symbol": symbol, "exchange": exchange, "data_timestamp": {"gte": since}},
+            order_by="-data_timestamp",
         )
 
     async def get_by_data_source(self, data_source: str) -> list[MarketDataRecord]:
         """Get data by source."""
-        return await self.get_all(filters={"data_source": data_source}, order_by="-timestamp")
+        return await self.get_all(filters={"source": data_source}, order_by="-data_timestamp")
 
     async def get_poor_quality_data(self, threshold: float = 0.8) -> list[MarketDataRecord]:
-        """Get data with poor quality scores."""
-        records = await self.get_all()
-        return [
-            record
-            for record in records
-            if record.quality_score is not None and record.quality_score < threshold
-        ]
+        """Get data with poor quality scores - not applicable for this model."""
+        # MarketDataRecord doesn't have quality_score field
+        return []
 
     async def get_invalid_data(self) -> list[MarketDataRecord]:
-        """Get invalid data records."""
-        return await self.get_all(filters={"validation_status": "invalid"}, order_by="-timestamp")
+        """Get invalid data records - not applicable for this model."""
+        # MarketDataRecord doesn't have validation_status field
+        return []
 
     async def cleanup_old_data(self, days: int = 90) -> int:
         """Clean up old market data."""
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-        old_records = await self.get_all(filters={"timestamp": {"lt": cutoff_date}})
+        old_records = await self.get_all(filters={"data_timestamp": {"lt": cutoff_date}})
 
         count = 0
         for record in old_records:

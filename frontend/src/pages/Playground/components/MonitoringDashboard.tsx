@@ -4,60 +4,35 @@
  */
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Separator } from '@/components/ui/separator';
 import {
-  Box,
-  Paper,
-  Typography,
-  Grid,
-  Card,
-  CardContent,
-  Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  InputAdornment,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  IconButton,
-  Tooltip,
-  Button,
-  LinearProgress,
-  Alert,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Divider,
-  useTheme,
-  alpha,
-  Switch,
-  FormControlLabel
-} from '@mui/material';
-import {
-  Search as SearchIcon,
-  FilterList as FilterIcon,
-  Refresh as RefreshIcon,
-  Download as DownloadIcon,
-  PlayArrow as PlayArrowIcon,
-  Pause as PauseIcon,
-  Error as ErrorIcon,
-  Warning as WarningIcon,
-  Info as InfoIcon,
-  TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  Timeline as TimelineIcon,
-  Visibility as VisibilityIcon,
-  VisibilityOff as VisibilityOffIcon,
-  FullscreenExit as FullscreenExitIcon
-} from '@mui/icons-material';
-import {
+  Search,
+  Filter,
+  RefreshCw,
+  Download,
+  Play,
+  Pause,
+  AlertTriangle,
+  AlertCircle,
+  Info,
+  TrendingUp,
+  TrendingDown,
   LineChart,
+  Eye,
+  EyeOff
+} from 'lucide-react';
+import {
+  LineChart as RechartsLineChart,
   Line,
   XAxis,
   YAxis,
@@ -98,7 +73,6 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
   execution,
   configuration
 }) => {
-  const theme = useTheme();
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // State management
@@ -162,20 +136,20 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
   // Get log icon based on level
   const getLogIcon = (level: string) => {
     switch (level) {
-      case 'error': return <ErrorIcon color="error" />;
-      case 'warning': return <WarningIcon color="warning" />;
-      case 'info': return <InfoIcon color="info" />;
-      default: return <InfoIcon />;
+      case 'error': return <AlertTriangle className="h-4 w-4 text-red-500" />;
+      case 'warning': return <AlertCircle className="h-4 w-4 text-yellow-500" />;
+      case 'info': return <Info className="h-4 w-4 text-blue-500" />;
+      default: return <Info className="h-4 w-4" />;
     }
   };
 
   // Get log color based on level
   const getLogColor = (level: string) => {
     switch (level) {
-      case 'error': return theme.palette.error.main;
-      case 'warning': return theme.palette.warning.main;
-      case 'info': return theme.palette.info.main;
-      default: return theme.palette.text.primary;
+      case 'error': return 'text-red-500';
+      case 'warning': return 'text-yellow-500';
+      case 'info': return 'text-blue-500';
+      default: return 'text-foreground';
     }
   };
 
@@ -197,146 +171,135 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
 
   if (!execution) {
     return (
-      <Paper elevation={2} sx={{ p: 3, textAlign: 'center', minHeight: 400 }}>
-        <Typography variant="h6" color="text.secondary" gutterBottom>
-          No Active Execution
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Start an execution to monitor performance and view real-time data.
-        </Typography>
-      </Paper>
+      <Card className="p-6 text-center min-h-96">
+        <CardContent>
+          <h3 className="text-lg font-semibold text-muted-foreground mb-2">
+            No Active Execution
+          </h3>
+          <p className="text-muted-foreground">
+            Start an execution to monitor performance and view real-time data.
+          </p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, height: '100%' }}>
+    <div className="flex flex-col gap-6 h-full">
       {/* Performance Overview */}
-      <Grid container spacing={2}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card elevation={2}>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Current Equity
-              </Typography>
-              <Typography variant="h5" fontWeight="bold">
-                {formatCurrency(currentEquity)}
-              </Typography>
-              <Typography 
-                variant="body2" 
-                color={totalReturn >= 0 ? 'success.main' : 'error.main'}
-                sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.5 }}
-              >
-                {totalReturn >= 0 ? <TrendingUpIcon fontSize="small" /> : <TrendingDownIcon fontSize="small" />}
-                {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="text-center p-4">
+            <p className="text-sm text-muted-foreground mb-1">
+              Current Equity
+            </p>
+            <h3 className="text-2xl font-bold">
+              {formatCurrency(currentEquity)}
+            </h3>
+            <div className={`flex items-center justify-center gap-1 text-sm ${
+              totalReturn >= 0 ? 'text-green-600' : 'text-red-600'
+            }`}>
+              {totalReturn >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+              {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
+            </div>
+          </CardContent>
+        </Card>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card elevation={2}>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Total Trades
-              </Typography>
-              <Typography variant="h5" fontWeight="bold">
-                {execution.metrics?.totalTrades || 0}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Win Rate: {execution.metrics?.winRate.toFixed(1) || 0}%
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+        <Card>
+          <CardContent className="text-center p-4">
+            <p className="text-sm text-muted-foreground mb-1">
+              Total Trades
+            </p>
+            <h3 className="text-2xl font-bold">
+              {execution.metrics?.totalTrades || 0}
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Win Rate: {execution.metrics?.winRate?.toFixed(1) || 0}%
+            </p>
+          </CardContent>
+        </Card>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card elevation={2}>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Max Drawdown
-              </Typography>
-              <Typography variant="h5" fontWeight="bold" color="error.main">
-                {maxDrawdownPercent.toFixed(2)}%
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {formatCurrency(maxDrawdown)}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+        <Card>
+          <CardContent className="text-center p-4">
+            <p className="text-sm text-muted-foreground mb-1">
+              Max Drawdown
+            </p>
+            <h3 className="text-2xl font-bold text-red-600">
+              {maxDrawdownPercent.toFixed(2)}%
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              {formatCurrency(maxDrawdown)}
+            </p>
+          </CardContent>
+        </Card>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card elevation={2}>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary" gutterBottom>
-                Sharpe Ratio
-              </Typography>
-              <Typography variant="h5" fontWeight="bold">
-                {execution.metrics?.sharpeRatio?.toFixed(2) || 'N/A'}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Risk-adjusted return
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+        <Card>
+          <CardContent className="text-center p-4">
+            <p className="text-sm text-muted-foreground mb-1">
+              Sharpe Ratio
+            </p>
+            <h3 className="text-2xl font-bold">
+              {execution.metrics?.sharpeRatio?.toFixed(2) || 'N/A'}
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Risk-adjusted return
+            </p>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Execution Progress */}
       {execution.status === 'running' && (
-        <Card elevation={2}>
-          <CardContent>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="h6">Execution Progress</Typography>
-              <Chip 
-                label={`${Math.round(execution.progress)}%`}
-                color="primary"
-                variant="filled"
-              />
-            </Box>
-            <LinearProgress 
-              variant="determinate" 
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Execution Progress</h3>
+              <Badge variant="default">
+                {Math.round(execution.progress)}%
+              </Badge>
+            </div>
+            <Progress 
               value={execution.progress} 
-              sx={{ height: 8, borderRadius: 4, mb: 1 }}
+              className="h-2 mb-2"
             />
-            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-              <Typography variant="body2" color="text.secondary">
+            <div className="flex justify-between text-sm text-muted-foreground">
+              <span>
                 Status: {execution.status.charAt(0).toUpperCase() + execution.status.slice(1)}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
+              </span>
+              <span>
                 Duration: {execution.duration ? `${Math.round(execution.duration / 1000)}s` : 'N/A'}
-              </Typography>
-            </Box>
+              </span>
+            </div>
           </CardContent>
         </Card>
       )}
 
       {/* Main Content Grid */}
-      <Grid container spacing={3} sx={{ flexGrow: 1 }}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1">
         {/* Equity Curve Chart */}
-        <Grid item xs={12} lg={8}>
-          <Card elevation={2} sx={{ height: 400 }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <TimelineIcon />
+        <div className="lg:col-span-2">
+          <Card className="h-96">
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle className="flex items-center gap-2">
+                  <LineChart className="h-5 w-5" />
                   Equity Curve
-                </Typography>
-                <FormControl size="small" sx={{ minWidth: 120 }}>
-                  <InputLabel>Timeframe</InputLabel>
-                  <Select
-                    value={selectedTimeframe}
-                    label="Timeframe"
-                    onChange={(e) => setSelectedTimeframe(e.target.value)}
-                  >
-                    <MenuItem value="1h">1 Hour</MenuItem>
-                    <MenuItem value="4h">4 Hours</MenuItem>
-                    <MenuItem value="1d">1 Day</MenuItem>
-                    <MenuItem value="1w">1 Week</MenuItem>
-                  </Select>
-                </FormControl>
-              </Box>
-              <ResponsiveContainer width="100%" height={300}>
+                </CardTitle>
+                <Select value={selectedTimeframe} onValueChange={setSelectedTimeframe}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1h">1 Hour</SelectItem>
+                    <SelectItem value="4h">4 Hours</SelectItem>
+                    <SelectItem value="1d">1 Day</SelectItem>
+                    <SelectItem value="1w">1 Week</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={250}>
                 <AreaChart data={equityCurveData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis 
@@ -354,198 +317,168 @@ const MonitoringDashboard: React.FC<MonitoringDashboardProps> = ({
                   <Area
                     type="monotone"
                     dataKey="equity"
-                    stroke={theme.palette.primary.main}
-                    fill={alpha(theme.palette.primary.main, 0.3)}
+                    stroke="hsl(var(--primary))"
+                    fill="hsl(var(--primary) / 0.3)"
                     strokeWidth={2}
                   />
                 </AreaChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>
-        </Grid>
+        </div>
 
         {/* Recent Trades */}
-        <Grid item xs={12} lg={4}>
-          <Card elevation={2} sx={{ height: 400 }}>
+        <div>
+          <Card className="h-96">
+            <CardHeader>
+              <CardTitle>Recent Trades</CardTitle>
+            </CardHeader>
             <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Recent Trades
-              </Typography>
-              <List sx={{ maxHeight: 300, overflow: 'auto' }}>
-                {recentTrades.map((trade, index) => (
-                  <React.Fragment key={trade.id}>
-                    <ListItem>
-                      <ListItemIcon>
-                        {trade.side === 'buy' ? (
-                          <TrendingUpIcon color="success" />
-                        ) : (
-                          <TrendingDownIcon color="error" />
-                        )}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <Typography variant="body2" fontWeight="medium">
+              <ScrollArea className="h-64">
+                <div className="space-y-4">
+                  {recentTrades.map((trade, index) => (
+                    <div key={trade.id}>
+                      <div className="flex items-start space-x-3">
+                        <div className="flex-shrink-0">
+                          {trade.side === 'buy' ? (
+                            <TrendingUp className="h-4 w-4 text-green-600" />
+                          ) : (
+                            <TrendingDown className="h-4 w-4 text-red-600" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-start">
+                            <p className="text-sm font-medium text-foreground">
                               {trade.symbol}
-                            </Typography>
-                            <Typography 
-                              variant="body2" 
-                              color={trade.pnl && trade.pnl >= 0 ? 'success.main' : 'error.main'}
-                              fontWeight="medium"
-                            >
+                            </p>
+                            <p className={`text-sm font-medium ${
+                              trade.pnl && trade.pnl >= 0 ? 'text-green-600' : 'text-red-600'
+                            }`}>
                               {trade.pnl ? `${trade.pnl >= 0 ? '+' : ''}$${trade.pnl.toFixed(2)}` : 'Pending'}
-                            </Typography>
-                          </Box>
-                        }
-                        secondary={
-                          <Box>
-                            <Typography variant="caption" color="text.secondary">
-                              {trade.side.toUpperCase()} {trade.quantity} @ ${trade.price.toLocaleString()}
-                            </Typography>
-                            <Typography variant="caption" display="block" color="text.secondary">
-                              {new Date(trade.timestamp).toLocaleTimeString()}
-                            </Typography>
-                          </Box>
-                        }
-                      />
-                    </ListItem>
-                    {index < recentTrades.length - 1 && <Divider variant="inset" component="li" />}
-                  </React.Fragment>
-                ))}
-              </List>
+                            </p>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {trade.side.toUpperCase()} {trade.quantity} @ ${trade.price.toLocaleString()}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(trade.timestamp).toLocaleTimeString()}
+                          </p>
+                        </div>
+                      </div>
+                      {index < recentTrades.length - 1 && <Separator className="mt-3" />}
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
             </CardContent>
           </Card>
-        </Grid>
+        </div>
 
-        {/* Execution Logs */}
-        <Grid item xs={12}>
-          <Card elevation={2}>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">Execution Logs</Typography>
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={autoScrollLogs}
-                        onChange={(e) => setAutoScrollLogs(e.target.checked)}
-                        size="small"
-                      />
-                    }
-                    label="Auto-scroll"
+      </div>
+
+      {/* Execution Logs */}
+      <div className="col-span-full">
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <CardTitle>Execution Logs</CardTitle>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="auto-scroll"
+                    checked={autoScrollLogs}
+                    onCheckedChange={setAutoScrollLogs}
                   />
-                  <Tooltip title="Download logs">
-                    <IconButton size="small">
-                      <DownloadIcon />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-              </Box>
+                  <Label htmlFor="auto-scroll" className="text-sm">Auto-scroll</Label>
+                </div>
+                <Button size="sm" variant="outline">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
 
-              {/* Log Filters */}
-              <Grid container spacing={2} sx={{ mb: 2 }}>
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    fullWidth
-                    size="small"
+            {/* Log Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-4">
+              <div className="md:col-span-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
                     placeholder="Search logs..."
                     value={logFilter}
                     onChange={(e) => setLogFilter(e.target.value)}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <SearchIcon />
-                        </InputAdornment>
-                      )
-                    }}
+                    className="pl-10"
                   />
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Level</InputLabel>
-                    <Select
-                      value={logLevelFilter}
-                      label="Level"
-                      onChange={(e) => setLogLevelFilter(e.target.value)}
-                    >
-                      <MenuItem value="all">All Levels</MenuItem>
-                      <MenuItem value="debug">Debug</MenuItem>
-                      <MenuItem value="info">Info</MenuItem>
-                      <MenuItem value="warning">Warning</MenuItem>
-                      <MenuItem value="error">Error</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Grid>
-                <Grid item xs={12} md={3}>
-                  <FormControl fullWidth size="small">
-                    <InputLabel>Category</InputLabel>
-                    <Select
-                      value={logCategoryFilter}
-                      label="Category"
-                      onChange={(e) => setLogCategoryFilter(e.target.value)}
-                    >
-                      <MenuItem value="all">All Categories</MenuItem>
-                      <MenuItem value="strategy">Strategy</MenuItem>
-                      <MenuItem value="risk">Risk</MenuItem>
-                      <MenuItem value="execution">Execution</MenuItem>
-                      <MenuItem value="data">Data</MenuItem>
-                      <MenuItem value="system">System</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Grid>
-              </Grid>
+                </div>
+              </div>
+              <div className="md:col-span-1.5">
+                <Select value={logLevelFilter} onValueChange={setLogLevelFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Level" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Levels</SelectItem>
+                    <SelectItem value="debug">Debug</SelectItem>
+                    <SelectItem value="info">Info</SelectItem>
+                    <SelectItem value="warning">Warning</SelectItem>
+                    <SelectItem value="error">Error</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="md:col-span-1.5">
+                <Select value={logCategoryFilter} onValueChange={setLogCategoryFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    <SelectItem value="strategy">Strategy</SelectItem>
+                    <SelectItem value="risk">Risk</SelectItem>
+                    <SelectItem value="execution">Execution</SelectItem>
+                    <SelectItem value="data">Data</SelectItem>
+                    <SelectItem value="system">System</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
-              {/* Log List */}
-              <Box 
-                sx={{ 
-                  maxHeight: 300, 
-                  overflow: 'auto',
-                  border: 1,
-                  borderColor: 'divider',
-                  borderRadius: 1,
-                  bgcolor: alpha(theme.palette.background.default, 0.5)
-                }}
-              >
-                <List dense>
+            {/* Log List */}
+            <div className="border rounded-lg bg-muted/10 max-h-80">
+              <ScrollArea className="h-80">
+                <div className="p-4">
                   {filteredLogs.length === 0 ? (
-                    <ListItem>
-                      <ListItemText 
-                        primary="No logs available"
-                        secondary="Logs will appear here as the execution progresses"
-                      />
-                    </ListItem>
+                    <div className="text-center py-8">
+                      <p className="font-medium">No logs available</p>
+                      <p className="text-sm text-muted-foreground">
+                        Logs will appear here as the execution progresses
+                      </p>
+                    </div>
                   ) : (
-                    filteredLogs.map((log) => (
-                      <ListItem key={log.id}>
-                        <ListItemIcon sx={{ minWidth: 32 }}>
-                          {getLogIcon(log.level)}
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={
-                            <Typography 
-                              variant="body2" 
-                              component="pre" 
-                              sx={{ 
-                                fontFamily: 'monospace', 
-                                whiteSpace: 'pre-wrap',
-                                color: getLogColor(log.level)
-                              }}
-                            >
+                    <div className="space-y-2">
+                      {filteredLogs.map((log) => (
+                        <div key={log.id} className="flex items-start gap-3 py-1">
+                          <div className="flex-shrink-0 mt-1">
+                            {getLogIcon(log.level)}
+                          </div>
+                          <div className="flex-1">
+                            <pre className={`text-sm font-mono whitespace-pre-wrap ${getLogColor(log.level)}`}>
                               [{new Date(log.timestamp).toLocaleTimeString()}] [{log.category.toUpperCase()}] {log.message}
-                            </Typography>
-                          }
-                        />
-                      </ListItem>
-                    ))
+                            </pre>
+                          </div>
+                        </div>
+                      ))}
+                      <div ref={logsEndRef} />
+                    </div>
                   )}
-                  <div ref={logsEndRef} />
-                </List>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-    </Box>
+                </div>
+              </ScrollArea>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
 };
 

@@ -10,8 +10,10 @@ These tests verify the new query methods added to DatabaseQueries:
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+from contextlib import asynccontextmanager
 
 import pytest
+import pytest_asyncio
 
 from src.database.models import (
     DataPipelineRecord,
@@ -32,12 +34,25 @@ class TestMarketDataRecordQueries:
         session.execute = AsyncMock()
         session.commit = AsyncMock()
         session.delete = MagicMock()
+        session.add = MagicMock()
+        session.flush = AsyncMock()
+        session.refresh = AsyncMock()
         return session
 
-    @pytest.fixture
-    def mock_db_queries(self, mock_session):
-        """Create DatabaseQueries instance with mock session."""
-        return DatabaseQueries(mock_session)
+    @pytest_asyncio.fixture
+    async def mock_db_queries(self, mock_session):
+        """Create DatabaseQueries instance with properly mocked database."""
+        # Create an async context manager for the mock session
+        @asynccontextmanager
+        async def mock_get_session():
+            yield mock_session
+        
+        # Pass the mock session directly to DatabaseQueries
+        queries = DatabaseQueries(mock_session)
+        
+        # Patch get_async_session in connection module
+        with patch('src.database.connection.get_async_session', mock_get_session):
+            yield queries
 
     @pytest.fixture
     def sample_market_data_record(self):
@@ -45,16 +60,14 @@ class TestMarketDataRecordQueries:
         return MarketDataRecord(
             symbol="BTCUSDT",
             exchange="binance",
-            timestamp=datetime.now(timezone.utc),
+            data_timestamp=datetime.now(timezone.utc),
             open_price=50000.0,
             high_price=51000.0,
             low_price=49000.0,
             close_price=50500.0,
-            price=50500.0,
             volume=100.0,
-            data_source="exchange",
-            quality_score=0.95,
-            validation_status="valid"
+            interval="1h",
+            source="exchange"
         )
 
     @pytest.mark.asyncio
@@ -64,7 +77,7 @@ class TestMarketDataRecordQueries:
 
         result = await mock_db_queries.create_market_data_record(sample_market_data_record)
 
-        assert result is True
+        assert result == sample_market_data_record
         mock_db_queries.session.add.assert_called_once_with(sample_market_data_record)
         mock_db_queries.session.commit.assert_called_once()
 
@@ -76,7 +89,7 @@ class TestMarketDataRecordQueries:
 
         result = await mock_db_queries.bulk_create_market_data_records(records)
 
-        assert result is True
+        assert result == records
         mock_db_queries.session.add_all.assert_called_once_with(records)
         mock_db_queries.session.commit.assert_called_once()
 
@@ -138,12 +151,24 @@ class TestFeatureRecordQueries:
         session.execute = AsyncMock()
         session.commit = AsyncMock()
         session.add = MagicMock()
+        session.add_all = MagicMock()
+        session.flush = AsyncMock()
+        session.refresh = AsyncMock()
         return session
 
-    @pytest.fixture
-    def mock_db_queries(self, mock_session):
-        """Create DatabaseQueries instance with mock session."""
-        return DatabaseQueries(mock_session)
+    @pytest_asyncio.fixture
+    async def mock_db_queries(self, mock_session):
+        """Create DatabaseQueries instance with properly mocked database."""
+        @asynccontextmanager
+        async def mock_get_session():
+            yield mock_session
+        
+        # Pass the mock session directly to DatabaseQueries
+        queries = DatabaseQueries(mock_session)
+        
+        # Patch get_async_session in connection module
+        with patch('src.database.connection.get_async_session', mock_get_session):
+            yield queries
 
     @pytest.fixture
     def sample_feature_record(self):
@@ -163,7 +188,7 @@ class TestFeatureRecordQueries:
         """Test creating a feature record."""
         result = await mock_db_queries.create_feature_record(sample_feature_record)
 
-        assert result is True
+        assert result == sample_feature_record
         mock_db_queries.session.add.assert_called_once_with(sample_feature_record)
         mock_db_queries.session.commit.assert_called_once()
 
@@ -175,7 +200,7 @@ class TestFeatureRecordQueries:
 
         result = await mock_db_queries.bulk_create_feature_records(records)
 
-        assert result is True
+        assert result == records
         mock_db_queries.session.add_all.assert_called_once_with(records)
         mock_db_queries.session.commit.assert_called_once()
 
@@ -206,12 +231,23 @@ class TestDataQualityRecordQueries:
         session.execute = AsyncMock()
         session.commit = AsyncMock()
         session.add = MagicMock()
+        session.flush = AsyncMock()
+        session.refresh = AsyncMock()
         return session
 
-    @pytest.fixture
-    def mock_db_queries(self, mock_session):
-        """Create DatabaseQueries instance with mock session."""
-        return DatabaseQueries(mock_session)
+    @pytest_asyncio.fixture
+    async def mock_db_queries(self, mock_session):
+        """Create DatabaseQueries instance with properly mocked database."""
+        @asynccontextmanager
+        async def mock_get_session():
+            yield mock_session
+        
+        # Pass the mock session directly to DatabaseQueries
+        queries = DatabaseQueries(mock_session)
+        
+        # Patch get_async_session in connection module
+        with patch('src.database.connection.get_async_session', mock_get_session):
+            yield queries
 
     @pytest.fixture
     def sample_quality_record(self):
@@ -236,7 +272,7 @@ class TestDataQualityRecordQueries:
         """Test creating a data quality record."""
         result = await mock_db_queries.create_data_quality_record(sample_quality_record)
 
-        assert result is True
+        assert result == sample_quality_record
         mock_db_queries.session.add.assert_called_once_with(sample_quality_record)
         mock_db_queries.session.commit.assert_called_once()
 
@@ -267,12 +303,23 @@ class TestDataPipelineRecordQueries:
         session.execute = AsyncMock()
         session.commit = AsyncMock()
         session.add = MagicMock()
+        session.flush = AsyncMock()
+        session.refresh = AsyncMock()
         return session
 
-    @pytest.fixture
-    def mock_db_queries(self, mock_session):
-        """Create DatabaseQueries instance with mock session."""
-        return DatabaseQueries(mock_session)
+    @pytest_asyncio.fixture
+    async def mock_db_queries(self, mock_session):
+        """Create DatabaseQueries instance with properly mocked database."""
+        @asynccontextmanager
+        async def mock_get_session():
+            yield mock_session
+        
+        # Pass the mock session directly to DatabaseQueries
+        queries = DatabaseQueries(mock_session)
+        
+        # Patch get_async_session in connection module
+        with patch('src.database.connection.get_async_session', mock_get_session):
+            yield queries
 
     @pytest.fixture
     def sample_pipeline_record(self):
@@ -290,7 +337,7 @@ class TestDataPipelineRecordQueries:
         """Test creating a data pipeline record."""
         result = await mock_db_queries.create_data_pipeline_record(sample_pipeline_record)
 
-        assert result is True
+        assert result == sample_pipeline_record
         mock_db_queries.session.add.assert_called_once_with(sample_pipeline_record)
         mock_db_queries.session.commit.assert_called_once()
 
@@ -337,7 +384,7 @@ class TestDataPipelineRecordQueries:
         mock_db_queries.session.execute.return_value = mock_result
 
         result = await mock_db_queries.get_data_pipeline_records(
-            execution_id="exec_001"
+            pipeline_name="market_data_ingestion"
         )
 
         assert result == mock_records
@@ -354,12 +401,23 @@ class TestQueryErrorHandling:
         session.execute = AsyncMock(side_effect=Exception("Database error"))
         session.commit = AsyncMock(side_effect=Exception("Commit error"))
         session.add = MagicMock(side_effect=Exception("Add error"))
+        session.add_all = MagicMock(side_effect=Exception("Add error"))
         return session
 
-    @pytest.fixture
-    def mock_db_queries_with_error(self, mock_session_with_error):
+    @pytest_asyncio.fixture
+    async def mock_db_queries_with_error(self, mock_session_with_error):
         """Create DatabaseQueries instance with error-prone mock session."""
-        return DatabaseQueries(mock_session_with_error)
+        # Create an async context manager for the mock session
+        @asynccontextmanager
+        async def mock_get_session():
+            yield mock_session_with_error
+        
+        # Pass the mock session directly to DatabaseQueries
+        queries = DatabaseQueries(mock_session_with_error)
+        
+        # Patch get_async_session in connection module
+        with patch('src.database.connection.get_async_session', mock_get_session):
+            yield queries
 
     @pytest.mark.asyncio
     async def test_create_market_data_record_error(self, mock_db_queries_with_error):
@@ -367,7 +425,9 @@ class TestQueryErrorHandling:
         record = MarketDataRecord(
             symbol="BTCUSDT",
             exchange="binance",
-            timestamp=datetime.now(timezone.utc)
+            data_timestamp=datetime.now(timezone.utc),
+            interval="1h",
+            source="exchange"
         )
 
         with pytest.raises(Exception, match="Add error"):
@@ -380,7 +440,9 @@ class TestQueryErrorHandling:
             MarketDataRecord(
                 symbol="BTCUSDT",
                 exchange="binance",
-                timestamp=datetime.now(timezone.utc)
+                data_timestamp=datetime.now(timezone.utc),
+                interval="1h",
+                source="exchange"
             )
         ]
 
@@ -415,12 +477,23 @@ class TestQueryParameterHandling:
         session.execute = AsyncMock()
         session.commit = AsyncMock()
         session.add = MagicMock()
+        session.flush = AsyncMock()
+        session.refresh = AsyncMock()
         return session
 
-    @pytest.fixture
-    def mock_db_queries(self, mock_session):
-        """Create DatabaseQueries instance with mock session."""
-        return DatabaseQueries(mock_session)
+    @pytest_asyncio.fixture
+    async def mock_db_queries(self, mock_session):
+        """Create DatabaseQueries instance with properly mocked database."""
+        @asynccontextmanager
+        async def mock_get_session():
+            yield mock_session
+        
+        # Pass the mock session directly to DatabaseQueries
+        queries = DatabaseQueries(mock_session)
+        
+        # Patch get_async_session in connection module
+        with patch('src.database.connection.get_async_session', mock_get_session):
+            yield queries
 
     @pytest.mark.asyncio
     async def test_get_market_data_records_with_filters(self, mock_db_queries):
@@ -492,9 +565,7 @@ class TestQueryParameterHandling:
         # Test with all filters
         result = await mock_db_queries.get_data_pipeline_records(
             pipeline_name="market_data_ingestion",
-            execution_id="exec_001",
-            status="running",
-            stage="started"
+            status="running"
         )
 
         assert result == mock_records

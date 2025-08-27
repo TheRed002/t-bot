@@ -21,6 +21,7 @@ def config():
     """Create test configuration."""
     config = MagicMock(spec=Config)
     config.error_handling = MagicMock()
+    config.execution = {"default_daily_volume": "1000000"}
     return config
 
 
@@ -47,13 +48,13 @@ def sample_market_data():
     """Create sample market data."""
     return MarketData(
         symbol="BTCUSDT",
-        price=Decimal("50000"),
-        volume=Decimal("100000"),
         timestamp=datetime.now(timezone.utc),
-        bid=Decimal("49995"),
-        ask=Decimal("50005"),
-        high_price=Decimal("51000"),
-        low_price=Decimal("49000")
+        open=Decimal("49500"),
+        high=Decimal("51000"),
+        low=Decimal("49000"),
+        close=Decimal("50000"),
+        volume=Decimal("100000"),
+        exchange="binance"
     )
 
 
@@ -279,14 +280,14 @@ class TestSlippageModel:
         """Test volatility adjustment calculation."""
         adjustment = await slippage_model._calculate_volatility_adjustment("BTCUSDT", sample_market_data)
         
-        assert isinstance(adjustment, float)
+        assert isinstance(adjustment, Decimal)
         assert adjustment > 0
         
         # With high=51000, low=49000, price=50000
         # volatility = (51000-49000)/50000 = 0.04 = 4%
         # This should fall in "high" volatility regime (3-5%)
         expected_volatility = 0.04
-        assert abs(adjustment - 1.5) < 0.1  # High volatility multiplier
+        assert abs(float(adjustment) - 1.5) < 0.1  # High volatility multiplier
 
     @pytest.mark.asyncio
     async def test_calculate_volatility_adjustment_low_vol(self, slippage_model):
@@ -303,7 +304,7 @@ class TestSlippageModel:
         adjustment = await slippage_model._calculate_volatility_adjustment("BTCUSDT", market_data)
         
         # Volatility = (50200-49800)/50000 = 0.008 = 0.8% (low)
-        assert adjustment == 0.8  # Low volatility multiplier
+        assert adjustment == Decimal("0.8")  # Low volatility multiplier
 
     @pytest.mark.asyncio
     async def test_calculate_volatility_adjustment_no_range(self, slippage_model):

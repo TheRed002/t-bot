@@ -3,7 +3,18 @@
  * Centralized HTTP client with interceptors for auth and error handling
  */
 
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import { ApiResponse, PaginatedResponse, AuthTokens, RefreshTokenResponse } from '@/types';
+
+// Prevent circular imports by declaring the function here
+let refreshTokenFunction: (() => Promise<RefreshTokenResponse>) | null = null;
+let tokenStorage: any = null;
+
+// Function to set dependencies (called from authAPI)
+export const setAuthDependencies = (refreshFn: () => Promise<RefreshTokenResponse>, storage: any) => {
+  refreshTokenFunction = refreshFn;
+  tokenStorage = storage;
+};
 
 // API base configuration
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
@@ -11,23 +22,39 @@ const API_TIMEOUT = 30000; // 30 seconds
 
 // Create axios instance
 export const apiClient: AxiosInstance = axios.create({
-  baseURL: `${API_BASE_URL}/api`,
+  baseURL: API_BASE_URL, // Backend routes are at root level (/auth, /trading, etc.)
   timeout: API_TIMEOUT,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
+// Extend InternalAxiosRequestConfig to include metadata
+interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
+  metadata?: {
+    startTime: Date;
+  };
+}
+
 // Request interceptor for adding auth token
 apiClient.interceptors.request.use(
-  (config: AxiosRequestConfig) => {
-    const token = localStorage.getItem('token');
+  (config: InternalAxiosRequestConfig) => {
+    // Get token from secure storage (will be set by authAPI)
+    let token: string | null = null;
+    
+    if (tokenStorage) {
+      token = tokenStorage.getAccessToken();
+    } else {
+      // Fallback to localStorage for backward compatibility
+      token = localStorage.getItem('token') || localStorage.getItem('tbot_access_token') || sessionStorage.getItem('tbot_access_token');
+    }
+    
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     
     // Add request timestamp for debugging
-    config.metadata = { startTime: new Date() };
+    (config as any).metadata = { startTime: new Date() };
     
     return config;
   },
@@ -37,31 +64,111 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling and logging
+// Track requests being refreshed to prevent multiple refresh attempts
+let isRefreshing = false;
+let failedQueue: Array<{ resolve: Function; reject: Function }> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) {
+      reject(error);
+    } else {
+      resolve(token);
+    }
+  });
+  
+  failedQueue = [];
+};
+
+// Response interceptor for error handling and automatic token refresh
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => {
     // Log response time for performance monitoring
-    const responseTime = new Date().getTime() - response.config.metadata?.startTime?.getTime();
-    if (responseTime > 1000) {
-      console.warn(`Slow API response: ${response.config.url} took ${responseTime}ms`);
+    const metadata = (response.config as any).metadata;
+    if (metadata?.startTime) {
+      const responseTime = new Date().getTime() - metadata.startTime.getTime();
+      if (responseTime > 1000) {
+        console.warn(`Slow API response: ${response.config.url} took ${responseTime}ms`);
+      }
     }
     
     return response;
   },
-  (error) => {
+  async (error) => {
+    const originalRequest = error.config;
+    
     // Handle common error scenarios
     if (error.response) {
       const { status, data } = error.response;
       
-      switch (status) {
-        case 401:
-          // Unauthorized - clear token and redirect to login
-          localStorage.removeItem('token');
-          window.location.href = '/login';
-          break;
+      // Handle 401 Unauthorized with automatic token refresh
+      if (status === 401 && !originalRequest._retry) {
+        if (isRefreshing) {
+          // If already refreshing, queue this request
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          }).then(token => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return apiClient(originalRequest);
+          }).catch(err => {
+            return Promise.reject(err);
+          });
+        }
+        
+        originalRequest._retry = true;
+        isRefreshing = true;
+        
+        // Attempt to refresh token
+        if (refreshTokenFunction && tokenStorage) {
+          try {
+            const refreshResponse = await refreshTokenFunction();
+            const newToken = refreshResponse.tokens.access_token;
+            
+            // Update authorization header
+            apiClient.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            
+            processQueue(null, newToken);
+            
+            return apiClient(originalRequest);
+          } catch (refreshError) {
+            processQueue(refreshError, null);
+            
+            // Clear tokens and redirect to login
+            if (tokenStorage) {
+              tokenStorage.clearTokens();
+            }
+            
+            // Only redirect if we're not already on the login page
+            if (!window.location.pathname.includes('/login')) {
+              window.location.href = '/login';
+            }
+            
+            return Promise.reject(refreshError);
+          } finally {
+            isRefreshing = false;
+          }
+        } else {
+          // No refresh function available, clear tokens and redirect
+          if (tokenStorage) {
+            tokenStorage.clearTokens();
+          } else {
+            // Fallback cleanup
+            localStorage.removeItem('token');
+            localStorage.removeItem('tbot_access_token');
+            sessionStorage.removeItem('tbot_access_token');
+          }
           
+          if (!window.location.pathname.includes('/login')) {
+            window.location.href = '/login';
+          }
+        }
+      }
+      
+      // Handle other error status codes
+      switch (status) {
         case 403:
-          console.error('Forbidden access:', data.message);
+          console.error('Forbidden access:', data?.message || 'Access denied');
           break;
           
         case 404:
@@ -73,11 +180,11 @@ apiClient.interceptors.response.use(
           break;
           
         case 500:
-          console.error('Server error:', data.message);
+          console.error('Server error:', data?.message || 'Internal server error');
           break;
           
         default:
-          console.error('API error:', status, data.message);
+          console.error('API error:', status, data?.message || 'Unknown error');
       }
     } else if (error.request) {
       // Network error
@@ -91,25 +198,7 @@ apiClient.interceptors.response.use(
   }
 );
 
-// API response types
-export interface ApiResponse<T = any> {
-  data: T;
-  message: string;
-  success: boolean;
-  timestamp: string;
-}
-
-export interface PaginatedResponse<T = any> {
-  data: T[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
-  message: string;
-  success: boolean;
-}
+// API response types are imported from @/types
 
 // Common API methods
 export const api = {
@@ -196,3 +285,9 @@ export const createAbortController = (): AbortController => {
 
 // Export configured client
 export default apiClient;
+
+// Export utility for setting up token refresh
+export const setupTokenRefresh = () => {
+  // This will be called from the auth slice to set up dependencies
+  console.log('Token refresh interceptor configured');
+};

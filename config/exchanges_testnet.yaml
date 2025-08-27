@@ -1,0 +1,116 @@
+# Exchange Configuration for Testnet/Sandbox Environments
+# 
+# This configuration file contains settings for connecting to sandbox/testnet
+# environments of supported exchanges for safe testing.
+#
+# SECURITY WARNING: Never commit real API keys to version control!
+# Use environment variables or secure key management for production.
+
+exchanges:
+  # Binance Testnet Configuration
+  binance:
+    enabled: true
+    testnet: true  # Enable testnet mode
+    api_key: "${BINANCE_TESTNET_API_KEY:-your_binance_testnet_api_key}"
+    api_secret: "${BINANCE_TESTNET_API_SECRET:-your_binance_testnet_api_secret}"
+    base_url: "https://testnet.binance.vision"
+    ws_url: "wss://testnet.binance.vision/ws"
+    rate_limits:
+      requests_per_minute: 1200
+      orders_per_second: 10
+      orders_per_24_hours: 160000
+      weight_per_minute: 1200
+    
+  # Coinbase Sandbox Configuration  
+  coinbase:
+    enabled: true
+    sandbox: true  # Enable sandbox mode
+    api_key: "${COINBASE_SANDBOX_API_KEY:-your_coinbase_sandbox_api_key}"
+    api_secret: "${COINBASE_SANDBOX_API_SECRET:-your_coinbase_sandbox_api_secret}"
+    passphrase: "${COINBASE_SANDBOX_PASSPHRASE:-your_coinbase_sandbox_passphrase}"
+    base_url: "https://api-public.sandbox.exchange.coinbase.com"
+    ws_url: "wss://advanced-trade-ws-sandbox.coinbase.com"
+    rate_limits:
+      requests_per_minute: 600
+      orders_per_second: 5
+      private_requests_per_second: 5
+      public_requests_per_second: 10
+  
+  # OKX Demo Trading Configuration
+  okx:
+    enabled: true
+    sandbox: true  # Enable demo trading mode
+    api_key: "${OKX_DEMO_API_KEY:-your_okx_demo_api_key}"
+    api_secret: "${OKX_DEMO_API_SECRET:-your_okx_demo_api_secret}" 
+    passphrase: "${OKX_DEMO_PASSPHRASE:-your_okx_demo_passphrase}"
+    base_url: "https://www.okx.com"  # OKX uses same URL with flag differentiation
+    ws_url: "wss://ws.okx.com:8443/ws/v5/public"
+    ws_private_url: "wss://ws.okx.com:8443/ws/v5/private"
+    rate_limits:
+      requests_per_2_seconds: 60
+      orders_per_2_seconds: 600
+      historical_data_per_2_seconds: 20
+
+# Global Exchange Settings
+global:
+  default_timeout: 30
+  max_retries: 3
+  retry_delay: 1.0
+  enable_rate_limiting: true
+  enable_order_validation: true
+  
+  # Test trading parameters
+  test_mode:
+    enabled: true
+    max_order_size: 0.01  # Maximum order size in base currency
+    allowed_symbols:
+      - "BTCUSDT"
+      - "ETHUSDT"
+      - "BTC-USD"
+      - "ETH-USD"
+      - "BTC-USDT"
+      - "ETH-USDT"
+    
+  # WebSocket settings
+  websocket:
+    auto_reconnect: true
+    max_reconnect_attempts: 5
+    reconnect_delay: 5.0
+    ping_interval: 30
+    ping_timeout: 10
+    
+  # Error handling
+  error_handling:
+    circuit_breaker:
+      failure_threshold: 5
+      timeout: 60
+      expected_exception: ExchangeError
+    
+    retry_policy:
+      max_attempts: 3
+      backoff_factor: 2.0
+      backoff_jitter: true
+
+# Logging configuration for exchange testing
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+  # Exchange-specific logging levels  
+  loggers:
+    exchanges.binance: DEBUG
+    exchanges.coinbase: DEBUG
+    exchanges.okx: DEBUG
+    exchanges.base: INFO
+    
+# Health check configuration
+health_checks:
+  enabled: true
+  interval: 30  # seconds
+  endpoints:
+    - name: "exchange_connectivity"
+      check: "api_connection"
+    - name: "account_access" 
+      check: "account_balance"
+    - name: "market_data"
+      check: "ticker_data"

@@ -108,7 +108,7 @@ class TestFundFlowManager:
 
     def test_initialization(self, fund_flow_manager, config):
         """Test fund flow manager initialization."""
-        assert fund_flow_manager.config == config
+        assert fund_flow_manager.config == config.capital_management
         assert fund_flow_manager.capital_config == config.capital_management
         assert fund_flow_manager.fund_flows == []
         assert fund_flow_manager.strategy_performance == {}

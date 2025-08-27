@@ -46,6 +46,11 @@ class TestTechnicalIndicatorCalculator:
             "max_calculation_time": 5.0,
         }
         config.max_price_history = 1000
+        # Add missing error_handling config
+        config.error_handling = MagicMock()
+        config.error_handling.pattern_detection_enabled = True
+        config.error_handling.correlation_analysis_enabled = True
+        config.error_handling.predictive_alerts_enabled = True
         return config
 
     @pytest.fixture
@@ -369,7 +374,7 @@ class TestTechnicalIndicatorCalculator:
     async def test_cleanup(self, calculator, sample_market_data):
         """Test calculator cleanup."""
         # Add data and perform calculations
-        for data in sample_market_data[:10]:
+        for data in sample_market_data[:25]:  # Provide enough data for SMA calculation (default period is 20)
             await calculator.add_market_data(data)
         
         await calculator.calculate_sma("BTCUSDT")
@@ -469,6 +474,11 @@ class TestIndicatorAccuracy:
         config = MagicMock(spec=Config)
         config.indicators = {"default_periods": {"sma": 5}}
         config.max_price_history = 1000
+        # Add missing error_handling config
+        config.error_handling = MagicMock()
+        config.error_handling.pattern_detection_enabled = True
+        config.error_handling.correlation_analysis_enabled = True
+        config.error_handling.predictive_alerts_enabled = True
         
         calculator = TechnicalIndicatorCalculator(config)
         

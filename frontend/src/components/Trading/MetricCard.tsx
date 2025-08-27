@@ -5,22 +5,17 @@
 
 import React from 'react';
 import {
-  Card,
-  CardContent,
-  Typography,
-  Box,
-  Skeleton,
-  Tooltip,
-  IconButton,
-} from '@mui/material';
-import {
   TrendingUp,
   TrendingDown,
   Info,
-  Refresh,
-} from '@mui/icons-material';
+  RefreshCw,
+} from 'lucide-react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
-import { tradingTheme } from '@/theme';
 
 interface MetricCardProps {
   title: string;
@@ -111,181 +106,136 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   };
 
   const currentTrend = determineTrend();
-  const changeColor = tradingTheme.getPriceChangeColor(change || 0);
+  const changeColor = (change || 0) >= 0 ? 'text-green-500' : 'text-red-500';
 
-  const cardVariants = {
-    default: {
-      background: 'background.paper',
-      border: 'none',
-    },
-    highlighted: {
-      background: 'linear-gradient(135deg, rgba(64, 196, 255, 0.1), rgba(147, 51, 234, 0.1))',
-      border: '1px solid rgba(64, 196, 255, 0.2)',
-    },
-    minimal: {
-      background: 'transparent',
-      border: '1px solid',
-      borderColor: 'divider',
-    },
+  const getCardClasses = () => {
+    const base = "transition-all duration-200 hover:shadow-lg";
+    switch (variant) {
+      case 'highlighted':
+        return cn(
+          base,
+          "bg-gradient-to-br from-blue-500/10 to-purple-500/10 border-blue-500/20 hover:shadow-blue-500/30"
+        );
+      case 'minimal':
+        return cn(base, "bg-transparent border");
+      default:
+        return base;
+    }
   };
 
   return (
-    <motion.div
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-      transition={{ duration: 0.2 }}
-    >
-      <Card
-        sx={{
-          height: cardHeight,
-          cursor: onClick ? 'pointer' : 'default',
-          position: 'relative',
-          overflow: 'visible',
-          ...cardVariants[variant],
-          '&:hover': {
-            boxShadow: (theme) => 
-              variant === 'highlighted' 
-                ? '0 8px 32px rgba(64, 196, 255, 0.3)'
-                : theme.shadows[4],
-          },
-        }}
-        onClick={onClick}
+    <TooltipProvider>
+      <motion.div
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        transition={{ duration: 0.2 }}
       >
-        <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          {/* Header with title and actions */}
-          <Box 
-            display="flex" 
-            justifyContent="space-between" 
-            alignItems="flex-start"
-            mb={1}
-          >
-            <Typography 
-              variant="body2" 
-              color="text.secondary"
-              sx={{ 
-                fontWeight: 500,
-                letterSpacing: '0.5px',
-                textTransform: 'uppercase',
-              }}
-            >
-              {title}
-            </Typography>
-            
-            <Box display="flex" alignItems="center" gap={0.5}>
-              {tooltip && (
-                <Tooltip title={tooltip} arrow>
-                  <IconButton size="small" sx={{ p: 0.5 }}>
-                    <Info sx={{ fontSize: 16 }} />
-                  </IconButton>
-                </Tooltip>
-              )}
+        <Card
+          className={cn(
+            getCardClasses(),
+            "relative overflow-visible",
+            onClick ? "cursor-pointer" : "cursor-default"
+          )}
+          style={{ height: cardHeight }}
+          onClick={onClick}
+        >
+          <CardContent className="h-full flex flex-col p-4">
+            {/* Header with title and actions */}
+            <div className="flex justify-between items-start mb-2">
+              <h3 className="text-sm text-muted-foreground font-medium tracking-wide uppercase">
+                {title}
+              </h3>
               
-              {onRefresh && (
-                <IconButton 
-                  size="small" 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRefresh();
-                  }}
-                  sx={{ p: 0.5 }}
-                >
-                  <Refresh sx={{ fontSize: 16 }} />
-                </IconButton>
-              )}
-            </Box>
-          </Box>
-
-          {/* Main value */}
-          <Box flex={1} display="flex" flexDirection="column" justifyContent="center">
-            {loading ? (
-              <Skeleton variant="text" width="80%" height={40} />
-            ) : (
-              <Typography 
-                variant={valueSize}
-                sx={{ 
-                  fontWeight: 600,
-                  fontFamily: 'monospace',
-                  lineHeight: 1.2,
-                }}
-              >
-                {formatValue(value, format, precision)}
-              </Typography>
-            )}
-          </Box>
-
-          {/* Change indicator and subtitle */}
-          <Box>
-            {(change !== undefined || changePercent !== undefined || subtitle) && (
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                {loading ? (
-                  <Skeleton variant="text" width="60%" height={20} />
-                ) : (
-                  <>
-                    {(change !== undefined || changePercent !== undefined) && (
-                      <Box display="flex" alignItems="center" gap={0.5}>
-                        {currentTrend === 'up' && (
-                          <TrendingUp sx={{ fontSize: 16, color: changeColor }} />
-                        )}
-                        {currentTrend === 'down' && (
-                          <TrendingDown sx={{ fontSize: 16, color: changeColor }} />
-                        )}
-                        
-                        <Typography 
-                          variant="body2" 
-                          sx={{ 
-                            color: changeColor,
-                            fontWeight: 500,
-                            fontFamily: 'monospace',
-                          }}
-                        >
-                          {change !== undefined && formatChange(change, format)}
-                          {change !== undefined && changePercent !== undefined && ' '}
-                          {changePercent !== undefined && `(${formatChange(changePercent, 'percentage')})`}
-                        </Typography>
-                      </Box>
-                    )}
-                    
-                    {subtitle && (
-                      <Typography 
-                        variant="caption" 
-                        color="text.secondary"
-                        sx={{ 
-                          fontWeight: 400,
-                          lineHeight: 1.2,
-                        }}
-                      >
-                        {subtitle}
-                      </Typography>
-                    )}
-                  </>
+              <div className="flex items-center gap-1">
+                {tooltip && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-6 w-6">
+                        <Info className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{tooltip}</TooltipContent>
+                  </Tooltip>
                 )}
-              </Box>
-            )}
-          </Box>
-        </CardContent>
+                
+                {onRefresh && (
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-6 w-6"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRefresh();
+                    }}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
 
-        {/* Animated border for highlighted variant */}
-        {variant === 'highlighted' && (
-          <Box
-            sx={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              borderRadius: 1,
-              background: 'linear-gradient(45deg, transparent, rgba(64, 196, 255, 0.1), transparent)',
-              pointerEvents: 'none',
-              opacity: 0,
-              transition: 'opacity 0.3s ease',
-              '.MuiCard-root:hover &': {
-                opacity: 1,
-              },
-            }}
-          />
-        )}
-      </Card>
-    </motion.div>
+            {/* Main value */}
+            <div className="flex-1 flex flex-col justify-center">
+              {loading ? (
+                <Skeleton className="h-10 w-4/5" />
+              ) : (
+                <div className={cn(
+                  "font-semibold font-mono leading-tight",
+                  size === 'small' ? 'text-lg' :
+                  size === 'medium' ? 'text-xl' : 'text-2xl'
+                )}>
+                  {formatValue(value, format, precision)}
+                </div>
+              )}
+            </div>
+
+            {/* Change indicator and subtitle */}
+            <div>
+              {(change !== undefined || changePercent !== undefined || subtitle) && (
+                <div className="flex items-center justify-between">
+                  {loading ? (
+                    <Skeleton className="h-5 w-3/5" />
+                  ) : (
+                    <>
+                      {(change !== undefined || changePercent !== undefined) && (
+                        <div className="flex items-center gap-1">
+                          {currentTrend === 'up' && (
+                            <TrendingUp className={cn("h-4 w-4", changeColor)} />
+                          )}
+                          {currentTrend === 'down' && (
+                            <TrendingDown className={cn("h-4 w-4", changeColor)} />
+                          )}
+                          
+                          <span className={cn(
+                            "text-sm font-medium font-mono",
+                            changeColor
+                          )}>
+                            {change !== undefined && formatChange(change, format)}
+                            {change !== undefined && changePercent !== undefined && ' '}
+                            {changePercent !== undefined && `(${formatChange(changePercent, 'percentage')})`}
+                          </span>
+                        </div>
+                      )}
+                      
+                      {subtitle && (
+                        <span className="text-xs text-muted-foreground leading-tight">
+                          {subtitle}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </CardContent>
+
+          {/* Animated border for highlighted variant */}
+          {variant === 'highlighted' && (
+            <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-transparent via-blue-500/10 to-transparent pointer-events-none opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+          )}
+        </Card>
+      </motion.div>
+    </TooltipProvider>
   );
 };
 

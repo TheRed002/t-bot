@@ -466,20 +466,11 @@ class TestProductionLoggingSetup:
                 environment="development", log_level="DEBUG", log_file=None
             )
 
-    def test_setup_debug_logging(self):
-        """Test setup_debug_logging function."""
-        with patch("src.core.logging.setup_development_logging") as mock_setup_dev:
-            with patch("src.core.logging.get_logger") as mock_get_logger:
-                mock_logger = MagicMock()
-                mock_get_logger.return_value = mock_logger
-
-                from src.core.logging import setup_debug_logging
-
-                setup_debug_logging()
-
-                mock_setup_dev.assert_called_once()
-                mock_get_logger.assert_called_once_with("src.core.logging")
-                mock_logger.info.assert_called_once_with("Debug logging enabled")
+    def test_debug_logging_function_removed(self):
+        """Test that setup_debug_logging function was removed."""
+        # Verify that the function no longer exists
+        with pytest.raises(ImportError):
+            from src.core.logging import setup_debug_logging
 
 
 class TestLogCleanup:

@@ -21,14 +21,41 @@ import { playgroundAPI } from '@/services/api/playgroundAPI';
 
 // Initial state
 const initialState: PlaygroundState = {
+  // Strategy templates
+  availableTemplates: [],
+  templatesLoading: false,
+  
+  // Configurations
   configurations: [],
   activeConfiguration: null,
+  configurationHistory: [],
+  
+  // Executions
   executions: [],
   activeExecution: null,
   comparisonExecutions: [],
+  
+  // A/B Testing
+  abTests: [],
+  activeABTest: null,
+  
+  // Presets
+  presets: [],
+  presetsLoading: false,
+  
+  // UI State
   isLoading: false,
   error: null,
-  filters: {}
+  
+  // Filters
+  filters: {},
+  
+  // Optimization state
+  optimization: {
+    isOptimizing: false,
+    optimizationProgress: 0,
+    optimizationHistory: []
+  }
 };
 
 // Async thunks for API calls
@@ -94,7 +121,7 @@ export const controlExecution = createAsyncThunk(
 
 export const fetchExecutions = createAsyncThunk(
   'playground/fetchExecutions',
-  async (filters?: { status?: string[]; mode?: string[]; dateRange?: DateRange }, { rejectWithValue }) => {
+  async (filters: { status?: string[]; mode?: string[]; dateRange?: DateRange } = {}, { rejectWithValue }) => {
     try {
       const response = await playgroundAPI.getExecutions(filters);
       return response.data;
@@ -166,7 +193,7 @@ export const startBatchOptimization = createAsyncThunk(
 
 export const fetchPresets = createAsyncThunk(
   'playground/fetchPresets',
-  async (category?: string, { rejectWithValue }) => {
+  async (category: string | undefined, { rejectWithValue }) => {
     try {
       const response = await playgroundAPI.getPresets(category);
       return response.data;

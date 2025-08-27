@@ -3,37 +3,65 @@
  * Mobile-first responsive design breakpoints
  */
 
-export const breakpoints = {
-  // Breakpoint values (in pixels)
-  values: {
-    xs: 0,      // Extra small devices (phones)
-    sm: 576,    // Small devices (large phones)
-    md: 768,    // Medium devices (tablets)
-    lg: 992,    // Large devices (desktops)
-    xl: 1200,   // Extra large devices (large desktops)
-    xxl: 1400,  // Extra extra large devices (very large desktops)
-  },
+// Breakpoint values (in pixels)
+const breakpointValues = {
+  xs: 0,      // Extra small devices (phones)
+  sm: 576,    // Small devices (large phones)
+  md: 768,    // Medium devices (tablets)
+  lg: 992,    // Large devices (desktops)
+  xl: 1200,   // Extra large devices (large desktops)
+  xxl: 1400,  // Extra extra large devices (very large desktops)
+} as const;
+
+type BreakpointKey = keyof typeof breakpointValues;
+
+export const breakpoints: {
+  values: typeof breakpointValues;
+  up: (breakpoint: BreakpointKey) => string;
+  down: (breakpoint: BreakpointKey) => string;
+  between: (min: BreakpointKey, max: BreakpointKey) => string;
+  only: (breakpoint: BreakpointKey) => string;
+  container: Record<BreakpointKey, string>;
+  grid: Record<BreakpointKey, number>;
+  dashboard: {
+    sidebarCollapse: string;
+    chartStackVertical: string;
+    tableScrollHorizontal: string;
+    cardSingle: string;
+    cardDouble: string;
+    cardTriple: string;
+    cardQuad: string;
+    cardSix: string;
+  };
+  trading: {
+    orderBookStack: string;
+    chartMinHeight: string;
+    positionTableCompact: string;
+    quickActionsCollapse: string;
+  };
+} = {
+  values: breakpointValues,
 
   // Media query helpers
-  up: (breakpoint: keyof typeof breakpoints.values) => 
-    `@media (min-width: ${breakpoints.values[breakpoint]}px)`,
+  up: (breakpoint: BreakpointKey) => 
+    `@media (min-width: ${breakpointValues[breakpoint]}px)`,
   
-  down: (breakpoint: keyof typeof breakpoints.values) => 
-    `@media (max-width: ${breakpoints.values[breakpoint] - 1}px)`,
+  down: (breakpoint: BreakpointKey) => 
+    `@media (max-width: ${breakpointValues[breakpoint] - 1}px)`,
   
-  between: (min: keyof typeof breakpoints.values, max: keyof typeof breakpoints.values) =>
-    `@media (min-width: ${breakpoints.values[min]}px) and (max-width: ${breakpoints.values[max] - 1}px)`,
+  between: (min: BreakpointKey, max: BreakpointKey) =>
+    `@media (min-width: ${breakpointValues[min]}px) and (max-width: ${breakpointValues[max] - 1}px)`,
 
-  only: (breakpoint: keyof typeof breakpoints.values) => {
-    const bps = Object.keys(breakpoints.values) as Array<keyof typeof breakpoints.values>;
+  only: (breakpoint: BreakpointKey) => {
+    const bps = Object.keys(breakpointValues) as Array<BreakpointKey>;
     const index = bps.indexOf(breakpoint);
     
     if (index === 0) {
-      return breakpoints.down(bps[1]);
+      return `@media (max-width: ${breakpointValues[bps[1]] - 1}px)`;
     } else if (index === bps.length - 1) {
-      return breakpoints.up(breakpoint);
+      return `@media (min-width: ${breakpointValues[breakpoint]}px)`;
     } else {
-      return breakpoints.between(breakpoint, bps[index + 1]);
+      return `@media (min-width: ${breakpointValues[breakpoint]}px) and (max-width: ${breakpointValues[bps[index + 1]] - 1}px)`;
     }
   },
 

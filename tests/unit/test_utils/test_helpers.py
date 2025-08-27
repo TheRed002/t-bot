@@ -394,7 +394,7 @@ class TestFileOperations:
         content = "test content"
 
         # Mock the entire Path class and its methods
-        with patch("src.utils.helpers.Path") as mock_path_class:
+        with patch("src.utils.file_utils.Path") as mock_path_class:
             mock_path_instance = MagicMock()
             mock_path_class.return_value = mock_path_instance
             mock_path_instance.parent.mkdir.return_value = None
@@ -407,7 +407,7 @@ class TestFileOperations:
         """Test safe file writing with permission error."""
         content = "test content"
 
-        with patch("pathlib.Path") as mock_path:
+        with patch("src.utils.file_utils.Path") as mock_path:
             mock_path_instance = MagicMock()
             mock_path.return_value = mock_path_instance
             mock_path_instance.parent.mkdir.return_value = None
@@ -421,7 +421,7 @@ class TestFileOperations:
         """Test loading JSON config file."""
         config_data = {"key": "value", "number": 123}
 
-        with patch("src.utils.helpers.safe_read_file", return_value=json.dumps(config_data)):
+        with patch("src.utils.file_utils.safe_read_file", return_value=json.dumps(config_data)):
             result = load_config_file("config.json")
 
         assert result == config_data
@@ -431,7 +431,7 @@ class TestFileOperations:
         config_data = {"key": "value", "number": 123}
         yaml_content = "key: value\nnumber: 123"
 
-        with patch("src.utils.helpers.safe_read_file", return_value=yaml_content):
+        with patch("src.utils.file_utils.safe_read_file", return_value=yaml_content):
             with patch("yaml.safe_load", return_value=config_data):
                 result = load_config_file("config.yaml")
 
@@ -440,7 +440,7 @@ class TestFileOperations:
     def test_load_config_file_unsupported_format(self):
         """Test loading config file with unsupported format."""
         # Mock the safe_read_file to return some content
-        with patch("src.utils.helpers.safe_read_file", return_value="some content"):
+        with patch("src.utils.file_utils.safe_read_file", return_value="some content"):
             with pytest.raises(ValidationError, match="Unsupported file format"):
                 load_config_file("config.txt")
 

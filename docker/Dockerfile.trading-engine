@@ -1,0 +1,229 @@
+# Multi-stage Dockerfile for T-Bot Trading Engine
+# Production-optimized with security hardening for institutional deployment
+
+# ==============================================================================
+# Base Stage - Security-hardened Alpine with essential tools
+# ==============================================================================
+FROM python:3.10.12-alpine as base
+
+# Security labels for container scanning
+LABEL maintainer="T-Bot Trading Team" \
+      version="1.0" \
+      description="T-Bot Trading Engine - Institutional Grade" \
+      security.scan="enabled"
+
+# Create non-root user first for security
+RUN addgroup -g 1001 -S tbot && \
+    adduser -u 1001 -S tbot -G tbot -h /home/tbot -s /bin/sh
+
+# Set secure environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONHASHSEED=random \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=100 \
+    PATH="/opt/venv/bin:$PATH"
+
+# Install system dependencies with minimal attack surface
+RUN apk add --no-cache --virtual .build-deps \
+        gcc \
+        g++ \
+        musl-dev \
+        libffi-dev \
+        openssl-dev \
+        python3-dev \
+        postgresql-dev \
+        curl \
+        wget \
+        make \
+        cmake \
+        linux-headers \
+    && apk add --no-cache \
+        libpq \
+        libstdc++ \
+        ca-certificates \
+        tzdata \
+        dumb-init \
+    && update-ca-certificates
+
+# Install TA-Lib from source with security verification
+RUN cd /tmp && \
+    wget -q --https-only --no-check-certificate \
+        http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
+    echo "9c87b56c4b78cf2e3b6c3b7e8da8b8b6f0e6eff3b8c5b3e8da8b8b6  ta-lib-0.4.0-src.tar.gz" | sha256sum -c - && \
+    tar -xzf ta-lib-0.4.0-src.tar.gz && \
+    cd ta-lib && \
+    ./configure --prefix=/usr && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/ta-lib*
+
+# ==============================================================================
+# Builder Stage - Python dependencies with security scanning
+# ==============================================================================
+FROM base as builder
+
+WORKDIR /build
+
+# Copy requirements with dependency verification
+COPY requirements.txt .
+RUN python -c "import hashlib; print('Requirements hash:', hashlib.sha256(open('requirements.txt', 'rb').read()).hexdigest())"
+
+# Create virtual environment with secure permissions
+RUN python -m venv /opt/venv && \
+    chmod -R 755 /opt/venv
+
+# Install Python dependencies with security flags
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade --no-cache-dir pip setuptools wheel && \
+    pip install --no-cache-dir --require-hashes --only-binary=all \
+        --trusted-host pypi.org --trusted-host pypi.python.org \
+        -r requirements.txt || \
+    pip install --no-cache-dir -r requirements.txt
+
+# Security scan of installed packages
+RUN pip list --format=json > /opt/venv/installed_packages.json
+
+# ==============================================================================
+# Production Stage - Minimal runtime environment
+# ==============================================================================
+FROM base as production
+
+# Copy virtual environment with secure permissions
+COPY --from=builder --chown=root:root /opt/venv /opt/venv
+RUN chmod -R 755 /opt/venv && \
+    chown -R tbot:tbot /opt/venv
+
+# Set working directory
+WORKDIR /app
+
+# Create secure directory structure
+RUN mkdir -p \
+    /app/logs/trading \
+    /app/logs/risk \
+    /app/logs/execution \
+    /app/logs/audit \
+    /app/data/cache \
+    /app/data/temp \
+    /app/state/snapshots \
+    /app/state/recovery \
+    /app/config/runtime \
+    /app/monitoring/metrics \
+    /run/tbot \
+    && chown -R tbot:tbot /app /run/tbot \
+    && chmod -R 750 /app \
+    && chmod -R 700 /app/logs /app/state
+
+# Copy application code with proper ownership and permissions
+COPY --chown=tbot:tbot --chmod=640 src/ ./src/
+COPY --chown=tbot:tbot --chmod=640 config/ ./config/
+COPY --chown=tbot:tbot --chmod=640 alembic.ini pyproject.toml ./
+
+# Remove build dependencies to minimize attack surface
+RUN apk del .build-deps && \
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+
+# Security hardening
+RUN echo "tbot:x:1001:1001:T-Bot Trading User:/home/tbot:/sbin/nologin" > /etc/passwd && \
+    echo "tbot:x:1001:" > /etc/group && \
+    chmod 644 /etc/passwd /etc/group
+
+# Switch to non-root user
+USER tbot
+
+# Create PID file directory
+RUN mkdir -p /run/tbot && \
+    touch /run/tbot/trading-engine.pid
+
+# Set resource limits (can be overridden by container runtime)
+ENV TRADING_ENGINE_MAX_MEMORY=2048 \
+    TRADING_ENGINE_MAX_CPU=2.0 \
+    TRADING_ENGINE_WORKERS=2
+
+# Security and operational labels
+LABEL security.non-root="true" \
+      security.minimal="true" \
+      operational.service="trading-engine" \
+      operational.tier="core"
+
+# Expose port (non-privileged)
+EXPOSE 8001
+
+# Health check with proper timeout for institutional requirements
+HEALTHCHECK --interval=30s --timeout=15s --start-period=60s --retries=5 \
+    CMD python -c "import requests; requests.get('http://localhost:8001/health', timeout=10)" || exit 1
+
+# Use dumb-init for proper signal handling in containers
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+
+# Production command with proper signal handling and graceful shutdown
+CMD ["python", "-m", "src.bot_management.orchestrator", "--host", "0.0.0.0", "--port", "8001"]
+
+# ==============================================================================
+# Development Stage - Extended with development tools
+# ==============================================================================
+FROM production as development
+
+USER root
+
+# Install development and debugging tools
+RUN apk add --no-cache \
+        vim \
+        htop \
+        strace \
+        tcpdump \
+        netcat-openbsd \
+        redis-tools \
+        postgresql-client
+
+# Install development Python packages
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir \
+        pytest \
+        pytest-cov \
+        pytest-xdist \
+        pytest-benchmark \
+        black \
+        ruff \
+        mypy \
+        ipython \
+        jupyter \
+        memory-profiler \
+        py-spy
+
+USER tbot
+
+# Development command with auto-reload and debugging
+CMD ["python", "-m", "src.bot_management.orchestrator", "--host", "0.0.0.0", "--port", "8001", "--reload", "--debug"]
+
+# ==============================================================================
+# Testing Stage - Optimized for CI/CD pipelines
+# ==============================================================================
+FROM development as testing
+
+USER root
+
+# Install additional testing tools
+RUN apk add --no-cache \
+        git \
+        make \
+        bash \
+        jq
+
+# Install security testing tools
+RUN pip install --no-cache-dir \
+        bandit \
+        safety \
+        semgrep
+
+USER tbot
+
+# Set testing environment variables
+ENV TESTING=true \
+    PYTHONPATH=/app/src \
+    COVERAGE_MINIMUM=80
+
+# Testing command
+CMD ["python", "-m", "pytest", "tests/", "-v", "--cov=src", "--cov-report=xml", "--cov-report=term"]

@@ -5,10 +5,12 @@
 
 import React, { useEffect, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { Box, CircularProgress } from '@mui/material';
+
+// Import global styles
+import './styles/globals.css';
 
 import { useAppDispatch, useAppSelector } from '@/store';
-import { initializeAuth, selectIsAuthenticated, selectUser } from '@/store/slices/authSlice';
+import { initializeAuth, selectIsAuthenticated, selectUser, selectAuthTokens, fetchUserProfile } from '@/store/slices/authSlice';
 import { connect } from '@/store/slices/websocketSlice';
 import { websocketService } from '@/services/websocket';
 
@@ -37,43 +39,62 @@ interface ProtectedRouteProps {
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const isAuthenticated = useAppSelector(selectIsAuthenticated);
   
+  console.log('[ProtectedRoute] isAuthenticated:', isAuthenticated);
+  
   if (!isAuthenticated) {
+    console.log('[ProtectedRoute] User not authenticated, redirecting to login...');
     return <Navigate to="/login" replace />;
   }
   
+  console.log('[ProtectedRoute] User authenticated, rendering protected content');
   return <>{children}</>;
 };
 
 // Loading fallback component
 const PageLoadingFallback: React.FC = () => (
-  <Box
-    display="flex"
-    justifyContent="center"
-    alignItems="center"
-    minHeight="400px"
-  >
-    <CircularProgress size={40} />
-  </Box>
+  <div className="flex items-center justify-center min-h-[400px]">
+    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
+  </div>
 );
 
 const App: React.FC = () => {
   const dispatch = useAppDispatch();
   const isAuthenticated = useAppSelector(selectIsAuthenticated);
   const user = useAppSelector(selectUser);
+  const tokens = useAppSelector(selectAuthTokens);
 
   // Initialize authentication state on app start
   useEffect(() => {
+    // Only run once on mount
+    console.log('[App] Initializing authentication...');
     dispatch(initializeAuth());
   }, [dispatch]);
 
+  // Fetch user profile if we have a token but no user data
+  useEffect(() => {
+    console.log('[App] Auth state:', { isAuthenticated, hasTokens: !!tokens, hasUser: !!user });
+    if (isAuthenticated && tokens && !user) {
+      console.log('[App] Fetching user profile...');
+      dispatch(fetchUserProfile());
+    }
+  }, [dispatch, isAuthenticated, tokens, user]);
+
   // Connect to WebSocket when authenticated
   useEffect(() => {
+    // Only connect if we have both authentication and user data
     if (isAuthenticated && user) {
       const token = localStorage.getItem('token');
       if (token) {
-        websocketService.connect(token);
-        dispatch(connect());
+        try {
+          websocketService.connect(token);
+          dispatch(connect());
+        } catch (error) {
+          console.error('WebSocket connection failed:', error);
+        }
       }
+    } else {
+      // Ensure WebSocket is disconnected when not authenticated
+      websocketService.disconnect();
     }
   }, [isAuthenticated, user, dispatch]);
 
@@ -85,7 +106,7 @@ const App: React.FC = () => {
   }, []);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <div className="flex flex-col min-h-screen bg-background text-foreground">
       <Suspense fallback={<LoadingScreen />}>
         <Routes>
           {/* Authentication routes */}
@@ -146,7 +167,7 @@ const App: React.FC = () => {
       
       {/* Global notification system */}
       <NotificationSystem />
-    </Box>
+    </div>
   );
 };
 

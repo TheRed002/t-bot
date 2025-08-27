@@ -149,42 +149,46 @@ class TestAuthAPI:
         }
         
         with patch('src.web_interface.api.auth.get_current_user') as mock_get_user:
-            with patch('src.web_interface.api.auth.get_user') as mock_get_db_user:
+            with patch('src.web_interface.security.auth.get_user') as mock_get_db_user:
                 with patch('src.web_interface.api.auth.jwt_handler') as mock_jwt:
-                    from src.web_interface.security.auth import User, UserInDB
-                    
-                    # Mock current user
-                    mock_user = User(
-                        user_id="test_001",
-                        username="testuser",
-                        email="test@example.com",
-                        is_active=True,
-                        scopes=["read"]
-                    )
-                    mock_get_user.return_value = mock_user
-                    
-                    # Mock database user
-                    mock_db_user = UserInDB(
-                        user_id="test_001",
-                        username="testuser",
-                        email="test@example.com",
-                        hashed_password="old_hashed_password",
-                        scopes=["read"]
-                    )
-                    mock_get_db_user.return_value = mock_db_user
-                    
-                    # Mock JWT handler
-                    mock_jwt.verify_password.return_value = True
-                    mock_jwt.hash_password.return_value = "new_hashed_password"
-                    
-                    response = test_client.put("/auth/me/password", 
-                                             json=password_data, 
-                                             headers=auth_headers)
-                    
-                    assert response.status_code == status.HTTP_200_OK
-                    data = response.json()
-                    assert data["success"] is True
-                    assert data["message"] == "Password changed successfully"
+                    with patch('src.web_interface.security.auth.fake_users_db') as mock_fake_db:
+                        from src.web_interface.security.auth import User, UserInDB
+                        
+                        # Mock current user
+                        mock_user = User(
+                            user_id="test_001",
+                            username="testuser",
+                            email="test@example.com",
+                            is_active=True,
+                            scopes=["read"]
+                        )
+                        mock_get_user.return_value = mock_user
+                        
+                        # Mock database user
+                        mock_db_user = UserInDB(
+                            user_id="test_001",
+                            username="testuser",
+                            email="test@example.com",
+                            hashed_password="old_hashed_password",
+                            scopes=["read"]
+                        )
+                        mock_get_db_user.return_value = mock_db_user
+                        
+                        # Mock fake_users_db
+                        mock_fake_db.__getitem__ = lambda self, key: mock_db_user
+                        
+                        # Mock JWT handler
+                        mock_jwt.verify_password.return_value = True
+                        mock_jwt.hash_password.return_value = "new_hashed_password"
+                        
+                        response = test_client.put("/auth/me/password", 
+                                                 json=password_data, 
+                                                 headers=auth_headers)
+                        
+                        assert response.status_code == status.HTTP_200_OK
+                        data = response.json()
+                        assert data["success"] is True
+                        assert data["message"] == "Password changed successfully"
 
     def test_change_password_wrong_current(self, test_client, auth_headers):
         """Test password change with wrong current password."""
@@ -194,39 +198,43 @@ class TestAuthAPI:
         }
         
         with patch('src.web_interface.api.auth.get_current_user') as mock_get_user:
-            with patch('src.web_interface.api.auth.get_user') as mock_get_db_user:
+            with patch('src.web_interface.security.auth.get_user') as mock_get_db_user:
                 with patch('src.web_interface.api.auth.jwt_handler') as mock_jwt:
-                    from src.web_interface.security.auth import User, UserInDB
-                    
-                    # Mock current user
-                    mock_user = User(
-                        user_id="test_001",
-                        username="testuser",
-                        email="test@example.com",
-                        is_active=True,
-                        scopes=["read"]
-                    )
-                    mock_get_user.return_value = mock_user
-                    
-                    # Mock database user
-                    mock_db_user = UserInDB(
-                        user_id="test_001",
-                        username="testuser",
-                        email="test@example.com",
-                        hashed_password="old_hashed_password",
-                        scopes=["read"]
-                    )
-                    mock_get_db_user.return_value = mock_db_user
-                    
-                    # Mock JWT handler - wrong password
-                    mock_jwt.verify_password.return_value = False
-                    
-                    response = test_client.put("/auth/me/password", 
-                                             json=password_data, 
-                                             headers=auth_headers)
-                    
-                    assert response.status_code == status.HTTP_400_BAD_REQUEST
-                    assert "Current password is incorrect" in response.json()["detail"]
+                    with patch('src.web_interface.security.auth.fake_users_db') as mock_fake_db:
+                        from src.web_interface.security.auth import User, UserInDB
+                        
+                        # Mock current user
+                        mock_user = User(
+                            user_id="test_001",
+                            username="testuser",
+                            email="test@example.com",
+                            is_active=True,
+                            scopes=["read"]
+                        )
+                        mock_get_user.return_value = mock_user
+                        
+                        # Mock database user
+                        mock_db_user = UserInDB(
+                            user_id="test_001",
+                            username="testuser",
+                            email="test@example.com",
+                            hashed_password="old_hashed_password",
+                            scopes=["read"]
+                        )
+                        mock_get_db_user.return_value = mock_db_user
+                        
+                        # Mock fake_users_db
+                        mock_fake_db.__getitem__ = lambda self, key: mock_db_user
+                        
+                        # Mock JWT handler - wrong password
+                        mock_jwt.verify_password.return_value = False
+                        
+                        response = test_client.put("/auth/me/password", 
+                                                 json=password_data, 
+                                                 headers=auth_headers)
+                        
+                        assert response.status_code == status.HTTP_400_BAD_REQUEST
+                        assert "Current password is incorrect" in response.json()["detail"]
 
     def test_create_user_admin_only(self, test_client, admin_auth_headers):
         """Test user creation (admin only)."""
@@ -273,7 +281,7 @@ class TestAuthAPI:
     def test_list_users_admin_only(self, test_client, admin_auth_headers):
         """Test listing users (admin only)."""
         with patch('src.web_interface.api.auth.get_admin_user') as mock_get_admin:
-            with patch('src.web_interface.api.auth.fake_users_db') as mock_db:
+            with patch('src.web_interface.security.auth.fake_users_db') as mock_db:
                 from src.web_interface.security.auth import User, UserInDB
                 
                 # Mock admin user

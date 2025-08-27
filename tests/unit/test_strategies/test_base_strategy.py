@@ -19,6 +19,7 @@ from src.core.types import (
     SignalDirection,
     StrategyMetrics,
     StrategyStatus,
+    StrategyType,
 )
 
 # Import from P-011
@@ -27,6 +28,26 @@ from src.strategies.base import BaseStrategy
 
 class MockStrategy(BaseStrategy):
     """Mock strategy implementation for testing."""
+
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Return the strategy type."""
+        return StrategyType.CUSTOM
+    
+    @property
+    def name(self) -> str:
+        """Return the strategy name."""
+        return self.config.name if hasattr(self, 'config') else "mock_strategy"
+    
+    @property
+    def version(self) -> str:
+        """Return the strategy version."""
+        return "1.0.0"
+    
+    @property
+    def status(self) -> StrategyStatus:
+        """Return the strategy status."""
+        return self._status if hasattr(self, '_status') else StrategyStatus.STOPPED
 
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
         """Generate mock signals."""
@@ -66,9 +87,10 @@ class TestBaseStrategy:
         """Create mock strategy configuration."""
         return {
             "name": "test_strategy",
-            "strategy_type": "static",
+            "strategy_id": "test_strategy_001",
+            "strategy_type": "mean_reversion",
+            "symbol": "BTCUSDT",
             "enabled": True,
-            "symbols": ["BTCUSDT", "ETHUSDT"],
             "timeframe": "1h",
             "min_confidence": 0.6,
             "max_positions": 5,

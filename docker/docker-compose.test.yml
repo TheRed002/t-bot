@@ -1,0 +1,368 @@
+# Docker Compose for T-Bot Testing Environment
+# Optimized for CI/CD pipeline with test databases and mock services
+
+version: '3.8'
+
+services:
+  # ==============================================================================
+  # Testing Services
+  # ==============================================================================
+
+  # Backend Testing Service
+  backend-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+      target: testing
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+        - BUILD_DATE=${BUILD_DATE:-}
+        - VCS_REF=${VCS_REF:-}
+    container_name: tbot-backend-test
+    hostname: backend-test
+    environment:
+      - NODE_ENV=test
+      - TESTING=true
+      - MOCK_MODE=true
+      - DATABASE_URL=postgresql://${DB_USER:-test_user}:${DB_PASSWORD:-test_pass}@postgresql-test:5432/${DB_NAME:-tbot_test}
+      - REDIS_URL=redis://redis-test:6379/0
+      - INFLUXDB_URL=http://influxdb-test:8086
+      - JWT_SECRET_KEY=test-secret-key-not-for-production
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app/src
+    volumes:
+      - ../src:/app/src:ro
+      - ../tests:/app/tests:ro
+      - ../config:/app/config:ro
+      - test_coverage:/app/coverage
+      - test_reports:/app/reports
+    depends_on:
+      postgresql-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    networks:
+      - tbot-test-network
+    command: >
+      sh -c "
+        echo 'Running database migrations...' &&
+        python -m alembic upgrade head &&
+        echo 'Running unit tests...' &&
+        pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=html --cov-report=term --junitxml=reports/junit.xml &&
+        echo 'Running integration tests...' &&
+        pytest tests/integration/ -v --junitxml=reports/junit-integration.xml
+      "
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('Test service healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Frontend Testing Service
+  frontend-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      target: testing
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    container_name: tbot-frontend-test
+    hostname: frontend-test
+    environment:
+      - NODE_ENV=test
+      - CI=true
+      - REACT_APP_API_URL=http://backend-test:8000/api
+    volumes:
+      - ../frontend/src:/app/src:ro
+      - ../frontend/public:/app/public:ro
+      - ../frontend/package.json:/app/package.json:ro
+      - ../frontend/tsconfig.json:/app/tsconfig.json:ro
+      - frontend_test_coverage:/app/coverage
+      - frontend_test_reports:/app/test-results
+    networks:
+      - tbot-test-network
+    command: >
+      sh -c "
+        echo 'Running linting...' &&
+        npm run lint &&
+        echo 'Running type checking...' &&
+        npm run type-check &&
+        echo 'Running unit tests...' &&
+        npm test -- --coverage --watchAll=false --testResultsProcessor=jest-junit &&
+        echo 'Running e2e tests...' &&
+        npm run test:e2e
+      "
+
+  # Workers Testing Service
+  workers-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.workers
+      target: testing
+    container_name: tbot-workers-test
+    hostname: workers-test
+    environment:
+      - NODE_ENV=test
+      - TESTING=true
+      - CELERY_BROKER_URL=redis://redis-test:6379/2
+      - CELERY_RESULT_BACKEND=redis://redis-test:6379/2
+      - DATABASE_URL=postgresql://${DB_USER:-test_user}:${DB_PASSWORD:-test_pass}@postgresql-test:5432/${DB_NAME:-tbot_test}
+    volumes:
+      - ../src:/app/src:ro
+      - ../tests:/app/tests:ro
+      - ml_test_models:/app/models
+      - ml_test_data:/app/data
+    depends_on:
+      - redis-test
+      - postgresql-test
+    networks:
+      - tbot-test-network
+    command: >
+      sh -c "
+        echo 'Testing ML models...' &&
+        pytest tests/unit/test_ml/ -v &&
+        echo 'Testing data processing...' &&
+        pytest tests/unit/test_data/ -v &&
+        echo 'Testing optimization algorithms...' &&
+        pytest tests/unit/test_optimization/ -v
+      "
+
+  # Security Testing Service
+  security-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+      target: testing
+    container_name: tbot-security-test
+    hostname: security-test
+    environment:
+      - NODE_ENV=test
+      - TESTING=true
+    volumes:
+      - ../src:/app/src:ro
+      - ../tests:/app/tests:ro
+      - security_reports:/app/security-reports
+    networks:
+      - tbot-test-network
+    command: >
+      sh -c "
+        echo 'Running security scans...' &&
+        bandit -r src/ -f json -o security-reports/bandit-report.json &&
+        safety check --json --output security-reports/safety-report.json &&
+        semgrep --config=auto src/ --json -o security-reports/semgrep-report.json &&
+        echo 'Security scans completed'
+      "
+
+  # Performance Testing Service
+  performance-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+      target: testing
+    container_name: tbot-performance-test
+    hostname: performance-test
+    environment:
+      - NODE_ENV=test
+      - TESTING=true
+      - DATABASE_URL=postgresql://${DB_USER:-test_user}:${DB_PASSWORD:-test_pass}@postgresql-test:5432/${DB_NAME:-tbot_test}
+    volumes:
+      - ../tests/performance:/app/tests/performance:ro
+      - ../src:/app/src:ro
+      - performance_reports:/app/performance-reports
+    depends_on:
+      - postgresql-test
+      - redis-test
+    networks:
+      - tbot-test-network
+    command: >
+      sh -c "
+        echo 'Running performance tests...' &&
+        pytest tests/performance/ -v --benchmark-only --benchmark-json=performance-reports/benchmark.json &&
+        echo 'Performance tests completed'
+      "
+
+  # ==============================================================================
+  # Test Database Services
+  # ==============================================================================
+
+  # Test PostgreSQL Database
+  postgresql-test:
+    image: postgres:15-alpine
+    container_name: tbot-postgresql-test
+    hostname: postgresql-test
+    environment:
+      POSTGRES_DB: ${DB_NAME:-tbot_test}
+      POSTGRES_USER: ${DB_USER:-test_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-test_pass}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgresql_test_data:/var/lib/postgresql/data
+      - ./services/postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
+      -c max_connections=200
+      -c shared_buffers=128MB
+      -c effective_cache_size=256MB
+      -c work_mem=4MB
+      -c maintenance_work_mem=64MB
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c log_statement=all
+      -c log_duration=on
+      -c log_min_duration_statement=0
+    tmpfs:
+      - /var/lib/postgresql/data:size=1G
+    networks:
+      - tbot-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-test_user} -d ${DB_NAME:-tbot_test}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  # Test Redis Instance
+  redis-test:
+    image: redis:7-alpine
+    container_name: tbot-redis-test
+    hostname: redis-test
+    command: >
+      redis-server
+      --appendonly no
+      --save ""
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    tmpfs:
+      - /data:size=256M
+    networks:
+      - tbot-test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # Test InfluxDB Instance
+  influxdb-test:
+    image: influxdb:2.7-alpine
+    container_name: tbot-influxdb-test
+    hostname: influxdb-test
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: test_admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: test_password
+      DOCKER_INFLUXDB_INIT_ORG: test_org
+      DOCKER_INFLUXDB_INIT_BUCKET: test_bucket
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: test-token-12345
+    tmpfs:
+      - /var/lib/influxdb2:size=512M
+    networks:
+      - tbot-test-network
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  # ==============================================================================
+  # Mock Services for External APIs
+  # ==============================================================================
+
+  # Mock Exchange API Server
+  mock-exchanges:
+    image: wiremock/wiremock:2.35.0-alpine
+    container_name: tbot-mock-exchanges
+    hostname: mock-exchanges
+    ports:
+      - "8089:8080"
+    environment:
+      - JAVA_OPTS=-Xmx256m
+    volumes:
+      - ../tests/fixtures/wiremock:/home/wiremock:ro
+    command: --global-response-templating --verbose
+    networks:
+      - tbot-test-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/__admin/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+
+  # Test Results Aggregator
+  test-aggregator:
+    image: alpine:latest
+    container_name: tbot-test-aggregator
+    hostname: test-aggregator
+    volumes:
+      - test_coverage:/coverage
+      - test_reports:/reports
+      - frontend_test_coverage:/frontend-coverage
+      - frontend_test_reports:/frontend-reports
+      - security_reports:/security-reports
+      - performance_reports:/performance-reports
+    command: >
+      sh -c "
+        echo 'Aggregating test results...' &&
+        find /coverage -name '*.xml' -o -name '*.json' -o -name '*.html' &&
+        find /reports -name '*.xml' -o -name '*.json' &&
+        find /security-reports -name '*.json' &&
+        find /performance-reports -name '*.json' &&
+        echo 'Test results aggregation completed'
+      "
+    depends_on:
+      - backend-test
+      - frontend-test
+      - workers-test
+      - security-test
+      - performance-test
+    networks:
+      - tbot-test-network
+
+# ==============================================================================
+# Volumes
+# ==============================================================================
+volumes:
+  # Test database volumes (using tmpfs for speed)
+  postgresql_test_data:
+    driver: local
+  
+  # Test result volumes
+  test_coverage:
+    driver: local
+  test_reports:
+    driver: local
+  frontend_test_coverage:
+    driver: local
+  frontend_test_reports:
+    driver: local
+  security_reports:
+    driver: local
+  performance_reports:
+    driver: local
+  
+  # ML test data
+  ml_test_models:
+    driver: local
+  ml_test_data:
+    driver: local
+
+# ==============================================================================
+# Networks
+# ==============================================================================
+networks:
+  tbot-test-network:
+    driver: bridge
+    name: tbot-test-network
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+          gateway: 172.21.0.1

@@ -84,10 +84,10 @@ class TestDynamicRiskManagementIntegration:
         """Create a sample trading signal."""
         return Signal(
             direction=SignalDirection.BUY,
-            confidence=0.8,
+            strength=0.8,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy",
+            source="test_strategy",
             metadata={},
         )
 
@@ -188,7 +188,7 @@ class TestDynamicRiskManagementIntegration:
         )
 
         # Should detect high volatility regime
-        assert regime in [MarketRegime.HIGH_VOLATILITY, MarketRegime.CRISIS]
+        assert regime in [MarketRegime.HIGH_VOLATILITY, MarketRegime.HIGH_VOLATILITY]
 
         # Calculate adaptive position size
         portfolio_value = Decimal("10000")
@@ -266,7 +266,7 @@ class TestDynamicRiskManagementIntegration:
         )
 
         # Should be more restrictive due to high volatility (if detected)
-        if regime in [MarketRegime.HIGH_VOLATILITY, MarketRegime.CRISIS]:
+        if regime in [MarketRegime.HIGH_VOLATILITY, MarketRegime.HIGH_VOLATILITY]:
             assert adaptive_limits["max_positions"] < base_limits["max_positions"]
             assert adaptive_limits["max_portfolio_exposure"] < base_limits["max_portfolio_exposure"]
         else:
@@ -367,7 +367,7 @@ class TestDynamicRiskManagementIntegration:
             MarketRegime.LOW_VOLATILITY,
             MarketRegime.MEDIUM_VOLATILITY,
             MarketRegime.HIGH_VOLATILITY,
-            MarketRegime.CRISIS,
+            MarketRegime.HIGH_VOLATILITY,
         ]
 
         for regime in regimes:

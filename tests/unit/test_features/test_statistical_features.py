@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 from src.core.config import Config
@@ -138,6 +139,8 @@ class TestStatisticalFeatureCalculator:
         
         # Returns should be calculated
         assert len(calculator.price_data["BTCUSDT"]) == 2
+        # Get fresh reference to the DataFrame after adding second data point
+        df = calculator.price_data["BTCUSDT"]
         assert df["returns"].iloc[1] != 0.0  # Should have calculated return
 
     @pytest.mark.asyncio
@@ -231,14 +234,14 @@ class TestStatisticalFeatureCalculator:
         correlated_data = []
         for i, data in enumerate(sample_market_data):
             # Create correlated price (same trend + noise)
-            correlated_price = data.price * (1 + np.random.normal(0, 0.01))
+            correlated_price = Decimal(str(float(data.price) * (1 + np.random.normal(0, 0.01))))
             
             correlated_market_data = MarketData(
                 symbol="ETHUSDT",
                 price=correlated_price,
                 open_price=correlated_price,
-                high_price=correlated_price * 1.01,
-                low_price=correlated_price * 0.99,
+                high_price=correlated_price * Decimal("1.01"),
+                low_price=correlated_price * Decimal("0.99"),
                 volume=data.volume,
                 timestamp=data.timestamp,
                 source="test",

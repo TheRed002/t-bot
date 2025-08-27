@@ -1,13 +1,28 @@
 """
 Unit tests for core configuration system.
 
-These tests verify the configuration loading, validation, and management.
+These tests verify the configuration loading, validation, and management
+using the new refactored configuration structure.
 """
+
+import os
+from unittest.mock import MagicMock, patch
+from pathlib import Path
+import tempfile
+import json
+import yaml
 
 import pytest
 from pydantic import ValidationError
 
-from src.core.config import Config, DatabaseConfig, ErrorHandlingConfig, SecurityConfig
+# Import from new refactored structure
+from src.core.config.main import Config, get_config
+from src.core.config.database import DatabaseConfig
+from src.core.config.exchange import ExchangeConfig
+from src.core.config.strategy import StrategyConfig
+from src.core.config.risk import RiskConfig
+from src.core.config.service import ConfigService, get_config_service
+from src.core.dependency_injection import get_container
 
 
 class TestDatabaseConfig:
@@ -15,346 +30,397 @@ class TestDatabaseConfig:
 
     def test_database_config_defaults(self):
         """Test database configuration defaults."""
-        db_config = DatabaseConfig()
+        # Create config without environment variables
+        with patch.dict(os.environ, {}, clear=True):
+            db_config = DatabaseConfig()
 
-        # Test default values
-        assert db_config.postgresql_host == "localhost"
-        assert db_config.postgresql_port == 5432
-        assert db_config.postgresql_database == "trading_bot"
-        # Note: Redis host might be different in WSL environment
-        assert db_config.redis_port == 6379
-        # Note: InfluxDB host might be different in WSL environment
-        assert db_config.influxdb_port == 8086
-
-    def test_database_config_validation(self):
-        """Test database configuration validation."""
-        # Test valid port numbers
-        db_config = DatabaseConfig()
-        assert db_config.postgresql_port == 5432
-        assert db_config.redis_port == 6379
-        assert db_config.influxdb_port == 8086
-
-        # Test invalid port numbers
-        with pytest.raises(ValueError):
-            db_config.postgresql_port = 0
-
-        with pytest.raises(ValueError):
-            db_config.postgresql_port = 70000
-
-    def test_database_pool_size_validation(self):
-        """Test database pool size validation."""
-        db_config = DatabaseConfig()
-
-        # Test valid pool size
-        db_config.postgresql_pool_size = 20
-        assert db_config.postgresql_pool_size == 20
-
-        # Test invalid pool size
-        with pytest.raises(ValueError):
-            db_config.postgresql_pool_size = 0
-
-        with pytest.raises(ValueError):
-            db_config.postgresql_pool_size = 150
-
-
-class TestSecurityConfig:
-    """Test security configuration."""
-
-    def test_security_config_defaults(self):
-        """Test security configuration defaults."""
-        import os
-        # Clear environment variable for test isolation
-        original_value = os.environ.pop('JWT_EXPIRE_MINUTES', None)
-        try:
-            security_config = SecurityConfig()
             # Test default values
-            assert security_config.jwt_algorithm == "HS256"
-            assert security_config.jwt_expire_minutes == 30
-        finally:
-            # Restore original value if it existed
-            if original_value is not None:
-                os.environ['JWT_EXPIRE_MINUTES'] = original_value
+            assert db_config.postgresql_host == "localhost"
+            assert db_config.postgresql_port == 5432
+            assert db_config.postgresql_database == "tbot_dev"
+            assert db_config.redis_port == 6379
+            assert db_config.influxdb_port == 8086
 
-    def test_jwt_expire_validation(self):
-        """Test JWT expiration validation."""
-        security_config = SecurityConfig()
+    def test_database_config_from_env(self):
+        """Test database configuration from environment variables."""
+        with patch.dict(os.environ, {
+            'DB_HOST': 'db.example.com',
+            'DB_PORT': '5433',
+            'REDIS_HOST': 'redis.example.com'
+        }):
+            db_config = DatabaseConfig()
+            
+            assert db_config.postgresql_host == 'db.example.com'
+            assert db_config.postgresql_port == 5433
+            assert db_config.redis_host == 'redis.example.com'
 
-        # Test valid expiration times
-        security_config.jwt_expire_minutes = 60
-        assert security_config.jwt_expire_minutes == 60
+    def test_database_url_generation(self):
+        """Test database URL generation."""
+        db_config = DatabaseConfig()
+        # Override the values after creation to test URL generation
+        db_config.postgresql_username = 'testuser'
+        db_config.postgresql_password = 'testpass'
+        db_config.postgresql_host = 'localhost'
+        db_config.postgresql_database = 'testdb'
+        
+        expected_url = 'postgresql://testuser:testpass@localhost:5432/testdb'
+        assert db_config.postgresql_url == expected_url
 
-        security_config.jwt_expire_minutes = 1
-        assert security_config.jwt_expire_minutes == 1
-
-        # Test invalid expiration times
-        with pytest.raises(ValueError):
-            security_config.jwt_expire_minutes = 0
-
-        with pytest.raises(ValueError):
-            security_config.jwt_expire_minutes = 1500
-
-    def test_key_length_validation(self):
-        """Test key length validation."""
-        security_config = SecurityConfig()
-
-        # Test valid key lengths
-        valid_key = "a" * 32
-        security_config.secret_key = valid_key
-        security_config.encryption_key = valid_key
-        assert security_config.secret_key == valid_key
-        assert security_config.encryption_key == valid_key
-
-        # Test invalid key lengths
-        invalid_key = "a" * 20
-        with pytest.raises(ValueError):
-            security_config.secret_key = invalid_key
-
-        with pytest.raises(ValueError):
-            security_config.encryption_key = invalid_key
+    def test_redis_url_generation(self):
+        """Test Redis URL generation."""
+        db_config = DatabaseConfig()
+        # Override the values after creation to test URL generation
+        db_config.redis_host = 'redis.local'
+        db_config.redis_port = 6380
+        db_config.redis_password = None
+        
+        expected_url = 'redis://redis.local:6380/0'
+        assert db_config.redis_url == expected_url
 
 
-class TestErrorHandlingConfig:
-    """Test error handling configuration."""
+class TestExchangeConfig:
+    """Test exchange configuration."""
 
-    def test_error_handling_config_defaults(self):
-        """Test error handling configuration defaults."""
-        error_config = ErrorHandlingConfig()
+    def test_exchange_config_defaults(self):
+        """Test exchange configuration defaults."""
+        exchange_config = ExchangeConfig()
+        
+        assert exchange_config.default_exchange == 'binance'
+        assert exchange_config.testnet_mode == False
+        assert exchange_config.rate_limit_per_second == 10
 
-        # Test default values
-        assert error_config.circuit_breaker_failure_threshold == 5
-        assert error_config.circuit_breaker_recovery_timeout == 30
-        assert error_config.max_retry_attempts == 3
-        assert error_config.retry_backoff_factor == 2.0
-        assert error_config.pattern_detection_enabled is True
-        assert error_config.correlation_analysis_enabled is True
-        assert error_config.predictive_alerts_enabled is True
+    def test_exchange_credentials(self):
+        """Test exchange credentials retrieval."""
+        with patch.dict(os.environ, {
+            'BINANCE_API_KEY': 'test_key',
+            'BINANCE_API_SECRET': 'test_secret'
+        }):
+            exchange_config = ExchangeConfig()
+            
+            creds = exchange_config.get_exchange_credentials('binance')
+            assert creds['api_key'] == 'test_key'
+            assert creds['api_secret'] == 'test_secret'
+            assert creds['testnet'] == False
 
-    def test_positive_integer_validation(self):
-        """Test positive integer validation."""
-        error_config = ErrorHandlingConfig()
-
-        # Test valid values
-        error_config.circuit_breaker_failure_threshold = 10
-        error_config.max_retry_attempts = 5
-        error_config.order_rejection_max_retries = 3
-        assert error_config.circuit_breaker_failure_threshold == 10
-        assert error_config.max_retry_attempts == 5
-        assert error_config.order_rejection_max_retries == 3
-
-        # Test invalid values
-        with pytest.raises(ValueError):
-            error_config.circuit_breaker_failure_threshold = 0
-
-        with pytest.raises(ValueError):
-            error_config.max_retry_attempts = -1
-
-    def test_positive_float_validation(self):
-        """Test positive float validation."""
-        error_config = ErrorHandlingConfig()
-
-        # Test valid values
-        error_config.retry_backoff_factor = 1.5
-        error_config.partial_fill_min_percentage = 0.7
-        error_config.max_discrepancy_threshold = 0.05
-        assert error_config.retry_backoff_factor == 1.5
-        assert error_config.partial_fill_min_percentage == 0.7
-        assert error_config.max_discrepancy_threshold == 0.05
-
-        # Test invalid values
-        with pytest.raises(ValueError):
-            error_config.retry_backoff_factor = 0.0
-
-        with pytest.raises(ValueError):
-            error_config.partial_fill_min_percentage = -0.1
+    def test_websocket_config(self):
+        """Test WebSocket configuration."""
+        exchange_config = ExchangeConfig()
+        
+        ws_config = exchange_config.get_websocket_config('binance')
+        assert 'url' in ws_config
+        assert ws_config['reconnect_attempts'] == 5
+        assert ws_config['ping_interval'] == 30
 
 
-class TestConfig:
-    """Test main configuration class."""
+class TestStrategyConfig:
+    """Test strategy configuration."""
 
-    def test_config_creation(self):
-        """Test configuration creation with defaults."""
+    def test_strategy_config_defaults(self):
+        """Test strategy configuration defaults."""
+        strategy_config = StrategyConfig()
+        
+        assert strategy_config.default_strategy == 'market_making'
+        assert strategy_config.backtest_enabled == False
+        assert strategy_config.paper_trading_enabled == False
+
+    def test_strategy_params(self):
+        """Test strategy parameters."""
+        strategy_config = StrategyConfig()
+        
+        # Test market making params
+        mm_params = strategy_config.get_strategy_params('market_making')
+        assert mm_params['bid_spread'] == 0.001
+        assert mm_params['ask_spread'] == 0.001
+        assert mm_params['order_levels'] == 3
+        
+        # Test arbitrage params
+        arb_params = strategy_config.get_strategy_params('arbitrage')
+        assert arb_params['min_profit_threshold'] == 0.002
+        assert arb_params['max_exposure'] == 10000
+
+
+class TestRiskConfig:
+    """Test risk management configuration."""
+
+    def test_risk_config_defaults(self):
+        """Test risk configuration defaults."""
+        risk_config = RiskConfig()
+        
+        assert risk_config.position_sizing_method == 'fixed'
+        assert float(risk_config.max_position_size) == 1000.0
+        assert risk_config.risk_per_trade == 0.02
+        assert risk_config.max_leverage == 1.0
+
+    def test_risk_validation(self):
+        """Test risk parameter validation."""
+        risk_config = RiskConfig()
+        
+        # Valid risk per trade
+        risk_config.risk_per_trade = 0.05
+        assert risk_config.risk_per_trade == 0.05
+        
+        # Invalid risk per trade (too high)
+        with pytest.raises(ValidationError):
+            risk_config = RiskConfig(risk_per_trade=0.15)  # > 0.1
+
+    def test_position_size_params(self):
+        """Test position sizing parameters."""
+        risk_config = RiskConfig()
+        risk_config.position_sizing_method = 'kelly_criterion'
+        risk_config.kelly_fraction = 0.25
+        
+        params = risk_config.get_position_size_params()
+        assert params['method'] == 'kelly_criterion'
+        assert params['kelly_fraction'] == 0.25
+
+    def test_circuit_breaker_config(self):
+        """Test circuit breaker configuration."""
+        risk_config = RiskConfig()
+        
+        assert risk_config.enable_circuit_breakers == True
+        assert risk_config.loss_limit_circuit_breaker == 0.05
+        assert risk_config.circuit_breaker_cooldown == 3600
+
+
+class TestMainConfig:
+    """Test main configuration aggregator."""
+
+    def test_config_initialization(self):
+        """Test main config initialization."""
         config = Config()
-
-        assert config.app_name == "trading-bot-suite"
-        assert config.app_version == "1.0.0"  # Updated to match actual implementation
-        assert config.environment in ["development", "staging", "production"]
+        
+        # Check that all sub-configs are initialized
         assert isinstance(config.database, DatabaseConfig)
-        assert isinstance(config.security, SecurityConfig)
-        assert isinstance(config.error_handling, ErrorHandlingConfig)
-
-    def test_environment_validation(self):
-        """Test environment validation."""
-        config = Config()
-
-        # Test valid environments
-        config.environment = "development"
+        assert isinstance(config.exchange, ExchangeConfig)
+        assert isinstance(config.strategy, StrategyConfig)
+        assert isinstance(config.risk, RiskConfig)
+        
+        # Check app-level config
+        assert config.app_name == "T-Bot Trading System"
         assert config.environment == "development"
 
-        config.environment = "staging"
-        assert config.environment == "staging"
+    def test_config_backward_compatibility(self):
+        """Test backward compatibility properties."""
+        with patch.dict(os.environ, {
+            'POSTGRESQL_HOST': 'db.test.com',
+            'DB_HOST': 'db.test.com',  # Override the .env value
+            'BINANCE_API_KEY': 'test_key'
+        }):
+            config = Config()
+            
+            # Test backward compatible properties
+            assert config.postgresql_host == 'db.test.com'
+            assert config.binance_api_key == 'test_key'
+            assert config.db_url == config.database.postgresql_url
+            assert config.redis_url == config.database.redis_url
 
-        config.environment = "production"
-        assert config.environment == "production"
+    def test_config_from_file(self):
+        """Test loading configuration from file."""
+        # Create temporary config file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            config_data = {
+                'database': {
+                    'postgresql_host': 'file.db.com',
+                    'postgresql_port': 5433
+                },
+                'exchange': {
+                    'default_exchange': 'coinbase'
+                },
+                'risk': {
+                    'risk_per_trade': 0.03
+                }
+            }
+            yaml.dump(config_data, f)
+            temp_path = f.name
+        
+        try:
+            # Load config from file
+            config = Config(config_file=temp_path)
+            
+            assert config.database.postgresql_host == 'file.db.com'
+            assert config.database.postgresql_port == 5433
+            assert config.exchange.default_exchange == 'coinbase'
+            assert config.risk.risk_per_trade == 0.03
+        finally:
+            # Clean up
+            os.unlink(temp_path)
 
-        # Test invalid environment
-        with pytest.raises(ValueError):
-            config.validate_environment("invalid_environment")
-
-    def test_validate_environment_invalid(self):
-        """Test environment validation with invalid value."""
-        with pytest.raises(ValidationError):
-            Config(environment="invalid_env")
-
-    def test_generate_schema(self):
-        """Test schema generation."""
+    def test_config_save_to_file(self):
+        """Test saving configuration to file."""
         config = Config()
-        # This should not raise an exception
-        config.generate_schema()
+        config.database.postgresql_host = 'save.test.com'
+        config.exchange.default_exchange = 'okx'
+        
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            temp_path = f.name
+        
+        try:
+            config.save_to_file(temp_path)
+            
+            # Load and verify
+            with open(temp_path, 'r') as f:
+                saved_data = json.load(f)
+            
+            assert saved_data['database']['postgresql_host'] == 'save.test.com'
+            assert saved_data['exchange']['default_exchange'] == 'okx'
+        finally:
+            # Clean up
+            os.unlink(temp_path)
 
-    def test_from_yaml_file_not_found(self):
-        """Test from_yaml with non-existent file."""
-        with pytest.raises(FileNotFoundError):
-            Config.from_yaml("nonexistent.yaml")
-
-    def test_from_yaml_with_env_override_file_exists(self, tmp_path):
-        """Test from_yaml_with_env_override with existing file."""
-        yaml_file = tmp_path / "test_config.yaml"
-        yaml_file.write_text("""
-        environment: "staging"
-        app_name: "test-app"
-        """)
-
-        config = Config.from_yaml_with_env_override(str(yaml_file))
-        assert config.environment == "staging"
-        assert config.app_name == "test-app"
-
-    def test_from_yaml_with_env_override_file_not_exists(self):
-        """Test from_yaml_with_env_override with non-existent file."""
-        config = Config.from_yaml_with_env_override("nonexistent.yaml")
-        # Should create config with defaults
-        assert config.environment in ["development", "staging", "production"]
-
-    def test_to_yaml(self, tmp_path):
-        """Test saving configuration to YAML file."""
+    def test_config_validation(self):
+        """Test configuration validation."""
         config = Config()
-        yaml_file = tmp_path / "output_config.yaml"
+        
+        # Should not raise any errors
+        config.validate()
+        
+        # Test with invalid configuration
+        config.risk.risk_per_trade = 0.05  # Valid
+        config.validate()  # Should still pass
 
-        config.to_yaml(str(yaml_file))
+    def test_get_config_singleton(self):
+        """Test get_config singleton pattern."""
+        config1 = get_config()
+        config2 = get_config()
+        
+        # Should be the same instance
+        assert config1 is config2
+        
+        # Test reload
+        config3 = get_config(reload=True)
+        assert config3 is not config2
 
-        assert yaml_file.exists()
-        with open(yaml_file) as f:
-            content = f.read()
-            # Check that the file contains expected configuration structure
-            assert "app_name:" in content
-            assert "app_version:" in content
-            assert "database:" in content
-            assert "security:" in content
-
-    def test_get_database_url(self):
-        """Test database URL generation."""
+    def test_config_methods(self):
+        """Test configuration helper methods."""
         config = Config()
-        url = config.get_database_url()
-        assert "postgresql://" in url
-        assert "localhost:5432" in url
-        assert "trading_bot" in url
+        
+        # Test get_exchange_config
+        exchange_config = config.get_exchange_config('binance')
+        assert 'api_key' in exchange_config
+        assert 'api_secret' in exchange_config
+        
+        # Test get_strategy_config
+        strategy_config = config.get_strategy_config('market_making')
+        assert 'bid_spread' in strategy_config
+        
+        # Test get_risk_config
+        risk_config = config.get_risk_config()
+        assert 'method' in risk_config
+        assert 'risk_per_trade' in risk_config
 
-    def test_get_async_database_url(self):
-        """Test async database URL generation."""
+    def test_config_to_dict(self):
+        """Test configuration to dictionary conversion."""
         config = Config()
-        url = config.get_async_database_url()
-        assert "postgresql+asyncpg://" in url
-        assert "localhost:5432" in url
-        assert "trading_bot" in url
-
-    def test_get_redis_url_with_password(self):
-        """Test Redis URL generation with password."""
-        config = Config()
-        config.database.redis_password = "test_password"
-        url = config.get_redis_url()
-        assert "redis://:test_password@" in url
-
-    def test_get_redis_url_without_password(self):
-        """Test Redis URL generation without password."""
-        config = Config()
-        config.database.redis_password = None
-        url = config.get_redis_url()
-        assert "redis://" in url
-        assert "6379" in url
-
-    def test_is_production(self):
-        """Test production environment check."""
-        config = Config(environment="production")
-        assert config.is_production() is True
-        assert config.is_development() is False
-
-    def test_is_development(self):
-        """Test development environment check."""
-        config = Config(environment="development")
-        assert config.is_development() is True
-        assert config.is_production() is False
-
-    def test_validate_yaml_config_valid(self, tmp_path):
-        """Test YAML config validation with valid file."""
-        yaml_file = tmp_path / "valid_config.yaml"
-        yaml_file.write_text("""
-        environment: "staging"
-        app_name: "test-app"
-        """)
-
-        config = Config()
-        assert config.validate_yaml_config(str(yaml_file)) is True
-
-    def test_validate_yaml_config_invalid(self, tmp_path):
-        """Test YAML config validation with invalid file."""
-        yaml_file = tmp_path / "invalid_config.yaml"
-        yaml_file.write_text("""
-        environment: "invalid_env"
-        """)
-
-        # Should return False for invalid config
-        config = Config()
-        assert config.validate_yaml_config(str(yaml_file)) is False
-
-    def test_validate_yaml_config_file_not_found(self):
-        """Test YAML config validation with non-existent file."""
-        config = Config()
-        assert config.validate_yaml_config("nonexistent.yaml") is False
+        config_dict = config.to_dict()
+        
+        assert 'app' in config_dict
+        assert 'database' in config_dict
+        assert 'exchange' in config_dict
+        assert 'strategy' in config_dict
+        assert 'risk' in config_dict
+        
+        assert config_dict['app']['name'] == "T-Bot Trading System"
+        assert config_dict['database']['postgresql_port'] == 5432
 
 
-class TestConfigIntegration:
-    """Test configuration integration."""
+@pytest.mark.asyncio
+class TestConfigService:
+    """Test modern ConfigService implementation."""
 
-    def test_config_sub_components(self):
-        """Test that sub-configurations are properly integrated."""
-        config = Config()
+    async def test_config_service_initialization(self):
+        """Test ConfigService initialization."""
+        service = ConfigService()
+        await service.initialize()
+        
+        assert service._initialized
+        
+        await service.shutdown()
+        assert not service._initialized
 
-        # Test database sub-config
-        assert hasattr(config, "database")
-        assert isinstance(config.database, DatabaseConfig)
-        assert config.database.postgresql_host == "localhost"
+    async def test_config_service_database_config(self):
+        """Test database configuration access."""
+        service = ConfigService()
+        await service.initialize()
+        
+        db_config = service.get_database_config()
+        assert isinstance(db_config, DatabaseConfig)
+        assert db_config.postgresql_port == 5432
+        
+        await service.shutdown()
 
-        # Test security sub-config
-        assert hasattr(config, "security")
-        assert isinstance(config.security, SecurityConfig)
-        assert config.security.jwt_algorithm == "HS256"
+    async def test_config_service_exchange_config(self):
+        """Test exchange configuration access."""
+        service = ConfigService()
+        await service.initialize()
+        
+        exchange_config = service.get_exchange_config()
+        assert isinstance(exchange_config, ExchangeConfig)
+        
+        await service.shutdown()
 
-        # Test error handling sub-config
-        assert hasattr(config, "error_handling")
-        assert isinstance(config.error_handling, ErrorHandlingConfig)
-        assert config.error_handling.circuit_breaker_failure_threshold == 5
+    async def test_config_service_caching(self):
+        """Test configuration caching."""
+        service = ConfigService(cache_ttl=60)
+        await service.initialize()
+        
+        # First access should load from config
+        db_config1 = service.get_database_config()
+        
+        # Second access should come from cache
+        db_config2 = service.get_database_config()
+        
+        assert db_config1 is db_config2  # Should be same object from cache
+        
+        # Get cache stats
+        stats = service.get_cache_stats()
+        assert stats['total_keys'] > 0
+        assert stats['total_accesses'] > 0
+        
+        await service.shutdown()
 
-    def test_config_immutability(self):
-        """Test that configuration validation prevents invalid changes."""
-        config = Config()
+    async def test_config_service_dependency_injection(self):
+        """Test ConfigService with dependency injection."""
+        from src.core.config.service import register_config_service_in_container
+        
+        # Register service in container
+        register_config_service_in_container()
+        
+        # Get from container
+        container = get_container()
+        service = await container.get("ConfigService")
+        
+        assert isinstance(service, ConfigService)
+        assert service._initialized
+        
+        # Test config access
+        db_config = service.get_database_config()
+        assert isinstance(db_config, DatabaseConfig)
+        
+        await service.shutdown()
 
-        # Test that invalid environment changes are prevented
-        with pytest.raises(ValueError):
-            config.environment = "invalid"
+    async def test_config_value_access(self):
+        """Test dot notation config value access."""
+        service = ConfigService()
+        await service.initialize()
+        
+        # Test nested value access
+        port = service.get_config_value("database.postgresql_port", 5432)
+        assert port == 5432
+        
+        # Test with default
+        non_existent = service.get_config_value("non.existent.key", "default")
+        assert non_existent == "default"
+        
+        await service.shutdown()
 
-        # Test that invalid database settings are prevented
-        with pytest.raises(ValueError):
-            config.database.postgresql_port = 0
-
-        # Test that invalid security settings are prevented
-        with pytest.raises(ValueError):
-            config.security.jwt_expire_minutes = 0
+    async def test_config_service_context_manager(self):
+        """Test ConfigService as async context manager."""
+        async with ConfigService() as service:
+            assert service._initialized
+            
+            db_config = service.get_database_config()
+            assert isinstance(db_config, DatabaseConfig)
+        
+        # Should be shutdown after context exit
+        assert not service._initialized

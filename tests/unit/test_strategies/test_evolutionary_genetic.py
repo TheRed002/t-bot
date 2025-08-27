@@ -14,6 +14,7 @@ Tests cover:
 
 import asyncio
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Dict, Tuple
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -26,6 +27,7 @@ from src.strategies.evolutionary.fitness import FitnessEvaluator
 from src.strategies.evolutionary.mutations import MutationOperator, CrossoverOperator
 from src.backtesting.engine import BacktestConfig, BacktestResult
 from src.core.exceptions import OptimizationError
+from src.core.types import MarketData, Position, Signal, StrategyConfig, StrategyType
 from src.strategies.base import BaseStrategy
 
 
@@ -41,8 +43,11 @@ class MockStrategy(BaseStrategy):
         # Create proper config for BaseStrategy
         config = {
             'name': 'test_strategy',
-            'strategy_type': 'static',  # Use valid StrategyType enum value
-            'symbols': kwargs.get('symbols', ['BTC/USD']),
+            'strategy_id': 'mock_strategy_001',
+            'strategy_type': 'mean_reversion',  # Use valid StrategyType enum value
+            'symbol': 'BTCUSDT',
+            'timeframe': '1h',
+            'symbols': kwargs.get('symbols', ['BTCUSDT']),
             'parameters': {
                 'param1': self.param1,
                 'param2': self.param2,
@@ -51,6 +56,50 @@ class MockStrategy(BaseStrategy):
         }
         super().__init__(config)
     
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Get the strategy type."""
+        return StrategyType.MEAN_REVERSION
+    
+    @property
+    def name(self) -> str:
+        """Get strategy name."""
+        return getattr(self, '_name', "mock_strategy")
+    
+    @name.setter
+    def name(self, value: str) -> None:
+        """Set strategy name."""
+        self._name = value
+    
+    @property
+    def version(self) -> str:
+        """Get strategy version."""
+        return getattr(self, '_version', "1.0.0")
+    
+    @version.setter 
+    def version(self, value: str) -> None:
+        """Set strategy version."""
+        self._version = value
+    
+    @property
+    def status(self) -> 'StrategyStatus':
+        """Get strategy status."""
+        from src.core.types import StrategyStatus
+        return getattr(self, '_status', StrategyStatus.ACTIVE)
+    
+    @status.setter
+    def status(self, value: 'StrategyStatus') -> None:
+        """Set strategy status.""" 
+        self._status = value
+    
+    async def initialize(self, config: StrategyConfig) -> None:
+        """Initialize the strategy with configuration."""
+        pass
+    
+    async def generate_signals(self, data: MarketData) -> list[Signal]:
+        """Generate trading signals from market data."""
+        return []
+    
     async def generate_signal(self, symbol: str, data):
         return None
     
@@ -58,15 +107,15 @@ class MockStrategy(BaseStrategy):
         """Implementation required by BaseStrategy."""
         return []
     
-    def get_position_size(self, signal, portfolio_value):
+    def get_position_size(self, signal: Signal) -> Decimal:
         """Implementation required by BaseStrategy."""
-        return 1000.0
+        return Decimal("1000.0")
     
-    def should_exit(self, position, current_data):
+    def should_exit(self, position: Position, data: MarketData) -> bool:
         """Implementation required by BaseStrategy."""
         return False
     
-    async def validate_signal(self, signal):
+    async def validate_signal(self, signal: Signal) -> bool:
         """Implementation required by BaseStrategy."""
         return True
 

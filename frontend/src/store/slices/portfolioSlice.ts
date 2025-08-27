@@ -36,7 +36,7 @@ export const fetchPortfolioSummary = createAsyncThunk(
 
 export const fetchPositions = createAsyncThunk(
   'portfolio/fetchPositions',
-  async (filters?: PortfolioFilters, { rejectWithValue }) => {
+  async (filters: Partial<PortfolioFilters> = {}, { rejectWithValue }) => {
     try {
       const response = await portfolioAPI.getPositions(filters);
       return response.data;
@@ -48,7 +48,7 @@ export const fetchPositions = createAsyncThunk(
 
 export const fetchBalances = createAsyncThunk(
   'portfolio/fetchBalances',
-  async (filters?: PortfolioFilters, { rejectWithValue }) => {
+  async (filters: Partial<PortfolioFilters> = {}, { rejectWithValue }) => {
     try {
       const response = await portfolioAPI.getBalances(filters);
       return response.data;
@@ -103,6 +103,7 @@ const portfolioSlice = createSlice({
 
 export const { clearError, updateFilters, updatePositionPrice } = portfolioSlice.actions;
 
+export const selectPortfolioState = (state: { portfolio: PortfolioState }) => state.portfolio;
 export const selectPortfolioSummary = (state: { portfolio: PortfolioState }) => state.portfolio.summary;
 export const selectPositions = (state: { portfolio: PortfolioState }) => state.portfolio.positions;
 export const selectBalances = (state: { portfolio: PortfolioState }) => state.portfolio.balances;

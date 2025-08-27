@@ -104,17 +104,65 @@ def mock_model_manager():
 @pytest.fixture
 def test_app(test_config, mock_bot_orchestrator, mock_execution_engine, mock_model_manager):
     """Create test FastAPI application."""
-    app = create_app(
-        config=test_config,
-        bot_orchestrator_instance=mock_bot_orchestrator,
-        execution_engine_instance=mock_execution_engine,
-        model_manager_instance=mock_model_manager
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from src.web_interface.app import _register_routes
+    from src.web_interface.security.auth import init_auth
+    
+    # Create pure FastAPI app for testing (not combined with Socket.IO)
+    fastapi_app = FastAPI(
+        title="T-Bot Trading System API (Test)",
+        description="Test instance of T-Bot API",
+        version="1.0.0",
+        debug=True,
     )
+    
+    # Register routes
+    _register_routes(fastapi_app)
     
     # Initialize authentication for testing
     init_auth(test_config)
     
-    return app
+    # Override auth dependencies for testing
+    from src.web_interface.security.auth import get_current_user, get_admin_user, get_trading_user, User
+    
+    def mock_current_user():
+        return User(
+            user_id="test_001",
+            username="testuser",
+            email="test@example.com",
+            is_active=True,
+            scopes=["read", "write"]
+        )
+    
+    def mock_admin_user():
+        return User(
+            user_id="admin_001",
+            username="admin",
+            email="admin@example.com",
+            is_active=True,
+            scopes=["admin", "read", "write", "trade"]
+        )
+    
+    def mock_trading_user():
+        return User(
+            user_id="trader_001",
+            username="trader",
+            email="trader@example.com",
+            is_active=True,
+            scopes=["read", "write", "trade"]
+        )
+    
+    # Override dependencies
+    fastapi_app.dependency_overrides[get_current_user] = mock_current_user
+    fastapi_app.dependency_overrides[get_admin_user] = mock_admin_user
+    fastapi_app.dependency_overrides[get_trading_user] = mock_trading_user
+    
+    # Set global bot orchestrator for bot management API
+    from src.web_interface.api import bot_management
+    bot_management.set_bot_orchestrator(mock_bot_orchestrator)
+    
+    return fastapi_app
 
 
 @pytest.fixture
@@ -186,16 +234,17 @@ def sample_bot_config():
     return BotConfiguration(
         bot_id="test_bot_001",
         bot_name="Test Bot",
-        bot_type=BotType.STRATEGY,
+        bot_type=BotType.TRADING,
         strategy_name="trend_following",
         exchanges=["binance"],
         symbols=["BTCUSDT"],
         allocated_capital=Decimal("10000"),
+        max_position_size=Decimal("1000"),  # Added missing field
         risk_percentage=0.02,
         priority=BotPriority.NORMAL,
         auto_start=False,
-        configuration={},
-        created_by="test_user",
+        strategy_config={},  # Fixed: should be strategy_config not configuration
+        metadata={"created_by": "test_user"},  # Fixed: should be metadata
         created_at=datetime.utcnow()
     )
 

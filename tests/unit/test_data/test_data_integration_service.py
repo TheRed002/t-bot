@@ -41,38 +41,42 @@ class TestDataIntegrationService:
         """Create sample market data."""
         return MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.0"),
             timestamp=datetime.now(timezone.utc),
-            bid=Decimal("49999.00"),
-            ask=Decimal("50001.00"),
-            open_price=Decimal("49900.00"),
-            high_price=Decimal("50100.00"),
-            low_price=Decimal("49800.00")
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            exchange="binance",
+            bid_price=Decimal("49999.00"),
+            ask_price=Decimal("50001.00")
         )
 
     @pytest.fixture
     def service(self, mock_config):
         """Create DataIntegrationService instance with mocked dependencies."""
         with patch('src.data.services.data_integration_service.ErrorHandler'):
-            with patch('src.data.services.data_integration_service.InfluxDBClientWrapper'):
+            with patch('src.data.services.data_integration_service.DataService') as mock_data_service:
+                # Mock the DataService instance
+                mock_ds_instance = AsyncMock()
+                mock_ds_instance.initialize = AsyncMock()
+                mock_ds_instance.store_market_data = AsyncMock(return_value=True)
+                mock_ds_instance.get_market_data = AsyncMock(return_value=[])
+                mock_ds_instance.cleanup_old_data = AsyncMock(return_value=0)
+                mock_data_service.return_value = mock_ds_instance
+                
                 service = DataIntegrationService(mock_config)
-                service.influx_client = None  # Disable InfluxDB for unit tests
                 return service
 
     def test_initialization(self, mock_config):
         """Test service initialization."""
         with patch('src.data.services.data_integration_service.ErrorHandler'):
-            with patch('src.data.services.data_integration_service.InfluxDBClientWrapper') as mock_influx:
-                # Mock the InfluxDB client to return None on connect failure
-                mock_influx.return_value.connect.side_effect = Exception("Connection failed")
-
+            with patch('src.data.services.data_integration_service.DataService'):
                 service = DataIntegrationService(mock_config)
 
                 assert service.storage_mode == StorageMode.BATCH
                 assert service.batch_size == 100
                 assert service.cleanup_interval == 3600
-                assert service.influx_client is None
 
     def test_initialization_with_defaults(self):
         """Test service initialization with default values."""
@@ -81,7 +85,7 @@ class TestDataIntegrationService:
         config.influxdb = {}
 
         with patch('src.data.services.data_integration_service.ErrorHandler'):
-            with patch('src.data.services.data_integration_service.InfluxDBClientWrapper'):
+            with patch('src.data.services.data_integration_service.DataService'):
                 service = DataIntegrationService(config)
 
                 assert service.storage_mode == StorageMode.BATCH
@@ -91,85 +95,70 @@ class TestDataIntegrationService:
     @pytest.mark.asyncio
     async def test_store_single_market_data(self, service, mock_market_data):
         """Test storing single market data."""
-        with patch.object(service, '_store_market_data_to_postgresql', new_callable=AsyncMock) as mock_store:
-            mock_store.return_value = True
+        # The service fixture already mocks the DataService
+        service._data_service.store_market_data.return_value = True
+        
+        result = await service.store_market_data(mock_market_data, "binance")
 
-            result = await service.store_market_data(mock_market_data, "binance")
-
-            assert result is True
-            mock_store.assert_called_once_with([mock_market_data], "binance")
+        assert result is True
+        service._data_service.store_market_data.assert_called_once_with(mock_market_data, "binance", validate=True)
 
     @pytest.mark.asyncio
     async def test_store_market_data_batch(self, service, mock_market_data):
         """Test storing batch market data."""
         market_data_list = [mock_market_data, mock_market_data]
+        
+        service._data_service.store_market_data.return_value = True
+        
+        result = await service.store_market_data(market_data_list, "binance")
 
-        with patch.object(service, '_store_market_data_to_postgresql', new_callable=AsyncMock) as mock_store:
-            mock_store.return_value = True
-
-            result = await service.store_market_data(market_data_list, "binance")
-
-            assert result is True
-            mock_store.assert_called_once_with(market_data_list, "binance")
+        assert result is True
+        service._data_service.store_market_data.assert_called_once_with(market_data_list, "binance", validate=True)
 
     @pytest.mark.asyncio
     async def test_store_market_data_failure(self, service, mock_market_data):
         """Test market data storage failure handling."""
-        with patch.object(service, '_store_market_data_to_postgresql', new_callable=AsyncMock) as mock_store:
-            mock_store.side_effect = Exception("Database error")
+        service._data_service.store_market_data.side_effect = Exception("Database error")
+        
+        result = await service.store_market_data(mock_market_data, "binance")
 
-            result = await service.store_market_data(mock_market_data, "binance")
-
-            assert result is False
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_store_market_data_with_influxdb(self, mock_config):
         """Test market data storage with InfluxDB enabled."""
         with patch('src.data.services.data_integration_service.ErrorHandler'):
-            with patch('src.data.services.data_integration_service.InfluxDBClientWrapper') as mock_influx:
-                mock_client = MagicMock()
-                mock_influx.return_value = mock_client
-                mock_client.connect.return_value = None
-
+            with patch('src.data.services.data_integration_service.DataService') as mock_data_service:
+                mock_ds_instance = AsyncMock()
+                mock_ds_instance.initialize = AsyncMock()
+                mock_ds_instance.store_market_data = AsyncMock(return_value=True)
+                mock_data_service.return_value = mock_ds_instance
+                
                 service = DataIntegrationService(mock_config)
-                service.influx_client = mock_client
 
                 market_data = MarketData(
                     symbol="BTCUSDT",
-                    price=Decimal("50000.00"),
+                    timestamp=datetime.now(timezone.utc),
+                    open=Decimal("49900.00"),
+                    high=Decimal("50100.00"),
+                    low=Decimal("49800.00"),
+                    close=Decimal("50000.00"),
                     volume=Decimal("100.0"),
-                    timestamp=datetime.now(timezone.utc)
+                    exchange="binance"
                 )
 
-                with patch.object(service, '_store_market_data_to_postgresql', new_callable=AsyncMock) as mock_store:
-                    mock_store.return_value = True
+                result = await service.store_market_data(market_data, "binance")
 
-                    result = await service.store_market_data(market_data, "binance")
+                assert result is True
+                mock_ds_instance.store_market_data.assert_called_once_with(market_data, "binance", validate=True)
 
-                    assert result is True
-                    mock_client.write_market_data.assert_called_once()
-
+    @pytest.mark.skip(reason="store_feature method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_store_feature(self, service):
         """Test feature storage."""
-        with patch('src.data.services.data_integration_service.get_async_session') as mock_session:
-            mock_session.return_value.__aenter__.return_value = MagicMock()
+        pass
 
-            with patch('src.data.services.data_integration_service.DatabaseQueries') as mock_queries:
-                mock_db = MagicMock()
-                mock_queries.return_value = mock_db
-                mock_db.create_feature_record = AsyncMock()
-
-                result = await service.store_feature(
-                    symbol="BTCUSDT",
-                    feature_type="technical",
-                    feature_name="sma_20",
-                    feature_value=49500.0
-                )
-
-                assert result is True
-                mock_db.create_feature_record.assert_called_once()
-
+    @pytest.mark.skip(reason="store_feature method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_store_feature_failure(self, service):
         """Test feature storage failure handling."""
@@ -190,6 +179,7 @@ class TestDataIntegrationService:
 
                 assert result is False
 
+    @pytest.mark.skip(reason="store_data_quality_metrics method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_store_data_quality_metrics(self, service):
         """Test data quality metrics storage."""
@@ -214,6 +204,7 @@ class TestDataIntegrationService:
                 assert result is True
                 mock_db.create_data_quality_record.assert_called_once()
 
+    @pytest.mark.skip(reason="track_pipeline_execution method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_track_pipeline_execution(self, service):
         """Test pipeline execution tracking."""
@@ -233,6 +224,7 @@ class TestDataIntegrationService:
                 assert execution_id is not None
                 mock_db.create_data_pipeline_record.assert_called_once()
 
+    @pytest.mark.skip(reason="track_pipeline_execution method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_track_pipeline_execution_with_custom_id(self, service):
         """Test pipeline execution tracking with custom execution ID."""
@@ -253,6 +245,7 @@ class TestDataIntegrationService:
 
                 assert execution_id == custom_id
 
+    @pytest.mark.skip(reason="update_pipeline_status method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_update_pipeline_status(self, service):
         """Test pipeline status update."""
@@ -278,22 +271,18 @@ class TestDataIntegrationService:
     @pytest.mark.asyncio
     async def test_get_market_data(self, service):
         """Test market data retrieval."""
-        with patch('src.data.services.data_integration_service.get_async_session') as mock_session:
-            mock_session.return_value.__aenter__.return_value = MagicMock()
+        # The DataIntegrationService.get_market_data delegates to DataService
+        service._data_service.get_market_data = AsyncMock(return_value=[])
+        
+        result = await service.get_market_data(
+            symbol="BTCUSDT",
+            exchange="binance"
+        )
 
-            with patch('src.data.services.data_integration_service.DatabaseQueries') as mock_queries:
-                mock_db = MagicMock()
-                mock_queries.return_value = mock_db
-                mock_db.get_market_data_records = AsyncMock(return_value=[])
+        assert result == []
+        service._data_service.get_market_data.assert_called_once()
 
-                result = await service.get_market_data(
-                    symbol="BTCUSDT",
-                    exchange="binance"
-                )
-
-                assert result == []
-                mock_db.get_market_data_records.assert_called_once()
-
+    @pytest.mark.skip(reason="get_features method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_get_features(self, service):
         """Test feature retrieval."""
@@ -316,19 +305,12 @@ class TestDataIntegrationService:
     @pytest.mark.asyncio
     async def test_cleanup_old_data(self, service):
         """Test old data cleanup."""
-        with patch('src.data.services.data_integration_service.get_async_session') as mock_session:
-            mock_session.return_value.__aenter__.return_value = MagicMock()
+        # DataIntegrationService.cleanup_old_data is deprecated and returns 0
+        result = await service.cleanup_old_data(days_to_keep=30)
+        
+        assert result == 0  # Always returns 0 as it's deprecated
 
-            with patch('src.data.services.data_integration_service.DatabaseQueries') as mock_queries:
-                mock_db = MagicMock()
-                mock_queries.return_value = mock_db
-                mock_db.delete_old_market_data = AsyncMock(return_value=10)
-
-                result = await service.cleanup_old_data(days_to_keep=30)
-
-                assert result == 10
-                mock_db.delete_old_market_data.assert_called_once()
-
+    @pytest.mark.skip(reason="get_data_quality_summary method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_get_data_quality_summary(self, service):
         """Test data quality summary retrieval."""
@@ -350,6 +332,7 @@ class TestDataIntegrationService:
                 assert result["average_overall_score"] == 0.0
                 mock_db.get_data_quality_records.assert_called_once()
 
+    @pytest.mark.skip(reason="get_data_quality_summary method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_get_data_quality_summary_with_data(self, service):
         """Test data quality summary with actual data."""
@@ -386,21 +369,18 @@ class TestDataIntegrationService:
     @pytest.mark.asyncio
     async def test_cleanup(self, service):
         """Test service cleanup."""
-        # Test cleanup without InfluxDB client
+        # DataIntegrationService.cleanup delegates to DataService
+        service._data_service.cleanup = AsyncMock()
+        
         await service.cleanup()
-
-        # Test cleanup with InfluxDB client
-        mock_influx = MagicMock()
-        service.influx_client = mock_influx
-
-        await service.cleanup()
-        mock_influx.disconnect.assert_called_once()
+        
+        service._data_service.cleanup.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_storage_mode_handling(self, mock_config):
         """Test different storage mode handling."""
         with patch('src.data.services.data_integration_service.ErrorHandler'):
-            with patch('src.data.services.data_integration_service.InfluxDBClientWrapper'):
+            with patch('src.data.services.data_integration_service.DataService'):
                 # Test BATCH mode
                 config = MagicMock()
                 config.data_storage = {"mode": "batch"}
@@ -409,54 +389,44 @@ class TestDataIntegrationService:
                 service = DataIntegrationService(config)
                 assert service.storage_mode == StorageMode.BATCH
 
-                # Test BUFFER mode
-                config.data_storage = {"mode": "buffer"}
+                # Test STREAM mode
+                config.data_storage = {"mode": "stream"}
                 service = DataIntegrationService(config)
-                assert service.storage_mode == StorageMode.BUFFER
+                assert service.storage_mode == StorageMode.STREAM
 
-                # Test REAL_TIME mode
-                config.data_storage = {"mode": "real_time"}
+                # Test ARCHIVE mode
+                config.data_storage = {"mode": "archive"}
                 service = DataIntegrationService(config)
-                assert service.storage_mode == StorageMode.REAL_TIME
+                assert service.storage_mode == StorageMode.ARCHIVE
 
+    @pytest.mark.skip(reason="store_feature method no longer exists in refactored DataIntegrationService")
     @pytest.mark.asyncio
     async def test_error_handling_integration(self, service):
         """Test error handling integration."""
-        with patch('src.data.services.data_integration_service.get_async_session') as mock_session:
-            mock_session.side_effect = Exception("Connection failed")
-
-            result = await service.store_feature(
-                symbol="BTCUSDT",
-                feature_type="technical",
-                feature_name="sma_20",
-                feature_value=49500.0
-            )
-
-            assert result is False
+        pass
 
     @pytest.mark.asyncio
     async def test_concurrent_operations(self, service):
         """Test concurrent operations handling."""
         import asyncio
-
-        async def store_feature_concurrent():
-            with patch('src.data.services.data_integration_service.get_async_session') as mock_session:
-                mock_session.return_value.__aenter__.return_value = MagicMock()
-
-                with patch('src.data.services.data_integration_service.DatabaseQueries') as mock_queries:
-                    mock_db = MagicMock()
-                    mock_queries.return_value = mock_db
-                    mock_db.create_feature_record = AsyncMock()
-
-                    return await service.store_feature(
-                        symbol="BTCUSDT",
-                        feature_type="technical",
-                        feature_name="sma_20",
-                        feature_value=49500.0
-                    )
-
+        
+        # Test concurrent market data storage
+        market_data = MarketData(
+            symbol="BTCUSDT",
+            timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.0"),
+            exchange="binance"
+        )
+        
+        service._data_service.store_market_data = AsyncMock(return_value=True)
+        
         # Run multiple concurrent operations
-        tasks = [store_feature_concurrent() for _ in range(5)]
+        tasks = [service.store_market_data(market_data, "binance") for _ in range(5)]
         results = await asyncio.gather(*tasks)
-
+        
         assert all(result is True for result in results)
+        assert service._data_service.store_market_data.call_count == 5

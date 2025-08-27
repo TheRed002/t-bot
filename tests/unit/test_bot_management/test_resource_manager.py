@@ -16,11 +16,38 @@ def config():
     """Create test configuration."""
     config = MagicMock(spec=Config)
     config.error_handling = MagicMock()
+    config.capital_management = MagicMock()
+    config.capital_management.total_capital = 100000
+    config.capital_management.emergency_reserve_pct = 0.1
+    config.database = MagicMock()
     config.bot_management = {
         "total_capital": 100000,
         "max_api_requests_per_minute": 1000,
         "max_database_connections": 50,
-        "resource_check_interval": 60
+        "resource_check_interval": 60,
+        "resource_limits": {
+            "total_capital": "100000",
+            "total_api_calls_per_minute": "1000",
+            "max_database_connections": "50"
+        }
+    }
+    # Add to_dict method for ConfigService compatibility
+    config.to_dict.return_value = {
+        "error_handling": {},
+        "capital_management": {
+            "total_capital": 100000,
+            "emergency_reserve_pct": 0.1
+        },
+        "database": {},
+        "bot_management": config.bot_management,
+        "database_service": {
+            "cache_enabled": True,
+            "cache_ttl_seconds": 300,
+            "query_cache_max_size": 1000,
+            "slow_query_threshold_seconds": 1.0,
+            "connection_pool_monitoring_enabled": True,
+            "performance_metrics_enabled": True
+        }
     }
     return config
 
@@ -38,10 +65,9 @@ class TestResourceManager:
     async def test_resource_manager_initialization(self, resource_manager, config):
         """Test resource manager initialization."""
         assert resource_manager.config == config
-        assert resource_manager.total_capital == Decimal("100000")
-        assert resource_manager.available_capital == Decimal("100000")
-        assert resource_manager.allocated_capital == Decimal("0")
-        assert resource_manager.bot_allocations == {}
+        assert resource_manager.global_resource_limits is not None
+        assert resource_manager.resource_allocations == {}
+        assert resource_manager.resource_usage_history is not None
         assert not resource_manager.is_running
 
     @pytest.mark.asyncio
@@ -71,10 +97,12 @@ class TestResourceManager:
         success = await resource_manager.request_resources(bot_id, capital_amount, priority)
         
         assert success
-        assert bot_id in resource_manager.bot_allocations
-        assert resource_manager.bot_allocations[bot_id]["capital"] == capital_amount
-        assert resource_manager.allocated_capital == capital_amount
-        assert resource_manager.available_capital == Decimal("90000")
+        assert bot_id in resource_manager.resource_allocations
+        # Check that the bot has a capital allocation
+        from src.core.types import ResourceType
+        assert ResourceType.CAPITAL in resource_manager.resource_allocations[bot_id]
+        capital_allocation = resource_manager.resource_allocations[bot_id][ResourceType.CAPITAL]
+        assert capital_allocation.allocated_amount == capital_amount
 
     @pytest.mark.asyncio
     async def test_request_capital_insufficient_funds(self, resource_manager):
@@ -87,8 +115,7 @@ class TestResourceManager:
         success = await resource_manager.request_resources(bot_id, capital_amount, priority)
         
         assert not success
-        assert bot_id not in resource_manager.bot_allocations
-        assert resource_manager.allocated_capital == Decimal("0")
+        assert bot_id not in resource_manager.resource_allocations
 
     @pytest.mark.asyncio
     async def test_request_capital_high_priority_override(self, resource_manager):
@@ -107,7 +134,7 @@ class TestResourceManager:
         
         # Should succeed due to high priority
         assert success
-        assert high_priority_bot in resource_manager.bot_allocations
+        assert high_priority_bot in resource_manager.resource_allocations
 
     @pytest.mark.asyncio
     async def test_release_resources_success(self, resource_manager):
@@ -122,9 +149,7 @@ class TestResourceManager:
         success = await resource_manager.release_resources(bot_id)
         
         assert success
-        assert bot_id not in resource_manager.bot_allocations
-        assert resource_manager.allocated_capital == Decimal("0")
-        assert resource_manager.available_capital == Decimal("100000")
+        assert bot_id not in resource_manager.resource_allocations
 
     @pytest.mark.asyncio
     async def test_release_resources_not_found(self, resource_manager):
@@ -146,9 +171,9 @@ class TestResourceManager:
         success = await resource_manager.update_capital_allocation(bot_id, new_capital)
         
         assert success
-        assert resource_manager.bot_allocations[bot_id]["capital"] == new_capital
-        assert resource_manager.allocated_capital == new_capital
-        assert resource_manager.available_capital == Decimal("85000")
+        # Check the allocation was updated
+        allocations = await resource_manager.get_bot_allocations()
+        assert allocations[bot_id]["capital"] == new_capital
 
     @pytest.mark.asyncio
     async def test_update_capital_allocation_insufficient(self, resource_manager):

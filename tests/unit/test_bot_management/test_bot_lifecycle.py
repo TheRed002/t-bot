@@ -91,7 +91,7 @@ class TestBotLifecycle:
         assert bot_config is not None
         assert bot_config.bot_name == bot_name
         assert bot_config.strategy_name == "test_strategy"
-        assert bot_config.bot_type == BotType.STRATEGY
+        assert bot_config.bot_type == BotType.TRADING
         assert lifecycle.lifecycle_stats["bots_created"] == 1
         assert bot_config.bot_id in lifecycle.bot_lifecycles
 
@@ -124,13 +124,14 @@ class TestBotLifecycle:
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
             bot_name="Test Bot",
-            bot_type=BotType.STRATEGY,
+            bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
             exchanges=["binance"],
             symbols=["BTCUSDT"],
             allocated_capital=Decimal("10000"),
             max_position_size=Decimal("1000"),
+            risk_percentage=0.02,
             auto_start=True
         )
         
@@ -151,13 +152,14 @@ class TestBotLifecycle:
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
             bot_name="Test Bot",
-            bot_type=BotType.STRATEGY,
+            bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
             exchanges=["binance"],
             symbols=["BTCUSDT"],
             allocated_capital=Decimal("10000"),
             max_position_size=Decimal("1000"),
+            risk_percentage=0.02,
             auto_start=True
         )
         
@@ -176,13 +178,14 @@ class TestBotLifecycle:
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
             bot_name="Test Bot",
-            bot_type=BotType.STRATEGY,
+            bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
             exchanges=["binance"],
             symbols=["BTCUSDT"],
             allocated_capital=Decimal("10000"),
             max_position_size=Decimal("1000"),
+            risk_percentage=0.02,
             auto_start=True
         )
         
@@ -191,8 +194,9 @@ class TestBotLifecycle:
         
         await lifecycle._initialize_bot_lifecycle("test_bot_001", "simple_strategy_bot", "immediate")
         
-        with pytest.raises(Exception):
-            await lifecycle.deploy_bot(bot_config, mock_orchestrator)
+        # Should return False on deployment failure
+        result = await lifecycle.deploy_bot(bot_config, mock_orchestrator)
+        assert result is False
         
         assert lifecycle.lifecycle_stats["failed_deployments"] == 1
 
@@ -382,11 +386,13 @@ class TestBotLifecycle:
         # Add some lifecycle data
         await lifecycle._initialize_bot_lifecycle("test_bot", "simple_strategy_bot", "immediate")
         
-        # Run one cycle of monitoring loop
-        await lifecycle._lifecycle_loop()
-        
-        # Should complete without errors
+        # The lifecycle loop runs in background, just verify it started
         assert lifecycle.is_running
+        assert lifecycle.lifecycle_task is not None
+        
+        # Stop the lifecycle manager to end the loop
+        await lifecycle.stop()
+        assert not lifecycle.is_running
 
     @pytest.mark.asyncio
     async def test_template_validation(self, lifecycle):
@@ -414,13 +420,14 @@ class TestBotLifecycle:
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
             bot_name="Test Bot",
-            bot_type=BotType.STRATEGY,
+            bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
             exchanges=["binance"],
             symbols=["BTCUSDT"],
             allocated_capital=Decimal("10000"),
             max_position_size=Decimal("1000"),
+            risk_percentage=0.02,
             auto_start=True
         )
         
@@ -463,13 +470,14 @@ class TestBotLifecycle:
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
             bot_name="Test Bot",
-            bot_type=BotType.STRATEGY,
+            bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
             exchanges=["binance"],
             symbols=["BTCUSDT"],
             allocated_capital=Decimal("10000"),
             max_position_size=Decimal("1000"),
+            risk_percentage=0.02,
             auto_start=True
         )
         

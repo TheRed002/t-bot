@@ -4,6 +4,7 @@ import pytest
 from decimal import Decimal
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+from pydantic import ValidationError
 
 from src.core.config import Config
 from src.core.types import (
@@ -24,6 +25,7 @@ def config():
     """Create test configuration."""
     config = MagicMock(spec=Config)
     config.error_handling = MagicMock()
+    config.execution = {"default_portfolio_value": "100000"}
     return config
 
 
@@ -268,10 +270,14 @@ class TestTWAPAlgorithm:
         sample_execution_instruction.time_horizon_minutes = 1
         
         with patch('asyncio.sleep', new_callable=AsyncMock):
-            with pytest.raises(Exception):
-                await twap_algorithm.execute(
-                    sample_execution_instruction, mock_exchange_factory, mock_risk_manager
-                )
+            result = await twap_algorithm.execute(
+                sample_execution_instruction, mock_exchange_factory, mock_risk_manager
+            )
+            
+            # When all slices fail, execution should complete with status="failed"
+            assert result.status == ExecutionStatus.FAILED
+            assert result.total_filled_quantity == Decimal("0")
+            assert result.error_message is not None
 
     @pytest.mark.asyncio
     async def test_execute_no_exchange_factory(self, twap_algorithm, sample_execution_instruction):
@@ -313,13 +319,13 @@ class TestTWAPAlgorithm:
     @pytest.mark.asyncio
     async def test_validate_instruction_invalid_order(self, twap_algorithm):
         """Test instruction validation with invalid order."""
-        instruction = ExecutionInstruction(
-            order=None,
-            algorithm=ExecutionAlgorithm.TWAP
-        )
-        
-        with pytest.raises(Exception):
-            await twap_algorithm.validate_instruction(instruction)
+        # Creating ExecutionInstruction with None order will fail Pydantic validation
+        # So we test that the Pydantic validation itself raises an error
+        with pytest.raises(ValidationError):
+            instruction = ExecutionInstruction(
+                order=None,
+                algorithm=ExecutionAlgorithm.TWAP
+            )
 
     @pytest.mark.asyncio
     async def test_validate_instruction_missing_symbol(self, twap_algorithm):

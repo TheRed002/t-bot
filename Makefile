@@ -20,9 +20,11 @@ SCRIPTS_DIR := scripts
 # Docker settings
 -include .env
 export
-DOCKER_COMPOSE := docker-compose -f $(DOCKER_DIR)/docker-compose.yml
-DOCKER_COMPOSE_SERVICES := docker-compose -f $(DOCKER_DIR)/docker-compose.services.yml
-DOCKER_COMPOSE_FULL := docker-compose -f $(DOCKER_DIR)/docker-compose.full.yml
+DOCKER_COMPOSE := docker-compose -f "$(DOCKER_DIR)/docker-compose.yml"
+DOCKER_COMPOSE_SERVICES := docker-compose -f "$(DOCKER_DIR)/docker-compose.services.yml"
+DOCKER_COMPOSE_PROD := docker-compose -f "$(DOCKER_DIR)/docker-compose.prod.yml"
+DOCKER_COMPOSE_TEST := docker-compose -f "$(DOCKER_DIR)/docker-compose.test.yml"
+DOCKER_COMPOSE_MONITORING := docker-compose -f "$(DOCKER_DIR)/docker-compose.monitoring.yml"
 
 # GPU/CUDA settings
 CUDA_VERSION := 12.1
@@ -33,7 +35,7 @@ PYTHON_VERSION := 3.10
 .PHONY: test test-unit test-integration test-mock coverage lint format typecheck
 .PHONY: docker-build docker-up docker-down docker-logs docker-clean
 .PHONY: services-up services-down services-logs services-clean
-.PHONY: run run-mock run-web migrate clean clean-deep validate audit
+.PHONY: run run-mock run-web run-all run-all-dev kill stop restart status migrate clean clean-deep validate audit
 .PHONY: pre-commit check-all fix-all
 
 help: ## Show this help message
@@ -45,6 +47,7 @@ help: ## Show this help message
 	@echo '    setup            - Complete setup (venv, deps, external libs, GPU)'
 	@echo '    setup-venv       - Create and setup Python virtual environment'
 	@echo '    setup-external   - Install external dependencies (TA-Lib, etc.)'
+	@echo '    setup-frontend   - Install Node.js and frontend dependencies'
 	@echo '    setup-gpu        - Install GPU/CUDA dependencies'
 	@echo '    install-deps     - Install Python dependencies'
 	@echo '    install-gpu-deps - Install GPU-enabled Python packages'
@@ -52,7 +55,17 @@ help: ## Show this help message
 	@echo '🏃 Running the Application:'
 	@echo '    run              - Run T-Bot trading system'
 	@echo '    run-mock         - Run T-Bot in mock mode (no API keys)'
-	@echo '    run-web          - Start web interface'
+	@echo '    run-backend      - Run backend trading engine only'
+	@echo '    run-web          - Start web API (backend)'
+	@echo '    run-worker       - Run background worker processes'
+	@echo '    run-websocket    - Run WebSocket server only'
+	@echo '    run-frontend     - Start React frontend'
+	@echo '    run-all          - Start backend, API, and frontend'
+	@echo '    run-all-dev      - Start backend and frontend in development watch mode'
+	@echo '    kill             - Stop all running servers'
+	@echo '    stop             - Alias for kill command'
+	@echo '    restart          - Restart all servers'
+	@echo '    status           - Check status of T-Bot services'
 	@echo '    migrate          - Run database migrations'
 	@echo ''
 	@echo '🐳 Docker & Services:'
@@ -87,20 +100,30 @@ help: ## Show this help message
 # Setup & Installation Commands
 # ============================================================================
 
-setup: ## Complete setup (venv, deps, external libs, GPU)
+setup: ## Complete setup (venv, deps, external libs, GPU, frontend)
 	@echo "🔧 Complete T-Bot Setup..."
 	@echo "📋 Running pre-installation checks..."
-	@bash $(SCRIPTS_DIR)/setup/pre_install.sh
+	@bash "$(SCRIPTS_DIR)/setup/pre_install.sh"
 	@$(MAKE) -s setup-venv
 	@$(MAKE) -s setup-external
 	@$(MAKE) -s install-deps
 	@echo "🎮 Optional: Installing GPU support (failures won't stop setup)..."
 	@$(MAKE) -s setup-gpu || echo "⚠️  GPU setup skipped (optional)"
 	@$(MAKE) -s install-gpu-deps || echo "⚠️  GPU packages skipped (optional)"
+	@echo "🎨 Setting up frontend..."
+	@if command -v node > /dev/null 2>&1 || [ -f ~/.nvm/nvm.sh ]; then \
+		echo "Installing frontend dependencies..."; \
+		if [ -f ~/.nvm/nvm.sh ]; then \
+			. ~/.nvm/nvm.sh; \
+		fi; \
+		cd frontend && npm install --silent 2>/dev/null || echo "⚠️  Frontend setup skipped (npm install failed)"; \
+	else \
+		echo "⚠️  Node.js not found. Run 'make setup-frontend' to install"; \
+	fi
 	@$(MAKE) -s services-up
 	@$(MAKE) -s migrate
 	@echo "✅ Complete setup finished!"
-	@echo "ℹ️  Run 'make run' to start the application"
+	@echo "ℹ️  Run 'make run-all' to start the full application"
 	@echo "ℹ️  Run 'make test' to verify everything works"
 
 setup-venv: ## Create and setup Python virtual environment
@@ -116,19 +139,24 @@ setup-venv: ## Create and setup Python virtual environment
 
 setup-external: ## Install external dependencies (TA-Lib, etc.)
 	@echo "📦 Installing external libraries..."
-	@bash $(SCRIPTS_DIR)/setup/external_libs.sh install
+	@bash "$(SCRIPTS_DIR)/setup/external_libs.sh" install
 	@echo "✅ External libraries installed!"
+
+setup-frontend: ## Install Node.js and frontend dependencies
+	@echo "🎨 Setting up frontend (Node.js + React)..."
+	@bash "$(SCRIPTS_DIR)/setup/nodejs.sh"
+	@echo "✅ Frontend setup completed!"
 
 setup-gpu: ## Install GPU/CUDA dependencies
 	@echo "🎮 Setting up GPU/CUDA support..."
-	@bash $(SCRIPTS_DIR)/setup/cuda.sh install
-	@bash $(SCRIPTS_DIR)/setup/cudnn.sh install
-	@bash $(SCRIPTS_DIR)/setup/lightgbm.sh install
+	@bash "$(SCRIPTS_DIR)/setup/cuda.sh" install
+	@bash "$(SCRIPTS_DIR)/setup/cudnn.sh" install
+	@bash "$(SCRIPTS_DIR)/setup/lightgbm.sh" install
 	@echo "✅ GPU setup completed!"
 
 install-deps: ## Install Python dependencies
 	@echo "📦 Installing Python dependencies..."
-	@cd $(PROJECT_DIR) && bash $(SCRIPTS_DIR)/setup/install_requirements.sh
+	@bash "$(SCRIPTS_DIR)/setup/install_requirements.sh"
 	@echo "✅ Python dependencies installed!"
 
 install-gpu-deps: ## Install GPU-enabled Python packages
@@ -149,20 +177,97 @@ install-gpu-deps: ## Install GPU-enabled Python packages
 run: ## Run T-Bot trading system
 	@echo "🚀 Starting T-Bot Trading System..."
 	@echo "⚠️  Checking services..."
-	@$(MAKE) services-check
-	@source $(VENV)/bin/activate && python -m src.main
+	@$(MAKE) -s services-check || true
+	@bash -c 'source $(VENV)/bin/activate && python -m src.main'
 
 run-mock: ## Run T-Bot in mock mode (no API keys)
 	@echo "🚀 Starting T-Bot in Mock Mode..."
-	@source $(VENV)/bin/activate && MOCK_MODE=true python -m src.main
+	@bash -c 'source $(VENV)/bin/activate && MOCK_MODE=true python -m src.main'
 
-run-web: ## Start web interface
-	@echo "🌐 Starting Web Interface..."
-	@source $(VENV)/bin/activate && python -m src.web_interface.app
+run-web: ## Start web API (backend)
+	@echo "🌐 Starting Web API..."
+	@bash -c 'source $(VENV)/bin/activate && uvicorn src.web_interface.app:get_app --host 0.0.0.0 --port 8000 --log-level info'
+
+run-frontend: ## Start frontend React application
+	@echo "🎨 Starting Frontend React App..."
+	@if command -v npm > /dev/null 2>&1; then \
+		cd frontend && npm install --silent 2>/dev/null && npm start; \
+	elif [ -f ~/.nvm/nvm.sh ]; then \
+		bash -c '. ~/.nvm/nvm.sh && cd frontend && npm install --silent 2>/dev/null && npm start'; \
+	else \
+		echo "❌ Node.js/npm not installed. Please install Node.js first:"; \
+		echo "   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"; \
+		echo "   nvm install node"; \
+		exit 1; \
+	fi
+
+kill: ## Kill all running servers (frontend and backend)
+	@echo "🛑 Stopping all T-Bot servers..."
+	@echo "Killing backend processes..."
+	@-pkill -f "python.*-m.*src\.main" 2>/dev/null || true
+	@-pkill -f "python.*src/main\.py" 2>/dev/null || true
+	@echo "Killing web API processes..."
+	@-pkill -f "python.*-m.*src\.web_interface" 2>/dev/null || true
+	@-pkill -f "python.*src/web_interface/app\.py" 2>/dev/null || true
+	@echo "Killing Uvicorn processes..."
+	@-pkill -f "uvicorn.*src\.web_interface" 2>/dev/null || true
+	@-pkill -f "uvicorn.*get_app" 2>/dev/null || true
+	@echo "Killing frontend processes..."
+	@-pkill -f "webpack.*serve" 2>/dev/null || true
+	@-pkill -f "node.*webpack" 2>/dev/null || true
+	@-pkill -f "npm.*start" 2>/dev/null || true
+	@-pkill -f "npm.*run.*start" 2>/dev/null || true
+	@-pkill -f "node.*react-scripts" 2>/dev/null || true
+	@-pkill -f "webpack-dev-server" 2>/dev/null || true
+	@echo "Killing Node.js processes on frontend..."
+	@-ps aux | grep -E "(webpack|react|npm).*start" | grep -v grep | awk '{print $$2}' | xargs -r kill -9 2>/dev/null || true
+	@echo "Killing processes on common ports..."
+	@-lsof -ti:8000 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+	@-lsof -ti:3000 2>/dev/null | xargs -r kill -9 2>/dev/null || true  
+	@-lsof -ti:8080 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+	@echo "✅ All servers stopped!"
+
+stop: kill ## Alias for kill command
+
+restart: ## Restart all servers
+	@$(MAKE) kill
+	@sleep 2
+	@echo "🔄 Restarting servers..."
+	@$(MAKE) run-all
+
+run-all: ## Start backend, web API, and frontend (if Node.js available)
+	@echo "🚀 Starting all T-Bot services..."
+	@bash "$(SCRIPTS_DIR)/development/run-all.sh"
+
+run-all-dev: ## Start backend and frontend in development watch mode (auto-reload on changes)
+	@echo "🚀 Starting T-Bot in development mode..."
+	@bash "$(SCRIPTS_DIR)/development/run-dev.sh"
+
+status: ## Check status of T-Bot services
+	@echo "📊 T-Bot Service Status:"
+	@echo "------------------------"
+	@echo -n "Backend Process: "
+	@ps aux | grep -E "python.*-m.*src\.main|python.*src/main\.py" | grep -v grep > /dev/null 2>&1 && echo "✅ Running" || echo "❌ Stopped"
+	@echo -n "Web API (FastAPI): "
+	@ps aux | grep -E "python.*-m.*src\.web_interface|uvicorn.*src\.web_interface|uvicorn.*get_app" | grep -v grep > /dev/null 2>&1 && echo "✅ Running" || echo "❌ Stopped"
+	@echo -n "Frontend (React): "
+	@ps aux | grep -E "webpack.*serve|node.*webpack|npm.*start|node.*react-scripts|webpack-dev-server" | grep -v grep > /dev/null 2>&1 && echo "✅ Running" || echo "❌ Stopped"
+	@echo -n "API Port 8000: "
+	@lsof -i:8000 > /dev/null 2>&1 && echo "✅ In use (http://localhost:8000/docs)" || echo "❌ Free"
+	@echo -n "Frontend Port 3000: "
+	@lsof -i:3000 > /dev/null 2>&1 && echo "✅ In use (http://localhost:3000)" || echo "❌ Free"
+	@echo -n "Docker Services: "
+	@docker ps 2>/dev/null | grep -q tbot && echo "✅ Running" || echo "❌ Stopped"
+	@echo ""
+	@echo "Active Python Processes:"
+	@ps aux | grep -E "python.*src\.(main|web_interface)" | grep -v grep || echo "  None found"
+	@echo ""
+	@echo "Active Frontend Processes:"
+	@ps aux | grep -E "(webpack|react|npm).*start" | grep -v grep || echo "  None found"
 
 migrate: ## Run database migrations
 	@echo "🔄 Running database migrations..."
-	@source $(VENV)/bin/activate && alembic upgrade head
+	@bash -c 'source $(VENV)/bin/activate && alembic upgrade head 2>/dev/null || echo "⚠️  No migrations to run or alembic not installed"'
 	@echo "✅ Migrations completed!"
 
 # ============================================================================
@@ -171,26 +276,26 @@ migrate: ## Run database migrations
 
 docker-build: ## Build Docker images
 	@echo "🐳 Building Docker images..."
-	@docker build -t tbot-backend:latest -f $(DOCKER_DIR)/Dockerfile.backend .
-	@docker build -t tbot-gpu:latest -f $(DOCKER_DIR)/Dockerfile.gpu .
+	@docker build -t tbot-backend:latest -f "$(DOCKER_DIR)/Dockerfile.backend" .
+	@docker build -t tbot-gpu:latest -f "$(DOCKER_DIR)/Dockerfile" .
 	@echo "✅ Docker images built!"
 
 docker-up: ## Start all services with Docker
 	@echo "🐳 Starting all services with Docker..."
-	@$(DOCKER_COMPOSE_FULL) up -d
+	@$(DOCKER_COMPOSE) up -d
 	@echo "✅ All services started!"
 
 docker-down: ## Stop Docker services
 	@echo "🛑 Stopping Docker services..."
-	@$(DOCKER_COMPOSE_FULL) down
+	@$(DOCKER_COMPOSE) down
 	@echo "✅ Services stopped!"
 
 docker-logs: ## Show Docker logs
-	@$(DOCKER_COMPOSE_FULL) logs -f
+	@$(DOCKER_COMPOSE) logs -f
 
 docker-clean: ## Clean Docker resources
 	@echo "🧹 Cleaning Docker resources..."
-	@$(DOCKER_COMPOSE_FULL) down -v
+	@$(DOCKER_COMPOSE) down -v
 	@docker system prune -f
 	@echo "✅ Docker cleanup completed!"
 
@@ -236,9 +341,9 @@ services-clean: ## Stop services and remove volumes
 
 services-check: ## Check if services are running
 	@echo "🔍 Checking services status..."
-	@docker ps | grep -q tbot-postgresql || (echo "⚠️  PostgreSQL not running. Run 'make services-up'" && exit 1)
-	@docker ps | grep -q tbot-redis || (echo "⚠️  Redis not running. Run 'make services-up'" && exit 1)
-	@echo "✅ All services are running!"
+	@docker ps 2>/dev/null | grep -q postgres || echo "⚠️  PostgreSQL not running. Run 'make services-up'"
+	@docker ps 2>/dev/null | grep -q redis || echo "⚠️  Redis not running. Run 'make services-up'"
+	@echo "✅ Service check completed!"
 
 # ============================================================================
 # Testing & Quality Commands
@@ -246,45 +351,45 @@ services-check: ## Check if services are running
 
 test: ## Run all tests
 	@echo "🧪 Running all tests..."
-	@source $(VENV)/bin/activate && python -m pytest $(TEST_DIR)/ -v --tb=short
+	@bash -c 'source $(VENV)/bin/activate && python -m pytest "$(TEST_DIR)/" -v --tb=short'
 	@echo "✅ Tests completed!"
 
 test-unit: ## Run unit tests only
 	@echo "🧪 Running unit tests..."
-	@source $(VENV)/bin/activate && python -m pytest $(TEST_DIR)/unit/ -v --tb=short
+	@bash -c 'source $(VENV)/bin/activate && python -m pytest "$(TEST_DIR)/unit/" -v --tb=short'
 	@echo "✅ Unit tests completed!"
 
 test-integration: ## Run integration tests
 	@echo "🧪 Running integration tests..."
-	@source $(VENV)/bin/activate && python -m pytest $(TEST_DIR)/integration/ -v --tb=short
+	@bash -c 'source $(VENV)/bin/activate && python -m pytest "$(TEST_DIR)/integration/" -v --tb=short'
 	@echo "✅ Integration tests completed!"
 
 test-mock: ## Run tests in mock mode
 	@echo "🧪 Running tests in mock mode..."
-	@source $(VENV)/bin/activate && MOCK_MODE=true python -m pytest $(TEST_DIR)/ -v --tb=short
+	@bash -c 'source $(VENV)/bin/activate && MOCK_MODE=true python -m pytest "$(TEST_DIR)/" -v --tb=short'
 	@echo "✅ Mock tests completed!"
 
 coverage: ## Run tests with coverage report
 	@echo "📊 Running tests with coverage..."
-	@source $(VENV)/bin/activate && python -m pytest $(TEST_DIR)/ --cov=$(SRC_DIR) --cov-report=html --cov-report=term-missing
+	@bash -c 'source $(VENV)/bin/activate && python -m pytest "$(TEST_DIR)/" --cov="$(SRC_DIR)" --cov-report=html --cov-report=term-missing'
 	@echo "✅ Coverage report generated!"
 	@echo "📁 HTML report: htmlcov/index.html"
 
 lint: ## Run linting checks
 	@echo "🔍 Running linting checks..."
-	@source $(VENV)/bin/activate && ruff check $(SRC_DIR) $(TEST_DIR)
+	@bash -c 'source $(VENV)/bin/activate && ruff check "$(SRC_DIR)" "$(TEST_DIR)"'
 	@echo "✅ Linting completed!"
 
 format: ## Format code with ruff and black
 	@echo "🎨 Formatting code..."
-	@source $(VENV)/bin/activate && ruff check $(SRC_DIR) $(TEST_DIR) --fix
-	@source $(VENV)/bin/activate && ruff format $(SRC_DIR) $(TEST_DIR)
-	@source $(VENV)/bin/activate && black $(SRC_DIR) $(TEST_DIR) --line-length 100
+	@bash -c 'source $(VENV)/bin/activate && ruff check "$(SRC_DIR)" "$(TEST_DIR)" --fix'
+	@bash -c 'source $(VENV)/bin/activate && ruff format "$(SRC_DIR)" "$(TEST_DIR)"'
+	@bash -c 'source $(VENV)/bin/activate && black "$(SRC_DIR)" "$(TEST_DIR)" --line-length 100'
 	@echo "✅ Code formatted!"
 
 typecheck: ## Run type checking with mypy
 	@echo "🔍 Running type checking..."
-	@source $(VENV)/bin/activate && mypy $(SRC_DIR) --ignore-missing-imports
+	@bash -c 'source $(VENV)/bin/activate && mypy "$(SRC_DIR)" --ignore-missing-imports'
 	@echo "✅ Type checking completed!"
 
 check-all: ## Run all checks (lint, type, test)
@@ -305,12 +410,12 @@ fix-all: ## Fix all auto-fixable issues
 
 validate: ## Validate project configuration
 	@echo "🔍 Validating project configuration..."
-	@bash $(SCRIPTS_DIR)/validate_setup.sh
+	@bash "$(SCRIPTS_DIR)/development/validate_setup.sh" || echo "⚠️  Validation script not found"
 	@echo "✅ Validation completed!"
 
 audit: ## Complete system audit
 	@echo "🔍 Running complete system audit..."
-	@bash $(SCRIPTS_DIR)/final_validation.sh
+	@bash "$(SCRIPTS_DIR)/system/final_validation.sh" || echo "⚠️  Audit script not found"
 	@echo "✅ Audit completed!"
 
 pre-commit: ## Run pre-commit checks

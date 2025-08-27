@@ -7,6 +7,7 @@ T-Bot is a cryptocurrency trading bot with multiple exchange integrations, risk 
 - **Python Version**: 3.10.12
 - **Virtual Environment**: WSL Ubuntu at `~/.venv/bin/activate`
 - **Working Directory**: `/mnt/e/Work/P-41 Trading/code/t-bot`
+- **Setup tool**: `make`, `export PATH="$HOME/.nvm/versions/node/v18.19.0/bin:$PATH`
 
 ## Critical Commands
 These commands should be run automatically when making code changes:
@@ -36,7 +37,7 @@ wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/a
 wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && pytest tests/integration/ -v"
 ```
 
-## Code Quality Agents
+## Code Agents
 
 ### 1. Formatting Agent
 **Purpose**: Automatically format code according to project standards
@@ -76,6 +77,11 @@ find src/ -name "*.py" | xargs -P 4 -n 10 bash -c 'for file; do ruff format "$fi
 ```bash
 wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && pylint src/ --disable=all --enable=duplicate-code"
 ```
+**MENDATORY**: Always use specialized agents when available for a specific task. 
+
+### 5. Frontend inspector Agent via Playwright
+**Purpose**: Identify and fix UI related issues by inspecting UI and console logs
+
 
 ## Batch Processing Strategy
 
@@ -132,29 +138,6 @@ wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/a
 - Risk per trade must not exceed configured percentage
 - Total exposure must stay within portfolio limits
 
+## Directories
+- If you want to generate any image, code, logs, summary or anything which is not related to production project, please save them in .claude_experiments directory at project root so that we don't clutter the actual code. 
 
-Current Task:
-Requirement already satisfied: pygments<3.0.0,>=2.13.0 in /home/bbc/.venv/lib/python3.10/site-packages (from rich->keras>=3.10.0->tensorflow[and-cuda]) (2.19.2)
-Requirement already satisfied: mdurl~=0.1 in /home/bbc/.venv/lib/python3.10/site-packages (from markdown-it-py>=2.2.0->rich->keras>=3.10.0->tensorflow[and-cuda]) (0.1.2)
-Downloading tensorflow-2.20.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (620.4 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 620.4/620.4 MB 5.7 MB/s  0:01:13
-Downloading tensorboard-2.20.0-py3-none-any.whl (5.5 MB)
-   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.5/5.5 MB 8.1 MB/s  0:00:00
-Installing collected packages: tensorboard, tensorflow
-  Attempting uninstall: tensorboard
-    Found existing installation: tensorboard 2.19.0
-    Uninstalling tensorboard-2.19.0:
-      Successfully uninstalled tensorboard-2.19.0
-  Attempting uninstall: tensorflow
-    Found existing installation: tensorflow 2.19.0
-    Uninstalling tensorflow-2.19.0:
-      Successfully uninstalled tensorflow-2.19.0
-Successfully installed tensorboard-2.20.0 tensorflow-2.20.0
-Requirement already satisfied: cupy-cuda12x in /home/bbc/.venv/lib/python3.10/site-packages (13.5.1)
-Requirement already satisfied: numpy<2.6,>=1.22 in /home/bbc/.venv/lib/python3.10/site-packages (from cupy-cuda12x) (2.1.3)
-Requirement already satisfied: fastrlock>=0.5 in /home/bbc/.venv/lib/python3.10/site-packages (from cupy-cuda12x) (0.8.3)
-ERROR: Could not find a version that satisfies the requirement rapids-cuda12 (from versions: none)
-ERROR: No matching distribution found for rapids-cuda12
-make[1]: *** [Makefile:138: install-gpu-deps] Error 1
-make[1]: Leaving directory '/mnt/e/Work/P-41 Trading/code/t-bot'
-make: *** [Makefile:98: setup] Error 2

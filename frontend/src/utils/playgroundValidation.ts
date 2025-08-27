@@ -3,7 +3,7 @@
  * Provides comprehensive validation for playground configurations and parameters
  */
 
-import { PlaygroundConfiguration, PlaygroundExecution } from '@/types';
+import { PlaygroundConfiguration, PlaygroundExecution, PositionSizeMethod } from '@/types';
 
 export interface ValidationError {
   field: string;
@@ -85,7 +85,7 @@ export const validatePlaygroundConfiguration = (config: PlaygroundConfiguration)
       });
     }
 
-    if (config.positionSizing.type === 'percentage' && config.positionSizing.value > 50) {
+    if (config.positionSizing.method === PositionSizeMethod.PERCENTAGE && config.positionSizing.value > 50) {
       warnings.push({
         field: 'positionSizing.value',
         message: 'Position size greater than 50% of portfolio is high risk',
@@ -93,7 +93,7 @@ export const validatePlaygroundConfiguration = (config: PlaygroundConfiguration)
       });
     }
 
-    if (config.positionSizing.type === 'fixed' && config.positionSizing.value < 10) {
+    if (config.positionSizing.method === PositionSizeMethod.FIXED && config.positionSizing.value < 10) {
       warnings.push({
         field: 'positionSizing.value',
         message: 'Very small fixed position sizes may not be practical due to fees',

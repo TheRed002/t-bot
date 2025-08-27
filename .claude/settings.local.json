@@ -1,4 +1,8 @@
 {
+  "env": {
+    "BASH_DEFAULT_TIMEOUT_MS": "900000",
+    "BASH_MAX_TIMEOUT_MS": "900000"
+  },
   "permissions": {
     "allow": [
       "Bash(python:*)",
@@ -79,9 +83,21 @@
       "Bash(cd:*)",
       "Bash(export:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(pkill:*)",
+      "Bash(true)",
+      "Bash(timeout 10 python -m pytest tests/unit/test_bot_management/ -xvs)",
+      "Bash(timeout 30 python -m pytest tests/unit/test_bot_management/ -v --tb=no)",
+      "Bash(ruff check:*)",
+      "Bash(ruff format:*)",
+      "Bash(pytest:*)",
+      "Bash(timeout 60 pytest tests/unit/test_database/ --tb=no -q)",
+      "Bash(timeout 10 python -m pytest:*)"
     ],
     "deny": [],
-    "ask": []
+    "ask": [],
+    "additionalDirectories": [
+      "/mnt/e/Work"
+    ]
   }
 }

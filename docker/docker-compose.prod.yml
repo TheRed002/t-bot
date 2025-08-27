@@ -1,0 +1,827 @@
+# Docker Compose for T-Bot Production Environment
+# Institutional-grade deployment with security hardening, monitoring, and high availability
+
+version: '3.8'
+
+services:
+  # ==============================================================================
+  # Core Trading Services - Production Configuration
+  # ==============================================================================
+
+  # Main Trading Engine - Primary Instance
+  trading-engine-primary:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.trading-engine
+      target: production
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+        - BUILD_DATE=${BUILD_DATE}
+        - VCS_REF=${VCS_REF}
+    image: tbot/trading-engine:${VERSION:-latest}
+    container_name: tbot-trading-engine-primary
+    hostname: trading-engine-primary
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      - NODE_ENV=production
+      - DEBUG=false
+      - MOCK_MODE=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TRADING_MODE=live
+      - INSTANCE_ID=primary
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgresql-primary:5432/${DB_NAME}
+      - DATABASE_REPLICA_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgresql-replica:5432/${DB_NAME}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-cluster:6379/0
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - INFLUXDB_ORG=${INFLUXDB_ORG}
+      - INFLUXDB_BUCKET=${INFLUXDB_BUCKET}
+      # Security settings
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - API_KEY_ENCRYPTION=${API_KEY_ENCRYPTION}
+      # Resource limits
+      - MAX_MEMORY=4096
+      - MAX_CPU=4.0
+      - TRADING_ENGINE_WORKERS=4
+    volumes:
+      - trading_data:/app/data:rw
+      - trading_models:/app/models:rw
+      - trading_state:/app/state:rw
+      - trading_logs:/app/logs:rw
+      - trading_config:/app/config/runtime:rw
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    secrets:
+      - exchange_api_keys
+      - database_credentials
+      - jwt_secrets
+    depends_on:
+      postgresql-primary:
+        condition: service_healthy
+      redis-cluster:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+    networks:
+      - tbot-network
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8001/health', timeout=10)"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 120s
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4.0'
+        reservations:
+          memory: 2G
+          cpus: '2.0'
+      restart_policy:
+        condition: unless-stopped
+        delay: 30s
+        max_attempts: 3
+        window: 120s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        labels: "service=trading-engine,instance=primary"
+
+  # Trading Engine - Secondary Instance (Standby)
+  trading-engine-secondary:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.trading-engine
+      target: production
+    image: tbot/trading-engine:${VERSION:-latest}
+    container_name: tbot-trading-engine-secondary
+    hostname: trading-engine-secondary
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DEBUG=false
+      - MOCK_MODE=false
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TRADING_MODE=standby
+      - INSTANCE_ID=secondary
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgresql-replica:5432/${DB_NAME}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-cluster:6379/0
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+    volumes:
+      - trading_data:/app/data:ro
+      - trading_models:/app/models:ro
+      - trading_state:/app/state:rw
+      - secondary_logs:/app/logs:rw
+    secrets:
+      - exchange_api_keys
+      - database_credentials
+    depends_on:
+      - postgresql-replica
+      - redis-cluster
+    networks:
+      - tbot-network
+    profiles:
+      - ha
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+
+  # Web API Service - Load Balanced
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+      target: production
+    image: tbot/backend:${VERSION:-latest}
+    hostname: backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DEBUG=false
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgresql-primary:5432/${DB_NAME}
+      - DATABASE_REPLICA_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgresql-replica:5432/${DB_NAME}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-cluster:6379/1
+      - INFLUXDB_URL=http://influxdb:8086
+      - INFLUXDB_TOKEN=${INFLUXDB_TOKEN}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - API_RATE_LIMIT=1000
+      - MAX_WORKERS=8
+    volumes:
+      - backend_logs:/app/logs:rw
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+    secrets:
+      - database_credentials
+      - jwt_secrets
+    depends_on:
+      postgresql-primary:
+        condition: service_healthy
+      redis-cluster:
+        condition: service_healthy
+    networks:
+      - tbot-network
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      mode: replicated
+      replicas: 3
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+      update_config:
+        parallelism: 1
+        delay: 30s
+        failure_action: rollback
+        monitor: 60s
+        max_failure_ratio: 0.1
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        monitor: 60s
+      restart_policy:
+        condition: unless-stopped
+        delay: 10s
+        max_attempts: 3
+        window: 120s
+
+  # WebSocket Service - High Performance
+  websocket:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.websocket
+      target: production
+    image: tbot/websocket:${VERSION:-latest}
+    hostname: websocket
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8002:8002"
+      - "127.0.0.1:8003:8003"
+    environment:
+      - NODE_ENV=production
+      - DEBUG=false
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis-cluster:6379/2
+      - WEBSOCKET_MAX_CONNECTIONS=50000
+      - WEBSOCKET_WORKERS=8
+    volumes:
+      - websocket_logs:/app/logs:rw
+    secrets:
+      - redis_credentials
+    depends_on:
+      - redis-cluster
+    networks:
+      - tbot-network
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "python", "-c", "import asyncio, websockets; asyncio.run(websockets.connect('ws://localhost:8002/health').close())"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      mode: replicated
+      replicas: 2
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '1.0'
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # Background Workers - Distributed Processing
+  workers:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.workers
+      target: production
+    image: tbot/workers:${VERSION:-latest}
+    hostname: workers
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis-cluster:6379/3
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis-cluster:6379/3
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@postgresql-primary:5432/${DB_NAME}
+      - CELERY_WORKER_CONCURRENCY=8
+      - CELERY_WORKER_MAX_TASKS_PER_CHILD=500
+      - ML_TRAINING_MODE=production
+    volumes:
+      - worker_logs:/app/logs:rw
+      - ml_models:/app/models:rw
+      - ml_data:/app/data:rw
+    secrets:
+      - database_credentials
+      - redis_credentials
+    depends_on:
+      - redis-cluster
+      - postgresql-primary
+    networks:
+      - tbot-network
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "celery", "-A", "src.ml.training.trainer", "inspect", "ping"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 180s
+    deploy:
+      mode: replicated
+      replicas: 4
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4.0'
+        reservations:
+          memory: 2G
+          cpus: '2.0'
+
+  # Frontend - Production Web Server
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+      target: production
+    image: tbot/frontend:${VERSION:-latest}
+    hostname: frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - NGINX_WORKER_PROCESSES=auto
+      - NGINX_WORKER_CONNECTIONS=4096
+    volumes:
+      - frontend_logs:/var/log/nginx:rw
+      - ssl_certificates:/etc/ssl/certs:ro
+      - ssl_private_keys:/etc/ssl/private:ro
+    networks:
+      - tbot-network
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      mode: replicated
+      replicas: 2
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # ==============================================================================
+  # Database Services - High Availability Configuration
+  # ==============================================================================
+
+  # Primary PostgreSQL Database
+  postgresql-primary:
+    image: postgres:15-alpine
+    container_name: tbot-postgresql-primary
+    hostname: postgresql-primary
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_REPLICATION_USER: ${DB_REPLICATION_USER}
+      POSTGRES_REPLICATION_PASSWORD: ${DB_REPLICATION_PASSWORD}
+      PGUSER: ${DB_USER}
+    volumes:
+      - postgresql_primary_data:/var/lib/postgresql/data
+      - postgresql_backups:/backups
+      - ./configs/postgresql-primary.conf:/etc/postgresql/postgresql.conf:ro
+      - ./configs/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./scripts/postgresql-primary-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    secrets:
+      - database_credentials
+    networks:
+      - tbot-network
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME} && pg_is_in_recovery || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4.0'
+        reservations:
+          memory: 4G
+          cpus: '2.0'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # Replica PostgreSQL Database
+  postgresql-replica:
+    image: postgres:15-alpine
+    container_name: tbot-postgresql-replica
+    hostname: postgresql-replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PRIMARY_HOST: postgresql-primary
+      POSTGRES_REPLICATION_USER: ${DB_REPLICATION_USER}
+      POSTGRES_REPLICATION_PASSWORD: ${DB_REPLICATION_PASSWORD}
+      PGUSER: ${DB_USER}
+    volumes:
+      - postgresql_replica_data:/var/lib/postgresql/data
+      - ./configs/postgresql-replica.conf:/etc/postgresql/postgresql.conf:ro
+      - ./scripts/postgresql-replica-init.sh:/docker-entrypoint-initdb.d/01-init.sh:ro
+    command: >
+      postgres
+      -c config_file=/etc/postgresql/postgresql.conf
+    secrets:
+      - database_credentials
+    depends_on:
+      - postgresql-primary
+    networks:
+      - tbot-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME} && pg_is_in_recovery"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    profiles:
+      - ha
+
+  # Redis Cluster
+  redis-cluster:
+    image: redis:7-alpine
+    container_name: tbot-redis-cluster
+    hostname: redis-cluster
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    command: >
+      sh -c "redis-server
+      --requirepass $${REDIS_PASSWORD}
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 4gb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --tcp-keepalive 60
+      --timeout 300
+      --tcp-backlog 511
+      --databases 16"
+    volumes:
+      - redis_data:/data
+      - redis_config:/etc/redis
+    secrets:
+      - redis_credentials
+    networks:
+      - tbot-network
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+
+  # InfluxDB - Time Series Database
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: tbot-influxdb-prod
+    hostname: influxdb
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_ADMIN_USER}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN}
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+      - influxdb_config:/etc/influxdb2
+      - influxdb_backups:/backups
+    secrets:
+      - influxdb_credentials
+    networks:
+      - tbot-network
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+
+  # ==============================================================================
+  # Monitoring Stack
+  # ==============================================================================
+
+  # Prometheus - Metrics Collection
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: tbot-prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=90d'
+      - '--storage.tsdb.retention.size=50GB'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    networks:
+      - tbot-monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Grafana - Visualization and Dashboards
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: tbot-grafana
+    hostname: grafana
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_SERVER_ROOT_URL=https://${DOMAIN}/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - grafana_data:/var/lib/grafana
+    secrets:
+      - grafana_credentials
+    networks:
+      - tbot-monitoring
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # ==============================================================================
+  # Load Balancer
+  # ==============================================================================
+
+  # HAProxy - Load Balancer and SSL Termination
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: tbot-haproxy
+    hostname: haproxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:8404:8404"  # Stats page
+    volumes:
+      - ./configs/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ssl_certificates:/etc/ssl/certs:ro
+      - ssl_private_keys:/etc/ssl/private:ro
+      - haproxy_logs:/var/log/haproxy:rw
+    secrets:
+      - ssl_certificates
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - tbot-network
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8404/stats"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+# ==============================================================================
+# Secrets Management
+# ==============================================================================
+secrets:
+  exchange_api_keys:
+    external: true
+  database_credentials:
+    external: true
+  redis_credentials:
+    external: true
+  influxdb_credentials:
+    external: true
+  jwt_secrets:
+    external: true
+  grafana_credentials:
+    external: true
+  ssl_certificates:
+    external: true
+
+# ==============================================================================
+# Volumes - Production Data Storage
+# ==============================================================================
+volumes:
+  # Database volumes with backup configuration
+  postgresql_primary_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/postgresql/primary
+  postgresql_replica_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/postgresql/replica
+  postgresql_backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/backups/postgresql
+  
+  # Redis data
+  redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/redis
+  redis_config:
+    driver: local
+  
+  # InfluxDB data
+  influxdb_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/influxdb
+  influxdb_config:
+    driver: local
+  influxdb_backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/backups/influxdb
+  
+  # Application data
+  trading_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/trading
+  trading_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/models
+  trading_state:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/state
+  trading_config:
+    driver: local
+  
+  # ML data
+  ml_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/ml/models
+  ml_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/ml/data
+  
+  # Monitoring data
+  prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/prometheus
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/data/grafana
+  
+  # Log volumes
+  trading_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/logs/trading
+  backend_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/logs/backend
+  websocket_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/logs/websocket
+  worker_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/logs/workers
+  frontend_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/logs/frontend
+  haproxy_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/logs/haproxy
+  secondary_logs:
+    driver: local
+  
+  # SSL certificates
+  ssl_certificates:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/ssl/certs
+  ssl_private_keys:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/ssl/private
+
+# ==============================================================================
+# Networks - Production Network Configuration
+# ==============================================================================
+networks:
+  tbot-network:
+    driver: bridge
+    name: tbot-prod-network
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.22.0.0/16
+          gateway: 172.22.0.1
+    driver_opts:
+      com.docker.network.bridge.name: tbot-prod-br0
+      com.docker.network.driver.mtu: 1500
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+
+  tbot-monitoring:
+    driver: bridge
+    name: tbot-monitoring-network
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.23.0.0/16
+          gateway: 172.23.0.1
+    driver_opts:
+      com.docker.network.bridge.name: tbot-monitor-br0

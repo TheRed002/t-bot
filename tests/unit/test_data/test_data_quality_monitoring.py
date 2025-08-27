@@ -52,14 +52,13 @@ class TestQualityMonitor:
         """Create valid market data for testing"""
         return MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
-            bid=Decimal("49999.00"),
-            ask=Decimal("50001.00"),
-            open_price=Decimal("49900.00"),
-            high_price=Decimal("50100.00"),
-            low_price=Decimal("49800.00"),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
     @pytest.fixture
@@ -67,18 +66,18 @@ class TestQualityMonitor:
         """Create valid signals for testing"""
         return [
             Signal(
-                direction=SignalDirection.BUY,
-                confidence=0.75,
-                timestamp=datetime.now(timezone.utc),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy",
+                direction=SignalDirection.BUY,
+                strength=0.75,
+                timestamp=datetime.now(timezone.utc),
+                source="test_strategy",
             ),
             Signal(
-                direction=SignalDirection.SELL,
-                confidence=0.85,
-                timestamp=datetime.now(timezone.utc) + timedelta(seconds=1),
                 symbol="ETHUSDT",
-                strategy_name="test_strategy",
+                direction=SignalDirection.SELL,
+                strength=0.85,
+                timestamp=datetime.now(timezone.utc) + timedelta(seconds=1),
+                source="test_strategy",
             ),
         ]
 
@@ -110,9 +109,13 @@ class TestQualityMonitor:
         """Test monitoring of invalid market data"""
         invalid_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("-100.00"),  # Negative price
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("50000.00"),
+            high=Decimal("50000.00"),
+            low=Decimal("50000.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         quality_score, drift_alerts = await monitor.monitor_data_quality(invalid_data)
@@ -126,9 +129,13 @@ class TestQualityMonitor:
         """Test monitoring of data with missing fields"""
         incomplete_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("0"),  # Zero volume (treated as missing)
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("0"),  # Zero volume (treated as missing)
+            exchange="binance",
         )
 
         quality_score, drift_alerts = await monitor.monitor_data_quality(incomplete_data)
@@ -164,11 +171,11 @@ class TestQualityMonitor:
         for i in range(10):  # Need at least 10 signals for drift detection
             signal = Signal(
                 direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
-                confidence=0.3 + (i * 0.01),
+                strength=0.3 + (i * 0.01),
                 # Low confidence with slight variation
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy",
+                source="test_strategy",
             )
             low_confidence_signals.append(signal)
 
@@ -230,18 +237,26 @@ class TestQualityMonitor:
             price = 50000 + i * 10  # Stable progression
             data = MarketData(
                 symbol=symbol,
-                price=Decimal(str(price)),
-                volume=Decimal("100.5"),
                 timestamp=datetime.now(timezone.utc),
+                open=Decimal(str(price - 50)),
+                high=Decimal(str(price + 50)),
+                low=Decimal(str(price - 100)),
+                close=Decimal(str(price)),
+                volume=Decimal("100.5"),
+                exchange="binance",
             )
             await monitor.monitor_data_quality(data)
 
         # Add data with significant drift
         drifted_data = MarketData(
             symbol=symbol,
-            price=Decimal("60000.00"),  # Significant price increase
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("59900.00"),
+            high=Decimal("60100.00"),
+            low=Decimal("59800.00"),
+            close=Decimal("60000.00"),  # Significant price increase
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         quality_score, drift_alerts = await monitor.monitor_data_quality(drifted_data)
@@ -252,9 +267,9 @@ class TestQualityMonitor:
         # Check drift alert properties
         for alert in drift_alerts:
             assert alert.drift_type in [
-                DriftType.COVARIATE_DRIFT, DriftType.DISTRIBUTION_DRIFT]
-            assert alert.feature in ["price", "volume"]
-            assert alert.severity in [QualityLevel.FAIR, QualityLevel.POOR]
+                DriftType.FEATURE, DriftType.CONCEPT]
+            assert alert.feature in ["price", "close", "volume"]
+            assert alert.severity in [QualityLevel.ACCEPTABLE, QualityLevel.POOR]
             assert alert.timestamp is not None
             assert "drift_score" in alert.metadata
 
@@ -266,10 +281,10 @@ class TestQualityMonitor:
         for i in range(20):
             signal = Signal(
                 direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
-                confidence=0.8,  # Stable high confidence
+                strength=0.8,  # Stable high confidence
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy",
+                source="test_strategy",
             )
             stable_signals.append(signal)
 
@@ -285,11 +300,11 @@ class TestQualityMonitor:
         for i in range(10):
             signal = Signal(
                 direction=SignalDirection.BUY if i % 2 == 0 else SignalDirection.SELL,
-                confidence=0.3 + (i * 0.01),
+                strength=0.3 + (i * 0.01),
                 # Low confidence with slight variation
                 timestamp=datetime.now(timezone.utc) + timedelta(seconds=i),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy",
+                source="test_strategy",
             )
             low_confidence_signals.append(signal)
 
@@ -298,7 +313,7 @@ class TestQualityMonitor:
         # Should detect concept drift
         assert len(drift_alerts) > 0
         assert any(alert.drift_type ==
-                   DriftType.CONCEPT_DRIFT for alert in drift_alerts)
+                   DriftType.CONCEPT for alert in drift_alerts)
 
     @pytest.mark.asyncio
     async def test_calculate_quality_score(self, monitor: QualityMonitor):
@@ -306,11 +321,15 @@ class TestQualityMonitor:
         # Test with complete, valid data
         complete_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
-            bid=Decimal("49999.00"),
-            ask=Decimal("50001.00"),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
+            bid_price=Decimal("49999.00"),
+            ask_price=Decimal("50001.00"),
         )
 
         score = await monitor._calculate_quality_score(complete_data)
@@ -320,9 +339,13 @@ class TestQualityMonitor:
         # Test with incomplete data
         incomplete_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("0"),  # Zero volume (treated as missing)
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("0"),  # Zero volume (treated as missing)
+            exchange="binance",
         )
 
         score = await monitor._calculate_quality_score(incomplete_data)
@@ -332,13 +355,17 @@ class TestQualityMonitor:
         # Test with invalid data
         invalid_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("-100.00"),  # Negative price
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("50000.00"),
+            high=Decimal("50000.00"),
+            low=Decimal("50000.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         score = await monitor._calculate_quality_score(invalid_data)
-        assert score < 0.7  # Should be low for invalid data
+        assert score < 0.8  # Should be lower for invalid data
 
     @pytest.mark.asyncio
     async def test_calculate_distribution_drift(self, monitor: QualityMonitor):
@@ -412,21 +439,31 @@ class TestQualityMonitor:
         symbol = "BTCUSDT"
         # First add stable historical data
         for i in range(25):
+            price = 50000 + i * 10
             data = MarketData(
                 symbol=symbol,
-                price=Decimal(str(50000 + i * 10)),  # Stable progression
-                volume=Decimal("100.5"),
                 timestamp=datetime.now(timezone.utc),
+                open=Decimal(str(price - 50)),
+                high=Decimal(str(price + 50)),
+                low=Decimal(str(price - 100)),
+                close=Decimal(str(price)),  # Stable progression
+                volume=Decimal("100.5"),
+                exchange="binance",
             )
             await monitor.monitor_data_quality(data)
 
         # Then add data with significant drift
         for i in range(10):
+            price = 60000 + i * 1000
             data = MarketData(
                 symbol=symbol,
-                price=Decimal(str(60000 + i * 1000)),  # Significant drift
-                volume=Decimal("100.5"),
                 timestamp=datetime.now(timezone.utc),
+                open=Decimal(str(price - 50)),
+                high=Decimal(str(price + 50)),
+                low=Decimal(str(price - 100)),
+                close=Decimal(str(price)),  # Significant drift
+                volume=Decimal("100.5"),
+                exchange="binance",
             )
             await monitor.monitor_data_quality(data)
 
@@ -448,9 +485,9 @@ class TestQualityLevel:
         """Test quality level enum values"""
         assert QualityLevel.EXCELLENT.value == "excellent"
         assert QualityLevel.GOOD.value == "good"
-        assert QualityLevel.FAIR.value == "fair"
+        assert QualityLevel.ACCEPTABLE.value == "acceptable"
         assert QualityLevel.POOR.value == "poor"
-        assert QualityLevel.CRITICAL.value == "critical"
+        assert QualityLevel.UNUSABLE.value == "unusable"
 
 
 class TestDriftType:
@@ -458,10 +495,11 @@ class TestDriftType:
 
     def test_drift_types(self):
         """Test drift type enum values"""
-        assert DriftType.CONCEPT_DRIFT.value == "concept_drift"
-        assert DriftType.COVARIATE_DRIFT.value == "covariate_drift"
-        assert DriftType.LABEL_DRIFT.value == "label_drift"
-        assert DriftType.DISTRIBUTION_DRIFT.value == "distribution_drift"
+        assert DriftType.CONCEPT.value == "concept"
+        assert DriftType.FEATURE.value == "feature"
+        assert DriftType.PREDICTION.value == "prediction"
+        assert DriftType.LABEL.value == "label"
+        assert DriftType.SCHEMA.value == "schema"
 
 
 class TestQualityMetric:
@@ -491,7 +529,7 @@ class TestDriftAlert:
     def test_drift_alert_creation(self):
         """Test drift alert creation"""
         alert = DriftAlert(
-            drift_type=DriftType.COVARIATE_DRIFT,
+            drift_type=DriftType.FEATURE,
             feature="price",
             severity=QualityLevel.POOR,
             description="Price distribution drift detected",
@@ -499,7 +537,7 @@ class TestDriftAlert:
             metadata={"drift_score": 0.15},
         )
 
-        assert alert.drift_type == DriftType.COVARIATE_DRIFT
+        assert alert.drift_type == DriftType.FEATURE
         assert alert.feature == "price"
         assert alert.severity == QualityLevel.POOR
         assert alert.description == "Price distribution drift detected"

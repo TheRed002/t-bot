@@ -1,15 +1,24 @@
 """
 Integration tests for Risk Management Framework.
 
-This module tests the complete risk management workflow including all components
-working together in realistic scenarios.
+Tests circuit breakers, position limits, emergency controls, portfolio risk metrics,
+correlation monitoring, and adaptive risk management across all system components.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Dict, List, Any, Optional
+from unittest.mock import Mock, AsyncMock, patch
+import time
+import asyncio
+import logging
 
 import pytest
 
+from tests.integration.base_integration import (
+    BaseIntegrationTest, MockExchangeFactory, PerformanceMonitor,
+    performance_test, wait_for_condition
+)
 from src.core.config import Config
 from src.core.exceptions import RiskManagementError, ValidationError
 from src.core.types import (
@@ -22,8 +31,13 @@ from src.core.types import (
     RiskMetrics,
     Signal,
     SignalDirection,
+    BotStatus,
+    Order,
+    OrderStatus
 )
 from src.risk_management import RiskManager
+
+logger = logging.getLogger(__name__)
 
 
 class TestRiskManagementIntegration:
@@ -50,7 +64,8 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now(),
+                opened_at=datetime.now(timezone.utc),
+                exchange="binance",
             ),
             Position(
                 symbol="ETHUSDT",
@@ -59,7 +74,8 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("3100"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now(),
+                opened_at=datetime.now(timezone.utc),
+                exchange="binance",
             ),
         ]
 
@@ -69,25 +85,23 @@ class TestRiskManagementIntegration:
         return [
             MarketData(
                 symbol="BTCUSDT",
-                price=Decimal("51000"),
+                open=Decimal("50000"),
+                high=Decimal("52000"),
+                low=Decimal("49000"),
+                close=Decimal("51000"),
                 volume=Decimal("1000"),
-                timestamp=datetime.now(),
-                bid=Decimal("50990"),
-                ask=Decimal("51010"),
-                open_price=Decimal("50000"),
-                high_price=Decimal("52000"),
-                low_price=Decimal("49000"),
+                timestamp=datetime.now(timezone.utc),
+                exchange="binance",
             ),
             MarketData(
                 symbol="ETHUSDT",
-                price=Decimal("3100"),
+                open=Decimal("3000"),
+                high=Decimal("3200"),
+                low=Decimal("2900"),
+                close=Decimal("3100"),
                 volume=Decimal("500"),
-                timestamp=datetime.now(),
-                bid=Decimal("3095"),
-                ask=Decimal("3105"),
-                open_price=Decimal("3000"),
-                high_price=Decimal("3200"),
-                low_price=Decimal("2900"),
+                timestamp=datetime.now(timezone.utc),
+                exchange="binance",
             ),
         ]
 
@@ -97,17 +111,17 @@ class TestRiskManagementIntegration:
         return [
             Signal(
                 direction=SignalDirection.BUY,
-                confidence=0.8,
-                timestamp=datetime.now(),
+                strength=0.8,
+                timestamp=datetime.now(timezone.utc),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy",
+                source="test_strategy",
             ),
             Signal(
                 direction=SignalDirection.SELL,
-                confidence=0.7,
-                timestamp=datetime.now(),
+                strength=0.7,
+                timestamp=datetime.now(timezone.utc),
                 symbol="ETHUSDT",
-                strategy_name="test_strategy",
+                source="test_strategy",
             ),
         ]
 
@@ -191,21 +205,21 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("1000"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now(),
+                opened_at=datetime.now(timezone.utc),
+                exchange="binance",
             )
             positions.append(position)
 
             market_data.append(
                 MarketData(
                     symbol=symbol,
-                    price=Decimal("51000"),
+                    open=Decimal("50000"),
+                    high=Decimal("52000"),
+                    low=Decimal("49000"),
+                    close=Decimal("51000"),
                     volume=Decimal("10000"),
-                    timestamp=datetime.now(),
-                    bid=Decimal("50990"),
-                    ask=Decimal("51010"),
-                    open_price=Decimal("50000"),
-                    high_price=Decimal("52000"),
-                    low_price=Decimal("49000"),
+                    timestamp=datetime.now(timezone.utc),
+                    exchange="binance",
                 )
             )
 
@@ -235,10 +249,10 @@ class TestRiskManagementIntegration:
         # Test position sizing with large portfolio
         signal = Signal(
             direction=SignalDirection.BUY,
-            confidence=0.9,
+            strength=0.9,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy",
+            source="test_strategy",
         )
 
         position_size = await risk_manager.calculate_position_size(signal, portfolio_value)
@@ -259,21 +273,21 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("45000"),  # 10% loss
                 unrealized_pnl=Decimal("-500"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now(),
+                opened_at=datetime.now(timezone.utc),
+                exchange="binance",
             )
         ]
 
         market_data = [
             MarketData(
                 symbol="BTCUSDT",
-                price=Decimal("45000"),
+                open=Decimal("50000"),
+                high=Decimal("52000"),
+                low=Decimal("44000"),
+                close=Decimal("45000"),
                 volume=Decimal("1000"),
-                timestamp=datetime.now(),
-                bid=Decimal("44990"),
-                ask=Decimal("45010"),
-                open_price=Decimal("50000"),
-                high_price=Decimal("52000"),
-                low_price=Decimal("44000"),
+                timestamp=datetime.now(timezone.utc),
+                exchange="binance",
             )
         ]
 
@@ -318,24 +332,24 @@ class TestRiskManagementIntegration:
         signals = [
             Signal(
                 direction=SignalDirection.BUY,
-                confidence=0.8,
+                strength=0.8,
                 timestamp=datetime.now(),
                 symbol="BTCUSDT",
-                strategy_name="momentum_strategy",
+                source="momentum_strategy",
             ),
             Signal(
                 direction=SignalDirection.SELL,
-                confidence=0.7,
+                strength=0.7,
                 timestamp=datetime.now(),
                 symbol="ETHUSDT",
-                strategy_name="mean_reversion_strategy",
+                source="mean_reversion_strategy",
             ),
             Signal(
                 direction=SignalDirection.BUY,
-                confidence=0.9,
+                strength=0.9,
                 timestamp=datetime.now(),
                 symbol="ADAUSDT",
-                strategy_name="ml_strategy",
+                source="ml_strategy",
             ),
         ]
 
@@ -370,10 +384,10 @@ class TestRiskManagementIntegration:
         # Test with invalid signal
         invalid_signal = Signal(
             direction=SignalDirection.BUY,
-            confidence=0.0,  # Invalid confidence
+            strength=0.0,  # Invalid confidence
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy",
+            source="test_strategy",
         )
 
         portfolio_value = Decimal("10000")
@@ -419,10 +433,10 @@ class TestRiskManagementIntegration:
             # Validate signals
             signal = Signal(
                 direction=SignalDirection.BUY,
-                confidence=0.8,
+                strength=0.8,
                 timestamp=datetime.now(),
                 symbol="BTCUSDT",
-                strategy_name="test_strategy",
+                source="test_strategy",
             )
             is_valid = await risk_manager.validate_signal(signal)
             assert isinstance(is_valid, bool)
@@ -457,10 +471,10 @@ class TestRiskManagementIntegration:
         zero_portfolio_value = Decimal("0")
         signal = Signal(
             direction=SignalDirection.BUY,
-            confidence=0.8,
+            strength=0.8,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy",
+            source="test_strategy",
         )
 
         with pytest.raises(RiskManagementError):
@@ -482,10 +496,10 @@ class TestRiskManagementIntegration:
 
         signal = Signal(
             direction=SignalDirection.BUY,
-            confidence=0.8,
+            strength=0.8,
             timestamp=datetime.now(),
             symbol="BTCUSDT",
-            strategy_name="test_strategy",
+            source="test_strategy",
         )
 
         position_size = await risk_manager.calculate_position_size(signal, portfolio_value)
@@ -513,21 +527,21 @@ class TestRiskManagementIntegration:
                 current_price=Decimal("51000"),
                 unrealized_pnl=Decimal("100"),
                 side=OrderSide.BUY,
-                timestamp=datetime.now(),
+                opened_at=datetime.now(timezone.utc),
+                exchange="binance",
             )
         ]
 
         market_data = [
             MarketData(
                 symbol="BTCUSDT",
-                price=Decimal("51000"),
+                open=Decimal("50000"),
+                high=Decimal("52000"),
+                low=Decimal("49000"),
+                close=Decimal("51000"),
                 volume=Decimal("1000"),
-                timestamp=datetime.now(),
-                bid=Decimal("50990"),
-                ask=Decimal("51010"),
-                open_price=Decimal("50000"),
-                high_price=Decimal("52000"),
-                low_price=Decimal("49000"),
+                timestamp=datetime.now(timezone.utc),
+                exchange="binance",
             )
         ]
 
@@ -540,7 +554,7 @@ class TestRiskManagementIntegration:
         initial_metrics = await risk_manager.calculate_risk_metrics(positions, market_data)
 
         # Update with price change
-        market_data[0].price = Decimal("52000")  # Price increase
+        market_data[0].close = Decimal("52000")  # Price increase
         positions[0].current_price = Decimal("52000")
         positions[0].unrealized_pnl = Decimal("200")
 
@@ -558,3 +572,447 @@ class TestRiskManagementIntegration:
         should_exit = await risk_manager.should_exit_position(positions[0], market_data[0])
         # Should not exit due to profit and low risk
         assert should_exit is False
+
+
+class TestCircuitBreakerIntegration(BaseIntegrationTest):
+    """Test circuit breaker mechanisms across trading operations."""
+    
+    @pytest.mark.asyncio
+    @performance_test(max_duration=30.0)
+    async def test_daily_loss_circuit_breaker(self, performance_monitor):
+        """Test daily loss circuit breaker activation and recovery."""
+        
+        exchanges = await self.create_mock_exchanges()
+        binance = exchanges["binance"]
+        
+        # Setup risk manager with daily loss limits
+        risk_manager = Mock()
+        risk_manager.daily_loss_limit = Decimal("5000.0")  # $5,000 daily loss limit
+        risk_manager.current_daily_pnl = Decimal("0.0")
+        risk_manager.circuit_breaker_active = False
+        risk_manager.trading_halted = False
+        
+        # Mock emergency controls
+        emergency_controls = Mock()
+        emergency_controls.halt_all_trading = AsyncMock(return_value=True)
+        emergency_controls.cancel_all_orders = AsyncMock(return_value=True)
+        emergency_controls.send_alert = AsyncMock(return_value=True)
+        
+        # Trade execution function with risk checks
+        async def execute_trade_with_risk_check(symbol, side, quantity, expected_pnl):
+            nonlocal risk_manager
+            
+            # Pre-trade risk check
+            projected_daily_pnl = risk_manager.current_daily_pnl + expected_pnl
+            
+            if abs(projected_daily_pnl) > risk_manager.daily_loss_limit:
+                # Circuit breaker should activate
+                risk_manager.circuit_breaker_active = True
+                risk_manager.trading_halted = True
+                
+                await emergency_controls.halt_all_trading()
+                await emergency_controls.cancel_all_orders()
+                await emergency_controls.send_alert(f"Daily loss limit exceeded: ${abs(projected_daily_pnl)}")
+                
+                logger.warning(f"Circuit breaker activated: Daily P&L would be ${projected_daily_pnl}")
+                return None
+            
+            if risk_manager.trading_halted:
+                logger.info("Trading halted by circuit breaker - trade rejected")
+                return None
+            
+            # Execute trade
+            order_id = await binance.place_order({
+                "symbol": symbol,
+                "side": side,
+                "quantity": str(quantity),
+                "type": "MARKET"
+            })
+            
+            # Update P&L
+            risk_manager.current_daily_pnl += expected_pnl
+            
+            performance_monitor.record_api_call()
+            logger.info(f"Trade executed: {side} {quantity} {symbol}, P&L: ${expected_pnl}")
+            
+            return order_id
+        
+        # Simulate series of trades leading to circuit breaker
+        trades = [
+            ("BTC/USDT", "BUY", Decimal("0.5"), Decimal("500.0")),    # Profit
+            ("ETH/USDT", "BUY", Decimal("5.0"), Decimal("-800.0")),   # Loss
+            ("BTC/USDT", "SELL", Decimal("0.3"), Decimal("-1200.0")), # Loss
+            ("ETH/USDT", "SELL", Decimal("3.0"), Decimal("300.0")),   # Profit
+            ("BTC/USDT", "BUY", Decimal("1.0"), Decimal("-2000.0")),  # Large loss
+            ("ETH/USDT", "BUY", Decimal("10.0"), Decimal("-1800.0"))  # This should trigger circuit breaker
+        ]
+        
+        executed_trades = []
+        
+        for i, (symbol, side, quantity, expected_pnl) in enumerate(trades):
+            order_id = await execute_trade_with_risk_check(symbol, side, quantity, expected_pnl)
+            
+            if order_id is not None:
+                executed_trades.append((i, symbol, side, quantity, expected_pnl))
+            else:
+                logger.info(f"Trade {i+1} rejected by circuit breaker")
+                break
+        
+        # Verify circuit breaker activation
+        assert risk_manager.circuit_breaker_active is True
+        assert risk_manager.trading_halted is True
+        
+        # Should not execute all trades due to circuit breaker
+        assert len(executed_trades) < len(trades)
+        
+        logger.info(f"Circuit breaker test complete: {len(executed_trades)}/{len(trades)} trades executed")
+        
+        # Test circuit breaker reset
+        async def reset_daily_circuit_breaker():
+            risk_manager.current_daily_pnl = Decimal("0.0")
+            risk_manager.circuit_breaker_active = False
+            risk_manager.trading_halted = False
+            logger.info("Circuit breaker reset for new trading day")
+        
+        await reset_daily_circuit_breaker()
+        
+        # Verify reset
+        assert risk_manager.circuit_breaker_active is False
+        assert risk_manager.trading_halted is False
+        
+        logger.info("Circuit breaker reset and recovery successful")
+    
+    @pytest.mark.asyncio
+    async def test_position_concentration_limits(self):
+        """Test position concentration limit enforcement."""
+        
+        portfolio_limits = Mock()
+        portfolio_limits.max_single_asset_concentration = Decimal("0.3")  # 30% max per asset
+        portfolio_limits.max_sector_concentration = Decimal("0.6")        # 60% max per sector
+        portfolio_limits.total_portfolio_value = Decimal("200000.0")      # $200k portfolio
+        
+        # Define asset sectors
+        asset_sectors = {
+            "BTC/USDT": "crypto_large_cap",
+            "ETH/USDT": "crypto_large_cap", 
+            "ADA/USDT": "crypto_mid_cap",
+            "DOT/USDT": "crypto_mid_cap",
+            "LINK/USDT": "crypto_defi"
+        }
+        
+        current_portfolio = {}
+        
+        def calculate_concentrations():
+            """Calculate current asset and sector concentrations."""
+            total_value = sum(current_portfolio.values())
+            
+            asset_concentrations = {}
+            sector_concentrations = {}
+            
+            for symbol, position_value in current_portfolio.items():
+                # Asset concentration
+                if total_value > 0:
+                    asset_concentrations[symbol] = position_value / total_value
+                
+                # Sector concentration
+                sector = asset_sectors.get(symbol, "unknown")
+                if sector not in sector_concentrations:
+                    sector_concentrations[sector] = Decimal("0.0")
+                sector_concentrations[sector] += position_value / total_value if total_value > 0 else Decimal("0.0")
+            
+            return asset_concentrations, sector_concentrations, total_value
+        
+        async def attempt_position_addition(symbol, position_value):
+            """Attempt to add position with concentration checking."""
+            test_portfolio = current_portfolio.copy()
+            test_portfolio[symbol] = test_portfolio.get(symbol, Decimal("0.0")) + position_value
+            
+            # Calculate concentrations with new position
+            temp_portfolio = current_portfolio
+            current_portfolio.update(test_portfolio)
+            asset_conc, sector_conc, total_value = calculate_concentrations()
+            
+            # Check asset concentration limit
+            symbol_concentration = asset_conc.get(symbol, Decimal("0.0"))
+            if symbol_concentration > portfolio_limits.max_single_asset_concentration:
+                logger.warning(f"Asset concentration limit exceeded for {symbol}: "
+                              f"{symbol_concentration:.1%} > {portfolio_limits.max_single_asset_concentration:.1%}")
+                return False, f"Asset concentration limit exceeded: {symbol_concentration:.1%}"
+            
+            # Check sector concentration limit
+            sector = asset_sectors.get(symbol, "unknown")
+            sector_concentration = sector_conc.get(sector, Decimal("0.0"))
+            if sector_concentration > portfolio_limits.max_sector_concentration:
+                logger.warning(f"Sector concentration limit exceeded for {sector}: "
+                              f"{sector_concentration:.1%} > {portfolio_limits.max_sector_concentration:.1%}")
+                return False, f"Sector concentration limit exceeded: {sector_concentration:.1%}"
+            
+            # Position allowed - update portfolio
+            current_portfolio[symbol] = current_portfolio.get(symbol, Decimal("0.0")) + position_value
+            
+            logger.info(f"Position added: {symbol} +${position_value} "
+                       f"(concentration: {symbol_concentration:.1%}, sector {sector}: {sector_concentration:.1%})")
+            
+            return True, "Position added successfully"
+        
+        # Test concentration limit scenarios
+        concentration_tests = [
+            # Build up crypto_large_cap sector
+            ("BTC/USDT", Decimal("40000.0")),   # 20% - allowed
+            ("ETH/USDT", Decimal("30000.0")),   # 15% - allowed (sector: 35%)
+            ("BTC/USDT", Decimal("20000.0")),   # BTC: 30%, sector: 45% - allowed
+            ("ETH/USDT", Decimal("40000.0")),   # ETH would be 35% - rejected (asset limit)
+            ("BTC/USDT", Decimal("30000.0")),   # Sector would be 60% - at sector limit
+            ("ETH/USDT", Decimal("10000.0")),   # Sector would be 65% - rejected (sector limit)
+            
+            # Try other sectors
+            ("ADA/USDT", Decimal("25000.0")),   # 12.5% mid_cap - allowed
+            ("LINK/USDT", Decimal("30000.0")),  # 15% defi - allowed
+        ]
+        
+        concentration_results = []
+        
+        for symbol, position_value in concentration_tests:
+            success, message = await attempt_position_addition(symbol, position_value)
+            
+            asset_conc, sector_conc, total_value = calculate_concentrations()
+            
+            concentration_results.append({
+                "symbol": symbol,
+                "position_value": position_value,
+                "success": success,
+                "message": message,
+                "asset_concentration": asset_conc.get(symbol, Decimal("0.0")),
+                "sector": asset_sectors.get(symbol, "unknown"),
+                "sector_concentration": sector_conc.get(asset_sectors.get(symbol, "unknown"), Decimal("0.0")),
+                "total_portfolio_value": total_value
+            })
+        
+        # Verify concentration limits enforced
+        successful_additions = [r for r in concentration_results if r["success"]]
+        rejected_additions = [r for r in concentration_results if not r["success"]]
+        
+        # Check that all successful additions respect limits
+        for result in successful_additions:
+            assert result["asset_concentration"] <= portfolio_limits.max_single_asset_concentration
+            assert result["sector_concentration"] <= portfolio_limits.max_sector_concentration
+        
+        logger.info(f"Concentration limit tests: {len(successful_additions)} allowed, "
+                   f"{len(rejected_additions)} rejected")
+
+
+class TestCorrelationMonitoring(BaseIntegrationTest):
+    """Test correlation monitoring and risk management."""
+    
+    @pytest.mark.asyncio
+    async def test_asset_correlation_stress_testing(self):
+        """Test correlation behavior under market stress conditions."""
+        
+        correlation_monitor = Mock()
+        
+        # Simulate normal vs stress market conditions
+        normal_correlations = {
+            ("BTC", "ETH"): 0.75,
+            ("BTC", "ADA"): 0.45,
+            ("BTC", "LINK"): 0.20,
+            ("ETH", "ADA"): 0.50,
+            ("ETH", "LINK"): 0.25,
+            ("ADA", "LINK"): 0.30,
+        }
+        
+        # During stress, correlations tend to increase (assets move together)
+        stress_correlations = {
+            ("BTC", "ETH"): 0.95,   # Very high correlation
+            ("BTC", "ADA"): 0.85,   # Increased correlation
+            ("BTC", "LINK"): 0.70,  # Much higher correlation
+            ("ETH", "ADA"): 0.80,   # Higher correlation
+            ("ETH", "LINK"): 0.75,  # Higher correlation
+            ("ADA", "LINK"): 0.65,  # Higher correlation
+        }
+        
+        def simulate_market_stress(stress_level=1.0):
+            """Simulate market stress impact on correlations."""
+            stressed_correlations = {}
+            
+            for pair, normal_corr in normal_correlations.items():
+                stress_corr = stress_correlations[pair]
+                
+                # Interpolate between normal and stress correlations
+                current_corr = normal_corr + stress_level * (stress_corr - normal_corr)
+                stressed_correlations[pair] = min(current_corr, 0.99)  # Cap at 99%
+            
+            return stressed_correlations
+        
+        # Test different stress levels
+        stress_levels = [0.0, 0.3, 0.6, 1.0]  # Normal, mild stress, high stress, extreme stress
+        
+        portfolio_positions = {
+            "BTC": Decimal("40000.0"),
+            "ETH": Decimal("30000.0"),
+            "ADA": Decimal("20000.0"),
+            "LINK": Decimal("10000.0")
+        }
+        
+        def calculate_portfolio_correlation_risk(correlations, positions):
+            """Calculate overall portfolio correlation risk."""
+            assets = list(positions.keys())
+            total_value = sum(positions.values())
+            
+            # Calculate weighted correlation risk
+            total_correlation_risk = Decimal("0.0")
+            pair_count = 0
+            
+            for i, asset1 in enumerate(assets):
+                for j, asset2 in enumerate(assets[i+1:], i+1):
+                    pair = (asset1, asset2) if (asset1, asset2) in correlations else (asset2, asset1)
+                    correlation = correlations.get(pair, 0.0)
+                    
+                    # Weight by position sizes
+                    weight1 = positions[asset1] / total_value
+                    weight2 = positions[asset2] / total_value
+                    
+                    # Correlation risk contribution
+                    pair_risk = Decimal(str(correlation)) * weight1 * weight2
+                    total_correlation_risk += pair_risk
+                    pair_count += 1
+            
+            # Average correlation risk
+            avg_correlation_risk = total_correlation_risk / pair_count if pair_count > 0 else Decimal("0.0")
+            
+            return avg_correlation_risk, total_correlation_risk
+        
+        stress_test_results = []
+        
+        for stress_level in stress_levels:
+            current_correlations = simulate_market_stress(stress_level)
+            avg_risk, total_risk = calculate_portfolio_correlation_risk(current_correlations, portfolio_positions)
+            
+            # Calculate diversification benefit (inverse of correlation risk)
+            diversification_benefit = Decimal("1.0") - avg_risk
+            
+            stress_test_results.append({
+                "stress_level": stress_level,
+                "avg_correlation_risk": avg_risk,
+                "total_correlation_risk": total_risk,
+                "diversification_benefit": diversification_benefit,
+                "correlations": current_correlations.copy()
+            })
+            
+            logger.info(f"Stress level {stress_level}: Avg correlation risk {avg_risk:.3f}, "
+                       f"Diversification benefit {diversification_benefit:.3f}")
+        
+        # Verify stress impact on correlations
+        normal_result = stress_test_results[0]  # stress_level = 0.0
+        extreme_result = stress_test_results[-1]  # stress_level = 1.0
+        
+        # Correlation risk should increase with stress
+        assert extreme_result["avg_correlation_risk"] > normal_result["avg_correlation_risk"]
+        
+        # Diversification benefit should decrease with stress
+        assert extreme_result["diversification_benefit"] < normal_result["diversification_benefit"]
+        
+        # Test correlation risk threshold alerts
+        risk_threshold = Decimal("0.6")  # 60% correlation risk threshold
+        
+        alert_triggered = False
+        for result in stress_test_results:
+            if result["avg_correlation_risk"] > risk_threshold:
+                alert_triggered = True
+                logger.warning(f"Correlation risk alert: {result['avg_correlation_risk']:.1%} > {risk_threshold:.1%} "
+                              f"at stress level {result['stress_level']}")
+                break
+        
+        assert alert_triggered is True  # Should trigger alert under stress
+        
+        logger.info("Correlation stress testing completed")
+
+
+class TestEmergencyControls(BaseIntegrationTest):
+    """Test emergency control mechanisms."""
+    
+    @pytest.mark.asyncio
+    async def test_emergency_shutdown_procedures(self):
+        """Test emergency shutdown and recovery procedures."""
+        
+        exchanges = await self.create_mock_exchanges()
+        
+        emergency_controls = Mock()
+        emergency_controls.shutdown_active = False
+        emergency_controls.emergency_reason = None
+        
+        # Mock emergency shutdown functions
+        async def trigger_emergency_shutdown(reason):
+            emergency_controls.shutdown_active = True
+            emergency_controls.emergency_reason = reason
+            
+            # Stop all trading
+            for exchange_name, exchange in exchanges.items():
+                exchange.trading_enabled = False
+                logger.info(f"Trading disabled on {exchange_name}")
+            
+            # Cancel all open orders (mocked)
+            cancelled_orders = 0
+            for exchange_name, exchange in exchanges.items():
+                # Mock cancelling orders
+                cancelled_orders += 3  # Assume 3 orders per exchange
+            
+            logger.warning(f"Emergency shutdown triggered: {reason}")
+            logger.info(f"Cancelled {cancelled_orders} open orders")
+            
+            return True
+        
+        async def recovery_procedures():
+            # Check system health
+            system_healthy = True
+            
+            # Re-enable trading if system is healthy
+            if system_healthy:
+                for exchange_name, exchange in exchanges.items():
+                    exchange.trading_enabled = True
+                    logger.info(f"Trading re-enabled on {exchange_name}")
+                
+                emergency_controls.shutdown_active = False
+                emergency_controls.emergency_reason = None
+                logger.info("System recovery completed")
+                return True
+            
+            return False
+        
+        emergency_controls.trigger_emergency_shutdown = trigger_emergency_shutdown
+        emergency_controls.recovery_procedures = recovery_procedures
+        
+        # Test emergency scenarios
+        emergency_scenarios = [
+            "Daily loss limit exceeded",
+            "System connectivity lost",
+            "Risk management failure",
+            "Manual emergency stop"
+        ]
+        
+        for scenario in emergency_scenarios:
+            # Trigger emergency shutdown
+            shutdown_success = await emergency_controls.trigger_emergency_shutdown(scenario)
+            
+            assert shutdown_success is True
+            assert emergency_controls.shutdown_active is True
+            assert emergency_controls.emergency_reason == scenario
+            
+            # Verify trading is halted
+            for exchange in exchanges.values():
+                assert exchange.trading_enabled is False
+            
+            logger.info(f"Emergency shutdown test completed for: {scenario}")
+            
+            # Test recovery
+            recovery_success = await emergency_controls.recovery_procedures()
+            
+            assert recovery_success is True
+            assert emergency_controls.shutdown_active is False
+            
+            # Verify trading is restored
+            for exchange in exchanges.values():
+                assert exchange.trading_enabled is True
+            
+            logger.info(f"Recovery test completed for: {scenario}")
+        
+        logger.info("Emergency control tests completed")

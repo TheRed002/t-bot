@@ -3,6 +3,11 @@
 # pip install pip-upgrader
 # pip-upgrade
 
+# Build tools and compatibility fixes
+setuptools<81.0.0  # Pin to avoid pkg_resources deprecation warnings from googleapis
+# Downgrade googleapis to prevent pkg_resources warnings
+googleapis-common-protos<1.60.0  # Use older version that doesn't trigger pkg_resources warnings
+
 # Pydantic for configuration and data validation
 pydantic==2.11.7
 pydantic-settings==2.10.1
@@ -39,9 +44,16 @@ ccxt==4.4.98
 python-binance==1.0.29
 okx==2.1.2
 coinbase-advanced-py==1.8.2
+# Alternative Coinbase libraries for broader compatibility
+coinbase-pro==0.3.0
+cbpro==1.1.4
 websockets>=12.0,<14.0
 aiohttp==3.12.15
 aiofiles==24.1.0
+# Additional crypto exchange libraries
+cryptography>=42.0.0  # Required for API signing
+requests>=2.31.0  # HTTP requests
+websocket-client>=1.6.0  # WebSocket client
 
 # Technical Analysis Dependencies (P-012)
 TA-Lib==0.4.32  # Must match the C library version
@@ -69,7 +81,10 @@ statsmodels>=0.14.0  # Statistical analysis for features
 # Web Interface Dependencies (P-026, P-027, P-028)
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
+python-socketio>=5.11.0
+python-socketio[asyncio_client]>=5.11.0
 python-jose[cryptography]>=3.3.0
+bcrypt==4.0.1
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
 slowapi>=0.1.9  # Rate limiting
@@ -96,5 +111,3 @@ opentelemetry-instrumentation-sqlalchemy>=0.42b0
 memory-profiler>=0.61.0
 py-spy>=0.3.14
 line-profiler>=4.1.3
-
-# TODO: Add more dependencies as subsequent prompts are implemented 

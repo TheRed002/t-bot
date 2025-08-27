@@ -5,31 +5,19 @@
 
 import React, { useMemo, useState, useCallback } from 'react';
 import {
-  Paper,
-  Box,
-  Typography,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  IconButton,
-  Tooltip,
-  ToggleButton,
-  ToggleButtonGroup,
-  LinearProgress,
-} from '@mui/material';
-import {
-  Refresh,
+  RefreshCw,
   Settings,
   ZoomIn,
   ZoomOut,
-  Fullscreen,
-} from '@mui/icons-material';
+} from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
-import { colors } from '@/theme/colors';
-import { tradingTheme } from '@/theme';
 
 export interface OrderBookEntry {
   price: number;
@@ -77,14 +65,12 @@ const calculateDepthPercentage = (volume: number, maxVolume: number): number => 
 export const OrderBook: React.FC<OrderBookProps> = ({
   data,
   symbol = 'BTC/USD',
-  currentPrice,
   onPriceClick,
   onRefresh,
   loading = false,
   precision = 2,
   maxRows = 10,
   showSpread = true,
-  showVolume = true,
   compact = false,
 }) => {
   const [displayMode, setDisplayMode] = useState<'both' | 'bids' | 'asks'>('both');
@@ -117,7 +103,7 @@ export const OrderBook: React.FC<OrderBookProps> = ({
   );
 
   const handleDisplayModeChange = useCallback((
-    event: React.MouseEvent<HTMLElement>,
+    _event: React.MouseEvent<HTMLElement>,
     newMode: string | null,
   ) => {
     if (newMode) {
@@ -142,65 +128,46 @@ export const OrderBook: React.FC<OrderBookProps> = ({
     return (
       <TableRow
         key={`${type}-${index}`}
-        sx={{
-          position: 'relative',
-          cursor: isClickable ? 'pointer' : 'default',
-          '&:hover': isClickable ? {
-            backgroundColor: 'action.hover',
-          } : {},
-        }}
+        className={cn(
+          "relative",
+          isClickable ? "cursor-pointer hover:bg-muted/50" : "cursor-default"
+        )}
         onClick={() => isClickable && handlePriceClick(entry.price)}
       >
         {/* Volume Column */}
-        <TableCell 
-          sx={{ 
-            position: 'relative',
-            overflow: 'hidden',
-            py: compact ? 0.5 : 1,
-            fontSize: compact ? '0.75rem' : '0.875rem',
-            fontFamily: 'monospace',
-          }}
-        >
+        <TableCell className={cn(
+          "relative overflow-hidden font-mono",
+          compact ? "py-1 text-xs" : "py-2 text-sm"
+        )}>
           {/* Depth Background */}
-          <Box
-            sx={{
-              position: 'absolute',
-              top: 0,
-              right: 0,
-              bottom: 0,
-              width: `${depthPercentage}%`,
-              backgroundColor: type === 'bid' 
-                ? 'rgba(76, 175, 80, 0.1)' 
-                : 'rgba(244, 67, 54, 0.1)',
-              zIndex: 0,
-            }}
+          <div
+            className={cn(
+              "absolute top-0 right-0 bottom-0 z-0",
+              type === 'bid' 
+                ? 'bg-green-500/10' 
+                : 'bg-red-500/10'
+            )}
+            style={{ width: `${depthPercentage}%` }}
           />
-          <Box sx={{ position: 'relative', zIndex: 1 }}>
+          <div className="relative z-10">
             {formatVolume(entry.volume)}
-          </Box>
+          </div>
         </TableCell>
 
         {/* Price Column */}
-        <TableCell 
-          sx={{ 
-            py: compact ? 0.5 : 1,
-            fontSize: compact ? '0.75rem' : '0.875rem',
-            fontFamily: 'monospace',
-            fontWeight: 600,
-            color: type === 'bid' ? colors.financial.profit : colors.financial.loss,
-          }}
-        >
+        <TableCell className={cn(
+          "font-mono font-semibold",
+          compact ? "py-1 text-xs" : "py-2 text-sm",
+          type === 'bid' ? 'text-green-500' : 'text-red-500'
+        )}>
           {formatPrice(entry.price, precision)}
         </TableCell>
 
         {/* Total Column */}
-        <TableCell 
-          sx={{ 
-            py: compact ? 0.5 : 1,
-            fontSize: compact ? '0.75rem' : '0.875rem',
-            fontFamily: 'monospace',
-          }}
-        >
+        <TableCell className={cn(
+          "font-mono",
+          compact ? "py-1 text-xs" : "py-2 text-sm"
+        )}>
           {formatVolume(entry.total)}
         </TableCell>
       </TableRow>
@@ -208,156 +175,162 @@ export const OrderBook: React.FC<OrderBookProps> = ({
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3 }}
-    >
-      <Paper sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <Box
-          p={2}
-          display="flex"
-          justifyContent="space-between"
-          alignItems="center"
-          borderBottom="1px solid"
-          borderColor="divider"
-        >
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
-            Order Book - {symbol}
-          </Typography>
+    <TooltipProvider>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
+        <Card className="h-full flex flex-col">
+          {/* Header */}
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 border-b">
+            <CardTitle className="text-lg font-semibold">
+              Order Book - {symbol}
+            </CardTitle>
 
-          <Box display="flex" alignItems="center" gap={1}>
-            {/* Display Mode Toggle */}
-            <ToggleButtonGroup
-              value={displayMode}
-              exclusive
-              onChange={handleDisplayModeChange}
-              size="small"
-            >
-              <ToggleButton value="bids">Bids</ToggleButton>
-              <ToggleButton value="both">Both</ToggleButton>
-              <ToggleButton value="asks">Asks</ToggleButton>
-            </ToggleButtonGroup>
+            <div className="flex items-center gap-1">
+              {/* Display Mode Toggle */}
+              <div className="flex border rounded-md">
+                <Button
+                  variant={displayMode === 'bids' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setDisplayMode('bids')}
+                  className="rounded-r-none"
+                >
+                  Bids
+                </Button>
+                <Button
+                  variant={displayMode === 'both' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setDisplayMode('both')}
+                  className="rounded-none border-x-0"
+                >
+                  Both
+                </Button>
+                <Button
+                  variant={displayMode === 'asks' ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => setDisplayMode('asks')}
+                  className="rounded-l-none"
+                >
+                  Asks
+                </Button>
+              </div>
 
-            {/* Zoom Controls */}
-            <Tooltip title="Zoom In">
-              <IconButton
-                size="small"
-                onClick={() => setZoomLevel(Math.min(zoomLevel + 0.5, 3))}
-                disabled={zoomLevel >= 3}
-              >
-                <ZoomIn />
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title="Zoom Out">
-              <IconButton
-                size="small"
-                onClick={() => setZoomLevel(Math.max(zoomLevel - 0.5, 0.5))}
-                disabled={zoomLevel <= 0.5}
-              >
-                <ZoomOut />
-              </IconButton>
-            </Tooltip>
-
-            {/* Refresh Button */}
-            {onRefresh && (
-              <Tooltip title="Refresh">
-                <IconButton size="small" onClick={onRefresh}>
-                  <Refresh />
-                </IconButton>
+              {/* Zoom Controls */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setZoomLevel(Math.min(zoomLevel + 0.5, 3))}
+                    disabled={zoomLevel >= 3}
+                  >
+                    <ZoomIn className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Zoom In</TooltipContent>
               </Tooltip>
-            )}
 
-            {/* Settings */}
-            <Tooltip title="Settings">
-              <IconButton size="small">
-                <Settings />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </Box>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setZoomLevel(Math.max(zoomLevel - 0.5, 0.5))}
+                    disabled={zoomLevel <= 0.5}
+                  >
+                    <ZoomOut className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Zoom Out</TooltipContent>
+              </Tooltip>
 
-        {/* Loading Bar */}
-        {loading && <LinearProgress />}
+              {/* Refresh Button */}
+              {onRefresh && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" onClick={onRefresh}>
+                      <RefreshCw className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Refresh</TooltipContent>
+                </Tooltip>
+              )}
 
-        {/* Order Book Content */}
-        <Box flex={1} overflow="hidden">
-          <TableContainer sx={{ height: '100%' }}>
-            <Table stickyHeader size={compact ? 'small' : 'medium'}>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem' }}>
-                    Volume
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem' }}>
-                    Price
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, fontSize: '0.75rem' }}>
-                    Total
-                  </TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {/* Asks (Sell Orders) - Shown in reverse order */}
-                {(displayMode === 'both' || displayMode === 'asks') &&
-                  visibleAsks.reverse().map((ask, index) =>
-                    renderOrderRow(ask, 'ask', index)
-                  )}
+              {/* Settings */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Settings</TooltipContent>
+              </Tooltip>
+            </div>
+          </CardHeader>
 
-                {/* Spread Indicator */}
-                {showSpread && displayMode === 'both' && (
+          {/* Loading Bar */}
+          {loading && (
+            <div className="px-4">
+              <Progress value={undefined} className="h-1" />
+            </div>
+          )}
+
+          {/* Order Book Content */}
+          <CardContent className="flex-1 overflow-hidden p-0">
+            <div className="h-full overflow-auto">
+              <Table>
+                <TableHeader className="sticky top-0 bg-background">
                   <TableRow>
-                    <TableCell colSpan={3} sx={{ py: 1, textAlign: 'center' }}>
-                      <Box
-                        sx={{
-                          backgroundColor: 'background.default',
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          py: 0.5,
-                          px: 1,
-                        }}
-                      >
-                        <Typography
-                          variant="caption"
-                          sx={{
-                            fontFamily: 'monospace',
-                            fontWeight: 600,
-                            color: 'warning.main',
-                          }}
-                        >
-                          Spread: {formatPrice(spread, precision)} ({spreadPercent.toFixed(2)}%)
-                        </Typography>
-                      </Box>
+                    <TableCell className="font-semibold text-xs">
+                      Volume
+                    </TableCell>
+                    <TableCell className="font-semibold text-xs">
+                      Price
+                    </TableCell>
+                    <TableCell className="font-semibold text-xs">
+                      Total
                     </TableCell>
                   </TableRow>
-                )}
+                </TableHeader>
+                <TableBody>
+                  {/* Asks (Sell Orders) - Shown in reverse order */}
+                  {(displayMode === 'both' || displayMode === 'asks') &&
+                    visibleAsks.reverse().map((ask, index) =>
+                      renderOrderRow(ask, 'ask', index)
+                    )}
 
-                {/* Bids (Buy Orders) */}
-                {(displayMode === 'both' || displayMode === 'bids') &&
-                  visibleBids.map((bid, index) =>
-                    renderOrderRow(bid, 'bid', index)
+                  {/* Spread Indicator */}
+                  {showSpread && displayMode === 'both' && (
+                    <TableRow>
+                      <TableCell colSpan={3} className="py-2 text-center">
+                        <Badge variant="outline" className="font-mono font-semibold text-yellow-500">
+                          Spread: {formatPrice(spread, precision)} ({spreadPercent.toFixed(2)}%)
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
                   )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        </Box>
 
-        {/* Footer with Last Update */}
-        <Box
-          p={1}
-          borderTop="1px solid"
-          borderColor="divider"
-          textAlign="center"
-        >
-          <Typography variant="caption" color="text.secondary">
-            Last updated: {new Date(data.lastUpdate).toLocaleTimeString()}
-          </Typography>
-        </Box>
-      </Paper>
-    </motion.div>
+                  {/* Bids (Buy Orders) */}
+                  {(displayMode === 'both' || displayMode === 'bids') &&
+                    visibleBids.map((bid, index) =>
+                      renderOrderRow(bid, 'bid', index)
+                    )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+
+          {/* Footer with Last Update */}
+          <div className="border-t p-2 text-center">
+            <p className="text-xs text-muted-foreground">
+              Last updated: {new Date(data.lastUpdate).toLocaleTimeString()}
+            </p>
+          </div>
+        </Card>
+      </motion.div>
+    </TooltipProvider>
   );
 };
 

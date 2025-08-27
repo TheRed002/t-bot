@@ -1,0 +1,494 @@
+# Production Environment Configuration - T-Bot Trading System
+# This configuration is optimized for production deployment with enterprise security and performance
+
+environment: production
+debug: false
+app_name: "t-bot-trading-system"
+app_version: "1.0.0"
+log_level: "INFO"
+
+# Database Configuration - Production Hardened
+database:
+  # PostgreSQL - Primary Database
+  DB_HOST: "${POSTGRES_HOST:-postgres-cluster.production.internal}"
+  DB_PORT: 5432
+  DB_NAME: "tbot_production"
+  DB_USER: "${POSTGRES_USER}"
+  DB_PASSWORD: "${POSTGRES_PASSWORD}"
+  postgresql_pool_size: 50
+  postgresql_max_overflow: 100
+  postgresql_pool_timeout: 30
+  postgresql_pool_recycle: 3600
+  postgresql_pool_pre_ping: true
+  postgresql_echo: false
+  postgresql_ssl_mode: "require"
+  postgresql_ssl_cert: "/etc/ssl/certs/postgresql-client.crt"
+  postgresql_ssl_key: "/etc/ssl/private/postgresql-client.key"
+  postgresql_ssl_ca: "/etc/ssl/certs/ca-certificates.crt"
+  
+  # Redis - Caching and Session Store
+  REDIS_HOST: "${REDIS_HOST:-redis-cluster.production.internal}"
+  REDIS_PORT: 6380  # Non-standard port for security
+  REDIS_PASSWORD: "${REDIS_PASSWORD}"
+  REDIS_DB: 0
+  redis_ssl: true
+  redis_ssl_cert_reqs: "required"
+  redis_ssl_ca_certs: "/etc/ssl/certs/redis-ca.crt"
+  redis_ssl_certfile: "/etc/ssl/certs/redis-client.crt"
+  redis_ssl_keyfile: "/etc/ssl/private/redis-client.key"
+  redis_connection_pool_size: 100
+  redis_connection_pool_timeout: 5
+  redis_socket_connect_timeout: 5
+  redis_socket_timeout: 5
+  redis_health_check_interval: 30
+  
+  # InfluxDB - Time Series Data
+  INFLUXDB_HOST: "${INFLUXDB_HOST:-influxdb-cluster.production.internal}"
+  INFLUXDB_PORT: 8086
+  INFLUXDB_TOKEN: "${INFLUXDB_TOKEN}"
+  INFLUXDB_ORG: "tbot-production"
+  INFLUXDB_BUCKET: "trading_data_production"
+  influxdb_ssl: true
+  influxdb_ssl_ca_cert: "/etc/ssl/certs/influxdb-ca.crt"
+  influxdb_timeout: 30000
+  influxdb_retries: 3
+  influxdb_retry_interval: 1000
+
+# Security Configuration - Enterprise Grade
+security:
+  # JWT Configuration
+  secret_key: "${JWT_SECRET_KEY}"  # Must be 256-bit key
+  jwt_algorithm: "RS256"  # RSA signature for production
+  jwt_expire_minutes: 15  # Short expiration for security
+  jwt_refresh_expire_hours: 24
+  jwt_public_key_path: "/etc/ssl/certs/jwt-public.pem"
+  jwt_private_key_path: "/etc/ssl/private/jwt-private.pem"
+  
+  # Encryption Configuration
+  encryption_key: "${ENCRYPTION_KEY}"  # AES-256 key
+  encryption_algorithm: "AES-256-GCM"
+  key_derivation_salt: "${KEY_DERIVATION_SALT}"
+  
+  # API Security
+  cors_origins:
+    - "https://trading.company.com"
+    - "https://admin.trading.company.com"
+  cors_allow_credentials: true
+  cors_allow_methods: ["GET", "POST", "PUT", "DELETE"]
+  cors_allow_headers: ["Authorization", "Content-Type", "X-Requested-With"]
+  
+  # Rate Limiting
+  rate_limit_per_minute: 1000
+  rate_limit_burst: 100
+  rate_limit_redis_key_prefix: "rate_limit:prod:"
+  
+  # Session Security
+  secure_cookies: true
+  cookie_samesite: "Strict"
+  cookie_httponly: true
+  session_timeout_minutes: 30
+  max_sessions_per_user: 3
+
+# Error Handling Configuration - Production Optimized
+error_handling:
+  circuit_breaker_failure_threshold: 10
+  circuit_breaker_recovery_timeout: 60
+  circuit_breaker_half_open_max_calls: 5
+  max_retry_attempts: 5
+  retry_backoff_factor: 2.0
+  retry_max_delay: 300  # 5 minutes max delay
+  pattern_detection_enabled: true
+  correlation_analysis_enabled: true
+  predictive_alerts_enabled: true
+  state_validation_frequency: 30
+  auto_reconciliation_enabled: true
+  max_discrepancy_threshold: 0.001  # Tighter threshold for production
+  partial_fill_min_percentage: 0.9
+  network_max_offline_duration: 120  # 2 minutes max offline
+  data_feed_max_staleness: 10  # 10 seconds max staleness
+  order_rejection_max_retries: 3
+  error_notification_webhook: "${ERROR_WEBHOOK_URL}"
+  critical_error_email_list:
+    - "ops-team@company.com"
+    - "trading-team@company.com"
+
+# Exchange Configuration - Production APIs
+exchanges:
+  default_timeout: 10  # Shorter timeout for production
+  max_retries: 3
+  connection_pool_size: 20
+  
+  # Binance Production
+  binance_api_key: "${BINANCE_API_KEY}"
+  binance_api_secret: "${BINANCE_API_SECRET}"
+  binance_testnet: false
+  binance_base_url: "https://api.binance.com"
+  binance_websocket_url: "wss://stream.binance.com:9443"
+  
+  # OKX Production
+  okx_api_key: "${OKX_API_KEY}"
+  okx_api_secret: "${OKX_API_SECRET}"
+  okx_passphrase: "${OKX_PASSPHRASE}"
+  okx_sandbox: false
+  okx_base_url: "https://www.okx.com"
+  okx_websocket_url: "wss://ws.okx.com:8443"
+  
+  # Coinbase Production
+  coinbase_api_key: "${COINBASE_API_KEY}"
+  coinbase_api_secret: "${COINBASE_API_SECRET}"
+  coinbase_sandbox: false
+  coinbase_base_url: "https://api.exchange.coinbase.com"
+  coinbase_websocket_url: "wss://ws-feed.exchange.coinbase.com"
+  
+  # Production Rate Limits - Conservative
+  rate_limits:
+    binance:
+      orders_per_second: 8  # Conservative limit
+      requests_per_minute: 1000
+      websocket_connections: 3
+      weight_per_minute: 6000
+    okx:
+      orders_per_second: 15
+      requests_per_minute: 500
+      websocket_connections: 2
+      weight_per_minute: 2000
+    coinbase:
+      orders_per_second: 10
+      requests_per_minute: 400
+      websocket_connections: 2
+  
+  supported_exchanges: ["binance", "okx", "coinbase"]
+
+# Risk Management - Conservative Production Settings
+risk:
+  default_position_size_method: "volatility_adjusted"
+  default_position_size_pct: 0.01  # Very conservative 1%
+  max_position_size_pct: 0.05  # Maximum 5% per position
+  max_total_positions: 5  # Limited concurrent positions
+  max_positions_per_symbol: 1
+  max_portfolio_exposure: 0.8  # 80% max exposure
+  max_sector_exposure: 0.15  # 15% max per sector
+  max_correlation_exposure: 0.3  # 30% max correlated exposure
+  max_leverage: 1.0  # No leverage in production
+  max_daily_loss_pct: 0.02  # 2% daily loss limit
+  max_drawdown_pct: 0.08  # 8% max drawdown
+  var_confidence_level: 0.99  # 99% VaR confidence
+  kelly_lookback_days: 60  # Longer lookback for stability
+  kelly_max_fraction: 0.1  # Conservative Kelly fraction
+  volatility_window: 30
+  volatility_target: 0.015  # 1.5% daily volatility target
+  var_calculation_window: 252
+  drawdown_calculation_window: 252
+  correlation_calculation_window: 90
+  emergency_close_positions: true
+  emergency_recovery_timeout_hours: 2
+  emergency_manual_override_enabled: true
+  stop_loss_buffer_pct: 0.001  # 0.1% buffer for stop losses
+
+# Capital Management - Production Settings
+capital_management:
+  base_currency: "USDT"
+  total_capital: "${TOTAL_CAPITAL}"
+  emergency_reserve_pct: 0.2  # 20% emergency reserve
+  allocation_strategy: "risk_parity_optimized"
+  rebalance_frequency_hours: 24
+  min_allocation_pct: 0.005  # 0.5% minimum allocation
+  max_allocation_pct: 0.15  # 15% maximum allocation
+  max_exchange_allocation_pct: 0.4  # 40% max per exchange
+  min_exchange_balance: 1000.0
+  max_daily_reallocation_pct: 0.1  # 10% max daily reallocation
+  fund_flow_cooldown_minutes: 120  # 2 hour cooldown
+  min_deposit_amount: 10000.0
+  min_withdrawal_amount: 1000.0
+  max_withdrawal_pct: 0.1  # 10% max withdrawal
+  
+  supported_currencies:
+    - "USDT"
+    - "USDC"
+    - "BTC"
+    - "ETH"
+  
+  hedging_enabled: true
+  hedging_threshold: 0.05  # 5% exposure threshold
+  hedge_ratio: 0.9  # 90% hedge coverage
+  
+  withdrawal_rules:
+    profit_only:
+      enabled: true
+      description: "Only withdraw realized profits"
+    maintain_minimum:
+      enabled: true
+      description: "Keep minimum capital for each strategy"
+    performance_based:
+      enabled: true
+      description: "Allow withdrawals only if performance > threshold"
+      threshold: 0.1  # 10% minimum performance
+    daily_limit:
+      enabled: true
+      amount: 50000.0  # Daily withdrawal limit
+    approval_required:
+      enabled: true
+      threshold: 100000.0  # Require approval for large withdrawals
+  
+  auto_compound_enabled: true
+  auto_compound_frequency: "weekly"
+  profit_threshold: 1000.0
+  max_daily_loss_pct: 0.02
+  max_weekly_loss_pct: 0.06
+  max_monthly_loss_pct: 0.1
+  profit_lock_pct: 0.7  # Lock 70% of profits
+  
+  per_strategy_minimum:
+    mean_reversion: 25000.0
+    trend_following: 50000.0
+    ml_strategy: 75000.0
+    arbitrage: 100000.0
+    market_making: 150000.0
+  
+  exchange_allocation_weights:
+    binance: 0.5
+    okx: 0.3
+    coinbase: 0.2
+
+# Strategy Management - Production Settings
+strategies:
+  max_concurrent_strategies: 5  # Limited for stability
+  strategy_restart_delay: 300  # 5 minute restart delay
+  performance_window_days: 30
+  default_min_confidence: 0.8  # High confidence threshold
+  default_position_size: 0.01
+  default_stop_loss: 0.015  # 1.5% stop loss
+  default_take_profit: 0.03  # 3% take profit
+  enable_hot_reload: false  # Disabled in production for stability
+  config_check_interval: 60
+  min_win_rate: 0.5  # 50% minimum win rate
+  min_sharpe_ratio: 1.0  # Minimum Sharpe ratio of 1.0
+  max_drawdown_threshold: 0.08  # 8% max drawdown
+  performance_evaluation_frequency: 24
+  auto_disable_poor_performers: true
+  performance_alert_threshold: 0.4
+
+# Machine Learning Configuration - Production Optimized
+ml:
+  model_registry_path: "${ML_MODELS_PATH:-/data/ml/registry}"
+  artifact_store_path: "${ML_ARTIFACTS_PATH:-/data/ml/artifacts}"
+  model_cache_size: 5  # Limited cache for memory efficiency
+  default_train_test_split: 0.8
+  default_validation_split: 0.2
+  max_training_time_hours: 12  # Limited training time
+  feature_selection_threshold: 0.05  # Higher threshold for feature selection
+  max_features: 500  # Limited features for performance
+  feature_cache_ttl_hours: 12
+  optuna_n_trials: 50  # Reduced trials for faster optimization
+  optuna_timeout_hours: 6
+  optuna_pruning_enabled: true
+  cross_validation_folds: 3  # Reduced folds for performance
+  validation_frequency_days: 7
+  performance_degradation_threshold: 0.05  # Stricter degradation threshold
+  drift_detection_enabled: true
+  drift_check_frequency_hours: 4  # More frequent drift checks
+  drift_threshold: 0.03  # Stricter drift threshold
+  inference_batch_size: 500  # Smaller batches for lower latency
+  prediction_cache_ttl_minutes: 2  # Shorter cache TTL
+  model_warmup_enabled: true
+  
+  supported_model_types:
+    - "price_predictor"
+    - "direction_classifier"
+    - "volatility_forecaster"
+    - "regime_detector"
+  
+  # Production Model Thresholds - Stricter
+  min_accuracy_threshold: 0.65  # Higher accuracy requirement
+  min_precision_threshold: 0.6
+  min_recall_threshold: 0.6
+  min_f1_threshold: 0.6
+  validation_threshold: 0.7  # Higher validation threshold
+  
+  # Resource Limits - Production Optimized
+  max_memory_gb: 16.0
+  max_cpu_cores: 8
+  gpu_enabled: false  # CPU-only for stability
+  max_memory_mb: 8192
+  max_workers: 6
+  use_multiprocessing: false
+  batch_size: 500
+  chunk_size: 50
+
+# Logging Configuration - Production
+logging:
+  level: "INFO"
+  format: "json"  # Structured logging for production
+  handlers:
+    - type: "rotating_file"
+      filename: "/var/log/tbot/application.log"
+      max_size: "100MB"
+      backup_count: 10
+      level: "INFO"
+    - type: "syslog"
+      address: ["syslog.production.internal", 514]
+      facility: "daemon"
+      level: "WARNING"
+    - type: "elasticsearch"
+      hosts: ["elasticsearch-cluster.production.internal:9200"]
+      index_prefix: "tbot-logs-prod"
+      level: "INFO"
+  
+  # Sensitive Data Filtering
+  filter_patterns:
+    - "password"
+    - "secret"
+    - "token"
+    - "key"
+    - "api_key"
+    - "private_key"
+  
+  # Log Retention
+  retention_days: 90
+  archive_after_days: 30
+
+# Monitoring and Metrics - Production
+monitoring:
+  enabled: true
+  metrics_port: 9090
+  health_check_port: 8080
+  
+  # Prometheus Configuration
+  prometheus:
+    enabled: true
+    endpoint: "/metrics"
+    namespace: "tbot"
+    labels:
+      environment: "production"
+      service: "trading-bot"
+  
+  # Health Checks
+  health_checks:
+    database:
+      enabled: true
+      timeout: 5
+      interval: 30
+    exchanges:
+      enabled: true
+      timeout: 10
+      interval: 60
+    redis:
+      enabled: true
+      timeout: 3
+      interval: 30
+  
+  # Alerting Thresholds
+  alerts:
+    error_rate_threshold: 0.01  # 1% error rate
+    response_time_threshold: 1000  # 1 second
+    memory_usage_threshold: 0.8  # 80% memory usage
+    cpu_usage_threshold: 0.7  # 70% CPU usage
+    disk_usage_threshold: 0.8  # 80% disk usage
+    
+    # Trading-Specific Alerts
+    position_size_deviation_threshold: 0.1  # 10% deviation
+    profit_loss_threshold: -1000.0  # $1000 loss threshold
+    drawdown_alert_threshold: 0.05  # 5% drawdown alert
+    daily_volume_threshold: 1000000.0  # $1M daily volume
+
+# Performance Configuration - Production Optimized
+performance:
+  # Connection Pooling
+  database_connection_pool:
+    min_size: 10
+    max_size: 50
+    acquire_timeout: 30
+    idle_timeout: 300
+  
+  # Caching Configuration
+  cache:
+    default_ttl: 300  # 5 minutes
+    max_size: 10000  # Maximum cache entries
+    strategy:
+      price_data_ttl: 60  # 1 minute for price data
+      market_data_ttl: 30  # 30 seconds for market data
+      portfolio_data_ttl: 300  # 5 minutes for portfolio data
+  
+  # WebSocket Configuration
+  websocket:
+    max_connections: 100
+    ping_interval: 30
+    ping_timeout: 10
+    close_timeout: 10
+    max_message_size: 65536  # 64KB
+    compression: true
+    heartbeat_interval: 30
+  
+  # Background Task Configuration
+  celery:
+    broker_url: "redis://${REDIS_HOST}:${REDIS_PORT}/1"
+    result_backend: "redis://${REDIS_HOST}:${REDIS_PORT}/2"
+    worker_concurrency: 4
+    task_time_limit: 3600  # 1 hour task limit
+    task_soft_time_limit: 3000  # 50 minutes soft limit
+    worker_prefetch_multiplier: 1
+    task_acks_late: true
+    worker_disable_rate_limits: false
+    task_reject_on_worker_lost: true
+
+# Backup and Recovery Configuration
+backup:
+  enabled: true
+  schedule:
+    database_backup: "0 2 * * *"  # Daily at 2 AM
+    configuration_backup: "0 3 * * *"  # Daily at 3 AM
+    log_backup: "0 4 * * 0"  # Weekly on Sunday at 4 AM
+  
+  retention:
+    daily_backups: 30  # Keep 30 daily backups
+    weekly_backups: 12  # Keep 12 weekly backups
+    monthly_backups: 12  # Keep 12 monthly backups
+  
+  storage:
+    type: "s3"
+    bucket: "${BACKUP_S3_BUCKET}"
+    encryption: true
+    compression: true
+  
+  disaster_recovery:
+    rpo_minutes: 60  # 1 hour Recovery Point Objective
+    rto_minutes: 240  # 4 hour Recovery Time Objective
+    backup_verification: true
+    automated_recovery_testing: true
+
+# Compliance and Audit Configuration
+compliance:
+  audit_logging:
+    enabled: true
+    log_level: "all"  # Log all operations
+    storage: "elasticsearch"
+    retention_years: 7  # 7 year retention for compliance
+    encryption: true
+  
+  data_retention:
+    trade_data_years: 10
+    user_data_years: 7
+    log_data_years: 3
+    backup_data_years: 5
+  
+  regulatory_reporting:
+    enabled: true
+    formats: ["csv", "json", "xml"]
+    schedule: "0 6 * * 1"  # Weekly on Monday at 6 AM
+    recipients:
+      - "compliance@company.com"
+      - "risk@company.com"
+  
+  access_control:
+    multi_factor_authentication: true
+    password_policy:
+      min_length: 12
+      require_uppercase: true
+      require_lowercase: true
+      require_numbers: true
+      require_symbols: true
+      max_age_days: 90
+    session_management:
+      concurrent_sessions: 3
+      idle_timeout_minutes: 30
+      absolute_timeout_hours: 8

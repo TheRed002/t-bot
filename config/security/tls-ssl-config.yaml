@@ -1,0 +1,422 @@
+# TLS/SSL Configuration - T-Bot Trading System
+# Comprehensive TLS/SSL settings for production security
+
+# Global TLS Settings
+tls:
+  enabled: true
+  version_min: "1.2"  # Minimum TLS 1.2
+  version_max: "1.3"  # Support TLS 1.3
+  
+  # Cipher Suites (Secure configurations)
+  cipher_suites:
+    - "TLS_AES_256_GCM_SHA384"  # TLS 1.3
+    - "TLS_CHACHA20_POLY1305_SHA256"  # TLS 1.3
+    - "TLS_AES_128_GCM_SHA256"  # TLS 1.3
+    - "ECDHE-RSA-AES256-GCM-SHA384"  # TLS 1.2
+    - "ECDHE-RSA-AES128-GCM-SHA256"  # TLS 1.2
+    - "ECDHE-RSA-CHACHA20-POLY1305"  # TLS 1.2
+  
+  # Certificate Configuration
+  certificates:
+    # Main application certificate
+    application:
+      cert_file: "/etc/ssl/certs/tbot-app.crt"
+      key_file: "/etc/ssl/private/tbot-app.key"
+      ca_file: "/etc/ssl/certs/ca-bundle.crt"
+      
+      # Certificate properties
+      common_name: "trading.company.com"
+      san_names:
+        - "api.trading.company.com"
+        - "ws.trading.company.com"
+        - "admin.trading.company.com"
+      
+      # Certificate validation
+      verify_mode: "CERT_REQUIRED"
+      check_hostname: true
+      
+      # Certificate rotation
+      auto_rotation: true
+      rotation_days_before_expiry: 30
+      rotation_notification: true
+    
+    # Client certificates for service-to-service communication
+    client:
+      cert_file: "/etc/ssl/certs/tbot-client.crt"
+      key_file: "/etc/ssl/private/tbot-client.key"
+      ca_file: "/etc/ssl/certs/client-ca.crt"
+      
+      # Mutual TLS settings
+      mtls_enabled: true
+      client_cert_required: true
+      verify_client_cert: true
+    
+    # Database client certificates
+    database:
+      postgresql:
+        cert_file: "/etc/ssl/certs/postgresql-client.crt"
+        key_file: "/etc/ssl/private/postgresql-client.key"
+        ca_file: "/etc/ssl/certs/postgresql-ca.crt"
+        ssl_mode: "require"
+        ssl_min_protocol: "TLSv1.2"
+      
+      redis:
+        cert_file: "/etc/ssl/certs/redis-client.crt"
+        key_file: "/etc/ssl/private/redis-client.key"
+        ca_file: "/etc/ssl/certs/redis-ca.crt"
+        ssl_cert_reqs: "required"
+        ssl_check_hostname: true
+      
+      influxdb:
+        cert_file: "/etc/ssl/certs/influxdb-client.crt"
+        key_file: "/etc/ssl/private/influxdb-client.key"
+        ca_file: "/etc/ssl/certs/influxdb-ca.crt"
+        skip_verify: false
+  
+  # HSTS (HTTP Strict Transport Security)
+  hsts:
+    enabled: true
+    max_age: 31536000  # 1 year
+    include_subdomains: true
+    preload: true
+  
+  # OCSP (Online Certificate Status Protocol)
+  ocsp:
+    enabled: true
+    stapling: true
+    responder_timeout: 10
+    cache_timeout: 3600
+  
+  # Certificate Transparency
+  certificate_transparency:
+    enabled: true
+    expect_ct: true
+    max_age: 86400
+    enforce: true
+    report_uri: "https://ct-reports.company.com/report"
+
+# WebSocket TLS Configuration
+websocket_tls:
+  enabled: true
+  cert_file: "/etc/ssl/certs/tbot-ws.crt"
+  key_file: "/etc/ssl/private/tbot-ws.key"
+  ca_file: "/etc/ssl/certs/ws-ca.crt"
+  
+  # WebSocket-specific TLS settings
+  verify_mode: "CERT_REQUIRED"
+  check_hostname: true
+  ssl_version: "TLSv1.2"
+  
+  # Client certificate authentication for WebSocket
+  client_cert_auth: true
+  client_ca_file: "/etc/ssl/certs/ws-client-ca.crt"
+
+# Exchange API TLS Configuration
+exchange_tls:
+  # Binance TLS settings
+  binance:
+    verify_ssl: true
+    ca_bundle: "/etc/ssl/certs/binance-ca.crt"
+    cert_file: "/etc/ssl/certs/binance-client.crt"
+    key_file: "/etc/ssl/private/binance-client.key"
+    ssl_version: "TLSv1.2"
+    ciphers: "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS"
+  
+  # OKX TLS settings
+  okx:
+    verify_ssl: true
+    ca_bundle: "/etc/ssl/certs/okx-ca.crt"
+    cert_file: "/etc/ssl/certs/okx-client.crt"
+    key_file: "/etc/ssl/private/okx-client.key"
+    ssl_version: "TLSv1.2"
+    ciphers: "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS"
+  
+  # Coinbase TLS settings
+  coinbase:
+    verify_ssl: true
+    ca_bundle: "/etc/ssl/certs/coinbase-ca.crt"
+    cert_file: "/etc/ssl/certs/coinbase-client.crt"
+    key_file: "/etc/ssl/private/coinbase-client.key"
+    ssl_version: "TLSv1.2"
+    ciphers: "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS"
+
+# Load Balancer TLS Configuration
+load_balancer_tls:
+  enabled: true
+  
+  # HAProxy TLS termination
+  haproxy:
+    ssl_certificate: "/etc/ssl/certs/haproxy.pem"  # Combined cert+key file
+    ssl_ca_file: "/etc/ssl/certs/haproxy-ca.crt"
+    ssl_verify: "required"
+    ssl_min_ver: "TLSv1.2"
+    ssl_max_ver: "TLSv1.3"
+    
+    # SSL bind options
+    ssl_options:
+      - "no-sslv3"
+      - "no-tlsv10"
+      - "no-tlsv11"
+      - "no-tls-tickets"
+      - "ssl-min-ver TLSv1.2"
+    
+    # Cipher suite
+    cipher_suite: "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256"
+    
+    # ECDH curve
+    ecdh_curve: "secp384r1:secp256r1"
+    
+    # DHE parameters
+    dhe_param_size: 2048
+  
+  # Nginx TLS termination (alternative)
+  nginx:
+    ssl_certificate: "/etc/ssl/certs/nginx.crt"
+    ssl_certificate_key: "/etc/ssl/private/nginx.key"
+    ssl_trusted_certificate: "/etc/ssl/certs/nginx-ca.crt"
+    
+    # SSL protocols
+    ssl_protocols: "TLSv1.2 TLSv1.3"
+    
+    # Cipher suites
+    ssl_ciphers: "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-GCM-SHA256"
+    ssl_prefer_server_ciphers: true
+    
+    # SSL session settings
+    ssl_session_cache: "shared:SSL:10m"
+    ssl_session_timeout: "10m"
+    ssl_session_tickets: false
+    
+    # OCSP stapling
+    ssl_stapling: true
+    ssl_stapling_verify: true
+    ssl_stapling_responder: "http://ocsp.company.com/"
+    
+    # Security headers
+    security_headers:
+      strict_transport_security: "max-age=31536000; includeSubDomains; preload"
+      x_frame_options: "DENY"
+      x_content_type_options: "nosniff"
+      referrer_policy: "strict-origin-when-cross-origin"
+
+# Certificate Management
+certificate_management:
+  # Automatic certificate generation (Let's Encrypt or internal CA)
+  auto_generation:
+    enabled: true
+    provider: "acme"  # or "internal_ca"
+    
+    # ACME (Let's Encrypt) configuration
+    acme:
+      server: "https://acme-v02.api.letsencrypt.org/directory"
+      email: "ssl-admin@company.com"
+      key_type: "ecdsa"
+      key_size: 256
+      
+      # DNS challenge for wildcard certificates
+      dns_challenge:
+        provider: "cloudflare"
+        credentials:
+          api_token: "${CLOUDFLARE_API_TOKEN}"
+    
+    # Internal CA configuration
+    internal_ca:
+      ca_cert: "/etc/ssl/certs/internal-ca.crt"
+      ca_key: "/etc/ssl/private/internal-ca.key"
+      validity_days: 365
+      key_algorithm: "ecdsa"
+      key_size: 256
+  
+  # Certificate monitoring and alerting
+  monitoring:
+    enabled: true
+    check_interval: 3600  # Check every hour
+    
+    # Expiry notifications
+    expiry_alerts:
+      - days_before: 30
+        notification: "warning"
+        channels: ["email", "slack"]
+      - days_before: 7
+        notification: "critical"
+        channels: ["email", "slack", "pagerduty"]
+      - days_before: 1
+        notification: "emergency"
+        channels: ["email", "slack", "pagerduty", "sms"]
+    
+    # Certificate validation checks
+    validation_checks:
+      - name: "certificate_chain"
+        enabled: true
+      - name: "certificate_expiry"
+        enabled: true
+      - name: "certificate_revocation"
+        enabled: true
+      - name: "cipher_strength"
+        enabled: true
+      - name: "protocol_version"
+        enabled: true
+  
+  # Certificate backup and recovery
+  backup:
+    enabled: true
+    backup_location: "/backup/ssl"
+    encryption_key: "${SSL_BACKUP_ENCRYPTION_KEY}"
+    retention_days: 365
+    
+    # Automated backup schedule
+    schedule: "0 2 * * *"  # Daily at 2 AM
+
+# TLS Security Policies
+security_policies:
+  # Minimum security requirements
+  minimum_requirements:
+    tls_version: "1.2"
+    key_size: 2048  # Minimum RSA key size
+    ecdsa_curve: "secp256r1"  # Minimum ECDSA curve
+    hash_algorithm: "sha256"  # Minimum hash algorithm
+    
+    # Prohibited configurations
+    prohibited:
+      protocols: ["SSLv2", "SSLv3", "TLSv1.0", "TLSv1.1"]
+      ciphers: ["RC4", "DES", "3DES", "MD5", "SHA1"]
+      key_exchanges: ["NULL", "aNULL", "eNULL"]
+  
+  # Perfect Forward Secrecy
+  perfect_forward_secrecy:
+    enabled: true
+    required: true
+    key_exchanges: ["ECDHE", "DHE"]
+  
+  # Certificate pinning
+  certificate_pinning:
+    enabled: true
+    
+    # HPKP (HTTP Public Key Pinning) - Use with caution
+    hpkp:
+      enabled: false  # Disabled due to risk
+      max_age: 60
+      include_subdomains: false
+      pins:
+        - "sha256-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX="  # Primary key pin
+        - "sha256-YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY="  # Backup key pin
+    
+    # Certificate Transparency monitoring
+    ct_monitoring:
+      enabled: true
+      log_servers:
+        - "https://ct.googleapis.com/logs/argon2021/"
+        - "https://ct.cloudflare.com/logs/nimbus2021/"
+
+# Performance Optimization
+performance:
+  # SSL/TLS session management
+  session_management:
+    session_cache_enabled: true
+    session_cache_size: "10m"
+    session_timeout: 300
+    session_tickets: false  # Disabled for security
+  
+  # Connection optimization
+  connection_optimization:
+    keep_alive_enabled: true
+    keep_alive_timeout: 65
+    keep_alive_requests: 100
+    
+    # TCP optimizations
+    tcp_no_delay: true
+    tcp_cork: false
+    
+    # Buffer sizes
+    ssl_buffer_size: "4k"
+    client_body_buffer_size: "128k"
+  
+  # Compression (be careful with CRIME/BREACH attacks)
+  compression:
+    enabled: false  # Disabled to prevent CRIME/BREACH attacks
+    level: 1
+    min_length: 1000
+    types: ["text/plain", "application/json", "text/css", "application/javascript"]
+
+# Monitoring and Logging
+monitoring:
+  # SSL/TLS connection logging
+  connection_logging:
+    enabled: true
+    log_level: "info"
+    log_format: "json"
+    
+    # Fields to log
+    log_fields:
+      - "timestamp"
+      - "client_ip"
+      - "server_name"
+      - "protocol_version"
+      - "cipher_suite"
+      - "key_exchange"
+      - "authentication"
+      - "certificate_subject"
+      - "certificate_issuer"
+      - "handshake_time"
+      - "connection_duration"
+  
+  # SSL/TLS metrics
+  metrics:
+    enabled: true
+    
+    # Prometheus metrics
+    prometheus:
+      - name: "tls_connections_total"
+        help: "Total number of TLS connections"
+        labels: ["protocol", "cipher", "status"]
+      
+      - name: "tls_handshake_duration_seconds"
+        help: "TLS handshake duration in seconds"
+        buckets: [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+      
+      - name: "certificate_expiry_seconds"
+        help: "Certificate expiry time in seconds"
+        labels: ["common_name", "issuer"]
+      
+      - name: "tls_errors_total"
+        help: "Total number of TLS errors"
+        labels: ["error_type", "protocol"]
+
+# Compliance and Standards
+compliance:
+  # Regulatory compliance
+  standards:
+    - "PCI-DSS"
+    - "SOX"
+    - "GDPR"
+    - "ISO 27001"
+    - "NIST Cybersecurity Framework"
+  
+  # TLS/SSL compliance requirements
+  requirements:
+    pci_dss:
+      min_tls_version: "1.2"
+      strong_cryptography: true
+      key_management: true
+      certificate_validation: true
+    
+    sox:
+      encryption_in_transit: true
+      certificate_lifecycle_management: true
+      access_controls: true
+    
+    gdpr:
+      data_encryption: true
+      secure_data_transmission: true
+      privacy_by_design: true
+  
+  # Audit trail
+  audit_trail:
+    enabled: true
+    events:
+      - "certificate_generation"
+      - "certificate_renewal"
+      - "certificate_revocation"
+      - "tls_configuration_change"
+      - "cipher_suite_modification"
+      - "protocol_version_change"

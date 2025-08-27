@@ -1,0 +1,578 @@
+# Disaster Recovery Environment Configuration - T-Bot Trading System
+# This configuration is for emergency failover scenarios and disaster recovery
+
+environment: disaster-recovery
+debug: false
+app_name: "t-bot-trading-system-dr"
+app_version: "1.0.0-dr"
+log_level: "INFO"
+
+# Database Configuration - Disaster Recovery (Optimized for quick startup)
+database:
+  # PostgreSQL - DR Database (Read replicas or backup restore target)
+  DB_HOST: "${DR_POSTGRES_HOST:-postgres-dr.disaster.internal}"
+  DB_PORT: 5432
+  DB_NAME: "tbot_production_dr"
+  DB_USER: "${DR_POSTGRES_USER}"
+  DB_PASSWORD: "${DR_POSTGRES_PASSWORD}"
+  postgresql_pool_size: 30  # Smaller pool for quick startup
+  postgresql_max_overflow: 60
+  postgresql_pool_timeout: 30
+  postgresql_pool_recycle: 1800  # More frequent recycle for stability
+  postgresql_pool_pre_ping: true
+  postgresql_echo: false
+  postgresql_ssl_mode: "require"
+  postgresql_ssl_cert: "/etc/ssl/certs/postgresql-client-dr.crt"
+  postgresql_ssl_key: "/etc/ssl/private/postgresql-client-dr.key"
+  postgresql_ssl_ca: "/etc/ssl/certs/ca-certificates.crt"
+  
+  # Redis - DR Instance
+  REDIS_HOST: "${DR_REDIS_HOST:-redis-dr.disaster.internal}"
+  REDIS_PORT: 6380
+  REDIS_PASSWORD: "${DR_REDIS_PASSWORD}"
+  REDIS_DB: 0
+  redis_ssl: true
+  redis_ssl_cert_reqs: "required"
+  redis_ssl_ca_certs: "/etc/ssl/certs/redis-ca-dr.crt"
+  redis_ssl_certfile: "/etc/ssl/certs/redis-client-dr.crt"
+  redis_ssl_keyfile: "/etc/ssl/private/redis-client-dr.key"
+  redis_connection_pool_size: 50  # Smaller pool for DR
+  redis_connection_pool_timeout: 10  # Longer timeout for DR conditions
+  redis_socket_connect_timeout: 10
+  redis_socket_timeout: 10
+  redis_health_check_interval: 15  # More frequent health checks
+  
+  # InfluxDB - DR Instance
+  INFLUXDB_HOST: "${DR_INFLUXDB_HOST:-influxdb-dr.disaster.internal}"
+  INFLUXDB_PORT: 8086
+  INFLUXDB_TOKEN: "${DR_INFLUXDB_TOKEN}"
+  INFLUXDB_ORG: "tbot-disaster-recovery"
+  INFLUXDB_BUCKET: "trading_data_dr"
+  influxdb_ssl: true
+  influxdb_ssl_ca_cert: "/etc/ssl/certs/influxdb-ca-dr.crt"
+  influxdb_timeout: 60000  # Longer timeout for DR
+  influxdb_retries: 5  # More retries in DR scenario
+  influxdb_retry_interval: 2000
+
+# Security Configuration - Disaster Recovery (Enhanced security)
+security:
+  # JWT Configuration - More secure for DR
+  secret_key: "${DR_JWT_SECRET_KEY}"  # Different key for DR
+  jwt_algorithm: "RS256"
+  jwt_expire_minutes: 10  # Shorter expiration for security
+  jwt_refresh_expire_hours: 12
+  jwt_public_key_path: "/etc/ssl/certs/jwt-public-dr.pem"
+  jwt_private_key_path: "/etc/ssl/private/jwt-private-dr.pem"
+  
+  # Encryption Configuration
+  encryption_key: "${DR_ENCRYPTION_KEY}"
+  encryption_algorithm: "AES-256-GCM"
+  key_derivation_salt: "${DR_KEY_DERIVATION_SALT}"
+  
+  # API Security - Restricted for DR
+  cors_origins:
+    - "https://dr.trading.company.com"  # Only DR domain
+  cors_allow_credentials: true
+  cors_allow_methods: ["GET", "POST", "PUT"]  # Limited methods
+  cors_allow_headers: ["Authorization", "Content-Type"]
+  
+  # Rate Limiting - More restrictive
+  rate_limit_per_minute: 500
+  rate_limit_burst: 50
+  rate_limit_redis_key_prefix: "rate_limit:dr:"
+  
+  # Session Security - More restrictive
+  secure_cookies: true
+  cookie_samesite: "Strict"
+  cookie_httponly: true
+  session_timeout_minutes: 15  # Shorter sessions in DR
+  max_sessions_per_user: 1  # Single session only
+
+# Error Handling Configuration - Disaster Recovery (More aggressive)
+error_handling:
+  circuit_breaker_failure_threshold: 3  # Lower threshold for DR
+  circuit_breaker_recovery_timeout: 120  # Longer recovery time
+  circuit_breaker_half_open_max_calls: 2
+  max_retry_attempts: 10  # More retries in DR scenario
+  retry_backoff_factor: 3.0  # Higher backoff for unstable conditions
+  retry_max_delay: 600  # 10 minutes max delay
+  pattern_detection_enabled: true
+  correlation_analysis_enabled: true
+  predictive_alerts_enabled: true
+  state_validation_frequency: 15  # Very frequent validation
+  auto_reconciliation_enabled: true
+  max_discrepancy_threshold: 0.0005  # Very tight threshold
+  partial_fill_min_percentage: 0.95  # High fill requirement
+  network_max_offline_duration: 60  # 1 minute max offline
+  data_feed_max_staleness: 5  # 5 seconds max staleness
+  order_rejection_max_retries: 5
+  error_notification_webhook: "${DR_ERROR_WEBHOOK_URL}"
+  critical_error_email_list:
+    - "dr-ops@company.com"
+    - "incident-response@company.com"
+    - "ceo@company.com"  # Include executives for DR events
+
+# Exchange Configuration - Disaster Recovery (Conservative)
+exchanges:
+  default_timeout: 30  # Longer timeout for unstable conditions
+  max_retries: 5  # More retries
+  connection_pool_size: 10  # Smaller pool for stability
+  
+  # Primary exchange only for DR (reduce complexity)
+  binance_api_key: "${DR_BINANCE_API_KEY}"
+  binance_api_secret: "${DR_BINANCE_API_SECRET}"
+  binance_testnet: false
+  binance_base_url: "https://api.binance.com"
+  binance_websocket_url: "wss://stream.binance.com:9443"
+  
+  # Backup exchanges (disabled by default, can be enabled manually)
+  okx_api_key: "${DR_OKX_API_KEY:-}"
+  okx_api_secret: "${DR_OKX_API_SECRET:-}"
+  okx_passphrase: "${DR_OKX_PASSPHRASE:-}"
+  okx_sandbox: false
+  
+  coinbase_api_key: "${DR_COINBASE_API_KEY:-}"
+  coinbase_api_secret: "${DR_COINBASE_API_SECRET:-}"
+  coinbase_sandbox: false
+  
+  # Very conservative rate limits for DR
+  rate_limits:
+    binance:
+      orders_per_second: 3  # Very conservative
+      requests_per_minute: 300
+      websocket_connections: 1  # Single connection
+      weight_per_minute: 2000
+    okx:
+      orders_per_second: 2
+      requests_per_minute: 200
+      websocket_connections: 1
+    coinbase:
+      orders_per_second: 2
+      requests_per_minute: 150
+      websocket_connections: 1
+  
+  # Only primary exchange enabled by default
+  supported_exchanges: ["binance"]
+
+# Risk Management - Disaster Recovery (Ultra-conservative)
+risk:
+  default_position_size_method: "fixed_amount"  # Predictable sizing
+  default_position_size_pct: 0.005  # 0.5% extremely conservative
+  max_position_size_pct: 0.02  # 2% maximum position
+  max_total_positions: 3  # Very limited positions
+  max_positions_per_symbol: 1
+  max_portfolio_exposure: 0.5  # 50% max exposure
+  max_sector_exposure: 0.1  # 10% max per sector
+  max_correlation_exposure: 0.2  # 20% max correlated exposure
+  max_leverage: 1.0  # No leverage in DR
+  max_daily_loss_pct: 0.01  # 1% daily loss limit
+  max_drawdown_pct: 0.03  # 3% max drawdown
+  var_confidence_level: 0.99  # 99% VaR confidence
+  kelly_lookback_days: 90  # Longer lookback for stability
+  kelly_max_fraction: 0.05  # Very conservative Kelly
+  volatility_window: 60  # Longer volatility window
+  volatility_target: 0.01  # 1% daily volatility target
+  var_calculation_window: 252
+  drawdown_calculation_window: 252
+  correlation_calculation_window: 120
+  emergency_close_positions: true
+  emergency_recovery_timeout_hours: 4  # Longer recovery time
+  emergency_manual_override_enabled: true
+  stop_loss_buffer_pct: 0.002  # Larger buffer
+
+# Capital Management - Disaster Recovery (Conservative)
+capital_management:
+  base_currency: "USDT"
+  total_capital: "${DR_TOTAL_CAPITAL}"  # May be less than production
+  emergency_reserve_pct: 0.5  # 50% emergency reserve
+  allocation_strategy: "risk_parity_conservative"
+  rebalance_frequency_hours: 72  # Less frequent rebalancing
+  min_allocation_pct: 0.001  # 0.1% minimum allocation
+  max_allocation_pct: 0.05  # 5% maximum allocation
+  max_exchange_allocation_pct: 1.0  # Single exchange in DR
+  min_exchange_balance: 5000.0  # Higher minimum balance
+  max_daily_reallocation_pct: 0.05  # 5% max daily reallocation
+  fund_flow_cooldown_minutes: 360  # 6 hour cooldown
+  min_deposit_amount: 50000.0  # Higher minimums
+  min_withdrawal_amount: 10000.0
+  max_withdrawal_pct: 0.05  # 5% max withdrawal
+  
+  supported_currencies:
+    - "USDT"  # Only stable coins for DR
+    - "USDC"
+  
+  hedging_enabled: true
+  hedging_threshold: 0.02  # 2% exposure threshold
+  hedge_ratio: 1.0  # 100% hedge coverage in DR
+  
+  withdrawal_rules:
+    profit_only:
+      enabled: true
+      description: "Only withdraw realized profits in DR"
+    maintain_minimum:
+      enabled: true
+      description: "Keep minimum capital for each strategy"
+    performance_based:
+      enabled: true
+      description: "Allow withdrawals only if performance > threshold"
+      threshold: 0.2  # 20% minimum performance
+    daily_limit:
+      enabled: true
+      amount: 10000.0  # Low daily limit
+    approval_required:
+      enabled: true
+      threshold: 10000.0  # All withdrawals require approval
+  
+  auto_compound_enabled: false  # Disabled in DR
+  auto_compound_frequency: "never"
+  profit_threshold: 10000.0
+  max_daily_loss_pct: 0.01
+  max_weekly_loss_pct: 0.03
+  max_monthly_loss_pct: 0.05
+  profit_lock_pct: 1.0  # Lock all profits in DR
+  
+  per_strategy_minimum:
+    mean_reversion: 100000.0  # Higher minimums for DR
+    trend_following: 200000.0
+    ml_strategy: 300000.0
+    arbitrage: 500000.0
+    market_making: 1000000.0
+  
+  exchange_allocation_weights:
+    binance: 1.0  # Single exchange
+    okx: 0.0
+    coinbase: 0.0
+
+# Strategy Management - Disaster Recovery (Minimal strategies)
+strategies:
+  max_concurrent_strategies: 2  # Very limited strategies
+  strategy_restart_delay: 600  # 10 minute restart delay
+  performance_window_days: 60  # Longer evaluation window
+  default_min_confidence: 0.9  # Very high confidence required
+  default_position_size: 0.005
+  default_stop_loss: 0.01  # 1% stop loss
+  default_take_profit: 0.02  # 2% take profit
+  enable_hot_reload: false  # Disabled for stability
+  config_check_interval: 300  # 5 minute checks
+  min_win_rate: 0.7  # 70% minimum win rate
+  min_sharpe_ratio: 2.0  # High Sharpe ratio requirement
+  max_drawdown_threshold: 0.03  # 3% max drawdown
+  performance_evaluation_frequency: 24
+  auto_disable_poor_performers: true
+  performance_alert_threshold: 0.6
+
+# Machine Learning Configuration - Disaster Recovery (Disabled/Minimal)
+ml:
+  model_registry_path: "${DR_ML_MODELS_PATH:-/data/ml/dr/registry}"
+  artifact_store_path: "${DR_ML_ARTIFACTS_PATH:-/data/ml/dr/artifacts}"
+  model_cache_size: 1  # Minimal cache
+  default_train_test_split: 0.9  # More training data
+  default_validation_split: 0.1
+  max_training_time_hours: 1  # Very limited training
+  feature_selection_threshold: 0.1  # High threshold
+  max_features: 50  # Very limited features
+  feature_cache_ttl_hours: 24
+  optuna_n_trials: 5  # Minimal trials
+  optuna_timeout_hours: 1
+  optuna_pruning_enabled: true
+  cross_validation_folds: 2
+  validation_frequency_days: 14  # Less frequent validation
+  performance_degradation_threshold: 0.02  # Very strict
+  drift_detection_enabled: true
+  drift_check_frequency_hours: 2  # More frequent drift checks
+  drift_threshold: 0.01  # Very strict drift threshold
+  inference_batch_size: 100
+  prediction_cache_ttl_minutes: 10
+  model_warmup_enabled: false  # Disabled for faster startup
+  
+  supported_model_types:
+    - "price_predictor"  # Only basic prediction in DR
+  
+  # Very strict model thresholds for DR
+  min_accuracy_threshold: 0.8  # Very high accuracy requirement
+  min_precision_threshold: 0.8
+  min_recall_threshold: 0.8
+  min_f1_threshold: 0.8
+  validation_threshold: 0.9  # Very high validation threshold
+  
+  # Limited resources for DR
+  max_memory_gb: 4.0
+  max_cpu_cores: 2
+  gpu_enabled: false
+  max_memory_mb: 2048
+  max_workers: 1
+  use_multiprocessing: false
+  batch_size: 50
+  chunk_size: 10
+
+# Logging Configuration - Disaster Recovery (Enhanced logging)
+logging:
+  level: "INFO"
+  format: "json"
+  handlers:
+    - type: "rotating_file"
+      filename: "/var/log/tbot/disaster-recovery.log"
+      max_size: "200MB"
+      backup_count: 20
+      level: "INFO"
+    - type: "syslog"
+      address: ["syslog-dr.disaster.internal", 514]
+      facility: "daemon"
+      level: "WARNING"
+    - type: "elasticsearch"
+      hosts: ["elasticsearch-dr.disaster.internal:9200"]
+      index_prefix: "tbot-logs-dr"
+      level: "INFO"
+    - type: "remote"  # Send logs to offsite location
+      endpoint: "${DR_LOG_ENDPOINT}"
+      level: "ERROR"
+  
+  # Enhanced filtering for DR
+  filter_patterns:
+    - "password"
+    - "secret"
+    - "token"
+    - "key"
+    - "api_key"
+    - "private_key"
+  
+  # Extended retention for DR analysis
+  retention_days: 180
+  archive_after_days: 60
+
+# Monitoring and Metrics - Disaster Recovery (Enhanced monitoring)
+monitoring:
+  enabled: true
+  metrics_port: 9090
+  health_check_port: 8080
+  
+  # Enhanced Prometheus for DR
+  prometheus:
+    enabled: true
+    endpoint: "/metrics"
+    namespace: "tbot_dr"
+    labels:
+      environment: "disaster-recovery"
+      service: "trading-bot"
+      datacenter: "${DR_DATACENTER:-dr-primary}"
+  
+  # More frequent health checks
+  health_checks:
+    database:
+      enabled: true
+      timeout: 10
+      interval: 15  # Every 15 seconds
+    exchanges:
+      enabled: true
+      timeout: 15
+      interval: 30
+    redis:
+      enabled: true
+      timeout: 5
+      interval: 15
+  
+  # Strict alerting thresholds for DR
+  alerts:
+    error_rate_threshold: 0.005  # 0.5% error rate
+    response_time_threshold: 500  # 500ms response time
+    memory_usage_threshold: 0.7  # 70% memory usage
+    cpu_usage_threshold: 0.6  # 60% CPU usage
+    disk_usage_threshold: 0.7  # 70% disk usage
+    
+    # Trading-Specific Alerts - Very strict
+    position_size_deviation_threshold: 0.05  # 5% deviation
+    profit_loss_threshold: -100.0  # $100 loss threshold
+    drawdown_alert_threshold: 0.01  # 1% drawdown alert
+    daily_volume_threshold: 10000.0  # $10K daily volume
+
+# Performance Configuration - Disaster Recovery (Conservative)
+performance:
+  # Conservative connection pooling
+  database_connection_pool:
+    min_size: 5
+    max_size: 20
+    acquire_timeout: 60
+    idle_timeout: 600
+  
+  # Conservative caching
+  cache:
+    default_ttl: 600  # 10 minutes
+    max_size: 5000
+    strategy:
+      price_data_ttl: 120  # 2 minutes
+      market_data_ttl: 60  # 1 minute
+      portfolio_data_ttl: 600  # 10 minutes
+  
+  # Conservative WebSocket settings
+  websocket:
+    max_connections: 10
+    ping_interval: 20
+    ping_timeout: 10
+    close_timeout: 15
+    max_message_size: 32768
+    compression: true
+    heartbeat_interval: 20
+  
+  # Conservative background tasks
+  celery:
+    broker_url: "redis://${DR_REDIS_HOST}:${DR_REDIS_PORT}/1"
+    result_backend: "redis://${DR_REDIS_HOST}:${DR_REDIS_PORT}/2"
+    worker_concurrency: 1  # Single worker for stability
+    task_time_limit: 7200  # 2 hour task limit
+    task_soft_time_limit: 6600  # 110 minutes soft limit
+    worker_prefetch_multiplier: 1
+    task_acks_late: true
+    worker_disable_rate_limits: false
+
+# Backup and Recovery Configuration - Disaster Recovery (Enhanced)
+backup:
+  enabled: true
+  schedule:
+    database_backup: "*/15 * * * *"  # Every 15 minutes
+    configuration_backup: "*/30 * * * *"  # Every 30 minutes
+    state_backup: "*/5 * * * *"  # Every 5 minutes
+  
+  retention:
+    daily_backups: 90  # Keep 90 daily backups
+    weekly_backups: 52  # Keep 52 weekly backups
+    monthly_backups: 24  # Keep 24 monthly backups
+  
+  storage:
+    type: "multi"  # Multiple storage backends
+    primary:
+      type: "s3"
+      bucket: "${DR_BACKUP_S3_BUCKET}"
+      region: "${DR_BACKUP_S3_REGION}"
+      encryption: true
+      compression: true
+    secondary:
+      type: "gcs"
+      bucket: "${DR_BACKUP_GCS_BUCKET}"
+      encryption: true
+      compression: true
+    offsite:
+      type: "azure"
+      container: "${DR_BACKUP_AZURE_CONTAINER}"
+      encryption: true
+      compression: true
+  
+  disaster_recovery:
+    rpo_minutes: 15  # 15 minute Recovery Point Objective
+    rto_minutes: 60  # 1 hour Recovery Time Objective
+    backup_verification: true
+    automated_recovery_testing: true
+    cross_region_replication: true
+    
+    # Recovery procedures
+    recovery_scripts:
+      database_restore: "/scripts/dr/restore-database.sh"
+      configuration_restore: "/scripts/dr/restore-config.sh"
+      state_restore: "/scripts/dr/restore-state.sh"
+    
+    # Recovery validation
+    validation_tests:
+      database_integrity: true
+      application_startup: true
+      trading_functionality: true
+      data_consistency: true
+
+# Compliance and Audit Configuration - Disaster Recovery (Enhanced)
+compliance:
+  audit_logging:
+    enabled: true
+    log_level: "all"
+    storage: "multiple"  # Multiple storage backends
+    retention_years: 10  # Extended retention for DR
+    encryption: true
+    
+    # Multiple audit destinations
+    destinations:
+      - type: "elasticsearch"
+        hosts: ["elasticsearch-audit-dr.disaster.internal:9200"]
+      - type: "s3"
+        bucket: "${DR_AUDIT_S3_BUCKET}"
+      - type: "syslog"
+        server: "audit-syslog-dr.disaster.internal"
+  
+  data_retention:
+    trade_data_years: 15  # Extended retention
+    user_data_years: 10
+    log_data_years: 5
+    backup_data_years: 10
+  
+  regulatory_reporting:
+    enabled: true
+    formats: ["csv", "json", "xml", "pdf"]
+    schedule: "0 6 * * 1"  # Weekly on Monday
+    recipients:
+      - "dr-compliance@company.com"
+      - "regulatory@company.com"
+      - "legal@company.com"
+    
+    # Enhanced reporting for DR
+    dr_specific_reports:
+      - "dr_activation_report"
+      - "trading_continuity_report"
+      - "risk_exposure_report"
+      - "capital_preservation_report"
+  
+  access_control:
+    multi_factor_authentication: true
+    password_policy:
+      min_length: 16  # Enhanced security for DR
+      require_uppercase: true
+      require_lowercase: true
+      require_numbers: true
+      require_symbols: true
+      max_age_days: 30  # More frequent password changes
+    session_management:
+      concurrent_sessions: 1  # Single session only
+      idle_timeout_minutes: 10  # Very short idle timeout
+      absolute_timeout_hours: 4  # 4 hour absolute timeout
+
+# Disaster Recovery Specific Configuration
+disaster_recovery:
+  # Activation settings
+  activation_triggers:
+    - "primary_datacenter_outage"
+    - "database_failure"
+    - "critical_application_failure"
+    - "network_partition"
+    - "manual_activation"
+  
+  # Operational mode
+  operation_mode: "survival"  # survival, recovery, normal
+  reduced_functionality: true
+  manual_approval_required: true
+  
+  # Notification settings
+  notification:
+    activation_notifications:
+      - type: "email"
+        recipients: ["incident-response@company.com", "executives@company.com"]
+      - type: "sms"
+        recipients: ["${DR_SMS_CONTACTS}"]
+      - type: "slack"
+        channel: "#incident-response"
+      - type: "pagerduty"
+        service_key: "${DR_PAGERDUTY_KEY}"
+  
+  # Recovery procedures
+  recovery_procedures:
+    automatic_failback: false  # Manual failback only
+    health_check_interval: 30  # Check every 30 seconds
+    recovery_validation_required: true
+    
+  # Resource limitations
+  resource_limits:
+    max_concurrent_trades: 5
+    max_daily_trades: 50
+    max_position_value: 10000.0
+    trading_hours_only: true  # Only trade during market hours
+  
+  # Emergency contacts
+  emergency_contacts:
+    incident_commander: "${DR_INCIDENT_COMMANDER}"
+    technical_lead: "${DR_TECHNICAL_LEAD}"
+    business_continuity: "${DR_BUSINESS_CONTINUITY}"
+    external_support: "${DR_EXTERNAL_SUPPORT}"

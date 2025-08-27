@@ -1,0 +1,473 @@
+# Staging Environment Configuration - T-Bot Trading System
+# This configuration mirrors production but with relaxed settings for testing
+
+environment: staging
+debug: true
+app_name: "t-bot-trading-system-staging"
+app_version: "1.0.0-staging"
+log_level: "DEBUG"
+
+# Database Configuration - Staging
+database:
+  # PostgreSQL - Staging Database
+  DB_HOST: "${POSTGRES_HOST:-postgres-staging.internal}"
+  DB_PORT: 5432
+  DB_NAME: "tbot_staging"
+  DB_USER: "${POSTGRES_USER}"
+  DB_PASSWORD: "${POSTGRES_PASSWORD}"
+  postgresql_pool_size: 20
+  postgresql_max_overflow: 40
+  postgresql_pool_timeout: 30
+  postgresql_pool_recycle: 3600
+  postgresql_pool_pre_ping: true
+  postgresql_echo: false
+  postgresql_ssl_mode: "prefer"
+  
+  # Redis - Staging
+  REDIS_HOST: "${REDIS_HOST:-redis-staging.internal}"
+  REDIS_PORT: 6379
+  REDIS_PASSWORD: "${REDIS_PASSWORD}"
+  REDIS_DB: 0
+  redis_ssl: false
+  redis_connection_pool_size: 50
+  redis_connection_pool_timeout: 5
+  redis_socket_connect_timeout: 5
+  redis_socket_timeout: 5
+  redis_health_check_interval: 60
+  
+  # InfluxDB - Staging
+  INFLUXDB_HOST: "${INFLUXDB_HOST:-influxdb-staging.internal}"
+  INFLUXDB_PORT: 8086
+  INFLUXDB_TOKEN: "${INFLUXDB_TOKEN}"
+  INFLUXDB_ORG: "tbot-staging"
+  INFLUXDB_BUCKET: "trading_data_staging"
+  influxdb_ssl: false
+  influxdb_timeout: 30000
+  influxdb_retries: 3
+  influxdb_retry_interval: 1000
+
+# Security Configuration - Staging
+security:
+  # JWT Configuration - More relaxed for testing
+  secret_key: "${JWT_SECRET_KEY}"
+  jwt_algorithm: "HS256"  # Symmetric key for staging
+  jwt_expire_minutes: 60  # Longer expiration for testing
+  jwt_refresh_expire_hours: 48
+  
+  # Encryption Configuration
+  encryption_key: "${ENCRYPTION_KEY}"
+  encryption_algorithm: "AES-256-GCM"
+  key_derivation_salt: "${KEY_DERIVATION_SALT}"
+  
+  # API Security - Relaxed for testing
+  cors_origins:
+    - "https://staging.trading.company.com"
+    - "https://testing.trading.company.com"
+    - "http://localhost:3000"  # Allow local development
+    - "http://localhost:8080"
+  cors_allow_credentials: true
+  cors_allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+  cors_allow_headers: ["*"]
+  
+  # Rate Limiting - More permissive
+  rate_limit_per_minute: 5000
+  rate_limit_burst: 500
+  rate_limit_redis_key_prefix: "rate_limit:staging:"
+  
+  # Session Security - Relaxed
+  secure_cookies: true
+  cookie_samesite: "Lax"
+  cookie_httponly: true
+  session_timeout_minutes: 120  # Longer sessions for testing
+  max_sessions_per_user: 10  # More sessions allowed
+
+# Error Handling Configuration - More verbose for debugging
+error_handling:
+  circuit_breaker_failure_threshold: 5
+  circuit_breaker_recovery_timeout: 30
+  circuit_breaker_half_open_max_calls: 3
+  max_retry_attempts: 3
+  retry_backoff_factor: 1.5
+  retry_max_delay: 120
+  pattern_detection_enabled: true
+  correlation_analysis_enabled: true
+  predictive_alerts_enabled: true
+  state_validation_frequency: 60  # More frequent validation
+  auto_reconciliation_enabled: true
+  max_discrepancy_threshold: 0.01
+  partial_fill_min_percentage: 0.7
+  network_max_offline_duration: 300
+  data_feed_max_staleness: 30
+  order_rejection_max_retries: 5  # More retries for testing
+  error_notification_webhook: "${STAGING_ERROR_WEBHOOK_URL}"
+  critical_error_email_list:
+    - "staging-ops@company.com"
+    - "dev-team@company.com"
+
+# Exchange Configuration - Testnet/Sandbox APIs
+exchanges:
+  default_timeout: 30  # Longer timeout for testing
+  max_retries: 5
+  connection_pool_size: 10
+  
+  # Binance Testnet
+  binance_api_key: "${BINANCE_TESTNET_API_KEY}"
+  binance_api_secret: "${BINANCE_TESTNET_API_SECRET}"
+  binance_testnet: true
+  binance_base_url: "https://testnet.binance.vision"
+  binance_websocket_url: "wss://testnet.binance.vision"
+  
+  # OKX Demo Trading
+  okx_api_key: "${OKX_DEMO_API_KEY}"
+  okx_api_secret: "${OKX_DEMO_API_SECRET}"
+  okx_passphrase: "${OKX_DEMO_PASSPHRASE}"
+  okx_sandbox: true
+  okx_base_url: "https://www.okx.com"
+  okx_websocket_url: "wss://wspap.okx.com:8443"
+  
+  # Coinbase Sandbox
+  coinbase_api_key: "${COINBASE_SANDBOX_API_KEY}"
+  coinbase_api_secret: "${COINBASE_SANDBOX_API_SECRET}"
+  coinbase_sandbox: true
+  coinbase_base_url: "https://api-public.sandbox.exchange.coinbase.com"
+  coinbase_websocket_url: "wss://ws-feed-public.sandbox.exchange.coinbase.com"
+  
+  # Staging Rate Limits - More permissive
+  rate_limits:
+    binance:
+      orders_per_second: 15
+      requests_per_minute: 1500
+      websocket_connections: 5
+      weight_per_minute: 8000
+    okx:
+      orders_per_second: 25
+      requests_per_minute: 800
+      websocket_connections: 5
+      weight_per_minute: 3000
+    coinbase:
+      orders_per_second: 20
+      requests_per_minute: 600
+      websocket_connections: 5
+  
+  supported_exchanges: ["binance", "okx", "coinbase"]
+
+# Risk Management - Staging Settings (More permissive)
+risk:
+  default_position_size_method: "fixed_percentage"
+  default_position_size_pct: 0.02  # 2% position size for testing
+  max_position_size_pct: 0.1  # 10% max position
+  max_total_positions: 10
+  max_positions_per_symbol: 2  # Allow multiple positions for testing
+  max_portfolio_exposure: 0.9  # 90% max exposure
+  max_sector_exposure: 0.3  # 30% max per sector
+  max_correlation_exposure: 0.5  # 50% max correlated exposure
+  max_leverage: 2.0  # Allow some leverage for testing
+  max_daily_loss_pct: 0.05  # 5% daily loss limit
+  max_drawdown_pct: 0.15  # 15% max drawdown
+  var_confidence_level: 0.95  # 95% VaR confidence
+  kelly_lookback_days: 30
+  kelly_max_fraction: 0.2
+  volatility_window: 20
+  volatility_target: 0.02  # 2% daily volatility target
+  var_calculation_window: 252
+  drawdown_calculation_window: 252
+  correlation_calculation_window: 60
+  emergency_close_positions: true
+  emergency_recovery_timeout_hours: 1
+  emergency_manual_override_enabled: true
+  stop_loss_buffer_pct: 0.005  # Larger buffer for testing
+
+# Capital Management - Staging Settings
+capital_management:
+  base_currency: "USDT"
+  total_capital: "${STAGING_CAPITAL:-50000.0}"  # Lower capital for staging
+  emergency_reserve_pct: 0.15  # 15% emergency reserve
+  allocation_strategy: "equal_weight"  # Simple allocation for testing
+  rebalance_frequency_hours: 12  # More frequent rebalancing
+  min_allocation_pct: 0.01  # 1% minimum allocation
+  max_allocation_pct: 0.2  # 20% maximum allocation
+  max_exchange_allocation_pct: 0.5  # 50% max per exchange
+  min_exchange_balance: 100.0
+  max_daily_reallocation_pct: 0.2  # 20% max daily reallocation
+  fund_flow_cooldown_minutes: 30  # Shorter cooldown
+  min_deposit_amount: 1000.0
+  min_withdrawal_amount: 100.0
+  max_withdrawal_pct: 0.2  # 20% max withdrawal
+  
+  supported_currencies:
+    - "USDT"
+    - "USDC"
+    - "BTC"
+    - "ETH"
+    - "BNB"  # Additional for testing
+  
+  hedging_enabled: true
+  hedging_threshold: 0.1  # 10% exposure threshold
+  hedge_ratio: 0.8  # 80% hedge coverage
+  
+  withdrawal_rules:
+    profit_only:
+      enabled: false  # Allow all withdrawals in staging
+      description: "Allow all withdrawals for testing"
+    maintain_minimum:
+      enabled: true
+      description: "Keep minimum capital for each strategy"
+    performance_based:
+      enabled: false  # Disabled for testing
+      description: "Performance-based withdrawals disabled in staging"
+      threshold: 0.0
+    daily_limit:
+      enabled: true
+      amount: 10000.0  # Lower daily limit
+    approval_required:
+      enabled: false  # No approval required in staging
+      threshold: 1000000.0
+  
+  auto_compound_enabled: true
+  auto_compound_frequency: "daily"  # More frequent for testing
+  profit_threshold: 100.0
+  max_daily_loss_pct: 0.05
+  max_weekly_loss_pct: 0.1
+  max_monthly_loss_pct: 0.2
+  profit_lock_pct: 0.5  # Lock 50% of profits
+  
+  per_strategy_minimum:
+    mean_reversion: 5000.0
+    trend_following: 10000.0
+    ml_strategy: 15000.0
+    arbitrage: 20000.0
+    market_making: 25000.0
+  
+  exchange_allocation_weights:
+    binance: 0.4
+    okx: 0.35
+    coinbase: 0.25
+
+# Strategy Management - Staging Settings
+strategies:
+  max_concurrent_strategies: 8  # More strategies for testing
+  strategy_restart_delay: 60  # Shorter restart delay
+  performance_window_days: 14  # Shorter evaluation window
+  default_min_confidence: 0.6  # Lower confidence threshold
+  default_position_size: 0.02
+  default_stop_loss: 0.02  # 2% stop loss
+  default_take_profit: 0.04  # 4% take profit
+  enable_hot_reload: true  # Enabled for testing
+  config_check_interval: 30  # More frequent checks
+  min_win_rate: 0.4  # 40% minimum win rate
+  min_sharpe_ratio: 0.5  # Lower Sharpe ratio requirement
+  max_drawdown_threshold: 0.15  # 15% max drawdown
+  performance_evaluation_frequency: 12  # Every 12 hours
+  auto_disable_poor_performers: true
+  performance_alert_threshold: 0.3
+
+# Machine Learning Configuration - Staging
+ml:
+  model_registry_path: "${STAGING_ML_MODELS_PATH:-/data/ml/staging/registry}"
+  artifact_store_path: "${STAGING_ML_ARTIFACTS_PATH:-/data/ml/staging/artifacts}"
+  model_cache_size: 10
+  default_train_test_split: 0.8
+  default_validation_split: 0.2
+  max_training_time_hours: 24
+  feature_selection_threshold: 0.01
+  max_features: 1000
+  feature_cache_ttl_hours: 24
+  optuna_n_trials: 100
+  optuna_timeout_hours: 12
+  optuna_pruning_enabled: true
+  cross_validation_folds: 5
+  validation_frequency_days: 7
+  performance_degradation_threshold: 0.1
+  drift_detection_enabled: true
+  drift_check_frequency_hours: 6
+  drift_threshold: 0.05
+  inference_batch_size: 1000
+  prediction_cache_ttl_minutes: 5
+  model_warmup_enabled: true
+  
+  supported_model_types:
+    - "price_predictor"
+    - "direction_classifier"
+    - "volatility_forecaster"
+    - "regime_detector"
+  
+  # Staging Model Thresholds
+  min_accuracy_threshold: 0.55
+  min_precision_threshold: 0.5
+  min_recall_threshold: 0.5
+  min_f1_threshold: 0.5
+  validation_threshold: 0.6
+  
+  # Resource Limits - Staging
+  max_memory_gb: 8.0
+  max_cpu_cores: 4
+  gpu_enabled: false
+  max_memory_mb: 4096
+  max_workers: 4
+  use_multiprocessing: false
+  batch_size: 1000
+  chunk_size: 100
+
+# Logging Configuration - Staging (More verbose)
+logging:
+  level: "DEBUG"
+  format: "json"
+  handlers:
+    - type: "rotating_file"
+      filename: "/var/log/tbot/staging.log"
+      max_size: "50MB"
+      backup_count: 5
+      level: "DEBUG"
+    - type: "console"
+      level: "INFO"
+    - type: "elasticsearch"
+      hosts: ["elasticsearch-staging.internal:9200"]
+      index_prefix: "tbot-logs-staging"
+      level: "DEBUG"
+  
+  # Less strict filtering for debugging
+  filter_patterns:
+    - "password"
+    - "secret"
+    - "private_key"
+  
+  # Shorter retention for staging
+  retention_days: 30
+  archive_after_days: 7
+
+# Monitoring and Metrics - Staging
+monitoring:
+  enabled: true
+  metrics_port: 9090
+  health_check_port: 8080
+  
+  # Prometheus Configuration
+  prometheus:
+    enabled: true
+    endpoint: "/metrics"
+    namespace: "tbot_staging"
+    labels:
+      environment: "staging"
+      service: "trading-bot"
+  
+  # Health Checks - More frequent
+  health_checks:
+    database:
+      enabled: true
+      timeout: 10
+      interval: 30
+    exchanges:
+      enabled: true
+      timeout: 15
+      interval: 30
+    redis:
+      enabled: true
+      timeout: 5
+      interval: 30
+  
+  # Relaxed Alerting Thresholds
+  alerts:
+    error_rate_threshold: 0.05  # 5% error rate
+    response_time_threshold: 2000  # 2 seconds
+    memory_usage_threshold: 0.85  # 85% memory usage
+    cpu_usage_threshold: 0.8  # 80% CPU usage
+    disk_usage_threshold: 0.85  # 85% disk usage
+    
+    # Trading-Specific Alerts - More permissive
+    position_size_deviation_threshold: 0.2  # 20% deviation
+    profit_loss_threshold: -500.0  # $500 loss threshold
+    drawdown_alert_threshold: 0.1  # 10% drawdown alert
+    daily_volume_threshold: 100000.0  # $100K daily volume
+
+# Performance Configuration - Staging
+performance:
+  # Connection Pooling - Smaller pools
+  database_connection_pool:
+    min_size: 5
+    max_size: 20
+    acquire_timeout: 30
+    idle_timeout: 300
+  
+  # Caching Configuration
+  cache:
+    default_ttl: 300
+    max_size: 5000
+    strategy:
+      price_data_ttl: 60
+      market_data_ttl: 30
+      portfolio_data_ttl: 300
+  
+  # WebSocket Configuration
+  websocket:
+    max_connections: 50
+    ping_interval: 30
+    ping_timeout: 10
+    close_timeout: 10
+    max_message_size: 65536
+    compression: true
+    heartbeat_interval: 30
+  
+  # Background Task Configuration
+  celery:
+    broker_url: "redis://${REDIS_HOST}:${REDIS_PORT}/1"
+    result_backend: "redis://${REDIS_HOST}:${REDIS_PORT}/2"
+    worker_concurrency: 2
+    task_time_limit: 1800  # 30 minutes
+    task_soft_time_limit: 1500  # 25 minutes
+    worker_prefetch_multiplier: 1
+    task_acks_late: true
+    worker_disable_rate_limits: false
+
+# Backup and Recovery Configuration - Staging
+backup:
+  enabled: true
+  schedule:
+    database_backup: "0 3 * * *"  # Daily at 3 AM
+    configuration_backup: "0 4 * * *"  # Daily at 4 AM
+  
+  retention:
+    daily_backups: 7  # Keep 7 daily backups
+    weekly_backups: 4  # Keep 4 weekly backups
+    monthly_backups: 3  # Keep 3 monthly backups
+  
+  storage:
+    type: "local"
+    path: "/data/backups/staging"
+    encryption: false  # Disabled for staging
+    compression: true
+  
+  disaster_recovery:
+    rpo_minutes: 240  # 4 hour Recovery Point Objective
+    rto_minutes: 480  # 8 hour Recovery Time Objective
+
+# Compliance and Audit Configuration - Staging
+compliance:
+  audit_logging:
+    enabled: true
+    log_level: "important"  # Log important operations only
+    storage: "file"
+    retention_years: 2  # Shorter retention
+    encryption: false
+  
+  data_retention:
+    trade_data_years: 2
+    user_data_years: 2
+    log_data_years: 1
+    backup_data_years: 1
+  
+  regulatory_reporting:
+    enabled: false  # Disabled in staging
+  
+  access_control:
+    multi_factor_authentication: false  # Disabled for easier testing
+    password_policy:
+      min_length: 8
+      require_uppercase: false
+      require_lowercase: true
+      require_numbers: true
+      require_symbols: false
+      max_age_days: 180  # Longer password age
+    session_management:
+      concurrent_sessions: 10
+      idle_timeout_minutes: 120
+      absolute_timeout_hours: 12

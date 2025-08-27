@@ -36,8 +36,9 @@ class TestVolatilityBreakoutStrategy:
         """Create a test configuration for the strategy."""
         return {
             "name": "volatility_breakout",
-            "strategy_type": StrategyType.DYNAMIC,
-            "symbols": ["BTC/USD", "ETH/USD"],
+            "strategy_id": "volatility_breakout_001",
+            "strategy_type": StrategyType.MOMENTUM,
+            "symbol": "BTC/USD",
             "timeframe": "1h",
             "position_size_pct": 0.02,
             "min_confidence": 0.6,
@@ -421,7 +422,7 @@ class TestVolatilityBreakoutStrategy:
         assert strategy._get_regime_breakout_adjustment(MarketRegime.LOW_VOLATILITY) == 1.5
         assert strategy._get_regime_breakout_adjustment(MarketRegime.MEDIUM_VOLATILITY) == 1.0
         assert strategy._get_regime_breakout_adjustment(MarketRegime.HIGH_VOLATILITY) == 0.7
-        assert strategy._get_regime_breakout_adjustment(MarketRegime.CRISIS) == 0.5
+        assert strategy._get_regime_breakout_adjustment(MarketRegime.HIGH_VOLATILITY) == 0.5
 
     def test_get_regime_confidence_multiplier(self, strategy):
         """Test regime confidence multiplier calculation."""
@@ -429,7 +430,7 @@ class TestVolatilityBreakoutStrategy:
         assert strategy._get_regime_confidence_multiplier(MarketRegime.LOW_VOLATILITY) == 1.1
         assert strategy._get_regime_confidence_multiplier(MarketRegime.MEDIUM_VOLATILITY) == 1.0
         assert strategy._get_regime_confidence_multiplier(MarketRegime.HIGH_VOLATILITY) == 0.8
-        assert strategy._get_regime_confidence_multiplier(MarketRegime.CRISIS) == 0.6
+        assert strategy._get_regime_confidence_multiplier(MarketRegime.HIGH_VOLATILITY) == 0.6
 
     def test_is_signal_valid_for_regime(self, strategy):
         """Test regime-specific signal validation."""

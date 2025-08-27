@@ -22,7 +22,7 @@ export const queryClient = new QueryClient({
     queries: {
       // Stale time for different data types
       staleTime: 5 * 1000, // 5 seconds default
-      cacheTime: 10 * 60 * 1000, // 10 minutes cache
+      gcTime: 10 * 60 * 1000, // 10 minutes cache
       
       // Retry configuration
       retry: (failureCount, error: any) => {
@@ -41,16 +41,10 @@ export const queryClient = new QueryClient({
       refetchOnMount: true,
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
-      
-      // Error handling
-      onError: handleError,
     },
     mutations: {
       // Retry configuration for mutations
       retry: false, // Don't retry mutations by default
-      
-      // Error handling
-      onError: handleError,
     },
   },
   
@@ -113,35 +107,35 @@ export const queryOptions = {
   // Real-time data (very short stale time)
   realtime: {
     staleTime: 1000, // 1 second
-    cacheTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 5 * 60 * 1000, // 5 minutes
     refetchInterval: 1000, // Refetch every second
   },
   
   // Frequently updated data
   frequent: {
     staleTime: 5 * 1000, // 5 seconds
-    cacheTime: 10 * 60 * 1000, // 10 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
     refetchInterval: 5000, // Refetch every 5 seconds
   },
   
   // Moderately updated data
   moderate: {
     staleTime: 30 * 1000, // 30 seconds
-    cacheTime: 30 * 60 * 1000, // 30 minutes
+    gcTime: 30 * 60 * 1000, // 30 minutes
     refetchInterval: 30000, // Refetch every 30 seconds
   },
   
   // Rarely updated data
   static: {
     staleTime: 5 * 60 * 1000, // 5 minutes
-    cacheTime: 60 * 60 * 1000, // 1 hour
+    gcTime: 60 * 60 * 1000, // 1 hour
     refetchInterval: false, // No automatic refetch
   },
   
   // One-time data (like strategy definitions)
   once: {
     staleTime: Infinity,
-    cacheTime: Infinity,
+    gcTime: Infinity,
     refetchInterval: false,
     refetchOnMount: false,
     refetchOnWindowFocus: false,

@@ -4,73 +4,37 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Alert } from '@/components/ui/alert';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import {
-  Box,
-  Grid,
-  Typography,
-  Paper,
-  TextField,
-  InputAdornment,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Chip,
-  Button,
-  IconButton,
-  Tooltip,
-  Card,
-  CardContent,
-  CardActions,
-  Breadcrumbs,
-  Link,
-  Divider,
-  Alert,
-  Switch,
-  FormControlLabel,
-  Tab,
-  Tabs,
-  AppBar,
-  Toolbar,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-} from '@mui/material';
-import {
-  Search as SearchIcon,
-  ExpandMore as ExpandMoreIcon,
-  GetStarted as GetStartedIcon,
-  TrendingUp as TradingIcon,
-  Psychology as StrategyIcon,
-  Security as RiskIcon,
-  SmartToy as BotIcon,
-  Science as PlaygroundIcon,
-  Code as CodeIcon,
-  ContactSupport as ContactIcon,
-  Print as PrintIcon,
-  Share as ShareIcon,
-  Bookmark as BookmarkIcon,
-  KeyboardArrowRight as ArrowIcon,
-  PlayArrow as PlayIcon,
-  VideoLibrary as VideoIcon,
-  Article as ArticleIcon,
-  QuestionAnswer as QAIcon,
-  Settings as SettingsIcon,
-  Api as ApiIcon,
-  School as TutorialIcon,
-  BugReport as TroubleshootIcon,
-  MenuBook as GlossaryIcon,
-  ContentCopy as CopyIcon,
-  Home as HomeIcon,
-} from '@mui/icons-material';
+  Search,
+  ChevronDown,
+  Play,
+  TrendingUp,
+  Brain,
+  Shield,
+  Bot,
+  Beaker,
+  HelpCircle,
+  Printer,
+  Share,
+  Bookmark,
+  ChevronRight,
+  MessageSquare,
+  Settings,
+  Code,
+  GraduationCap,
+  Bug,
+  Copy,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useTheme } from '@mui/material/styles';
 import { colors } from '@/theme/colors';
+import { cn } from '@/lib/utils';
 
 // Types for help content
 interface HelpArticle {
@@ -107,7 +71,7 @@ const helpCategories: HelpCategory[] = [
   {
     id: 'getting-started',
     title: 'Getting Started',
-    icon: <GetStartedIcon />,
+    icon: <Play className="w-6 h-6" />,
     description: 'Learn the basics of T-Bot trading system',
     articles: ['quick-start', 'account-setup', 'first-bot'],
     color: colors.accent.cyan,
@@ -115,7 +79,7 @@ const helpCategories: HelpCategory[] = [
   {
     id: 'trading-basics',
     title: 'Trading Basics',
-    icon: <TradingIcon />,
+    icon: <TrendingUp className="w-6 h-6" />,
     description: 'Fundamental trading concepts and operations',
     articles: ['trading-interface', 'order-types', 'market-analysis'],
     color: colors.financial.profit,
@@ -123,7 +87,7 @@ const helpCategories: HelpCategory[] = [
   {
     id: 'strategy-config',
     title: 'Strategy Configuration',
-    icon: <StrategyIcon />,
+    icon: <Brain className="w-6 h-6" />,
     description: 'Configure and customize trading strategies',
     articles: ['strategy-basics', 'parameter-tuning', 'backtesting'],
     color: colors.accent.purple,
@@ -131,7 +95,7 @@ const helpCategories: HelpCategory[] = [
   {
     id: 'risk-management',
     title: 'Risk Management',
-    icon: <RiskIcon />,
+    icon: <Shield className="w-6 h-6" />,
     description: 'Protect your capital with proper risk controls',
     articles: ['risk-settings', 'position-sizing', 'stop-losses'],
     color: colors.financial.warning,
@@ -139,7 +103,7 @@ const helpCategories: HelpCategory[] = [
   {
     id: 'bot-management',
     title: 'Bot Management',
-    icon: <BotIcon />,
+    icon: <Bot className="w-6 h-6" />,
     description: 'Create, monitor, and manage trading bots',
     articles: ['bot-creation', 'bot-monitoring', 'bot-optimization'],
     color: colors.accent.teal,
@@ -147,7 +111,7 @@ const helpCategories: HelpCategory[] = [
   {
     id: 'playground',
     title: 'Playground Tutorial',
-    icon: <PlaygroundIcon />,
+    icon: <Beaker className="w-6 h-6" />,
     description: 'Use the playground for strategy testing',
     articles: ['playground-basics', 'simulation-modes', 'optimization'],
     color: colors.primary[500],
@@ -155,7 +119,7 @@ const helpCategories: HelpCategory[] = [
   {
     id: 'api-docs',
     title: 'API Documentation',
-    icon: <ApiIcon />,
+    icon: <Code className="w-6 h-6" />,
     description: 'Technical API reference and examples',
     articles: ['api-overview', 'authentication', 'endpoints'],
     color: colors.status.info,
@@ -163,7 +127,7 @@ const helpCategories: HelpCategory[] = [
   {
     id: 'troubleshooting',
     title: 'Troubleshooting',
-    icon: <TroubleshootIcon />,
+    icon: <Bug className="w-6 h-6" />,
     description: 'Common issues and solutions',
     articles: ['common-errors', 'connection-issues', 'performance'],
     color: colors.financial.loss,
@@ -560,14 +524,11 @@ const keyboardShortcuts = [
 ];
 
 const HelpPage: React.FC = () => {
-  const theme = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<HelpArticle | null>(null);
   const [expandedAccordions, setExpandedAccordions] = useState<string[]>([]);
   const [tabValue, setTabValue] = useState(0);
-  const [showShortcuts, setShowShortcuts] = useState(false);
-  const [darkMode, setDarkMode] = useState(true);
   const [bookmarkedArticles, setBookmarkedArticles] = useState<string[]>([]);
 
   // Search functionality
@@ -647,726 +608,627 @@ const HelpPage: React.FC = () => {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
-      <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <div className="h-screen flex flex-col">
         {/* Header */}
-        <AppBar position="static" color="transparent" elevation={0}>
-          <Toolbar>
-            <Typography variant="h5" component="h1" sx={{ flexGrow: 1, fontWeight: 600 }}>
-              Help & Documentation
-            </Typography>
+        <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="flex h-16 items-center justify-between px-6">
+            <h1 className="text-2xl font-semibold">Help & Documentation</h1>
             
-            <Box display="flex" alignItems="center" gap={2}>
-              <TextField
-                size="small"
-                placeholder="Search documentation..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-                sx={{ width: 300 }}
-              />
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search documentation..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-80 pl-10"
+                />
+              </div>
               
-              <Tooltip title="Keyboard shortcuts">
-                <IconButton onClick={() => setShowShortcuts(true)}>
-                  <SettingsIcon />
-                </IconButton>
-              </Tooltip>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8">
+                    <Settings className="h-4 w-4" />
+                    <span className="sr-only">Keyboard shortcuts</span>
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Keyboard Shortcuts</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-2">
+                    {keyboardShortcuts.map((shortcut, index) => (
+                      <div key={index} className="flex justify-between items-center">
+                        <span className="text-sm">{shortcut.description}</span>
+                        <Badge variant="outline" className="font-mono text-xs">
+                          {shortcut.key}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                </DialogContent>
+              </Dialog>
               
-              <Tooltip title="Print page">
-                <IconButton onClick={() => window.print()}>
-                  <PrintIcon />
-                </IconButton>
-              </Tooltip>
-            </Box>
-          </Toolbar>
-        </AppBar>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => window.print()}
+                className="h-8 w-8"
+              >
+                <Printer className="h-4 w-4" />
+                <span className="sr-only">Print page</span>
+              </Button>
+            </div>
+          </div>
+        </div>
 
-        <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
+        <div className="flex flex-1 overflow-hidden">
           {/* Sidebar */}
-          <Paper
-            sx={{
-              width: 320,
-              borderRadius: 0,
-              borderRight: 1,
-              borderColor: 'divider',
-              overflow: 'auto',
-            }}
-          >
+          <div className="w-80 border-r bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 overflow-auto">
             {/* Breadcrumbs */}
             {(selectedCategory || selectedArticle) && (
-              <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
-                <Breadcrumbs separator={<ArrowIcon fontSize="small" />}>
+              <div className="p-4 border-b">
+                <nav className="flex items-center space-x-1 text-sm text-muted-foreground">
                   {getBreadcrumbs().map((crumb, index) => (
-                    <Link
-                      key={index}
-                      color="inherit"
-                      href={crumb.href}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        if (index === 0) {
-                          setSelectedCategory(null);
-                          setSelectedArticle(null);
-                        } else if (index === 1) {
-                          setSelectedArticle(null);
-                        }
-                      }}
-                      sx={{ cursor: 'pointer' }}
-                    >
-                      {crumb.label}
-                    </Link>
+                    <React.Fragment key={index}>
+                      {index > 0 && <ChevronRight className="h-4 w-4" />}
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (index === 0) {
+                            setSelectedCategory(null);
+                            setSelectedArticle(null);
+                          } else if (index === 1) {
+                            setSelectedArticle(null);
+                          }
+                        }}
+                        className="hover:text-foreground transition-colors"
+                      >
+                        {crumb.label}
+                      </button>
+                    </React.Fragment>
                   ))}
-                </Breadcrumbs>
-              </Box>
+                </nav>
+              </div>
             )}
 
             {/* Navigation */}
-            <List sx={{ py: 1 }}>
+            <div className="p-2 space-y-1">
               {!selectedCategory ? (
                 // Category list
                 helpCategories.map((category) => (
-                  <ListItem key={category.id} disablePadding sx={{ mb: 0.5 }}>
-                    <ListItemButton
-                      onClick={() => setSelectedCategory(category.id)}
-                      sx={{
-                        mx: 1,
-                        borderRadius: 2,
-                        '&:hover': {
-                          backgroundColor: 'action.hover',
-                        },
-                      }}
-                    >
-                      <ListItemIcon sx={{ color: category.color }}>
-                        {category.icon}
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={category.title}
-                        secondary={category.description}
-                        primaryTypographyProps={{ fontWeight: 500 }}
-                        secondaryTypographyProps={{ fontSize: '0.75rem' }}
-                      />
-                    </ListItemButton>
-                  </ListItem>
+                  <button
+                    key={category.id}
+                    onClick={() => setSelectedCategory(category.id)}
+                    className="w-full flex items-start gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left"
+                  >
+                    <div style={{ color: category.color }} className="mt-0.5">
+                      {category.icon}
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">{category.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {category.description}
+                      </div>
+                    </div>
+                  </button>
                 ))
               ) : (
                 // Article list for selected category
                 <>
-                  <ListItem>
+                  <div className="p-2">
                     <Button
-                      startIcon={<ArrowIcon sx={{ transform: 'rotate(180deg)' }} />}
+                      variant="ghost"
                       onClick={() => setSelectedCategory(null)}
-                      sx={{ mb: 1 }}
+                      className="mb-2"
                     >
+                      <ChevronRight className="h-4 w-4 mr-2 rotate-180" />
                       Back to Categories
                     </Button>
-                  </ListItem>
-                  {helpArticles
-                    .filter(article => article.category === selectedCategory)
-                    .map((article) => (
-                      <ListItem key={article.id} disablePadding sx={{ mb: 0.5 }}>
-                        <ListItemButton
-                          selected={selectedArticle?.id === article.id}
+                  </div>
+                  <div className="space-y-1">
+                    {helpArticles
+                      .filter(article => article.category === selectedCategory)
+                      .map((article) => (
+                        <div
+                          key={article.id}
+                          className={cn(
+                            "mx-2 rounded-lg transition-colors cursor-pointer",
+                            selectedArticle?.id === article.id
+                              ? "bg-accent"
+                              : "hover:bg-accent/50"
+                          )}
                           onClick={() => setSelectedArticle(article)}
-                          sx={{
-                            mx: 1,
-                            borderRadius: 2,
-                          }}
                         >
-                          <ListItemText
-                            primary={article.title}
-                            secondary={
-                              <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                                <Chip
-                                  label={article.difficulty}
-                                  size="small"
-                                  color={
-                                    article.difficulty === 'beginner' ? 'success' :
-                                    article.difficulty === 'intermediate' ? 'warning' : 'error'
-                                  }
-                                />
-                                <Typography variant="caption" color="text.secondary">
+                          <div className="flex items-start justify-between p-3">
+                            <div className="flex-1">
+                              <div className="text-sm font-medium">{article.title}</div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <Badge
+                                  variant={article.difficulty === 'beginner' ? 'default' : 
+                                          article.difficulty === 'intermediate' ? 'secondary' : 'destructive'}
+                                  className="text-xs"
+                                >
+                                  {article.difficulty}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
                                   {article.estimatedTime}
-                                </Typography>
-                              </Box>
-                            }
-                            primaryTypographyProps={{ fontSize: '0.9rem' }}
-                          />
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleBookmark(article.id);
-                            }}
-                          >
-                            <BookmarkIcon
-                              fontSize="small"
-                              color={bookmarkedArticles.includes(article.id) ? 'primary' : 'disabled'}
-                            />
-                          </IconButton>
-                        </ListItemButton>
-                      </ListItem>
-                    ))}
+                                </span>
+                              </div>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleBookmark(article.id);
+                              }}
+                            >
+                              <Bookmark
+                                className={cn(
+                                  "h-3 w-3",
+                                  bookmarkedArticles.includes(article.id)
+                                    ? "fill-current text-primary"
+                                    : "text-muted-foreground"
+                                )}
+                              />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
                 </>
               )}
-            </List>
-          </Paper>
+            </div>
+          </div>
 
           {/* Main Content */}
-          <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
+          <div className="flex-1 overflow-auto">
             {selectedArticle ? (
               // Article content
-              <Box sx={{ p: 4, maxWidth: 800, mx: 'auto' }}>
-                <Box display="flex" justifyContent="between" alignItems="flex-start" mb={3}>
-                  <Box>
-                    <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 600 }}>
+              <div className="p-6 max-w-4xl mx-auto">
+                <div className="flex justify-between items-start mb-6">
+                  <div>
+                    <h1 className="text-3xl font-semibold mb-4">
                       {selectedArticle.title}
-                    </Typography>
+                    </h1>
                     
-                    <Box display="flex" alignItems="center" gap={2} mb={2}>
-                      <Chip
-                        label={selectedArticle.difficulty}
-                        size="small"
-                        color={
-                          selectedArticle.difficulty === 'beginner' ? 'success' :
-                          selectedArticle.difficulty === 'intermediate' ? 'warning' : 'error'
-                        }
-                      />
-                      <Typography variant="body2" color="text.secondary">
+                    <div className="flex items-center gap-4 mb-4">
+                      <Badge
+                        variant={selectedArticle.difficulty === 'beginner' ? 'default' : 
+                                selectedArticle.difficulty === 'intermediate' ? 'secondary' : 'destructive'}
+                      >
+                        {selectedArticle.difficulty}
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">
                         Estimated time: {selectedArticle.estimatedTime}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
+                      </span>
+                      <span className="text-sm text-muted-foreground">
                         Updated: {selectedArticle.lastUpdated}
-                      </Typography>
-                    </Box>
+                      </span>
+                    </div>
 
-                    <Box display="flex" gap={1} mb={3}>
+                    <div className="flex gap-2 mb-6">
                       {selectedArticle.tags.map((tag) => (
-                        <Chip key={tag} label={tag} size="small" variant="outlined" />
+                        <Badge key={tag} variant="outline">{tag}</Badge>
                       ))}
-                    </Box>
-                  </Box>
+                    </div>
+                  </div>
 
-                  <Box display="flex" gap={1}>
-                    <Tooltip title="Bookmark article">
-                      <IconButton onClick={() => toggleBookmark(selectedArticle.id)}>
-                        <BookmarkIcon
-                          color={bookmarkedArticles.includes(selectedArticle.id) ? 'primary' : 'disabled'}
-                        />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Share article">
-                      <IconButton>
-                        <ShareIcon />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                </Box>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => toggleBookmark(selectedArticle.id)}
+                    >
+                      <Bookmark
+                        className={cn(
+                          "h-4 w-4",
+                          bookmarkedArticles.includes(selectedArticle.id)
+                            ? "fill-current text-primary"
+                            : "text-muted-foreground"
+                        )}
+                      />
+                    </Button>
+                    <Button variant="ghost" size="icon">
+                      <Share className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
 
                 {/* Article content */}
-                <Paper sx={{ p: 3, mb: 3 }}>
-                  <Typography
-                    component="div"
-                    sx={{
-                      '& h1': { fontSize: '1.75rem', fontWeight: 600, mb: 2, mt: 3 },
-                      '& h2': { fontSize: '1.5rem', fontWeight: 600, mb: 2, mt: 3 },
-                      '& h3': { fontSize: '1.25rem', fontWeight: 600, mb: 1.5, mt: 2 },
-                      '& p': { mb: 1.5, lineHeight: 1.7 },
-                      '& ul': { pl: 3, mb: 2 },
-                      '& li': { mb: 0.5 },
-                      '& code': {
-                        backgroundColor: 'action.hover',
-                        px: 0.5,
-                        borderRadius: 0.5,
-                        fontFamily: 'monospace',
-                      },
-                    }}
-                  >
-                    {selectedArticle.content.split('\n').map((line, index) => {
-                      if (line.startsWith('# ')) {
-                        return <Typography key={index} variant="h1" component="h1">{line.slice(2)}</Typography>;
-                      }
-                      if (line.startsWith('## ')) {
-                        return <Typography key={index} variant="h2" component="h2">{line.slice(3)}</Typography>;
-                      }
-                      if (line.startsWith('### ')) {
-                        return <Typography key={index} variant="h3" component="h3">{line.slice(4)}</Typography>;
-                      }
-                      if (line.trim() === '') {
-                        return <br key={index} />;
-                      }
-                      return <Typography key={index} component="p">{line}</Typography>;
-                    })}
-                  </Typography>
-                </Paper>
+                <Card className="mb-6">
+                  <CardContent className="p-6 prose max-w-none">
+                    <div className="space-y-4">
+                      {selectedArticle.content.split('\n').map((line, index) => {
+                        if (line.startsWith('# ')) {
+                          return <h1 key={index} className="text-2xl font-semibold mt-6 mb-4 first:mt-0">{line.slice(2)}</h1>;
+                        }
+                        if (line.startsWith('## ')) {
+                          return <h2 key={index} className="text-xl font-semibold mt-6 mb-3">{line.slice(3)}</h2>;
+                        }
+                        if (line.startsWith('### ')) {
+                          return <h3 key={index} className="text-lg font-semibold mt-4 mb-2">{line.slice(4)}</h3>;
+                        }
+                        if (line.trim() === '') {
+                          return <div key={index} className="h-2" />;
+                        }
+                        return <p key={index} className="leading-7 text-sm">{line}</p>;
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
 
                 {/* Code Examples */}
                 {selectedArticle.codeExamples && selectedArticle.codeExamples.length > 0 && (
-                  <Box mb={3}>
-                    <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                      Code Examples
-                    </Typography>
-                    {selectedArticle.codeExamples.map((example, index) => (
-                      <Card key={index} sx={{ mb: 2 }}>
-                        <CardContent>
-                          <Box display="flex" justifyContent="between" alignItems="center" mb={2}>
-                            <Box>
-                              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                {example.title}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary">
-                                {example.description}
-                              </Typography>
-                            </Box>
-                            <Box display="flex" gap={1}>
-                              <Chip label={example.language} size="small" />
-                              <Tooltip title="Copy code">
-                                <IconButton
-                                  size="small"
+                  <div className="mb-6">
+                    <h2 className="text-xl font-semibold mb-4">Code Examples</h2>
+                    <div className="space-y-4">
+                      {selectedArticle.codeExamples.map((example, index) => (
+                        <Card key={index}>
+                          <CardContent className="p-4">
+                            <div className="flex justify-between items-start mb-4">
+                              <div>
+                                <h3 className="font-semibold text-lg mb-1">{example.title}</h3>
+                                <p className="text-sm text-muted-foreground">{example.description}</p>
+                              </div>
+                              <div className="flex gap-2">
+                                <Badge variant="secondary">{example.language}</Badge>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6"
                                   onClick={() => copyToClipboard(example.code)}
                                 >
-                                  <CopyIcon fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                            </Box>
-                          </Box>
-                          <Box
-                            component="pre"
-                            sx={{
-                              backgroundColor: 'action.hover',
-                              p: 2,
-                              borderRadius: 1,
-                              overflow: 'auto',
-                              fontFamily: 'monospace',
-                              fontSize: '0.875rem',
-                              lineHeight: 1.5,
-                            }}
-                          >
-                            <code>{example.code}</code>
-                          </Box>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </Box>
+                                  <Copy className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                            <pre className="bg-muted p-4 rounded-lg overflow-auto text-sm">
+                              <code>{example.code}</code>
+                            </pre>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 {/* Related Articles */}
                 {selectedArticle.relatedArticles && selectedArticle.relatedArticles.length > 0 && (
-                  <Box>
-                    <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                      Related Articles
-                    </Typography>
-                    <Grid container spacing={2}>
+                  <div>
+                    <h2 className="text-xl font-semibold mb-4">Related Articles</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {selectedArticle.relatedArticles.map((relatedId) => {
                         const relatedArticle = helpArticles.find(a => a.id === relatedId);
                         if (!relatedArticle) return null;
                         
                         return (
-                          <Grid item xs={12} md={6} key={relatedId}>
-                            <Card sx={{ cursor: 'pointer' }} onClick={() => setSelectedArticle(relatedArticle)}>
-                              <CardContent>
-                                <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                  {relatedArticle.title}
-                                </Typography>
-                                <Box display="flex" alignItems="center" gap={1} mt={1}>
-                                  <Chip
-                                    label={relatedArticle.difficulty}
-                                    size="small"
-                                    color={
-                                      relatedArticle.difficulty === 'beginner' ? 'success' :
-                                      relatedArticle.difficulty === 'intermediate' ? 'warning' : 'error'
-                                    }
-                                  />
-                                  <Typography variant="caption" color="text.secondary">
-                                    {relatedArticle.estimatedTime}
-                                  </Typography>
-                                </Box>
-                              </CardContent>
-                            </Card>
-                          </Grid>
+                          <Card
+                            key={relatedId}
+                            className="cursor-pointer hover:bg-accent transition-colors"
+                            onClick={() => setSelectedArticle(relatedArticle)}
+                          >
+                            <CardContent className="p-4">
+                              <h3 className="font-semibold mb-2">{relatedArticle.title}</h3>
+                              <div className="flex items-center gap-2">
+                                <Badge
+                                  variant={relatedArticle.difficulty === 'beginner' ? 'default' : 
+                                          relatedArticle.difficulty === 'intermediate' ? 'secondary' : 'destructive'}
+                                >
+                                  {relatedArticle.difficulty}
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {relatedArticle.estimatedTime}
+                                </span>
+                              </div>
+                            </CardContent>
+                          </Card>
                         );
                       })}
-                    </Grid>
-                  </Box>
+                    </div>
+                  </div>
                 )}
-              </Box>
+              </div>
             ) : (
               // Main help page content
-              <Box sx={{ p: 4 }}>
+              <div className="p-6">
                 {searchQuery ? (
                   // Search results
-                  <Box>
-                    <Typography variant="h5" gutterBottom sx={{ fontWeight: 600 }}>
+                  <div>
+                    <h2 className="text-2xl font-semibold mb-6">
                       Search Results for "{searchQuery}"
-                    </Typography>
+                    </h2>
                     
                     {filteredArticles.length > 0 && (
-                      <Box mb={4}>
-                        <Typography variant="h6" gutterBottom>
+                      <div className="mb-8">
+                        <h3 className="text-lg font-semibold mb-4">
                           Articles ({filteredArticles.length})
-                        </Typography>
-                        <Grid container spacing={2}>
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                           {filteredArticles.map((article) => (
-                            <Grid item xs={12} md={6} lg={4} key={article.id}>
-                              <Card
-                                sx={{ cursor: 'pointer', height: '100%' }}
-                                onClick={() => {
-                                  setSelectedCategory(article.category);
-                                  setSelectedArticle(article);
-                                }}
-                              >
-                                <CardContent>
-                                  <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                                    {article.title}
-                                  </Typography>
-                                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                                    {article.content.slice(0, 100)}...
-                                  </Typography>
-                                  <Box display="flex" justifyContent="between" alignItems="center">
-                                    <Chip
-                                      label={article.difficulty}
-                                      size="small"
-                                      color={
-                                        article.difficulty === 'beginner' ? 'success' :
-                                        article.difficulty === 'intermediate' ? 'warning' : 'error'
-                                      }
-                                    />
-                                    <Typography variant="caption" color="text.secondary">
-                                      {article.estimatedTime}
-                                    </Typography>
-                                  </Box>
-                                </CardContent>
-                              </Card>
-                            </Grid>
+                            <Card
+                              key={article.id}
+                              className="cursor-pointer h-full hover:bg-accent transition-colors"
+                              onClick={() => {
+                                setSelectedCategory(article.category);
+                                setSelectedArticle(article);
+                              }}
+                            >
+                              <CardContent className="p-4">
+                                <h4 className="font-semibold mb-2">{article.title}</h4>
+                                <p className="text-sm text-muted-foreground mb-4 line-clamp-3">
+                                  {article.content.slice(0, 100)}...
+                                </p>
+                                <div className="flex justify-between items-center">
+                                  <Badge
+                                    variant={article.difficulty === 'beginner' ? 'default' : 
+                                            article.difficulty === 'intermediate' ? 'secondary' : 'destructive'}
+                                  >
+                                    {article.difficulty}
+                                  </Badge>
+                                  <span className="text-xs text-muted-foreground">
+                                    {article.estimatedTime}
+                                  </span>
+                                </div>
+                              </CardContent>
+                            </Card>
                           ))}
-                        </Grid>
-                      </Box>
+                        </div>
+                      </div>
                     )}
 
                     {filteredFAQ.length > 0 && (
-                      <Box>
-                        <Typography variant="h6" gutterBottom>
+                      <div>
+                        <h3 className="text-lg font-semibold mb-4">
                           FAQ Results ({filteredFAQ.length})
-                        </Typography>
-                        {filteredFAQ.map((faq, index) => (
-                          <Accordion key={index}>
-                            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                              <Typography sx={{ fontWeight: 500 }}>{faq.question}</Typography>
-                            </AccordionSummary>
-                            <AccordionDetails>
-                              <Typography>{faq.answer}</Typography>
-                            </AccordionDetails>
-                          </Accordion>
-                        ))}
-                      </Box>
+                        </h3>
+                        <div className="space-y-2">
+                          {filteredFAQ.map((faq, index) => (
+                            <Card key={index}>
+                              <CardContent className="p-4">
+                                <div className="flex items-start gap-3">
+                                  <HelpCircle className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />
+                                  <div>
+                                    <h4 className="font-medium mb-2">{faq.question}</h4>
+                                    <p className="text-sm text-muted-foreground">{faq.answer}</p>
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
                     )}
 
                     {filteredArticles.length === 0 && filteredFAQ.length === 0 && (
-                      <Alert severity="info">
-                        No results found for "{searchQuery}". Try different keywords or browse categories below.
+                      <Alert>
+                        <HelpCircle className="h-4 w-4" />
+                        <div>
+                          No results found for "{searchQuery}". Try different keywords or browse categories below.
+                        </div>
                       </Alert>
                     )}
-                  </Box>
+                  </div>
                 ) : (
                   // Default help page content
-                  <Box>
+                  <div>
                     {/* Welcome Section */}
-                    <Box textAlign="center" mb={6}>
-                      <Typography variant="h3" component="h1" gutterBottom sx={{ fontWeight: 600 }}>
+                    <div className="text-center mb-12">
+                      <h1 className="text-4xl font-semibold mb-4">
                         Welcome to T-Bot Help Center
-                      </Typography>
-                      <Typography variant="h6" color="text.secondary" sx={{ mb: 4, maxWidth: 600, mx: 'auto' }}>
+                      </h1>
+                      <p className="text-lg text-muted-foreground mb-8 max-w-2xl mx-auto">
                         Your comprehensive guide to mastering algorithmic trading with T-Bot.
                         Find tutorials, API documentation, and troubleshooting guides.
-                      </Typography>
+                      </p>
                       
-                      <Box display="flex" justifyContent="center" gap={2}>
+                      <div className="flex justify-center gap-4">
                         <Button
-                          variant="contained"
-                          startIcon={<GetStartedIcon />}
                           onClick={() => {
                             setSelectedCategory('getting-started');
                             setSelectedArticle(helpArticles.find(a => a.id === 'quick-start') || null);
                           }}
+                          className="gap-2"
                         >
+                          <Play className="h-4 w-4" />
                           Quick Start Guide
                         </Button>
                         <Button
-                          variant="outlined"
-                          startIcon={<PlayIcon />}
+                          variant="outline"
                           onClick={() => window.open('/playground', '_blank')}
+                          className="gap-2"
                         >
+                          <Play className="h-4 w-4" />
                           Try Playground
                         </Button>
-                      </Box>
-                    </Box>
+                      </div>
+                    </div>
 
                     {/* Categories Grid */}
-                    <Typography variant="h5" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
+                    <h2 className="text-2xl font-semibold mb-6">
                       Documentation Categories
-                    </Typography>
+                    </h2>
                     
-                    <Grid container spacing={3} mb={6}>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-12">
                       {helpCategories.map((category) => (
-                        <Grid item xs={12} sm={6} md={4} key={category.id}>
-                          <Card
-                            sx={{
-                              cursor: 'pointer',
-                              height: '100%',
-                              transition: 'transform 0.2s, box-shadow 0.2s',
-                              '&:hover': {
-                                transform: 'translateY(-4px)',
-                                boxShadow: 4,
-                              },
-                            }}
-                            onClick={() => setSelectedCategory(category.id)}
-                          >
-                            <CardContent sx={{ textAlign: 'center', p: 3 }}>
-                              <Box
-                                sx={{
-                                  display: 'inline-flex',
-                                  p: 2,
-                                  borderRadius: '50%',
-                                  backgroundColor: `${category.color}20`,
-                                  color: category.color,
-                                  mb: 2,
-                                }}
-                              >
-                                {category.icon}
-                              </Box>
-                              <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                                {category.title}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                                {category.description}
-                              </Typography>
-                              <Chip
-                                label={`${category.articles.length} articles`}
-                                size="small"
-                                variant="outlined"
-                              />
-                            </CardContent>
-                          </Card>
-                        </Grid>
+                        <Card
+                          key={category.id}
+                          className="cursor-pointer h-full hover:shadow-lg transition-all duration-200 hover:-translate-y-1"
+                          onClick={() => setSelectedCategory(category.id)}
+                        >
+                          <CardContent className="text-center p-6">
+                            <div
+                              className="inline-flex p-4 rounded-full mb-4"
+                              style={{
+                                backgroundColor: `${category.color}20`,
+                                color: category.color,
+                              }}
+                            >
+                              {category.icon}
+                            </div>
+                            <h3 className="text-lg font-semibold mb-2">{category.title}</h3>
+                            <p className="text-sm text-muted-foreground mb-4">{category.description}</p>
+                            <Badge variant="outline">
+                              {category.articles.length} articles
+                            </Badge>
+                          </CardContent>
+                        </Card>
                       ))}
-                    </Grid>
+                    </div>
 
                     {/* Quick Access Tabs */}
-                    <Paper sx={{ mb: 4 }}>
-                      <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)}>
-                        <Tab icon={<QAIcon />} label="FAQ" />
-                        <Tab icon={<TutorialIcon />} label="Video Tutorials" />
-                        <Tab icon={<ContactIcon />} label="Contact Support" />
-                      </Tabs>
-
-                      {/* FAQ Tab */}
-                      {tabValue === 0 && (
-                        <Box sx={{ p: 3 }}>
-                          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                            Frequently Asked Questions
-                          </Typography>
-                          {faqData.slice(0, 6).map((faq, index) => (
-                            <Accordion
-                              key={index}
-                              expanded={expandedAccordions.includes(`faq-${index}`)}
-                              onChange={handleAccordionChange(`faq-${index}`)}
-                            >
-                              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                                <Typography sx={{ fontWeight: 500 }}>{faq.question}</Typography>
-                              </AccordionSummary>
-                              <AccordionDetails>
-                                <Typography>{faq.answer}</Typography>
-                              </AccordionDetails>
-                            </Accordion>
-                          ))}
-                          <Box textAlign="center" mt={3}>
-                            <Button variant="outlined">View All FAQ</Button>
-                          </Box>
-                        </Box>
-                      )}
-
-                      {/* Video Tutorials Tab */}
-                      {tabValue === 1 && (
-                        <Box sx={{ p: 3 }}>
-                          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                    <Card className="mb-8">
+                      <Tabs value={tabValue === 0 ? 'faq' : tabValue === 1 ? 'tutorials' : 'support'} onValueChange={(v) => setTabValue(v === 'faq' ? 0 : v === 'tutorials' ? 1 : 2)}>
+                        <TabsList className="grid w-full grid-cols-3">
+                          <TabsTrigger value="faq" className="flex items-center gap-2">
+                            <MessageSquare className="h-4 w-4" />
+                            FAQ
+                          </TabsTrigger>
+                          <TabsTrigger value="tutorials" className="flex items-center gap-2">
+                            <GraduationCap className="h-4 w-4" />
                             Video Tutorials
-                          </Typography>
-                          <Grid container spacing={3}>
+                          </TabsTrigger>
+                          <TabsTrigger value="support" className="flex items-center gap-2">
+                            <HelpCircle className="h-4 w-4" />
+                            Contact Support
+                          </TabsTrigger>
+                        </TabsList>
+
+                        <TabsContent value="faq" className="p-6">
+                          <h3 className="text-lg font-semibold mb-4">
+                            Frequently Asked Questions
+                          </h3>
+                          <div className="space-y-3">
+                            {faqData.slice(0, 6).map((faq, index) => (
+                              <Card key={index}>
+                                <CardContent className="p-4">
+                                  <div className="flex items-start gap-3">
+                                    <HelpCircle className="h-5 w-5 mt-0.5 text-muted-foreground flex-shrink-0" />
+                                    <div>
+                                      <h4 className="font-medium mb-2">{faq.question}</h4>
+                                      <p className="text-sm text-muted-foreground">{faq.answer}</p>
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                          <div className="text-center mt-6">
+                            <Button variant="outline">View All FAQ</Button>
+                          </div>
+                        </TabsContent>
+
+                        <TabsContent value="tutorials" className="p-6">
+                          <h3 className="text-lg font-semibold mb-4">
+                            Video Tutorials
+                          </h3>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                             {[
                               { title: 'Getting Started with T-Bot', duration: '5:30', level: 'Beginner' },
                               { title: 'Setting Up Your First Bot', duration: '8:45', level: 'Beginner' },
                               { title: 'Advanced Strategy Configuration', duration: '12:20', level: 'Advanced' },
                               { title: 'Risk Management Best Practices', duration: '7:15', level: 'Intermediate' },
                             ].map((video, index) => (
-                              <Grid item xs={12} sm={6} md={3} key={index}>
-                                <Card>
-                                  <Box
-                                    sx={{
-                                      height: 120,
-                                      backgroundColor: 'action.hover',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    <PlayIcon sx={{ fontSize: 40, color: 'primary.main' }} />
-                                  </Box>
-                                  <CardContent>
-                                    <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-                                      {video.title}
-                                    </Typography>
-                                    <Box display="flex" justifyContent="between" alignItems="center" mt={1}>
-                                      <Typography variant="caption" color="text.secondary">
-                                        {video.duration}
-                                      </Typography>
-                                      <Chip
-                                        label={video.level}
-                                        size="small"
-                                        color={
-                                          video.level === 'Beginner' ? 'success' :
-                                          video.level === 'Intermediate' ? 'warning' : 'error'
-                                        }
-                                      />
-                                    </Box>
-                                  </CardContent>
-                                </Card>
-                              </Grid>
+                              <Card key={index} className="overflow-hidden">
+                                <div className="h-32 bg-muted flex items-center justify-center cursor-pointer hover:bg-muted/80 transition-colors">
+                                  <Play className="h-10 w-10 text-primary" />
+                                </div>
+                                <CardContent className="p-4">
+                                  <h4 className="font-semibold text-sm mb-2">{video.title}</h4>
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-xs text-muted-foreground">{video.duration}</span>
+                                    <Badge
+                                      variant={video.level === 'Beginner' ? 'default' : 
+                                              video.level === 'Intermediate' ? 'secondary' : 'destructive'}
+                                    >
+                                      {video.level}
+                                    </Badge>
+                                  </div>
+                                </CardContent>
+                              </Card>
                             ))}
-                          </Grid>
-                        </Box>
-                      )}
+                          </div>
+                        </TabsContent>
 
-                      {/* Contact Support Tab */}
-                      {tabValue === 2 && (
-                        <Box sx={{ p: 3 }}>
-                          <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
+                        <TabsContent value="support" className="p-6">
+                          <h3 className="text-lg font-semibold mb-4">
                             Get Help & Support
-                          </Typography>
-                          <Grid container spacing={3}>
-                            <Grid item xs={12} md={6}>
-                              <Card>
-                                <CardContent>
-                                  <Typography variant="h6" gutterBottom>
-                                    📧 Email Support
-                                  </Typography>
-                                  <Typography variant="body2" color="text.secondary" paragraph>
-                                    Get help from our technical support team. We typically respond within 24 hours.
-                                  </Typography>
-                                  <Button variant="contained" href="mailto:support@tbot.trading">
-                                    Contact Support
-                                  </Button>
-                                </CardContent>
-                              </Card>
-                            </Grid>
-                            <Grid item xs={12} md={6}>
-                              <Card>
-                                <CardContent>
-                                  <Typography variant="h6" gutterBottom>
-                                    💬 Community Forum
-                                  </Typography>
-                                  <Typography variant="body2" color="text.secondary" paragraph>
-                                    Join our community to ask questions and share knowledge with other traders.
-                                  </Typography>
-                                  <Button variant="outlined" href="https://community.tbot.trading" target="_blank">
-                                    Visit Forum
-                                  </Button>
-                                </CardContent>
-                              </Card>
-                            </Grid>
-                            <Grid item xs={12}>
-                              <Alert severity="info">
-                                <Typography variant="body2">
-                                  For urgent technical issues affecting live trading, please contact our emergency support line at +1-555-TBOT-911.
-                                </Typography>
-                              </Alert>
-                            </Grid>
-                          </Grid>
-                        </Box>
-                      )}
-                    </Paper>
+                          </h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                            <Card>
+                              <CardContent className="p-6">
+                                <h4 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                                  📧 Email Support
+                                </h4>
+                                <p className="text-sm text-muted-foreground mb-4">
+                                  Get help from our technical support team. We typically respond within 24 hours.
+                                </p>
+                                <Button asChild>
+                                  <a href="mailto:support@tbot.trading">Contact Support</a>
+                                </Button>
+                              </CardContent>
+                            </Card>
+                            <Card>
+                              <CardContent className="p-6">
+                                <h4 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                                  💬 Community Forum
+                                </h4>
+                                <p className="text-sm text-muted-foreground mb-4">
+                                  Join our community to ask questions and share knowledge with other traders.
+                                </p>
+                                <Button variant="outline" asChild>
+                                  <a href="https://community.tbot.trading" target="_blank">Visit Forum</a>
+                                </Button>
+                              </CardContent>
+                            </Card>
+                          </div>
+                          <Alert>
+                            <HelpCircle className="h-4 w-4" />
+                            <div>
+                              For urgent technical issues affecting live trading, please contact our emergency support line at +1-555-TBOT-911.
+                            </div>
+                          </Alert>
+                        </TabsContent>
+                      </Tabs>
+                    </Card>
 
                     {/* System Requirements */}
-                    <Paper sx={{ p: 3, mb: 4 }}>
-                      <Typography variant="h6" gutterBottom sx={{ fontWeight: 600 }}>
-                        System Requirements
-                      </Typography>
-                      <Grid container spacing={3}>
-                        <Grid item xs={12} md={6}>
-                          <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                            Minimum Requirements
-                          </Typography>
-                          <List dense>
-                            <ListItem>
-                              <ListItemText primary="Modern web browser (Chrome 90+, Firefox 88+, Safari 14+)" />
-                            </ListItem>
-                            <ListItem>
-                              <ListItemText primary="Stable internet connection (minimum 1 Mbps)" />
-                            </ListItem>
-                            <ListItem>
-                              <ListItemText primary="JavaScript enabled" />
-                            </ListItem>
-                            <ListItem>
-                              <ListItemText primary="Minimum screen resolution: 1024x768" />
-                            </ListItem>
-                          </List>
-                        </Grid>
-                        <Grid item xs={12} md={6}>
-                          <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 600 }}>
-                            Recommended
-                          </Typography>
-                          <List dense>
-                            <ListItem>
-                              <ListItemText primary="Latest Chrome or Firefox browser" />
-                            </ListItem>
-                            <ListItem>
-                              <ListItemText primary="High-speed internet (10+ Mbps)" />
-                            </ListItem>
-                            <ListItem>
-                              <ListItemText primary="Full HD display (1920x1080)" />
-                            </ListItem>
-                            <ListItem>
-                              <ListItemText primary="Hardware acceleration enabled" />
-                            </ListItem>
-                          </List>
-                        </Grid>
-                      </Grid>
-                    </Paper>
-                  </Box>
+                    <Card>
+                      <CardContent className="p-6">
+                        <h3 className="text-lg font-semibold mb-6">
+                          System Requirements
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <div>
+                            <h4 className="font-semibold mb-4">Minimum Requirements</h4>
+                            <ul className="space-y-2 text-sm">
+                              <li>• Modern web browser (Chrome 90+, Firefox 88+, Safari 14+)</li>
+                              <li>• Stable internet connection (minimum 1 Mbps)</li>
+                              <li>• JavaScript enabled</li>
+                              <li>• Minimum screen resolution: 1024x768</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <h4 className="font-semibold mb-4">Recommended</h4>
+                            <ul className="space-y-2 text-sm">
+                              <li>• Latest Chrome or Firefox browser</li>
+                              <li>• High-speed internet (10+ Mbps)</li>
+                              <li>• Full HD display (1920x1080)</li>
+                              <li>• Hardware acceleration enabled</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
                 )}
-              </Box>
+              </div>
             )}
-          </Box>
-        </Box>
-
-        {/* Keyboard Shortcuts Dialog */}
-        <Dialog open={showShortcuts} onClose={() => setShowShortcuts(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>Keyboard Shortcuts</DialogTitle>
-          <DialogContent>
-            <List>
-              {keyboardShortcuts.map((shortcut, index) => (
-                <ListItem key={index}>
-                  <Box display="flex" justifyContent="between" width="100%">
-                    <Typography variant="body2">{shortcut.description}</Typography>
-                    <Chip
-                      label={shortcut.key}
-                      size="small"
-                      variant="outlined"
-                      sx={{ fontFamily: 'monospace' }}
-                    />
-                  </Box>
-                </ListItem>
-              ))}
-            </List>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setShowShortcuts(false)}>Close</Button>
-          </DialogActions>
-        </Dialog>
-      </Box>
+          </div>
+        </div>
+      </div>
     </motion.div>
   );
 };

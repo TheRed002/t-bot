@@ -3,6 +3,14 @@
  */
 
 import { configureStore } from '@reduxjs/toolkit';
+import authReducer from '../authSlice';
+import botReducer from '../botSlice';
+import portfolioReducer from '../portfolioSlice';
+import strategyReducer from '../strategySlice';
+import riskReducer from '../riskSlice';
+import marketReducer from '../marketSlice';
+import uiReducer from '../uiSlice';
+import websocketReducer from '../websocketSlice';
 import playgroundReducer, {
   setActiveConfiguration,
   updateConfigurationField,
@@ -31,10 +39,18 @@ import playgroundReducer, {
 } from '../playgroundSlice';
 import { PlaygroundConfiguration, PlaygroundExecution, PlaygroundMetrics } from '@/types';
 
-// Mock store setup
+// Mock store setup with all required reducers
 const createMockStore = (preloadedState = {}) => {
   return configureStore({
     reducer: {
+      auth: authReducer,
+      bots: botReducer,
+      portfolio: portfolioReducer,
+      strategies: strategyReducer,
+      risk: riskReducer,
+      market: marketReducer,
+      ui: uiReducer,
+      websocket: websocketReducer,
       playground: playgroundReducer
     },
     preloadedState
@@ -427,8 +443,8 @@ describe('playgroundSlice', () => {
     it('sets filters', () => {
       const store = createMockStore();
       const filters = {
-        status: ['running', 'completed'],
-        mode: ['historical']
+        status: ['running', 'completed'] as ('running' | 'completed')[],
+        mode: ['historical'] as ('historical')[]
       };
 
       store.dispatch(setFilters(filters));

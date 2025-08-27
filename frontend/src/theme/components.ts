@@ -169,7 +169,7 @@ export const components = {
   MuiToolbar: {
     styleOverrides: {
       root: {
-        minHeight: `${spacing.layout.headerHeight}px !important`,
+        minHeight: `${spacing.component.headerHeight}px !important`,
         padding: `0 ${spacing.layout.containerPadding}px`,
       },
     },
@@ -181,7 +181,7 @@ export const components = {
       paper: {
         backgroundColor: colors.background.elevated,
         borderColor: colors.border.primary,
-        width: spacing.layout.sidebarWidth,
+        // Remove fixed width from theme - let component control it
       },
     },
   },

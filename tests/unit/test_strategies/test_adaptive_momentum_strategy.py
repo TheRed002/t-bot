@@ -36,8 +36,9 @@ class TestAdaptiveMomentumStrategy:
         """Create a test configuration for the strategy."""
         return {
             "name": "adaptive_momentum",
-            "strategy_type": StrategyType.DYNAMIC,
-            "symbols": ["BTC/USD", "ETH/USD"],
+            "strategy_id": "adaptive_momentum_001",
+            "strategy_type": StrategyType.MOMENTUM,
+            "symbol": "BTC/USD",
             "timeframe": "1h",
             "position_size_pct": 0.02,
             "min_confidence": 0.6,
@@ -114,7 +115,7 @@ class TestAdaptiveMomentumStrategy:
     def test_strategy_initialization(self, strategy):
         """Test strategy initialization."""
         assert strategy.name == "adaptive_momentum"
-        assert strategy.strategy_type == StrategyType.DYNAMIC
+        assert strategy.strategy_type == StrategyType.MOMENTUM
         assert strategy.fast_ma_period == 20
         assert strategy.slow_ma_period == 50
         assert strategy.rsi_period == 14
@@ -308,7 +309,7 @@ class TestAdaptiveMomentumStrategy:
         assert strategy._get_regime_confidence_multiplier(MarketRegime.LOW_VOLATILITY) == 1.1
         assert strategy._get_regime_confidence_multiplier(MarketRegime.MEDIUM_VOLATILITY) == 1.0
         assert strategy._get_regime_confidence_multiplier(MarketRegime.HIGH_VOLATILITY) == 0.8
-        assert strategy._get_regime_confidence_multiplier(MarketRegime.CRISIS) == 0.6
+        assert strategy._get_regime_confidence_multiplier(MarketRegime.HIGH_VOLATILITY) == 0.6
 
     @pytest.mark.asyncio
     async def test_validate_signal_success(self, strategy, sample_signal):
@@ -486,7 +487,7 @@ class TestAdaptiveMomentumStrategy:
         # Test with valid config
         valid_config = {
             "name": "adaptive_momentum",
-            "strategy_type": StrategyType.DYNAMIC,
+            "strategy_type": StrategyType.MOMENTUM,
             "symbols": ["BTC/USD"],
             "timeframe": "1h",
             "position_size_pct": 0.02,
@@ -500,7 +501,7 @@ class TestAdaptiveMomentumStrategy:
         # Test with missing required config
         invalid_config = {
             "name": "adaptive_momentum",
-            "strategy_type": StrategyType.DYNAMIC,
+            "strategy_type": StrategyType.MOMENTUM,
             "symbols": ["BTC/USD"],
         }
 

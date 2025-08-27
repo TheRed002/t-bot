@@ -317,6 +317,7 @@ class Application:
             await self._shutdown_risk_management()
             await self._shutdown_exchanges()
             await self._shutdown_database()
+            await self._shutdown_error_handlers()
 
             self.health_status["status"] = "stopped"
             self.logger.info("Graceful shutdown completed")
@@ -387,6 +388,23 @@ class Application:
         # Placeholder for P-017 ML shutdown
         self.logger.info("ML models shutdown placeholder - will be implemented in P-017")
         self.health_status["components"]["ml_models"] = "shutdown"
+
+    async def _shutdown_error_handlers(self) -> None:
+        """Shutdown all error handlers and cleanup resources."""
+        try:
+            from src.error_handling.decorators import shutdown_all_error_handlers, get_active_handler_count
+            
+            active_count = get_active_handler_count()
+            if active_count > 0:
+                self.logger.info(f"Shutting down {active_count} active error handlers")
+                await shutdown_all_error_handlers()
+                self.logger.info("All error handlers shut down successfully")
+            
+            self.health_status["components"]["error_handlers"] = "shutdown"
+            
+        except Exception as e:
+            self.logger.error(f"Error handler shutdown failed: {e!s}")
+            self.health_status["components"]["error_handlers"] = "error"
 
     def get_health_status(self) -> dict[str, Any]:
         """Get current application health status."""

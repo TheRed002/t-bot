@@ -29,6 +29,11 @@ const websocketSlice = createSlice({
       state.isConnected = false;
       state.connectionStatus = 'disconnected';
     },
+    disconnected: (state, action: PayloadAction<string>) => {
+      state.isConnected = false;
+      state.connectionStatus = 'disconnected';
+      state.error = null;
+    },
     error: (state, action: PayloadAction<string>) => {
       state.isConnected = false;
       state.connectionStatus = 'error';
@@ -44,5 +49,5 @@ const websocketSlice = createSlice({
   },
 });
 
-export const { connect, connected, disconnect, error, heartbeat, messageReceived } = websocketSlice.actions;
+export const { connect, connected, disconnect, disconnected, error, heartbeat, messageReceived } = websocketSlice.actions;
 export default websocketSlice.reducer;

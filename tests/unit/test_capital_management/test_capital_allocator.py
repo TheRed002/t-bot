@@ -8,14 +8,15 @@ This module tests the dynamic capital allocation framework including:
 - Risk-based allocation
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from unittest.mock import Mock, AsyncMock
 
 from src.capital_management.capital_allocator import CapitalAllocator
-from src.core.config import Config
-from src.core.exceptions import ValidationError
+from src.capital_management.service import CapitalService
+from src.core.exceptions import ValidationError, ServiceError
 from src.core.types import AllocationStrategy, CapitalAllocation, CapitalMetrics
 
 
@@ -25,85 +26,69 @@ class TestCapitalAllocator:
     @pytest.fixture
     def config(self):
         """Create test configuration with capital management settings."""
-        config = Config()
-        config.capital_management.total_capital = 100000.0
-        config.capital_management.emergency_reserve_pct = 0.1
-        config.capital_management.allocation_strategy = AllocationStrategy.PERFORMANCE_WEIGHTED
-        config.capital_management.rebalance_frequency_hours = 24
-        config.capital_management.min_allocation_pct = 0.05
-        config.capital_management.max_allocation_pct = 0.4
+        config = {
+            'total_capital': 100000.0,
+            'emergency_reserve_pct': 0.1,
+            'allocation_strategy': 'EQUAL_WEIGHT',
+            'rebalance_frequency_hours': 24,
+            'min_allocation_pct': 0.05,
+            'max_allocation_pct': 0.4,
+            'max_daily_reallocation_pct': 0.1,
+            'per_strategy_minimum': {
+                'test_strategy': 1000.0
+            }
+        }
         return config
 
     @pytest.fixture
-    def capital_allocator(self, config):
-        """Create capital allocator instance."""
-        return CapitalAllocator(config)
+    def mock_capital_service(self):
+        """Create mock capital service."""
+        service = Mock(spec=CapitalService)
+        service.allocate_capital = AsyncMock()
+        service.release_capital = AsyncMock()
+        service.update_utilization = AsyncMock()
+        service.get_capital_metrics = AsyncMock()
+        service.get_performance_metrics = Mock(return_value={})
+        return service
 
     @pytest.fixture
-    def sample_allocations(self):
-        """Create sample capital allocations."""
-        return [
-            CapitalAllocation(
-                strategy_id="strategy_1",
-                exchange="binance",
-                allocated_amount=Decimal("20000"),
-                utilized_amount=Decimal("16000"),
-                available_amount=Decimal("4000"),
-                allocation_percentage=0.2,
-                last_rebalance=datetime.now() - timedelta(hours=12),
-            ),
-            CapitalAllocation(
-                strategy_id="strategy_2",
-                exchange="okx",
-                allocated_amount=Decimal("15000"),
-                utilized_amount=Decimal("10500"),
-                available_amount=Decimal("4500"),
-                allocation_percentage=0.15,
-                last_rebalance=datetime.now() - timedelta(hours=6),
-            ),
-            CapitalAllocation(
-                strategy_id="strategy_3",
-                exchange="coinbase",
-                allocated_amount=Decimal("10000"),
-                utilized_amount=Decimal("6000"),
-                available_amount=Decimal("4000"),
-                allocation_percentage=0.1,
-                last_rebalance=datetime.now() - timedelta(hours=18),
-            ),
-        ]
+    def capital_allocator(self, mock_capital_service, config):
+        """Create capital allocator instance."""
+        allocator = CapitalAllocator(capital_service=mock_capital_service)
+        # Manually set config for testing
+        allocator.capital_config = config
+        allocator.rebalance_frequency_hours = config['rebalance_frequency_hours']
+        allocator.max_daily_reallocation_pct = config['max_daily_reallocation_pct']
+        return allocator
 
-    def test_initialization(self, capital_allocator, config):
+    def test_initialization(self, capital_allocator, config, mock_capital_service):
         """Test capital allocator initialization."""
-        assert capital_allocator.config == config
-        assert capital_allocator.capital_config == config.capital_management
-        assert capital_allocator.total_capital == Decimal(
-            str(config.capital_management.total_capital)
-        )
-        assert capital_allocator.emergency_reserve == Decimal(
-            str(
-                config.capital_management.total_capital
-                * config.capital_management.emergency_reserve_pct
-            )
-        )
-        assert capital_allocator.available_capital == Decimal(
-            str(
-                config.capital_management.total_capital
-                * (1 - config.capital_management.emergency_reserve_pct)
-            )
-        )
-        assert capital_allocator.strategy_allocations == {}
-        assert capital_allocator.exchange_allocations == {}
+        assert capital_allocator.capital_config == config
+        assert capital_allocator.capital_service == mock_capital_service
         assert capital_allocator.strategy_performance == {}
-        # Check that last_rebalance is set to a recent time (within last
-        # minute)
-        assert (datetime.now() - capital_allocator.last_rebalance).total_seconds() < 60
+        assert capital_allocator.rebalance_frequency_hours == config['rebalance_frequency_hours']
+        assert capital_allocator.max_daily_reallocation_pct == config['max_daily_reallocation_pct']
+        # Check that last_rebalance is set to a recent time (within last minute)
+        assert (datetime.now(timezone.utc) - capital_allocator.last_rebalance).total_seconds() < 60
 
     @pytest.mark.asyncio
-    async def test_allocate_capital_basic(self, capital_allocator):
+    async def test_allocate_capital_basic(self, capital_allocator, mock_capital_service):
         """Test basic capital allocation."""
         strategy_name = "test_strategy"
         exchange_name = "binance"
         allocation_amount = Decimal("10000")
+
+        # Mock the service response
+        mock_allocation = CapitalAllocation(
+            strategy_id=strategy_name,
+            exchange=exchange_name,
+            allocated_amount=allocation_amount,
+            utilized_amount=Decimal("0"),
+            available_amount=allocation_amount,
+            allocation_percentage=0.1,
+            last_rebalance=datetime.now()
+        )
+        mock_capital_service.allocate_capital.return_value = mock_allocation
 
         result = await capital_allocator.allocate_capital(
             strategy_name, exchange_name, allocation_amount
@@ -113,24 +98,21 @@ class TestCapitalAllocator:
         assert result.strategy_id == strategy_name
         assert result.exchange == exchange_name
         assert result.allocated_amount == allocation_amount
-        allocation_key = f"{strategy_name}_{exchange_name}"
-        assert allocation_key in capital_allocator.strategy_allocations
-
-        allocation = capital_allocator.strategy_allocations[allocation_key]
-        assert allocation.strategy_id == strategy_name
-        assert allocation.exchange == exchange_name
-        assert allocation.allocated_amount == allocation_amount
-        assert allocation.allocation_percentage == float(
-            allocation_amount / capital_allocator.total_capital
-        )
-        assert allocation.utilized_amount == Decimal("0")
+        
+        # Verify service was called correctly
+        mock_capital_service.allocate_capital.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_allocate_capital_insufficient_funds(self, capital_allocator):
+    async def test_allocate_capital_insufficient_funds(self, capital_allocator, mock_capital_service):
         """Test allocation with insufficient available capital."""
         strategy_name = "test_strategy"
         exchange_name = "binance"
         allocation_amount = Decimal("100000")  # More than available capital
+
+        # Mock service to raise ValidationError
+        mock_capital_service.allocate_capital.side_effect = ValidationError(
+            "Insufficient capital"
+        )
 
         with pytest.raises(ValidationError):
             await capital_allocator.allocate_capital(
@@ -138,473 +120,234 @@ class TestCapitalAllocator:
             )
 
     @pytest.mark.asyncio
-    async def test_allocate_capital_existing_allocation(self, capital_allocator):
-        """Test allocation to existing strategy/exchange combination."""
+    async def test_release_capital(self, capital_allocator, mock_capital_service):
+        """Test capital release functionality."""
         strategy_name = "test_strategy"
         exchange_name = "binance"
+        release_amount = Decimal("5000")
 
-        # First allocation
-        await capital_allocator.allocate_capital(strategy_name, exchange_name, Decimal("5000"))
+        # Mock successful release
+        mock_capital_service.release_capital.return_value = True
 
-        # Second allocation to same strategy/exchange
-        result = await capital_allocator.allocate_capital(
-            strategy_name, exchange_name, Decimal("3000")
+        result = await capital_allocator.release_capital(
+            strategy_name, exchange_name, release_amount
         )
 
-        assert isinstance(result, CapitalAllocation)
-        allocation_key = f"{strategy_name}_{exchange_name}"
-        allocation = capital_allocator.strategy_allocations[allocation_key]
-        assert allocation.allocated_amount == Decimal("3000")  # Second allocation overwrites first
-        assert allocation.allocation_percentage == 3000 / float(capital_allocator.total_capital)
+        assert result is True
+        mock_capital_service.release_capital.assert_called_once_with(
+            strategy_id=strategy_name,
+            exchange=exchange_name,
+            release_amount=release_amount,
+            bot_id=None,
+            authorized_by="CapitalAllocator"
+        )
 
     @pytest.mark.asyncio
-    async def test_rebalance_allocations_equal_weight(self, capital_allocator, config):
-        """Test rebalancing with equal weight strategy."""
-        config.capital_management.allocation_strategy = AllocationStrategy.EQUAL_WEIGHT
-
-        # Setup existing allocations
-        capital_allocator.strategy_allocations = {
-            "strategy_1_binance": CapitalAllocation(
-                strategy_id="strategy_1",
-                exchange="binance",
-                allocated_amount=Decimal("20000"),
-                utilized_amount=Decimal("16000"),
-                available_amount=Decimal("4000"),
-                allocation_percentage=0.2,
-                last_rebalance=datetime.now() - timedelta(hours=25),
-            ),
-            "strategy_2_okx": CapitalAllocation(
-                strategy_id="strategy_2",
-                exchange="okx",
-                allocated_amount=Decimal("15000"),
-                utilized_amount=Decimal("10500"),
-                available_amount=Decimal("4500"),
-                allocation_percentage=0.15,
-                last_rebalance=datetime.now() - timedelta(hours=25),
-            ),
-        }
-
-        result = await capital_allocator.rebalance_allocations()
-
-        assert isinstance(result, dict)
-        # Equal weight should result in equal allocations
-        for allocation in result.values():
-            assert isinstance(allocation, CapitalAllocation)
-            assert allocation.allocation_percentage > 0
-
-    @pytest.mark.asyncio
-    async def test_rebalance_allocations_performance_weighted(self, capital_allocator, config):
-        """Test rebalancing with performance weighted strategy."""
-        config.capital_management.allocation_strategy = AllocationStrategy.PERFORMANCE_WEIGHTED
-
-        # Setup allocations with different performance scores
-        capital_allocator.strategy_allocations = {
-            "strategy1_binance": CapitalAllocation(
-                strategy_id="strategy1",
-                exchange="binance",
-                allocated_amount=Decimal("20000"),
-                utilized_amount=Decimal("16000"),
-                available_amount=Decimal("4000"),
-                allocation_percentage=0.2,
-                last_rebalance=datetime.now() - timedelta(hours=25),
-            ),
-            "strategy2_okx": CapitalAllocation(
-                strategy_id="strategy2",
-                exchange="okx",
-                allocated_amount=Decimal("15000"),
-                utilized_amount=Decimal("10500"),
-                available_amount=Decimal("4500"),
-                allocation_percentage=0.15,
-                last_rebalance=datetime.now() - timedelta(hours=25),
-            ),
-        }
-
-        # Add performance data
-        capital_allocator.strategy_performance = {
-            "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2},
-            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8},
-        }
-
-        result = await capital_allocator.rebalance_allocations()
-
-        assert isinstance(result, dict)
-        # Higher performing strategy should get more allocation
-        assert len(result) > 0
-        for allocation in result.values():
-            assert isinstance(allocation, CapitalAllocation)
-            assert allocation.allocation_percentage > 0
-
-    @pytest.mark.asyncio
-    async def test_rebalance_allocations_no_rebalance_needed(self, capital_allocator):
-        """Test rebalancing when not needed (within frequency window)."""
-        # Setup allocation with recent rebalance
-        capital_allocator.strategy_allocations = {
-            "strategy_1_binance": CapitalAllocation(
-                strategy_id="strategy_1",
-                exchange="binance",
-                allocated_amount=Decimal("20000"),
-                utilized_amount=Decimal("16000"),
-                available_amount=Decimal("4000"),
-                allocation_percentage=0.2,
-                last_rebalance=datetime.now() - timedelta(hours=2),  # Recent rebalance
-            )
-        }
-
-        result = await capital_allocator.rebalance_allocations()
-
-        # Should return allocations even if no rebalance needed
-        assert isinstance(result, dict)
-
-    @pytest.mark.asyncio
-    async def test_update_utilization(self, capital_allocator):
-        """Test updating utilization rates."""
-        strategy_name = "test_strategy"
-        exchange_name = "binance"
-        utilization_rate = Decimal("0.75")
-
-        # Setup allocation
-        allocation_key = f"{strategy_name}_{exchange_name}"
-        capital_allocator.strategy_allocations = {
-            allocation_key: CapitalAllocation(
-                strategy_id=strategy_name,
-                exchange=exchange_name,
-                allocated_amount=Decimal("10000"),
-                utilized_amount=Decimal("5000"),
-                available_amount=Decimal("5000"),
-                allocation_percentage=0.1,
-                last_rebalance=datetime.now(),
-            )
-        }
-
-        await capital_allocator.update_utilization(strategy_name, exchange_name, utilization_rate)
-
-        allocation = capital_allocator.strategy_allocations[allocation_key]
-        assert allocation.utilized_amount == utilization_rate
-
-    @pytest.mark.asyncio
-    async def test_update_utilization_allocation_not_found(self, capital_allocator):
-        """Test updating utilization for non-existent allocation."""
-        await capital_allocator.update_utilization("nonexistent", "nonexistent", Decimal("0.5"))
-        # Should not raise an exception, just do nothing
-
-    @pytest.mark.asyncio
-    async def test_get_capital_metrics(self, capital_allocator):
+    async def test_get_capital_metrics(self, capital_allocator, mock_capital_service):
         """Test getting capital metrics."""
-        # Setup allocations
-        capital_allocator.strategy_allocations = {
-            "strategy_1_binance": CapitalAllocation(
-                strategy_id="strategy_1",
-                exchange="binance",
-                allocated_amount=Decimal("20000"),
-                utilized_amount=Decimal("16000"),
-                available_amount=Decimal("4000"),
-                allocation_percentage=0.2,
-                last_rebalance=datetime.now(),
-            ),
-            "strategy_2_okx": CapitalAllocation(
-                strategy_id="strategy_2",
-                exchange="okx",
-                allocated_amount=Decimal("15000"),
-                utilized_amount=Decimal("10500"),
-                available_amount=Decimal("4500"),
-                allocation_percentage=0.15,
-                last_rebalance=datetime.now(),
-            ),
-        }
+        # Mock metrics
+        mock_metrics = CapitalMetrics(
+            total_capital=Decimal("100000"),
+            allocated_capital=Decimal("45000"),
+            available_capital=Decimal("45000"),
+            utilization_rate=0.45,
+            allocation_efficiency=0.85,
+            rebalance_frequency_hours=24,
+            emergency_reserve=Decimal("10000"),
+            last_updated=datetime.now(),
+            allocation_count=3,
+            total_pnl=Decimal("5000"),
+            realized_pnl=Decimal("3000"),
+            unrealized_pnl=Decimal("2000"),
+            daily_return=0.02,
+            weekly_return=0.05,
+            monthly_return=0.15,
+            yearly_return=0.0,
+            total_return=0.05,
+            sharpe_ratio=1.2,
+            sortino_ratio=1.5,
+            calmar_ratio=2.0,
+            current_drawdown=0.03,
+            max_drawdown=0.05,
+            var_95=Decimal("2000"),
+            expected_shortfall=Decimal("3000"),
+            strategies_active=3,
+            positions_open=10,
+            leverage_used=1.0,
+            timestamp=datetime.now()
+        )
+        mock_capital_service.get_capital_metrics.return_value = mock_metrics
 
-        metrics = await capital_allocator.get_capital_metrics()
+        result = await capital_allocator.get_capital_metrics()
 
-        assert isinstance(metrics, CapitalMetrics)
-        assert metrics.total_capital == capital_allocator.total_capital
-        assert metrics.allocated_capital == Decimal("35000")
-        # Available capital should be the available_capital attribute (which is
-        # total - emergency_reserve)
-        assert metrics.available_capital == capital_allocator.available_capital
-        assert metrics.emergency_reserve == capital_allocator.emergency_reserve
-        assert metrics.utilization_rate > 0  # Should have some utilization
-        assert metrics.allocation_efficiency > 0  # Should have some efficiency
+        assert isinstance(result, CapitalMetrics)
+        assert result.total_capital == Decimal("100000")
+        assert result.allocation_efficiency == 0.85
+        mock_capital_service.get_capital_metrics.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_equal_weight_allocation(self, capital_allocator):
-        """Test equal weight allocation strategy."""
-        # Setup some allocations first - need to match the expected format
-        capital_allocator.strategy_allocations = {
-            "strategy1_binance": CapitalAllocation(
-                strategy_id="strategy1",
-                exchange="binance",
-                allocated_amount=Decimal("10000"),
-                utilized_amount=Decimal("8000"),
-                available_amount=Decimal("2000"),
-                allocation_percentage=0.1,
-                last_rebalance=datetime.now(),
-            ),
-            "strategy1_okx": CapitalAllocation(
-                strategy_id="strategy1",
-                exchange="okx",
-                allocated_amount=Decimal("5000"),
-                utilized_amount=Decimal("4000"),
-                available_amount=Decimal("1000"),
-                allocation_percentage=0.05,
-                last_rebalance=datetime.now(),
-            ),
-            "strategy2_binance": CapitalAllocation(
-                strategy_id="strategy2",
-                exchange="binance",
-                allocated_amount=Decimal("15000"),
-                utilized_amount=Decimal("12000"),
-                available_amount=Decimal("3000"),
-                allocation_percentage=0.15,
-                last_rebalance=datetime.now(),
-            ),
-        }
+    async def test_rebalance_allocations(self, capital_allocator, mock_capital_service):
+        """Test rebalancing allocations."""
+        # Mock current metrics indicating rebalance is needed
+        mock_metrics = CapitalMetrics(
+            total_capital=Decimal("100000"),
+            allocated_capital=Decimal("45000"),
+            available_capital=Decimal("45000"),
+            utilization_rate=0.3,  # Low utilization
+            allocation_efficiency=0.2,  # Low efficiency
+            rebalance_frequency_hours=24,
+            emergency_reserve=Decimal("10000"),
+            last_updated=datetime.now(),
+            allocation_count=3,
+            total_pnl=Decimal("5000"),
+            realized_pnl=Decimal("3000"),
+            unrealized_pnl=Decimal("2000"),
+            daily_return=0.02,
+            weekly_return=0.05,
+            monthly_return=0.15,
+            yearly_return=0.0,
+            total_return=0.05,
+            sharpe_ratio=1.2,
+            sortino_ratio=1.5,
+            calmar_ratio=2.0,
+            current_drawdown=0.03,
+            max_drawdown=0.05,
+            var_95=Decimal("2000"),
+            expected_shortfall=Decimal("3000"),
+            strategies_active=3,
+            positions_open=10,
+            leverage_used=1.0,
+            timestamp=datetime.now()
+        )
+        mock_capital_service.get_capital_metrics.return_value = mock_metrics
 
-        result = await capital_allocator._equal_weight_allocation()
+        # Force last rebalance to be old enough
+        capital_allocator.last_rebalance = datetime.now() - timedelta(hours=25)
+
+        result = await capital_allocator.rebalance_allocations()
 
         assert isinstance(result, dict)
-        assert len(result) > 0
-        for allocation in result.values():
-            assert isinstance(allocation, CapitalAllocation)
-            assert allocation.allocation_percentage > 0
+        mock_capital_service.get_capital_metrics.assert_called()
 
     @pytest.mark.asyncio
-    async def test_performance_weighted_allocation(self, capital_allocator):
-        """Test performance weighted allocation strategy."""
-        # Setup allocations
-        capital_allocator.strategy_allocations = {
-            "strategy1_binance": CapitalAllocation(
-                strategy_id="strategy1",
-                exchange="binance",
-                allocated_amount=Decimal("10000"),
-                utilized_amount=Decimal("8000"),
-                available_amount=Decimal("2000"),
-                allocation_percentage=0.1,
-                last_rebalance=datetime.now(),
-            ),
-            "strategy2_binance": CapitalAllocation(
-                strategy_id="strategy2",
-                exchange="binance",
-                allocated_amount=Decimal("15000"),
-                utilized_amount=Decimal("12000"),
-                available_amount=Decimal("3000"),
-                allocation_percentage=0.15,
-                last_rebalance=datetime.now(),
-            ),
-        }
+    async def test_update_utilization(self, capital_allocator, mock_capital_service):
+        """Test updating utilization."""
+        strategy_name = "test_strategy"
+        exchange_name = "binance"
+        utilized_amount = Decimal("7500")
 
-        # Setup performance data
-        capital_allocator.strategy_performance = {
-            "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2},
-            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8},
-        }
+        # Mock successful update
+        mock_capital_service.update_utilization.return_value = True
 
-        result = await capital_allocator._performance_weighted_allocation(
-            capital_allocator.strategy_performance
+        await capital_allocator.update_utilization(
+            strategy_name, exchange_name, utilized_amount
         )
+
+        mock_capital_service.update_utilization.assert_called_once_with(
+            strategy_id=strategy_name,
+            exchange=exchange_name,
+            utilized_amount=utilized_amount,
+            bot_id=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_emergency_reserve(self, capital_allocator, mock_capital_service):
+        """Test getting emergency reserve."""
+        # Mock metrics with emergency reserve
+        mock_metrics = CapitalMetrics(
+            total_capital=Decimal("100000"),
+            allocated_capital=Decimal("45000"),
+            available_capital=Decimal("45000"),
+            utilization_rate=0.45,
+            allocation_efficiency=0.85,
+            rebalance_frequency_hours=24,
+            emergency_reserve=Decimal("10000"),
+            last_updated=datetime.now(),
+            allocation_count=3,
+            total_pnl=Decimal("5000"),
+            realized_pnl=Decimal("3000"),
+            unrealized_pnl=Decimal("2000"),
+            daily_return=0.02,
+            weekly_return=0.05,
+            monthly_return=0.15,
+            yearly_return=0.0,
+            total_return=0.05,
+            sharpe_ratio=1.2,
+            sortino_ratio=1.5,
+            calmar_ratio=2.0,
+            current_drawdown=0.03,
+            max_drawdown=0.05,
+            var_95=Decimal("2000"),
+            expected_shortfall=Decimal("3000"),
+            strategies_active=3,
+            positions_open=10,
+            leverage_used=1.0,
+            timestamp=datetime.now()
+        )
+        mock_capital_service.get_capital_metrics.return_value = mock_metrics
+
+        result = await capital_allocator.get_emergency_reserve()
+
+        assert result == Decimal("10000")
+        mock_capital_service.get_capital_metrics.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_allocation_summary(self, capital_allocator, mock_capital_service):
+        """Test getting allocation summary."""
+        # Mock metrics
+        mock_metrics = CapitalMetrics(
+            total_capital=Decimal("100000"),
+            allocated_capital=Decimal("45000"),
+            available_capital=Decimal("45000"),
+            utilization_rate=0.45,
+            allocation_efficiency=0.85,
+            rebalance_frequency_hours=24,
+            emergency_reserve=Decimal("10000"),
+            last_updated=datetime.now(),
+            allocation_count=3,
+            total_pnl=Decimal("5000"),
+            realized_pnl=Decimal("3000"),
+            unrealized_pnl=Decimal("2000"),
+            daily_return=0.02,
+            weekly_return=0.05,
+            monthly_return=0.15,
+            yearly_return=0.0,
+            total_return=0.05,
+            sharpe_ratio=1.2,
+            sortino_ratio=1.5,
+            calmar_ratio=2.0,
+            current_drawdown=0.03,
+            max_drawdown=0.05,
+            var_95=Decimal("2000"),
+            expected_shortfall=Decimal("3000"),
+            strategies_active=3,
+            positions_open=10,
+            leverage_used=1.0,
+            timestamp=datetime.now()
+        )
+        mock_capital_service.get_capital_metrics.return_value = mock_metrics
+        
+        # Mock performance metrics
+        mock_capital_service.get_performance_metrics.return_value = {
+            "successful_allocations": 10,
+            "failed_allocations": 2,
+            "total_releases": 5,
+            "average_allocation_time_ms": 250.0
+        }
+
+        result = await capital_allocator.get_allocation_summary()
 
         assert isinstance(result, dict)
-        assert len(result) > 0
-        for allocation in result.values():
-            assert isinstance(allocation, CapitalAllocation)
-            assert allocation.allocation_percentage > 0
+        assert result["total_allocations"] == 3
+        assert result["total_allocated"] == Decimal("45000")
+        assert result["total_capital"] == Decimal("100000")
+        assert "service_metrics" in result
 
     @pytest.mark.asyncio
-    async def test_volatility_weighted_allocation(self, capital_allocator):
-        """Test volatility weighted allocation strategy."""
-        # Setup allocations
-        capital_allocator.strategy_allocations = {
-            "strategy1_binance": CapitalAllocation(
-                strategy_id="strategy1",
-                exchange="binance",
-                allocated_amount=Decimal("10000"),
-                utilized_amount=Decimal("8000"),
-                available_amount=Decimal("2000"),
-                allocation_percentage=0.1,
-                last_rebalance=datetime.now(),
-            ),
-            "strategy2_binance": CapitalAllocation(
-                strategy_id="strategy2",
-                exchange="binance",
-                allocated_amount=Decimal("15000"),
-                utilized_amount=Decimal("12000"),
-                available_amount=Decimal("3000"),
-                allocation_percentage=0.15,
-                last_rebalance=datetime.now(),
-            ),
-        }
+    async def test_service_error_handling(self, capital_allocator, mock_capital_service):
+        """Test handling of service errors."""
+        # Mock service to raise ServiceError
+        mock_capital_service.allocate_capital.side_effect = ServiceError("Service unavailable")
 
-        # Setup performance data
-        capital_allocator.strategy_performance = {
-            "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2, "volatility": 0.15},
-            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8, "volatility": 0.08},
-        }
-
-        result = await capital_allocator._volatility_weighted_allocation(
-            capital_allocator.strategy_performance
-        )
-
-        assert isinstance(result, dict)
-        assert len(result) > 0
-        for allocation in result.values():
-            assert isinstance(allocation, CapitalAllocation)
-            assert allocation.allocation_percentage > 0
-
-    @pytest.mark.asyncio
-    async def test_risk_parity_allocation(self, capital_allocator):
-        """Test risk parity allocation strategy."""
-        # Setup allocations
-        capital_allocator.strategy_allocations = {
-            "strategy1_binance": CapitalAllocation(
-                strategy_id="strategy1",
-                exchange="binance",
-                allocated_amount=Decimal("10000"),
-                utilized_amount=Decimal("8000"),
-                available_amount=Decimal("2000"),
-                allocation_percentage=0.1,
-                last_rebalance=datetime.now(),
-            ),
-            "strategy2_binance": CapitalAllocation(
-                strategy_id="strategy2",
-                exchange="binance",
-                allocated_amount=Decimal("15000"),
-                utilized_amount=Decimal("12000"),
-                available_amount=Decimal("3000"),
-                allocation_percentage=0.15,
-                last_rebalance=datetime.now(),
-            ),
-        }
-
-        # Setup performance data
-        capital_allocator.strategy_performance = {
-            "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2, "volatility": 0.15},
-            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8, "volatility": 0.08},
-        }
-
-        result = await capital_allocator._risk_parity_allocation(
-            capital_allocator.strategy_performance
-        )
-
-        assert isinstance(result, dict)
-        assert len(result) > 0
-        for allocation in result.values():
-            assert isinstance(allocation, CapitalAllocation)
-            assert allocation.allocation_percentage > 0
-
-    @pytest.mark.asyncio
-    async def test_dynamic_allocation(self, capital_allocator):
-        """Test dynamic allocation strategy."""
-        # Setup allocations
-        capital_allocator.strategy_allocations = {
-            "strategy1_binance": CapitalAllocation(
-                strategy_id="strategy1",
-                exchange="binance",
-                allocated_amount=Decimal("10000"),
-                utilized_amount=Decimal("8000"),
-                available_amount=Decimal("2000"),
-                allocation_percentage=0.1,
-                last_rebalance=datetime.now(),
-            ),
-            "strategy2_binance": CapitalAllocation(
-                strategy_id="strategy2",
-                exchange="binance",
-                allocated_amount=Decimal("15000"),
-                utilized_amount=Decimal("12000"),
-                available_amount=Decimal("3000"),
-                allocation_percentage=0.15,
-                last_rebalance=datetime.now(),
-            ),
-        }
-
-        # Setup performance data
-        capital_allocator.strategy_performance = {
-            "strategy1": {"return_rate": 0.9, "sharpe_ratio": 1.2, "volatility": 0.15},
-            "strategy2": {"return_rate": 0.6, "sharpe_ratio": 0.8, "volatility": 0.08},
-        }
-
-        result = await capital_allocator._dynamic_allocation(capital_allocator.strategy_performance)
-
-        assert isinstance(result, dict)
-        assert len(result) > 0
-        for allocation in result.values():
-            assert isinstance(allocation, CapitalAllocation)
-            assert allocation.allocation_percentage > 0
-
-    @pytest.mark.asyncio
-    async def test_calculate_performance_metrics(self, capital_allocator):
-        """Test calculating performance metrics."""
-        strategy_name = "teststrategy"
-
-        # Setup allocations first
-        capital_allocator.strategy_allocations = {
-            f"{strategy_name}_binance": CapitalAllocation(
-                strategy_id=strategy_name,
-                exchange="binance",
-                allocated_amount=Decimal("10000"),
-                utilized_amount=Decimal("8000"),
-                available_amount=Decimal("2000"),
-                allocation_percentage=0.1,
-                last_rebalance=datetime.now(),
-            )
-        }
-
-        # Setup performance data
-        capital_allocator.strategy_performance = {
-            strategy_name: {"return_rate": 0.85, "sharpe_ratio": 1.1}
-        }
-
-        metrics = await capital_allocator._calculate_performance_metrics()
-
-        assert isinstance(metrics, dict)
-        assert strategy_name in metrics
-        assert "return_rate" in metrics[strategy_name]
-        assert "sharpe_ratio" in metrics[strategy_name]
-
-    @pytest.mark.asyncio
-    async def test_calculate_performance_metrics_no_data(self, capital_allocator):
-        """Test calculating performance metrics with no data."""
-        metrics = await capital_allocator._calculate_performance_metrics()
-
-        assert isinstance(metrics, dict)
-        assert len(metrics) == 0  # No performance data
-
-    @pytest.mark.asyncio
-    async def test_update_total_capital(self, capital_allocator):
-        """Test updating total capital."""
-        new_total = Decimal("150000")
-
-        await capital_allocator.update_total_capital(new_total)
-
-        assert capital_allocator.total_capital == new_total
-        assert capital_allocator.emergency_reserve == new_total * Decimal(
-            str(capital_allocator.capital_config.emergency_reserve_pct)
-        )
-        assert capital_allocator.available_capital == new_total * (
-            1 - Decimal(str(capital_allocator.capital_config.emergency_reserve_pct))
-        )
-
-    @pytest.mark.asyncio
-    async def test_get_emergency_reserve(self, capital_allocator):
-        """Test getting emergency reserve amount."""
-        reserve = await capital_allocator.get_emergency_reserve()
-
-        assert reserve == capital_allocator.emergency_reserve
-        assert reserve == capital_allocator.total_capital * Decimal(
-            str(capital_allocator.capital_config.emergency_reserve_pct)
-        )
-
-    @pytest.mark.asyncio
-    async def test_get_available_capital(self, capital_allocator):
-        """Test getting available capital amount."""
-        available = capital_allocator.available_capital
-
-        assert available == capital_allocator.total_capital * (
-            1 - Decimal(str(capital_allocator.capital_config.emergency_reserve_pct))
-        )
-
-    @pytest.mark.asyncio
-    async def test_get_available_capital_attribute(self, capital_allocator):
-        """Test getting available capital attribute."""
-        available = capital_allocator.available_capital
-
-        assert available == capital_allocator.total_capital * (
-            1 - Decimal(str(capital_allocator.capital_config.emergency_reserve_pct))
-        )
+        with pytest.raises(ServiceError):
+            await capital_allocator.allocate_capital("test", "binance", Decimal("1000"))

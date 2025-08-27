@@ -485,7 +485,7 @@ class TestRedisIntegration:
 
     async def test_redis_basic_operations(self, config):
         """Test Redis basic operations."""
-        redis_client = RedisClient(config.get_redis_url())
+        redis_client = RedisClient(config)
 
         # Connect to Redis
         await redis_client.connect()
@@ -502,7 +502,7 @@ class TestRedisIntegration:
 
     async def test_redis_trading_operations(self, config):
         """Test Redis trading-specific operations."""
-        redis_client = RedisClient(config.get_redis_url())
+        redis_client = RedisClient(config)
 
         await redis_client.connect()
 

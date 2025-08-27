@@ -146,10 +146,10 @@ The CD pipeline handles automated deployment to staging and production environme
 
 ## Deployment Scripts
 
-### Deploy Script (`scripts/deploy.sh`)
+### Deploy Script (`scripts/deployment/deploy.sh`)
 
 ```bash
-./scripts/deploy.sh [environment] [version]
+./scripts/deployment/deploy.sh [environment] [version]
 ```
 
 Features:
@@ -159,10 +159,10 @@ Features:
 - Health check validation
 - Automatic rollback on failure
 
-### Rollback Script (`scripts/rollback.sh`)
+### Rollback Script (`scripts/maintenance/rollback.sh`)
 
 ```bash
-./scripts/rollback.sh [environment] [version]
+./scripts/maintenance/rollback.sh [environment] [version]
 ```
 
 Features:

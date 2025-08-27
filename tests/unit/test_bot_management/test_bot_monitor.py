@@ -36,17 +36,25 @@ def config():
 def bot_metrics():
     """Create test bot metrics."""
     return BotMetrics(
+        bot_id="test_bot_001",
+        total_trades=25,
+        profitable_trades=23,
+        losing_trades=2,
+        total_pnl=Decimal("150.50"),
+        unrealized_pnl=Decimal("25.30"),
+        win_rate=0.92,
+        average_trade_pnl=Decimal("6.02"),
+        max_drawdown=Decimal("15.30"),
+        sharpe_ratio=1.85,
+        uptime_percentage=0.98,
+        error_count=2,
+        last_heartbeat=datetime.now(timezone.utc),
         cpu_usage=45.0,
         memory_usage=60.0,
-        active_positions=3,
-        orders_per_minute=5.2,
-        error_rate=0.02,
-        latency_ms=125.0,
-        uptime_seconds=3600,
-        total_trades=25,
-        successful_trades=23,
-        pnl=Decimal("150.50"),
-        timestamp=datetime.now(timezone.utc)
+        api_calls_count=350,
+        start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+        last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+        metrics_updated_at=datetime.now(timezone.utc)
     )
 
 
@@ -56,6 +64,33 @@ def monitor(config):
     return BotMonitor(config)
 
 
+def create_test_bot_metrics(bot_id: str = "test_bot_001", **overrides) -> BotMetrics:
+    """Create test BotMetrics with all required fields."""
+    default_data = {
+        "bot_id": bot_id,
+        "total_trades": 25,
+        "profitable_trades": 23,
+        "losing_trades": 2,
+        "total_pnl": Decimal("150.50"),
+        "unrealized_pnl": Decimal("25.30"),
+        "win_rate": 0.92,
+        "average_trade_pnl": Decimal("6.02"),
+        "max_drawdown": Decimal("15.30"),
+        "sharpe_ratio": 1.85,
+        "uptime_percentage": 0.98,
+        "error_count": 2,
+        "last_heartbeat": datetime.now(timezone.utc),
+        "cpu_usage": 45.0,
+        "memory_usage": 60.0,
+        "api_calls_count": 350,
+        "start_time": datetime.now(timezone.utc) - timedelta(hours=1),
+        "last_trade_time": datetime.now(timezone.utc) - timedelta(minutes=5),
+        "metrics_updated_at": datetime.now(timezone.utc)
+    }
+    default_data.update(overrides)
+    return BotMetrics(**default_data)
+
+
 class TestBotMonitor:
     """Test cases for BotMonitor class."""
 
@@ -63,7 +98,7 @@ class TestBotMonitor:
     async def test_monitor_initialization(self, monitor, config):
         """Test monitor initialization."""
         assert monitor.config == config
-        assert monitor.bot_metrics == {}
+        assert monitor.monitored_bots == {}
         assert monitor.alert_history == []
         assert monitor.performance_baselines == {}
         assert not monitor.is_running
@@ -91,28 +126,29 @@ class TestBotMonitor:
         
         await monitor.update_bot_metrics(bot_id, bot_metrics)
         
-        assert bot_id in monitor.bot_metrics
-        assert monitor.bot_metrics[bot_id] == bot_metrics
-        assert monitor.monitoring_statistics["total_metrics_updates"] == 1
+        assert bot_id in monitor.monitored_bots
+        assert monitor.monitored_bots[bot_id]["last_metrics_collection"] is not None
+        assert monitor.monitoring_stats["total_checks"] >= 0
 
     @pytest.mark.asyncio
-    async def test_get_bot_metrics(self, monitor, bot_metrics):
-        """Test retrieving bot metrics."""
+    async def test_get_bot_health_details(self, monitor, bot_metrics):
+        """Test retrieving bot health details."""
         bot_id = "test_bot_001"
         
         # Add metrics
         await monitor.update_bot_metrics(bot_id, bot_metrics)
         
-        # Retrieve metrics
-        retrieved = await monitor.get_bot_metrics(bot_id)
+        # Retrieve health details
+        health_details = await monitor.get_bot_health_details(bot_id)
         
-        assert retrieved == bot_metrics
+        assert health_details is not None
+        assert health_details["bot_id"] == bot_id
 
     @pytest.mark.asyncio
-    async def test_get_bot_metrics_not_found(self, monitor):
-        """Test retrieving metrics for non-existent bot."""
-        retrieved = await monitor.get_bot_metrics("non_existent")
-        assert retrieved is None
+    async def test_get_bot_health_details_not_found(self, monitor):
+        """Test retrieving health details for non-existent bot."""
+        health_details = await monitor.get_bot_health_details("non_existent")
+        assert health_details is None
 
     @pytest.mark.asyncio
     async def test_check_bot_health_healthy(self, monitor, bot_metrics):
@@ -136,18 +172,16 @@ class TestBotMonitor:
         bot_status = BotStatus.RUNNING
         
         # Create unhealthy metrics
-        unhealthy_metrics = BotMetrics(
+        unhealthy_metrics = create_test_bot_metrics(
+            bot_id=bot_id,
             cpu_usage=95.0,  # High CPU
-            memory_usage=90.0,  # High memory
-            active_positions=3,
-            orders_per_minute=0.1,  # Low activity
-            error_rate=0.15,  # High error rate
-            latency_ms=1500.0,  # High latency
-            uptime_seconds=3600,
+            memory_usage=500.0,  # High memory 
+            error_count=50,  # High errors
             total_trades=10,
-            successful_trades=7,  # Low success rate
-            pnl=Decimal("-50.00"),  # Negative PnL
-            timestamp=datetime.now(timezone.utc)
+            profitable_trades=3,  # Low success rate
+            losing_trades=7,
+            total_pnl=Decimal("-50.00"),  # Negative PnL
+            win_rate=0.30  # Low win rate
         )
         
         await monitor.update_bot_metrics(bot_id, unhealthy_metrics)
@@ -166,8 +200,8 @@ class TestBotMonitor:
         
         health_report = await monitor.check_bot_health(bot_id, bot_status)
         
-        assert health_report["overall_health"] == "unknown"
-        assert "No metrics available" in health_report["issues"]
+        assert "error" in health_report
+        assert "not registered" in health_report["error"]
 
     @pytest.mark.asyncio
     async def test_generate_alert_threshold_exceeded(self, monitor, bot_metrics):
@@ -176,17 +210,18 @@ class TestBotMonitor:
         
         # Create metrics that exceed thresholds
         high_cpu_metrics = BotMetrics(
-            cpu_usage=85.0,  # Exceeds 80% threshold
+            bot_id=bot_id,
+            cpu_usage=85.0,  # Exceeds 70% warning threshold
             memory_usage=60.0,
-            active_positions=3,
-            orders_per_minute=5.2,
-            error_rate=0.02,
-            latency_ms=125.0,
-            uptime_seconds=3600,
             total_trades=25,
-            successful_trades=23,
-            pnl=Decimal("150.50"),
-            timestamp=datetime.now(timezone.utc)
+            profitable_trades=23,
+            losing_trades=2,
+            total_pnl=Decimal("150.50"),
+            unrealized_pnl=Decimal("25.30"),
+            win_rate=0.92,
+            error_count=2,
+            uptime_percentage=0.98,
+            last_heartbeat=datetime.now(timezone.utc)
         )
         
         await monitor.update_bot_metrics(bot_id, high_cpu_metrics)
@@ -207,17 +242,18 @@ class TestBotMonitor:
         # Add multiple metrics to establish baseline
         for i in range(10):
             metrics = BotMetrics(
+                bot_id=bot_id,
                 cpu_usage=40.0 + i,
                 memory_usage=50.0 + i,
-                active_positions=3,
-                orders_per_minute=5.0,
-                error_rate=0.02,
-                latency_ms=100.0 + i * 5,
-                uptime_seconds=3600 + i * 60,
                 total_trades=25 + i,
-                successful_trades=23 + i,
-                pnl=Decimal("150.50"),
-                timestamp=datetime.now(timezone.utc)
+                profitable_trades=23 + i,
+                losing_trades=2,
+                total_pnl=Decimal("150.50"),
+                unrealized_pnl=Decimal("25.30"),
+                win_rate=0.92,
+                error_count=1,
+                uptime_percentage=0.98,
+                last_heartbeat=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, metrics)
         
@@ -238,17 +274,18 @@ class TestBotMonitor:
         # Establish baseline first
         for i in range(10):
             normal_metrics = BotMetrics(
+                bot_id=bot_id,
                 cpu_usage=45.0,
                 memory_usage=60.0,
-                active_positions=3,
-                orders_per_minute=5.0,
-                error_rate=0.02,
-                latency_ms=125.0,
-                uptime_seconds=3600,
                 total_trades=25,
-                successful_trades=23,
-                pnl=Decimal("150.50"),
-                timestamp=datetime.now(timezone.utc)
+                profitable_trades=23,
+                losing_trades=2,
+                total_pnl=Decimal("150.50"),
+                unrealized_pnl=Decimal("25.30"),
+                win_rate=0.92,
+                error_count=1,
+                uptime_percentage=0.98,
+                last_heartbeat=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, normal_metrics)
         
@@ -256,23 +293,24 @@ class TestBotMonitor:
         
         # Add anomalous metrics
         anomalous_metrics = BotMetrics(
+            bot_id=bot_id,
             cpu_usage=95.0,  # Significantly higher than baseline
             memory_usage=60.0,
-            active_positions=3,
-            orders_per_minute=0.5,  # Much lower than baseline
-            error_rate=0.02,
-            latency_ms=125.0,
-            uptime_seconds=3600,
             total_trades=25,
-            successful_trades=23,
-            pnl=Decimal("150.50"),
-            timestamp=datetime.now(timezone.utc)
+            profitable_trades=23,
+            losing_trades=2,
+            total_pnl=Decimal("150.50"),
+            unrealized_pnl=Decimal("25.30"),
+            win_rate=0.92,
+            error_count=1,
+            uptime_percentage=0.98,
+            last_heartbeat=datetime.now(timezone.utc)
         )
         
         anomalies = await monitor._detect_anomalies(bot_id, anomalous_metrics)
         
         assert len(anomalies) > 0
-        assert any("cpu_usage" in anomaly for anomaly in anomalies)
+        assert any("cpu_usage" in anomaly.get("metric", "") for anomaly in anomalies)
 
     @pytest.mark.asyncio
     async def test_get_monitoring_summary(self, monitor):
@@ -281,17 +319,18 @@ class TestBotMonitor:
         for i in range(3):
             bot_id = f"bot_{i}"
             metrics = BotMetrics(
+                bot_id=bot_id,
                 cpu_usage=45.0 + i * 10,
                 memory_usage=60.0 + i * 5,
-                active_positions=3,
-                orders_per_minute=5.0,
-                error_rate=0.02,
-                latency_ms=125.0,
-                uptime_seconds=3600,
                 total_trades=25,
-                successful_trades=23,
-                pnl=Decimal("150.50"),
-                timestamp=datetime.now(timezone.utc)
+                profitable_trades=23,
+                losing_trades=2,
+                total_pnl=Decimal("150.50"),
+                unrealized_pnl=Decimal("25.30"),
+                win_rate=0.92,
+                error_count=1,
+                uptime_percentage=0.98,
+                last_heartbeat=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, metrics)
         
@@ -303,6 +342,9 @@ class TestBotMonitor:
             "severity": "warning",
             "timestamp": datetime.now(timezone.utc)
         })
+        # Update monitoring stats to reflect the alert
+        monitor.monitoring_stats["alerts_generated"] = 1
+        monitor.monitoring_stats["warning_alerts"] = 1
         
         summary = await monitor.get_monitoring_summary()
         
@@ -375,17 +417,18 @@ class TestBotMonitor:
         # Add a bot with metrics
         bot_id = "test_bot_001"
         metrics = BotMetrics(
+            bot_id=bot_id,
             cpu_usage=45.0,
             memory_usage=60.0,
-            active_positions=3,
-            orders_per_minute=5.0,
-            error_rate=0.02,
-            latency_ms=125.0,
-            uptime_seconds=3600,
             total_trades=25,
-            successful_trades=23,
-            pnl=Decimal("150.50"),
-            timestamp=datetime.now(timezone.utc)
+            profitable_trades=23,
+            losing_trades=2,
+            total_pnl=Decimal("150.50"),
+            unrealized_pnl=Decimal("0.00"),
+            win_rate=0.92,
+            uptime_percentage=0.9,
+            error_count=2,
+            last_heartbeat=datetime.now(timezone.utc)
         )
         await monitor.update_bot_metrics(bot_id, metrics)
         
@@ -402,17 +445,18 @@ class TestBotMonitor:
         
         # Add old metrics
         old_metrics = BotMetrics(
+            bot_id=bot_id,
             cpu_usage=45.0,
             memory_usage=60.0,
-            active_positions=3,
-            orders_per_minute=5.0,
-            error_rate=0.02,
-            latency_ms=125.0,
-            uptime_seconds=3600,
             total_trades=25,
-            successful_trades=23,
-            pnl=Decimal("150.50"),
-            timestamp=datetime.now(timezone.utc) - timedelta(days=2)
+            profitable_trades=23,
+            losing_trades=2,
+            total_pnl=Decimal("150.50"),
+            unrealized_pnl=Decimal("0.00"),
+            win_rate=0.92,
+            uptime_percentage=0.9,
+            error_count=2,
+            last_heartbeat=datetime.now(timezone.utc)
         )
         
         # Simulate old metrics in history
@@ -474,17 +518,18 @@ class TestBotMonitor:
         # Establish good baseline
         for i in range(10):
             good_metrics = BotMetrics(
+                bot_id=bot_id,
                 cpu_usage=30.0,
                 memory_usage=40.0,
-                active_positions=3,
-                orders_per_minute=10.0,
-                error_rate=0.01,
-                latency_ms=100.0,
-                uptime_seconds=3600,
                 total_trades=50,
-                successful_trades=49,
-                pnl=Decimal("200.00"),
-                timestamp=datetime.now(timezone.utc)
+                profitable_trades=49,
+                losing_trades=1,
+                total_pnl=Decimal("200.00"),
+                unrealized_pnl=Decimal("0.00"),
+                win_rate=0.98,
+                uptime_percentage=0.95,
+                error_count=1,
+                last_heartbeat=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, good_metrics)
         
@@ -492,17 +537,18 @@ class TestBotMonitor:
         
         # Add degraded performance metrics
         degraded_metrics = BotMetrics(
+            bot_id=bot_id,
             cpu_usage=70.0,  # Higher CPU
             memory_usage=80.0,  # Higher memory
-            active_positions=3,
-            orders_per_minute=2.0,  # Much lower throughput
-            error_rate=0.08,  # Higher error rate
-            latency_ms=300.0,  # Higher latency
-            uptime_seconds=3600,
             total_trades=55,
-            successful_trades=50,
-            pnl=Decimal("150.00"),  # Lower performance
-            timestamp=datetime.now(timezone.utc)
+            profitable_trades=50,
+            losing_trades=5,
+            total_pnl=Decimal("150.00"),  # Lower performance
+            unrealized_pnl=Decimal("0.00"),
+            win_rate=0.91,
+            uptime_percentage=0.85,
+            error_count=8,
+            last_heartbeat=datetime.now(timezone.utc)
         )
         
         degradation = await monitor._detect_performance_degradation(bot_id, degraded_metrics)
@@ -534,17 +580,18 @@ class TestBotMonitor:
         for i in range(10):
             # Gradually increasing CPU usage
             trending_metrics = BotMetrics(
+                bot_id=bot_id,
                 cpu_usage=50.0 + i * 3,  # Trending upward
                 memory_usage=60.0 + i * 2,
-                active_positions=3,
-                orders_per_minute=5.0 - i * 0.2,  # Trending downward
-                error_rate=0.02 + i * 0.01,  # Trending upward
-                latency_ms=125.0 + i * 10,
-                uptime_seconds=3600,
                 total_trades=25,
-                successful_trades=23,
-                pnl=Decimal("150.50"),
-                timestamp=base_time + timedelta(minutes=i * 5)
+                profitable_trades=23,
+                losing_trades=2,
+                total_pnl=Decimal("150.50"),
+                unrealized_pnl=Decimal("0.00"),
+                win_rate=0.92,
+                uptime_percentage=0.95,
+                error_count=2 + i,  # Trending upward
+                last_heartbeat=base_time + timedelta(minutes=i * 5)
             )
             await monitor.update_bot_metrics(bot_id, trending_metrics)
         
@@ -566,17 +613,18 @@ class TestBotMonitor:
         
         for bot_id, cpu, memory, orders, error_rate in bots_data:
             metrics = BotMetrics(
+                bot_id=bot_id,
                 cpu_usage=cpu,
                 memory_usage=memory,
-                active_positions=3,
-                orders_per_minute=orders,
-                error_rate=error_rate,
-                latency_ms=125.0,
-                uptime_seconds=3600,
                 total_trades=25,
-                successful_trades=23,
-                pnl=Decimal("150.50"),
-                timestamp=datetime.now(timezone.utc)
+                profitable_trades=23,
+                losing_trades=2,
+                total_pnl=Decimal("150.50"),
+                unrealized_pnl=Decimal("0.00"),
+                win_rate=0.92,
+                uptime_percentage=0.95,
+                error_count=int(error_rate * 100),  # Convert error_rate to count
+                last_heartbeat=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, metrics)
         

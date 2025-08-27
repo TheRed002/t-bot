@@ -51,25 +51,24 @@ class TestDataValidator:
         """Create valid market data for testing"""
         return MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
-            bid=Decimal("49999.00"),
-            ask=Decimal("50001.00"),
-            open_price=Decimal("49900.00"),
-            high_price=Decimal("50100.00"),
-            low_price=Decimal("49800.00"),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
     @pytest.fixture
     def valid_signal(self) -> Signal:
         """Create valid signal for testing"""
         return Signal(
-            direction=SignalDirection.BUY,
-            confidence=0.75,
-            timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
-            strategy_name="test_strategy",
+            direction=SignalDirection.BUY,
+            strength=0.75,
+            timestamp=datetime.now(timezone.utc),
+            source="test_strategy",
         )
 
     @pytest.mark.asyncio
@@ -99,9 +98,13 @@ class TestDataValidator:
         # but is still valid Pydantic structure
         invalid_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("0"),  # Zero price (invalid)
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("0"),  # Zero close price (invalid)
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -111,16 +114,20 @@ class TestDataValidator:
 
         # Check for specific validation issues
         field_names = [issue.field for issue in issues]
-        assert "price" in field_names
+        assert "close" in field_names or "price" in field_names
 
     @pytest.mark.asyncio
     async def test_validate_market_data_invalid_price(self, validator: DataValidator):
         """Test validation with invalid price"""
         invalid_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("-100.00"),  # Negative price
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("-100.00"),  # Negative price
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -129,7 +136,7 @@ class TestDataValidator:
         assert len(issues) > 0
 
         # Check for price validation issue
-        price_issues = [issue for issue in issues if issue.field == "price"]
+        price_issues = [issue for issue in issues if issue.field in ["price", "close"]]
         assert len(price_issues) > 0
 
     @pytest.mark.asyncio
@@ -137,11 +144,15 @@ class TestDataValidator:
         """Test validation with invalid bid/ask spread"""
         invalid_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
-            bid=Decimal("50001.00"),  # Bid > Ask
-            ask=Decimal("49999.00"),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
+            bid_price=Decimal("50001.00"),  # Bid > Ask
+            ask_price=Decimal("49999.00"),
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -160,9 +171,13 @@ class TestDataValidator:
         future_time = datetime.now(timezone.utc) + timedelta(hours=1)
         invalid_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
             timestamp=future_time,
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -180,7 +195,14 @@ class TestDataValidator:
         """Test validation with old data"""
         old_time = datetime.now(timezone.utc) - timedelta(minutes=2)
         invalid_data = MarketData(
-            symbol="BTCUSDT", price=Decimal("50000.00"), volume=Decimal("100.5"), timestamp=old_time
+            symbol="BTCUSDT",
+            timestamp=old_time,
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         is_valid, issues = await validator.validate_market_data(invalid_data)
@@ -209,10 +231,10 @@ class TestDataValidator:
         # issues
         edge_signal = Signal(
             direction=SignalDirection.BUY,
-            confidence=0.0,  # Minimum confidence (edge case)
+            strength=0.0,  # Minimum strength (edge case)
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
-            strategy_name="test_strategy",
+            source="test_strategy",
         )
 
         is_valid, issues = await validator.validate_signal(edge_signal)
@@ -229,10 +251,10 @@ class TestDataValidator:
         # and test the validation logic separately
         valid_signal = Signal(
             direction=SignalDirection.BUY,
-            confidence=0.75,
+            strength=0.75,
             timestamp=datetime.now(timezone.utc),
             symbol="BTCUSDT",
-            strategy_name="test_strategy",
+            source="test_strategy",
         )
 
         is_valid, issues = await validator.validate_signal(valid_signal)
@@ -246,10 +268,10 @@ class TestDataValidator:
         """Test validation with invalid symbol"""
         invalid_signal = Signal(
             direction=SignalDirection.BUY,
-            confidence=0.75,
+            strength=0.75,
             timestamp=datetime.now(timezone.utc),
             symbol="",  # Empty symbol
-            strategy_name="test_strategy",
+            source="test_strategy",
         )
 
         is_valid, issues = await validator.validate_signal(invalid_signal)
@@ -266,16 +288,24 @@ class TestDataValidator:
         """Test cross-source consistency validation with valid data"""
         primary_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         secondary_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50001.00"),  # Small difference
-            volume=Decimal("100.0"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50001.00"),  # Small difference
+            volume=Decimal("100.0"),
+            exchange="binance",
         )
 
         is_consistent, issues = await validator.validate_cross_source_consistency(
@@ -292,16 +322,24 @@ class TestDataValidator:
         """Test cross-source consistency with symbol mismatch"""
         primary_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         secondary_data = MarketData(
             symbol="ETHUSDT",  # Different symbol
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("2990.00"),
+            high=Decimal("3010.00"),
+            low=Decimal("2980.00"),
+            close=Decimal("3000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         is_consistent, issues = await validator.validate_cross_source_consistency(
@@ -321,16 +359,24 @@ class TestDataValidator:
         """Test cross-source consistency with significant price difference"""
         primary_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("50000.00"),
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("50000.00"),
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         secondary_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("51000.00"),  # 2% difference (above 1% threshold)
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("50900.00"),
+            high=Decimal("51100.00"),
+            low=Decimal("50800.00"),
+            close=Decimal("51000.00"),  # 2% difference (above 1% threshold)
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         is_consistent, issues = await validator.validate_cross_source_consistency(
@@ -354,25 +400,33 @@ class TestDataValidator:
             price = 50000 + i * 10  # Normal price progression
             data = MarketData(
                 symbol=symbol,
-                price=Decimal(str(price)),
-                volume=Decimal("100.5"),
                 timestamp=datetime.now(timezone.utc),
+                open=Decimal(str(price - 50)),
+                high=Decimal(str(price + 50)),
+                low=Decimal(str(price - 100)),
+                close=Decimal(str(price)),
+                volume=Decimal("100.5"),
+                exchange="binance",
             )
             await validator.validate_market_data(data)
 
         # Now add an outlier
         outlier_data = MarketData(
             symbol=symbol,
-            price=Decimal("60000.00"),  # Significant outlier
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("59900.00"),
+            high=Decimal("60100.00"),
+            low=Decimal("59800.00"),
+            close=Decimal("60000.00"),  # Significant outlier
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         is_valid, issues = await validator.validate_market_data(outlier_data)
 
         # Should detect outlier
         outlier_issues = [
-            issue for issue in issues if issue.field == "price_outlier"]
+            issue for issue in issues if issue.field in ["price_outlier", "close_outlier"]]
         assert len(outlier_issues) > 0
 
     @pytest.mark.asyncio
@@ -415,9 +469,13 @@ class TestDataValidator:
         # Pydantic)
         malformed_data = MarketData(
             symbol="BTCUSDT",
-            price=Decimal("-100.00"),  # Negative price (invalid)
-            volume=Decimal("100.5"),
             timestamp=datetime.now(timezone.utc),
+            open=Decimal("49900.00"),
+            high=Decimal("50100.00"),
+            low=Decimal("49800.00"),
+            close=Decimal("-100.00"),  # Negative price (invalid)
+            volume=Decimal("100.5"),
+            exchange="binance",
         )
 
         is_valid, issues = await validator.validate_market_data(malformed_data)

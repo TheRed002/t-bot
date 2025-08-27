@@ -23,26 +23,31 @@ def config():
     """Provide application configuration for tests."""
     from src.core.config import DatabaseConfig
 
-    return Config(
-        environment="development",
-        debug=True,
-        database=DatabaseConfig(
-            postgresql_host="localhost",
-            postgresql_port=5432,
-            postgresql_database="trading_bot_test",
-            postgresql_username="trading_bot_test",
-            postgresql_password="test_password",
-            redis_host="localhost",
-            redis_port=6379,
-            redis_db=1,  # Use different DB to avoid conflicts
-            redis_password="redis_password",  # Password from docker-compose
-            influxdb_host="localhost",
-            influxdb_port=8086,
-            influxdb_bucket="trading_data_test",
-            influxdb_org="trading_bot_dev",
-            influxdb_token="trading_bot_token",
-        ),
+    # Create DatabaseConfig separately
+    db_config = DatabaseConfig(
+        postgresql_host="localhost",
+        postgresql_port=5432,
+        postgresql_database="trading_bot_test",
+        postgresql_username="trading_bot_test",
+        postgresql_password="test_password",
+        redis_host="localhost",
+        redis_port=6379,
+        redis_db=1,  # Use different DB to avoid conflicts
+        redis_password="redis_password",  # Password from docker-compose
+        influxdb_host="localhost",
+        influxdb_port=8086,
+        influxdb_bucket="trading_data_test",
+        influxdb_org="trading_bot_dev",
+        influxdb_token="trading_bot_token",
     )
+    
+    # Create Config instance
+    config = Config()
+    config.environment = "development"
+    config.debug = True
+    config.database = db_config
+    
+    return config
 
 
 @pytest.fixture(scope="session")
@@ -326,11 +331,18 @@ def database_setup(config, test_db_config):
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def cleanup_after_all_tests():
     """
-    Clean up all database connections after all tests complete.
-    This ensures no lingering connections cause warnings.
+    Clean up all database connections and error handlers after all tests complete.
+    This ensures no lingering connections or async tasks cause warnings.
     """
     yield
 
+    # Clean up any remaining error handlers
+    try:
+        from src.error_handling.decorators import shutdown_all_error_handlers
+        await shutdown_all_error_handlers()
+    except Exception:
+        pass  # Ignore cleanup errors
+    
     # Clean up any remaining connections
     try:
         await close_database()

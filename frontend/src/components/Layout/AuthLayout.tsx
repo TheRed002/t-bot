@@ -4,8 +4,6 @@
  */
 
 import React from 'react';
-import { Box, Container, Paper } from '@mui/material';
-import { colors } from '@/theme/colors';
 
 interface AuthLayoutProps {
   children: React.ReactNode;
@@ -13,33 +11,24 @@ interface AuthLayoutProps {
 
 const AuthLayout: React.FC<AuthLayoutProps> = ({ children }) => {
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        backgroundColor: colors.background.primary,
-        backgroundImage: `
-          radial-gradient(circle at 25% 25%, ${colors.primary[500]}20 0%, transparent 50%),
-          radial-gradient(circle at 75% 75%, ${colors.accent.cyan}15 0%, transparent 50%)
-        `,
-      }}
-    >
-      <Container maxWidth="sm">
-        <Paper
-          elevation={0}
-          sx={{
-            p: 4,
-            backgroundColor: colors.background.secondary,
-            border: `1px solid ${colors.border.primary}`,
-            borderRadius: 2,
-          }}
-        >
-          {children}
-        </Paper>
-      </Container>
-    </Box>
+    <div className="min-h-screen bg-background">
+      {/* Background pattern */}
+      <div className="fixed inset-0 -z-10 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]" />
+      
+      {/* Content */}
+      <div className="relative z-10">
+        {children}
+      </div>
+      
+      {/* Footer */}
+      <footer className="fixed bottom-0 w-full border-t bg-background/95 backdrop-blur-sm">
+        <div className="mx-auto max-w-7xl px-4 py-3">
+          <p className="text-center text-xs text-muted-foreground">
+            T-Bot Trading System © {new Date().getFullYear()} - Advanced Cryptocurrency Trading Platform
+          </p>
+        </div>
+      </footer>
+    </div>
   );
 };
 

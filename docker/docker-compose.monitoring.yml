@@ -1,0 +1,482 @@
+# Docker Compose for T-Bot Monitoring Stack
+# Comprehensive observability for institutional trading operations
+
+version: '3.8'
+
+services:
+  # ==============================================================================
+  # Metrics Collection and Storage
+  # ==============================================================================
+
+  # Prometheus - Primary metrics collection
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: tbot-prometheus
+    hostname: prometheus
+    restart: unless-stopped
+    user: "65534:65534"  # nobody user
+    ports:
+      - "127.0.0.1:9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=90d'
+      - '--storage.tsdb.retention.size=100GB'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--web.external-url=https://${DOMAIN:-localhost}/prometheus/'
+      - '--web.route-prefix=/'
+      - '--log.level=info'
+      - '--query.max-concurrency=20'
+      - '--query.max-samples=50000000'
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    networks:
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+    labels:
+      - "prometheus.io/scrape=true"
+      - "prometheus.io/port=9090"
+
+  # Node Exporter - System metrics
+  node-exporter:
+    image: prom/node-exporter:v1.6.0
+    container_name: tbot-node-exporter
+    hostname: node-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9100:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.systemd'
+      - '--collector.processes'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - tbot-monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.2'
+        reservations:
+          memory: 64M
+          cpus: '0.1'
+
+  # cAdvisor - Container metrics
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: tbot-cadvisor
+    hostname: cadvisor
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    devices:
+      - /dev/kmsg
+    privileged: true
+    networks:
+      - tbot-monitoring
+    command:
+      - '--housekeeping_interval=30s'
+      - '--max_housekeeping_interval=35s'
+      - '--event_storage_event_limit=default=0'
+      - '--event_storage_age_limit=default=0'
+      - '--disable_metrics=accelerator,cpu_topology,disk,memory_numa,tcp,udp,percpu,sched,process,hugetlb,referenced_memory,resctrl,cpuset,advtcp,memory_numa'
+      - '--docker_only'
+
+  # PostgreSQL Exporter
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.12.1
+    container_name: tbot-postgres-exporter
+    hostname: postgres-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9187:9187"
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${DB_USER}:${DB_PASSWORD}@postgresql:5432/${DB_NAME}?sslmode=disable"
+      PG_EXPORTER_EXTEND_QUERY_PATH: "/etc/postgres_exporter/queries.yaml"
+    volumes:
+      - ../monitoring/postgres-exporter/queries.yaml:/etc/postgres_exporter/queries.yaml:ro
+    networks:
+      - tbot-monitoring
+    depends_on:
+      - prometheus
+
+  # Redis Exporter
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.52.0
+    container_name: tbot-redis-exporter
+    hostname: redis-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9121:9121"
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD}"
+    networks:
+      - tbot-monitoring
+    depends_on:
+      - prometheus
+
+  # ==============================================================================
+  # Visualization and Dashboards
+  # ==============================================================================
+
+  # Grafana - Primary visualization platform
+  grafana:
+    image: grafana/grafana-enterprise:10.0.0
+    container_name: tbot-grafana
+    hostname: grafana
+    restart: unless-stopped
+    user: "472:0"  # grafana user
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      # Security settings
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_SECURITY_SECRET_KEY=${GRAFANA_SECRET_KEY}
+      - GF_SECURITY_COOKIE_SECURE=true
+      - GF_SECURITY_COOKIE_SAMESITE=strict
+      - GF_SECURITY_CONTENT_TYPE_PROTECTION=true
+      - GF_SECURITY_X_CONTENT_TYPE_OPTIONS=nosniff
+      - GF_SECURITY_X_XSS_PROTECTION=true
+      
+      # Server settings
+      - GF_SERVER_DOMAIN=${DOMAIN:-localhost}
+      - GF_SERVER_ROOT_URL=https://${DOMAIN:-localhost}/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SERVER_ENABLE_GZIP=true
+      
+      # Database settings
+      - GF_DATABASE_TYPE=postgres
+      - GF_DATABASE_HOST=postgresql:5432
+      - GF_DATABASE_NAME=${GRAFANA_DB_NAME:-grafana}
+      - GF_DATABASE_USER=${GRAFANA_DB_USER:-grafana}
+      - GF_DATABASE_PASSWORD=${GRAFANA_DB_PASSWORD}
+      - GF_DATABASE_SSL_MODE=disable
+      
+      # Session settings
+      - GF_SESSION_PROVIDER=redis
+      - GF_SESSION_PROVIDER_CONFIG=addr=redis:6379,pool_size=100,db=grafana,password=${REDIS_PASSWORD}
+      
+      # Authentication settings
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_AUTH_OAUTH_AUTO_LOGIN=false
+      
+      # Alerting settings
+      - GF_ALERTING_ENABLED=true
+      - GF_UNIFIED_ALERTING_ENABLED=true
+      - GF_ALERTING_EXECUTE_ALERTS=true
+      - GF_ALERTING_ERROR_OR_TIMEOUT=alerting
+      - GF_ALERTING_NODATA_OR_NULLVALUES=no_data
+      
+      # Plugin settings
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource,grafana-worldmap-panel,grafana-piechart-panel,camptocamp-prometheus-alertmanager-datasource
+      
+      # Logging
+      - GF_LOG_LEVEL=info
+      - GF_LOG_MODE=console file
+      
+      # Feature toggles
+      - GF_FEATURE_TOGGLES_ENABLE=alertingBigTransactions
+      
+      # SMTP settings (if email alerts needed)
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_HOST=${SMTP_HOST}:${SMTP_PORT:-587}
+      - GF_SMTP_USER=${SMTP_USER}
+      - GF_SMTP_PASSWORD=${SMTP_PASSWORD}
+      - GF_SMTP_FROM_ADDRESS=${SMTP_FROM:-alerts@tbot.local}
+      - GF_SMTP_FROM_NAME=T-Bot Monitoring
+      
+    volumes:
+      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ../monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ../monitoring/grafana/alerting:/etc/grafana/provisioning/alerting:ro
+      - ../monitoring/grafana/plugins:/var/lib/grafana/plugins:ro
+      - grafana_data:/var/lib/grafana
+      - grafana_logs:/var/log/grafana
+    secrets:
+      - grafana_credentials
+    networks:
+      - tbot-monitoring
+    depends_on:
+      - prometheus
+      - postgresql
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # ==============================================================================
+  # Log Management
+  # ==============================================================================
+
+  # Loki - Log aggregation
+  loki:
+    image: grafana/loki:2.8.0
+    container_name: tbot-loki
+    hostname: loki
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - ../monitoring/loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - tbot-monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # Promtail - Log collection
+  promtail:
+    image: grafana/promtail:2.8.0
+    container_name: tbot-promtail
+    hostname: promtail
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9080:9080"
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ../monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - promtail_data:/promtail
+    networks:
+      - tbot-monitoring
+    depends_on:
+      - loki
+
+  # ==============================================================================
+  # Alerting
+  # ==============================================================================
+
+  # Alertmanager - Alert routing and management
+  alertmanager:
+    image: prom/alertmanager:v0.25.0
+    container_name: tbot-alertmanager
+    hostname: alertmanager
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9093:9093"
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=https://${DOMAIN:-localhost}/alertmanager/'
+      - '--web.route-prefix=/'
+      - '--cluster.listen-address=0.0.0.0:9094'
+      - '--log.level=info'
+    volumes:
+      - ../monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    networks:
+      - tbot-monitoring
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+
+  # ==============================================================================
+  # Application Performance Monitoring
+  # ==============================================================================
+
+  # Jaeger - Distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.46.0
+    container_name: tbot-jaeger
+    hostname: jaeger
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:16686:16686"  # Jaeger UI
+      - "127.0.0.1:14268:14268"  # HTTP collector
+      - "127.0.0.1:6831:6831/udp"  # UDP collector
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - SPAN_STORAGE_TYPE=elasticsearch
+      - ES_SERVER_URLS=http://elasticsearch:9200
+    volumes:
+      - jaeger_data:/tmp
+    networks:
+      - tbot-monitoring
+    depends_on:
+      - elasticsearch
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # Elasticsearch - Storage for traces and logs
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.8.0
+    container_name: tbot-elasticsearch
+    hostname: elasticsearch
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9200:9200"
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - xpack.security.enabled=false
+      - xpack.monitoring.collection.enabled=true
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - tbot-monitoring
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 2G
+          cpus: '1.0'
+
+  # ==============================================================================
+  # Business Intelligence and Analytics
+  # ==============================================================================
+
+  # Metabase - Business intelligence for trading analytics
+  metabase:
+    image: metabase/metabase:v0.46.4
+    container_name: tbot-metabase
+    hostname: metabase
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      - MB_DB_TYPE=postgres
+      - MB_DB_DBNAME=${METABASE_DB_NAME:-metabase}
+      - MB_DB_PORT=5432
+      - MB_DB_USER=${METABASE_DB_USER:-metabase}
+      - MB_DB_PASS=${METABASE_DB_PASSWORD}
+      - MB_DB_HOST=postgresql
+      - JAVA_OPTS=-Xmx2g -Xms1g
+    volumes:
+      - metabase_data:/metabase-data
+    networks:
+      - tbot-monitoring
+    depends_on:
+      - postgresql
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+# ==============================================================================
+# Volumes
+# ==============================================================================
+volumes:
+  # Monitoring data
+  prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/monitoring/prometheus
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/monitoring/grafana
+  grafana_logs:
+    driver: local
+  alertmanager_data:
+    driver: local
+  loki_data:
+    driver: local
+  promtail_data:
+    driver: local
+  
+  # APM data
+  jaeger_data:
+    driver: local
+  elasticsearch_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/tbot/monitoring/elasticsearch
+  
+  # Business intelligence
+  metabase_data:
+    driver: local
+
+# ==============================================================================
+# Secrets
+# ==============================================================================
+secrets:
+  grafana_credentials:
+    external: true
+
+# ==============================================================================
+# Networks
+# ==============================================================================
+networks:
+  tbot-monitoring:
+    external: true
+    name: tbot-monitoring-network

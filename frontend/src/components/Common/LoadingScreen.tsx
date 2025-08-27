@@ -1,95 +1,56 @@
 /**
- * Loading screen component for initial app load
+ * Loading screen component
+ * Full-screen loading indicator with animation
  */
 
 import React from 'react';
-import { Box, CircularProgress, Typography, keyframes } from '@mui/material';
-import { styled } from '@mui/material/styles';
-import { colors } from '@/theme/colors';
-
-// Animated logo rotation
-const logoSpin = keyframes`
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-`;
-
-const LoadingContainer = styled(Box)(({ theme }) => ({
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  height: '100vh',
-  backgroundColor: colors.background.primary,
-  color: colors.text.primary,
-}));
-
-const Logo = styled(Box)(({ theme }) => ({
-  width: 64,
-  height: 64,
-  backgroundColor: colors.primary[500],
-  borderRadius: '50%',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  marginBottom: theme.spacing(3),
-  animation: `${logoSpin} 2s linear infinite`,
-  fontSize: '24px',
-  fontWeight: 'bold',
-  color: colors.text.primary,
-}));
-
-const LoadingText = styled(Typography)(({ theme }) => ({
-  color: colors.text.secondary,
-  marginBottom: theme.spacing(2),
-  fontSize: '14px',
-}));
-
-const ProgressContainer = styled(Box)(({ theme }) => ({
-  display: 'flex',
-  alignItems: 'center',
-  gap: theme.spacing(2),
-}));
+import { cn } from '@/lib/utils';
 
 interface LoadingScreenProps {
   message?: string;
-  showProgress?: boolean;
+  className?: string;
 }
 
-const LoadingScreen: React.FC<LoadingScreenProps> = ({
-  message = 'Loading T-Bot Trading System...',
-  showProgress = true,
+const LoadingScreen: React.FC<LoadingScreenProps> = ({ 
+  message = 'Loading trading system...', 
+  className 
 }) => {
   return (
-    <LoadingContainer>
-      <Logo>TB</Logo>
+    <div className={cn(
+      "fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-sm",
+      className
+    )}>
+      <div className="relative">
+        {/* Animated rings */}
+        <div className="absolute inset-0 animate-ping">
+          <div className="h-24 w-24 rounded-full border-4 border-primary/30" />
+        </div>
+        <div className="absolute inset-0 animate-ping animation-delay-200">
+          <div className="h-24 w-24 rounded-full border-4 border-primary/20" />
+        </div>
+        <div className="absolute inset-0 animate-ping animation-delay-400">
+          <div className="h-24 w-24 rounded-full border-4 border-primary/10" />
+        </div>
+        
+        {/* Center spinner */}
+        <div className="relative flex h-24 w-24 items-center justify-center">
+          <div className="h-16 w-16 animate-spin rounded-full border-4 border-muted border-t-primary" />
+        </div>
+      </div>
       
-      <Typography
-        variant="h4"
-        component="h1"
-        sx={{
-          color: colors.text.primary,
-          fontWeight: 600,
-          marginBottom: 1,
-        }}
-      >
-        T-Bot Trading System
-      </Typography>
+      {/* Loading text */}
+      <div className="mt-8 space-y-2 text-center">
+        <h2 className="text-xl font-semibold tracking-tight">T-Bot Trading System</h2>
+        <p className="text-sm text-muted-foreground animate-pulse">{message}</p>
+      </div>
       
-      <LoadingText>{message}</LoadingText>
-      
-      {showProgress && (
-        <ProgressContainer>
-          <CircularProgress
-            size={24}
-            sx={{ color: colors.primary[500] }}
-          />
-        </ProgressContainer>
-      )}
-    </LoadingContainer>
+      {/* Progress dots */}
+      <div className="mt-4 flex space-x-1">
+        <span className="h-2 w-2 animate-bounce rounded-full bg-primary animation-delay-0" />
+        <span className="h-2 w-2 animate-bounce rounded-full bg-primary animation-delay-200" />
+        <span className="h-2 w-2 animate-bounce rounded-full bg-primary animation-delay-400" />
+      </div>
+    </div>
   );
 };
 

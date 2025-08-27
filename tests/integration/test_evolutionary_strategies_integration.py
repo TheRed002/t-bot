@@ -23,7 +23,7 @@ from src.strategies.evolutionary.genetic import GeneticAlgorithm, GeneticConfig
 from src.strategies.evolutionary.fitness import FitnessEvaluator
 from src.strategies.evolutionary.population import Individual, Population
 from src.backtesting.engine import BacktestEngine, BacktestConfig, BacktestResult
-from src.core.types import SignalDirection
+from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyConfig, StrategyType
 from src.strategies.base import BaseStrategy
 
 
@@ -31,7 +31,17 @@ class ParameterizedTestStrategy(BaseStrategy):
     """Test strategy with multiple parameters for optimization."""
     
     def __init__(self, **config):
-        super().__init__(config)
+        # Create proper config for BaseStrategy 
+        strategy_config = {
+            'name': 'parameterized_test_strategy',
+            'strategy_id': 'param_test_001',
+            'strategy_type': 'mean_reversion',
+            'symbol': 'BTCUSDT',
+            'timeframe': '1h',
+            'symbols': ['BTCUSDT'],
+            **config
+        }
+        super().__init__(strategy_config)
         self.lookback_period = config.get('lookback_period', 20)
         self.threshold = config.get('threshold', 0.02)
         self.use_volume = config.get('use_volume', True)
@@ -39,8 +49,48 @@ class ParameterizedTestStrategy(BaseStrategy):
         self.ma_ratio = config.get('ma_ratio', 1.5)
         self.signal_history = {}
     
-    async def initialize(self, symbol: str, data: pd.DataFrame):
-        """Initialize strategy."""
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Get the strategy type."""
+        return StrategyType.MEAN_REVERSION
+    
+    @property
+    def name(self) -> str:
+        """Get strategy name."""
+        return getattr(self, '_name', "parameterized_test_strategy")
+    
+    @name.setter
+    def name(self, value: str) -> None:
+        """Set strategy name."""
+        self._name = value
+    
+    @property
+    def version(self) -> str:
+        """Get strategy version."""
+        return getattr(self, '_version', "1.0.0")
+    
+    @version.setter 
+    def version(self, value: str) -> None:
+        """Set strategy version."""
+        self._version = value
+    
+    @property
+    def status(self) -> 'StrategyStatus':
+        """Get strategy status."""
+        from src.core.types import StrategyStatus
+        return getattr(self, '_status', StrategyStatus.ACTIVE)
+    
+    @status.setter
+    def status(self, value: 'StrategyStatus') -> None:
+        """Set strategy status.""" 
+        self._status = value
+    
+    async def initialize(self, config: StrategyConfig) -> None:
+        """Initialize the strategy with configuration."""
+        pass
+    
+    async def initialize_symbol(self, symbol: str, data: pd.DataFrame):
+        """Initialize strategy for a specific symbol."""
         self.signal_history[symbol] = []
     
     async def generate_signal(self, symbol: str, data: pd.DataFrame) -> SignalDirection:
@@ -104,6 +154,26 @@ class ParameterizedTestStrategy(BaseStrategy):
             })
         
         return signal
+    
+    async def generate_signals(self, data: MarketData) -> list[Signal]:
+        """Generate trading signals from market data."""
+        return []
+    
+    async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
+        """Implementation required by BaseStrategy."""
+        return []
+    
+    def get_position_size(self, signal: Signal) -> Decimal:
+        """Implementation required by BaseStrategy."""
+        return Decimal("1000.0")
+    
+    def should_exit(self, position: Position, data: MarketData) -> bool:
+        """Implementation required by BaseStrategy."""
+        return False
+    
+    async def validate_signal(self, signal: Signal) -> bool:
+        """Implementation required by BaseStrategy."""
+        return True
 
 
 class MultiFitnesEvaluator(FitnessEvaluator):

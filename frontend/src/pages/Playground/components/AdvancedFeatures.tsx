@@ -4,73 +4,52 @@
  */
 
 import React, { useState, useCallback } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Alert } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Separator } from '@/components/ui/separator';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+
 import {
-  Box,
-  Paper,
-  Typography,
-  Grid,
-  Card,
-  CardContent,
-  Button,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Slider,
-  Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  IconButton,
-  Tooltip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Alert,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  ListItemSecondaryAction,
-  Divider,
-  LinearProgress,
-  useTheme,
-  alpha,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  FormControlLabel,
-  Switch
-} from '@mui/material';
-import {
-  Science as ScienceIcon,
-  CompareArrows as CompareIcon,
-  Tune as TuneIcon,
-  Speed as SpeedIcon,
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  PlayArrow as PlayIcon,
-  ExpandMore as ExpandMoreIcon,
-  Assessment as AssessmentIcon,
-  Timeline as TimelineIcon,
-  Warning as WarningIcon,
-  CheckCircle as CheckCircleIcon,
-  Psychology as PsychologyIcon,
-  AutoFixHigh as OptimizeIcon
-} from '@mui/icons-material';
+  Beaker,
+  ArrowLeftRight,
+  Settings2,
+  Gauge,
+  Plus,
+  Edit,
+  Trash2,
+  Play,
+  ChevronDown,
+  BarChart3,
+  TrendingUp,
+  AlertTriangle,
+  CheckCircle,
+  Brain,
+  Sparkles,
+  Activity
+} from 'lucide-react';
 
 import {
   PlaygroundConfiguration,
   PlaygroundExecution,
   ABTest,
-  ParameterOptimization
+  ParameterOptimization,
+  PositionSizeMethod,
+  AllocationStrategy,
+  StrategyType
 } from '@/types';
+import { cn } from '@/lib/utils';
 
 interface AdvancedFeaturesProps {
   configuration: PlaygroundConfiguration | null;
@@ -87,40 +66,54 @@ const mockABTests: ABTest[] = [
         name: 'Conservative SL (2%)',
         description: 'Lower risk approach',
         symbols: ['BTC/USDT'],
-        positionSizing: { type: 'percentage', value: 2, maxPositions: 5 },
+        positionSizing: { method: PositionSizeMethod.PERCENTAGE, value: 2, maxPositions: 5 },
         tradingSide: 'both',
         riskSettings: {
           stopLossPercentage: 2,
           takeProfitPercentage: 4,
           maxDrawdownPercentage: 10,
-          maxRiskPerTrade: 2
+          maxRiskPerTrade: 2,
+          correlationLimit: 0.7,
+          enableCircuitBreaker: true,
+          dailyLossLimit: 5
         },
         portfolioSettings: {
           maxPositions: 5,
-          allocationStrategy: 'equal_weight',
+          allocationStrategy: AllocationStrategy.EQUAL_WEIGHT,
           rebalanceFrequency: 'daily'
         },
-        strategy: { type: 'trend_following', parameters: {} },
+        strategyTemplate: { 
+          templateId: 'trend_following_template', 
+          strategyType: StrategyType.TREND_FOLLOWING, 
+          parameters: {} 
+        },
         timeframe: '1h'
       },
       treatment: {
         name: 'Aggressive SL (3%)',
         description: 'Higher risk for better returns',
         symbols: ['BTC/USDT'],
-        positionSizing: { type: 'percentage', value: 2, maxPositions: 5 },
+        positionSizing: { method: PositionSizeMethod.PERCENTAGE, value: 2, maxPositions: 5 },
         tradingSide: 'both',
         riskSettings: {
           stopLossPercentage: 3,
           takeProfitPercentage: 6,
           maxDrawdownPercentage: 15,
-          maxRiskPerTrade: 3
+          maxRiskPerTrade: 3,
+          correlationLimit: 0.7,
+          enableCircuitBreaker: true,
+          dailyLossLimit: 8
         },
         portfolioSettings: {
           maxPositions: 5,
-          allocationStrategy: 'equal_weight',
+          allocationStrategy: AllocationStrategy.EQUAL_WEIGHT,
           rebalanceFrequency: 'daily'
         },
-        strategy: { type: 'trend_following', parameters: {} },
+        strategyTemplate: { 
+          templateId: 'trend_following_template', 
+          strategyType: StrategyType.TREND_FOLLOWING, 
+          parameters: {} 
+        },
         timeframe: '1h'
       }
     },
@@ -179,7 +172,6 @@ const AdvancedFeatures: React.FC<AdvancedFeaturesProps> = ({
   configuration,
   executions
 }) => {
-  const theme = useTheme();
 
   // State management
   const [abTests, setAbTests] = useState<ABTest[]>(mockABTests);
@@ -191,9 +183,22 @@ const AdvancedFeatures: React.FC<AdvancedFeaturesProps> = ({
   const [optimizationMetric, setOptimizationMetric] = useState<string>('sharpe_ratio');
   const [optimizationProgress, setOptimizationProgress] = useState<number>(0);
   const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
+  const [sensitivityExpanded, setSensitivityExpanded] = useState<boolean>(false);
 
   // A/B Test Creation Form State
-  const [abTestForm, setABTestForm] = useState({
+  interface ABTestFormData {
+    name: string;
+    description: string;
+    controlName: string;
+    treatmentName: string;
+    testParameter: string;
+    controlValue: number;
+    treatmentValue: number;
+    significance: number;
+    duration: number;
+  }
+  
+  const [abTestForm, setABTestForm] = useState<ABTestFormData>({
     name: '',
     description: '',
     controlName: 'Control',
@@ -267,10 +272,10 @@ const AdvancedFeatures: React.FC<AdvancedFeaturesProps> = ({
   }, []);
 
   // Get significance badge color
-  const getSignificanceBadgeColor = (pValue: number, alpha: number = 0.05) => {
-    if (pValue < alpha) return 'success';
-    if (pValue < alpha * 2) return 'warning';
-    return 'error';
+  const getSignificanceBadgeVariant = (pValue: number, alpha: number = 0.05) => {
+    if (pValue < alpha) return 'default';
+    if (pValue < alpha * 2) return 'secondary';
+    return 'destructive';
   };
 
   // Format parameter value
@@ -282,678 +287,625 @@ const AdvancedFeatures: React.FC<AdvancedFeaturesProps> = ({
   };
 
   return (
-    <Box>
+    <div className="space-y-6">
       {/* Header */}
-      <Typography variant="h5" fontWeight="bold" gutterBottom sx={{ mb: 3 }}>
-        Advanced Features
-      </Typography>
+      <div>
+        <h2 className="text-2xl font-bold mb-2">Advanced Features</h2>
+        <p className="text-muted-foreground">
+          A/B testing, parameter optimization, and multi-instance execution tools
+        </p>
+      </div>
 
-      <Grid container spacing={3}>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* A/B Testing Section */}
-        <Grid item xs={12} lg={6}>
-          <Card elevation={2} sx={{ height: 'fit-content' }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <ScienceIcon color="primary" />
-                  A/B Testing
-                </Typography>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<AddIcon />}
-                  onClick={() => setCreateABTestOpen(true)}
-                  disabled={!configuration}
-                >
-                  Create Test
-                </Button>
-              </Box>
-
-              <Typography variant="body2" color="text.secondary" paragraph>
-                Compare different configurations to find the optimal settings scientifically.
-              </Typography>
-
-              {abTests.length === 0 ? (
-                <Alert severity="info" sx={{ mb: 2 }}>
-                  No A/B tests created yet. Create your first test to compare different configurations.
-                </Alert>
-              ) : (
-                <List>
-                  {abTests.map((test, index) => (
-                    <React.Fragment key={test.id}>
-                      <ListItem>
-                        <ListItemIcon>
-                          <CompareIcon />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={test.name}
-                          secondary={
-                            <Box>
-                              <Typography variant="caption" display="block">
-                                Status: {test.status}
-                              </Typography>
-                              {test.results && (
-                                <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                                  <Chip
-                                    size="small"
-                                    label={`p-value: ${test.results.pValue.toFixed(3)}`}
-                                    color={getSignificanceBadgeColor(test.results.pValue)}
-                                  />
-                                  <Chip
-                                    size="small"
-                                    label={`Winner: ${test.results.winner}`}
-                                    color="primary"
-                                    variant="outlined"
-                                  />
-                                </Box>
-                              )}
-                            </Box>
-                          }
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Beaker className="h-5 w-5 text-primary" />
+                A/B Testing
+              </CardTitle>
+              <Dialog open={createABTestOpen} onOpenChange={setCreateABTestOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={!configuration}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create Test
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Create A/B Test</DialogTitle>
+                    <DialogDescription>
+                      Compare different configurations to find optimal settings scientifically.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div>
+                      <Label htmlFor="test-name">Test Name</Label>
+                      <Input
+                        id="test-name"
+                        value={abTestForm.name}
+                        onChange={(e) => setABTestForm(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="Stop Loss Comparison"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="description">Description</Label>
+                      <Textarea
+                        id="description"
+                        value={abTestForm.description}
+                        onChange={(e) => setABTestForm(prev => ({ ...prev, description: e.target.value }))}
+                        placeholder="Test different stop loss values..."
+                        rows={2}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="control-name">Control Name</Label>
+                        <Input
+                          id="control-name"
+                          value={abTestForm.controlName}
+                          onChange={(e) => setABTestForm(prev => ({ ...prev, controlName: e.target.value }))}
+                          placeholder="Control"
                         />
-                        <ListItemSecondaryAction>
-                          <IconButton
-                            size="small"
-                            onClick={() => setSelectedABTest(test)}
-                          >
-                            <AssessmentIcon />
-                          </IconButton>
-                        </ListItemSecondaryAction>
-                      </ListItem>
-                      {index < abTests.length - 1 && <Divider variant="inset" component="li" />}
-                    </React.Fragment>
-                  ))}
-                </List>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
+                      </div>
+                      <div>
+                        <Label htmlFor="treatment-name">Treatment Name</Label>
+                        <Input
+                          id="treatment-name"
+                          value={abTestForm.treatmentName}
+                          onChange={(e) => setABTestForm(prev => ({ ...prev, treatmentName: e.target.value }))}
+                          placeholder="Treatment"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label>Test Parameter</Label>
+                      <Select value={abTestForm.testParameter} onValueChange={(value) => setABTestForm(prev => ({ ...prev, testParameter: value }))}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="stopLossPercentage">Stop Loss %</SelectItem>
+                          <SelectItem value="takeProfitPercentage">Take Profit %</SelectItem>
+                          <SelectItem value="positionSize">Position Size</SelectItem>
+                          <SelectItem value="maxDrawdownPercentage">Max Drawdown %</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="control-value">Control Value</Label>
+                        <Input
+                          id="control-value"
+                          type="number"
+                          value={abTestForm.controlValue}
+                          onChange={(e) => setABTestForm(prev => ({ ...prev, controlValue: Number(e.target.value) }))}
+                          step="0.1"
+                          min="0"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="treatment-value">Treatment Value</Label>
+                        <Input
+                          id="treatment-value"
+                          type="number"
+                          value={abTestForm.treatmentValue}
+                          onChange={(e) => setABTestForm(prev => ({ ...prev, treatmentValue: Number(e.target.value) }))}
+                          step="0.1"
+                          min="0"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setCreateABTestOpen(false)}>Cancel</Button>
+                      <Button onClick={handleCreateABTest} disabled={!abTestForm.name || !configuration}>
+                        Create Test
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              Compare different configurations to find the optimal settings scientifically.
+            </p>
+
+            {abTests.length === 0 ? (
+              <Alert>
+                <Activity className="h-4 w-4" />
+                <div>
+                  <div className="font-medium">No A/B tests created yet</div>
+                  <div className="text-sm">Create your first test to compare different configurations.</div>
+                </div>
+              </Alert>
+            ) : (
+              <div className="space-y-3">
+                {abTests.map((test) => (
+                  <Card key={test.id} className="border">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-start gap-3">
+                          <ArrowLeftRight className="h-4 w-4 mt-1 text-muted-foreground" />
+                          <div>
+                            <div className="font-medium">{test.name}</div>
+                            <div className="text-sm text-muted-foreground">Status: {test.status}</div>
+                            {test.results && (
+                              <div className="flex gap-2 mt-2">
+                                <Badge variant={getSignificanceBadgeVariant(test.results.pValue)}>
+                                  p-value: {test.results.pValue.toFixed(3)}
+                                </Badge>
+                                <Badge variant="outline">
+                                  Winner: {test.results.winner}
+                                </Badge>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setSelectedABTest(test)}
+                        >
+                          <BarChart3 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Parameter Optimization Section */}
-        <Grid item xs={12} lg={6}>
-          <Card elevation={2} sx={{ height: 'fit-content' }}>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <TuneIcon color="primary" />
-                  Parameter Optimization
-                </Typography>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<OptimizeIcon />}
-                  onClick={() => setOptimizationOpen(true)}
-                  disabled={!configuration}
-                >
-                  Optimize
-                </Button>
-              </Box>
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Settings2 className="h-5 w-5 text-primary" />
+                Parameter Optimization
+              </CardTitle>
+              <Dialog open={optimizationOpen} onOpenChange={setOptimizationOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={!configuration}>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Optimize
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>Parameter Optimization</DialogTitle>
+                    <DialogDescription>
+                      Find optimal parameter values using systematic search algorithms.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-6">
+                    <div>
+                      <Label>Optimization Metric</Label>
+                      <Select value={optimizationMetric} onValueChange={setOptimizationMetric}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="sharpe_ratio">Sharpe Ratio</SelectItem>
+                          <SelectItem value="return">Total Return</SelectItem>
+                          <SelectItem value="calmar_ratio">Calmar Ratio</SelectItem>
+                          <SelectItem value="sortino_ratio">Sortino Ratio</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-              <Typography variant="body2" color="text.secondary" paragraph>
-                Find optimal parameter values using systematic search algorithms.
-              </Typography>
+                    {parameters.map((param) => (
+                      <Card key={param.parameter} className="border">
+                        <CardContent className="p-4">
+                          <div className="space-y-4">
+                            <Label>{param.parameter}</Label>
+                            {param.type === 'range' && (
+                              <div className="px-2">
+                                <Slider
+                                  value={[param.min || 0, param.max || 10]}
+                                  onValueChange={([min, max]) => {
+                                    setParameters(prev => prev.map(p => 
+                                      p.parameter === param.parameter 
+                                        ? { ...p, min, max }
+                                        : p
+                                    ));
+                                  }}
+                                  min={0}
+                                  max={20}
+                                  step={param.step || 0.1}
+                                  className="w-full"
+                                />
+                                <div className="flex justify-between text-sm text-muted-foreground mt-2">
+                                  <span>Min: {formatParameterValue(param, param.min || 0)}</span>
+                                  <span>Max: {formatParameterValue(param, param.max || 10)}</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
 
-              {isOptimizing && (
-                <Box sx={{ mb: 2 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                    <Typography variant="body2">Optimization Progress</Typography>
-                    <Typography variant="body2">{Math.round(optimizationProgress)}%</Typography>
-                  </Box>
-                  <LinearProgress
-                    variant="determinate"
-                    value={optimizationProgress}
-                    sx={{ height: 8, borderRadius: 4 }}
-                  />
-                </Box>
-              )}
+                    <Alert>
+                      <Activity className="h-4 w-4" />
+                      <div>
+                        <div className="font-medium">Note</div>
+                        <div className="text-sm">
+                          Optimization will test multiple parameter combinations to find the optimal settings 
+                          based on the selected metric. This process may take several minutes.
+                        </div>
+                      </div>
+                    </Alert>
 
-              <List>
-                {parameters.map((param, index) => (
-                  <React.Fragment key={param.parameter}>
-                    <ListItem>
-                      <ListItemText
-                        primary={param.parameter}
-                        secondary={
-                          <Box>
-                            <Typography variant="caption" display="block">
-                              Current: {formatParameterValue(param, param.current || 0)} → 
-                              Optimal: {formatParameterValue(param, param.optimal || 0)}
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                              <Typography variant="caption">Sensitivity:</Typography>
-                              <LinearProgress
-                                variant="determinate"
-                                value={(param.sensitivity || 0) * 100}
-                                sx={{ flexGrow: 1, height: 4, borderRadius: 2 }}
-                              />
-                              <Typography variant="caption">
-                                {((param.sensitivity || 0) * 100).toFixed(0)}%
-                              </Typography>
-                            </Box>
-                          </Box>
-                        }
-                      />
-                    </ListItem>
-                    {index < parameters.length - 1 && <Divider variant="inset" component="li" />}
-                  </React.Fragment>
-                ))}
-              </List>
-            </CardContent>
-          </Card>
-        </Grid>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setOptimizationOpen(false)}>Cancel</Button>
+                      <Button
+                        onClick={() => {
+                          handleStartOptimization();
+                          setOptimizationOpen(false);
+                        }}
+                        disabled={isOptimizing}
+                      >
+                        Start Optimization
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              Find optimal parameter values using systematic search algorithms.
+            </p>
 
-        {/* Multi-Instance Execution */}
-        <Grid item xs={12}>
-          <Card elevation={2}>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <SpeedIcon color="primary" />
-                  Multi-Instance Execution
-                </Typography>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={<PlayIcon />}
-                  onClick={() => setMultiInstanceOpen(true)}
-                  disabled={!configuration}
-                >
+            {isOptimizing && (
+              <div className="mb-4">
+                <div className="flex justify-between text-sm mb-2">
+                  <span>Optimization Progress</span>
+                  <span>{Math.round(optimizationProgress)}%</span>
+                </div>
+                <Progress value={optimizationProgress} className="h-2" />
+              </div>
+            )}
+
+            <div className="space-y-3">
+              {parameters.map((param) => (
+                <Card key={param.parameter} className="border">
+                  <CardContent className="p-4">
+                    <div className="space-y-2">
+                      <div className="font-medium">{param.parameter}</div>
+                      <div className="text-sm text-muted-foreground">
+                        Current: {formatParameterValue(param, param.current || 0)} → 
+                        Optimal: {formatParameterValue(param, param.optimal || 0)}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Sensitivity:</span>
+                        <Progress 
+                          value={(param.sensitivity || 0) * 100} 
+                          className="flex-1 h-1" 
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {((param.sensitivity || 0) * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Multi-Instance Execution */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Gauge className="h-5 w-5 text-primary" />
+              Multi-Instance Execution
+            </CardTitle>
+            <Dialog open={multiInstanceOpen} onOpenChange={setMultiInstanceOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={!configuration}>
+                  <Play className="h-4 w-4 mr-2" />
                   Configure
                 </Button>
-              </Box>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Multi-Instance Configuration</DialogTitle>
+                  <DialogDescription>
+                    Configure multiple strategy instances to run simultaneously.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="instance-count">Number of Instances</Label>
+                      <Input
+                        id="instance-count"
+                        type="number"
+                        value={multiInstanceConfig.instanceCount}
+                        onChange={(e) => setMultiInstanceConfig(prev => ({
+                          ...prev,
+                          instanceCount: Number(e.target.value)
+                        }))}
+                        min="1"
+                        max="10"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">Maximum 10 instances recommended</p>
+                    </div>
+                    <div>
+                      <Label htmlFor="resource-limit">Resource Limit (%)</Label>
+                      <Input
+                        id="resource-limit"
+                        type="number"
+                        value={multiInstanceConfig.resourceLimit}
+                        onChange={(e) => setMultiInstanceConfig(prev => ({
+                          ...prev,
+                          resourceLimit: Number(e.target.value)
+                        }))}
+                        min="10"
+                        max="100"
+                      />
+                      <p className="text-xs text-muted-foreground mt-1">CPU/Memory usage limit</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="parallel-execution"
+                      checked={multiInstanceConfig.parallelExecution}
+                      onCheckedChange={(checked) => setMultiInstanceConfig(prev => ({
+                        ...prev,
+                        parallelExecution: checked
+                      }))}
+                    />
+                    <div>
+                      <Label htmlFor="parallel-execution">Enable parallel execution</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Run instances simultaneously for faster results (requires more resources)
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={() => setMultiInstanceOpen(false)}>Cancel</Button>
+                    <Button>Start Multi-Instance Execution</Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-4">
+            Run multiple configurations simultaneously to compare performance across different parameters.
+          </p>
 
-              <Typography variant="body2" color="text.secondary" paragraph>
-                Run multiple configurations simultaneously to compare performance across different parameters.
-              </Typography>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <Card className="text-center">
+              <CardContent className="p-4">
+                <div className="text-2xl font-bold text-primary">{multiInstanceConfig.instanceCount}</div>
+                <div className="text-sm text-muted-foreground">Active Instances</div>
+              </CardContent>
+            </Card>
+            <Card className="text-center">
+              <CardContent className="p-4">
+                <div className="text-2xl font-bold text-primary">{multiInstanceConfig.symbols.length}</div>
+                <div className="text-sm text-muted-foreground">Trading Pairs</div>
+              </CardContent>
+            </Card>
+            <Card className="text-center">
+              <CardContent className="p-4">
+                <div className="text-2xl font-bold text-primary">{multiInstanceConfig.strategies.length}</div>
+                <div className="text-sm text-muted-foreground">Strategies</div>
+              </CardContent>
+            </Card>
+            <Card className="text-center">
+              <CardContent className="p-4">
+                <div className="text-2xl font-bold text-primary">{multiInstanceConfig.resourceLimit}%</div>
+                <div className="text-sm text-muted-foreground">Resource Limit</div>
+              </CardContent>
+            </Card>
+          </div>
 
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Card variant="outlined">
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="primary" fontWeight="bold">
-                        {multiInstanceConfig.instanceCount}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Active Instances
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Card variant="outlined">
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="primary" fontWeight="bold">
-                        {multiInstanceConfig.symbols.length}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Trading Pairs
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Card variant="outlined">
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="primary" fontWeight="bold">
-                        {multiInstanceConfig.strategies.length}
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Strategies
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Card variant="outlined">
-                    <CardContent sx={{ textAlign: 'center' }}>
-                      <Typography variant="h4" color="primary" fontWeight="bold">
-                        {multiInstanceConfig.resourceLimit}%
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Resource Limit
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
+          {multiInstanceConfig.parallelExecution && (
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <div>
+                <div className="font-medium">Warning</div>
+                <div className="text-sm">
+                  Parallel execution will consume significant system resources. 
+                  Monitor CPU and memory usage during execution.
+                </div>
+              </div>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
 
-              {multiInstanceConfig.parallelExecution && (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                  <Typography variant="body2">
-                    <strong>Warning:</strong> Parallel execution will consume significant system resources. 
-                    Monitor CPU and memory usage during execution.
-                  </Typography>
-                </Alert>
-              )}
-            </CardContent>
+      {/* Sensitivity Analysis */}
+      <Collapsible open={sensitivityExpanded} onOpenChange={setSensitivityExpanded}>
+        <CollapsibleTrigger asChild>
+          <Card className="cursor-pointer">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Brain className="h-5 w-5 text-primary" />
+                  Sensitivity Analysis
+                </div>
+                <ChevronDown className={cn("h-4 w-4 transition-transform", sensitivityExpanded && "rotate-180")} />
+              </CardTitle>
+            </CardHeader>
           </Card>
-        </Grid>
-
-        {/* Sensitivity Analysis */}
-        <Grid item xs={12}>
-          <Accordion>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <PsychologyIcon color="primary" />
-                Sensitivity Analysis
-              </Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Typography variant="body2" color="text.secondary" paragraph>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <Card>
+            <CardContent className="p-6">
+              <p className="text-sm text-muted-foreground mb-4">
                 Analyze how sensitive your strategy is to parameter changes. Higher sensitivity indicates 
                 parameters that require careful tuning.
-              </Typography>
+              </p>
               
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle1" gutterBottom>
-                    Parameter Sensitivity Ranking
-                  </Typography>
-                  <TableContainer>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Parameter</TableCell>
-                          <TableCell align="right">Sensitivity</TableCell>
-                          <TableCell align="right">Impact</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {parameters
-                          .sort((a, b) => (b.sensitivity || 0) - (a.sensitivity || 0))
-                          .map((param) => (
-                            <TableRow key={param.parameter}>
-                              <TableCell>{param.parameter}</TableCell>
-                              <TableCell align="right">
-                                {((param.sensitivity || 0) * 100).toFixed(1)}%
-                              </TableCell>
-                              <TableCell align="right">
-                                <Chip
-                                  size="small"
-                                  label={
-                                    (param.sensitivity || 0) > 0.7 ? 'High' :
-                                    (param.sensitivity || 0) > 0.4 ? 'Medium' : 'Low'
-                                  }
-                                  color={
-                                    (param.sensitivity || 0) > 0.7 ? 'error' :
-                                    (param.sensitivity || 0) > 0.4 ? 'warning' : 'success'
-                                  }
-                                  variant="outlined"
-                                />
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Grid>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h3 className="text-lg font-medium mb-4">Parameter Sensitivity Ranking</h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Parameter</TableHead>
+                        <TableHead className="text-right">Sensitivity</TableHead>
+                        <TableHead className="text-right">Impact</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {parameters
+                        .sort((a, b) => (b.sensitivity || 0) - (a.sensitivity || 0))
+                        .map((param) => (
+                          <TableRow key={param.parameter}>
+                            <TableCell>{param.parameter}</TableCell>
+                            <TableCell className="text-right">
+                              {((param.sensitivity || 0) * 100).toFixed(1)}%
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Badge
+                                variant={
+                                  (param.sensitivity || 0) > 0.7 ? 'destructive' :
+                                  (param.sensitivity || 0) > 0.4 ? 'secondary' : 'default'
+                                }
+                              >
+                                {(param.sensitivity || 0) > 0.7 ? 'High' :
+                                 (param.sensitivity || 0) > 0.4 ? 'Medium' : 'Low'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                    </TableBody>
+                  </Table>
+                </div>
 
-                <Grid item xs={12} md={6}>
-                  <Typography variant="subtitle1" gutterBottom>
-                    Optimization Recommendations
-                  </Typography>
-                  <List>
-                    <ListItem>
-                      <ListItemIcon>
-                        <CheckCircleIcon color="success" />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Position Size Optimization"
-                        secondary="High sensitivity detected. Consider using Kelly Criterion for optimal sizing."
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        <WarningIcon color="warning" />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Stop Loss Tuning"
-                        secondary="Medium sensitivity. Test values between 1.5% and 3.5% for optimal results."
-                      />
-                    </ListItem>
-                    <ListItem>
-                      <ListItemIcon>
-                        <CheckCircleIcon color="success" />
-                      </ListItemIcon>
-                      <ListItemText
-                        primary="Take Profit Settings"
-                        secondary="Low sensitivity. Current settings are robust across different market conditions."
-                      />
-                    </ListItem>
-                  </List>
-                </Grid>
-              </Grid>
-            </AccordionDetails>
-          </Accordion>
-        </Grid>
-      </Grid>
-
-      {/* Create A/B Test Dialog */}
-      <Dialog
-        open={createABTestOpen}
-        onClose={() => setCreateABTestOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Create A/B Test</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Test Name"
-                value={abTestForm.name}
-                onChange={(e) => setAbTestForm(prev => ({ ...prev, name: e.target.value }))}
-                required
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                multiline
-                rows={2}
-                label="Description"
-                value={abTestForm.description}
-                onChange={(e) => setAbTestForm(prev => ({ ...prev, description: e.target.value }))}
-              />
-            </Grid>
-            <Grid item xs={6}>
-              <TextField
-                fullWidth
-                label="Control Name"
-                value={abTestForm.controlName}
-                onChange={(e) => setAbTestForm(prev => ({ ...prev, controlName: e.target.value }))}
-              />
-            </Grid>
-            <Grid item xs={6}>
-              <TextField
-                fullWidth
-                label="Treatment Name"
-                value={abTestForm.treatmentName}
-                onChange={(e) => setAbTestForm(prev => ({ ...prev, treatmentName: e.target.value }))}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Test Parameter</InputLabel>
-                <Select
-                  value={abTestForm.testParameter}
-                  label="Test Parameter"
-                  onChange={(e) => setAbTestForm(prev => ({ ...prev, testParameter: e.target.value }))}
-                >
-                  <MenuItem value="stopLossPercentage">Stop Loss %</MenuItem>
-                  <MenuItem value="takeProfitPercentage">Take Profit %</MenuItem>
-                  <MenuItem value="positionSize">Position Size</MenuItem>
-                  <MenuItem value="maxDrawdownPercentage">Max Drawdown %</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Control Value"
-                value={abTestForm.controlValue}
-                onChange={(e) => setAbTestForm(prev => ({ ...prev, controlValue: Number(e.target.value) }))}
-                inputProps={{ step: 0.1, min: 0 }}
-              />
-            </Grid>
-            <Grid item xs={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Treatment Value"
-                value={abTestForm.treatmentValue}
-                onChange={(e) => setAbTestForm(prev => ({ ...prev, treatmentValue: Number(e.target.value) }))}
-                inputProps={{ step: 0.1, min: 0 }}
-              />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCreateABTestOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleCreateABTest}
-            variant="contained"
-            disabled={!abTestForm.name || !configuration}
-          >
-            Create Test
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Parameter Optimization Dialog */}
-      <Dialog
-        open={optimizationOpen}
-        onClose={() => setOptimizationOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>Parameter Optimization</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={3} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Optimization Metric</InputLabel>
-                <Select
-                  value={optimizationMetric}
-                  label="Optimization Metric"
-                  onChange={(e) => setOptimizationMetric(e.target.value)}
-                >
-                  <MenuItem value="sharpe_ratio">Sharpe Ratio</MenuItem>
-                  <MenuItem value="return">Total Return</MenuItem>
-                  <MenuItem value="calmar_ratio">Calmar Ratio</MenuItem>
-                  <MenuItem value="sortino_ratio">Sortino Ratio</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-
-            {parameters.map((param) => (
-              <Grid item xs={12} key={param.parameter}>
-                <Paper variant="outlined" sx={{ p: 2 }}>
-                  <Typography variant="subtitle2" gutterBottom>
-                    {param.parameter}
-                  </Typography>
-                  {param.type === 'range' && (
-                    <Box sx={{ px: 2 }}>
-                      <Slider
-                        value={[param.min || 0, param.max || 10]}
-                        onChange={(_, value) => {
-                          const [min, max] = value as number[];
-                          setParameters(prev => prev.map(p => 
-                            p.parameter === param.parameter 
-                              ? { ...p, min, max }
-                              : p
-                          ));
-                        }}
-                        min={0}
-                        max={20}
-                        step={param.step || 0.1}
-                        marks
-                        valueLabelDisplay="auto"
-                        valueLabelFormat={(value) => formatParameterValue(param, value)}
-                      />
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                        <Typography variant="caption">Min: {formatParameterValue(param, param.min || 0)}</Typography>
-                        <Typography variant="caption">Max: {formatParameterValue(param, param.max || 10)}</Typography>
-                      </Box>
-                    </Box>
-                  )}
-                </Paper>
-              </Grid>
-            ))}
-
-            <Grid item xs={12}>
-              <Alert severity="info">
-                Optimization will test multiple parameter combinations to find the optimal settings 
-                based on the selected metric. This process may take several minutes.
-              </Alert>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOptimizationOpen(false)}>Cancel</Button>
-          <Button
-            onClick={() => {
-              handleStartOptimization();
-              setOptimizationOpen(false);
-            }}
-            variant="contained"
-            disabled={isOptimizing}
-          >
-            Start Optimization
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Multi-Instance Configuration Dialog */}
-      <Dialog
-        open={multiInstanceOpen}
-        onClose={() => setMultiInstanceOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>Multi-Instance Configuration</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={3} sx={{ mt: 1 }}>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Number of Instances"
-                value={multiInstanceConfig.instanceCount}
-                onChange={(e) => setMultiInstanceConfig(prev => ({
-                  ...prev,
-                  instanceCount: Number(e.target.value)
-                }))}
-                inputProps={{ min: 1, max: 10 }}
-                helperText="Maximum 10 instances recommended"
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Resource Limit (%)"
-                value={multiInstanceConfig.resourceLimit}
-                onChange={(e) => setMultiInstanceConfig(prev => ({
-                  ...prev,
-                  resourceLimit: Number(e.target.value)
-                }))}
-                inputProps={{ min: 10, max: 100 }}
-                helperText="CPU/Memory usage limit"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={multiInstanceConfig.parallelExecution}
-                    onChange={(e) => setMultiInstanceConfig(prev => ({
-                      ...prev,
-                      parallelExecution: e.target.checked
-                    }))}
-                  />
-                }
-                label="Enable parallel execution"
-              />
-              <Typography variant="body2" color="text.secondary">
-                Run instances simultaneously for faster results (requires more resources)
-              </Typography>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setMultiInstanceOpen(false)}>Cancel</Button>
-          <Button variant="contained">
-            Start Multi-Instance Execution
-          </Button>
-        </DialogActions>
-      </Dialog>
+                <div>
+                  <h3 className="text-lg font-medium mb-4">Optimization Recommendations</h3>
+                  <div className="space-y-4">
+                    <div className="flex gap-3">
+                      <CheckCircle className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="font-medium">Position Size Optimization</div>
+                        <div className="text-sm text-muted-foreground">
+                          High sensitivity detected. Consider using Kelly Criterion for optimal sizing.
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-3">
+                      <AlertTriangle className="h-5 w-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="font-medium">Stop Loss Tuning</div>
+                        <div className="text-sm text-muted-foreground">
+                          Medium sensitivity. Test values between 1.5% and 3.5% for optimal results.
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex gap-3">
+                      <CheckCircle className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <div className="font-medium">Take Profit Settings</div>
+                        <div className="text-sm text-muted-foreground">
+                          Low sensitivity. Current settings are robust across different market conditions.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </CollapsibleContent>
+      </Collapsible>
 
       {/* A/B Test Results Dialog */}
       {selectedABTest && (
-        <Dialog
-          open={!!selectedABTest}
-          onClose={() => setSelectedABTest(null)}
-          maxWidth="md"
-          fullWidth
-        >
-          <DialogTitle>{selectedABTest.name} - Results</DialogTitle>
-          <DialogContent>
+        <Dialog open={!!selectedABTest} onOpenChange={() => setSelectedABTest(null)}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{selectedABTest.name} - Results</DialogTitle>
+            </DialogHeader>
             {selectedABTest.results ? (
-              <Grid container spacing={3}>
-                <Grid item xs={12}>
-                  <Alert severity={selectedABTest.results.pValue < 0.05 ? 'success' : 'warning'}>
-                    <Typography variant="body1" fontWeight="bold">
+              <div className="space-y-6">
+                <Alert className={selectedABTest.results.pValue < 0.05 ? 'border-green-200' : 'border-yellow-200'}>
+                  <CheckCircle className="h-4 w-4" />
+                  <div>
+                    <div className="font-medium">
                       {selectedABTest.results.winner === 'treatment' ? 'Treatment' : 'Control'} configuration wins!
-                    </Typography>
-                    <Typography variant="body2">
+                    </div>
+                    <div className="text-sm">
                       P-value: {selectedABTest.results.pValue.toFixed(3)} 
                       {selectedABTest.results.pValue < 0.05 ? ' (Statistically significant)' : ' (Not significant)'}
-                    </Typography>
-                  </Alert>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="h6" gutterBottom>Control Configuration</Typography>
-                  <Typography variant="body2" paragraph>
-                    {selectedABTest.configurations.control.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {selectedABTest.configurations.control.description}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <Typography variant="h6" gutterBottom>Treatment Configuration</Typography>
-                  <Typography variant="body2" paragraph>
-                    {selectedABTest.configurations.treatment.name}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {selectedABTest.configurations.treatment.description}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="h6" gutterBottom>Statistical Results</Typography>
-                  <TableContainer>
-                    <Table>
-                      <TableBody>
-                        <TableRow>
-                          <TableCell>Effect Size</TableCell>
-                          <TableCell align="right">
-                            {selectedABTest.results.effect.magnitude.toFixed(2)}%
-                          </TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell>Confidence Interval</TableCell>
-                          <TableCell align="right">
-                            [{selectedABTest.results.confidenceInterval[0].toFixed(2)}%, {selectedABTest.results.confidenceInterval[1].toFixed(2)}%]
-                          </TableCell>
-                        </TableRow>
-                        <TableRow>
-                          <TableCell>Significance Level</TableCell>
-                          <TableCell align="right">
-                            {(selectedABTest.results.significanceLevel * 100).toFixed(0)}%
-                          </TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Grid>
-              </Grid>
+                    </div>
+                  </div>
+                </Alert>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <h3 className="text-lg font-medium mb-2">Control Configuration</h3>
+                    <p className="text-sm font-medium">{selectedABTest.configurations.control.name}</p>
+                    <p className="text-sm text-muted-foreground">{selectedABTest.configurations.control.description}</p>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-medium mb-2">Treatment Configuration</h3>
+                    <p className="text-sm font-medium">{selectedABTest.configurations.treatment.name}</p>
+                    <p className="text-sm text-muted-foreground">{selectedABTest.configurations.treatment.description}</p>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-medium mb-4">Statistical Results</h3>
+                  <Table>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell>Effect Size</TableCell>
+                        <TableCell className="text-right">
+                          {selectedABTest.results.effect.magnitude.toFixed(2)}%
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Confidence Interval</TableCell>
+                        <TableCell className="text-right">
+                          [{selectedABTest.results.confidenceInterval[0].toFixed(2)}%, {selectedABTest.results.confidenceInterval[1].toFixed(2)}%]
+                        </TableCell>
+                      </TableRow>
+                      <TableRow>
+                        <TableCell>Significance Level</TableCell>
+                        <TableCell className="text-right">
+                          {(selectedABTest.results.significanceLevel * 100).toFixed(0)}%
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <Button onClick={() => setSelectedABTest(null)}>Close</Button>
+                </div>
+              </div>
             ) : (
-              <Typography>No results available yet. Run the test to see results.</Typography>
+              <div className="text-center py-8">
+                <p className="text-muted-foreground mb-4">No results available yet. Run the test to see results.</p>
+                <div className="flex justify-center gap-2">
+                  <Button variant="outline" onClick={() => setSelectedABTest(null)}>Close</Button>
+                  <Button>Run A/B Test</Button>
+                </div>
+              </div>
             )}
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setSelectedABTest(null)}>Close</Button>
-            {!selectedABTest.results && (
-              <Button variant="contained">
-                Run A/B Test
-              </Button>
-            )}
-          </DialogActions>
         </Dialog>
       )}
-    </Box>
+    </div>
   );
 };
 

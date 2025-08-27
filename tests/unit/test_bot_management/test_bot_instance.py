@@ -32,18 +32,21 @@ def bot_config():
     """Create test bot configuration."""
     return BotConfiguration(
         bot_id="test_bot_001",
-        bot_name="Test Strategy Bot",
-        bot_type=BotType.STRATEGY,
-        priority=BotPriority.NORMAL,
-        strategy_name="test_strategy",
+        name="Test Strategy Bot",  # Changed from bot_name
+        bot_type=BotType.TRADING,
+        version="1.0.0",  # Added required field
+        strategy_id="test_strategy",  # Changed from strategy_name
         exchanges=["binance"],
         symbols=["BTCUSDT"],
-        allocated_capital=Decimal("10000"),
+        max_capital=Decimal("10000"),  # Changed from allocated_capital
         max_position_size=Decimal("1000"),
-        risk_percentage=0.02,
-        max_concurrent_positions=3,
-        heartbeat_interval=30,
-        auto_start=True
+        max_daily_loss=Decimal("200"),  # Added for risk management
+        health_check_interval=30,  # Changed from heartbeat_interval
+        auto_start=True,
+        strategy_config={
+            "risk_percentage": 0.02,
+            "max_concurrent_positions": 3
+        }  # Moved extra configs to strategy_config
     )
 
 
@@ -85,14 +88,21 @@ def bot_instance(config, bot_config):
     with patch('src.bot_management.bot_instance.StrategyFactory') as mock_sf:
         with patch('src.bot_management.bot_instance.ExchangeFactory') as mock_ef:
             with patch('src.bot_management.bot_instance.ExecutionEngine') as mock_ee:
-                with patch('src.bot_management.bot_instance.RiskManager') as mock_rm:
-                    with patch('src.bot_management.bot_instance.CapitalAllocator') as mock_ca:
+                with patch('src.bot_management.bot_instance.RiskService') as mock_rs:
+                    with patch('src.bot_management.bot_instance.CapitalAllocatorAdapter') as mock_ca:
                         # Mock the factories to return mock instances
-                        mock_sf.return_value = MagicMock()
-                        mock_ef.return_value = MagicMock()
-                        mock_ee.return_value = MagicMock()
-                        mock_rm.return_value = MagicMock()
-                        mock_ca.return_value = MagicMock()
+                        mock_sf_instance = AsyncMock()
+                        mock_sf_instance.get_available_strategies = AsyncMock(return_value=["test_strategy"])
+                        mock_sf_instance.create_strategy = AsyncMock()
+                        mock_sf.return_value = mock_sf_instance
+                        
+                        mock_ef_instance = AsyncMock()
+                        mock_ef_instance.get_exchange = AsyncMock()
+                        mock_ef.return_value = mock_ef_instance
+                        
+                        mock_ee.return_value = AsyncMock()
+                        mock_rs.return_value = AsyncMock()
+                        mock_ca.return_value = AsyncMock()
                         return BotInstance(config, bot_config)
 
 
@@ -103,7 +113,7 @@ class TestBotInstance:
     async def test_bot_instance_initialization(self, bot_instance, bot_config):
         """Test bot instance initialization."""
         assert bot_instance.bot_config == bot_config
-        assert bot_instance.bot_state.status == BotStatus.CREATED
+        assert bot_instance.bot_state.status == BotStatus.INITIALIZING
         assert bot_instance.bot_state.bot_id == "test_bot_001"
         assert not bot_instance.is_running
         assert bot_instance.strategy is None
@@ -113,76 +123,69 @@ class TestBotInstance:
     async def test_start_bot_success(self, bot_instance, mock_execution_engine, 
                                    mock_strategy, mock_exchange):
         """Test successful bot startup."""
-        # Setup mocks
-        with patch('src.execution.execution_engine.ExecutionEngine', return_value=mock_execution_engine):
-            with patch('src.strategies.strategy_factory.StrategyFactory') as mock_factory:
-                mock_factory.return_value.create_strategy.return_value = mock_strategy
-                with patch('src.exchanges.exchange_factory.ExchangeFactory') as mock_ex_factory:
-                    mock_ex_factory.return_value.get_exchange.return_value = mock_exchange
-                    
-                    # Start bot
-                    await bot_instance.start()
-                    
-                    # Verify state
-                    assert bot_instance.status == BotStatus.RUNNING
-                    assert bot_instance.is_running
-                    assert bot_instance.started_at is not None
-                    assert "strategy" in bot_instance.components
-                    assert "execution_engine" in bot_instance.components
+        # Setup the existing mocks in bot_instance to return our test mocks
+        bot_instance.strategy_factory.create_strategy = AsyncMock(return_value=mock_strategy)
+        bot_instance.exchange_factory.get_exchange = AsyncMock(return_value=mock_exchange)
+        
+        # Start bot
+        await bot_instance.start()
+        
+        # Verify state
+        assert bot_instance.bot_state.status == BotStatus.RUNNING
+        assert bot_instance.is_running
+        assert bot_instance.strategy is not None
+        assert bot_instance.primary_exchange is not None
 
     @pytest.mark.asyncio
     async def test_start_bot_already_running(self, bot_instance):
         """Test starting bot that's already running."""
-        bot_instance.status = BotStatus.RUNNING
+        bot_instance.bot_state.status = BotStatus.RUNNING
         bot_instance.is_running = True
         
         # Should handle gracefully
         await bot_instance.start()
-        assert bot_instance.status == BotStatus.RUNNING
+        assert bot_instance.bot_state.status == BotStatus.RUNNING
 
     @pytest.mark.asyncio
     async def test_stop_bot_success(self, bot_instance, mock_execution_engine, 
                                   mock_strategy, mock_exchange):
         """Test successful bot stop."""
         # Setup running bot
-        bot_instance.status = BotStatus.RUNNING
+        bot_instance.bot_state.status = BotStatus.RUNNING
         bot_instance.is_running = True
         bot_instance.trading_task = AsyncMock()
         bot_instance.heartbeat_task = AsyncMock()
-        bot_instance.components = {
-            "strategy": mock_strategy,
-            "execution_engine": mock_execution_engine
-        }
+        bot_instance.strategy = mock_strategy
+        bot_instance.execution_engine = mock_execution_engine
         
         # Stop bot
         await bot_instance.stop()
         
         # Verify state
-        assert bot_instance.status == BotStatus.STOPPED
+        assert bot_instance.bot_state.status == BotStatus.STOPPED
         assert not bot_instance.is_running
-        assert bot_instance.stopped_at is not None
 
     @pytest.mark.asyncio
     async def test_pause_resume_bot(self, bot_instance):
         """Test bot pause and resume functionality."""
         # Setup running bot
-        bot_instance.status = BotStatus.RUNNING
+        bot_instance.bot_state.status = BotStatus.RUNNING
         bot_instance.is_running = True
         
         # Pause bot
         await bot_instance.pause()
-        assert bot_instance.status == BotStatus.PAUSED
+        assert bot_instance.bot_state.status == BotStatus.PAUSED
         
         # Resume bot
         await bot_instance.resume()
-        assert bot_instance.status == BotStatus.RUNNING
+        assert bot_instance.bot_state.status == BotStatus.RUNNING
 
     @pytest.mark.asyncio
     async def test_execute_trade_success(self, bot_instance, mock_execution_engine):
         """Test successful trade execution."""
         # Setup
-        bot_instance.components = {"execution_engine": mock_execution_engine}
-        bot_instance.status = BotStatus.RUNNING
+        bot_instance.execution_engine = mock_execution_engine
+        bot_instance.bot_state.status = BotStatus.RUNNING
         
         order_request = OrderRequest(
             symbol="BTCUSDT",
@@ -192,11 +195,11 @@ class TestBotInstance:
         )
         
         # Mock successful execution
-        from src.core.types import ExecutionResult, ExecutionStatus
+        from src.core.types import ExecutionResult, ExecutionStatus, ExecutionAlgorithm
         execution_result = ExecutionResult(
             execution_id="exec_123",
             original_order=order_request,
-            algorithm="test",
+            algorithm=ExecutionAlgorithm.TWAP,
             status=ExecutionStatus.COMPLETED,
             start_time=datetime.now(timezone.utc)
         )
@@ -213,7 +216,7 @@ class TestBotInstance:
     @pytest.mark.asyncio
     async def test_execute_trade_paused_bot(self, bot_instance):
         """Test trade execution when bot is paused."""
-        bot_instance.status = BotStatus.PAUSED
+        bot_instance.bot_state.status = BotStatus.PAUSED
         
         order_request = OrderRequest(
             symbol="BTCUSDT",
@@ -252,14 +255,23 @@ class TestBotInstance:
             "quantity": Decimal("1.0"),
             "average_price": Decimal("50000")
         }
-        bot_instance.components = {"execution_engine": mock_execution_engine}
+        bot_instance.execution_engine = mock_execution_engine
         
         # Mock successful execution
-        from src.core.types import ExecutionResult, ExecutionStatus
+        from src.core.types import ExecutionResult, ExecutionStatus, ExecutionAlgorithm
+        
+        # Create a real OrderRequest instead of MagicMock
+        close_order = OrderRequest(
+            symbol="BTCUSDT",
+            side=OrderSide.SELL,
+            order_type=OrderType.MARKET,
+            quantity=Decimal("1.0")
+        )
+        
         execution_result = ExecutionResult(
             execution_id="exec_close_123",
-            original_order=MagicMock(),
-            algorithm="test",
+            original_order=close_order,
+            algorithm=ExecutionAlgorithm.MARKET,
             status=ExecutionStatus.COMPLETED,
             start_time=datetime.now(timezone.utc)
         )
@@ -276,8 +288,7 @@ class TestBotInstance:
     async def test_get_bot_summary(self, bot_instance):
         """Test bot summary generation."""
         # Setup some state
-        bot_instance.status = BotStatus.RUNNING
-        bot_instance.started_at = datetime.now(timezone.utc)
+        bot_instance.bot_state.status = BotStatus.RUNNING
         bot_instance.performance_metrics["total_trades"] = 5
         bot_instance.performance_metrics["profitable_trades"] = 3
         
@@ -298,8 +309,8 @@ class TestBotInstance:
     @pytest.mark.asyncio
     async def test_heartbeat_functionality(self, bot_instance):
         """Test heartbeat generation."""
-        bot_instance.status = BotStatus.RUNNING
-        bot_instance.last_heartbeat = datetime.now(timezone.utc)
+        bot_instance.bot_state.status = BotStatus.RUNNING
+        bot_instance.bot_state.last_heartbeat = datetime.now(timezone.utc)
         
         heartbeat = await bot_instance.get_heartbeat()
         
@@ -313,8 +324,8 @@ class TestBotInstance:
     async def test_error_handling_in_trading_loop(self, bot_instance, mock_strategy):
         """Test error handling in trading loop."""
         # Setup
-        bot_instance.components = {"strategy": mock_strategy}
-        bot_instance.status = BotStatus.RUNNING
+        bot_instance.strategy = mock_strategy
+        bot_instance.bot_state.status = BotStatus.RUNNING
         
         # Mock strategy to raise exception
         mock_strategy.generate_signals.side_effect = Exception("Strategy error")
@@ -323,7 +334,7 @@ class TestBotInstance:
         await bot_instance._trading_loop()
         
         # Bot should still be running (error handled)
-        assert bot_instance.status == BotStatus.RUNNING
+        assert bot_instance.bot_state.status == BotStatus.RUNNING
 
     @pytest.mark.asyncio
     async def test_performance_metrics_calculation(self, bot_instance):
@@ -368,8 +379,8 @@ class TestBotInstance:
     async def test_bot_restart_after_error(self, bot_instance):
         """Test bot restart functionality after error."""
         # Simulate error state
-        bot_instance.status = BotStatus.ERROR
-        bot_instance.error_count = 1
+        bot_instance.bot_state.status = BotStatus.ERROR
+        bot_instance.bot_metrics.error_count = 1
         
         # Restart bot
         with patch.object(bot_instance, 'start') as mock_start:

@@ -217,7 +217,7 @@ class TestAlertManager:
         assert alert_manager.config is not None
         assert alert_manager._rules == {}
         assert alert_manager._active_alerts == {}
-        assert alert_manager._alert_history == []
+        assert len(alert_manager._alert_history) == 0
         assert alert_manager._running is False
     
     def test_add_rule(self, alert_manager):
