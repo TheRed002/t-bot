@@ -62,6 +62,7 @@ CURRENT_TASK.md
 ISSUES.md
 logs.txt
 PendingTasks.md
+progress.json
 
 # Security - Never commit sensitive files
 initial_credentials.txt

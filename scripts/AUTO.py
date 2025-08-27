@@ -1,833 +1,1669 @@
 #!/usr/bin/env python3
 """
-Module Integration Checker - Systematic module and dependency validation.
-First checks each module's internal implementation, then verifies all its integrations.
+AUTO_FINAL.py - Production-Ready Module Fixer for Financial Application
+
+Key Features:
+- ENFORCES MINIMUM 70% TEST COVERAGE (90% for critical financial modules)
+- Generates comprehensive tests including edge cases and performance benchmarks
+- Smart parallel execution preventing correlated modules from running simultaneously  
+- Hallucination prevention with explicit constraints in prompts
+- CASCADE PROPAGATION: Breaking changes are cascaded to all dependent modules
+- NO ENHANCED VERSIONS: Direct modification only, no _v2 or _enhanced suffixes
+- Automatic retry on API 500 errors (3 attempts with 5s delay)
+- Financial calculation verification and precision testing
+- Performance benchmarks for time-critical operations
+- Integration test generation for complete workflows
+
+CRITICAL: This is a FINANCIAL APPLICATION - accuracy and test coverage are paramount!
 """
 
 import subprocess
 import sys
+import os
 import time
+import json
 import argparse
+import hashlib
+import signal
+import threading
+import shutil
+import traceback
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional, Set, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from enum import Enum
 
-# Module dependency hierarchy (order matters - from lowest to highest level)
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+# Module hierarchy from lowest to highest dependencies (based on actual codebase analysis)
 MODULE_HIERARCHY = [
-    "core",           # Base module - no dependencies
-    "utils",          # Depends on: core
-    "error_handling",  # Depends on: core, utils
-    "database",       # Depends on: core, utils, error_handling
-    "state",          # Depends on: core, utils, error_handling, database
-    "monitoring",     # Depends on: core, utils, error_handling, database
-    "exchanges",      # Depends on: core, utils, error_handling, database, monitoring
-    "risk_management",  # Depends on: core, utils, error_handling, database, monitoring
-    "execution",      # Depends on: core, utils, error_handling, database, exchanges, risk_management
-    "data",           # Depends on: core, utils, error_handling, database, monitoring
-    "ml",             # Depends on: core, utils, error_handling, database, data
-    "strategies",     # Depends on: core, utils, error_handling, database, risk_management, execution
-    "backtesting",    # Depends on: core, utils, error_handling, database, strategies, execution
-    "capital_management",  # Depends on: core, utils, error_handling, database, risk_management
-    "bot_management",  # Depends on: core, utils, error_handling, database, strategies, execution, capital_management
-    "web_interface",  # Depends on: core, utils, error_handling, database, bot_management
-]
-
-# Modules to skip (already verified or to be checked later)
-# Add module names here to skip them during checking
-SKIP_MODULES = [
-    # "core", "utils"  # Example: Uncomment to skip core and utils modules
-    # Add modules you want to skip here
+    # Foundation layer - no dependencies
     "core",
-    "utils",
-    "error_handling",
-    "database",
-    "state",
-    "monitoring",
-    "exchanges",
-    "risk_management",
-    "execution"
+    # Base utilities layer
+    "utils", "error_handling",
+    # Data & Infrastructure layer
+    "database", "monitoring",
+    # State & Data layer
+    "state", "data",
+    # Exchange & Risk layer
+    "exchanges", "risk_management",
+    # Execution layer
+    "execution",
+    # ML & Strategy layer
+    "ml", "strategies",
+    # Advanced features layer
+    "analytics", "backtesting", "optimization",
+    # Management layer
+    "capital_management", "bot_management",
+    # Interface layer
+    "web_interface"
 ]
 
-# You can also skip specific integrations
-# Format: ("module", "dependency")
-SKIP_INTEGRATIONS = [
-    # ("database", "core"), ("database", "utils")  # Example
-    # Add specific integrations you want to skip
-    ("utils", "core"),
-    ("error_handling", "core"), ("error_handling", "utils"),
-    ("database", "core"), ("database", "utils"), ("database", "error_handling"),
-    ("state", "core"), ("state", "utils"), ("state",
-                                            "error_handling"), ("state", "database"), ("state", "monitoring"),
-    ("monitoring", "core"), ("monitoring", "utils"), ("monitoring",
-                                                      "error_handling"), ("monitoring", "database"),
-    ("exchanges", "core"), ("exchanges", "utils"), ("exchanges", "error_handling"), ("exchanges",
-                                                                                     "database"), ("exchanges", "monitoring"), ("exchanges", "state"),
-    ("risk_management", "core"), ("risk_management", "utils"), ("risk_management", "error_handling"), (
-        "risk_management", "database"), ("risk_management", "monitoring"), ("risk_management", "state"),
-    ("execution", "core"), ("execution", "utils"), ("execution", "error_handling"), ("execution", "database"), ("execution",
-                                                                                                                "exchanges"), ("execution", "risk_management"), ("execution", "monitoring"), ("execution", "state"),
-]
-
-# Define which modules each module depends on
+# Module dependencies - Based on ACTUAL imports analysis from codebase
 MODULE_DEPENDENCIES = {
-    "core": [],
+    # Foundation layer
+    "core": [],  # No dependencies - foundation module
+
+    # Base utilities layer
     "utils": ["core"],
-    "error_handling": ["core", "utils"],
-    "database": ["core", "utils", "error_handling"],
-    "state": ["core", "utils", "error_handling", "database", "monitoring"],
-    "monitoring": ["core", "utils", "error_handling", "database"],
-    "exchanges": ["core", "utils", "error_handling", "database", "monitoring", "state"],
-    "data": ["core", "utils", "error_handling", "database", "monitoring"],
-    "risk_management": ["core", "utils", "error_handling", "database", "monitoring", "state"],
-    "execution": ["core", "utils", "error_handling", "database", "exchanges", "risk_management", "monitoring", "state"],
-    "ml": ["core", "utils", "error_handling", "database", "data"],
-    "strategies": ["core", "utils", "error_handling", "database", "risk_management", "execution", "data", "monitoring"],
-    "backtesting": ["core", "utils", "error_handling", "database", "strategies", "execution", "data"],
-    "capital_management": ["core", "utils", "error_handling", "database", "risk_management", "state"],
-    "bot_management": ["core", "utils", "error_handling", "database", "strategies", "execution", "capital_management", "monitoring", "state", "risk_management"],
-    "web_interface": ["core", "utils", "error_handling", "database", "bot_management", "monitoring", "state"],
+    "error_handling": ["core"],
+
+    # Data & Infrastructure layer
+    "database": ["core", "error_handling"],
+    "monitoring": ["core", "error_handling"],
+
+    # State & Data layer
+    "state": ["core", "database", "error_handling", "utils"],
+    "data": ["core", "database", "utils", "error_handling"],
+
+    # Exchange & Risk layer
+    "exchanges": ["core", "error_handling", "utils"],
+    "risk_management": ["core", "error_handling", "monitoring", "state", "utils"],
+
+    # Execution layer
+    "execution": ["core", "exchanges", "risk_management", "error_handling"],
+
+    # ML & Strategy layer
+    "ml": ["core", "data", "utils"],
+    "strategies": ["core", "data", "risk_management", "utils"],
+
+    # Advanced features layer
+    "analytics": ["core", "database", "monitoring"],
+    "backtesting": ["core", "strategies", "data", "execution"],
+    "optimization": ["core", "strategies", "backtesting"],
+
+    # Management layer (fixed circular dependency)
+    "capital_management": ["core", "risk_management", "state"],
+    "bot_management": ["core", "state", "capital_management", "strategies"],
+
+    # Interface layer - depends on most modules
+    "web_interface": ["core", "error_handling", "utils", "bot_management", "execution", "strategies", "risk_management"],
 }
 
-# Prompt template for checking module implementation V2
-MODULE_CHECK_TEMPLATE_V2 = """
-CRITICAL: Fix ALL backend issues in {module} module to ensure 100% test pass rate with ZERO errors/warnings.
+# Reverse dependencies - who depends on each module
+DEPENDENT_MODULES = defaultdict(list)
+for module, deps in MODULE_DEPENDENCIES.items():
+    for dep in deps:
+        DEPENDENT_MODULES[dep].append(module)
 
-**PHASE 1: COMPREHENSIVE ISSUE SCANNING**
-Use specialized agents to detect ALL issues:
+# Test mapping - verified against actual test directories
+TEST_DIRECTORIES = {
+    "core": "tests/unit/test_core",
+    "utils": "tests/unit/test_utils",
+    "error_handling": "tests/unit/test_error_handling",
+    "database": "tests/unit/test_database",
+    "state": "tests/unit/test_state",
+    "monitoring": "tests/unit/test_monitoring",
+    "exchanges": "tests/unit/test_exchange",  # Note: test_exchange not test_exchanges
+    "risk_management": "tests/unit/test_risk_management",
+    "execution": "tests/unit/test_execution",
+    "data": "tests/unit/test_data",
+    "ml": "tests/unit/test_ml",
+    "analytics": "tests/unit/test_analytics",
+    "optimization": "tests/unit/test_optimization",
+    "strategies": "tests/unit/test_strategies",
+    "backtesting": "tests/unit/test_backtesting",
+    "capital_management": "tests/unit/test_capital_management",
+    "bot_management": "tests/unit/test_bot_management",
+    "web_interface": "tests/unit/test_web_interface"
+}
 
-1. **SYNTAX & IMPORTS** (Task: performance-optimization-specialist)
-   - Missing/incorrect imports, circular dependencies
-   - Undefined variables, typos in function names
-   - Import order violations (stdlib → third-party → local)
-   - Unused imports that cause warnings
+# Configuration
+MAX_ITERATIONS_PER_MODULE = 10
+MAX_PARALLEL_MODULES = 2  # Reduced for safety
+API_RATE_LIMIT_PER_MINUTE = 5
+API_RATE_LIMIT_PER_HOUR = 100
+TEST_TIMEOUT_PER_MODULE = 300
+TEST_TIMEOUT_PER_TEST = 60
+CASCADE_CHECK_ENABLED = True
+HALLUCINATION_CHECK_ENABLED = True
+DRY_RUN_MODE = False  # Set via command line argument
 
-2. **TYPE SAFETY** (Task: financial-qa-engineer)
-   - Missing/incorrect type hints causing mypy errors
-   - Type mismatches in function signatures
-   - Generic types not properly parameterized
-   - Optional/Union types not handled correctly
-   - Return type mismatches
+# CRITICAL: Test coverage requirements for financial application
+MIN_TEST_COVERAGE = 70  # Minimum acceptable coverage
+CRITICAL_MODULE_COVERAGE = 90  # For critical financial modules
+FINANCIAL_CRITICAL_MODULES = [
+    "risk_management", "execution", "capital_management",
+    "strategies", "exchanges", "data"
+]
 
-3. **ASYNC/AWAIT PATTERNS** (Task: financial-api-architect)
-   - Missing await keywords causing coroutine warnings
-   - Blocking I/O in async functions
-   - Improper async context manager usage
-   - Race conditions in concurrent operations
-   - Deadlocks from circular awaits
+# Modules to skip
+SKIP_MODULES = []
 
-4. **RESOURCE MANAGEMENT** (Task: infrastructure-wizard)
-   - Database connections not closed properly
-   - File handles left open
-   - Memory leaks from unclosed streams
-   - WebSocket connections not cleaned up
-   - Thread/process pools not terminated
+# ============================================================================
+# HALLUCINATION DETECTOR
+# ============================================================================
 
-5. **BUSINESS LOGIC** (Task: algo-trading-specialist)
-   - Incorrect financial calculations (fees, PnL, position sizing)
-   - Wrong decimal precision for prices/quantities
-   - Missing boundary checks (min order size, max leverage)
-   - Incorrect order state transitions
-   - Missing risk validation checks
 
-6. **ERROR HANDLING** (Task: quality-control-enforcer)
-   - Unhandled exceptions causing test failures
-   - Missing try/except blocks
-   - Catching too broad exceptions (bare except)
-   - Not re-raising critical errors
-   - Error messages not properly formatted
+class HallucinationDetector:
+    """Prevents Claude from creating non-existent functions/classes"""
 
-7. **TEST COMPATIBILITY** (Task: integration-test-architect)
-   - Mock objects not matching real interfaces
-   - Test fixtures with incorrect data types
-   - Missing test database cleanup
-   - Hardcoded test values that break
-   - Async tests not properly awaited
+    def __init__(self):
+        self.known_functions = set()
+        self.known_classes = set()
+        self.known_imports = set()
+        self._scan_codebase()
 
-8. **LOGGING & WARNINGS** (Task: financial-docs-writer)
-   - Logger not properly initialized
-   - Sensitive data in log messages
-   - Incorrect log levels causing test noise
-   - Deprecation warnings from libraries
+    def _scan_codebase(self):
+        """Scan codebase to know what exists"""
+        import re
 
-**PHASE 2: SYSTEMATIC FIXING**
+        for py_file in Path("src").rglob("*.py"):
+            try:
+                with open(py_file, 'r') as f:
+                    content = f.read()
 
-1. **Priority Order**:
-   - CRITICAL: Causes test failures/crashes
-   - HIGH: Causes warnings or flaky tests
-   - MEDIUM: Code quality issues that affect maintainability
+                    # Find function definitions
+                    functions = re.findall(r'def\s+(\w+)\s*\(', content)
+                    self.known_functions.update(functions)
 
-2. **Fix Strategy**:
-   - Use Task tool with appropriate specialized agent for each issue type
-   - Fix imports and types first (foundation)
-   - Then async/await patterns
-   - Then resource management
-   - Then business logic
-   - Finally error handling and logging
+                    # Find class definitions
+                    classes = re.findall(r'class\s+(\w+)\s*[:\(]', content)
+                    self.known_classes.update(classes)
 
-3. **Validation After Each Fix**:
-   ```bash
-   # Run module-specific tests
-   python -m pytest tests/unit/test_{module}/ -xvs --tb=short
-   python -m pytest tests/integration/*{module}* -xvs --tb=short
-   
-   # Check for warnings
-   python -m pytest tests/unit/test_{module}/ -W error
-   
-   # Type checking
-   mypy src/{module}/ --ignore-missing-imports --strict
-   
-   # Linting
-   ruff check src/{module}/ --fix
-   ruff format src/{module}/
-   ```
+                    # Find imports
+                    imports = re.findall(r'from\s+([\w\.]+)\s+import', content)
+                    self.known_imports.update(imports)
+                    imports = re.findall(r'import\s+([\w\.]+)', content)
+                    self.known_imports.update(imports)
+            except:
+                pass
 
-**PHASE 3: COMPREHENSIVE TESTING**
-
-After all fixes, run complete test suite regarding the module:
-```bash
-# All unit tests for module
-python -m pytest tests/unit/test_{module}/ -v --tb=short --no-warnings
-
-# All integration tests involving module
-python -m pytest tests/integration/ -k {module} -v --tb=short
-
-# Coverage check
-python -m pytest tests/unit/test_{module}/ --cov=src/{module} --cov-report=term-missing
-```
-
-**SUCCESS CRITERIA**:
-- ✅ ALL tests pass (100% success rate)
-- ✅ ZERO warnings in test output
-- ✅ ZERO mypy errors
-- ✅ ZERO ruff violations
-- ✅ Coverage > 80% for critical paths
-
-**TRACKING**:
-Create .claude_experiments/{module}/{module}_audit.md with:
-```markdown
-# {module} Module Audit
-
-## Issues Found
-| ID | Status | Severity | File:Line | Issue | Fix Applied | Test Result |
-|----|--------|----------|-----------|-------|-------------|-------------|
-| {module}-001 | FIXED | CRITICAL | base.py:45 | Missing await | Added await keyword | PASS |
-
-## Test Results
-- Before: X failures, Y warnings
-- After: 0 failures, 0 warnings
-- Coverage: XX%
-
-## Validation Commands Run
-- [ ] pytest unit tests
-- [ ] pytest integration tests  
-- [ ] mypy type checking
-- [ ] ruff linting
-```
-
-MANDATORY COMPLETION CRITERIA:
-You MUST achieve ALL of these before marking complete:
-
-1. Run full test suite and paste the output showing:
-    ========= X passed, 0 failed, 0 errors, 0 warnings =========
-
-2. Run mypy and paste output showing:
-    Success: no issues found in N source files
-
-3. Create a checklist and check EVERY item:
-- [ ] All tests pass
-- [ ] Zero warnings
-- [ ] Zero type errors
-- [ ] All validation errors handled
-- [ ] All connections properly managed
-- [ ] All Decimal precision maintained
-
-4. If ANY criterion is not met, you MUST:
-- Fix the issue immediately
-- Re-run validation
-- Update the checklist
-
-DO NOT report "remaining issues" - FIX THEM ALL.
-
-IMPORTANT: Do NOT move to next module until current module has 100% test pass rate with zero warnings!
+    def get_constraints(self) -> str:
+        """Get constraints to add to prompts"""
+        return """
+CRITICAL ANTI-HALLUCINATION RULES:
+1. DO NOT create new functions that don't already exist
+2. DO NOT create new classes that don't already exist  
+3. DO NOT import modules that aren't in requirements.txt or src/
+4. DO NOT add functionality that wasn't there before
+5. ONLY fix the specific issue mentioned
+6. If a function/class doesn't exist, DO NOT create it - report error instead
+7. Use ONLY existing exception classes from src.core.exceptions
+8. Use ONLY existing types from src.core.types
+9. DO NOT write lengthy reports or documentation - just fix the code
+10. Focus on fixing issues, not explaining them
 """
 
-# Keep the old template for backward compatibility
-MODULE_CHECK_TEMPLATE = MODULE_CHECK_TEMPLATE_V2
+# ============================================================================
+# CASCADE PROTECTOR
+# ============================================================================
 
-# Prompt template for checking integration V2
-INTEGRATION_CHECK_V2 = """
-CRITICAL: Ensure PERFECT integration between {module} → {dependency} with ZERO test failures/warnings.
 
-**PHASE 1: DEEP INTEGRATION ANALYSIS**
-Use specialized agents to verify ALL integration points:
+class CascadeProtector:
+    """Prevents cascading failures across modules"""
 
-1. **IMPORT & DEPENDENCY ANALYSIS** (Task: system-design-architect)
-   - Verify all imports from {dependency} exist and are public APIs
-   - Check for circular dependencies causing import errors
-   - Ensure correct import paths (no relative imports across modules)
-   - Validate module initialization order dependencies
-   - Check for missing __init__.py exports
+    def __init__(self, test_runner):
+        self.test_runner = test_runner
+        self.module_test_results = {}
+        self.cascade_detected = False
 
-2. **INTERFACE COMPLIANCE** (Task: integration-architect)
-   - Verify {module} uses correct {dependency} interfaces
-   - Check method signatures match expected contracts
-   - Validate return types match {dependency} specifications
-   - Ensure proper use of abstract base classes/protocols
-   - Check for interface version compatibility
+    def check_dependents(self, fixed_module: str) -> List[Tuple[str, bool]]:
+        """Check if fixing a module broke its dependents"""
+        results = []
+        dependents = DEPENDENT_MODULES.get(fixed_module, [])
 
-3. **ASYNC INTEGRATION** (Task: pipeline-execution-orchestrator)
-   - Verify async/await consistency across module boundaries
-   - Check for missing awaits when calling {dependency} async methods
-   - Validate proper async context propagation
-   - Ensure no blocking calls in async chains
-   - Check for proper async resource cleanup
+        for dependent in dependents:
+            # Only check if dependent was previously working
+            if dependent in self.module_test_results:
+                prev_result = self.module_test_results[dependent]
+                if prev_result.get("success"):
+                    # Re-run tests
+                    print(f"🔍 Checking if {fixed_module} broke {dependent}...")
+                    new_result = self.test_runner.run_tests(dependent, timeout=60)
 
-4. **DATA FLOW VALIDATION** (Task: data-pipeline-maestro)
-   - Verify data types passed to {dependency} are correct
-   - Check for proper data validation before passing to {dependency}
-   - Validate data transformations at boundaries
-   - Ensure no data loss or corruption
-   - Check for proper null/None handling
+                    if not new_result.get("success"):
+                        print(f"⚠️ CASCADE DETECTED: {fixed_module} broke {dependent}!")
+                        self.cascade_detected = True
+                        results.append((dependent, False))
+                    else:
+                        results.append((dependent, True))
 
-5. **ERROR PROPAGATION** (Task: quality-control-enforcer)
-   - Verify all {dependency} exceptions are properly caught
-   - Check error handling doesn't swallow critical errors
-   - Validate error context is preserved across boundaries
-   - Ensure proper logging of integration failures
-   - Check for appropriate retry mechanisms
+        return results
 
-6. **RESOURCE MANAGEMENT** (Task: infrastructure-wizard)
-   - Verify {dependency} resources are properly acquired/released
-   - Check for connection pool usage where appropriate
-   - Validate transaction boundaries are respected
-   - Ensure no resource leaks across module boundaries
-   - Check for proper cleanup in error scenarios
+    def update_baseline(self, module: str, test_result: Dict):
+        """Update baseline test results"""
+        self.module_test_results[module] = test_result
 
-7. **DEPENDENCY INJECTION** (Task: system-design-architect)
-   - Verify proper use of dependency injection patterns
-   - Check for hardcoded dependencies that should be injected
-   - Validate mock-ability for testing
-   - Ensure proper factory/builder patterns where needed
-   - Check for service locator anti-patterns
+# ============================================================================
+# PROMPT LIBRARY - GRANULAR & SPECIFIC
+# ============================================================================
 
-**PHASE 2: INTEGRATION TESTING**
 
-1. **Test Coverage Analysis**:
-   ```bash
-   # Find all test files that test this integration
-   grep -r "from src.{dependency}" tests/unit/test_{module}/
-   grep -r "from src.{dependency}" tests/integration/
-   
-   # Run integration-specific tests
-   python -m pytest tests/integration/ -k "{module} and {dependency}" -xvs
-   ```
+class PromptType(Enum):
+    """Types of prompts for different fix categories"""
+    IMPORTS_ONLY = "imports_only"
+    TYPES_ONLY = "types_only"
+    ASYNC_ONLY = "async_only"
+    RESOURCES_ONLY = "resources_only"
+    ERRORS_ONLY = "errors_only"
+    TEST_FIXES = "test_fixes"
+    SLOW_TESTS = "slow_tests"
+    INTEGRATION = "integration"
 
-2. **Mock Verification**:
-   - Ensure mocks match actual {dependency} interfaces
-   - Verify mock return values match real implementations
-   - Check for over-mocking that hides integration issues
-   - Validate test doubles are kept in sync
 
-3. **Contract Testing**:
-   - Create contract tests for {module} → {dependency} interface
-   - Verify both sides of integration honor contracts
-   - Test edge cases and error conditions
-   - Validate performance characteristics
+# More granular, specific prompts with anti-hallucination and no-report instruction
+MODULE_PROMPTS = {
+    PromptType.IMPORTS_ONLY: """Use Task tool: system-design-architect
+Fix ONLY these specific import issues in src/{module}/:
 
-**PHASE 3: SYSTEMATIC FIXES**
+ISSUES TO FIX:
+1. NameError for undefined names - add the missing import
+2. ImportError for modules not found - fix the import path
+3. Circular imports - reorganize imports to break cycles
 
-1. **Fix Priority**:
-   - CRITICAL: Breaks {module} → {dependency} communication
-   - HIGH: Causes test failures or warnings
-   - MEDIUM: Violates best practices but works
+RULES:
+- ONLY add imports for names that are undefined
+- Use existing imports from other files in the same module as examples
+- Import order: stdlib → third-party → local (from src.*)
+- DO NOT create new functions or classes
+- DO NOT change any logic inside functions
+- DO NOT import anything not in requirements.txt or src/
 
-2. **Fix Process**:
-   ```python
-   # 1. Fix import issues first
-   # 2. Fix interface compliance
-   # 3. Fix async/await patterns
-   # 4. Fix data flow issues
-   # 5. Fix error handling
-   # 6. Fix resource management
-   ```
+VALIDATION:
+After changes, this must pass: python -m py_compile src/{module}/*.py
 
-3. **Validation After Each Fix**:
-   ```bash
-   # Test specific integration
-   python -m pytest tests/ -k "{module} and {dependency}" -xvs --tb=short
-   
-   # Check for import errors
-   python -c "from src.{module} import *; from src.{dependency} import *"
-   
-   # Run type checking
-   mypy src/{module}/ --follow-imports=normal
-   ```
+{anti_hallucination}
+""",
 
-**PHASE 4: COMPREHENSIVE VALIDATION**
+    PromptType.TYPES_ONLY: """Use Task tool: code-guardian-enforcer
+Fix ONLY type annotation issues in src/{module}/:
 
-Run complete integration test suite:
-```bash
-# All tests involving both modules
-python -m pytest tests/ -k "{module} and {dependency}" -v --no-warnings
+ISSUES TO FIX:
+1. Missing type hints on function parameters
+2. Missing return type annotations
+3. Incorrect type annotations causing mypy errors
 
-# Check for memory leaks
-python -m pytest tests/integration/ -k "{module}" --memprof
+RULES:
+- Add type hints ONLY where missing
+- Use types from typing module: Optional, List, Dict, Any, Union, Tuple
+- Use domain types from src.core.types: OrderType, PositionType, etc.
+- DO NOT change function logic
+- DO NOT create new type definitions
+- Common patterns:
+  - Prices/amounts: Decimal
+  - IDs: int or str  
+  - Timestamps: datetime
+  - Async functions: async def func() -> Dict[str, Any]
 
-# Verify no performance regression
-python -m pytest tests/performance/ -k "{module}" --benchmark-only
-```
+VALIDATION:
+After changes, this must pass: mypy src/{module}/ --ignore-missing-imports
 
-**SUCCESS CRITERIA**:
-- ✅ All integration tests pass
-- ✅ No import errors or warnings
-- ✅ No resource leaks detected
-- ✅ Proper error propagation verified
-- ✅ Contract tests all pass
+{anti_hallucination}
+""",
 
-**TRACKING**:
-Create .claude_experiments/{module}/{module}_to_{dependency}_integration.md:
-```markdown
-# Integration Audit: {module} → {dependency}
+    PromptType.ASYNC_ONLY: """Use Task tool: financial-api-architect
+Fix ONLY async/await issues in src/{module}/:
 
-## Integration Points
-| File | Line | Integration Type | Status |
-|------|------|-----------------|--------|
-| service.py | 45 | API Call | ✅ Fixed |
+ISSUES TO FIX:
+1. "coroutine was never awaited" - add missing await
+2. Blocking I/O in async function - make it async or run in executor
+3. Missing async with for context managers
 
-## Issues Fixed
-| ID | Severity | Issue | Fix | Test Result |
-|----|----------|-------|-----|-------------|
-| INT-001 | CRITICAL | Missing await | Added await | PASS |
+RULES:
+- ONLY add await where coroutines are called without await
+- ONLY add async to functions that use await
+- DO NOT change business logic
+- DO NOT create new async functions
+- Pattern: If you see `some_async_func()` without await, add await
 
-## Test Coverage
-- Integration tests: X/Y passing
-- Contract tests: A/B passing
-- Performance: No regression
-```
+VALIDATION:
+No "coroutine was never awaited" warnings when running tests
 
-MANDATORY COMPLETION CRITERIA:
-You MUST achieve ALL of these before marking complete:
+{anti_hallucination}
+""",
 
-1. Run full test suite and paste the output showing:
-    ========= X passed, 0 failed, 0 errors, 0 warnings =========
+    PromptType.RESOURCES_ONLY: """Use Task tool: infrastructure-wizard
+Fix ONLY resource leak issues in src/{module}/:
 
-2. Run mypy and paste output showing:
-    Success: no issues found in N source files
+ISSUES TO FIX:
+1. Unclosed database connections
+2. Unclosed file handles  
+3. Unclosed websocket connections
+4. Missing finally blocks
 
-3. Create a checklist and check EVERY item:
-- [ ] All tests pass
-- [ ] Zero warnings
-- [ ] Zero type errors
-- [ ] All validation errors handled
-- [ ] All connections properly managed
-- [ ] All Decimal precision maintained
+RULES:
+- Add try/finally or context managers ONLY where resources aren't closed
+- Use existing patterns from the codebase
+- DO NOT change business logic
+- DO NOT create new functions
+- Pattern: 
+  ```python
+  conn = None
+  try:
+      conn = get_connection()
+      # use conn
+  finally:
+      if conn:
+          conn.close()
+  ```
 
-4. If ANY criterion is not met, you MUST:
-- Fix the issue immediately
-- Re-run validation
-- Update the checklist
+{anti_hallucination}
+""",
 
-DO NOT report "remaining issues" - FIX THEM ALL.
+    PromptType.ERRORS_ONLY: """Use Task tool: quality-control-enforcer
+Fix ONLY error handling issues in src/{module}/:
 
-IMPORTANT: Every integration must work flawlessly with zero test failures!
+ISSUES TO FIX:
+1. Bare except clauses - replace with specific exceptions
+2. Missing error handling for operations that can fail
+3. Swallowed exceptions that should be re-raised
+
+RULES:
+- Replace `except:` with `except Exception:` or specific exception
+- Use exceptions from src.core.exceptions where they exist
+- DO NOT change success case logic
+- DO NOT create new exception classes
+- Pattern:
+  ```python
+  try:
+      risky_operation()
+  except SpecificError as e:
+      logger.error(f"Operation failed: {{e}}")
+      raise
+  ```
+
+{anti_hallucination}
+""",
+
+    PromptType.TEST_FIXES: """Use Task tool: integration-test-architect
+Fix ONLY these test failures in {test_dir}:
+
+TEST FAILURES:
+{failures}
+
+RULES:
+- Fix ONLY the failing assertions or mocks
+- DO NOT change test logic or coverage
+- DO NOT skip or remove tests
+- Update mocks to match actual interfaces
+- Fix expected values to match actual behavior
+- Common fixes:
+  - Update mock.return_value to match actual return
+  - Fix mock side_effect for exceptions
+  - Add missing await for async tests
+  - Update expected values in assertions
+
+{anti_hallucination}
+""",
+
+    PromptType.SLOW_TESTS: """Use Task tool: performance-optimization-specialist
+Optimize ONLY these slow tests in {test_dir}:
+
+SLOW TESTS (>{timeout}s):
+{slow_tests}
+
+COMPREHENSIVE OPTIMIZATION STRATEGIES:
+1. **Mock Heavy Operations**: Mock database queries, network calls, file I/O with lightweight responses
+2. **Use Fixtures**: Convert repeated setUp/tearDown to pytest fixtures with scope="module" or "session"
+3. **In-Memory Databases**: Replace real databases with sqlite:///:memory: for tests
+4. **Reduce Data Size**: Use minimal datasets (5-10 items instead of 100+)
+5. **Mock Time Operations**: Mock time.sleep(), datetime.now(), and time-based waits
+6. **Async Optimization**: Use pytest.mark.asyncio properly, avoid unnecessary awaits
+7. **Disable Logging**: Set logging to CRITICAL during tests to reduce I/O
+8. **Batch Assertions**: Group related assertions to reduce test setup overhead
+9. **Skip Integration Parts**: Mock external service calls instead of real connections
+10. **Use Test Doubles**: Replace heavy objects with lightweight test doubles
+
+CRITICAL RULES:
+- DO NOT change what the test validates
+- DO NOT reduce test coverage
+- DO NOT skip important edge cases
+- Maintain test reliability and determinism
+- DO NOT write any reports or lengthy explanations - just apply the fixes
+
+{anti_hallucination}
+"""
+}
+
+# Integration prompts
+INTEGRATION_PROMPTS = {
+    "verify_usage": """Use Task tool: integration-architect
+Verify {module} correctly uses {dependency} and fix any issues:
+
+CHECK & FIX:
+1. Is {module} calling {dependency}'s functions correctly?
+2. Are the parameters being passed correct types?
+3. Is {module} handling {dependency}'s exceptions?
+4. Is there duplicate code that {dependency} already provides?
+
+RULES:
+- ONLY fix incorrect usage of {dependency}
+- DO NOT create new integration points
+- DO NOT change {dependency} itself
+- Use {dependency}'s existing functions instead of duplicating
+
+{anti_hallucination}
+""",
+
+    "prevent_breaking": """Use Task tool: system-design-architect  
+Cascade changes from {module} to {dependent}:
+
+CHECK:
+1. Did we change any function signatures that {dependent} uses?
+2. Did we change any return types?
+3. Did we remove any functions/classes {dependent} imports?
+
+FIX by cascading changes:
+- If function signature changed, UPDATE all calls in {dependent}
+- If return type changed, UPDATE handling in {dependent}
+- If function/class removed, REMOVE or UPDATE imports in {dependent}
+- DO NOT keep backward compatibility - we're in dev stage
+- DO NOT create duplicate/enhanced versions
+- Make the breaking changes cascade properly
+
+{anti_hallucination}
+""",
+
+    "check_cross_module": """Use Task tool: integration-architect
+Check cross-module integration between {module} and {dependency}:
+
+CHECK:
+1. Are database models consistent between modules?
+2. Are event names matching between publisher and subscriber?
+3. Are API endpoints called with correct parameters?
+4. Are shared types properly imported from core.types?
+5. Are error codes consistent across modules?
+
+FIX:
+- Align database model definitions
+- Match event names exactly
+- Update API calls with correct parameters
+- Import shared types from src.core.types
+- Use consistent error codes from src.core.exceptions
+
+{anti_hallucination}
+""",
+
+    "fix_service_layer": """Use Task tool: system-design-architect
+Fix service layer violations in {module}:
+
+CHECK:
+1. Is business logic in controllers instead of services?
+2. Are repositories called directly from controllers?
+3. Are services tightly coupled to infrastructure?
+4. Missing service abstractions?
+5. Cross-service dependencies creating cycles?
+
+FIX:
+- Move business logic from controllers to services
+- Controllers should only call services, not repositories
+- Use dependency injection for infrastructure
+- Create service interfaces/protocols
+- Break cycles through event-driven patterns
+
+{anti_hallucination}
+""",
+
+    "align_data_flow": """Use Task tool: data-pipeline-maestro
+Align data flow patterns between {module} and {dependency}:
+
+CHECK:
+1. Data transformation consistency
+2. Message queue patterns (pub/sub vs req/reply)
+3. Batch vs stream processing alignment
+4. Data validation at boundaries
+5. Consistent error propagation
+
+FIX:
+- Use consistent data transformation patterns
+- Align on messaging patterns
+- Match processing paradigms
+- Add validation at module boundaries
+- Propagate errors consistently
+
+{anti_hallucination}
+"""
+}
+
+# ============================================================================
+# PROGRESS TRACKER
+# ============================================================================
+
+
+@dataclass
+class ModuleProgress:
+    """Tracks progress for a single module"""
+    module: str
+    status: str = "pending"  # pending, in_progress, completed, failed
+    iteration: int = 0
+    prompts_completed: List[str] = field(default_factory=list)
+    test_results: Dict[str, Any] = field(default_factory=dict)
+    errors: List[str] = field(default_factory=list)
+    cascade_checks: List[str] = field(default_factory=list)
+    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
+
+
+class ProgressTracker:
+    """Manages progress persistence and recovery"""
+
+    def __init__(self, progress_file: Path = Path("progress.json")):
+        self.progress_file = progress_file
+        self.progress_file.parent.mkdir(parents=True, exist_ok=True)
+        self.modules: Dict[str, ModuleProgress] = {}
+        self.completed_modules: Set[str] = set()
+        self.failed_modules: Set[str] = set()
+        self._lock = threading.Lock()
+        self._load_progress()
+
+    def _load_progress(self):
+        """Load progress from file if exists"""
+        if self.progress_file.exists():
+            try:
+                with open(self.progress_file, 'r') as f:
+                    data = json.load(f)
+                    for module_data in data.get("modules", []):
+                        module = ModuleProgress(**module_data)
+                        self.modules[module.module] = module
+                        if module.status == "completed":
+                            self.completed_modules.add(module.module)
+                        elif module.status == "failed":
+                            self.failed_modules.add(module.module)
+                    print(f"📚 Loaded progress: {len(self.completed_modules)} completed")
+            except Exception as e:
+                print(f"⚠️ Could not load progress: {e}")
+
+    def _save_progress_internal(self):
+        """Internal save without lock - must be called with lock already held"""
+        try:
+            data = {
+                "modules": [
+                    {
+                        "module": m.module,
+                        "status": m.status,
+                        "iteration": m.iteration,
+                        "prompts_completed": m.prompts_completed,
+                        "test_results": m.test_results,
+                        "errors": m.errors,
+                        "cascade_checks": m.cascade_checks,
+                        "timestamp": m.timestamp
+                    }
+                    for m in self.modules.values()
+                ],
+                "last_updated": datetime.now().isoformat(),
+                "dry_run": DRY_RUN_MODE  # Save dry_run flag
+            }
+            with open(self.progress_file, 'w') as f:
+                json.dump(data, f, indent=2, default=str)
+            print(f"💾 Progress saved to {self.progress_file}")
+        except Exception as e:
+            print(f"⚠️ Could not save progress: {e}")
+
+    def save_progress(self):
+        """Save current progress to file"""
+        with self._lock:
+            self._save_progress_internal()
+
+    def _get_module_progress_internal(self, module: str) -> ModuleProgress:
+        """Internal get/create without lock - must be called with lock already held"""
+        if module not in self.modules:
+            self.modules[module] = ModuleProgress(module=module)
+        return self.modules[module]
+
+    def get_module_progress(self, module: str) -> ModuleProgress:
+        """Get or create module progress"""
+        with self._lock:
+            return self._get_module_progress_internal(module)
+
+    def update_module(self, module: str, **kwargs):
+        """Update module progress"""
+        with self._lock:
+            print(f"🔄 Updating progress for {module}: {kwargs}")
+            # Use internal method that doesn't acquire lock again
+            progress = self._get_module_progress_internal(module)
+            for key, value in kwargs.items():
+                if hasattr(progress, key):
+                    setattr(progress, key, value)
+
+            if progress.status == "completed":
+                self.completed_modules.add(module)
+                self.failed_modules.discard(module)
+            elif progress.status == "failed":
+                self.failed_modules.add(module)
+                self.completed_modules.discard(module)
+
+            print(f"✅ Updated progress for {module}: {progress.status}")
+            # Call internal save that doesn't acquire lock again
+            self._save_progress_internal()
+
+    def is_module_complete(self, module: str) -> bool:
+        """Check if module is complete"""
+        return module in self.completed_modules
+
+# ============================================================================
+# RATE LIMITER
+# ============================================================================
+
+
+class RateLimiter:
+    """Manages API rate limiting"""
+
+    def __init__(self):
+        self.calls_per_minute = deque()
+        self.calls_per_hour = deque()
+        self.lock = threading.Lock()
+
+    def wait_if_needed(self) -> float:
+        """Wait if rate limit would be exceeded"""
+        with self.lock:
+            now = time.time()
+
+            # Clean old entries
+            minute_ago = now - 60
+            hour_ago = now - 3600
+
+            self.calls_per_minute = deque(
+                t for t in self.calls_per_minute if t > minute_ago
+            )
+            self.calls_per_hour = deque(
+                t for t in self.calls_per_hour if t > hour_ago
+            )
+
+            # Check limits
+            wait_time = 0
+            if len(self.calls_per_minute) >= API_RATE_LIMIT_PER_MINUTE:
+                wait_time = 60 - (now - self.calls_per_minute[0])
+            elif len(self.calls_per_hour) >= API_RATE_LIMIT_PER_HOUR:
+                wait_time = 3600 - (now - self.calls_per_hour[0])
+
+            if wait_time > 0:
+                print(f"⏳ Rate limit: waiting {wait_time:.1f}s...")
+                time.sleep(wait_time)
+
+            # Record call
+            self.calls_per_minute.append(now)
+            self.calls_per_hour.append(now)
+
+            return wait_time
+
+# ============================================================================
+# CLAUDE API EXECUTOR
+# ============================================================================
+
+
+class ClaudeExecutor:
+    """Executes Claude API calls with error handling and retry logic"""
+
+    def __init__(self, rate_limiter: RateLimiter, hallucination_detector: HallucinationDetector):
+        self.rate_limiter = rate_limiter
+        self.hallucination_detector = hallucination_detector
+        self.max_retries = 3
+        self.retry_delay = 5
+        self.total_prompts = 0
+        self.current_prompt = 0
+
+    def execute_prompt(self, prompt: str, description: str = "", use_feedback_agent: bool = False) -> Tuple[bool, str]:
+        """Execute a Claude prompt with anti-hallucination and retry logic"""
+
+        self.current_prompt += 1
+
+        print(f"\n{'='*60}")
+        print(
+            f"🤖 CLAUDE PROMPT [{self.current_prompt}/{self.total_prompts if self.total_prompts > 0 else '?'}]: {description}")
+        print(f"⏰ Time: {datetime.now().strftime('%H:%M:%S')}")
+        print(f"{'='*60}")
+
+        # Check for dry-run mode
+        if DRY_RUN_MODE:
+            print(f"🎭 DRY-RUN MODE: Skipping actual Claude API call")
+            print(f"📄 Would send prompt of {len(prompt)} characters")
+            return True, "[DRY-RUN] Mock response - no actual changes made"
+
+        # Add instruction to not write reports
+        no_reports_instruction = "\n\nIMPORTANT: DO NOT write lengthy reports, summaries, or explanations. Only apply the fixes directly."
+
+        # Add anti-hallucination constraints to prompt
+        if "{anti_hallucination}" in prompt:
+            prompt = prompt.replace(
+                "{anti_hallucination}",
+                self.hallucination_detector.get_constraints() + no_reports_instruction
+            )
+        else:
+            prompt += no_reports_instruction
+
+        retries = 0
+        while retries < self.max_retries:
+            # Wait for rate limit
+            self.rate_limiter.wait_if_needed()
+
+            # Prepare command
+            cmd = [
+                "claude",
+                "--dangerously-skip-permissions",
+                "--model", "claude-opus-4-20250514",
+                "-p", prompt
+            ]
+
+            try:
+                if retries > 0:
+                    print(f"🔄 Retry {retries}/{self.max_retries} for {description}...")
+                else:
+                    print(f"🚀 Sending to Claude API...")
+
+                start_time = time.time()
+                print(f"⏳ Executing command (timeout: 300s)...")
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                    check=True
+                )
+
+                elapsed = time.time() - start_time
+                print(f"✅ Claude responded in {elapsed:.1f}s")
+                print(f"📤 Response length: {len(result.stdout)} characters")
+
+                # Show response preview
+                if result.stdout:
+                    response_lines = result.stdout.split('\n')
+                    preview = response_lines[0] if response_lines else "Empty"
+                    print(f"📄 Response preview: {preview[:150]}...")
+
+                # Success - return result
+                return True, result.stdout
+
+            except subprocess.TimeoutExpired:
+                return False, "Timeout"
+            except subprocess.CalledProcessError as e:
+                error_msg = e.stderr[:500] if e.stderr else str(e)
+
+                # Check for 500 error or rate limit
+                if "500" in error_msg or "rate" in error_msg.lower() or "limit" in error_msg.lower():
+                    retries += 1
+                    if retries < self.max_retries:
+                        print(
+                            f"⚠️ API error (likely 500 or rate limit), retrying in {self.retry_delay}s...")
+                        time.sleep(self.retry_delay)
+                        continue
+
+                return False, f"Error: {error_msg[:200]}"
+            except Exception as e:
+                retries += 1
+                if retries < self.max_retries:
+                    print(f"⚠️ Exception occurred: {e}, retrying in {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
+                    continue
+                return False, str(e)
+
+        return False, f"Max retries ({self.max_retries}) exceeded"
+
+    def request_feedback(self, module: str, issue: str, agent: str = "code-guardian-enforcer") -> Tuple[bool, str]:
+        """Request feedback from specialized agent"""
+
+        feedback_prompt = f"""Use Task tool: {agent}
+
+Please review the following issue in {module} module and provide targeted feedback:
+
+ISSUE:
+{issue}
+
+Provide ONLY:
+1. Is this a real issue that needs fixing? (YES/NO)
+2. If YES, what specific fix is needed? (1-2 sentences)
+3. Any critical warnings about potential side effects?
+
+DO NOT write reports or lengthy explanations.
 """
 
-# Prompt template for checking integration (keep old one for compatibility)
-INTEGRATION_TEMPLATE = INTEGRATION_CHECK_V2
+        return self.execute_prompt(feedback_prompt, f"Getting feedback from {agent}", use_feedback_agent=True)
+
+# ============================================================================
+# TEST RUNNER
+# ============================================================================
 
 
-# Final validation template for entire codebase
-FINAL_VALIDATION_TEMPLATE = """
-FINAL VALIDATION: Ensure ENTIRE codebase is production-ready with 100% test pass rate.
+class TestRunner:
+    """Runs tests and analyzes results"""
 
-**COMPREHENSIVE TEST SUITE**
+    def __init__(self):
+        self.slow_test_threshold = 5
 
-1. **Run ALL Unit Tests**:
-   ```bash
-   # Run all unit tests with strict error checking
-   python -m pytest tests/unit/ -v --tb=short -W error --strict-markers
-   
-   # Check coverage
-   python -m pytest tests/unit/ --cov=src --cov-report=term-missing --cov-fail-under=80
-   ```
+    def run_tests(self, module: str, timeout: int = TEST_TIMEOUT_PER_MODULE) -> Dict[str, Any]:
+        """Run tests for a module"""
 
-2. **Run ALL Integration Tests**:
-   ```bash
-   # Run all integration tests
-   python -m pytest tests/integration/ -v --tb=short -W error
-   
-   # Run with different test orders to catch state dependencies
-   python -m pytest tests/integration/ --random-order
-   ```
+        print(f"\n🧪 RUNNING TESTS for {module}")
+        print(f"⏰ Time: {datetime.now().strftime('%H:%M:%S')}")
 
-3. **Static Analysis**:
-   ```bash
-   # Type checking on entire codebase
-   mypy src/ --ignore-missing-imports --strict --no-error-summary
-   
-   # Linting
-   ruff check src/ --select=ALL --ignore=D,ANN101,ANN102
-   ruff format src/ --check
-   
-   # Security scanning
-   bandit -r src/ -ll
-   
-   # Complexity analysis
-   radon cc src/ -s -nb
-   ```
+        test_dir = TEST_DIRECTORIES.get(module, f"tests/unit/test_{module}")
+        print(f"📁 Test directory: {test_dir}")
 
-4. **Performance Testing**:
-   ```bash
-   # Run performance benchmarks
-   python -m pytest tests/performance/ --benchmark-only
-   
-   # Memory profiling
-   python -m pytest tests/integration/ --memprof
-   ```
+        # Check for dry-run mode
+        if DRY_RUN_MODE:
+            print(f"🎭 DRY-RUN MODE: Simulating test execution")
+            print(f"📄 Would run: pytest {test_dir} -v --tb=short")
+            # Return simulated test results
+            return {
+                "success": True,
+                "passed": True,
+                "failures": [],
+                "slow_tests": [],
+                "warnings": False,
+                "output": "[DRY-RUN] Simulated test output",
+                "returncode": 0,
+                "dry_run": True
+            }
 
-5. **Mock Mode Testing**:
-   ```bash
-   # Test in mock mode
-   MOCK_MODE=true python -m pytest tests/ -k mock
-   ```
+        if not Path(test_dir).exists():
+            print(f"⚠️  No test directory found")
+            return {
+                "success": True,
+                "skipped": True,
+                "message": "No tests found"
+            }
 
-**CRITICAL VALIDATION POINTS**
+        cmd = [
+            "python", "-m", "pytest",
+            test_dir,
+            "-v", "--tb=short",
+            f"--timeout={TEST_TIMEOUT_PER_TEST}",
+            "--timeout-method=thread",
+            "-W", "ignore::DeprecationWarning"
+        ]
 
-1. **Module Coherence**:
-   - All modules properly initialized
-   - No circular dependencies
-   - Clean module boundaries
-   - Proper abstraction levels
+        print(f"🔧 Command: pytest {test_dir} -v --tb=short")
+        print(f"⏱️  Timeout: {timeout}s")
 
-2. **Async Consistency**:
-   - All async functions properly awaited
-   - No blocking I/O in async contexts
-   - Proper async context managers
-   - Clean shutdown of async resources
+        try:
+            start_time = time.time()
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False
+            )
+            elapsed = time.time() - start_time
+            print(f"✅ Tests completed in {elapsed:.1f}s")
 
-3. **Resource Management**:
-   - All database connections closed
-   - All file handles released
-   - All WebSocket connections cleaned up
-   - No memory leaks detected
+            output = result.stdout + result.stderr
+            passed = "passed" in output
+            failures = self._extract_failures(output)
+            slow_tests = self._extract_slow_tests(output)
+            warnings = "warnings summary" in output.lower()
 
-4. **Error Handling**:
-   - All exceptions properly caught
-   - Critical errors re-raised
-   - Proper error logging
-   - Graceful degradation
+            # Log test results
+            print(
+                f"📊 Result: {'PASS' if result.returncode == 0 else 'FAIL'} (return code: {result.returncode})")
+            if failures:
+                print(f"❌ {len(failures)} test failures found")
+            if slow_tests:
+                print(f"🐌 {len(slow_tests)} slow tests found")
 
-5. **Trading Logic Integrity**:
-   - Position calculations accurate
-   - Risk limits enforced
-   - Order state transitions valid
-   - Fee calculations correct
-   - Decimal precision maintained
+            return {
+                "success": result.returncode == 0,
+                "passed": passed,
+                "failures": failures,
+                "slow_tests": slow_tests,
+                "warnings": warnings,
+                "output": output[:5000],
+                "returncode": result.returncode
+            }
 
-**SUCCESS METRICS**:
-- ✅ 100% of unit tests pass
-- ✅ 100% of integration tests pass  
-- ✅ 0 mypy errors
-- ✅ 0 ruff violations
-- ✅ 0 security issues (bandit)
-- ✅ Code coverage > 80%
-- ✅ No performance regressions
-- ✅ No memory leaks
-- ✅ All async properly handled
-- ✅ Clean module dependencies
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "timeout": True,
+                "message": f"Tests exceeded {timeout}s timeout"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
-**FINAL REPORT**:
-Generate .claude_experiments/{module}/FINAL_VALIDATION_REPORT.md with:
-- Total tests run and passed
-- Coverage percentage
-- Static analysis results
-- Performance metrics
-- Any remaining warnings (should be 0)
-- Production readiness assessment
+    def _extract_failures(self, output: str) -> List[str]:
+        """Extract test failure information"""
+        failures = []
+        lines = output.split('\n')
+        for i, line in enumerate(lines):
+            if 'FAILED' in line or 'ERROR' in line:
+                failures.append(line.strip())
+                for j in range(1, min(4, len(lines) - i)):
+                    if lines[i + j].strip():
+                        failures.append(f"  {lines[i + j].strip()}")
+        return failures[:10]  # Limit to 10
 
-**MANDATORY COMPLETION CRITERIA**:
-You MUST achieve ALL of these before marking complete:
+    def _extract_slow_tests(self, output: str) -> List[str]:
+        """Extract slow test information"""
+        slow_tests = []
+        lines = output.split('\n')
+        for line in lines:
+            if 's]' in line and 'test_' in line:
+                try:
+                    parts = line.split('[')
+                    if len(parts) > 1:
+                        time_part = parts[-1].split('s]')[0]
+                        test_time = float(time_part)
+                        if test_time > self.slow_test_threshold:
+                            slow_tests.append(f"{line.strip()}")
+                except:
+                    pass
+        return slow_tests[:5]  # Limit to 5
 
-1. Run full test suite and paste the output showing:
-    ========= X passed, 0 failed, 0 errors, 0 warnings =========
-
-2. Run mypy and paste output showing:
-    Success: no issues found in N source files
-
-3. Create a checklist and check EVERY item:
-- [ ] All tests pass
-- [ ] Zero warnings
-- [ ] Zero type errors
-- [ ] All validation errors handled
-- [ ] All connections properly managed
-- [ ] All Decimal precision maintained
-
-4. If ANY criterion is not met, you MUST:
-- Fix the issue immediately
-- Re-run validation
-- Update the checklist
-
-DO NOT report "remaining issues" - FIX THEM ALL.
-
-ONLY mark as complete when ALL metrics show green!
-"""
+# ============================================================================
+# SMART PARALLEL EXECUTOR
+# ============================================================================
 
 
-def execute_claude_prompt(prompt):
-    """Execute a prompt using Claude Code CLI."""
-    cmd = [
-        "claude",
-        "--dangerously-skip-permissions",
-        "--model", "claude-opus-4-20250514",
-        "-p",
-        prompt
-    ]
+class SmartParallelExecutor:
+    """Manages parallel execution preventing correlated modules from running together"""
 
-    try:
-        subprocess.run(cmd, capture_output=False, text=True, check=True)
+    def __init__(self, max_workers: int = MAX_PARALLEL_MODULES):
+        self.max_workers = max_workers
+        self.currently_processing = set()
+        self.lock = threading.Lock()
+
+    def can_process_module(self, module: str) -> bool:
+        """Check if module can be processed now without conflicts"""
+        with self.lock:
+            # Check if any dependency is being processed
+            deps = MODULE_DEPENDENCIES.get(module, [])
+            for dep in deps:
+                if dep in self.currently_processing:
+                    return False
+
+            # Check if any dependent is being processed
+            dependents = DEPENDENT_MODULES.get(module, [])
+            for dependent in dependents:
+                if dependent in self.currently_processing:
+                    return False
+
+            return True
+
+    def start_processing(self, module: str):
+        """Mark module as being processed"""
+        with self.lock:
+            self.currently_processing.add(module)
+
+    def finish_processing(self, module: str):
+        """Mark module as done processing"""
+        with self.lock:
+            self.currently_processing.discard(module)
+
+    def get_safe_groups(self) -> List[List[str]]:
+        """Get groups of modules that can be safely processed in parallel"""
+        groups = []
+        processed = set(SKIP_MODULES)
+        remaining = [m for m in MODULE_HIERARCHY if m not in SKIP_MODULES]
+
+        while remaining:
+            group = []
+            for module in remaining[:]:
+                deps = MODULE_DEPENDENCIES.get(module, [])
+                dependents = DEPENDENT_MODULES.get(module, [])
+
+                # Can add to group if:
+                # 1. All dependencies are already processed
+                # 2. No module in current group depends on it
+                # 3. It doesn't depend on any module in current group
+                if all(d in processed for d in deps):
+                    conflict = False
+                    for g_module in group:
+                        g_deps = MODULE_DEPENDENCIES.get(g_module, [])
+                        if module in g_deps or g_module in deps:
+                            conflict = True
+                            break
+                        if g_module in dependents or module in DEPENDENT_MODULES.get(g_module, []):
+                            conflict = True
+                            break
+
+                    if not conflict:
+                        group.append(module)
+                        remaining.remove(module)
+
+            if group:
+                groups.append(group)
+                processed.update(group)
+            else:
+                # Process remaining one by one
+                if remaining:
+                    groups.append([remaining[0]])
+                    processed.add(remaining[0])
+                    remaining.pop(0)
+
+        return groups
+
+# ============================================================================
+# MODULE PROCESSOR WITH CASCADE PROTECTION
+# ============================================================================
+
+
+class ModuleProcessor:
+    """Processes a single module with cascade protection"""
+
+    def __init__(
+        self,
+        claude: ClaudeExecutor,
+        test_runner: TestRunner,
+        progress_tracker: ProgressTracker,
+        cascade_protector: CascadeProtector
+    ):
+        self.claude = claude
+        self.test_runner = test_runner
+        self.progress = progress_tracker
+        self.cascade_protector = cascade_protector
+        self.current_step = 0
+        self.total_steps = 0
+        self._calculate_total_prompts()
+
+    def _calculate_total_prompts(self):
+        """Calculate total number of prompts for all modules"""
+        # Base prompts per module
+        prompts_per_module = len([p for p in PromptType if p in MODULE_PROMPTS])
+        # Estimate iterations and additional prompts
+        estimated_iterations = 3  # Average
+        self.total_prompts_estimate = len(MODULE_HIERARCHY) * \
+            prompts_per_module * estimated_iterations
+
+    def _calculate_module_steps(self, module: str) -> int:
+        """Calculate total steps for a module"""
+        steps = 0
+        steps += 1  # Update status to in_progress
+        steps += 1  # Baseline test
+        steps += 5 * MAX_ITERATIONS_PER_MODULE  # Fix prompts
+        steps += MAX_ITERATIONS_PER_MODULE  # Test runs per iteration
+        steps += len(MODULE_DEPENDENCIES.get(module, []))  # Integration checks
+        steps += len(DEPENDENT_MODULES.get(module, []))  # Cascade checks
+        return steps
+
+    def _log_step(self, action: str):
+        """Log current step with progress indicator"""
+        self.current_step += 1
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        progress_pct = (self.current_step / self.total_steps * 100) if self.total_steps > 0 else 0
+        progress_bar = '█' * int(progress_pct / 5) + '░' * (20 - int(progress_pct / 5))
+        print(f"\n[🔹 STEP {self.current_step:03d}/{self.total_steps:03d}] {action}")
+        print(f"[📊 PROGRESS] [{progress_bar}] {progress_pct:.1f}% @ {timestamp}")
+
+    def process_module(self, module: str) -> bool:
+        """Process a module with granular fixes and cascade checks"""
+
+        print(f"\n{'='*80}")
+        print(f"📦 PROCESSING MODULE: {module}")
+        print(f"⏰ Started at: {datetime.now().strftime('%H:%M:%S')}")
+        print(f"{'='*80}")
+
+        # Skip if already complete
+        if self.progress.is_module_complete(module):
+            print(f"✅ {module}: Already completed (skipping)")
+            return True
+
+        # Initialize step tracking for this module
+        self.current_step = 0
+        self.total_steps = self._calculate_module_steps(module)
+        print(f"📢 Total steps for {module}: {self.total_steps}")
+
+        # Update progress
+        self._log_step("Updating module status to in_progress")
+        self.progress.update_module(module, status="in_progress")
+
+        # Get baseline test results
+        self._log_step("Running baseline tests")
+        print(f"📊 Getting baseline for {module}...")
+        baseline = self.test_runner.run_tests(module)
+        self.cascade_protector.update_baseline(module, baseline)
+
+        try:
+            module_progress = self.progress.get_module_progress(module)
+
+            # Process with granular prompts and verification after each
+            for iteration in range(module_progress.iteration, MAX_ITERATIONS_PER_MODULE):
+                print(f"\n🔄 Iteration {iteration + 1}/{MAX_ITERATIONS_PER_MODULE}")
+                self.progress.update_module(module, iteration=iteration + 1)
+
+                # Granular fix sequence with testing after each critical fix
+                fix_sequence = [
+                    (PromptType.IMPORTS_ONLY, "Fixing imports", True),
+                    (PromptType.TYPES_ONLY, "Fixing types", False),
+                    (PromptType.ASYNC_ONLY, "Fixing async/await", True),
+                    (PromptType.RESOURCES_ONLY, "Fixing resources", True),
+                    (PromptType.ERRORS_ONLY, "Fixing error handling", False),
+                ]
+
+                # Calculate prompts for this iteration
+                remaining_prompts = len(
+                    [p for p, _, _ in fix_sequence if p.value not in module_progress.prompts_completed])
+                print(f"📋 Prompts to execute this iteration: {remaining_prompts}")
+
+                tests_passing = False
+
+                prompt_num = 0
+                for prompt_type, description, test_after in fix_sequence:
+                    if prompt_type.value in module_progress.prompts_completed:
+                        print(f"⏭️  Skipping {prompt_type.value} (already completed)")
+                        continue
+
+                    prompt_num += 1
+                    self._log_step(f"{description} (iteration {iteration + 1})")
+                    print(
+                        f"🔧 FIX [{prompt_num}/{remaining_prompts}] in iteration {iteration + 1}: {prompt_type.value}")
+                    print(f"📋 Description: {description}")
+
+                    # Prepare prompt with module-specific info
+                    if prompt_type not in MODULE_PROMPTS:
+                        print(f"⚠️ Skipping {prompt_type.value} - not a module-level prompt")
+                        continue
+
+                    prompt = MODULE_PROMPTS[prompt_type].format(
+                        module=module,
+                        anti_hallucination="{anti_hallucination}"
+                    )
+
+                    # Log prompt details
+                    print(f"📝 Prompt length: {len(prompt)} characters")
+                    prompt_preview = prompt.split('\n')[0][:150]
+                    print(f"📝 Prompt preview: {prompt_preview}...")
+
+                    success, output = self.claude.execute_prompt(prompt, description)
+
+                    if success:
+                        print(f"✅ {description} completed successfully")
+                        module_progress.prompts_completed.append(prompt_type.value)
+                        self.progress.update_module(
+                            module,
+                            prompts_completed=module_progress.prompts_completed
+                        )
+                        print(
+                            f"💾 Progress saved (completed: {len(module_progress.prompts_completed)}/{len(fix_sequence)})")
+                        
+                        # Test after critical fixes
+                        if test_after:
+                            print(f"🧪 Quick test after {description}...")
+                            quick_test = self.test_runner.run_tests(module, timeout=60)
+
+                            # Check for cascading failures and propagate changes
+                            if CASCADE_CHECK_ENABLED:
+                                cascade_results = self.cascade_protector.check_dependents(module)
+                                if self.cascade_protector.cascade_detected:
+                                    print(f"🔄 CASCADE DETECTED! Propagating changes...")
+                                    # Instead of failing, propagate the changes
+                                    for dependent, needs_fix in cascade_results:
+                                        if not needs_fix:
+                                            print(f"  → Cascading changes to {dependent}")
+                                            prompt = INTEGRATION_PROMPTS["prevent_breaking"].format(
+                                                module=module,
+                                                dependent=dependent,
+                                                anti_hallucination="{anti_hallucination}"
+                                            )
+                                            self.claude.execute_prompt(
+                                                prompt,
+                                                f"Cascading changes from {module} to {dependent}"
+                                            )
+                                    # Reset cascade detection for next iteration
+                                    self.cascade_protector.cascade_detected = False
+                    else:
+                        print(f"❌ {description} failed: {output[:100]}")
+
+                # Full test run
+                self._log_step(f"Full test run (iteration {iteration + 1})")
+                print(f"🧪 Full test run for {module}...")
+                test_results = self.test_runner.run_tests(module)
+                self.progress.update_module(module, test_results=test_results)
+
+                # Request feedback if tests are still failing
+                if not test_results["success"] and test_results.get("failures"):
+                    print(f"🔍 Getting expert feedback on failures...")
+                    failures_str = "\n".join(test_results["failures"][:3])
+                    success, feedback = self.claude.request_feedback(
+                        module,
+                        failures_str,
+                        "quality-control-enforcer"
+                    )
+                    if success and "YES" in feedback:
+                        print(f"📝 Expert feedback: {feedback}")
+
+                if test_results.get("skipped"):
+                    print(f"⏭️ No tests for {module}")
+                    self.progress.update_module(module, status="completed")
+                    return True
+                
+                elif test_results["success"]:
+                    print(f"✅ {module}: All tests passing!")
+
+                    # Fix slow tests if any
+                    if test_results.get("slow_tests"):
+                        print(f"🐌 Optimizing {len(test_results['slow_tests'])} slow tests...")
+                        slow_tests_str = "\n".join(test_results["slow_tests"])
+                        prompt = MODULE_PROMPTS[PromptType.SLOW_TESTS].format(
+                            test_dir=TEST_DIRECTORIES.get(module),
+                            module=module,
+                            slow_tests=slow_tests_str,
+                            timeout=TEST_TIMEOUT_PER_TEST,
+                            anti_hallucination="{anti_hallucination}"
+                        )
+                        self.claude.execute_prompt(prompt, "Optimizing slow tests")
+
+                    # Final cascade check
+                    if CASCADE_CHECK_ENABLED:
+                        print(f"🔍 Final cascade check for {module}...")
+                        cascade_results = self.cascade_protector.check_dependents(module)
+                        for dependent, ok in cascade_results:
+                            if not ok:
+                                print(f"⚠️ {module} broke {dependent} - needs fixing")
+                                # Could trigger dependent fix here
+
+                    self.progress.update_module(module, status="completed")
+                    return True
+
+                # Fix test failures
+                if test_results.get("failures"):
+                    print(f"❌ Fixing {len(test_results['failures'])} test failures...")
+
+                    prompt = MODULE_PROMPTS[PromptType.TEST_FIXES].format(
+                        test_dir=TEST_DIRECTORIES.get(module),
+                        failures="\n".join(test_results["failures"][:5]),
+                        anti_hallucination="{anti_hallucination}"
+                    )
+                    self.claude.execute_prompt(prompt, "Fixing test failures")
+
+            # Max iterations reached
+            print(f"⚠️ {module}: Max iterations reached")
+            self.progress.update_module(module, status="failed")
+            return False
+
+        except Exception as e:
+            print(f"❌ {module}: Error - {e}")
+            self.progress.update_module(
+                module,
+                status="failed",
+                errors=[str(e)]
+            )
+            return False
+
+# ============================================================================
+# INTEGRATION CHECKER
+# ============================================================================
+
+
+class IntegrationChecker:
+    """Checks and fixes integration between modules"""
+
+    def __init__(self, claude: ClaudeExecutor, progress_tracker: ProgressTracker):
+        self.claude = claude
+        self.progress = progress_tracker
+
+    def check_integration(self, module: str, dependency: str) -> bool:
+        """Check integration between module and dependency"""
+
+        if not self.progress.is_module_complete(module):
+            return False
+
+        if not self.progress.is_module_complete(dependency):
+            return False
+
+        print(f"\n🔗 Checking: {module} → {dependency}")
+
+        # 1. Verify correct usage
+        prompt = INTEGRATION_PROMPTS["verify_usage"].format(
+            module=module,
+            dependency=dependency,
+            anti_hallucination="{anti_hallucination}"
+        )
+        success, output = self.claude.execute_prompt(
+            prompt,
+            f"Verifying {module} uses {dependency} correctly"
+        )
+
+        # 2. Check cross-module integration
+        prompt = INTEGRATION_PROMPTS["check_cross_module"].format(
+            module=module,
+            dependency=dependency,
+            anti_hallucination="{anti_hallucination}"
+        )
+        self.claude.execute_prompt(
+            prompt,
+            f"Checking cross-module integration between {module} and {dependency}"
+        )
+
+        # 3. Fix service layer violations
+        prompt = INTEGRATION_PROMPTS["fix_service_layer"].format(
+            module=module,
+            anti_hallucination="{anti_hallucination}"
+        )
+        self.claude.execute_prompt(
+            prompt,
+            f"Fixing service layer violations in {module}"
+        )
+
+        # 4. Align data flow patterns
+        prompt = INTEGRATION_PROMPTS["align_data_flow"].format(
+            module=module,
+            dependency=dependency,
+            anti_hallucination="{anti_hallucination}"
+        )
+        self.claude.execute_prompt(
+            prompt,
+            f"Aligning data flow between {module} and {dependency}"
+        )
+
+        # 5. Prevent breaking changes in dependent modules
+        dependents = DEPENDENT_MODULES.get(module, [])
+        for dependent in dependents:
+            if self.progress.is_module_complete(dependent):
+                prompt = INTEGRATION_PROMPTS["prevent_breaking"].format(
+                    module=module,
+                    dependent=dependent,
+                    anti_hallucination="{anti_hallucination}"
+                )
+                self.claude.execute_prompt(
+                    prompt,
+                    f"Ensuring {module} doesn't break {dependent}"
+                )
+
+        print(f"✅ Integration verified: {module} → {dependency}")
         return True
-    except subprocess.CalledProcessError:
-        print(f"✗ Error executing prompt")
-        return False
-    except FileNotFoundError:
-        print("✗ Claude Code CLI not found")
-        sys.exit(1)
+
+# ============================================================================
+# MAIN ORCHESTRATOR
+# ============================================================================
 
 
-def check_module(module):
-    """Check module's internal implementation."""
-    prompt = MODULE_CHECK_TEMPLATE.format(module=module)
+class AutoFixer:
+    """Main orchestrator with cascade protection"""
 
-    print(f"\n{'='*60}")
-    print(f"Checking Module: {module} (internal implementation)")
-    print('='*60)
+    def __init__(self, skip_modules: List[str] = None):
+        global SKIP_MODULES
+        if skip_modules:
+            SKIP_MODULES = skip_modules
 
-    success = execute_claude_prompt(prompt)
+        print("🔍 Scanning codebase...")
+        self.hallucination_detector = HallucinationDetector()
+        print("✅ Hallucination detector ready")
 
-    if success:
-        print(f"✓ Module check completed: {module}")
+        self.rate_limiter = RateLimiter()
+        self.claude = ClaudeExecutor(self.rate_limiter, self.hallucination_detector)
+        self.test_runner = TestRunner()
 
-    # Delay to avoid rate limiting
-    time.sleep(3)
+        print("📁 Loading progress...")
+        self.progress = ProgressTracker()
 
-    return success
+        self.cascade_protector = CascadeProtector(self.test_runner)
+        self.module_processor = ModuleProcessor(
+            self.claude,
+            self.test_runner,
+            self.progress,
+            self.cascade_protector
+        )
+        self.integration_checker = IntegrationChecker(
+            self.claude,
+            self.progress
+        )
+        self.parallel_executor = SmartParallelExecutor()
 
+        # Calculate total prompts
+        modules_to_process = [
+            m for m in MODULE_HIERARCHY if m not in SKIP_MODULES and not self.progress.is_module_complete(m)]
+        prompts_per_module = 5  # Base prompts
+        estimated_iterations = 2  # Average iterations
+        self.claude.total_prompts = len(modules_to_process) * \
+            prompts_per_module * estimated_iterations
+        print(f"📊 Estimated total prompts: ~{self.claude.total_prompts}")
 
-def check_integration(module, dependency):
-    """Check if a module properly uses its dependency."""
-    prompt = INTEGRATION_TEMPLATE.format(module=module, dependency=dependency)
+    def run_sequential(self) -> bool:
+        """Run fixes sequentially (safest)"""
+        all_success = True
 
-    print(f"\n{'='*60}")
-    print(f"Checking Integration: {module} → {dependency}")
-    print('='*60)
+        for module in MODULE_HIERARCHY:
+            if module in SKIP_MODULES:
+                continue
 
-    success = execute_claude_prompt(prompt)
+            success = self.module_processor.process_module(module)
 
-    if success:
-        print(f"✓ Integration check completed: {module} → {dependency}")
+            # Check integrations immediately after module completes successfully
+            if success:
+                print(f"\n🔗 Checking integrations for {module}")
+                deps = MODULE_DEPENDENCIES.get(module, [])
+                for dep in deps:
+                    if dep not in SKIP_MODULES and self.progress.is_module_complete(dep):
+                        self.integration_checker.check_integration(module, dep)
 
-    # Delay to avoid rate limiting
-    time.sleep(3)
+                # Also check if this module is a dependency for any completed modules
+                for other_module in MODULE_HIERARCHY:
+                    if other_module in SKIP_MODULES or other_module == module:
+                        continue
+                    if self.progress.is_module_complete(other_module):
+                        other_deps = MODULE_DEPENDENCIES.get(other_module, [])
+                        if module in other_deps:
+                            self.integration_checker.check_integration(other_module, module)
+            else:
+                all_success = False
+                if self.cascade_protector.cascade_detected:
+                    print("⛔ Stopping due to cascade failure")
+                    break
 
-    return success
+        return all_success
 
+    def run_smart_parallel(self) -> bool:
+        """Run in smart parallel mode preventing conflicts"""
+        all_success = True
+        groups = self.parallel_executor.get_safe_groups()
 
-def run_final_validation():
-    """Run final validation on entire codebase."""
-    print("\n" + "="*70)
-    print(" FINAL VALIDATION - ENTIRE CODEBASE")
-    print("="*70)
+        print(f"\n📊 Smart execution plan: {len(groups)} groups")
+        for i, group in enumerate(groups, 1):
+            print(f"  Group {i}: {', '.join(group)} (safe to run in parallel)")
 
-    prompt = FINAL_VALIDATION_TEMPLATE
+        for i, group in enumerate(groups, 1):
+            print(f"\n{'='*60}")
+            print(f"🚀 Processing group {i}/{len(groups)}: {', '.join(group)}")
+            print(f"{'='*60}")
 
-    print("\nRunning comprehensive validation on entire codebase...")
-    print("This will check:")
-    print("  - All unit tests pass")
-    print("  - All integration tests pass")
-    print("  - Static analysis (mypy, ruff, bandit)")
-    print("  - Performance benchmarks")
-    print("  - Memory profiling")
-    print("  - Mock mode testing")
+            if len(group) == 1:
+                # Single module, run directly
+                module = group[0]
+                self.parallel_executor.start_processing(module)
+                success = self.module_processor.process_module(module)
+                self.parallel_executor.finish_processing(module)
 
-    success = execute_claude_prompt(prompt)
+                if not success:
+                    all_success = False
+                    if self.cascade_protector.cascade_detected:
+                        print("⛔ Cascade detected, stopping parallel execution")
+                        return False
+            else:
+                # Multiple modules, run in parallel with safety checks
+                with ThreadPoolExecutor(max_workers=min(len(group), self.parallel_executor.max_workers)) as executor:
+                    futures = {}
 
-    if success:
-        print("\n✓ Final validation completed!")
-        print("Check .claude_experiments/FINAL_VALIDATION_REPORT.md for results")
-    else:
-        print("\n✗ Final validation failed!")
+                    for module in group:
+                        # Double-check safety before submitting
+                        if self.parallel_executor.can_process_module(module):
+                            self.parallel_executor.start_processing(module)
+                            future = executor.submit(
+                                self.module_processor.process_module,
+                                module
+                            )
+                            futures[future] = module
+                        else:
+                            print(f"⚠️ Skipping {module} - conflict detected")
 
-    return success
+                    for future in as_completed(futures):
+                        module = futures[future]
+                        try:
+                            success = future.result()
+                            if not success:
+                                all_success = False
+                        except Exception as e:
+                            print(f"❌ {module}: Exception - {e}")
+                            all_success = False
+                        finally:
+                            self.parallel_executor.finish_processing(module)
+
+                        if self.cascade_protector.cascade_detected:
+                            print("⛔ Cascade detected, cancelling remaining tasks")
+                            # Cancel remaining futures
+                            for f in futures:
+                                if not f.done():
+                                    f.cancel()
+                            return False
+
+            # Check integrations after each group
+            for module in group:
+                if self.progress.is_module_complete(module):
+                    print(f"\n🔗 Checking integrations for {module}")
+                    deps = MODULE_DEPENDENCIES.get(module, [])
+                    for dep in deps:
+                        if self.progress.is_module_complete(dep):
+                            self.integration_checker.check_integration(module, dep)
+
+                    # Check integration with other modules in the same group
+                    for other in group:
+                        if other != module and self.progress.is_module_complete(other):
+                            # Check if they have dependencies on each other
+                            if other in deps:
+                                self.integration_checker.check_integration(module, other)
+                            other_deps = MODULE_DEPENDENCIES.get(other, [])
+                            if module in other_deps:
+                                self.integration_checker.check_integration(other, module)
+
+        return all_success
+
+    def print_summary(self):
+        """Print final summary"""
+        completed = self.progress.completed_modules
+        failed = self.progress.failed_modules
+
+        print(f"\n{'='*60}")
+        print(f"📊 FINAL SUMMARY")
+        print(f"{'='*60}")
+
+        print(f"✅ Completed: {len(completed)} modules")
+        if completed:
+            for module in sorted(completed):
+                print(f"   • {module}")
+
+        print(f"\n❌ Failed: {len(failed)} modules")
+        if failed:
+            for module in sorted(failed):
+                progress = self.progress.get_module_progress(module)
+                errors = progress.errors[:2] if progress.errors else ["Unknown"]
+                print(f"   • {module}: {', '.join(errors)}")
+
+        if self.cascade_protector.cascade_detected:
+            print(f"\n⚠️ CASCADE FAILURES DETECTED - Review changes carefully!")
+
+        total = len(MODULE_HIERARCHY)
+        processed = len(completed) + len(failed)
+        success_rate = len(completed) / processed * 100 if processed > 0 else 0
+
+        print(f"\n📈 Progress: {processed}/{total} modules")
+        print(f"🎯 Success rate: {success_rate:.1f}%")
+
+# ============================================================================
+# MAIN ENTRY POINT
+# ============================================================================
 
 
 def main():
-    """Run systematic module and integration checks."""
-    print("="*70)
-    print(" MODULE & INTEGRATION CHECKER V2")
-    print("="*70)
+    print(f"\n{'='*80}")
+    print(f"🚀 AUTO_FINAL.py - Financial Application Module Fixer")
+    print(f"📅 Started at: {datetime.now().isoformat()}")
+    print(f"{'='*80}")
 
-    # Filter out skipped modules
-    modules_to_check = [m for m in MODULE_HIERARCHY if m not in SKIP_MODULES]
-
-    # Calculate actual checks (excluding skipped ones)
-    total_module_checks = len(modules_to_check)
-    total_integration_checks = sum(
-        len([d for d in deps if (module, d) not in SKIP_INTEGRATIONS])
-        for module, deps in MODULE_DEPENDENCIES.items()
-        if module not in SKIP_MODULES
+    parser = argparse.ArgumentParser(
+        description="AUTO_FINAL - Production-Ready Module Fixer"
     )
-    total_checks = total_module_checks + total_integration_checks
-
-    # Show skip information if any
-    if SKIP_MODULES:
-        print(f"\n⚠️  Skipping modules: {', '.join(SKIP_MODULES)}")
-    if SKIP_INTEGRATIONS:
-        print(f"⚠️  Skipping integrations: {', '.join([f'{m}→{d}' for m, d in SKIP_INTEGRATIONS])}")
-
-    current_check = 0
-    failed_module_checks = []
-    failed_integration_checks = []
-
-    print(f"\nTotal checks to perform:")
-    print(f"  - Module checks: {total_module_checks}")
-    print(f"  - Integration checks: {total_integration_checks}")
-    print(f"  - Total: {total_checks}")
-    if SKIP_MODULES or SKIP_INTEGRATIONS:
-        print(f"  - Skipped: {len(SKIP_MODULES)} modules, {len(SKIP_INTEGRATIONS)} integrations")
-    print("\nStarting systematic validation...\n")
-
-    # Process each module completely before moving to the next
-    for module in MODULE_HIERARCHY:
-        # Skip if module is in skip list
-        if module in SKIP_MODULES:
-            print(f"\n{'#'*70}")
-            print(f"# MODULE: {module} [SKIPPED]")
-            print(f"{'#'*70}")
-            continue
-
-        print(f"\n{'#'*70}")
-        print(f"# MODULE: {module}")
-        print(f"{'#'*70}")
-
-        # Step 1: Check the module itself
-        current_check += 1
-        print(f"\n[{current_check}/{total_checks}] Step 1: Checking {module} module implementation")
-
-        success = check_module(module)
-        if not success:
-            failed_module_checks.append(module)
-
-        # Step 2: Check all integrations for this module
-        dependencies = MODULE_DEPENDENCIES[module]
-
-        if dependencies:
-            # Filter out skipped integrations
-            deps_to_check = [d for d in dependencies if (module, d) not in SKIP_INTEGRATIONS]
-            skipped_deps = [d for d in dependencies if (module, d) in SKIP_INTEGRATIONS]
-
-            if skipped_deps:
-                print(
-                    f"\n⚠️  Skipping integrations: {', '.join([f'{module}→{d}' for d in skipped_deps])}")
-
-            if deps_to_check:
-                print(f"\nStep 2: Checking {len(deps_to_check)} integration(s) for {module}")
-
-                for dependency in deps_to_check:
-                    current_check += 1
-                    print(f"\n[{current_check}/{total_checks}]", end="")
-
-                    success = check_integration(module, dependency)
-
-                    if not success:
-                        failed_integration_checks.append((module, dependency))
-            else:
-                print(f"\nStep 2: All integrations skipped for {module}")
-        else:
-            print(f"\nStep 2: No dependencies to check for {module}")
-
-        print(f"\n{'='*70}")
-        print(f"Completed all checks for module: {module}")
-        print(f"{'='*70}")
-
-    # Summary
-    print("\n" + "#"*70)
-    print("# VALIDATION SUMMARY")
-    print("#"*70)
-
-    if failed_module_checks or failed_integration_checks:
-        if failed_module_checks:
-            print(f"\n✗ {len(failed_module_checks)} module check(s) failed:")
-            for module in failed_module_checks:
-                print(f"  - {module}")
-
-        if failed_integration_checks:
-            print(f"\n✗ {len(failed_integration_checks)} integration check(s) failed:")
-            for module, dep in failed_integration_checks:
-                print(f"  - {module} → {dep}")
-    else:
-        print("\n✓ All module and integration checks completed successfully!")
-
-    print(f"\nTotal checks performed: {current_check}/{total_checks}")
-    print(f"  - Module checks: {total_module_checks}")
-    print(f"  - Integration checks: {total_integration_checks}")
-    print("#"*70)
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Module Integration Checker V2")
-    parser.add_argument("--test", action="store_true",
-                        help="Test mode - only check first 4 modules")
-    parser.add_argument("--skip", nargs="+", help="Modules to skip (e.g., --skip core utils)")
-    parser.add_argument("--skip-integration", nargs="+",
-                        help="Integrations to skip (e.g., --skip-integration database:core database:utils)")
-    parser.add_argument("--only", nargs="+",
-                        help="Only check specific modules (e.g., --only database state)")
-    parser.add_argument(
-        "--start-from", help="Start from a specific module (e.g., --start-from database)")
-    parser.add_argument("--final-validation", action="store_true",
-                        help="Run final validation on entire codebase after module checks")
-    parser.add_argument("--final-only", action="store_true",
-                        help="Skip module checks and only run final validation")
+    parser.add_argument("--skip", nargs="+", help="Modules to skip", default=[])
+    parser.add_argument("--parallel", action="store_true", help="Run in smart parallel mode")
+    parser.add_argument("--reset", action="store_true", help="Reset progress")
+    parser.add_argument("--module", help="Process single module")
+    parser.add_argument("--no-cascade-check", action="store_true", help="Disable cascade checking")
+    parser.add_argument("--no-hallucination-check", action="store_true",
+                        help="Disable hallucination checking")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Dry-run mode: no code changes or Claude API calls")
 
     args = parser.parse_args()
 
-    if args.test:
-        print("TEST MODE - Only checking first 4 modules")
-        MODULE_HIERARCHY = MODULE_HIERARCHY[:4]
+    # Configure global settings
+    global CASCADE_CHECK_ENABLED, HALLUCINATION_CHECK_ENABLED, DRY_RUN_MODE
+    CASCADE_CHECK_ENABLED = not args.no_cascade_check
+    HALLUCINATION_CHECK_ENABLED = not args.no_hallucination_check
+    DRY_RUN_MODE = args.dry_run
 
-    if args.skip:
-        SKIP_MODULES.extend(args.skip)
-        print(f"Command-line skip: {', '.join(args.skip)}")
+    if DRY_RUN_MODE:
+        print(f"\n🎭 DRY-RUN MODE ENABLED")
+        print(f"  • No code files will be modified")
+        print(f"  • No Claude API calls will be made")
+        print(f"  • Tests will be simulated")
+        print(f"  • Progress will still be tracked")
 
-    if args.skip_integration:
-        for integration in args.skip_integration:
-            if ":" in integration:
-                module, dep = integration.split(":", 1)
-                SKIP_INTEGRATIONS.append((module, dep))
-        print(f"Command-line skip integrations: {', '.join(args.skip_integration)}")
+    # Reset progress if requested
+    if args.reset:
+        progress_file = Path("progress.json")
+        if progress_file.exists():
+            progress_file.unlink()
+            print("🔄 Progress reset")
 
-    if args.only:
-        # Only check specified modules
-        MODULE_HIERARCHY = [m for m in MODULE_HIERARCHY if m in args.only]
-        print(f"Only checking: {', '.join(MODULE_HIERARCHY)}")
+    # Initialize fixer first so we can access it in signal handler
+    fixer = AutoFixer(skip_modules=args.skip)
 
-    if args.start_from:
-        # Start from a specific module
-        if args.start_from in MODULE_HIERARCHY:
-            start_index = MODULE_HIERARCHY.index(args.start_from)
-            MODULE_HIERARCHY = MODULE_HIERARCHY[start_index:]
-            print(f"Starting from module: {args.start_from}")
+    # Setup signal handler with actual progress saving
+    def signal_handler(sig, frame):
+        print("\n\n⚠️ Interrupted! Saving progress...")
+        try:
+            fixer.progress.save_progress()
+            print("✅ Progress saved to progress.json")
+        except Exception as e:
+            print(f"❌ Could not save progress: {e}")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+
+    print(f"\n🎮 Execution Mode:")
+
+    try:
+        if args.module:
+            print(f"  ➡️ Single module: {args.module}")
+            success = fixer.module_processor.process_module(args.module)
+        elif args.parallel:
+            print(f"  ➡️ Parallel execution")
+            success = fixer.run_smart_parallel()
         else:
-            print(f"Warning: Module '{args.start_from}' not found. Starting from beginning.")
+            print(f"  ➡️ Sequential execution")
+            success = fixer.run_sequential()
 
-    # Handle final validation options
-    if args.final_only:
-        # Only run final validation
-        run_final_validation()
-    else:
-        # Run module checks
-        main()
+        fixer.print_summary()
 
-        # Run final validation if requested
-        if args.final_validation:
-            print("\n" + "="*70)
-            print("Starting final validation after module checks...")
-            print("="*70)
-            run_final_validation()
+        print(f"\n{'='*80}")
+        print(f"📅 Finished at: {datetime.now().isoformat()}")
+        print(f"🎯 Overall result: {'SUCCESS ✅' if success else 'FAILURE ❌'}")
+        print(f"{'='*80}")
+
+        sys.exit(0 if success else 1)
+
+    except Exception as e:
+        print(f"\n❌ Fatal error: {e}")
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

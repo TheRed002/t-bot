@@ -58,10 +58,10 @@ async def test_mock_exchange():
         order_type=OrderType.MARKET,
         amount=Decimal("0.001")
     )
-    print(f"✓ Order placed: {order.id} - {order.status}")
+    print(f"✓ Order placed: {order.order_id} - {order.status}")
     
     # Get order status
-    updated_order = await exchange.get_order(order.id)
+    updated_order = await exchange.get_order(order.order_id)
     print(f"✓ Order status: {updated_order.status}")
     
     # Check updated balances
