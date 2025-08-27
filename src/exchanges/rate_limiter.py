@@ -128,7 +128,7 @@ class RateLimiter:
         self.exchange_name = exchange_name
         # Initialize error handler if available
         if hasattr(config, "error_handling"):
-            self.error_handler = ErrorHandler(config.error_handling)
+            self.error_handler = ErrorHandler(config)
         else:
             self.error_handler = None
 
@@ -138,8 +138,8 @@ class RateLimiter:
             self._register_metrics()
 
         # Get rate limits from config or use constants as defaults
-        if hasattr(config, "exchanges") and hasattr(config.exchanges, "rate_limits"):
-            rate_limits = config.exchanges.rate_limits.get(exchange_name, {})
+        if hasattr(config, "exchange") and hasattr(config.exchange, "rate_limits"):
+            rate_limits = config.exchange.rate_limits.get(exchange_name, {})
         else:
             rate_limits = {}
         default_limits = RATE_LIMITS.get(exchange_name, RATE_LIMITS.get("default", {}))

@@ -290,9 +290,9 @@ class DatabaseConnectionManager:
                 org=self.config.database.influxdb_org,
             )
 
-            # Test connection
+            # Test connection (run sync ping in executor to avoid blocking)
             try:
-                self.influxdb_client.ping()
+                await asyncio.get_event_loop().run_in_executor(None, self.influxdb_client.ping)
             except Exception as e:
                 raise DataSourceError(f"InfluxDB health check failed: {e!s}")
 
@@ -337,10 +337,23 @@ class DatabaseConnectionManager:
                 yield session
                 await session.commit()
             except Exception:
-                await session.rollback()
+                try:
+                    await session.rollback()
+                except Exception as rollback_error:
+                    logger.error(f"Failed to rollback session: {rollback_error}")
+                    # Invalidate the session to prevent it from returning to the pool
+                    await session.invalidate()
                 raise
             finally:
-                await session.close()
+                try:
+                    await session.close()
+                except Exception as close_error:
+                    logger.error(f"Failed to close session: {close_error}")
+                    # Invalidate the session to prevent connection leak
+                    try:
+                        await session.invalidate()
+                    except Exception as invalidate_error:
+                        logger.critical(f"Failed to invalidate session: {invalidate_error}")
 
     def get_sync_session(self) -> Session:
         """Get sync database session."""
@@ -447,11 +460,7 @@ class DatabaseConnectionManager:
             else:
                 free = max(0, size - used)
 
-            return {
-                "size": size,
-                "used": used,
-                "free": free
-            }
+            return {"size": size, "used": used, "free": free}
         except Exception as e:
             logger.warning(f"Unable to get pool status: {e}")
             return {"size": 0, "used": 0, "free": 0}
@@ -557,9 +566,9 @@ async def health_check() -> dict[str, bool]:
         logger.error("Redis health check failed", error=str(e))
 
     try:
-        # Check InfluxDB
+        # Check InfluxDB (run sync ping in executor to avoid blocking)
         influxdb_client = get_influxdb_client()
-        influxdb_client.ping()
+        await asyncio.get_event_loop().run_in_executor(None, influxdb_client.ping)
         health_status["influxdb"] = True
     except Exception as e:
         logger.error("InfluxDB health check failed", error=str(e))
@@ -569,7 +578,7 @@ async def health_check() -> dict[str, bool]:
 
 async def debug_connection_info() -> dict[str, Any]:
     """Debug function to get connection information.
-    
+
     WARNING: This function should only be used in development/debugging.
     """
     if not _connection_manager:

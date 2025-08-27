@@ -107,7 +107,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                 raise ValidationError("Display quantity cannot exceed order quantity")
 
             # Check display percentage
-            display_pct = float(instruction.display_quantity / instruction.order.quantity)
+            display_pct = str(instruction.display_quantity / instruction.order.quantity)
             if display_pct < self.min_display_quantity_pct:
                 raise ValidationError(
                     f"Display quantity too small (minimum {self.min_display_quantity_pct * 100}%)"
@@ -154,7 +154,7 @@ class IcebergAlgorithm(BaseAlgorithm):
 
             # Register execution as running
             self.current_executions[execution_id] = execution_result
-            self.is_running = True
+            # is_running is managed by BaseComponent/BaseAlgorithm
             execution_result.status = ExecutionStatus.RUNNING
 
             # Calculate display quantity
@@ -164,8 +164,8 @@ class IcebergAlgorithm(BaseAlgorithm):
                 "Starting Iceberg execution",
                 execution_id=execution_id,
                 symbol=instruction.order.symbol,
-                total_quantity=float(instruction.order.quantity),
-                display_quantity=float(display_quantity),
+                total_quantity=str(instruction.order.quantity),
+                display_quantity=str(display_quantity),
             )
 
             # Get exchange for execution
@@ -200,7 +200,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                 "Iceberg execution completed",
                 execution_id=execution_id,
                 status=execution_result.status.value,
-                filled_quantity=float(execution_result.total_filled_quantity),
+                filled_quantity=str(execution_result.total_filled_quantity),
                 number_of_refreshes=execution_result.number_of_trades,
             )
 
@@ -225,7 +225,8 @@ class IcebergAlgorithm(BaseAlgorithm):
             raise ExecutionError(f"Iceberg execution failed: {e}")
 
         finally:
-            self.is_running = False
+            # is_running is managed by BaseComponent/BaseAlgorithm
+            pass
 
     async def cancel_execution(self, execution_id: str) -> bool:
         """
@@ -379,8 +380,8 @@ class IcebergAlgorithm(BaseAlgorithm):
                     self.logger.info(
                         "Iceberg slice placed",
                         refresh_count=refresh_count + 1,
-                        slice_quantity=float(slice_quantity),
-                        remaining=float(remaining_quantity),
+                        slice_quantity=str(slice_quantity),
+                        remaining=str(remaining_quantity),
                         order_id=order_response.id,
                     )
 
@@ -422,7 +423,7 @@ class IcebergAlgorithm(BaseAlgorithm):
             self.logger.info(
                 "Iceberg strategy completed",
                 total_refreshes=refresh_count,
-                remaining_quantity=float(remaining_quantity),
+                remaining_quantity=str(remaining_quantity),
             )
 
         except Exception as e:
@@ -477,7 +478,7 @@ class IcebergAlgorithm(BaseAlgorithm):
 
                         self.logger.debug(
                             f"Iceberg slice fully filled: {order_id}",
-                            filled_quantity=float(total_filled),
+                            filled_quantity=str(total_filled),
                         )
                         break
 
@@ -491,7 +492,7 @@ class IcebergAlgorithm(BaseAlgorithm):
 
                         self.logger.debug(
                             f"Iceberg slice partially filled: {order_id}",
-                            filled_quantity=float(total_filled),
+                            filled_quantity=str(total_filled),
                         )
 
                     elif order_status in [
@@ -503,7 +504,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                         self.logger.info(
                             f"Iceberg slice terminated: {order_id}",
                             status=order_status.value,
-                            filled_quantity=float(total_filled),
+                            filled_quantity=str(total_filled),
                         )
                         break
 
@@ -569,9 +570,9 @@ class IcebergAlgorithm(BaseAlgorithm):
                 "Price improvement calculated",
                 symbol=symbol,
                 side=side.value,
-                bid=float(market_data.bid),
-                ask=float(market_data.ask),
-                improved_price=float(improved_price),
+                bid=str(market_data.bid),
+                ask=str(market_data.ask),
+                improved_price=str(improved_price),
             )
 
             return improved_price
@@ -607,7 +608,7 @@ class IcebergAlgorithm(BaseAlgorithm):
                     execution_result.total_filled_quantity
                     / execution_result.original_order.quantity
                 )
-                execution_result.metadata["iceberg_fill_rate"] = float(fill_rate)
+                execution_result.metadata["iceberg_fill_rate"] = str(fill_rate)
                 execution_result.metadata["stealth_execution"] = True
                 execution_result.metadata["number_of_refreshes"] = execution_result.number_of_trades
 

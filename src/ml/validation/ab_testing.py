@@ -8,7 +8,7 @@ risk controls, and automated decision making.
 
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -49,7 +49,7 @@ class ABTestVariant:
         self.model_name = model_name
         self.traffic_allocation = traffic_allocation
         self.metadata = metadata or {}
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.now(timezone.utc)
 
         # Performance tracking
         self.predictions_count = 0
@@ -88,7 +88,7 @@ class ABTest:
 
         # Test lifecycle
         self.status = ABTestStatus.DRAFT
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.now(timezone.utc)
         self.started_at = None
         self.ended_at = None
 
@@ -289,7 +289,7 @@ class ABTestFramework(BaseComponent):
 
             # Start the test
             test.status = ABTestStatus.RUNNING
-            test.started_at = datetime.utcnow()
+            test.started_at = datetime.now(timezone.utc)
 
             self.logger.info(
                 "A/B test started",
@@ -406,7 +406,7 @@ class ABTestFramework(BaseComponent):
 
             variant.performance_metrics["predictions"].append(prediction)
             variant.performance_metrics["returns"].append(actual_return)
-            variant.performance_metrics["timestamps"].append(datetime.utcnow())
+            variant.performance_metrics["timestamps"].append(datetime.now(timezone.utc))
 
             # Calculate trading metrics if we have actual returns
             if actual_return is not None:
@@ -467,7 +467,7 @@ class ABTestFramework(BaseComponent):
             analysis_result = {
                 "test_id": test_id,
                 "test_name": test.name,
-                "analysis_timestamp": datetime.utcnow().isoformat(),
+                "analysis_timestamp": datetime.now(timezone.utc).isoformat(),
                 "test_status": test.status.value,
                 "test_duration_days": self._calculate_test_duration(test),
                 "control_variant": {
@@ -715,7 +715,7 @@ class ABTestFramework(BaseComponent):
         if test.started_at is None:
             return 0.0
 
-        end_time = test.ended_at or datetime.utcnow()
+        end_time = test.ended_at or datetime.now(timezone.utc)
         return (end_time - test.started_at).total_seconds() / 86400  # Convert to days
 
     def _calculate_statistical_power(
@@ -1120,7 +1120,7 @@ class ABTestFramework(BaseComponent):
 
             # Stop the test
             test.status = ABTestStatus.COMPLETED
-            test.ended_at = datetime.utcnow()
+            test.ended_at = datetime.now(timezone.utc)
             test.metadata["stop_reason"] = reason
 
             # Move to completed tests

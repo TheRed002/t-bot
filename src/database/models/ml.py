@@ -5,7 +5,7 @@ This module contains all ML-related database models for storing
 predictions, model metadata, and training results.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     BigInteger,
@@ -43,7 +43,7 @@ class MLPrediction(Base):
     # Timing information
     timestamp = Column(DateTime, nullable=False, index=True)  # Data timestamp
     prediction_timestamp = Column(
-        DateTime, nullable=False, default=datetime.utcnow
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
     )  # When prediction was made
 
     # Prediction results
@@ -119,8 +119,13 @@ class MLModelMetadata(Base):
     average_prediction_time_ms = Column(Float, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     def __repr__(self) -> str:
         return (
@@ -174,7 +179,7 @@ class MLTrainingJob(Base):
     early_stopping_epoch = Column(Integer, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
 

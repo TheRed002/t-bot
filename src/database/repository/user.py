@@ -1,17 +1,20 @@
 """User repository implementation."""
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.user import User
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 
-class UserRepository(BaseRepository[User]):
+class UserRepository(DatabaseRepository[User, str]):
     """Repository for User entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize user repository."""
-        super().__init__(session, User)
+
+        super().__init__(
+            session=session, model=User, entity_type=User, key_type=str, name="UserRepository"
+        )
 
     async def get_by_username(self, username: str) -> User | None:
         """Get user by username."""

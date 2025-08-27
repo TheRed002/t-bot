@@ -12,14 +12,25 @@ Uses Decimal precision for all financial calculations.
 import asyncio
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from enum import Enum
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config.main import Config
 from src.core.exceptions import RiskManagementError
 from src.core.types import MarketData, Position
+
+class CorrelationLevel(Enum):
+    """Correlation level classification."""
+    HIGH = "high_correlation"
+    MEDIUM = "medium_correlation"
+    LOW = "low_correlation"
+    UNKNOWN = "unknown"
+
+
+
 
 
 @dataclass
@@ -101,7 +112,8 @@ class CorrelationMonitor(BaseComponent):
         """
         async with self._lock:
             symbol = market_data.symbol
-            price = Decimal(str(market_data.price))
+            # Use close price as the current price
+            price = Decimal(str(market_data.close))
             timestamp = market_data.timestamp
 
             # Store new price
@@ -142,7 +154,7 @@ class CorrelationMonitor(BaseComponent):
         # Check cache first
         if cache_key in self._correlation_cache:
             correlation, cache_time = self._correlation_cache[cache_key]
-            if datetime.now() - cache_time < self._cache_timeout:
+            if datetime.now(timezone.utc) - cache_time < self._cache_timeout:
                 return correlation
 
         async with self._lock:
@@ -208,7 +220,7 @@ class CorrelationMonitor(BaseComponent):
                     correlation = Decimal("0.0")
 
                 # Cache result
-                self._correlation_cache[cache_key] = (correlation, datetime.now())
+                self._correlation_cache[cache_key] = (correlation, datetime.now(timezone.utc))
 
                 return correlation
 
@@ -244,7 +256,7 @@ class CorrelationMonitor(BaseComponent):
                     correlation_spike=False,
                     correlated_pairs_count=0,
                     portfolio_concentration_risk=Decimal("0.0"),
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(timezone.utc),
                     correlation_matrix={},
                 )
 
@@ -275,7 +287,7 @@ class CorrelationMonitor(BaseComponent):
                     correlation_spike=False,
                     correlated_pairs_count=0,
                     portfolio_concentration_risk=Decimal("0.0"),
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(timezone.utc),
                     correlation_matrix=correlation_matrix,
                 )
 
@@ -329,7 +341,7 @@ class CorrelationMonitor(BaseComponent):
                 correlation_spike=correlation_spike,
                 correlated_pairs_count=high_corr_pairs,
                 portfolio_concentration_risk=concentration_risk,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 correlation_matrix=correlation_matrix,
             )
 
@@ -383,39 +395,145 @@ class CorrelationMonitor(BaseComponent):
 
     async def cleanup_old_data(self, cutoff_time: datetime) -> None:
         """
-        Clean up old price and return data.
+        Clean up old price and return data with proper resource management.
 
         Args:
             cutoff_time: Remove data older than this time
         """
-        async with self._lock:
-            for symbol in list(self.price_history.keys()):
-                # Remove old price data
-                price_deque = self.price_history[symbol]
-                while price_deque and price_deque[0][1] < cutoff_time:
-                    price_deque.popleft()
+        try:
+            # Use timeout to prevent hanging during cleanup
+            async with asyncio.timeout(10.0):
+                async with self._lock:
+                    symbols_cleaned = 0
+                    cache_entries_cleaned = 0
 
-                # If deque is empty, remove the symbol
-                if not price_deque:
-                    del self.price_history[symbol]
-                    # Check if symbol exists in return_history before deleting
-                    if symbol in self.return_history:
-                        del self.return_history[symbol]
+                    # Clean up price and return data
+                    for symbol in list(self.price_history.keys()):
+                        try:
+                            # Remove old price data
+                            price_deque = self.price_history[symbol]
 
-            # Clear correlation cache
-            self._correlation_cache.clear()
+                            while price_deque and price_deque[0][1] < cutoff_time:
+                                price_deque.popleft()
+
+                            # If deque is empty or very small, remove the symbol
+                            if not price_deque or len(price_deque) < 5:
+                                del self.price_history[symbol]
+                                # Check if symbol exists in return_history before deleting
+                                if symbol in self.return_history:
+                                    del self.return_history[symbol]
+                                symbols_cleaned += 1
+                        except Exception as e:
+                            self.logger.error(f"Error cleaning data for symbol {symbol}: {e}")
+                            # Continue with other symbols
+
+                    # Clear correlation cache with size tracking
+                    cache_entries_cleaned = len(self._correlation_cache)
+                    self._correlation_cache.clear()
+
+                    # Log cleanup statistics for monitoring
+                    self.logger.info(
+                        "Data cleanup completed",
+                        symbols_cleaned=symbols_cleaned,
+                        cache_entries_cleaned=cache_entries_cleaned,
+                        remaining_symbols=len(self.price_history),
+                        cutoff_time=cutoff_time.isoformat(),
+                    )
+
+        except asyncio.TimeoutError:
+            self.logger.error("Data cleanup timed out after 10 seconds")
+        except Exception as e:
+            self.logger.error(f"Error during data cleanup: {e}")
+            # Don't re-raise to prevent blocking other operations
+
+    def _periodic_cache_cleanup(self) -> None:
+        """
+        Periodic cleanup of correlation cache to prevent memory leaks.
+        Called when cache grows too large.
+        """
+        try:
+            # Remove old cache entries (keep only recent ones)
+            current_time = datetime.now(timezone.utc)
+            entries_removed = 0
+
+            # Create new cache with only recent entries
+            new_cache = {}
+            for key, (correlation, cache_time) in self._correlation_cache.items():
+                if (
+                    current_time - cache_time < self._cache_timeout * 2
+                ):  # Keep entries for 2x timeout
+                    new_cache[key] = (correlation, cache_time)
+                else:
+                    entries_removed += 1
+
+            self._correlation_cache = new_cache
+
+            if entries_removed > 0:
+                self.logger.info(f"Cleaned up {entries_removed} old correlation cache entries")
+
+        except Exception as e:
+            self.logger.error(f"Error during cache cleanup: {e}")
+
+    async def cleanup_resources(self) -> None:
+        """
+        Clean up all resources used by the correlation monitor.
+        Should be called when shutting down or resetting the monitor.
+        """
+        try:
+            async with self._lock:
+                # Clear all data structures
+                symbols_count = len(self.price_history)
+                cache_size = len(self._correlation_cache)
+
+                self.price_history.clear()
+                self.return_history.clear()
+                self._correlation_cache.clear()
+
+                self.logger.info(
+                    "Correlation monitor resources cleaned up",
+                    symbols_cleared=symbols_count,
+                    cache_entries_cleared=cache_size,
+                )
+
+        except Exception as e:
+            self.logger.error(f"Error cleaning up correlation monitor resources: {e}")
 
     def get_status(self) -> dict[str, Any]:
-        """Get current monitor status."""
-        return {
-            "monitored_symbols": len(self.price_history),
-            "cache_size": len(self._correlation_cache),
-            "thresholds": {
-                "warning": str(self.thresholds.warning_threshold),
-                "critical": str(self.thresholds.critical_threshold),
-                "lookback_periods": self.thresholds.lookback_periods,
-            },
-            "data_points": {
-                symbol: len(history) for symbol, history in self.return_history.items()
-            },
-        }
+        """Get current monitor status with resource usage information."""
+        try:
+            # Calculate memory usage estimates
+            total_price_points = sum(len(history) for history in self.price_history.values())
+            total_return_points = sum(len(history) for history in self.return_history.values())
+
+            return {
+                "monitored_symbols": len(self.price_history),
+                "cache_size": len(self._correlation_cache),
+                "total_price_points": total_price_points,
+                "total_return_points": total_return_points,
+                "cache_timeout_minutes": self._cache_timeout.total_seconds() / 60,
+                "thresholds": {
+                    "warning": str(self.thresholds.warning_threshold),
+                    "critical": str(self.thresholds.critical_threshold),
+                    "lookback_periods": self.thresholds.lookback_periods,
+                    "min_periods": self.thresholds.min_periods,
+                },
+                "data_points_per_symbol": {
+                    symbol: len(history) for symbol, history in self.return_history.items()
+                },
+                "resource_usage": {
+                    "estimated_memory_mb": (total_price_points + total_return_points)
+                    * 8
+                    / 1024
+                    / 1024,  # Rough estimate
+                    "symbols_with_insufficient_data": len(
+                        [
+                            s
+                            for s, h in self.return_history.items()
+                            if len(h) < self.thresholds.min_periods
+                        ]
+                    ),
+                },
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting status: {e}")
+            return {"error": str(e), "monitored_symbols": 0, "cache_size": 0}

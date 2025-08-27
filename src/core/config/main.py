@@ -8,11 +8,13 @@ from typing import Any
 
 import yaml
 
+from .bot_management import BotManagementConfig
 from .capital import CapitalManagementConfig
 from .database import DatabaseConfig
 from .exchange import ExchangeConfig
 from .risk import RiskConfig
 from .security import SecurityConfig
+from .state_management import StateManagementConfig
 from .strategy import StrategyConfig
 
 
@@ -43,6 +45,8 @@ class Config:
         self.risk = RiskConfig()
         self.security = SecurityConfig()
         self.capital_management = CapitalManagementConfig()
+        self.bot_management = BotManagementConfig()
+        self.state_management = StateManagementConfig()
 
         # Load from config file if provided
         if config_file:
@@ -63,53 +67,67 @@ class Config:
     def load_from_file(self, config_file: str) -> None:
         """Load configuration from YAML or JSON file."""
         config_path = Path(config_file)
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_file}")
+        self._validate_config_file(config_path)
 
+        config_data = self._parse_config_file(config_path)
+        self._apply_config_data(config_data)
+
+    def _validate_config_file(self, config_path: Path) -> None:
+        """Validate config file exists and has supported format."""
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+
+        if config_path.suffix not in [".yaml", ".yml", ".json"]:
+            raise ValueError(f"Unsupported config file format: {config_path.suffix}")
+
+    def _parse_config_file(self, config_path: Path) -> dict[str, Any]:
+        """Parse config file based on format."""
         with open(config_path) as f:
             if config_path.suffix in [".yaml", ".yml"]:
-                config_data = yaml.safe_load(f)
+                return yaml.safe_load(f)
             elif config_path.suffix == ".json":
-                config_data = json.load(f)
+                return json.load(f)
             else:
                 raise ValueError(f"Unsupported config file format: {config_path.suffix}")
 
-        # Update domain configs with file data
-        if "database" in config_data:
-            for key, value in config_data["database"].items():
-                if hasattr(self.database, key):
-                    setattr(self.database, key, value)
+    def _apply_config_data(self, config_data: dict[str, Any]) -> None:
+        """Apply configuration data to domain configs."""
+        # Define config section mappings
+        config_mappings = {
+            "database": self.database,
+            "exchange": self.exchange,
+            "strategy": self.strategy,
+            "risk": self.risk,
+            "security": self.security,
+            "capital_management": self.capital_management,
+            "bot_management": self.bot_management,
+            "state_management": self.state_management,
+        }
 
-        if "exchange" in config_data:
-            for key, value in config_data["exchange"].items():
-                if hasattr(self.exchange, key):
-                    setattr(self.exchange, key, value)
+        for section_name, config_obj in config_mappings.items():
+            self._update_config_section(config_data, section_name, config_obj)
 
-        if "strategy" in config_data:
-            for key, value in config_data["strategy"].items():
-                if hasattr(self.strategy, key):
-                    setattr(self.strategy, key, value)
+    def _update_config_section(
+        self, config_data: dict[str, Any], section_name: str, config_obj: Any
+    ) -> None:
+        """Update a single config section if it exists in the data."""
+        if section_name not in config_data:
+            return
 
-        if "risk" in config_data:
-            for key, value in config_data["risk"].items():
-                if hasattr(self.risk, key):
-                    setattr(self.risk, key, value)
-
-        if "security" in config_data:
-            for key, value in config_data["security"].items():
-                if hasattr(self.security, key):
-                    setattr(self.security, key, value)
-
-        if "capital_management" in config_data:
-            for key, value in config_data["capital_management"].items():
-                if hasattr(self.capital_management, key):
-                    setattr(self.capital_management, key, value)
+        section_data = config_data[section_name]
+        for key, value in section_data.items():
+            if hasattr(config_obj, key):
+                setattr(config_obj, key, value)
 
     def save_to_file(self, config_file: str) -> None:
         """Save current configuration to YAML or JSON file."""
         config_path = Path(config_file)
+        config_data = self._build_config_data()
+        self._write_config_file(config_path, config_data)
 
-        config_data = {
+    def _build_config_data(self) -> dict[str, Any]:
+        """Build complete configuration data for serialization."""
+        return {
             "app": {
                 "name": self.app_name,
                 "environment": self.environment,
@@ -124,8 +142,12 @@ class Config:
             "risk": self.risk.model_dump(),
             "security": self.security.model_dump(),
             "capital_management": self.capital_management.model_dump(),
+            "bot_management": self.bot_management.model_dump(),
+            "state_management": self.state_management.model_dump(),
         }
 
+    def _write_config_file(self, config_path: Path, config_data: dict[str, Any]) -> None:
+        """Write configuration data to file in appropriate format."""
         with open(config_path, "w") as f:
             if config_path.suffix in [".yaml", ".yml"]:
                 yaml.dump(config_data, f, default_flow_style=False)
@@ -226,20 +248,16 @@ class Config:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert configuration to dictionary."""
-        return {
-            "app": {
-                "name": self.app_name,
-                "environment": self.environment,
-                "debug": self.debug,
-                "log_level": self.log_level,
-            },
-            "database": self.database.model_dump(),
-            "exchange": self.exchange.model_dump(),
-            "strategy": self.strategy.model_dump(),
-            "risk": self.risk.model_dump(),
-            "security": self.security.model_dump(),
-            "capital_management": self.capital_management.model_dump(),
+        # Reuse the config data building logic but with minimal app data
+        config_data = self._build_config_data()
+        # Simplify app section for to_dict
+        config_data["app"] = {
+            "name": self.app_name,
+            "environment": self.environment,
+            "debug": self.debug,
+            "log_level": self.log_level,
         }
+        return config_data
 
     def _json_serializer(self, obj):
         """Custom JSON serializer for Decimal objects."""

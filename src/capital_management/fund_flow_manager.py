@@ -952,7 +952,7 @@ class FundFlowManager(BaseComponent):
                     summary["strategies"][strategy_id] = {
                         "pnl": metrics.get("pnl", 0.0),
                         "performance_score": metrics.get("performance_score", 0.0),
-                        "last_updated": metrics.get("last_updated", datetime.now()),
+                        "last_updated": metrics.get("last_updated", datetime.now(timezone.utc)),
                     }
                 else:
                     # Handle case where metrics might be a single value

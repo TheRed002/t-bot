@@ -8,7 +8,7 @@ momentum-based stop loss adjustment, and market stress testing.
 CRITICAL: This module integrates with existing risk management framework from P-008/P-009.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -16,7 +16,7 @@ from src.core.base.component import BaseComponent
 from src.core.exceptions import RiskManagementError, ValidationError
 
 # MANDATORY: Import from P-001
-from src.core.types import MarketRegime, Position, Signal
+from src.core.types import MarketRegime, Position, Signal, SignalDirection
 
 # MANDATORY: Import from P-008/P-009
 # MANDATORY: Import from P-010 (regime detection)
@@ -179,7 +179,7 @@ class AdaptiveRiskManager(BaseComponent):
             self.logger.error(
                 "Error calculating adaptive position size", symbol=signal.symbol, error=str(e)
             )
-            raise RiskManagementError(f"Adaptive position sizing failed: {e!s}")
+            raise RiskManagementError(f"Adaptive position sizing failed: {e!s}") from e
 
     @time_execution
     async def calculate_adaptive_stop_loss(
@@ -201,11 +201,21 @@ class AdaptiveRiskManager(BaseComponent):
             if not signal.symbol or signal.symbol.strip() == "":
                 raise RiskManagementError("Invalid signal: symbol cannot be empty")
 
-            # Validate entry price
-            if entry_price <= 0:
-                raise RiskManagementError(
-                    f"Invalid entry price: {entry_price}. Price must be positive"
-                )
+            # Validate entry price with comprehensive checks
+            try:
+                if entry_price is None:
+                    raise RiskManagementError("Entry price cannot be None")
+                if not isinstance(entry_price, Decimal | int | float):
+                    raise RiskManagementError(
+                        f"Invalid entry price type: {type(entry_price).__name__}. "
+                        f"Must be Decimal, int, or float"
+                    )
+                if entry_price <= 0:
+                    raise RiskManagementError(
+                        f"Invalid entry price: {entry_price}. Price must be positive"
+                    )
+            except TypeError as e:
+                raise RiskManagementError(f"Type error validating entry price: {e}") from e
 
             # Get base stop loss percentage
             base_stop_loss_pct = self.base_stop_loss_pct
@@ -220,11 +230,26 @@ class AdaptiveRiskManager(BaseComponent):
                 str(stop_loss_multiplier)
             )
 
-            # Calculate stop loss price
-            if signal.direction.value == "buy":
-                stop_loss_price = entry_price * (1 - adaptive_stop_loss_pct)
-            else:
-                stop_loss_price = entry_price * (1 + adaptive_stop_loss_pct)
+            # Calculate stop loss price with validation
+            try:
+                if signal.direction == SignalDirection.BUY:
+                    stop_loss_price = entry_price * (1 - adaptive_stop_loss_pct)
+                elif signal.direction == SignalDirection.SELL:
+                    stop_loss_price = entry_price * (1 + adaptive_stop_loss_pct)
+                else:
+                    raise RiskManagementError(
+                        f"Invalid signal direction for stop loss calculation: {signal.direction}"
+                    )
+
+                # Validate calculated stop loss price
+                if stop_loss_price <= 0:
+                    raise RiskManagementError(
+                        f"Calculated stop loss price is invalid: {stop_loss_price}"
+                    )
+            except (TypeError, ValueError, ArithmeticError) as e:
+                raise RiskManagementError(
+                    f"Mathematical error calculating stop loss price: {e}"
+                ) from e
 
             self.logger.debug(
                 "Adaptive stop loss calculated",
@@ -241,7 +266,7 @@ class AdaptiveRiskManager(BaseComponent):
             self.logger.error(
                 "Error calculating adaptive stop loss", symbol=signal.symbol, error=str(e)
             )
-            raise RiskManagementError(f"Adaptive stop loss calculation failed: {e!s}")
+            raise RiskManagementError(f"Adaptive stop loss calculation failed: {e!s}") from e
 
     @time_execution
     async def calculate_adaptive_take_profit(
@@ -276,11 +301,26 @@ class AdaptiveRiskManager(BaseComponent):
                 str(take_profit_multiplier)
             )
 
-            # Calculate take profit price
-            if signal.direction.value == "buy":
-                take_profit_price = entry_price * (1 + adaptive_take_profit_pct)
-            else:
-                take_profit_price = entry_price * (1 - adaptive_take_profit_pct)
+            # Calculate take profit price with validation
+            try:
+                if signal.direction == SignalDirection.BUY:
+                    take_profit_price = entry_price * (1 + adaptive_take_profit_pct)
+                elif signal.direction == SignalDirection.SELL:
+                    take_profit_price = entry_price * (1 - adaptive_take_profit_pct)
+                else:
+                    raise RiskManagementError(
+                        f"Invalid signal direction for take profit calculation: {signal.direction}"
+                    )
+
+                # Validate calculated take profit price
+                if take_profit_price <= 0:
+                    raise RiskManagementError(
+                        f"Calculated take profit price is invalid: {take_profit_price}"
+                    )
+            except (TypeError, ValueError, ArithmeticError) as e:
+                raise RiskManagementError(
+                    f"Mathematical error calculating take profit price: {e}"
+                ) from e
 
             self.logger.debug(
                 "Adaptive take profit calculated",
@@ -297,7 +337,7 @@ class AdaptiveRiskManager(BaseComponent):
             self.logger.error(
                 "Error calculating adaptive take profit", symbol=signal.symbol, error=str(e)
             )
-            raise RiskManagementError(f"Adaptive take profit calculation failed: {e!s}")
+            raise RiskManagementError(f"Adaptive take profit calculation failed: {e!s}") from e
 
     @time_execution
     async def calculate_adaptive_portfolio_limits(
@@ -335,7 +375,7 @@ class AdaptiveRiskManager(BaseComponent):
 
             # Adjust maximum portfolio exposure
             if "max_portfolio_exposure" in adaptive_limits:
-                if current_regime in [MarketRegime.HIGH_VOLATILITY, MarketRegime.CRISIS]:
+                if current_regime == MarketRegime.HIGH_VOLATILITY:
                     # Reduce exposure
                     adaptive_limits["max_portfolio_exposure"] *= 0.8
                 elif current_regime == MarketRegime.LOW_VOLATILITY:
@@ -344,7 +384,7 @@ class AdaptiveRiskManager(BaseComponent):
 
             # Adjust correlation limits
             correlation_regime = await self._get_correlation_regime()
-            if correlation_regime == MarketRegime.HIGH_CORRELATION:
+            if correlation_regime == "high_correlation":
                 if "max_correlation_exposure" in adaptive_limits:
                     # Reduce correlation exposure
                     adaptive_limits["max_correlation_exposure"] *= 0.7
@@ -359,7 +399,7 @@ class AdaptiveRiskManager(BaseComponent):
 
         except Exception as e:
             self.logger.error("Error calculating adaptive portfolio limits", error=str(e))
-            raise RiskManagementError(f"Adaptive portfolio limits calculation failed: {e!s}")
+            raise RiskManagementError(f"Adaptive portfolio limits calculation failed: {e!s}") from e
 
     @time_execution
     async def run_stress_test(
@@ -405,7 +445,8 @@ class AdaptiveRiskManager(BaseComponent):
                     current_price=stressed_price,
                     unrealized_pnl=position.quantity * (stressed_price - position.entry_price),
                     side=position.side,
-                    timestamp=position.timestamp,
+                    opened_at=position.opened_at,
+                    exchange=position.exchange,
                 )
                 stressed_positions.append(stressed_position)
 
@@ -429,7 +470,7 @@ class AdaptiveRiskManager(BaseComponent):
                 "value_change_pct": value_change_pct,
                 "max_drawdown": max_drawdown,
                 "positions_affected": len(portfolio_positions),
-                "timestamp": datetime.now(),
+                "timestamp": datetime.now(timezone.utc),
             }
 
             self.logger.warning(
@@ -446,16 +487,35 @@ class AdaptiveRiskManager(BaseComponent):
             raise
         except Exception as e:
             self.logger.error("Error running stress test", scenario=scenario_name, error=str(e))
-            raise RiskManagementError(f"Stress test failed: {e!s}")
+            raise RiskManagementError(f"Stress test failed: {e!s}") from e
 
     async def _get_correlation_regime(self) -> str | None:
         """Get current correlation regime from detector."""
         try:
             # This would typically get correlation regime from the regime detector
             # For now, return None to use default behavior
+            if self.regime_detector is None:
+                self.logger.debug("No regime detector available for correlation regime")
+                return None
+
+            # Call regime detector to get correlation regime
+            # Implementation would depend on regime detector interface
+            return None
+        except AttributeError as e:
+            self.logger.error(
+                "Regime detector attribute error while getting correlation regime",
+                error=str(e),
+                detector_type=(
+                    type(self.regime_detector).__name__ if self.regime_detector else "None"
+                ),
+            )
             return None
         except Exception as e:
-            self.logger.error("Error getting correlation regime", error=str(e))
+            self.logger.error(
+                "Unexpected error getting correlation regime",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return None
 
     async def _calculate_momentum_adjustment(self, symbol: str) -> float:
@@ -469,22 +529,51 @@ class AdaptiveRiskManager(BaseComponent):
             float: Momentum adjustment multiplier
         """
         try:
+            # Validate input symbol
+            if not symbol or not isinstance(symbol, str) or symbol.strip() == "":
+                self.logger.warning("Invalid symbol for momentum adjustment", symbol=symbol)
+                return 1.0  # Neutral adjustment for invalid input
+
             # TODO: Remove in production - This is a placeholder implementation
-            # In production, this would calculate actual momentum from price
-            # data
+            # In production, this would calculate actual momentum from price data
             momentum_multiplier = 1.0  # Default no adjustment
 
-            # Simple momentum calculation (placeholder)
-            # This would use actual price data to calculate momentum
-            if symbol.endswith("USDT"):
+            # Simple momentum calculation (placeholder) with bounds checking
+            symbol_upper = symbol.upper().strip()
+            if symbol_upper.endswith("USDT"):
                 momentum_multiplier = 1.05  # Slight positive momentum for USDT pairs
-            elif symbol.endswith("BTC"):
+            elif symbol_upper.endswith("BTC"):
                 momentum_multiplier = 0.95  # Slight negative momentum for BTC pairs
+
+            # Apply safety bounds to prevent extreme multipliers
+            momentum_multiplier = max(0.1, min(momentum_multiplier, 5.0))
+
+            self.logger.debug(
+                "Momentum adjustment calculated", symbol=symbol, adjustment=momentum_multiplier
+            )
 
             return momentum_multiplier
 
+        except AttributeError as e:
+            self.logger.error(
+                "Attribute error calculating momentum adjustment", symbol=symbol, error=str(e)
+            )
+            return 1.0  # Return neutral adjustment on error
+        except TypeError as e:
+            self.logger.error(
+                "Type error calculating momentum adjustment",
+                symbol=symbol,
+                symbol_type=type(symbol).__name__,
+                error=str(e),
+            )
+            return 1.0  # Return neutral adjustment on error
         except Exception as e:
-            self.logger.error("Error calculating momentum adjustment", symbol=symbol, error=str(e))
+            self.logger.error(
+                "Unexpected error calculating momentum adjustment",
+                symbol=symbol,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return 1.0  # Return neutral adjustment on error
 
     def get_adaptive_parameters(self, regime: MarketRegime) -> dict[str, Any]:

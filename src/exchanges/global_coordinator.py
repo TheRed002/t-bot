@@ -10,7 +10,7 @@ P-002A (error handling), and P-003+ (exchange interfaces).
 
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.core.base import BaseComponent
@@ -198,7 +198,7 @@ class GlobalRateCoordinator(BaseComponent):
 
     async def _check_order_limits(self, count: int) -> bool:
         """Check order-specific global limits."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         minute_ago = now - timedelta(minutes=1)
 
         # Clean old entries
@@ -218,7 +218,7 @@ class GlobalRateCoordinator(BaseComponent):
 
     async def _check_connection_limits(self, count: int) -> bool:
         """Check connection-specific global limits."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         minute_ago = now - timedelta(minutes=1)
 
         # Clean old entries
@@ -238,7 +238,7 @@ class GlobalRateCoordinator(BaseComponent):
 
     async def _check_general_request_limits(self, count: int) -> bool:
         """Check general request limits."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         minute_ago = now - timedelta(minutes=1)
 
         # Clean old entries
@@ -271,7 +271,7 @@ class GlobalRateCoordinator(BaseComponent):
 
     def _record_request(self, request_type: str, count: int) -> None:
         """Record request for tracking."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         # Record based on request type
         if request_type == RequestType.ORDER_PLACEMENT.value:
@@ -286,8 +286,10 @@ class GlobalRateCoordinator(BaseComponent):
 
         # Clean old history - remove entries older than 1 hour AND keep max entries
         hour_ago = now - timedelta(hours=1)
-        
-        self.request_history["general"] = [t for t in self.request_history["general"] if t > hour_ago]
+
+        self.request_history["general"] = [
+            t for t in self.request_history["general"] if t > hour_ago
+        ]
         if len(self.request_history["general"]) > 10000:
             self.request_history["general"] = self.request_history["general"][-10000:]
 
@@ -301,7 +303,7 @@ class GlobalRateCoordinator(BaseComponent):
 
     def _record_exchange_usage(self, exchange: str, endpoint: str, request_type: str) -> None:
         """Record exchange-specific usage."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         self.exchange_usage[exchange][endpoint].append(now)
 
         # Clean old history - remove entries older than 1 hour AND keep max 1000 entries per endpoint
@@ -321,7 +323,7 @@ class GlobalRateCoordinator(BaseComponent):
         Returns:
             Dict containing usage statistics
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         minute_ago = now - timedelta(minutes=1)
 
         # Calculate current usage
@@ -350,7 +352,7 @@ class GlobalRateCoordinator(BaseComponent):
         if exchange not in self.exchange_usage:
             return {}
 
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         minute_ago = now - timedelta(minutes=1)
 
         stats = {}
@@ -411,7 +413,7 @@ class GlobalRateCoordinator(BaseComponent):
 
     async def _calculate_order_wait_time(self, count: int) -> float:
         """Calculate wait time for order capacity."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         minute_ago = now - timedelta(minutes=1)
 
         # Clean old entries
@@ -428,7 +430,7 @@ class GlobalRateCoordinator(BaseComponent):
 
     async def _calculate_connection_wait_time(self, count: int) -> float:
         """Calculate wait time for connection capacity."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         minute_ago = now - timedelta(minutes=1)
 
         # Clean old entries
@@ -445,7 +447,7 @@ class GlobalRateCoordinator(BaseComponent):
 
     async def _calculate_general_wait_time(self, count: int) -> float:
         """Calculate wait time for general request capacity."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         minute_ago = now - timedelta(minutes=1)
 
         # Clean old entries
@@ -496,7 +498,7 @@ class GlobalRateCoordinator(BaseComponent):
         Returns:
             Dict containing health information
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         minute_ago = now - timedelta(minutes=1)
 
         # Calculate current usage percentages

@@ -191,14 +191,14 @@ class VWAPAlgorithm(BaseAlgorithm):
 
             # Register execution as running
             self.current_executions[execution_id] = execution_result
-            self.is_running = True
+            # is_running is managed by BaseComponent/BaseAlgorithm
             execution_result.status = ExecutionStatus.RUNNING
 
             self.logger.info(
                 "Starting VWAP execution",
                 execution_id=execution_id,
                 symbol=instruction.order.symbol,
-                quantity=float(instruction.order.quantity),
+                quantity=str(instruction.order.quantity),
                 time_horizon=instruction.time_horizon_minutes,
             )
 
@@ -245,7 +245,7 @@ class VWAPAlgorithm(BaseAlgorithm):
                 "VWAP execution completed",
                 execution_id=execution_id,
                 status=execution_result.status.value,
-                filled_quantity=float(execution_result.total_filled_quantity),
+                filled_quantity=str(execution_result.total_filled_quantity),
                 number_of_trades=execution_result.number_of_trades,
             )
 
@@ -270,7 +270,8 @@ class VWAPAlgorithm(BaseAlgorithm):
             raise ExecutionError(f"VWAP execution failed: {e}")
 
         finally:
-            self.is_running = False
+            # is_running is managed by BaseComponent/BaseAlgorithm
+            pass
 
     async def cancel_execution(self, execution_id: str) -> bool:
         """
@@ -591,7 +592,7 @@ class VWAPAlgorithm(BaseAlgorithm):
                             f"Exchange error placing slice {slice_num}: {e}",
                             slice_num=slice_num,
                             symbol=slice_order.symbol,
-                            quantity=float(slice_order.quantity),
+                            quantity=str(slice_order.quantity),
                         )
                         # Continue with next slice, don't fail entire execution
                         execution_result.add_fill(
@@ -628,8 +629,8 @@ class VWAPAlgorithm(BaseAlgorithm):
                     self.logger.info(
                         "VWAP slice executed",
                         slice_number=slice_info["slice_number"],
-                        quantity=float(adjusted_quantity),
-                        filled=float(order_response.filled_quantity),
+                        quantity=str(adjusted_quantity),
+                        filled=str(order_response.filled_quantity),
                         volume_weight=slice_info["volume_weight"],
                         order_id=order_response.id,
                     )
@@ -686,8 +687,8 @@ class VWAPAlgorithm(BaseAlgorithm):
             self.logger.debug(
                 "Volume adjustment applied",
                 slice_number=slice_info["slice_number"],
-                original=float(original_quantity),
-                adjusted=float(adjusted_quantity),
+                original=str(original_quantity),
+                adjusted=str(adjusted_quantity),
                 factor=volume_adjustment_factor,
             )
 

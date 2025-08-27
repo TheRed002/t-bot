@@ -27,7 +27,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -721,6 +721,32 @@ class HighPerformanceWebSocketManager:
                 "connection_weights": dict(self.connection_pool.connection_weights),
             },
         }
+    
+    def get_connection_health(self) -> dict[str, Any]:
+        """
+        Get connection health status.
+        
+        This method provides compatibility with monitoring systems expecting
+        connection health information. It returns the same data as get_performance_summary
+        but also includes additional computed metrics for health monitoring.
+        """
+        # Get base performance summary
+        summary = self.get_performance_summary()
+        
+        # Calculate message rate
+        total_latency_sum = 0.0
+        message_count = 0
+        
+        for metrics in summary["connection_details"].values():
+            if "average_latency_ms" in metrics and metrics["messages_received"] > 0:
+                total_latency_sum += metrics["average_latency_ms"] * metrics["messages_received"]
+                message_count += metrics["messages_received"]
+        
+        # Add health-specific metrics
+        summary["total_latency_sum"] = total_latency_sum
+        summary["message_rate"] = message_count / max(1, time.time() - getattr(self, "start_time", time.time()))
+        
+        return summary
 
 
 class WebSocketConnectionPool:
@@ -792,7 +818,7 @@ class WebSocketConnectionPool:
             if available_connections:
                 # Return the least recently used connection
                 connection = min(available_connections, key=lambda c: c.last_used)
-                connection.last_used = datetime.now()
+                connection.last_used = datetime.now(timezone.utc)
                 return connection
 
             # Create new connection if pool not full
@@ -821,7 +847,7 @@ class WebSocketConnectionPool:
                 raise ValidationError("Valid connection is required")
 
             # Update connection stats
-            connection.last_used = datetime.now()
+            connection.last_used = datetime.now(timezone.utc)
 
             # Check if connection is still healthy
             if not self._is_connection_healthy(connection):
@@ -856,8 +882,8 @@ class WebSocketConnectionPool:
                 exchange=self.exchange,
                 connection_type=connection_type,
                 connection=connection_obj,
-                created_at=datetime.now(),
-                last_used=datetime.now(),
+                created_at=datetime.now(timezone.utc),
+                last_used=datetime.now(timezone.utc),
             )
 
             return pooled_connection
@@ -904,11 +930,15 @@ class WebSocketConnectionPool:
         """
         try:
             # Check if connection is too old
-            if datetime.now() - connection.created_at > timedelta(seconds=self.connection_timeout):
+            if datetime.now(timezone.utc) - connection.created_at > timedelta(
+                seconds=self.connection_timeout
+            ):
                 return False
 
             # Check if connection has been inactive for too long
-            if datetime.now() - connection.last_used > timedelta(seconds=self.connection_timeout):
+            if datetime.now(timezone.utc) - connection.last_used > timedelta(
+                seconds=self.connection_timeout
+            ):
                 return False
 
             # Check message rate limits
@@ -964,7 +994,7 @@ class WebSocketConnectionPool:
             bool: True if within limits
         """
         try:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             second_ago = now - timedelta(seconds=1)
 
             # Clean old message timestamps
@@ -1037,7 +1067,7 @@ class WebSocketConnectionPool:
             connection_id: Connection ID
         """
         try:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             self.message_counters[connection_id].append(now)
 
             # Clean old entries (keep last 1000)

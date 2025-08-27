@@ -9,7 +9,7 @@ CRITICAL: This strategy requires rapid execution sequencing and careful
 slippage management across the arbitrage chain.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -73,7 +73,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
         # State tracking
         self.active_triangular_arbitrages: dict[str, dict] = {}
         self.pair_prices: dict[str, MarketData] = {}
-        self.last_opportunity_check = datetime.now()
+        self.last_opportunity_check = datetime.now(timezone.utc)
 
         self.logger.info(
             "Triangular arbitrage strategy initialized",
@@ -184,8 +184,8 @@ class TriangularArbitrageStrategy(BaseStrategy):
             eth_usdt_rate = price3.price  # ETH/USDT rate
 
             # CRITICAL FIX: Atomic calculation with timestamp validation
-            calculation_timestamp = datetime.now()
-            
+            calculation_timestamp = datetime.now(timezone.utc)
+
             # Step 2: Calculate triangular conversion atomically
             # Start with 1 BTC worth of USDT
             start_usdt = btc_usdt_rate
@@ -197,7 +197,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
             final_usdt = eth_amount * eth_usdt_rate
 
             # Validate prices haven't changed significantly
-            price_age = (datetime.now() - price1.timestamp).total_seconds()
+            price_age = (datetime.now(timezone.utc) - price1.timestamp).total_seconds()
             if price_age > 0.5:  # Prices older than 500ms are stale
                 self.logger.debug(
                     "Triangular calculation aborted - stale prices",
@@ -223,7 +223,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
                         direction=SignalDirection.BUY,  # Direction doesn't matter for triangular
                         # Scale confidence with profit
                         confidence=min(0.9, net_profit_percentage / 2),
-                        timestamp=datetime.now(),
+                        timestamp=datetime.now(timezone.utc),
                         symbol=pair1,  # Use first pair as primary symbol
                         strategy_name=self.name,
                         metadata={
@@ -359,7 +359,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
         """
         try:
             # Check if we have recent price data for all pairs
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
             max_age = timedelta(milliseconds=self.latency_threshold)
 
             for pair in path:
@@ -571,7 +571,7 @@ class TriangularArbitrageStrategy(BaseStrategy):
 
             # Check execution timeout
             execution_timeout = position.metadata.get("execution_timeout", self.max_execution_time)
-            position_age = (datetime.now() - position.timestamp).total_seconds() * 1000
+            position_age = (datetime.now(timezone.utc) - position.timestamp).total_seconds() * 1000
 
             if position_age > execution_timeout:
                 self.logger.info(

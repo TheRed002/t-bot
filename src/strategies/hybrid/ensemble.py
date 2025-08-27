@@ -209,7 +209,15 @@ class CorrelationAnalyzer:
                             correlation_matrix[strategy1][strategy2] = (
                                 correlation if not np.isnan(correlation) else 0.0
                             )
-                        except:
+                        except (ValueError, RuntimeWarning) as e:
+                            self.logger.debug(
+                                f"Correlation calculation failed between {strategy1} and {strategy2}: {e}"
+                            )
+                            correlation_matrix[strategy1][strategy2] = 0.0
+                        except Exception as e:
+                            self.logger.warning(
+                                f"Unexpected error in strategy correlation calculation: {e}"
+                            )
                             correlation_matrix[strategy1][strategy2] = 0.0
 
         return correlation_matrix
@@ -638,10 +646,10 @@ class EnsembleStrategy(BaseStrategy):
 
     async def _check_and_rebalance(self) -> None:
         """Check if rebalancing is needed and perform it."""
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         try:
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
 
             if self.last_rebalance is None or current_time - self.last_rebalance > timedelta(
                 hours=self.rebalance_frequency
@@ -825,8 +833,12 @@ class EnsembleStrategy(BaseStrategy):
                             and strategy.last_signal_direction == SignalDirection.BUY
                         ):
                             opposing_signals += 1
-                except:
-                    continue
+                except (AttributeError, KeyError) as e:
+                    self.logger.debug(f"Strategy signal analysis failed: {e}")
+                    continue  # Skip this strategy
+                except Exception as e:
+                    self.logger.warning(f"Unexpected error in ensemble exit analysis: {e}")
+                    continue  # Continue with other strategies
 
             # Exit if majority of strategies are signaling opposite direction
             if total_signals > 0 and opposing_signals / total_signals > 0.6:

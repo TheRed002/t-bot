@@ -38,23 +38,16 @@ from typing import Any
 import psutil
 
 try:
-    from src.core.base import BaseComponent
+    import numpy as np
 except ImportError:
-    from src.base import BaseComponent
+    np = None
 
 try:
-    from src.core import OrderType
+    from scipy import stats
 except ImportError:
-    from enum import Enum
+    stats = None
 
-    class OrderType(Enum):
-        """Order type fallback."""
-
-        MARKET = "MARKET"
-        LIMIT = "LIMIT"
-        STOP = "STOP"
-        STOP_LIMIT = "STOP_LIMIT"
-
+from src.core import BaseComponent, OrderType
 
 # Import utils decorators and helpers for better integration
 from src.utils.decorators import cache_result, logged, monitored, retry, time_execution
@@ -89,7 +82,7 @@ except ImportError:
 
 
 from src.monitoring.alerting import Alert, AlertManager, AlertSeverity, AlertStatus
-from src.monitoring.metrics import MetricsCollector, get_metrics_collector
+from src.monitoring.metrics import MetricsCollector
 
 
 class PerformanceCategory(Enum):
@@ -250,23 +243,31 @@ class PerformanceProfiler(BaseComponent):
         """
         super().__init__(name="PerformanceProfiler")
 
-        self.metrics_collector = metrics_collector or get_metrics_collector()
+        # Remove service locator pattern - require explicit dependencies
+        if metrics_collector is None:
+            raise ValueError("metrics_collector is required - use dependency injection")
+
+        self.metrics_collector = metrics_collector
         self.alert_manager = alert_manager
-        self._error_handler = error_handler or get_global_error_handler()
+        self._error_handler = error_handler
         self.max_samples = max_samples
         self.collection_interval = collection_interval
         self.anomaly_detection = anomaly_detection
 
         # Performance data storage
         self._latency_data: dict[str, deque] = defaultdict(lambda: deque(maxlen=max_samples))
-        self._throughput_data: dict[str, list[tuple]] = defaultdict(list)
+        self._throughput_data: dict[str, deque] = defaultdict(lambda: deque(maxlen=max_samples))
         self._resource_history: deque = deque(maxlen=1000)
         self._gc_history: deque = deque(maxlen=100)
 
         # Threading and async support
-        self._lock = threading.RLock()
+        self._lock = threading.RLock()  # For sync methods
+        self._async_lock = asyncio.Lock()  # For async methods
         self._running = False
         self._background_task: asyncio.Task | None = None
+        self._shutdown_event = asyncio.Event()
+        self._graceful_shutdown_timeout = 30.0  # seconds
+        self._force_shutdown_timeout = 10.0  # seconds
 
         # Performance thresholds for alerting
         self._thresholds = {
@@ -281,6 +282,12 @@ class PerformanceProfiler(BaseComponent):
         # Baseline performance data for anomaly detection
         self._baselines: dict[str, dict[str, float]] = defaultdict(dict)
         self._last_baseline_update = 0.0
+
+        # Cache for performance optimization
+        self._metric_cache: dict[str, Any] = {}
+
+        # Task management for alerts
+        self._alert_tasks: set[asyncio.Task] = set()
 
         # Initialize metrics
         self._register_metrics()
@@ -396,83 +403,186 @@ class PerformanceProfiler(BaseComponent):
                 self.logger.warning(f"Failed to register metric {metric_def.name}: {e}")
 
     async def start(self) -> None:
-        """Start background performance monitoring."""
+        """Start background performance monitoring with proper task lifecycle."""
         if self._running:
             self.logger.warning("Performance profiler already running")
             return
 
         self._running = True
-        self._background_task = asyncio.create_task(self._monitoring_loop())
-        self.logger.info("Started performance monitoring")
+        self._shutdown_event.clear()
+
+        try:
+            self._background_task = asyncio.create_task(self._monitoring_loop())
+            self.logger.info("Started performance monitoring")
+        except Exception as e:
+            self._running = False
+            self.logger.error(f"Failed to start performance monitoring: {e}")
+            raise
 
     async def stop(self) -> None:
-        """Stop background performance monitoring."""
+        """Stop background performance monitoring with proper task lifecycle management."""
+        self.logger.info("Stopping performance monitoring...")
+
+        # Signal shutdown
         self._running = False
+        self._shutdown_event.set()
 
-        if self._background_task:
-            self._background_task.cancel()
+        if self._background_task and not self._background_task.done():
             try:
-                await self._background_task
-            except asyncio.CancelledError:
-                pass
-            self._background_task = None
+                # First try graceful shutdown
+                self.logger.debug("Attempting graceful shutdown of background task")
+                await asyncio.wait_for(
+                    self._background_task, timeout=self._graceful_shutdown_timeout
+                )
+                self.logger.debug("Background task stopped gracefully")
 
-        self.logger.info("Stopped performance monitoring")
+            except asyncio.TimeoutError:
+                # If graceful shutdown fails, cancel the task
+                self.logger.warning(
+                    f"Background task did not stop within {self._graceful_shutdown_timeout}s, "
+                    "cancelling..."
+                )
+                self._background_task.cancel()
+
+                try:
+                    # Wait for cancellation to complete
+                    await asyncio.wait_for(
+                        self._background_task, timeout=self._force_shutdown_timeout
+                    )
+                    self.logger.debug("Background task cancelled successfully")
+
+                except asyncio.TimeoutError:
+                    self.logger.error(
+                        f"Background task did not cancel within {self._force_shutdown_timeout}s - "
+                        "may cause resource leaks"
+                    )
+
+            except asyncio.CancelledError:
+                self.logger.debug("Background task was cancelled")
+
+            except Exception as e:
+                self.logger.error(f"Error stopping background task: {e}")
+
+            finally:
+                self._background_task = None
+
+        # Cancel any remaining alert tasks
+        if self._alert_tasks:
+            self.logger.debug(f"Cancelling {len(self._alert_tasks)} alert tasks")
+            for task in list(self._alert_tasks):
+                if not task.done():
+                    task.cancel()
+
+            # Wait briefly for alert tasks to finish
+            if self._alert_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*self._alert_tasks, return_exceptions=True), timeout=5.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Some alert tasks did not complete within timeout")
+
+            self._alert_tasks.clear()
+
+        self.logger.info("Performance monitoring stopped")
+
+    async def cleanup(self) -> None:
+        """Cleanup resources on shutdown."""
+        await self.stop()
+
+        # Clear data structures to prevent memory leaks
+        async with self._async_lock:
+            self._latency_data.clear()
+            self._throughput_data.clear()
+            self._resource_history.clear()
+            self._gc_history.clear()
+            self._baselines.clear()
+            self._metric_cache.clear()
+
+        self.logger.info("Performance profiler cleanup completed")
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.cleanup()
 
     @retry(max_attempts=3, delay=2.0)
     @logged(level="debug")
     async def _monitoring_loop(self) -> None:
-        """Background loop for collecting system metrics."""
+        """Background loop for collecting system metrics with proper cancellation."""
         consecutive_errors = 0
         max_consecutive_errors = 5
 
-        while self._running:
-            try:
-                # Check if we should still be running before each operation
-                if not self._running:
-                    break
-
-                await self._collect_system_resources()
-                await self._collect_gc_stats()
-                await self._check_performance_thresholds()
-
-                if self.anomaly_detection:
-                    await self._detect_anomalies()
-
-                # Reset error counter on success
-                consecutive_errors = 0
-
-                # Use wait_for to make sleep cancellable
+        try:
+            while self._running and not self._shutdown_event.is_set():
                 try:
-                    await asyncio.wait_for(
-                        asyncio.shield(asyncio.sleep(self.collection_interval)),
-                        timeout=self.collection_interval,
-                    )
-                except asyncio.TimeoutError:
-                    pass
+                    # Check shutdown signal first
+                    if self._shutdown_event.is_set():
+                        self.logger.debug("Shutdown signal received, exiting monitoring loop")
+                        break
 
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                consecutive_errors += 1
+                    # Double-check running state
+                    if not self._running:
+                        break
 
-                # Use error handler for intelligent recovery
-                if self._error_handler:
-                    recovery_scenario = RecoveryScenario(
-                        component="PerformanceProfiler",
-                        operation="monitoring_loop",
-                        error=e,
-                        context=ErrorContext(
+                    # Perform monitoring tasks
+                    await self._collect_system_resources()
+                    await self._collect_gc_stats()
+                    await self._check_performance_thresholds()
+
+                    if self.anomaly_detection:
+                        await self._detect_anomalies()
+
+                    # Reset error counter on success
+                    consecutive_errors = 0
+
+                    # Use cancellable wait with shutdown check
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.sleep(self.collection_interval),
+                            timeout=self.collection_interval + 1.0,  # Extra buffer
+                        )
+                    except asyncio.TimeoutError:
+                        # This shouldn't happen unless there's an issue with asyncio.sleep
+                        self.logger.warning("Sleep operation timed out unexpectedly")
+                    except asyncio.CancelledError:
+                        self.logger.debug("Monitoring loop cancelled during sleep")
+                        break
+
+                except asyncio.CancelledError:
+                    self.logger.debug("Monitoring loop cancelled")
+                    break
+                except Exception as e:
+                    consecutive_errors += 1
+
+                    # Use error handler for intelligent recovery
+                    if self._error_handler:
+                        recovery_scenario = RecoveryScenario(
                             component="PerformanceProfiler",
                             operation="monitoring_loop",
-                            consecutive_errors=consecutive_errors,
-                        ),
-                    )
+                            error=e,
+                            context=ErrorContext(
+                                error=e,
+                                component="PerformanceProfiler",
+                                operation="monitoring_loop",
+                                details={
+                                    "consecutive_errors": consecutive_errors,
+                                    "max_consecutive_errors": max_consecutive_errors,
+                                },
+                            ),
+                        )
 
                     try:
                         # Log the error and apply basic recovery strategy
-                        await self._error_handler.handle_error(e, recovery_scenario.context)
-                        
+                        if hasattr(self._error_handler, "handle_error"):
+                            await self._error_handler.handle_error(e, recovery_scenario.context)
+                        elif hasattr(self._error_handler, "handle_error_sync"):
+                            self._error_handler.handle_error_sync(e, recovery_scenario.context)
+
                         if consecutive_errors >= max_consecutive_errors:
                             self.logger.error(
                                 f"Too many consecutive errors ({consecutive_errors}), "
@@ -485,13 +595,29 @@ class PerformanceProfiler(BaseComponent):
                                 f"Error in monitoring loop (attempt {consecutive_errors}), "
                                 f"retrying in {wait_time}s: {e}"
                             )
-                            await asyncio.sleep(wait_time)
+                            try:
+                                await asyncio.sleep(wait_time)
+                            except asyncio.CancelledError:
+                                break
                     except Exception as recovery_error:
                         self.logger.error(f"Recovery failed: {recovery_error}")
-                        await asyncio.sleep(5.0)
-                else:
-                    self.logger.error(f"Error in performance monitoring loop: {e}")
-                    await asyncio.sleep(5.0)
+                        try:
+                            await asyncio.sleep(5.0)
+                        except asyncio.CancelledError:
+                            break
+                    else:
+                        self.logger.error(f"Error in performance monitoring loop: {e}")
+                        try:
+                            await asyncio.sleep(5.0)
+                        except asyncio.CancelledError:
+                            break
+
+        except asyncio.CancelledError:
+            self.logger.debug("Monitoring loop cancelled at top level")
+        except Exception as e:
+            self.logger.error(f"Fatal error in monitoring loop: {e}")
+        finally:
+            self.logger.debug("Monitoring loop exiting")
 
     @contextmanager
     @time_execution()
@@ -550,7 +676,7 @@ class PerformanceProfiler(BaseComponent):
 
             metric_name = f"{module_name}.{function_name}" if module_name else function_name
 
-            with self._lock:
+            async with self._async_lock:
                 self._latency_data[metric_name].append(duration_ms)
 
             # Update Prometheus metrics
@@ -595,27 +721,19 @@ class PerformanceProfiler(BaseComponent):
 
         # Check for performance threshold violations
         if latency_ms > self._thresholds["order_execution_latency_ms"]["critical"]:
-            task = asyncio.create_task(
-                self._send_performance_alert(
-                    "Critical order execution latency",
-                    f"Order execution latency {latency_ms:.2f}ms exceeds critical threshold",
-                    AlertSeverity.CRITICAL,
-                    labels,
-                )
+            self._create_managed_alert_task(
+                "Critical order execution latency",
+                f"Order execution latency {latency_ms:.2f}ms exceeds critical threshold",
+                AlertSeverity.CRITICAL,
+                labels,
             )
-            # Properly handle task completion
-            task.add_done_callback(self._handle_alert_task_completion)
         elif latency_ms > self._thresholds["order_execution_latency_ms"]["warning"]:
-            task = asyncio.create_task(
-                self._send_performance_alert(
-                    "High order execution latency",
-                    f"Order execution latency {latency_ms:.2f}ms exceeds warning threshold",
-                    AlertSeverity.HIGH,
-                    labels,
-                )
+            self._create_managed_alert_task(
+                "High order execution latency",
+                f"Order execution latency {latency_ms:.2f}ms exceeds warning threshold",
+                AlertSeverity.HIGH,
+                labels,
             )
-            # Properly handle task completion
-            task.add_done_callback(self._handle_alert_task_completion)
 
     def record_market_data_processing(
         self, exchange: str, data_type: str, processing_time_ms: float, message_count: int
@@ -628,12 +746,8 @@ class PerformanceProfiler(BaseComponent):
             # Update throughput data
             current_time = time.time()
             self._throughput_data[metric_name].append((current_time, message_count))
-
-            # Clean old throughput data (keep last 5 minutes)
-            cutoff_time = current_time - 300
-            self._throughput_data[metric_name] = [
-                (t, c) for t, c in self._throughput_data[metric_name] if t > cutoff_time
-            ]
+            
+            # No need to clean old data - deque is automatically bounded
 
         labels = {"exchange": exchange, "data_type": data_type}
 
@@ -885,7 +999,7 @@ class PerformanceProfiler(BaseComponent):
         return total_messages / time_span
 
     def _calculate_websocket_health(self, exchange: str) -> float:
-        """Calculate WebSocket connection health score."""
+        """Calculate WebSocket connection health score using financial trading criteria."""
         with self._lock:
             metric_name = f"websocket.{exchange}"
             latency_data = []
@@ -901,51 +1015,66 @@ class PerformanceProfiler(BaseComponent):
         # Health score based on latency percentiles
         stats = LatencyStats.from_values(latency_data)
 
-        # Score calculation:
-        # - Excellent (0.9-1.0): P95 < 10ms
-        # - Good (0.7-0.9): P95 < 50ms
-        # - Fair (0.5-0.7): P95 < 100ms
-        # - Poor (0.0-0.5): P95 >= 100ms
+        # Trading-specific thresholds based on market microstructure requirements
+        # High-frequency trading requires sub-millisecond latency
+        # Market making requires < 5ms for competitive quoting
+        # Arbitrage requires < 10ms for opportunity detection
+        # Regular trading can tolerate up to 50ms
 
-        if stats.p95 < 10:
+        if stats.p95 < 1:  # Sub-millisecond - excellent for HFT
             return 1.0
-        elif stats.p95 < 50:
-            return 0.8
-        elif stats.p95 < 100:
-            return 0.6
-        else:
-            return max(0.1, 1.0 - (stats.p95 - 100) / 1000)
+        elif stats.p95 < 5:  # < 5ms - good for market making
+            return 0.95
+        elif stats.p95 < 10:  # < 10ms - acceptable for arbitrage
+            return 0.85
+        elif stats.p95 < 50:  # < 50ms - acceptable for regular trading
+            return 0.70
+        elif stats.p95 < 100:  # < 100ms - marginal for trading
+            return 0.50
+        elif stats.p95 < 500:  # < 500ms - poor but functional
+            return 0.25
+        else:  # > 500ms - unacceptable for trading
+            return 0.1
 
     @retry(max_attempts=2, delay=1.0)
     @logged(level="debug")
     async def _collect_system_resources(self) -> None:
-        """Collect system resource metrics."""
+        """Collect system resource metrics using async-safe operations."""
         try:
-            process = psutil.Process()
+            loop = asyncio.get_event_loop()
 
-            # CPU metrics
-            cpu_percent = psutil.cpu_percent(interval=None)
+            # Run psutil operations in thread pool to avoid blocking
+            process = await loop.run_in_executor(None, psutil.Process)
 
-            # Memory metrics
-            memory = psutil.virtual_memory()
+            # CPU metrics - run in thread pool
+            cpu_percent = await loop.run_in_executor(None, psutil.cpu_percent, None)
 
-            # Disk I/O metrics
-            disk_io = psutil.disk_io_counters()
+            # Memory metrics - run in thread pool
+            memory = await loop.run_in_executor(None, psutil.virtual_memory)
 
-            # Network metrics
-            network_io = psutil.net_io_counters()
+            # Disk I/O metrics - run in thread pool
+            disk_io = await loop.run_in_executor(None, psutil.disk_io_counters)
 
-            # Load average (Unix only)
-            load_avg = list(os.getloadavg()) if hasattr(os, "getloadavg") else [0.0, 0.0, 0.0]
+            # Network metrics - run in thread pool
+            network_io = await loop.run_in_executor(None, psutil.net_io_counters)
 
-            # File descriptors
-            try:
-                open_fds = process.num_fds() if hasattr(process, "num_fds") else 0
-            except Exception:
-                open_fds = 0
+            # Load average (Unix only) - run in thread pool
+            def get_load_avg():
+                return list(os.getloadavg()) if hasattr(os, "getloadavg") else [0.0, 0.0, 0.0]
 
-            # Thread count
-            thread_count = process.num_threads()
+            load_avg = await loop.run_in_executor(None, get_load_avg)
+
+            # File descriptors - run in thread pool
+            def get_open_fds():
+                try:
+                    return process.num_fds() if hasattr(process, "num_fds") else 0
+                except Exception:
+                    return 0
+
+            open_fds = await loop.run_in_executor(None, get_open_fds)
+
+            # Thread count - run in thread pool
+            thread_count = await loop.run_in_executor(None, process.num_threads)
 
             stats = SystemResourceStats(
                 cpu_percent=cpu_percent,
@@ -962,7 +1091,7 @@ class PerformanceProfiler(BaseComponent):
                 last_updated=datetime.now(timezone.utc),
             )
 
-            with self._lock:
+            async with self._async_lock:
                 self._resource_history.append(stats)
 
             # Update Prometheus metrics
@@ -978,13 +1107,27 @@ class PerformanceProfiler(BaseComponent):
 
         except Exception as e:
             if hasattr(self, "_error_handler") and self._error_handler:
-                await self._error_handler.handle_error(
-                    e,
-                    ErrorContext(
-                        component="PerformanceProfiler",
-                        operation="collect_system_resources",
-                    ),
-                )
+                try:
+                    if hasattr(self._error_handler, "handle_error"):
+                        await self._error_handler.handle_error(
+                            e,
+                            ErrorContext(
+                                error=e,
+                                component="PerformanceProfiler",
+                                operation="collect_system_resources",
+                            ),
+                        )
+                    elif hasattr(self._error_handler, "handle_error_sync"):
+                        self._error_handler.handle_error_sync(
+                            e,
+                            ErrorContext(
+                                error=e,
+                                component="PerformanceProfiler",
+                                operation="collect_system_resources",
+                            ),
+                        )
+                except Exception as handler_error:
+                    self.logger.error(f"Error handler failed: {handler_error}")
             self.logger.error(f"Error collecting system resources: {e}")
 
     @retry(max_attempts=2, delay=0.5)
@@ -1007,7 +1150,7 @@ class PerformanceProfiler(BaseComponent):
                 last_updated=datetime.now(timezone.utc),
             )
 
-            with self._lock:
+            async with self._async_lock:
                 self._gc_history.append(stats)
 
             # Update Prometheus metrics
@@ -1026,13 +1169,27 @@ class PerformanceProfiler(BaseComponent):
 
         except Exception as e:
             if hasattr(self, "_error_handler") and self._error_handler:
-                await self._error_handler.handle_error(
-                    e,
-                    ErrorContext(
-                        component="PerformanceProfiler",
-                        operation="collect_gc_stats",
-                    ),
-                )
+                try:
+                    if hasattr(self._error_handler, "handle_error"):
+                        await self._error_handler.handle_error(
+                            e,
+                            ErrorContext(
+                                error=e,
+                                component="PerformanceProfiler",
+                                operation="collect_gc_stats",
+                            ),
+                        )
+                    elif hasattr(self._error_handler, "handle_error_sync"):
+                        self._error_handler.handle_error_sync(
+                            e,
+                            ErrorContext(
+                                error=e,
+                                component="PerformanceProfiler",
+                                operation="collect_gc_stats",
+                            ),
+                        )
+                except Exception as handler_error:
+                    self.logger.error(f"Error handler failed: {handler_error}")
             self.logger.error(f"Error collecting GC stats: {e}")
 
     async def _check_performance_thresholds(self) -> None:
@@ -1102,18 +1259,61 @@ class PerformanceProfiler(BaseComponent):
             self.logger.error(f"Error detecting anomalies: {e}")
 
     async def _update_performance_baselines(self) -> None:
-        """Update performance baselines for anomaly detection."""
-        with self._lock:
+        """Update performance baselines for anomaly detection with financial time series methods."""
+        async with self._async_lock:
             for metric_name, values in self._latency_data.items():
                 if len(values) >= 100:  # Need sufficient data for baseline
                     values_list = list(values)
-                    mean_val = sum(values_list) / len(values_list)
-                    variance = sum((x - mean_val) ** 2 for x in values_list) / len(values_list)
-                    std_val = variance**0.5
+
+                    # Use more robust statistical measures for financial time series
+                    if np is not None and stats is not None:
+                        values_array = np.array(values_list)
+
+                        # Calculate robust statistics
+                        mean_val = float(np.mean(values_array))
+                        std_val = float(np.std(values_array, ddof=1))  # Sample standard deviation
+                        median_val = float(np.median(values_array))
+
+                        # Calculate percentiles for outlier detection
+                        p95 = float(np.percentile(values_array, 95))
+                        p99 = float(np.percentile(values_array, 99))
+
+                        # For financial metrics, also track skewness and kurtosis
+                        skewness = float(stats.skew(values_array))
+                        kurtosis = float(stats.kurtosis(values_array))
+                    else:
+                        # Fallback to basic statistics if numpy/scipy not available
+                        sorted_values = sorted(values_list)
+                        mean_val = statistics.mean(sorted_values)
+                        std_val = statistics.stdev(sorted_values) if len(sorted_values) > 1 else 0.0
+                        median_val = statistics.median(sorted_values)
+
+                        # Simple percentile calculation
+                        p95_idx = int(len(sorted_values) * 0.95)
+                        p99_idx = int(len(sorted_values) * 0.99)
+                        p95 = (
+                            sorted_values[p95_idx]
+                            if p95_idx < len(sorted_values)
+                            else sorted_values[-1]
+                        )
+                        p99 = (
+                            sorted_values[p99_idx]
+                            if p99_idx < len(sorted_values)
+                            else sorted_values[-1]
+                        )
+
+                        # Basic skewness and kurtosis approximations
+                        skewness = 0.0
+                        kurtosis = 0.0
 
                     self._baselines[metric_name] = {
                         "mean": mean_val,
                         "std": std_val,
+                        "median": median_val,
+                        "p95": p95,
+                        "p99": p99,
+                        "skewness": skewness,
+                        "kurtosis": kurtosis,
                         "count": len(values_list),
                         "updated_at": time.time(),
                     }
@@ -1141,8 +1341,40 @@ class PerformanceProfiler(BaseComponent):
         except Exception as e:
             self.logger.error(f"Error sending performance alert: {e}")
 
+    def _create_managed_alert_task(self, title: str, message: str, severity, labels: dict) -> None:
+        """Create a managed alert task that cleans up after itself."""
+        if not self.alert_manager:
+            return
+
+        try:
+            task = asyncio.create_task(
+                self._send_performance_alert(title, message, severity, labels)
+            )
+
+            # Add to managed tasks
+            self._alert_tasks.add(task)
+
+            # Add cleanup callback
+            task.add_done_callback(self._handle_managed_alert_task_completion)
+
+        except Exception as e:
+            self.logger.error(f"Failed to create alert task: {e}")
+
+    def _handle_managed_alert_task_completion(self, task: asyncio.Task) -> None:
+        """Handle completion of managed alert tasks."""
+        # Remove from managed tasks
+        self._alert_tasks.discard(task)
+
+        try:
+            # Get the exception if task failed
+            exc = task.exception()
+            if exc:
+                self.logger.error(f"Alert task failed with exception: {exc}")
+        except Exception as e:
+            self.logger.error(f"Error handling alert task completion: {e}")
+
     def _handle_alert_task_completion(self, task: asyncio.Task) -> None:
-        """Handle completion of alert tasks."""
+        """Handle completion of alert tasks (legacy method)."""
         try:
             # Get the exception if task failed
             exc = task.exception()

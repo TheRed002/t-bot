@@ -21,12 +21,14 @@ except ImportError as e:
 
     class BaseComponent:
         """Minimal BaseComponent fallback for import errors."""
+
         def __init__(self):
             self.logger = logging.getLogger(self.__class__.__module__)
 
     # Log the import error
     logging.error(f"Failed to import BaseComponent from src.base: {e}")
 from src.core.config import Config
+from src.core.exceptions import ConfigurationError
 from src.core.logging import correlation_context
 from src.monitoring import (
     AlertManager,
@@ -99,10 +101,16 @@ async def _initialize_services():
                 "jwt": {
                     "secret_key": app_config.security.secret_key,
                     "algorithm": getattr(app_config.security, "jwt_algorithm", "HS256"),
-                    "access_token_expire_minutes": getattr(app_config.security, "jwt_expire_minutes", 30),
-                    "refresh_token_expire_days": getattr(app_config.security, "refresh_token_expire_days", 7),
+                    "access_token_expire_minutes": getattr(
+                        app_config.security, "jwt_expire_minutes", 30
+                    ),
+                    "refresh_token_expire_days": getattr(
+                        app_config.security, "refresh_token_expire_days", 7
+                    ),
                 },
-                "session": {"timeout_minutes": getattr(app_config.security, "session_timeout_minutes", 60)},
+                "session": {
+                    "timeout_minutes": getattr(app_config.security, "session_timeout_minutes", 60)
+                },
             }
         else:
             raise RuntimeError("Security configuration is required for authentication")
@@ -141,6 +149,7 @@ async def _connect_api_endpoints_to_services(registry):
             bot_mgmt_service = registry.get_service("bot_management")
             # Import here to avoid circular imports
             from src.web_interface.api import bot_management
+
             bot_management.set_bot_service(bot_mgmt_service)
             BaseComponent().logger.info("Connected bot management API to service")
 
@@ -339,6 +348,7 @@ def create_app(
             ConnectionPoolMiddleware,
             set_global_pool_manager,
         )
+
         connection_pool_middleware = ConnectionPoolMiddleware(fastapi_app, config)
         fastapi_app.add_middleware(ConnectionPoolMiddleware, config=config)
         set_global_pool_manager(connection_pool_middleware.pool_manager)
@@ -420,7 +430,7 @@ def _register_routes(app: FastAPI) -> None:
             "service": "t-bot-api",
             "version": "2.0.0",
             "architecture": "unified",
-            "components": {}
+            "components": {},
         }
 
         try:
@@ -444,11 +454,16 @@ def _register_routes(app: FastAPI) -> None:
         try:
             websocket_manager = get_unified_websocket_manager()
             if hasattr(websocket_manager, "get_connection_stats"):
-                health_status["components"]["websocket_connections"] = websocket_manager.get_connection_stats()
+                health_status["components"][
+                    "websocket_connections"
+                ] = websocket_manager.get_connection_stats()
             else:
                 health_status["components"]["websocket_connections"] = {"status": "available"}
         except Exception as e:
-            health_status["components"]["websocket_connections"] = {"status": "error", "error": str(e)}
+            health_status["components"]["websocket_connections"] = {
+                "status": "error",
+                "error": str(e),
+            }
 
         # If any component is in error, mark overall status as degraded
         if any(comp.get("status") == "error" for comp in health_status["components"].values()):
@@ -516,12 +531,17 @@ def _register_routes(app: FastAPI) -> None:
     ]
 
     # Track critical routers that must be available
-    critical_routers = {"src.web_interface.api.auth", "src.web_interface.api.bot_management", "src.web_interface.api.trading"}
+    critical_routers = {
+        "src.web_interface.api.auth",
+        "src.web_interface.api.bot_management",
+        "src.web_interface.api.trading",
+    }
     failed_critical = []
 
     for module_path, router_name, prefix, tags in routers:
         try:
             import importlib
+
             module = importlib.import_module(module_path)
             router = getattr(module, router_name)
             app.include_router(router, prefix=prefix, tags=tags)
@@ -689,12 +709,14 @@ def _get_app_lazy():
 # Lazy app creation for ASGI servers
 _lazy_app = None
 
+
 def get_asgi_app():
     """Get or create ASGI app for deployment."""
     global _lazy_app
     if _lazy_app is None:
         _lazy_app = get_app()
     return _lazy_app
+
 
 # Export app for ASGI servers - uvicorn expects 'app' variable
 # Use a lazy getter property to ensure app is created when accessed
@@ -708,6 +730,7 @@ class LazyApp:
     def __call__(self, *args, **kwargs):
         """Create and call app on first invocation."""
         return get_asgi_app()(*args, **kwargs)
+
 
 app = LazyApp()
 
@@ -726,8 +749,18 @@ if __name__ == "__main__":
             if _app_config_instance and hasattr(_app_config_instance, "api")
             else 8000
         )
-    except:
+    except (AttributeError, TypeError, ValueError) as e:
+        BaseComponent().logger.warning(
+            f"Failed to read port from config: {e}, using default port 8000"
+        )
         port = 8000
+    except Exception as e:
+        BaseComponent().logger.error(f"Unexpected error reading configuration: {e}")
+        raise ConfigurationError(
+            "Failed to read application configuration",
+            config_section="api.port",
+            suggested_action="Check configuration file format and accessibility",
+        ) from e
     host = "0.0.0.0"
 
     BaseComponent().logger.info(f"Starting web server on {host}:{port}")

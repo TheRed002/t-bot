@@ -7,7 +7,7 @@ P&L updates, balance changes, and portfolio performance metrics.
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -139,7 +139,7 @@ async def portfolio_websocket(websocket: WebSocket):
             "type": "welcome",
             "message": "Connected to T-Bot portfolio stream",
             "user_id": user.user_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "available_update_types": ["positions", "pnl", "balances", "performance", "alerts"],
             "instructions": {
                 "subscribe": 'Send {"action": "subscribe", "update_types": ["positions", "pnl"]}',
@@ -164,7 +164,7 @@ async def portfolio_websocket(websocket: WebSocket):
                     response = {
                         "type": "subscription_confirmed",
                         "update_types": update_types,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     await portfolio_manager.send_to_user(user.user_id, response)
 
@@ -175,19 +175,22 @@ async def portfolio_websocket(websocket: WebSocket):
                     response = {
                         "type": "unsubscription_confirmed",
                         "update_types": update_types,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     await portfolio_manager.send_to_user(user.user_id, response)
 
                 elif message.get("action") == "ping":
-                    pong_message = {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
+                    pong_message = {
+                        "type": "pong",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
                     await portfolio_manager.send_to_user(user.user_id, pong_message)
 
             except json.JSONDecodeError:
                 error_message = {
                     "type": "error",
                     "message": "Invalid JSON format",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 await portfolio_manager.send_to_user(user.user_id, error_message)
 
@@ -198,7 +201,7 @@ async def portfolio_websocket(websocket: WebSocket):
                 error_message = {
                     "type": "error",
                     "message": f"Message processing error: {e!s}",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 await portfolio_manager.send_to_user(user.user_id, error_message)
 
@@ -218,7 +221,7 @@ async def send_initial_portfolio_data(user_id: str, update_types: list[str]):
         if "positions" in update_types:
             positions_data = {
                 "type": "positions",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {
                     "positions": [
                         {
@@ -254,7 +257,7 @@ async def send_initial_portfolio_data(user_id: str, update_types: list[str]):
         if "pnl" in update_types:
             pnl_data = {
                 "type": "pnl",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {
                     "daily_pnl": random.uniform(-1000, 2000),
                     "weekly_pnl": random.uniform(-3000, 8000),
@@ -271,7 +274,7 @@ async def send_initial_portfolio_data(user_id: str, update_types: list[str]):
         if "balances" in update_types:
             balances_data = {
                 "type": "balances",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {
                     "balances": [
                         {
@@ -308,7 +311,7 @@ async def send_initial_portfolio_data(user_id: str, update_types: list[str]):
         if "performance" in update_types:
             performance_data = {
                 "type": "performance",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {
                     "portfolio_value": 169000.0,
                     "total_exposure": 140500.0,
@@ -345,7 +348,7 @@ async def portfolio_simulator():
                 # Simulate position changes
                 position_update = {
                     "type": "position_update",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "data": {
                         "symbol": random.choice(["BTCUSDT", "ETHUSDT"]),
                         "change_type": random.choice(
@@ -362,7 +365,7 @@ async def portfolio_simulator():
                 # Simulate P&L updates
                 pnl_update = {
                     "type": "pnl_update",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "data": {
                         "daily_pnl": random.uniform(-1000, 2000),
                         "realized_pnl_change": random.uniform(-200, 500),
@@ -377,7 +380,7 @@ async def portfolio_simulator():
                 if random.random() < 0.3:  # 30% chance
                     balance_update = {
                         "type": "balance_update",
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                         "data": {
                             "exchange": random.choice(["binance", "coinbase"]),
                             "currency": random.choice(["USDT", "USD", "BTC", "ETH"]),
@@ -394,7 +397,7 @@ async def portfolio_simulator():
                 if random.random() < 0.2:  # 20% chance
                     performance_update = {
                         "type": "performance_update",
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                         "data": {
                             "portfolio_value": 169000.0 + random.uniform(-5000, 5000),
                             "daily_return": random.uniform(-2, 3),
@@ -409,7 +412,7 @@ async def portfolio_simulator():
             if random.random() < 0.05:  # 5% chance
                 alert_update = {
                     "type": "portfolio_alert",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "data": {
                         "alert_type": random.choice(
                             ["profit_target", "stop_loss", "drawdown_warning", "exposure_limit"]

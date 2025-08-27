@@ -46,13 +46,18 @@ class GlobalErrorHandler:
                 DataValidationErrorHandler,
                 ValidationErrorHandler,
             )
+
             ErrorHandlerFactory.register("validation", ValidationErrorHandler)
             ErrorHandlerFactory.register("data_validation", DataValidationErrorHandler)
         except ImportError:
             logger.debug("Validation error handlers not available")
 
         try:
-            from src.error_handling.handlers.network import NetworkErrorHandler, RateLimitErrorHandler
+            from src.error_handling.handlers.network import (
+                NetworkErrorHandler,
+                RateLimitErrorHandler,
+            )
+
             ErrorHandlerFactory.register("network", NetworkErrorHandler)
             ErrorHandlerFactory.register("rate_limit", RateLimitErrorHandler)
         except ImportError:
@@ -65,6 +70,7 @@ class GlobalErrorHandler:
         """Register database error handler separately to avoid circular dependencies."""
         try:
             from src.error_handling.handlers.database import DatabaseErrorHandler
+
             ErrorHandlerFactory.register("database", DatabaseErrorHandler)
 
             # Update the handler chain if it exists
@@ -199,6 +205,57 @@ class GlobalErrorHandler:
             "timestamp": self._last_error_time.isoformat() if self._last_error_time else None,
         }
 
+    def handle_error_sync(
+        self,
+        error: Exception,
+        context: dict[str, Any] | None = None,
+        severity: str = "error",
+    ) -> dict[str, Any]:
+        """
+        Synchronous version of handle_error for use in non-async contexts.
+        
+        Args:
+            error: The exception to handle
+            context: Additional context about the error
+            severity: Error severity level
+            
+        Returns:
+            dict: Error handling result
+        """
+        import asyncio
+        
+        # Get or create event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # Already in async context, create task
+            future = asyncio.ensure_future(
+                self.handle_error(error, context, severity)
+            )
+            # Can't wait synchronously in running loop
+            self._logger.warning(
+                "handle_error_sync called from async context, scheduled as task",
+                error_type=type(error).__name__,
+            )
+            return {
+                "error": str(error),
+                "severity": severity,
+                "context": context,
+                "recovery_attempted": False,
+                "handler_result": None,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except RuntimeError:
+            # No running loop, safe to use run_until_complete
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    self.handle_error(error, context, severity)
+                )
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
+
     def handle_exception_hook(self, exc_type, exc_value, exc_traceback):
         """
         Global exception hook for unhandled exceptions.
@@ -225,8 +282,19 @@ class GlobalErrorHandler:
             "traceback": traceback.format_tb(exc_traceback),
         }
 
-        # Handle the error
-        asyncio.create_task(self.handle_error(exc_value, context, severity="critical"))
+        # Handle the error asynchronously with proper task management
+        error_task = asyncio.create_task(self.handle_error(exc_value, context, severity="critical"))
+        # Add done callback to log any exceptions from the error handling itself
+        error_task.add_done_callback(self._log_error_handler_exception)
+
+    def _log_error_handler_exception(self, task: asyncio.Task) -> None:
+        """Log exceptions that occur in error handling tasks."""
+        if task.exception():
+            self._logger.critical(
+                "Exception in error handler task",
+                handler_exception=str(task.exception()),
+                exc_info=task.exception(),
+            )
 
     def install_global_handler(self):
         """Install this handler as the global exception handler."""
@@ -278,8 +346,10 @@ class GlobalErrorHandler:
                         "args": str(args)[:200],  # Truncate for safety
                         "kwargs": str(kwargs)[:200],
                     }
-                    # Use asyncio.create_task for async handling
-                    asyncio.create_task(self.handle_error(e, context, severity))
+                    # Use asyncio.create_task for async handling with proper task management
+                    error_task = asyncio.create_task(self.handle_error(e, context, severity))
+                    # Add done callback to log any exceptions from the error handling itself
+                    error_task.add_done_callback(self._log_error_handler_exception)
                     if reraise:
                         raise
                     return default_return
@@ -325,7 +395,7 @@ def get_global_error_handler() -> GlobalErrorHandler:
 
 def register_with_di(container: Any) -> None:
     """Register GlobalErrorHandler with dependency injection container.
-    
+
     Args:
         container: The dependency injection container
     """

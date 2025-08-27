@@ -17,7 +17,7 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
 
@@ -150,15 +150,23 @@ class OrderIdempotencyManager(BaseComponent):
             "cache_misses": 0,
         }
 
-        # Background cleanup task
+        # Background cleanup task tracking
         self._cleanup_task: asyncio.Task | None = None
         self._cleanup_started = False
+        self._is_running = False
+        self._background_tasks: set[asyncio.Task] = set()
 
         self.logger.info("Order idempotency manager initialized", use_redis=self.use_redis)
+
+        # Register cleanup for proper resource management
+        import weakref
+
+        weakref.finalize(self, self._cleanup_on_del)
 
     async def start(self) -> None:
         """Start the idempotency manager and background tasks."""
         if not self._cleanup_started:
+            self._is_running = True
             self._start_cleanup_task()
             self._cleanup_started = True
             self.logger.info("Idempotency manager started")
@@ -167,16 +175,25 @@ class OrderIdempotencyManager(BaseComponent):
         """Start the periodic cleanup task."""
 
         async def cleanup_periodically():
-            while True:
+            while self._is_running:
                 try:
                     await asyncio.sleep(self.cleanup_interval_minutes * 60)
-                    await self._cleanup_expired_keys()
+                    if self._is_running:  # Check again after sleep
+                        await self._cleanup_expired_keys()
                 except asyncio.CancelledError:
+                    self.logger.debug("Cleanup task cancelled")
                     break
                 except Exception as e:
                     self.logger.error(f"Cleanup task error: {e}")
+                    # Continue running unless explicitly stopped
+                    if not self._is_running:
+                        break
 
         self._cleanup_task = asyncio.create_task(cleanup_periodically())
+        self._background_tasks.add(self._cleanup_task)
+
+        # Clean up completed tasks
+        self._cleanup_task.add_done_callback(self._background_tasks.discard)
 
     def _generate_order_hash(self, order: OrderRequest) -> str:
         """
@@ -332,7 +349,7 @@ class OrderIdempotencyManager(BaseComponent):
         except Exception as e:
             self.stats["failed_operations"] += 1
             self.logger.error(f"Failed to get/create idempotency key: {e}")
-            raise ExecutionError(f"Idempotency key operation failed: {e}")
+            raise ExecutionError(f"Idempotency key operation failed: {e}") from e
 
     @log_calls
     async def mark_order_completed(
@@ -676,27 +693,73 @@ class OrderIdempotencyManager(BaseComponent):
             self.logger.error(f"Failed to force expire key: {e}")
             return False
 
-    async def shutdown(self) -> None:
-        """Shutdown the idempotency manager."""
+    async def stop(self) -> None:
+        """Stop the idempotency manager and cancel all background tasks."""
         try:
-            # Cancel cleanup task
-            if self._cleanup_task:
+            self.logger.info("Stopping idempotency manager...")
+
+            # Signal shutdown to background tasks
+            self._is_running = False
+            self._cleanup_started = False
+
+            # Cancel and wait for cleanup task
+            if self._cleanup_task and not self._cleanup_task.done():
                 self._cleanup_task.cancel()
                 try:
                     await self._cleanup_task
                 except asyncio.CancelledError:
                     pass
+                except Exception as e:
+                    self.logger.warning(f"Error during cleanup task cancellation: {e}")
 
-            # Final cleanup
-            await self._cleanup_expired_keys()
+            # Cancel all background tasks
+            if self._background_tasks:
+                self.logger.debug(f"Cancelling {len(self._background_tasks)} background tasks")
+                for task in list(self._background_tasks):
+                    if not task.done():
+                        task.cancel()
 
-            # Clear caches
+                # Wait for all tasks to complete with timeout
+                if self._background_tasks:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*self._background_tasks, return_exceptions=True),
+                            timeout=5.0,
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Background tasks did not complete within timeout")
+
+                self._background_tasks.clear()
+
+            # Final cleanup of expired keys
+            try:
+                await self._cleanup_expired_keys()
+            except Exception as e:
+                self.logger.warning(f"Final cleanup failed: {e}")
+
+            # Clear all caches
             with self._cache_lock:
                 self._in_memory_cache.clear()
                 self._order_hash_to_key.clear()
                 self._client_order_id_to_key.clear()
 
-            self.logger.info("Idempotency manager shutdown completed")
+            self.logger.info("Idempotency manager stopped successfully")
 
         except Exception as e:
-            self.logger.error(f"Idempotency manager shutdown failed: {e}")
+            self.logger.error(f"Idempotency manager stop failed: {e}")
+            raise
+
+    async def shutdown(self) -> None:
+        """Shutdown the idempotency manager (alias for stop)."""
+        await self.stop()
+
+    def _cleanup_on_del(self) -> None:
+        """Emergency cleanup when object is deleted."""
+        try:
+            if self._cleanup_task and not self._cleanup_task.done():
+                self._cleanup_task.cancel()
+            for task in self._background_tasks:
+                if not task.done():
+                    task.cancel()
+        except Exception:
+            pass  # Ignore errors during emergency cleanup

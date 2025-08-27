@@ -43,7 +43,7 @@ def safe_read_file(file_path: str, encoding: str = "utf-8") -> str:
 
     except Exception as e:
         logger.error(f"Failed to read file {file_path}: {e!s}")
-        raise ValidationError(f"Cannot read file '{file_path}': {e!s}")
+        raise ValidationError(f"Cannot read file '{file_path}': {e!s}") from e
 
 
 def safe_write_file(file_path: str, content: str, encoding: str = "utf-8") -> None:
@@ -58,15 +58,14 @@ def safe_write_file(file_path: str, content: str, encoding: str = "utf-8") -> No
     Raises:
         ValidationError: If file cannot be written
     """
-    try:
-        path = Path(file_path)
+    path = Path(file_path)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
 
+    try:
         # Create directory if it doesn't exist
         path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write content atomically using temporary file
-        temp_path = path.with_suffix(path.suffix + ".tmp")
-
         with open(temp_path, "w", encoding=encoding) as f:
             f.write(content)
 
@@ -76,8 +75,16 @@ def safe_write_file(file_path: str, content: str, encoding: str = "utf-8") -> No
         logger.debug(f"Successfully wrote file: {file_path}")
 
     except Exception as e:
+        # Clean up temp file on failure
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except Exception:
+                # Ignore cleanup errors
+                pass
+
         logger.error(f"Failed to write file {file_path}: {e!s}")
-        raise ValidationError(f"Cannot write file '{file_path}': {e!s}")
+        raise ValidationError(f"Cannot write file '{file_path}': {e!s}") from e
 
 
 def ensure_directory_exists(directory_path: str) -> None:
@@ -97,7 +104,7 @@ def ensure_directory_exists(directory_path: str) -> None:
 
     except Exception as e:
         logger.error(f"Failed to create directory {directory_path}: {e}")
-        raise ValidationError(f"Cannot create directory '{directory_path}': {e}")
+        raise ValidationError(f"Cannot create directory '{directory_path}': {e}") from e
 
 
 def load_config_file(file_path: str) -> dict[str, Any]:
@@ -132,7 +139,7 @@ def load_config_file(file_path: str) -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to load config file {file_path}: {e!s}")
-        raise ValidationError(f"Cannot load config file '{file_path}': {e!s}")
+        raise ValidationError(f"Cannot load config file '{file_path}': {e!s}") from e
 
 
 def save_config_file(file_path: str, config: dict[str, Any]) -> None:
@@ -161,7 +168,7 @@ def save_config_file(file_path: str, config: dict[str, Any]) -> None:
 
     except Exception as e:
         logger.error(f"Failed to save config file {file_path}: {e!s}")
-        raise ValidationError(f"Cannot save config file '{file_path}': {e!s}")
+        raise ValidationError(f"Cannot save config file '{file_path}': {e!s}") from e
 
 
 def delete_file(file_path: str) -> None:
@@ -184,7 +191,7 @@ def delete_file(file_path: str) -> None:
 
     except Exception as e:
         logger.error(f"Failed to delete file {file_path}: {e!s}")
-        raise ValidationError(f"Cannot delete file '{file_path}': {e!s}")
+        raise ValidationError(f"Cannot delete file '{file_path}': {e!s}") from e
 
 
 def get_file_size(file_path: str) -> int:
@@ -208,7 +215,7 @@ def get_file_size(file_path: str) -> int:
         return path.stat().st_size
 
     except Exception as e:
-        raise ValidationError(f"Cannot get file size for '{file_path}': {e!s}")
+        raise ValidationError(f"Cannot get file size for '{file_path}': {e!s}") from e
 
 
 def list_files(directory: str, pattern: str = "*") -> list[str]:
@@ -237,4 +244,4 @@ def list_files(directory: str, pattern: str = "*") -> list[str]:
         return sorted(files)
 
     except Exception as e:
-        raise ValidationError(f"Cannot list files in '{directory}': {e!s}")
+        raise ValidationError(f"Cannot list files in '{directory}': {e!s}") from e

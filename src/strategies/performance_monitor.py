@@ -16,7 +16,7 @@ Key Features:
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -92,7 +92,7 @@ class PerformanceMetrics:
         self.average_holding_time = timedelta()
         self.total_time_in_market = timedelta()
         self.trades_per_day = 0.0
-        self.strategy_start_time = datetime.now()
+        self.strategy_start_time = datetime.now(timezone.utc)
 
         # Market exposure
         self.long_exposure_time = timedelta()
@@ -115,7 +115,7 @@ class PerformanceMetrics:
         self.tracking_error = 0.0
 
         # Last update timestamp
-        self.last_updated = datetime.now()
+        self.last_updated = datetime.now(timezone.utc)
 
 
 class PerformanceMonitor:
@@ -156,7 +156,7 @@ class PerformanceMonitor:
         # Monitoring control
         self.monitoring_active = False
         self.monitoring_task: asyncio.Task | None = None
-        self.last_update = datetime.now()
+        self.last_update = datetime.now(timezone.utc)
 
         # Alert thresholds
         self.alert_thresholds = {
@@ -323,7 +323,7 @@ class PerformanceMonitor:
             self._calculate_risk_metrics(metrics)
 
             # Mark as updated
-            metrics.last_updated = datetime.now()
+            metrics.last_updated = datetime.now(timezone.utc)
 
         except Exception:
             # Log error but don't fail the entire update
@@ -551,7 +551,7 @@ class PerformanceMonitor:
             metrics.total_time_in_market = sum(holding_times, timedelta())
 
         # Calculate trades per day
-        strategy_runtime = datetime.now() - metrics.strategy_start_time
+        strategy_runtime = datetime.now(timezone.utc) - metrics.strategy_start_time
         if strategy_runtime.days > 0:
             metrics.trades_per_day = metrics.total_trades / strategy_runtime.days
 
@@ -579,7 +579,7 @@ class PerformanceMonitor:
         for position in positions:
             if position.is_open():  # Use Position model method instead of status attribute
                 position_time = (
-                    datetime.now() - position.opened_at
+                    datetime.now(timezone.utc) - position.opened_at
                 )  # Use opened_at instead of entry_time
                 from src.core.types.trading import OrderSide
 
@@ -932,12 +932,16 @@ class PerformanceMonitor:
                         side=side,
                         quantity=Decimal(str(pos_dict.get("quantity", 0))),
                         entry_price=Decimal(str(pos_dict.get("entry_price", 0))),
-                        current_price=Decimal(str(pos_dict.get("current_price", 0)))
-                        if pos_dict.get("current_price")
-                        else None,
-                        unrealized_pnl=Decimal(str(pos_dict.get("unrealized_pnl", 0)))
-                        if pos_dict.get("unrealized_pnl")
-                        else None,
+                        current_price=(
+                            Decimal(str(pos_dict.get("current_price", 0)))
+                            if pos_dict.get("current_price")
+                            else None
+                        ),
+                        unrealized_pnl=(
+                            Decimal(str(pos_dict.get("unrealized_pnl", 0)))
+                            if pos_dict.get("unrealized_pnl")
+                            else None
+                        ),
                         realized_pnl=Decimal(str(pos_dict.get("realized_pnl", 0))),
                         opened_at=pos_dict.get("opened_at"),
                         closed_at=pos_dict.get("closed_at"),
@@ -997,7 +1001,7 @@ class PerformanceMonitor:
         """Fetch trade data from repository."""
         from datetime import timedelta
 
-        end_time = datetime.now()
+        end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=1)
 
         return await self.data_repository.get_strategy_trades(
@@ -1045,9 +1049,11 @@ class PerformanceMonitor:
         side = (
             OrderSide.BUY
             if isinstance(side_value, str) and side_value.lower() == "buy"
-            else OrderSide.SELL
-            if isinstance(side_value, str) and side_value.lower() == "sell"
-            else side_value
+            else (
+                OrderSide.SELL
+                if isinstance(side_value, str) and side_value.lower() == "sell"
+                else side_value
+            )
         )
 
         # Create Trade object
@@ -1060,7 +1066,9 @@ class PerformanceMonitor:
             quantity=Decimal(str(trade_dict.get("quantity", 0))),
             fee=Decimal(str(trade_dict.get("fee", 0))),
             fee_currency=trade_dict.get("fee_currency", "USD"),
-            timestamp=trade_dict.get("timestamp") or trade_dict.get("entry_time") or datetime.now(),
+            timestamp=trade_dict.get("timestamp")
+            or trade_dict.get("entry_time")
+            or datetime.now(timezone.utc),
             exchange=trade_dict.get("exchange", "unknown"),
             is_maker=trade_dict.get("is_maker", False),
             metadata=trade_dict.get("metadata", {}),
@@ -1104,7 +1112,7 @@ class PerformanceMonitor:
             "order_id": mapped_dict.get("order_id", "unknown"),
             "fee_currency": "USD",
             "exchange": "unknown",
-            "timestamp": mapped_dict.get("entry_time") or datetime.now(),
+            "timestamp": mapped_dict.get("entry_time") or datetime.now(timezone.utc),
         }
 
         for field, default_value in defaults.items():

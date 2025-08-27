@@ -162,15 +162,28 @@ class CapitalService(TransactionalService):
                 # Try to get from dependency injection
                 try:
                     self.uow_factory = self.resolve_dependency("UnitOfWorkFactory")
-                except Exception:
+                except DependencyError as e:
+                    self._logger.debug(f"UnitOfWorkFactory not available via DI: {e}")
                     # Try to resolve DatabaseService for backward compatibility
                     if not self.database_service:
                         try:
                             self.database_service = self.resolve_dependency("DatabaseService")
-                        except Exception:
+                        except DependencyError as e:
                             self._logger.warning(
-                                "Neither UnitOfWorkFactory nor DatabaseService available via DI"
+                                f"Neither UnitOfWorkFactory nor DatabaseService available via DI: {e}"
                             )
+                        except Exception as e:
+                            self._logger.error(f"Unexpected error resolving DatabaseService: {e}")
+                            raise ServiceError(
+                                "Failed to initialize database dependencies",
+                                component_name="CapitalManagementService",
+                            ) from e
+                except Exception as e:
+                    self._logger.error(f"Unexpected error resolving UnitOfWorkFactory: {e}")
+                    raise ServiceError(
+                        "Failed to resolve critical database dependencies",
+                        component_name="CapitalManagementService",
+                    ) from e
 
             # Initialize repositories if we have UoW factory (preferred) or database service
             # NOTE: Direct repository instantiation is deprecated - this is kept for backward compatibility
@@ -190,9 +203,13 @@ class CapitalService(TransactionalService):
             if not self.state_service:
                 try:
                     self.state_service = self.resolve_dependency("StateService")
-                except Exception:
+                except DependencyError as e:
+                    self._logger.info(
+                        f"StateService not available via DI: {e}, operating without state management integration"
+                    )
+                except Exception as e:
                     self._logger.warning(
-                        "StateService not available, operating without state management integration"
+                        f"Unexpected error resolving StateService: {e}, operating without state management"
                     )
 
             # Initialize capital metrics from database
@@ -1202,14 +1219,22 @@ class CapitalService(TransactionalService):
                 # Basic connectivity check via repository
                 try:
                     await self.capital_repository.get_all(limit=1)
-                except Exception:
+                except (DatabaseConnectionError, DatabaseQueryError) as e:
+                    self._logger.warning(f"Database connectivity check failed: {e}")
+                    return HealthStatus.UNHEALTHY
+                except Exception as e:
+                    self._logger.error(f"Unexpected error in repository health check: {e}")
                     return HealthStatus.UNHEALTHY
             elif self.uow_factory:
                 # Test UoW factory connectivity
                 try:
                     with self.uow_factory.create() as uow:
                         await uow.capital_allocations.get_all(limit=1)
-                except Exception:
+                except (DatabaseConnectionError, DatabaseQueryError) as e:
+                    self._logger.warning(f"UoW factory health check failed: {e}")
+                    return HealthStatus.UNHEALTHY
+                except Exception as e:
+                    self._logger.error(f"Unexpected error in UoW health check: {e}")
                     return HealthStatus.UNHEALTHY
 
             # Check emergency reserve maintenance

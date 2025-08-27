@@ -7,7 +7,7 @@ capabilities for ML models using the service layer pattern without direct databa
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import numpy as np
@@ -183,7 +183,7 @@ class FeatureEngineeringService(BaseService):
 
     async def _compute_features_impl(self, request: FeatureRequest) -> FeatureResponse:
         """Internal feature computation implementation."""
-        computation_start = datetime.utcnow()
+        computation_start = datetime.now(timezone.utc)
         warnings = []
 
         try:
@@ -223,7 +223,9 @@ class FeatureEngineeringService(BaseService):
             # Check cache
             cached_features = await self._get_cached_features(cache_key)
             if cached_features is not None:
-                computation_time = (datetime.utcnow() - computation_start).total_seconds() * 1000
+                computation_time = (
+                    datetime.now(timezone.utc) - computation_start
+                ).total_seconds() * 1000
                 return FeatureResponse(
                     feature_set=FeatureSet(
                         feature_set_id=cache_key,
@@ -267,10 +269,13 @@ class FeatureEngineeringService(BaseService):
                 symbol=request.symbol,
                 features=features_df.to_dict("records"),
                 feature_names=list(features_df.columns),
-                computation_time_ms=(datetime.utcnow() - computation_start).total_seconds() * 1000,
+                computation_time_ms=(datetime.now(timezone.utc) - computation_start).total_seconds()
+                * 1000,
             )
 
-            computation_time = (datetime.utcnow() - computation_start).total_seconds() * 1000
+            computation_time = (
+                datetime.now(timezone.utc) - computation_start
+            ).total_seconds() * 1000
 
             self._logger.info(
                 "Features computed successfully",
@@ -290,7 +295,9 @@ class FeatureEngineeringService(BaseService):
             )
 
         except Exception as e:
-            computation_time = (datetime.utcnow() - computation_start).total_seconds() * 1000
+            computation_time = (
+                datetime.now(timezone.utc) - computation_start
+            ).total_seconds() * 1000
             error_msg = f"Feature computation failed for {request.symbol}: {e}"
 
             self._logger.error(
@@ -691,7 +698,7 @@ class FeatureEngineeringService(BaseService):
             importance_scores = {
                 name: float(score)
                 for name, score in zip(
-                    selected_feature_names, scores[selector.get_support()]
+                    selected_feature_names, scores[selector.get_support()], strict=False
                 )
             }
 
@@ -814,7 +821,7 @@ class FeatureEngineeringService(BaseService):
             features_df, timestamp = self._feature_cache[cache_key]
             ttl_hours = self.fe_config.cache_ttl_hours
 
-            if datetime.utcnow() - timestamp < timedelta(hours=ttl_hours):
+            if datetime.now(timezone.utc) - timestamp < timedelta(hours=ttl_hours):
                 return features_df
 
         return None
@@ -830,7 +837,7 @@ class FeatureEngineeringService(BaseService):
             ]:
                 del self._feature_cache[key]
 
-        self._feature_cache[cache_key] = (features_df.copy(), datetime.utcnow())
+        self._feature_cache[cache_key] = (features_df.copy(), datetime.now(timezone.utc))
 
         # Clean old cache entries to prevent memory issues
         await self._clean_feature_cache()
@@ -838,7 +845,7 @@ class FeatureEngineeringService(BaseService):
     async def _clean_feature_cache(self) -> None:
         """Clean expired feature cache entries."""
         ttl_hours = self.fe_config.cache_ttl_hours
-        cutoff_time = datetime.utcnow() - timedelta(hours=ttl_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=ttl_hours)
 
         expired_keys = [
             key for key, (_, timestamp) in self._feature_cache.items() if timestamp < cutoff_time

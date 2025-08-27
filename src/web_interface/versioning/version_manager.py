@@ -7,7 +7,7 @@ and deprecation warnings for trading system endpoints.
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -98,7 +98,7 @@ class VersionManager(BaseComponent):
             minor=0,
             patch=0,
             status=VersionStatus.ACTIVE,
-            release_date=datetime.utcnow() - timedelta(days=365),
+            release_date=datetime.now(timezone.utc) - timedelta(days=365),
             features={"basic_trading", "bot_management", "portfolio_view", "market_data"},
         )
 
@@ -109,7 +109,7 @@ class VersionManager(BaseComponent):
             minor=1,
             patch=0,
             status=VersionStatus.ACTIVE,
-            release_date=datetime.utcnow() - timedelta(days=180),
+            release_date=datetime.now(timezone.utc) - timedelta(days=180),
             features={
                 "basic_trading",
                 "bot_management",
@@ -127,7 +127,7 @@ class VersionManager(BaseComponent):
             minor=0,
             patch=0,
             status=VersionStatus.ACTIVE,
-            release_date=datetime.utcnow() - timedelta(days=90),
+            release_date=datetime.now(timezone.utc) - timedelta(days=90),
             features={
                 "enhanced_trading",
                 "advanced_bot_management",
@@ -261,7 +261,7 @@ class VersionManager(BaseComponent):
             return False
 
         api_version.status = VersionStatus.DEPRECATED
-        api_version.deprecation_date = datetime.utcnow()
+        api_version.deprecation_date = datetime.now(timezone.utc)
         if sunset_date:
             api_version.sunset_date = sunset_date
 
@@ -275,7 +275,7 @@ class VersionManager(BaseComponent):
             return False
 
         api_version.status = VersionStatus.SUNSET
-        api_version.sunset_date = datetime.utcnow()
+        api_version.sunset_date = datetime.now(timezone.utc)
 
         self.logger.warning(f"API version {version} has been sunset")
         return True

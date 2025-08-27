@@ -221,7 +221,7 @@ class FileConfigProvider:
                 error_code="CONFIG_LOAD_FAILED",
                 category=ErrorCategory.CONFIGURATION,
                 details={"file_path": str(self.config_file), "error": str(e)},
-            )
+            ) from e
 
     async def save_config(self, config: ConfigDict) -> None:
         """Save configuration to file."""
@@ -253,7 +253,7 @@ class FileConfigProvider:
                 error_code="CONFIG_SAVE_FAILED",
                 category=ErrorCategory.CONFIGURATION,
                 details={"file_path": str(self.config_file), "error": str(e)},
-            )
+            ) from e
 
     async def watch_changes(self, callback: ConfigCallback) -> None:
         """Watch for file changes (simplified implementation)."""
@@ -328,7 +328,7 @@ class ConfigValidator:
                 error_code="CONFIG_DATABASE_INVALID",
                 category=ErrorCategory.VALIDATION,
                 details={"validation_errors": e.errors(), "config": config},
-            )
+            ) from e
 
     async def validate_exchange_config(self, config: dict) -> ExchangeConfig:
         """Validate exchange configuration."""
@@ -340,7 +340,7 @@ class ConfigValidator:
                 error_code="CONFIG_EXCHANGE_INVALID",
                 category=ErrorCategory.VALIDATION,
                 details={"validation_errors": e.errors(), "config": config},
-            )
+            ) from e
 
     async def validate_risk_config(self, config: dict) -> RiskConfig:
         """Validate risk configuration."""
@@ -352,7 +352,7 @@ class ConfigValidator:
                 error_code="CONFIG_RISK_INVALID",
                 category=ErrorCategory.VALIDATION,
                 details={"validation_errors": e.errors(), "config": config},
-            )
+            ) from e
 
     async def validate_strategy_config(self, config: dict) -> StrategyConfig:
         """Validate strategy configuration."""
@@ -364,7 +364,7 @@ class ConfigValidator:
                 error_code="CONFIG_STRATEGY_INVALID",
                 category=ErrorCategory.VALIDATION,
                 details={"validation_errors": e.errors(), "config": config},
-            )
+            ) from e
 
     def register_validator(self, config_section: str, validator: Callable[[dict], Any]) -> None:
         """Register a custom validator for a configuration section."""
@@ -388,7 +388,7 @@ class ConfigValidator:
                 error_code="CONFIG_CUSTOM_VALIDATION_FAILED",
                 category=ErrorCategory.VALIDATION,
                 details={"section": section, "config": config, "error": str(e)},
-            )
+            ) from e
 
 
 class ConfigService:
@@ -501,56 +501,11 @@ class ConfigService:
 
     async def _load_configuration(self) -> None:
         """Load configuration from all providers."""
-        merged_config: dict[str, Any] = {}
+        merged_config = await self._load_from_all_providers()
 
-        # Load from all providers (later providers override earlier ones)
-        for provider in self.providers:
-            try:
-                provider_config = await provider.load_config()
-                merged_config = self._deep_merge(merged_config, provider_config)
-                self.logger.debug(f"Loaded config from {provider.__class__.__name__}")
-            except Exception as e:
-                self.logger.error(f"Failed to load from {provider.__class__.__name__}: {e}")
-                # Continue with other providers
-                continue
-
-        # Create Config instance
         try:
-            # Convert merged config to Config instance
-            # Since Config expects individual domain configs, we need to structure the data
-            self._config = Config()
-
-            # Update domain configs if present in merged config
-            if "database" in merged_config:
-                self._config.database = await self.validator.validate_database_config(
-                    merged_config["database"]
-                )
-
-            if "exchange" in merged_config:
-                self._config.exchange = await self.validator.validate_exchange_config(
-                    merged_config["exchange"]
-                )
-
-            if "risk" in merged_config:
-                self._config.risk = await self.validator.validate_risk_config(merged_config["risk"])
-
-            if "strategy" in merged_config:
-                self._config.strategy = await self.validator.validate_strategy_config(
-                    merged_config["strategy"]
-                )
-
-            # Update app-level configs
-            app_config = merged_config.get("app", {})
-            if "environment" in app_config:
-                self._config.environment = app_config["environment"]
-            if "debug" in app_config:
-                self._config.debug = app_config["debug"]
-            if "log_level" in app_config:
-                self._config.log_level = app_config["log_level"]
-
-            # Clear cache after config reload
+            await self._create_config_instance(merged_config)
             self.cache.clear()
-
             self.logger.info("Configuration loaded and validated successfully")
 
         except Exception as e:
@@ -559,7 +514,56 @@ class ConfigService:
                 error_code="CONFIG_CREATION_FAILED",
                 category=ErrorCategory.CONFIGURATION,
                 details={"merged_config": merged_config, "error": str(e)},
-            )
+            ) from e
+
+    async def _load_from_all_providers(self) -> dict[str, Any]:
+        """Load configuration from all providers and merge them."""
+        merged_config: dict[str, Any] = {}
+
+        for provider in self.providers:
+            try:
+                provider_config = await provider.load_config()
+                merged_config = self._deep_merge(merged_config, provider_config)
+                self.logger.debug(f"Loaded config from {provider.__class__.__name__}")
+            except Exception as e:
+                self.logger.error(f"Failed to load from {provider.__class__.__name__}: {e}")
+                continue  # Continue with other providers
+
+        return merged_config
+
+    async def _create_config_instance(self, merged_config: dict[str, Any]) -> None:
+        """Create Config instance from merged configuration data."""
+        self._config = Config()
+
+        # Update domain configs
+        await self._update_domain_configs(merged_config)
+
+        # Update app-level configs
+        self._update_app_configs(merged_config)
+
+    async def _update_domain_configs(self, merged_config: dict[str, Any]) -> None:
+        """Update domain-specific configurations."""
+        domain_config_map = {
+            "database": self.validator.validate_database_config,
+            "exchange": self.validator.validate_exchange_config,
+            "risk": self.validator.validate_risk_config,
+            "strategy": self.validator.validate_strategy_config,
+        }
+
+        for domain, validator in domain_config_map.items():
+            if domain in merged_config:
+                validated_config = await validator(merged_config[domain])
+                setattr(self._config, domain, validated_config)
+
+    def _update_app_configs(self, merged_config: dict[str, Any]) -> None:
+        """Update application-level configurations."""
+        app_config = merged_config.get("app", {})
+
+        app_config_map = {"environment": "environment", "debug": "debug", "log_level": "log_level"}
+
+        for key, attr in app_config_map.items():
+            if key in app_config:
+                setattr(self._config, attr, app_config[key])
 
     def _deep_merge(self, base: dict, override: dict) -> dict:
         """Deep merge two dictionaries."""
@@ -786,19 +790,19 @@ class ConfigService:
         if self._config is not None:
             return self._config.to_dict()
         return None
-    
+
     def get_config_dict(self) -> dict[str, Any]:
         """Get the currently loaded configuration as dictionary.
-        
+
         This is an alias for get_loaded_config() for compatibility.
         Returns empty dict if config is not loaded.
         """
         loaded = self.get_loaded_config()
         return loaded if loaded is not None else {}
-    
+
     def get_config(self) -> dict[str, Any]:
         """Get the currently loaded configuration as dictionary.
-        
+
         This is an alias for get_config_dict() for compatibility.
         Returns empty dict if config is not loaded.
         """

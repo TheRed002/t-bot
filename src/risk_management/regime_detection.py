@@ -7,7 +7,7 @@ It detects volatility regimes, trend regimes, and correlation regimes with chang
 CRITICAL: This module integrates with existing risk management framework from P-008/P-009.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -52,15 +52,15 @@ class MarketRegimeDetector(BaseComponent):
 
         # Correlation thresholds
         self.correlation_thresholds = {
-            "low_correlation": 0.3,
-            "high_correlation": 0.7,
+            MarketRegime.LOW_CORRELATION: 0.3,
+            MarketRegime.HIGH_CORRELATION: 0.7,
         }
 
         # State tracking
         self.current_regime = MarketRegime.MEDIUM_VOLATILITY
         self.regime_history: list[RegimeChangeEvent] = []
         self.price_data: dict[str, list[float]] = {}
-        self.last_update = datetime.now()
+        self.last_update = datetime.now(timezone.utc)
 
         self.logger.info(
             "Market regime detector initialized",
@@ -282,7 +282,7 @@ class MarketRegimeDetector(BaseComponent):
             )
 
             # Check for regime change
-            await self._check_regime_change(comprehensive_regime)
+            self._check_regime_change(comprehensive_regime)
 
             return comprehensive_regime
 
@@ -342,7 +342,7 @@ class MarketRegimeDetector(BaseComponent):
         else:
             return dominant_trend  # Use trend regime for medium volatility
 
-    async def _check_regime_change(self, new_regime: MarketRegime) -> None:
+    def _check_regime_change(self, new_regime: MarketRegime) -> None:
         """
         Check for regime change and trigger alerts.
 
@@ -358,7 +358,7 @@ class MarketRegimeDetector(BaseComponent):
                     from_regime=self.current_regime,
                     to_regime=new_regime,
                     confidence=confidence,
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(timezone.utc),
                     trigger_metrics={
                         "volatility_window": self.volatility_window,
                         "trend_window": self.trend_window,
@@ -449,7 +449,7 @@ class MarketRegimeDetector(BaseComponent):
 
         total_changes = len(self.regime_history)
         regime_duration = (
-            datetime.now() - self.regime_history[-1].timestamp
+            datetime.now(timezone.utc) - self.regime_history[-1].timestamp
         ).total_seconds() / 3600
 
         stats = {

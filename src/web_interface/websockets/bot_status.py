@@ -7,7 +7,7 @@ performance metrics, trade notifications, and bot health monitoring.
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -161,7 +161,7 @@ async def bot_status_websocket(websocket: WebSocket):
             "type": "welcome",
             "message": "Connected to T-Bot bot status stream",
             "user_id": user.user_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "available_update_types": ["status", "metrics", "trades", "errors", "alerts"],
             "instructions": {
                 "subscribe_all": 'Send {"action": "subscribe_all"}',
@@ -187,7 +187,7 @@ async def bot_status_websocket(websocket: WebSocket):
                         "type": "subscription_confirmed",
                         "scope": "all_bots",
                         "update_types": message.get("update_types", ["status", "metrics"]),
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     await bot_manager.send_to_user(user.user_id, response)
 
@@ -203,7 +203,7 @@ async def bot_status_websocket(websocket: WebSocket):
                         "type": "subscription_confirmed",
                         "bot_ids": bot_ids,
                         "update_types": update_types,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     await bot_manager.send_to_user(user.user_id, response)
 
@@ -216,19 +216,22 @@ async def bot_status_websocket(websocket: WebSocket):
                     response = {
                         "type": "unsubscription_confirmed",
                         "bot_ids": bot_ids,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     await bot_manager.send_to_user(user.user_id, response)
 
                 elif message.get("action") == "ping":
-                    pong_message = {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
+                    pong_message = {
+                        "type": "pong",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
                     await bot_manager.send_to_user(user.user_id, pong_message)
 
             except json.JSONDecodeError:
                 error_message = {
                     "type": "error",
                     "message": "Invalid JSON format",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 await bot_manager.send_to_user(user.user_id, error_message)
 
@@ -239,7 +242,7 @@ async def bot_status_websocket(websocket: WebSocket):
                 error_message = {
                     "type": "error",
                     "message": f"Message processing error: {e!s}",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 await bot_manager.send_to_user(user.user_id, error_message)
 
@@ -260,11 +263,11 @@ async def send_initial_bot_status(user_id: str, bot_id: str, update_types: list[
             status_data = {
                 "type": "bot_status",
                 "bot_id": bot_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {
                     "status": random.choice(["running", "stopped", "paused", "error"]),
                     "uptime": f"{random.randint(1, 168)} hours",
-                    "last_trade": (datetime.utcnow()).isoformat(),
+                    "last_trade": (datetime.now(timezone.utc)).isoformat(),
                     "strategy": "trend_following",
                     "exchange": "binance",
                     "symbols": ["BTCUSDT", "ETHUSDT"],
@@ -277,7 +280,7 @@ async def send_initial_bot_status(user_id: str, bot_id: str, update_types: list[
             metrics_data = {
                 "type": "bot_metrics",
                 "bot_id": bot_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {
                     "total_trades": random.randint(10, 100),
                     "winning_trades": random.randint(5, 70),
@@ -304,14 +307,14 @@ async def send_initial_bot_status(user_id: str, bot_id: str, update_types: list[
                         "quantity": random.uniform(0.1, 2.0),
                         "price": random.uniform(40000, 50000),
                         "pnl": random.uniform(-100, 300),
-                        "executed_at": datetime.utcnow().isoformat(),
+                        "executed_at": datetime.now(timezone.utc).isoformat(),
                     }
                 )
 
             trades_data = {
                 "type": "bot_trades",
                 "bot_id": bot_id,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {"recent_trades": trades},
             }
             await bot_manager.send_to_user(user_id, trades_data)
@@ -346,7 +349,7 @@ async def bot_status_simulator():
                         metrics_update = {
                             "type": "bot_metrics_update",
                             "bot_id": bot_id,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                             "data": {
                                 "daily_pnl": random.uniform(-200, 800),
                                 "total_pnl": random.uniform(-1000, 5000),
@@ -360,7 +363,7 @@ async def bot_status_simulator():
                         trade_update = {
                             "type": "bot_trade_executed",
                             "bot_id": bot_id,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                             "data": {
                                 "trade_id": f"trade_{bot_id}_{random.randint(1000, 9999)}",
                                 "symbol": random.choice(["BTCUSDT", "ETHUSDT"]),
@@ -380,7 +383,7 @@ async def bot_status_simulator():
                             status_update = {
                                 "type": "bot_status_changed",
                                 "bot_id": bot_id,
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
                                 "data": {
                                     "old_status": "running",
                                     "new_status": random.choice(["paused", "error", "stopped"]),
@@ -401,7 +404,7 @@ async def bot_status_simulator():
                             alert_update = {
                                 "type": "bot_alert",
                                 "bot_id": bot_id,
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
                                 "data": {
                                     "alert_type": random.choice(["warning", "error", "info"]),
                                     "message": random.choice(

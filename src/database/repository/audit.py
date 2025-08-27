@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.audit import (
     CapitalAuditLog,
@@ -10,15 +10,21 @@ from src.database.models.audit import (
     PerformanceAuditLog,
     RiskAuditLog,
 )
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 
-class CapitalAuditLogRepository(BaseRepository[CapitalAuditLog]):
+class CapitalAuditLogRepository(DatabaseRepository[CapitalAuditLog, str]):
     """Repository for CapitalAuditLog entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize capital audit log repository."""
-        super().__init__(session, CapitalAuditLog)
+        super().__init__(
+            session=session,
+            model=CapitalAuditLog,
+            entity_type=CapitalAuditLog,
+            key_type=str,
+            name="CapitalAuditLogRepository",
+        )
 
     async def get_by_strategy(self, strategy_id: str) -> list[CapitalAuditLog]:
         """Get audit logs by strategy."""
@@ -37,12 +43,18 @@ class CapitalAuditLogRepository(BaseRepository[CapitalAuditLog]):
         )
 
 
-class ExecutionAuditLogRepository(BaseRepository[ExecutionAuditLog]):
+class ExecutionAuditLogRepository(DatabaseRepository[ExecutionAuditLog, str]):
     """Repository for ExecutionAuditLog entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize execution audit log repository."""
-        super().__init__(session, ExecutionAuditLog)
+        super().__init__(
+            session=session,
+            model=ExecutionAuditLog,
+            entity_type=ExecutionAuditLog,
+            key_type=str,
+            name="ExecutionAuditLogRepository",
+        )
 
     async def get_by_order(self, order_id: str) -> list[ExecutionAuditLog]:
         """Get audit logs by order."""
@@ -57,12 +69,18 @@ class ExecutionAuditLogRepository(BaseRepository[ExecutionAuditLog]):
         return await self.get_all(filters={"execution_status": "failed"}, order_by="-timestamp")
 
 
-class RiskAuditLogRepository(BaseRepository[RiskAuditLog]):
+class RiskAuditLogRepository(DatabaseRepository[RiskAuditLog, str]):
     """Repository for RiskAuditLog entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize risk audit log repository."""
-        super().__init__(session, RiskAuditLog)
+        super().__init__(
+            session=session,
+            model=RiskAuditLog,
+            entity_type=RiskAuditLog,
+            key_type=str,
+            name="RiskAuditLogRepository",
+        )
 
     async def get_by_risk_type(self, risk_type: str) -> list[RiskAuditLog]:
         """Get audit logs by risk type."""
@@ -77,12 +95,18 @@ class RiskAuditLogRepository(BaseRepository[RiskAuditLog]):
         return await self.get_all(filters={"severity": "critical"}, order_by="-timestamp")
 
 
-class PerformanceAuditLogRepository(BaseRepository[PerformanceAuditLog]):
+class PerformanceAuditLogRepository(DatabaseRepository[PerformanceAuditLog, str]):
     """Repository for PerformanceAuditLog entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize performance audit log repository."""
-        super().__init__(session, PerformanceAuditLog)
+        super().__init__(
+            session=session,
+            model=PerformanceAuditLog,
+            entity_type=PerformanceAuditLog,
+            key_type=str,
+            name="PerformanceAuditLogRepository",
+        )
 
     async def get_by_strategy(self, strategy_id: str) -> list[PerformanceAuditLog]:
         """Get performance audit logs by strategy."""

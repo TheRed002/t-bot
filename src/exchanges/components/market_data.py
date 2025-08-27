@@ -1,6 +1,6 @@
 """Market data provider component for exchanges."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from cachetools import TTLCache
@@ -17,7 +17,13 @@ class MarketDataProvider:
     and other market information with caching.
     """
 
-    def __init__(self, connection: ConnectionManager, cache_ttl: int = 60, cache_size: int = 100, logger: Any = None):
+    def __init__(
+        self,
+        connection: ConnectionManager,
+        cache_ttl: int = 60,
+        cache_size: int = 100,
+        logger: Any = None,
+    ):
         """
         Initialize market data provider.
 
@@ -255,7 +261,7 @@ class MarketDataProvider:
             "change_percent_24h": float(data.get("priceChangePercent", 0)),
             "high_24h": float(data.get("highPrice", 0)),
             "low_24h": float(data.get("lowPrice", 0)),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def _standardize_orderbook(self, data: dict) -> dict[str, Any]:
@@ -269,7 +275,7 @@ class MarketDataProvider:
                 {"price": float(price), "quantity": float(qty)}
                 for price, qty in data.get("asks", [])
             ],
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def _standardize_trade(self, data: dict) -> dict[str, Any]:
@@ -280,7 +286,7 @@ class MarketDataProvider:
             "quantity": float(data.get("qty", 0)),
             "time": data.get("time"),
             "is_buyer_maker": data.get("isBuyerMaker", False),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def _standardize_kline(self, data: list) -> dict[str, Any]:
@@ -296,7 +302,7 @@ class MarketDataProvider:
                 "close_time": data[6] if len(data) > 6 else None,
                 "quote_volume": float(data[7]) if len(data) > 7 else 0,
                 "trades": int(data[8]) if len(data) > 8 else 0,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         return {}
 

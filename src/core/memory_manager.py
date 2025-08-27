@@ -30,12 +30,13 @@ import time
 import tracemalloc
 import weakref
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
 import psutil
 
-from src.core.config import Config
+from src.core.config.main import Config
 from src.core.logging import get_logger
 
 T = TypeVar("T")
@@ -67,8 +68,8 @@ class ObjectPool(Generic[T]):
 
     def __init__(
         self,
-        create_func: callable,
-        reset_func: optional_callable = None,
+        create_func: Callable,
+        reset_func: Callable | None = None,
         max_size: int = 1000,
         name: str = "ObjectPool",
     ):
@@ -426,6 +427,7 @@ class HighPerformanceMemoryManager:
 
         # Background monitoring
         self.monitoring_task = None
+        self.leak_detector_task = None
         self.is_running = False
 
         # GC optimization
@@ -447,7 +449,7 @@ class HighPerformanceMemoryManager:
 
         # List pool
         self.pools["list"] = ObjectPool(
-            create_func=list, reset_func=lambda l: l.clear(), max_size=1000, name="ListPool"
+            create_func=list, reset_func=lambda lst: lst.clear(), max_size=1000, name="ListPool"
         )
 
         # Set pool
@@ -458,7 +460,7 @@ class HighPerformanceMemoryManager:
         # Cache-optimized list pool
         self.pools["cache_list"] = ObjectPool(
             create_func=CacheOptimizedList,
-            reset_func=lambda l: l.clear(),
+            reset_func=lambda cache_list: cache_list.clear(),
             max_size=100,
             name="CacheListPool",
         )
@@ -490,7 +492,7 @@ class HighPerformanceMemoryManager:
         self.is_running = True
 
         # Start leak detection
-        asyncio.create_task(self.leak_detector.start())
+        self.leak_detector_task = asyncio.create_task(self.leak_detector.start())
 
         # Start memory monitoring
         self.monitoring_task = asyncio.create_task(self._monitoring_loop())
@@ -683,6 +685,16 @@ class HighPerformanceMemoryManager:
         """Stop memory monitoring."""
         self.is_running = False
 
+        # Stop leak detection
+        if self.leak_detector_task and not self.leak_detector_task.done():
+            self.leak_detector.stop()
+            self.leak_detector_task.cancel()
+            try:
+                await self.leak_detector_task
+            except asyncio.CancelledError:
+                pass
+
+        # Stop monitoring task
         if self.monitoring_task:
             self.monitoring_task.cancel()
             try:

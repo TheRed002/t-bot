@@ -8,39 +8,57 @@ CRITICAL: This module integrates with P-001 core framework and will be
 used by all subsequent prompts for real-time state management.
 """
 
+import asyncio
 import json
 from typing import Any
 
 import redis.asyncio as redis
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 
 # Import core components from P-001
 from src.core.exceptions import DataError, DataSourceError
+
+# Import error handling from P-002A
+from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
 from src.utils.constants import TIMEOUTS
 
 # Import utils from P-007A
+from src.utils.decorators import circuit_breaker, retry, time_execution
 from src.utils.formatters import format_api_response
 
 
 class RedisClient(BaseComponent):
     """Async Redis client with utilities for trading bot data."""
 
-    def __init__(self, config_or_url, *, auto_close: bool = True):
+    def __init__(self, config_or_url, *, auto_close: bool = False):
         super().__init__()  # Initialize BaseComponent
         # Accept both config object and direct URL
         if hasattr(config_or_url, "redis"):
-            self.redis_url = getattr(config_or_url.redis, "url", "redis://localhost:6379/0") if hasattr(config_or_url, "redis") else "redis://localhost:6379/0"
+            self.redis_url = (
+                getattr(config_or_url.redis, "url", "redis://localhost:6379/0")
+                if hasattr(config_or_url, "redis")
+                else "redis://localhost:6379/0"
+            )
+            self.config = config_or_url
         elif isinstance(config_or_url, str):
             self.redis_url = config_or_url
+            self.config = None
         else:
             self.redis_url = "redis://localhost:6379/0"
+            self.config = None
 
         self.client: redis.Redis | None = None
         # Use utils constants for default TTL
         self._default_ttl = TIMEOUTS.get("REDIS_DEFAULT_TTL", 3600)
         self.auto_close = auto_close
+        self._close_lock = asyncio.Lock()
+        self.error_handler = ErrorHandler(self.config) if self.config else None
 
+    @time_execution
+    @retry(max_attempts=3)
+    @circuit_breaker(failure_threshold=3, recovery_timeout=30)
     async def connect(self) -> None:
         """Connect to Redis with proper configuration."""
         try:
@@ -57,8 +75,29 @@ class RedisClient(BaseComponent):
             self.logger.info("Redis connection established")
 
         except Exception as e:
-            self.logger.error("Redis connection failed", error=str(e))
-            raise DataSourceError(f"Redis connection failed: {e!s}")
+            if self.error_handler and self.config:
+                # Create error context for comprehensive error handling
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="redis_client",
+                    operation="connect",
+                    details={"redis_url": self.redis_url},
+                )
+
+                # Use ErrorHandler for sophisticated error management
+                recovery_scenario = NetworkDisconnectionRecovery(self.config)
+                handled = await self.error_handler.handle_error(e, error_context, recovery_scenario)
+
+                if not handled:
+                    self.logger.error("Redis connection failed", error=str(e))
+                    raise DataSourceError(f"Redis connection failed: {e!s}")
+                else:
+                    self.logger.info("Redis connection recovered after error handling")
+                    # Retry connection after recovery
+                    await self.connect()
+            else:
+                self.logger.error("Redis connection failed", error=str(e))
+                raise DataSourceError(f"Redis connection failed: {e!s}")
 
     async def _ensure_connected(self) -> None:
         if self.client is None:
@@ -66,26 +105,42 @@ class RedisClient(BaseComponent):
 
     async def _maybe_autoclose(self) -> None:
         if self.auto_close and self.client is not None:
-            try:
-                await self.client.aclose()
-            except AttributeError:
-                await self.client.close()
-            finally:
-                self.client = None
+            async with self._close_lock:
+                # Double-check pattern to avoid race conditions
+                if self.client is not None:
+                    try:
+                        # Check if aclose method exists (newer redis versions)
+                        if hasattr(self.client, "aclose") and callable(self.client.aclose):
+                            await self.client.aclose()
+                        else:
+                            # Fall back to close() for older versions
+                            await self.client.close()
+                    except Exception as e:
+                        self.logger.warning(f"Error during auto-close: {e}")
+                    finally:
+                        self.client = None
 
     async def disconnect(self) -> None:
         """Disconnect from Redis."""
         if self.client:
             try:
-                await self.client.aclose()
-            except AttributeError:
-                await self.client.close()
+                # Check if aclose method exists (newer redis versions)
+                if hasattr(self.client, "aclose") and callable(self.client.aclose):
+                    await self.client.aclose()
+                else:
+                    # Fall back to close() for older versions
+                    await self.client.close()
+            except Exception as e:
+                self.logger.warning(f"Error during disconnect: {e}")
+            finally:
+                self.client = None
             self.logger.info("Redis connection closed")
 
     def _get_namespaced_key(self, key: str, namespace: str = "trading_bot") -> str:
         """Get namespaced key for organization."""
         return f"{namespace}:{key}"
 
+    @circuit_breaker(failure_threshold=5, recovery_timeout=30)
     async def set(
         self, key: str, value: Any, ttl: int | None = None, namespace: str = "trading_bot"
     ) -> bool:
@@ -111,6 +166,14 @@ class RedisClient(BaseComponent):
             return result
 
         except Exception as e:
+            if self.error_handler and self.config:
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="redis_client",
+                    operation="set",
+                    details={"key": key, "namespace": namespace},
+                )
+                await self.error_handler.handle_error(e, error_context)
             self.logger.error("Redis set operation failed", key=key, error=str(e))
             raise DataError(f"Redis set operation failed: {e!s}")
         finally:

@@ -21,6 +21,7 @@ from src.core.logging import get_logger
 # Type checking imports to avoid circular dependencies
 if TYPE_CHECKING:
     from src.database.service import DatabaseService
+    from src.monitoring.metrics import MetricsCollector
     from src.state import StateService
 
 from .position_sizing import PositionSizer
@@ -44,6 +45,7 @@ class RiskManagementFactory:
         config: Config | None = None,
         database_service: "DatabaseService | None" = None,
         state_service: "StateService | None" = None,
+        metrics_collector: "MetricsCollector | None" = None,
     ):
         """
         Initialize risk management factory.
@@ -68,6 +70,7 @@ class RiskManagementFactory:
         self.config = config
         self.database_service = database_service
         self.state_service = state_service
+        self.metrics_collector = metrics_collector
         self._risk_service_instance: RiskService | None = None
 
         logger.info(
@@ -99,11 +102,20 @@ class RiskManagementFactory:
             if not self.state_service:
                 raise DependencyError("StateService is required for RiskService")
 
+            # Try to get metrics collector if not provided
+            metrics_collector = self.metrics_collector
+            if metrics_collector is None:
+                try:
+                    metrics_collector = get_container().get("MetricsCollectorProtocol")
+                except Exception:
+                    pass  # Will fallback in RiskService
+            
             self._risk_service_instance = RiskService(
                 database_service=self.database_service,
                 state_service=self.state_service,
                 config=self.config,
                 correlation_id=correlation_id,
+                metrics_collector=metrics_collector,
             )
 
             logger.info(

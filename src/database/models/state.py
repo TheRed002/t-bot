@@ -5,7 +5,7 @@ These models provide ACID-compliant state storage with versioning,
 checkpointing, audit trails, and backup/restore capabilities.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
@@ -135,7 +135,9 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
     base_snapshot_id = Column(
         UUID(as_uuid=True), ForeignKey("state_snapshots.snapshot_id"), nullable=True
     )
-    snapshot = relationship("StateSnapshot", back_populates="checkpoints", foreign_keys=[base_snapshot_id])
+    snapshot = relationship(
+        "StateSnapshot", back_populates="checkpoints", foreign_keys=[base_snapshot_id]
+    )
 
     # Previous checkpoint for chain
     previous_checkpoint_id = Column(
@@ -354,7 +356,7 @@ class StateMetadata(Base, AuditMixin):
     def increment_access_count(self) -> None:
         """Increment access counter and update last_accessed."""
         self.access_count += 1
-        self.last_accessed = datetime.utcnow()
+        self.last_accessed = datetime.now(timezone.utc)
 
     def is_in_storage_layer(self, layer: str) -> bool:
         """Check if state is stored in a specific layer."""
@@ -457,7 +459,7 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
     def is_expired(self) -> bool:
         """Check if backup is expired."""
         if self.expires_at:
-            return datetime.utcnow() > self.expires_at
+            return datetime.now(timezone.utc) > self.expires_at
         return False
 
     @hybrid_property

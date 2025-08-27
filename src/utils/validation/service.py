@@ -62,11 +62,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.core import BaseService, HealthStatus
 from src.core.exceptions import (
     ErrorCategory,
     ValidationError as TradingValidationError,
 )
 from src.core.types import ValidationLevel
+from src.core.types.base import ConfigDict
 
 from .core import ValidationFramework
 
@@ -177,6 +179,8 @@ class ValidationResult(BaseModel):
             ValidationDetail(
                 field=field,
                 validation_type=validation_type,
+                expected=None,
+                actual=None,
                 message=message,
                 severity=ValidationLevel.LOW,
                 suggestion=suggestion,
@@ -246,7 +250,10 @@ class NumericValidationRule(ValidationRule):
             is_valid=True,
             validation_type=ValidationType.ORDER,  # Default, can be overridden
             value=value,
+            normalized_value=None,
             context=context,
+            execution_time_ms=0.0,
+            cache_hit=False,
         )
 
         # Check if value is numeric
@@ -280,7 +287,7 @@ class NumericValidationRule(ValidationRule):
         result.normalized_value = numeric_value
 
         # Check zero
-        if not self.allow_zero and abs(float(numeric_value)) < EPSILON:
+        if not self.allow_zero and abs(numeric_value) < Decimal(str(EPSILON)):
             result.add_error(
                 "value",
                 "Zero values are not allowed",
@@ -350,7 +357,13 @@ class StringValidationRule(ValidationRule):
     ) -> ValidationResult:
         """Validate string value."""
         result = ValidationResult(
-            is_valid=True, validation_type=ValidationType.ORDER, value=value, context=context
+            is_valid=True,
+            validation_type=ValidationType.ORDER,
+            value=value,
+            normalized_value=None,
+            context=context,
+            execution_time_ms=0.0,
+            cache_hit=False,
         )
 
         # Check if value is string
@@ -499,7 +512,7 @@ class ValidationCache:
 class ValidatorRegistry:
     """Registry for validation rules."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._rules: dict[str, ValidationRule] = {}
         self.logger = logging.getLogger(f"{__name__}.ValidatorRegistry")
         self._register_default_rules()
@@ -573,7 +586,7 @@ class ValidatorRegistry:
         )
 
 
-class ValidationService:
+class ValidationService(BaseService):
     """Comprehensive validation service for the T-Bot trading system.
 
     This service provides centralized validation functionality that eliminates
@@ -611,15 +624,31 @@ class ValidationService:
     """
 
     def __init__(
-        self, cache_ttl: int = 300, enable_cache: bool = True, max_cache_size: int = 10000
+        self,
+        name: str | None = None,
+        config: ConfigDict | None = None,
+        correlation_id: str | None = None,
+        cache_ttl: int = 300,
+        enable_cache: bool = True,
+        max_cache_size: int = 10000,
     ):
         """Initialize ValidationService.
 
         Args:
+            name: Service name for identification
+            config: Service configuration
+            correlation_id: Request correlation ID
             cache_ttl: Cache time-to-live in seconds
             enable_cache: Enable validation result caching
             max_cache_size: Maximum cache size
         """
+        # Call BaseService constructor with proper parameters
+        super().__init__(
+            name=name or "ValidationService",
+            config=config,
+            correlation_id=correlation_id,
+        )
+
         self.cache = ValidationCache(cache_ttl, max_cache_size) if enable_cache else None
         self.registry = ValidatorRegistry()
         self.enable_cache = enable_cache
@@ -627,26 +656,59 @@ class ValidationService:
         # Use ValidationFramework as single source of truth
         self.framework = ValidationFramework()
 
-        self._initialized = False
-        self.logger = logging.getLogger(f"{__name__}.ValidationService")
+    async def _do_start(self) -> None:
+        """Override BaseService start method."""
+        await super()._do_start()
 
+        # Perform custom initialization
+        self.logger.info("ValidationService started successfully")
+
+    async def _do_stop(self) -> None:
+        """Override BaseService stop method."""
+        # Perform custom shutdown
+        self.logger.info("ValidationService shutdown completed")
+
+        await super()._do_stop()
+
+    async def _service_health_check(self) -> HealthStatus:
+        """Override BaseService health check method."""
+        if not self.is_running:
+            return HealthStatus.UNHEALTHY
+
+        # Check cache health if enabled
+        if self.cache:
+            # Check cache is responsive
+            try:
+                test_key = "_health_check_test"
+                test_result = ValidationResult(
+                    is_valid=True,
+                    validation_type=ValidationType.CONFIGURATION,
+                    value="health_check",
+                    normalized_value=None,
+                    context=None,
+                    execution_time_ms=0.0,
+                    cache_hit=False,
+                )
+                await self.cache.set(test_key, test_result, ttl=1)
+                await self.cache.get(test_key)
+            except Exception as e:
+                self.logger.error(f"Cache health check failed: {e}")
+                return HealthStatus.DEGRADED
+
+        return HealthStatus.HEALTHY
+
+    # Keep legacy methods for backward compatibility
     async def initialize(self) -> None:
-        """Initialize the validation service."""
-        if self._initialized:
-            self.logger.warning("ValidationService already initialized")
-            return
-
-        self.logger.info("ValidationService initialized successfully")
-        self._initialized = True
+        """Initialize the validation service (legacy method)."""
+        await self.start()
 
     async def shutdown(self) -> None:
-        """Shutdown the validation service."""
-        self._initialized = False
-        self.logger.info("ValidationService shutdown completed")
+        """Shutdown the validation service (legacy method)."""
+        await self.stop()
 
     def _ensure_initialized(self) -> None:
         """Ensure the service is initialized."""
-        if not self._initialized:
+        if not self.is_running:
             raise TradingValidationError(
                 "ValidationService not initialized. Call initialize() first.",
                 error_code="VALIDATION_SERVICE_NOT_INITIALIZED",
@@ -672,7 +734,13 @@ class ValidationService:
         rule = self.registry.get(rule_name)
         if not rule:
             result = ValidationResult(
-                is_valid=False, validation_type=ValidationType.ORDER, value=value, context=context
+                is_valid=False,
+                validation_type=ValidationType.ORDER,
+                value=value,
+                normalized_value=None,
+                context=context,
+                execution_time_ms=0.0,
+                cache_hit=False,
             )
             result.add_error(
                 "rule",
@@ -692,6 +760,86 @@ class ValidationService:
 
         return result
 
+    def _validate_required_order_fields(
+        self, order_data: dict[str, Any], result: ValidationResult
+    ) -> None:
+        """Validate required order fields."""
+        required_fields = ["symbol", "side", "type", "quantity"]
+        for field in required_fields:
+            if field not in order_data:
+                result.add_error(
+                    field,
+                    f"Required field '{field}' is missing",
+                    "required_field",
+                    expected="present",
+                    actual="missing",
+                    severity=ValidationLevel.CRITICAL,
+                )
+
+    def _setup_field_validations(self, order_data: dict[str, Any]) -> list[tuple[str, str, Any]]:
+        """Setup field validations based on order type."""
+        field_validations = [
+            ("symbol", "symbol", order_data.get("symbol")),
+            ("side", "order_side", order_data.get("side")),
+            ("type", "order_type", order_data.get("type")),
+            ("quantity", "quantity", order_data.get("quantity")),
+        ]
+
+        # Add price validation for limit orders
+        order_type = order_data.get("type", "").upper()
+        if order_type in ["LIMIT", "STOP_LIMIT"]:
+            field_validations.append(("price", "price", order_data.get("price")))
+
+        return field_validations
+
+    def _validate_price_requirement(
+        self, order_data: dict[str, Any], result: ValidationResult
+    ) -> None:
+        """Validate price requirement for limit orders."""
+        order_type = order_data.get("type", "").upper()
+        if order_type in ["LIMIT", "STOP_LIMIT"] and "price" not in order_data:
+            result.add_error(
+                "price",
+                f"Price is required for {order_type} orders",
+                "conditional_required",
+                severity=ValidationLevel.CRITICAL,
+            )
+
+    async def _execute_field_validations(
+        self,
+        field_validations: list[tuple[str, str, Any]],
+        result: ValidationResult,
+        context: ValidationContext | None = None,
+    ) -> None:
+        """Execute individual field validations."""
+        for field_name, rule_name, value in field_validations:
+            if value is not None:
+                field_result = await self._validate_with_rule(rule_name, value, context)
+                if not field_result.is_valid:
+                    for error in field_result.errors:
+                        result.add_error(
+                            field_name,
+                            error.message,
+                            error.validation_type,
+                            error.expected,
+                            error.actual,
+                            error.severity,
+                            error.suggestion,
+                        )
+                else:
+                    self._store_normalized_value(field_result, result, field_name)
+
+    def _store_normalized_value(
+        self, field_result: ValidationResult, result: ValidationResult, field_name: str
+    ) -> None:
+        """Store normalized value from field validation."""
+        if field_result.normalized_value is not None:
+            if result.normalized_value is None:
+                result.normalized_value = {}
+            if not isinstance(result.normalized_value, dict):
+                result.normalized_value = {}
+            result.normalized_value[field_name] = field_result.normalized_value
+
     # Order Validation
     async def validate_order(
         self, order_data: dict[str, Any], context: ValidationContext | None = None
@@ -709,70 +857,26 @@ class ValidationService:
         start_time = time.time()
 
         result = ValidationResult(
-            is_valid=True, validation_type=ValidationType.ORDER, value=order_data, context=context
+            is_valid=True,
+            validation_type=ValidationType.ORDER,
+            value=order_data,
+            normalized_value=None,
+            context=context,
+            execution_time_ms=0.0,
+            cache_hit=False,
         )
 
         # Check required fields
-        required_fields = ["symbol", "side", "type", "quantity"]
-        for field in required_fields:
-            if field not in order_data:
-                result.add_error(
-                    field,
-                    f"Required field '{field}' is missing",
-                    "required_field",
-                    expected="present",
-                    actual="missing",
-                    severity=ValidationLevel.CRITICAL,
-                )
-
+        self._validate_required_order_fields(order_data, result)
         if not result.is_valid:
             return result  # Early return for missing required fields
 
-        # Validate individual fields
-        field_validations = [
-            ("symbol", "symbol", order_data.get("symbol")),
-            ("side", "order_side", order_data.get("side")),
-            ("type", "order_type", order_data.get("type")),
-            ("quantity", "quantity", order_data.get("quantity")),
-        ]
+        # Validate price requirement for limit orders
+        self._validate_price_requirement(order_data, result)
 
-        # Add price validation for limit orders
-        order_type = order_data.get("type", "").upper()
-        if order_type in ["LIMIT", "STOP_LIMIT"]:
-            if "price" not in order_data:
-                result.add_error(
-                    "price",
-                    f"Price is required for {order_type} orders",
-                    "conditional_required",
-                    severity=ValidationLevel.CRITICAL,
-                )
-            else:
-                field_validations.append(("price", "price", order_data.get("price")))
-
-        # Execute field validations
-        for field_name, rule_name, value in field_validations:
-            if value is not None:
-                field_result = await self._validate_with_rule(rule_name, value, context)
-                if not field_result.is_valid:
-                    for error in field_result.errors:
-                        result.add_error(
-                            field_name,
-                            error.message,
-                            error.validation_type,
-                            error.expected,
-                            error.actual,
-                            error.severity,
-                            error.suggestion,
-                        )
-                else:
-                    # Store normalized value
-                    if field_result.normalized_value is not None:
-                        # Use the result's normalized_value field directly
-                        if result.normalized_value is None:
-                            result.normalized_value = {}
-                        if not isinstance(result.normalized_value, dict):
-                            result.normalized_value = {}
-                        result.normalized_value[field_name] = field_result.normalized_value
+        # Setup and execute field validations
+        field_validations = self._setup_field_validations(order_data)
+        await self._execute_field_validations(field_validations, result, context)
 
         # Business logic validations
         if result.is_valid:
@@ -796,8 +900,10 @@ class ValidationService:
             quantity = order_data.get("quantity", 0)
 
             if price and quantity:
-                notional = float(price) * float(quantity)
-                min_notional = 10.0  # This would come from exchange info
+                price_decimal = Decimal(str(price))
+                quantity_decimal = Decimal(str(quantity))
+                notional = price_decimal * quantity_decimal
+                min_notional = Decimal("10.0")  # This would come from exchange info
 
                 if notional < min_notional:
                     result.add_error(
@@ -818,7 +924,13 @@ class ValidationService:
         start_time = time.time()
 
         result = ValidationResult(
-            is_valid=True, validation_type=ValidationType.RISK, value=risk_data, context=context
+            is_valid=True,
+            validation_type=ValidationType.RISK,
+            value=risk_data,
+            normalized_value=None,
+            context=context,
+            execution_time_ms=0.0,
+            cache_hit=False,
         )
 
         # Use legacy framework for complex validation
@@ -844,7 +956,10 @@ class ValidationService:
             is_valid=True,
             validation_type=ValidationType.STRATEGY,
             value=strategy_data,
+            normalized_value=None,
             context=context,
+            execution_time_ms=0.0,
+            cache_hit=False,
         )
 
         # Use legacy framework
@@ -870,7 +985,10 @@ class ValidationService:
             is_valid=True,
             validation_type=ValidationType.MARKET_DATA,
             value=market_data,
+            normalized_value=None,
             context=context,
+            execution_time_ms=0.0,
+            cache_hit=False,
         )
 
         # Check required fields for OHLCV data
@@ -887,10 +1005,10 @@ class ValidationService:
         if result.is_valid:
             # Validate OHLC relationships
             try:
-                open_price = float(market_data["open"])
-                high_price = float(market_data["high"])
-                low_price = float(market_data["low"])
-                close_price = float(market_data["close"])
+                open_price = Decimal(str(market_data["open"]))
+                high_price = Decimal(str(market_data["high"]))
+                low_price = Decimal(str(market_data["low"]))
+                close_price = Decimal(str(market_data["close"]))
 
                 if high_price < max(open_price, close_price):
                     result.add_error(
@@ -956,7 +1074,10 @@ class ValidationService:
                     is_valid=False,
                     validation_type=ValidationType.ORDER,  # Default
                     value=data,
+                    normalized_value=None,
                     context=context,
+                    execution_time_ms=0.0,
+                    cache_hit=False,
                 )
                 error_result.add_error(
                     "validation_type",
@@ -972,13 +1093,16 @@ class ValidationService:
                 *[task for _, task in tasks], return_exceptions=True
             )
 
-            for (validation_name, _), task_result in zip(tasks, completed_tasks):
+            for (validation_name, _), task_result in zip(tasks, completed_tasks, strict=False):
                 if isinstance(task_result, Exception):
                     error_result = ValidationResult(
                         is_valid=False,
                         validation_type=ValidationType.ORDER,
                         value=None,
+                        normalized_value=None,
                         context=context,
+                        execution_time_ms=0.0,
+                        cache_hit=False,
                     )
                     error_result.add_error(
                         "execution",
@@ -988,7 +1112,9 @@ class ValidationService:
                     )
                     results[validation_name] = error_result
                 else:
-                    results[validation_name] = task_result
+                    # Type guard: task_result is ValidationResult at this point
+                    if isinstance(task_result, ValidationResult):
+                        results[validation_name] = task_result
 
         total_time = (time.time() - start_time) * 1000
         self.logger.debug(
@@ -1001,21 +1127,24 @@ class ValidationService:
     def validate_price(self, price: Any) -> bool:
         """Backward compatibility for price validation."""
         try:
-            return self.framework.validate_price(price)
+            self.framework.validate_price(price)
+            return True
         except ValueError:
             return False
 
     def validate_quantity(self, quantity: Any) -> bool:
         """Backward compatibility for quantity validation."""
         try:
-            return self.framework.validate_quantity(quantity)
+            self.framework.validate_quantity(quantity)
+            return True
         except ValueError:
             return False
 
     def validate_symbol(self, symbol: str) -> bool:
         """Backward compatibility for symbol validation."""
         try:
-            return self.framework.validate_symbol(symbol)
+            self.framework.validate_symbol(symbol)
+            return True
         except ValueError:
             return False
 
@@ -1028,22 +1157,23 @@ class ValidationService:
     def validate_decimal(self, value: Any) -> Any:
         """
         Validate and convert value to Decimal.
-        
+
         Args:
             value: Value to validate
-            
+
         Returns:
             Decimal value
-            
+
         Raises:
             ValidationError: If value cannot be converted to Decimal
         """
         from decimal import Decimal, InvalidOperation
+
         from src.core.exceptions import ValidationError
-        
+
         if isinstance(value, Decimal):
             return value
-            
+
         try:
             return Decimal(str(value))
         except (InvalidOperation, ValueError, TypeError) as e:
@@ -1051,8 +1181,8 @@ class ValidationService:
 
     def get_validation_stats(self) -> dict[str, Any]:
         """Get validation service statistics."""
-        stats = {
-            "initialized": self._initialized,
+        stats: dict[str, Any] = {
+            "initialized": self.is_running,
             "registered_rules": len(self.registry.list_rules()),
             "cache_enabled": self.enable_cache,
         }
@@ -1068,7 +1198,7 @@ class ValidationService:
         await self.initialize()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self.shutdown()
 

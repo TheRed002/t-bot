@@ -29,7 +29,7 @@ from src.core.types import (
     ExecutionResult,
     ExecutionStatus,
     MarketData,
-    Order,
+    OrderRequest,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -38,6 +38,8 @@ from src.core.types import (
 # Import database models for type checking and instantiation
 from src.database.models import (
     ExecutionAuditLog,
+    Order,
+    OrderFill,
     RiskAuditLog,
     Trade,
 )
@@ -54,6 +56,7 @@ from src.monitoring import MetricsCollector, get_tracer
 # Import risk management for integration
 from src.risk_management.service import RiskService
 from src.utils import ValidationFramework, cache_result, format_currency, time_execution
+from src.monitoring.financial_precision import safe_decimal_to_float
 
 
 class ExecutionService(TransactionalService):
@@ -197,7 +200,7 @@ class ExecutionService(TransactionalService):
             if recent_trades:
                 # Calculate initial metrics
                 total_volume = sum(
-                    float(trade.quantity) * float(trade.executed_price) for trade in recent_trades
+                    trade.quantity * trade.executed_price for trade in recent_trades
                 )
 
                 self._performance_metrics["total_executions"] = len(recent_trades)
@@ -286,7 +289,7 @@ class ExecutionService(TransactionalService):
                     "execution.order_type", execution_result.original_order.order_type.value
                 )
                 span.set_attribute(
-                    "execution.quantity", float(execution_result.total_filled_quantity)
+                    "execution.quantity", str(execution_result.total_filled_quantity)
                 )
                 if bot_id:
                     span.set_attribute("bot.id", bot_id)
@@ -302,46 +305,64 @@ class ExecutionService(TransactionalService):
                     execution_result, market_data, pre_trade_analysis
                 )
 
-                # Create trade record data
-                trade_data = {
+                # Create ORDER record data (not Trade - Trade is for closed positions)
+                order_data = {
                     "id": str(uuid.uuid4()),
                     "bot_id": bot_id,
-                    "exchange_order_id": execution_result.execution_id,
                     "exchange": execution_result.original_order.exchange or "binance",
+                    "exchange_order_id": execution_result.execution_id,
                     "symbol": execution_result.original_order.symbol,
                     "side": execution_result.original_order.side.value,
-                    "order_type": execution_result.original_order.order_type.value,
-                    "quantity": execution_result.total_filled_quantity,
-                    "price": execution_result.original_order.price or market_data.price,
-                    "executed_price": execution_result.average_fill_price or market_data.price,
-                    "fee": execution_result.total_fees,
-                    "status": self._map_execution_status_to_order_status(execution_result.status),
-                    "timestamp": datetime.now(timezone.utc),
-                    "executed_at": datetime.now(timezone.utc),
+                    "type": execution_result.original_order.order_type.value,
+                    "status": self._map_execution_status_to_order_status(execution_result.status).value,
+                    "price": self._convert_to_decimal_safe(execution_result.original_order.price or market_data.price),
+                    "quantity": self._convert_to_decimal_safe(execution_result.original_order.quantity),
+                    "filled_quantity": self._convert_to_decimal_safe(execution_result.total_filled_quantity),
+                    "average_fill_price": self._convert_to_decimal_safe(execution_result.average_fill_price or market_data.price),
+                    "created_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(timezone.utc),
                 }
 
-                # Create Trade instance
-                trade = Trade(**trade_data)
+                # Create Order instance
+                order = Order(**order_data)
 
-                # Save trade to database
-                saved_trade = await self.database_service.create_entity(trade)
+                # Save order to database
+                saved_order = await self.database_service.create_entity(order)
+
+                # Create OrderFill records
+                if execution_result.total_filled_quantity > 0:
+                    fill_data = {
+                        "id": str(uuid.uuid4()),
+                        "order_id": saved_order.id,
+                        "exchange_fill_id": execution_result.execution_id,
+                        "price": self._convert_to_decimal_safe(execution_result.average_fill_price),
+                        "quantity": self._convert_to_decimal_safe(execution_result.total_filled_quantity),
+                        "fee": self._convert_to_decimal_safe(execution_result.total_fees),
+                        "fee_currency": "USDT",
+                        "created_at": datetime.now(timezone.utc),
+                    }
+                    fill = OrderFill(**fill_data)
+                    await self.database_service.create_entity(fill)
 
                 # Convert to dict for response
-                saved_trade_dict = {
-                    "id": str(saved_trade.id),
-                    "bot_id": saved_trade.bot_id,
-                    "exchange_order_id": saved_trade.exchange_order_id,
-                    "symbol": saved_trade.symbol,
-                    "side": saved_trade.side,
-                    "quantity": saved_trade.quantity,
-                    "executed_price": saved_trade.executed_price,
+                saved_order_dict = {
+                    "id": str(saved_order.id),
+                    "bot_id": saved_order.bot_id,
+                    "exchange_order_id": saved_order.exchange_order_id,
+                    "symbol": saved_order.symbol,
+                    "side": saved_order.side,
+                    "type": saved_order.type,
+                    "status": saved_order.status,
+                    "quantity": float(saved_order.quantity),
+                    "filled_quantity": float(saved_order.filled_quantity),
+                    "average_fill_price": float(saved_order.average_fill_price) if saved_order.average_fill_price else None,
                 }
 
                 # Create comprehensive audit log
                 await self._create_execution_audit_log(
                     execution_id=execution_result.execution_id,
                     operation_type="trade_execution",
-                    trade_id=saved_trade.get("id"),
+                    order_id=str(saved_order.id),
                     execution_result=execution_result,
                     market_data=market_data,
                     bot_id=bot_id,
@@ -358,17 +379,17 @@ class ExecutionService(TransactionalService):
                 )
 
                 self._logger.info(
-                    "Trade execution recorded successfully",
-                    trade_id=saved_trade.get("id"),
+                    "Order execution recorded successfully",
+                    order_id=str(saved_order.id),
                     execution_id=execution_result.execution_id,
                     symbol=execution_result.original_order.symbol,
                     side=execution_result.original_order.side.value,
-                    quantity=format_currency(float(execution_result.total_filled_quantity)),
-                    executed_price=format_currency(float(execution_result.average_fill_price or 0)),
+                    quantity=format_currency(str(execution_result.total_filled_quantity)),
+                    executed_price=format_currency(str(execution_result.average_fill_price or 0)),
                     slippage_bps=execution_metrics.get("slippage_bps", 0),
                 )
 
-                return saved_trade_dict
+                return saved_order_dict
 
             except Exception as e:
                 # Create failure audit log
@@ -408,7 +429,7 @@ class ExecutionService(TransactionalService):
     @time_execution
     async def validate_order_pre_execution(
         self,
-        order: Order,
+        order: OrderRequest,
         market_data: MarketData,
         bot_id: str | None = None,
         risk_context: dict[str, Any] | None = None,
@@ -439,7 +460,7 @@ class ExecutionService(TransactionalService):
 
     async def _validate_order_pre_execution_impl(
         self,
-        order: Order,
+        order: OrderRequest,
         market_data: MarketData,
         bot_id: str | None,
         risk_context: dict[str, Any] | None,
@@ -610,66 +631,82 @@ class ExecutionService(TransactionalService):
                 filters = {}
             filters["timestamp"] = {"gte": start_time}
 
-            # Use database service to get trades with proper filtering
-            filtered_trades = await self.database_service.list_entities(
-                model_class=Trade,  # Use actual model class
+            # For now, get all orders and filter in memory
+            # TODO: Enhance DatabaseService to support complex filters
+            all_orders = await self.database_service.list_entities(
+                model_class=Order,  # Query Orders, not Trades
                 filters=filters,
-                order_by="timestamp",
+                order_by="created_at",  # Use created_at for Order model
                 order_desc=True,
                 limit=1000,
             )
 
-            if not filtered_trades:
+            # Filter by time in memory
+            filtered_orders = [
+                order for order in all_orders
+                if order.created_at >= start_time
+            ]
+
+            if not filtered_orders:
                 return self._get_empty_metrics()
 
-            # Calculate execution metrics
+            # Calculate execution metrics from orders
             total_volume = sum(
-                float(trade.quantity) * float(trade.executed_price) for trade in filtered_trades
+                order.filled_quantity * (order.average_fill_price or order.price or Decimal("0"))
+                for order in filtered_orders
+                if order.filled_quantity and order.filled_quantity > 0
             )
 
-            successful_trades = [
-                t
-                for t in filtered_trades
-                if hasattr(t, "status") and t.status == OrderStatus.COMPLETED.value
+            successful_orders = [
+                o
+                for o in filtered_orders
+                if o.status == OrderStatus.FILLED.value
             ]
-            failed_trades = [
+            failed_orders = [
                 t
-                for t in filtered_trades
+                for t in filtered_orders
                 if hasattr(t, "status")
                 and t.status in [OrderStatus.CANCELLED.value, OrderStatus.REJECTED.value]
             ]
 
-            success_rate = len(successful_trades) / len(filtered_trades) if filtered_trades else 0
+            success_rate = len(successful_orders) / len(filtered_orders) if filtered_orders else 0
 
-            # Calculate average fees
+            # Calculate average fees from order fills
             avg_fee_rate = 0.0
-            if successful_trades:
-                total_fees = sum(float(trade.fee) for trade in successful_trades)
-                avg_fee_rate = (total_fees / total_volume * 10000) if total_volume > 0 else 0.0
+            total_fees = Decimal("0")
+            
+            # Get fees from OrderFills if available
+            for order in successful_orders:
+                if hasattr(order, 'fills') and order.fills:
+                    order_fees = sum(fill.fee for fill in order.fills if fill.fee)
+                    total_fees += order_fees
+            
+            if total_volume > 0:
+                avg_fee_rate = float((total_fees / total_volume) * 10000)
 
             metrics = {
                 "time_range_hours": time_range_hours,
-                "total_trades": len(filtered_trades),
-                "successful_trades": len(successful_trades),
-                "failed_trades": len(failed_trades),
+                "total_trades": len(filtered_orders),
+                "successful_orders": len(successful_orders),
+                "failed_orders": len(failed_orders),
                 "success_rate": success_rate,
-                "total_volume": total_volume,
+                "total_volume": float(total_volume),
                 "average_fee_rate_bps": avg_fee_rate,
-                "symbols_traded": len(set(trade.symbol for trade in filtered_trades)),
-                "exchanges_used": len(set(trade.exchange for trade in filtered_trades)),
+                "symbols_traded": len(set(order.symbol for order in filtered_orders)),
+                "exchanges_used": len(set(order.exchange for order in filtered_orders)),
                 "side_distribution": {
                     "buy": len(
                         [
-                            t
-                            for t in filtered_trades
-                            if hasattr(t, "side") and t.side == OrderSide.BUY.value
+                            o
+                            for o in filtered_orders
+                            if o.side == OrderSide.BUY.value
                         ]
                     ),
                     "sell": len(
                         [
-                            t
-                            for t in filtered_trades
-                            if hasattr(t, "side") and t.side == OrderSide.SELL.value
+                            o
+                            for o in filtered_orders
+                            if o.side == OrderSide.SELL.value
                         ]
                     ),
                 },
@@ -681,9 +718,9 @@ class ExecutionService(TransactionalService):
             for order_type in [OrderType.MARKET, OrderType.LIMIT, OrderType.STOP_LOSS]:
                 count = len(
                     [
-                        t
-                        for t in filtered_trades
-                        if hasattr(t, "order_type") and t.order_type == order_type.value
+                        o
+                        for o in filtered_orders
+                        if o.type == order_type.value
                     ]
                 )
                 metrics["order_type_distribution"][order_type.value] = count
@@ -695,6 +732,19 @@ class ExecutionService(TransactionalService):
             raise ServiceError(f"Execution metrics calculation failed: {e}")
 
     # Helper Methods
+
+    def _convert_to_decimal_safe(self, value: Any, precision: int = 8) -> Decimal:
+        """Safely convert value to Decimal with proper precision."""
+        if value is None:
+            return Decimal("0")
+        
+        if isinstance(value, Decimal):
+            # Quantize to required precision
+            return value.quantize(Decimal(f"0.{'0' * precision}"))
+        
+        # Convert to string first to avoid float precision issues
+        decimal_value = Decimal(str(value))
+        return decimal_value.quantize(Decimal(f"0.{'0' * precision}"))
 
     def _validate_execution_result(self, execution_result: ExecutionResult) -> None:
         """Validate execution result parameters."""
@@ -726,7 +776,7 @@ class ExecutionService(TransactionalService):
             "slippage_bps": 0.0,
             "market_impact_bps": 0.0,
             "total_cost_bps": 0.0,
-            "fill_rate": float(
+            "fill_rate": str(
                 execution_result.total_filled_quantity / execution_result.original_order.quantity
             ),
             "quality_score": 0.0,
@@ -735,7 +785,7 @@ class ExecutionService(TransactionalService):
         # Calculate slippage
         if execution_result.average_fill_price and market_data.price:
             price_diff = execution_result.average_fill_price - market_data.price
-            slippage_bps = abs(float(price_diff / market_data.price)) * 10000
+            slippage_bps = abs(price_diff / market_data.price) * 10000
             metrics["slippage_bps"] = slippage_bps
 
         # Calculate quality score
@@ -771,7 +821,7 @@ class ExecutionService(TransactionalService):
         """Map execution status to order status."""
         mapping = {
             ExecutionStatus.PENDING: OrderStatus.PENDING,
-            ExecutionStatus.COMPLETED: OrderStatus.COMPLETED,
+            ExecutionStatus.COMPLETED: OrderStatus.FILLED,
             ExecutionStatus.PARTIAL: OrderStatus.PARTIALLY_FILLED,
             ExecutionStatus.CANCELLED: OrderStatus.CANCELLED,
             ExecutionStatus.FAILED: OrderStatus.REJECTED,
@@ -779,7 +829,7 @@ class ExecutionService(TransactionalService):
         return mapping.get(execution_status, OrderStatus.PENDING)
 
     async def _perform_basic_order_validation(
-        self, order: Order, market_data: MarketData
+        self, order: OrderRequest, market_data: MarketData
     ) -> dict[str, Any]:
         """Perform basic order validation checks."""
         checks = []
@@ -816,7 +866,7 @@ class ExecutionService(TransactionalService):
             )
         else:
             try:
-                ValidationFramework.validate_quantity(float(order.quantity))
+                ValidationFramework.validate_quantity(str(order.quantity))
                 checks.append(
                     {
                         "check": "quantity_validation",
@@ -856,7 +906,7 @@ class ExecutionService(TransactionalService):
 
         return {"checks": checks, "errors": errors}
 
-    async def _validate_position_size(self, order: Order, bot_id: str | None) -> dict[str, Any]:
+    async def _validate_position_size(self, order: OrderRequest, bot_id: str | None) -> dict[str, Any]:
         """Validate position size limits using RiskService."""
         checks = []
         warnings = []
@@ -888,8 +938,8 @@ class ExecutionService(TransactionalService):
                     timestamp=datetime.now(timezone.utc),
                     source="ExecutionService",
                     metadata={
-                        "quantity": float(order.quantity),
-                        "price": float(order.price) if order.price else 0.0,
+                        "quantity": str(order.quantity),
+                        "price": str(order.price) if order.price else "0.0",
                         "order_type": order.order_type.value,
                         "bot_id": bot_id,
                     },
@@ -923,7 +973,7 @@ class ExecutionService(TransactionalService):
                     current_price=Decimal(str(order.price)) if order.price else None,
                 )
 
-                if recommended_size and float(order.quantity) > float(recommended_size):
+                if recommended_size and order.quantity > recommended_size:
                     warnings.append(
                         f"Order quantity {order.quantity} exceeds risk-adjusted size {recommended_size}"
                     )
@@ -943,9 +993,7 @@ class ExecutionService(TransactionalService):
         # Simple fallback validation if RiskService not available
         else:
             # Basic position size check
-            if float(order.quantity) * float(order.price or Decimal("1")) > float(
-                self.max_order_value
-            ):
+            if (order.quantity * (order.price or Decimal("1"))) > self.max_order_value:
                 warnings.append(f"Order value exceeds maximum {self.max_order_value}")
                 checks.append(
                     {
@@ -966,7 +1014,7 @@ class ExecutionService(TransactionalService):
         return {"checks": checks, "warnings": warnings}
 
     async def _validate_market_conditions(
-        self, order: Order, market_data: MarketData
+        self, order: OrderRequest, market_data: MarketData
     ) -> dict[str, Any]:
         """Validate market conditions for execution."""
         checks = []
@@ -994,7 +1042,7 @@ class ExecutionService(TransactionalService):
         # Check spread if available
         if market_data.bid and market_data.ask:
             spread = market_data.ask - market_data.bid
-            spread_bps = float(spread / market_data.price) * 10000
+            spread_bps = (spread / market_data.price) * 10000
 
             if spread_bps > 50:  # More than 50 bps spread
                 checks.append(
@@ -1017,7 +1065,7 @@ class ExecutionService(TransactionalService):
 
     async def _perform_risk_assessment(
         self,
-        order: Order,
+        order: OrderRequest,
         market_data: MarketData,
         risk_context: dict[str, Any],
         bot_id: str | None,
@@ -1034,17 +1082,17 @@ class ExecutionService(TransactionalService):
                     positions=[],  # Current positions will be fetched by RiskService
                     market_data={
                         order.symbol: {
-                            "price": float(market_data.price),
-                            "volume": float(market_data.volume) if market_data.volume else 0.0,
+                            "price": str(market_data.price),
+                            "volume": str(market_data.volume) if market_data.volume else "0.0",
                             "bid": (
-                                float(market_data.bid)
+                                str(market_data.bid)
                                 if market_data.bid
-                                else float(market_data.price)
+                                else str(market_data.price)
                             ),
                             "ask": (
-                                float(market_data.ask)
+                                str(market_data.ask)
                                 if market_data.ask
-                                else float(market_data.price)
+                                else str(market_data.price)
                             ),
                         }
                     },
@@ -1117,7 +1165,7 @@ class ExecutionService(TransactionalService):
             )
 
         # Check liquidity risk
-        volume_ratio = float(order.quantity) / float(market_data.volume or 1000000)
+        volume_ratio = order.quantity / (market_data.volume or Decimal("1000000"))
         if volume_ratio > 0.01:  # More than 1% of daily volume
             risk_score += 25.0
             checks.append(
@@ -1154,7 +1202,7 @@ class ExecutionService(TransactionalService):
     def _generate_order_recommendations(
         self,
         validation_results: dict[str, Any],
-        order: Order,
+        order: OrderRequest,
         market_data: MarketData,
     ) -> list[str]:
         """Generate order execution recommendations."""
@@ -1171,7 +1219,7 @@ class ExecutionService(TransactionalService):
 
         # Check for market timing recommendations
         if market_data.bid and market_data.ask:
-            spread_bps = float((market_data.ask - market_data.bid) / market_data.price) * 10000
+            spread_bps = ((market_data.ask - market_data.bid) / market_data.price) * 10000
             if spread_bps > 30:
                 recommendations.append("Wait for tighter spread before executing")
 
@@ -1188,7 +1236,7 @@ class ExecutionService(TransactionalService):
         market_data: MarketData,
         bot_id: str | None = None,
         strategy_name: str | None = None,
-        trade_id: str | None = None,
+        order_id: str | None = None,
         execution_metrics: dict[str, Any] | None = None,
         pre_trade_analysis: dict[str, Any] | None = None,
         post_trade_analysis: dict[str, Any] | None = None,
@@ -1205,8 +1253,8 @@ class ExecutionService(TransactionalService):
                 "id": str(uuid.uuid4()),
                 "execution_id": execution_id,
                 "operation_type": operation_type,
-                "trade_id": trade_id,
-                "order_id": order.order_id,
+                "order_id": order_id,
+                "trade_id": None,  # Trade records are only for closed positions
                 "exchange_order_id": execution_id,
                 "bot_id": bot_id,
                 "strategy_name": strategy_name,
@@ -1214,12 +1262,12 @@ class ExecutionService(TransactionalService):
                 "exchange": order.exchange or "binance",
                 "side": order.side.value,
                 "order_type": order.order_type.value,
-                "requested_quantity": order.quantity,
-                "executed_quantity": execution_result.total_filled_quantity,
-                "remaining_quantity": order.quantity - execution_result.total_filled_quantity,
-                "requested_price": order.price,
-                "executed_price": execution_result.average_fill_price,
-                "market_price_at_time": market_data.price,
+                "requested_quantity": safe_decimal_to_float(self._convert_to_decimal_safe(order.quantity), "requested_quantity"),
+                "executed_quantity": safe_decimal_to_float(self._convert_to_decimal_safe(execution_result.total_filled_quantity), "executed_quantity"),
+                "remaining_quantity": safe_decimal_to_float(self._convert_to_decimal_safe(order.quantity - execution_result.total_filled_quantity), "remaining_quantity"),
+                "requested_price": safe_decimal_to_float(self._convert_to_decimal_safe(order.price), "requested_price") if order.price else None,
+                "executed_price": safe_decimal_to_float(self._convert_to_decimal_safe(execution_result.average_fill_price), "executed_price") if execution_result.average_fill_price else None,
+                "market_price_at_time": safe_decimal_to_float(self._convert_to_decimal_safe(market_data.price), "market_price_at_time"),
                 "slippage_bps": (
                     execution_metrics.get("slippage_bps", 0) if execution_metrics else 0
                 ),
@@ -1234,12 +1282,12 @@ class ExecutionService(TransactionalService):
                 "operation_status": operation_status,
                 "success": success,
                 "error_message": error_message,
-                "total_fees": execution_result.total_fees,
+                "total_fees": safe_decimal_to_float(self._convert_to_decimal_safe(execution_result.total_fees), "total_fees"),
                 "market_conditions": {
-                    "price": float(market_data.price),
-                    "volume": float(market_data.volume) if market_data.volume else 0,
-                    "bid": float(market_data.bid) if market_data.bid else None,
-                    "ask": float(market_data.ask) if market_data.ask else None,
+                    "price": str(market_data.price),
+                    "volume": str(market_data.volume) if market_data.volume else "0",
+                    "bid": str(market_data.bid) if market_data.bid else None,
+                    "ask": str(market_data.ask) if market_data.ask else None,
                 },
                 "signal_timestamp": operation_start,
                 "order_submission_timestamp": operation_start,
@@ -1259,6 +1307,16 @@ class ExecutionService(TransactionalService):
 
         except Exception as e:
             self._logger.error(f"Failed to create execution audit log: {e}")
+            # CRITICAL: Audit log failures must not be silent
+            # Store to fallback file for compliance
+            try:
+                import json
+                fallback_file = "/tmp/audit_log_fallback.jsonl"
+                with open(fallback_file, "a") as f:
+                    f.write(json.dumps(audit_log_data) + "\n")
+                self._logger.warning(f"Audit log saved to fallback file: {fallback_file}")
+            except Exception as fallback_error:
+                self._logger.critical(f"Failed to save audit log to fallback: {fallback_error}")
 
     async def _create_risk_audit_log(
         self,
@@ -1276,7 +1334,7 @@ class ExecutionService(TransactionalService):
                 "event_type": event_type,
                 "bot_id": bot_id,
                 "risk_level": validation_results["risk_level"],
-                "risk_score": validation_results["risk_score"],
+                "risk_score": float(validation_results["risk_score"]),
                 "threshold_breached": validation_results["overall_result"] == "failed",
                 "risk_description": f"Pre-trade validation for {event_type}",
                 "risk_calculation": validation_results["validation_checks"],
@@ -1297,6 +1355,14 @@ class ExecutionService(TransactionalService):
 
         except Exception as e:
             self._logger.error(f"Failed to create risk audit log: {e}")
+            # Store to fallback for compliance
+            try:
+                import json
+                fallback_file = "/tmp/risk_audit_fallback.jsonl"
+                with open(fallback_file, "a") as f:
+                    f.write(json.dumps(risk_audit_data) + "\n")
+            except Exception:
+                pass
 
     async def _update_execution_metrics(
         self,
@@ -1314,9 +1380,9 @@ class ExecutionService(TransactionalService):
         else:
             self._performance_metrics["failed_executions"] += 1
 
-        # Update volume
-        trade_value = float(
-            execution_result.total_filled_quantity * (execution_result.average_fill_price or 0)
+        # Update volume  
+        trade_value = (
+            execution_result.total_filled_quantity * (execution_result.average_fill_price or Decimal("0"))
         )
         self._performance_metrics["total_volume"] += trade_value
 
@@ -1371,7 +1437,9 @@ class ExecutionService(TransactionalService):
                 # Record trade metrics if execution was successful
                 if execution_result.status == ExecutionStatus.COMPLETED:
                     try:
-                        pnl_usd = 0.0  # PnL would need to be calculated based on position
+                        # TODO: Implement actual P&L calculation based on position tracking
+                        # Currently hardcoded to 0.0 as it requires position history and entry prices
+                        pnl_usd = 0.0
                         self.metrics_collector.trading_metrics.record_trade(
                             exchange=execution_result.original_order.exchange or "unknown",
                             strategy="unknown",  # Would need to be passed in
@@ -1391,9 +1459,9 @@ class ExecutionService(TransactionalService):
     def _get_empty_metrics(self) -> dict[str, Any]:
         """Return empty metrics structure."""
         return {
-            "total_trades": 0,
-            "successful_trades": 0,
-            "failed_trades": 0,
+            "total_orders": 0,
+            "successful_orders": 0,
+            "failed_orders": 0,
             "success_rate": 0.0,
             "total_volume": 0.0,
             "average_fee_rate_bps": 0.0,

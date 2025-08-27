@@ -23,8 +23,8 @@ from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 
 from src.core.exceptions import StrategyError
-
 from src.core.logging import get_logger
+
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
 

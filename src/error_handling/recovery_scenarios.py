@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.base import BaseComponent
+from src.core import BaseComponent
 from src.core.config import Config
 
 # MANDATORY: Import from P-001 core framework
@@ -26,14 +26,19 @@ class RecoveryScenario(BaseComponent):
     """Base class for recovery scenarios."""
 
     def __init__(self, config: Config):
+        super().__init__(name="RecoveryScenario", config={})
         self.config = config
         # Create default error handling config if not present
-        self.recovery_config = getattr(config, "error_handling", {
-            "partial_fill_min_percentage": 0.5,
-            "max_retry_attempts": 3,
-            "reconnect_timeout": 30,
-            "maintenance_check_interval": 300
-        })
+        self.recovery_config = getattr(
+            config,
+            "error_handling",
+            {
+                "partial_fill_min_percentage": 0.5,
+                "max_retry_attempts": 3,
+                "reconnect_timeout": 30,
+                "maintenance_check_interval": 300,
+            },
+        )
 
     @time_execution
     async def execute_recovery(self, context: Any) -> bool:
@@ -58,12 +63,12 @@ class PartialFillRecovery(RecoveryScenario):
         filled_quantity = context.get("filled_quantity", Decimal("0"))
 
         if not order or not filled_quantity:
-            self.logger.error("Invalid context for partial fill recovery", context=context)
+            self._logger.error("Invalid context for partial fill recovery", context=context)
             return False
 
         fill_percentage = float(filled_quantity / order.quantity)
 
-        self.logger.info(
+        self._logger.info(
             "Processing partial fill recovery",
             order_id=order.get("id"),
             fill_percentage=fill_percentage,
@@ -89,26 +94,26 @@ class PartialFillRecovery(RecoveryScenario):
         try:
             from src.execution.order_manager import OrderManager
         except ImportError:
-            self.logger.warning("OrderManager not available", order_id=order_id)
+            self._logger.warning("OrderManager not available", order_id=order_id)
             return
 
-        self.logger.info("Cancelling order", order_id=order_id)
+        self._logger.info("Cancelling order", order_id=order_id)
 
         try:
             order_manager = OrderManager(self.config)
             result = await order_manager.cancel_order(order_id)
 
             if result:
-                self.logger.info("Successfully cancelled order", order_id=order_id)
+                self._logger.info("Successfully cancelled order", order_id=order_id)
             else:
-                self.logger.warning("Could not cancel order", order_id=order_id)
+                self._logger.warning("Could not cancel order", order_id=order_id)
         except Exception as e:
-            self.logger.error("Failed to cancel order", order_id=order_id, error=str(e))
+            self._logger.error("Failed to cancel order", order_id=order_id, error=str(e))
 
     async def _log_partial_fill(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
         """Log partial fill details for analysis."""
         if self.log_details:
-            self.logger.info(
+            self._logger.info(
                 "Partial fill logged",
                 order_id=order.get("id"),
                 filled_quantity=filled_quantity,
@@ -122,10 +127,10 @@ class PartialFillRecovery(RecoveryScenario):
         try:
             from src.strategies.factory import StrategyFactory
         except ImportError:
-            self.logger.warning("StrategyFactory not available", signal_id=signal.get("id"))
+            self._logger.warning("StrategyFactory not available", signal_id=signal.get("id"))
             return
 
-        self.logger.info("Re-evaluating signal", signal_id=signal.get("id"))
+        self._logger.info("Re-evaluating signal", signal_id=signal.get("id"))
 
         try:
             strategy_name = signal.get("strategy", "")
@@ -138,7 +143,7 @@ class PartialFillRecovery(RecoveryScenario):
 
                 # Compare with original signal
                 if new_signal and new_signal.get("direction") != signal.get("direction"):
-                    self.logger.warning(
+                    self._logger.warning(
                         "Signal direction changed",
                         signal_id=signal.get("id"),
                         original=signal.get("direction"),
@@ -148,15 +153,15 @@ class PartialFillRecovery(RecoveryScenario):
                     signal["reevaluated"] = True
                     signal["reevaluation_result"] = new_signal
                 else:
-                    self.logger.info(
+                    self._logger.info(
                         "Signal still valid",
                         signal_id=signal.get("id"),
                         direction=signal.get("direction"),
                     )
             else:
-                self.logger.warning("No strategy specified for signal", signal_id=signal.get("id"))
+                self._logger.warning("No strategy specified for signal", signal_id=signal.get("id"))
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Failed to re-evaluate signal", signal_id=signal.get("id"), error=str(e)
             )
 
@@ -166,10 +171,10 @@ class PartialFillRecovery(RecoveryScenario):
             from src.database.manager import DatabaseManager
             from src.risk_management.risk_manager import RiskManager
         except ImportError:
-            self.logger.warning("Database or RiskManager not available", order_id=order.get("id"))
+            self._logger.warning("Database or RiskManager not available", order_id=order.get("id"))
             return
 
-        self.logger.info(
+        self._logger.info(
             "Updating position with partial fill",
             order_id=order.get("id"),
             filled_quantity=filled_quantity,
@@ -228,13 +233,13 @@ class PartialFillRecovery(RecoveryScenario):
                 exchange=order.get("exchange"),
             )
 
-            self.logger.info(
+            self._logger.info(
                 "Position updated with partial fill",
                 order_id=order.get("id"),
                 filled_quantity=filled_quantity,
             )
         except Exception as e:
-            self.logger.error("Failed to update position", order_id=order.get("id"), error=str(e))
+            self._logger.error("Failed to update position", order_id=order.get("id"), error=str(e))
 
     async def _adjust_stop_loss(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
         """Adjust stop loss based on partial fill."""
@@ -242,10 +247,10 @@ class PartialFillRecovery(RecoveryScenario):
             from src.database.manager import DatabaseManager
             from src.risk_management.risk_manager import RiskManager
         except ImportError:
-            self.logger.warning("Database or RiskManager not available", order_id=order.get("id"))
+            self._logger.warning("Database or RiskManager not available", order_id=order.get("id"))
             return
 
-        self.logger.info(
+        self._logger.info(
             "Adjusting stop loss for partial fill",
             order_id=order.get("id"),
             filled_quantity=filled_quantity,
@@ -311,18 +316,18 @@ class PartialFillRecovery(RecoveryScenario):
                         exchange=order.get("exchange"),
                     )
 
-                    self.logger.info(
+                    self._logger.info(
                         "Stop loss adjusted for partial fill",
                         order_id=order.get("id"),
                         filled_quantity=filled_quantity,
                         new_stop_loss=float(new_stop),
                     )
                 else:
-                    self.logger.warning(
+                    self._logger.warning(
                         "No position or stop loss found to adjust", order_id=order.get("id")
                     )
         except Exception as e:
-            self.logger.error("Failed to adjust stop loss", order_id=order.get("id"), error=str(e))
+            self._logger.error("Failed to adjust stop loss", order_id=order.get("id"), error=str(e))
 
 
 class NetworkDisconnectionRecovery(RecoveryScenario):
@@ -330,20 +335,18 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
 
     def __init__(self, config: Config):
         super().__init__(config)
-        self.max_offline_duration = self.recovery_config.get(
-            "network_max_offline_duration", 300
-        )
+        self.max_offline_duration = self.recovery_config.get("network_max_offline_duration", 300)
         self.sync_on_reconnect = True  # Default behavior
         self.conservative_mode = True  # Default behavior
         self.max_reconnect_attempts = 5
 
     @time_execution
-    @retry(max_attempts=5, base_delay=2.0)
+    @retry(max_attempts=5, delay=2.0)
     async def execute_recovery(self, context: dict[str, Any]) -> bool:
         """Handle network disconnection recovery."""
         component = context.get("component", "unknown")
 
-        self.logger.warning(
+        self._logger.warning(
             "Network disconnection detected",
             component=component,
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -378,12 +381,12 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             from src.bot_management.bot_coordinator import BotCoordinator
             from src.database.redis_client import RedisClient
         except ImportError:
-            self.logger.warning(
+            self._logger.warning(
                 "Bot coordinator or Redis client not available", component=component
             )
             return
 
-        self.logger.info("Switching to offline mode", component=component)
+        self._logger.info("Switching to offline mode", component=component)
 
         try:
             redis_client = RedisClient(self.config)
@@ -404,9 +407,11 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             if hasattr(bot_coordinator, "pause_bot"):
                 await bot_coordinator.pause_bot(component)
 
-            self.logger.info("Switched to offline mode", component=component)
+            self._logger.info("Switched to offline mode", component=component)
         except Exception as e:
-            self.logger.error("Failed to switch to offline mode", component=component, error=str(e))
+            self._logger.error(
+                "Failed to switch to offline mode", component=component, error=str(e)
+            )
 
     async def _persist_pending_operations(self, component: str) -> None:
         """Persist any pending operations to prevent data loss."""
@@ -414,12 +419,12 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             from src.database.redis_client import RedisClient
             from src.state.checkpoint_manager import CheckpointManager
         except ImportError:
-            self.logger.warning(
+            self._logger.warning(
                 "Redis client or CheckpointManager not available", component=component
             )
             return
 
-        self.logger.info("Persisting pending operations", component=component)
+        self._logger.info("Persisting pending operations", component=component)
 
         try:
             checkpoint_manager = CheckpointManager(self.config)
@@ -443,7 +448,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 component_name=component, state_data=checkpoint_data
             )
 
-            self.logger.info(
+            self._logger.info(
                 "Persisted pending operations",
                 component=component,
                 checkpoint_id=checkpoint_id,
@@ -451,7 +456,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 trades_count=len(pending_trades or []),
             )
         except Exception as e:
-            self.logger.error("Failed to persist operations", component=component, error=str(e))
+            self._logger.error("Failed to persist operations", component=component, error=str(e))
 
     async def _try_reconnect(self, component: str) -> bool:
         """Attempt to reconnect to the service."""
@@ -459,13 +464,13 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             from src.error_handling.connection_manager import ConnectionManager
             from src.exchanges.factory import ExchangeFactory
         except ImportError:
-            self.logger.warning(
+            self._logger.warning(
                 "ConnectionManager or ExchangeFactory not available", component=component
             )
             return False
 
         try:
-            self.logger.info("Attempting reconnection", component=component)
+            self._logger.info("Attempting reconnection", component=component)
 
             # ConnectionManager already imported above
             pass
@@ -481,10 +486,10 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 # Test connection with a simple API call
                 try:
                     await exchange.get_server_time()
-                    self.logger.info("Exchange reconnection successful", component=component)
+                    self._logger.info("Exchange reconnection successful", component=component)
                     return True
                 except Exception as e:
-                    self.logger.warning(f"Exchange reconnection failed: {e}", component=component)
+                    self._logger.warning(f"Exchange reconnection failed: {e}", component=component)
                     # Try using ConnectionManager's reconnect method as fallback
                     return await connection_manager.reconnect_connection(component)
             else:
@@ -492,23 +497,23 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 # This provides proper reconnection with exponential backoff
                 success = await connection_manager.reconnect_connection(component)
                 if success:
-                    self.logger.info(
+                    self._logger.info(
                         "ConnectionManager reconnection successful", component=component
                     )
                 else:
-                    self.logger.warning(
+                    self._logger.warning(
                         "ConnectionManager reconnection failed", component=component
                     )
                 return success
 
         except Exception as e:
-            self.logger.error("Reconnection attempt failed", component=component, error=str(e))
+            self._logger.error("Reconnection attempt failed", component=component, error=str(e))
             return False
 
     async def _reconcile_positions(self, component: str) -> None:
         """Reconcile positions with exchange data."""
         try:
-            self.logger.info("Reconciling positions", component=component)
+            self._logger.info("Reconciling positions", component=component)
 
             # Get cached positions from local storage
             cached_positions = await self._get_cached_positions(component)
@@ -520,22 +525,22 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             discrepancies = self._compare_positions(cached_positions, exchange_positions)
 
             if discrepancies:
-                self.logger.warning(
+                self._logger.warning(
                     "Position discrepancies found",
                     component=component,
                     discrepancies=len(discrepancies),
                 )
                 await self._resolve_discrepancies(component, discrepancies)
             else:
-                self.logger.info("Positions reconciled successfully", component=component)
+                self._logger.info("Positions reconciled successfully", component=component)
 
         except Exception as e:
-            self.logger.error("Failed to reconcile positions", component=component, error=str(e))
+            self._logger.error("Failed to reconcile positions", component=component, error=str(e))
 
     async def _reconcile_orders(self, component: str) -> None:
         """Reconcile orders with exchange data."""
         try:
-            self.logger.info("Reconciling orders", component=component)
+            self._logger.info("Reconciling orders", component=component)
 
             # Get pending orders from local cache
             cached_orders = await self._get_cached_orders(component)
@@ -548,26 +553,26 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             unknown_orders = [o for o in exchange_orders if o not in cached_orders]
 
             if missing_orders:
-                self.logger.warning(
+                self._logger.warning(
                     "Missing orders detected", component=component, count=len(missing_orders)
                 )
                 await self._handle_missing_orders(component, missing_orders)
 
             if unknown_orders:
-                self.logger.warning(
+                self._logger.warning(
                     "Unknown orders detected", component=component, count=len(unknown_orders)
                 )
                 await self._handle_unknown_orders(component, unknown_orders)
 
-            self.logger.info("Orders reconciled", component=component)
+            self._logger.info("Orders reconciled", component=component)
 
         except Exception as e:
-            self.logger.error("Failed to reconcile orders", component=component, error=str(e))
+            self._logger.error("Failed to reconcile orders", component=component, error=str(e))
 
     async def _verify_balances(self, component: str) -> None:
         """Verify account balances are consistent."""
         try:
-            self.logger.info("Verifying balances", component=component)
+            self._logger.info("Verifying balances", component=component)
 
             # Get cached balances
             cached_balances = await self._get_cached_balances(component)
@@ -591,17 +596,17 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                     }
 
             if discrepancies:
-                self.logger.error(
+                self._logger.error(
                     "Balance discrepancies detected",
                     component=component,
                     discrepancies=discrepancies,
                 )
                 await self._handle_balance_discrepancies(component, discrepancies)
             else:
-                self.logger.info("Balances verified successfully", component=component)
+                self._logger.info("Balances verified successfully", component=component)
 
         except Exception as e:
-            self.logger.error("Failed to verify balances", component=component, error=str(e))
+            self._logger.error("Failed to verify balances", component=component, error=str(e))
 
     async def _switch_to_online_mode(self, component: str) -> None:
         """Switch component back to online mode."""
@@ -610,13 +615,13 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             from src.database.redis_client import RedisClient
             from src.state.checkpoint_manager import CheckpointManager
         except ImportError:
-            self.logger.warning(
+            self._logger.warning(
                 "Bot coordinator, Redis client, or CheckpointManager not available",
                 component=component,
             )
             return
 
-        self.logger.info("Switching to online mode", component=component)
+        self._logger.info("Switching to online mode", component=component)
 
         try:
             redis_client = RedisClient(self.config)
@@ -629,7 +634,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 await checkpoint_manager.restore_checkpoint(
                     checkpoint_id=latest_checkpoint["id"], component_name=component
                 )
-                self.logger.info("Restored from checkpoint", component=component)
+                self._logger.info("Restored from checkpoint", component=component)
 
             # Update status in Redis
             await redis_client.set(
@@ -646,14 +651,14 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             if hasattr(bot_coordinator, "resume_bot"):
                 await bot_coordinator.resume_bot(component)
 
-            self.logger.info("Switched to online mode", component=component)
+            self._logger.info("Switched to online mode", component=component)
         except Exception as e:
-            self.logger.error("Failed to switch to online mode", component=component, error=str(e))
+            self._logger.error("Failed to switch to online mode", component=component, error=str(e))
 
     async def _enter_safe_mode(self, component: str) -> None:
         """Enter safe mode when reconnection fails."""
         try:
-            self.logger.warning("Entering safe mode", component=component)
+            self._logger.warning("Entering safe mode", component=component)
 
             # Cancel all pending orders
             await self._cancel_all_pending_orders(component)
@@ -677,14 +682,14 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 message=f"Component {component} entered safe mode due to connection failure",
             )
 
-            self.logger.warning(
+            self._logger.warning(
                 "Safe mode activated",
                 component=component,
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
 
         except Exception as e:
-            self.logger.error("Failed to enter safe mode", component=component, error=str(e))
+            self._logger.error("Failed to enter safe mode", component=component, error=str(e))
             # Safe mode failure is critical - attempt emergency shutdown
             await self._emergency_shutdown(component)
 
@@ -718,7 +723,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
     async def _resolve_discrepancies(self, component: str, discrepancies: list) -> None:
         """Resolve position discrepancies."""
         for discrepancy in discrepancies:
-            self.logger.warning(f"Resolving discrepancy for {discrepancy['symbol']}")
+            self._logger.warning(f"Resolving discrepancy for {discrepancy['symbol']}")
             # Implementation will update local cache with exchange data
 
     async def _get_cached_orders(self, component: str) -> list[dict]:
@@ -732,13 +737,13 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
     async def _handle_missing_orders(self, component: str, orders: list) -> None:
         """Handle orders missing from exchange."""
         for order in orders:
-            self.logger.warning(f"Handling missing order: {order}")
+            self._logger.warning(f"Handling missing order: {order}")
             # Mark as cancelled or resubmit based on strategy
 
     async def _handle_unknown_orders(self, component: str, orders: list) -> None:
         """Handle orders unknown to local cache."""
         for order in orders:
-            self.logger.warning(f"Handling unknown order: {order}")
+            self._logger.warning(f"Handling unknown order: {order}")
             # Add to local cache or cancel based on strategy
 
     async def _get_cached_balances(self, component: str) -> dict[str, Decimal]:
@@ -752,37 +757,37 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
     async def _handle_balance_discrepancies(self, component: str, discrepancies: dict) -> None:
         """Handle balance discrepancies."""
         for asset, info in discrepancies.items():
-            self.logger.error(f"Balance discrepancy for {asset}: {info}")
+            self._logger.error(f"Balance discrepancy for {asset}: {info}")
             # Update local cache with exchange data as source of truth
 
     async def _cancel_all_pending_orders(self, component: str) -> None:
         """Cancel all pending orders."""
-        self.logger.info(f"Cancelling all pending orders for {component}")
+        self._logger.info(f"Cancelling all pending orders for {component}")
         # Implementation will cancel orders via exchange API
 
     async def _close_all_positions(self, component: str) -> None:
         """Close all open positions."""
-        self.logger.info(f"Closing all positions for {component}")
+        self._logger.info(f"Closing all positions for {component}")
         # Implementation will close positions via exchange API
 
     async def _disable_trading(self, component: str) -> None:
         """Disable trading for component."""
-        self.logger.info(f"Disabling trading for {component}")
+        self._logger.info(f"Disabling trading for {component}")
         # Set flag in config/database to prevent new trades
 
     async def _set_safe_mode_flag(self, component: str, enabled: bool) -> None:
         """Set safe mode flag."""
-        self.logger.info(f"Setting safe mode flag for {component}: {enabled}")
+        self._logger.info(f"Setting safe mode flag for {component}: {enabled}")
         # Update system state to reflect safe mode
 
     async def _send_critical_alert(self, component: str, message: str) -> None:
         """Send critical alert notification."""
-        self.logger.critical(f"ALERT - {component}: {message}")
+        self._logger.critical(f"ALERT - {component}: {message}")
         # Implementation will send to monitoring/alerting system
 
     async def _emergency_shutdown(self, component: str) -> None:
         """Perform emergency shutdown."""
-        self.logger.critical(f"EMERGENCY SHUTDOWN - {component}")
+        self._logger.critical(f"EMERGENCY SHUTDOWN - {component}")
         # Implementation will perform graceful shutdown
 
 
@@ -800,7 +805,7 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
         """Handle exchange maintenance recovery."""
         exchange = context.get("exchange", "unknown")
 
-        self.logger.warning(
+        self._logger.warning(
             "Exchange maintenance detected",
             exchange=exchange,
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -822,9 +827,9 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
         try:
             # TODO: Implement maintenance schedule detection
             # This will be implemented in P-003+ (Exchange Integrations)
-            self.logger.info("Detecting maintenance schedule", exchange=exchange)
+            self._logger.info("Detecting maintenance schedule", exchange=exchange)
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Failed to detect maintenance schedule", exchange=exchange, error=str(e)
             )
 
@@ -833,9 +838,9 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
         try:
             # TODO: Implement capital redistribution
             # This will be implemented in P-010A (Capital Management System)
-            self.logger.info("Redistributing capital", exchange=exchange)
+            self._logger.info("Redistributing capital", exchange=exchange)
         except Exception as e:
-            self.logger.error("Failed to redistribute capital", exchange=exchange, error=str(e))
+            self._logger.error("Failed to redistribute capital", exchange=exchange, error=str(e))
 
     async def _pause_new_orders(self, exchange: str) -> None:
         """Pause new order placement on the exchange."""
@@ -843,9 +848,9 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
             # TODO: Implement order pausing
             # This will be implemented in P-020 (Order Management and Execution
             # Engine)
-            self.logger.info("Pausing new orders", exchange=exchange)
+            self._logger.info("Pausing new orders", exchange=exchange)
         except Exception as e:
-            self.logger.error("Failed to pause new orders", exchange=exchange, error=str(e))
+            self._logger.error("Failed to pause new orders", exchange=exchange, error=str(e))
 
 
 class DataFeedInterruptionRecovery(RecoveryScenario):
@@ -862,7 +867,7 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
         """Handle data feed interruption recovery."""
         data_source = context.get("data_source", "unknown")
 
-        self.logger.warning(
+        self._logger.warning(
             "Data feed interruption detected",
             data_source=data_source,
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -883,10 +888,10 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
             # TODO: Implement data staleness checking
             # This will be implemented in P-014 (Data Pipeline and Sources
             # Integration)
-            self.logger.info("Checking data staleness", data_source=data_source)
+            self._logger.info("Checking data staleness", data_source=data_source)
             return True  # Simulate stale data
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Failed to check data staleness", data_source=data_source, error=str(e)
             )
             return True
@@ -897,9 +902,9 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
             # TODO: Implement fallback source switching
             # This will be implemented in P-014 (Data Pipeline and Sources
             # Integration)
-            self.logger.info("Switching to fallback source", data_source=data_source)
+            self._logger.info("Switching to fallback source", data_source=data_source)
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Failed to switch to fallback source", data_source=data_source, error=str(e)
             )
 
@@ -908,9 +913,9 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
         try:
             # TODO: Implement conservative trading mode
             # This will be implemented in P-008+ (Risk Management)
-            self.logger.info("Enabling conservative trading", data_source=data_source)
+            self._logger.info("Enabling conservative trading", data_source=data_source)
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Failed to enable conservative trading", data_source=data_source, error=str(e)
             )
 
@@ -931,7 +936,7 @@ class OrderRejectionRecovery(RecoveryScenario):
         order = context.get("order")
         rejection_reason = context.get("rejection_reason", "unknown")
 
-        self.logger.warning(
+        self._logger.warning(
             "Order rejection detected",
             order_id=order.get("id") if order else "unknown",
             rejection_reason=rejection_reason,
@@ -951,13 +956,13 @@ class OrderRejectionRecovery(RecoveryScenario):
             # TODO: Implement rejection reason analysis
             # This will be implemented in P-020 (Order Management and Execution
             # Engine)
-            self.logger.info(
+            self._logger.info(
                 "Analyzing rejection reason",
                 order_id=order.get("id") if order else "unknown",
                 rejection_reason=rejection_reason,
             )
         except Exception as e:
-            self.logger.error("Failed to analyze rejection reason", error=str(e))
+            self._logger.error("Failed to analyze rejection reason", error=str(e))
 
     async def _adjust_order_parameters(self, order: dict[str, Any], rejection_reason: str) -> None:
         """Adjust order parameters based on rejection reason."""
@@ -965,13 +970,13 @@ class OrderRejectionRecovery(RecoveryScenario):
             # TODO: Implement parameter adjustment
             # This will be implemented in P-020 (Order Management and Execution
             # Engine)
-            self.logger.info(
+            self._logger.info(
                 "Adjusting order parameters",
                 order_id=order.get("id") if order else "unknown",
                 rejection_reason=rejection_reason,
             )
         except Exception as e:
-            self.logger.error("Failed to adjust order parameters", error=str(e))
+            self._logger.error("Failed to adjust order parameters", error=str(e))
 
 
 class APIRateLimitRecovery(RecoveryScenario):
@@ -989,7 +994,7 @@ class APIRateLimitRecovery(RecoveryScenario):
         api_endpoint = context.get("api_endpoint", "unknown")
         retry_after = context.get("retry_after", self.base_delay)
 
-        self.logger.warning(
+        self._logger.warning(
             "API rate limit exceeded", api_endpoint=api_endpoint, retry_after=retry_after
         )
 
@@ -1002,13 +1007,13 @@ class APIRateLimitRecovery(RecoveryScenario):
             try:
                 # TODO: Implement actual API call retry
                 # This will be implemented in P-003+ (Exchange Integrations)
-                self.logger.info(
+                self._logger.info(
                     "Retrying API call", api_endpoint=api_endpoint, attempt=attempt + 1
                 )
                 await asyncio.sleep(2**attempt)  # Exponential backoff
                 return True
             except Exception as e:
-                self.logger.error(
+                self._logger.error(
                     "API retry failed", api_endpoint=api_endpoint, attempt=attempt + 1, error=str(e)
                 )
 

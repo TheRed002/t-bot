@@ -9,6 +9,7 @@ for error logging and will be used by all subsequent prompts.
 """
 
 import asyncio
+from decimal import Decimal
 import threading
 import time
 import traceback
@@ -293,13 +294,13 @@ class ErrorHandler:
         if not isinstance(error_type, type):
             return ErrorSeverity.MEDIUM
 
-        if isinstance(error, (StateConsistencyError, SecurityError)):
+        if isinstance(error, StateConsistencyError | SecurityError):
             return ErrorSeverity.CRITICAL
         elif isinstance(
-            error, (RiskManagementError, ExchangeError, ConnectionError, ExecutionError)
+            error, RiskManagementError | ExchangeError | ConnectionError | ExecutionError
         ):
             return ErrorSeverity.HIGH
-        elif isinstance(error, (DataError, ModelError)):
+        elif isinstance(error, DataError | ModelError):
             return ErrorSeverity.MEDIUM
         elif isinstance(error, ValidationError):
             return ErrorSeverity.LOW
@@ -424,7 +425,8 @@ class ErrorHandler:
                 # Accept both class instances with execute_recovery and callables
                 try:
                     if hasattr(recovery_strategy, "execute_recovery"):
-                        await recovery_strategy.execute_recovery(context.__dict__)
+                        recovery_data = context.__dict__ if hasattr(context, "__dict__") else context
+                        await recovery_strategy.execute_recovery(recovery_data)
                     else:
                         await recovery_strategy(context)
                 except AttributeError as e:
@@ -480,6 +482,55 @@ class ErrorHandler:
             await self._escalate_error(context)
 
         return False
+
+    def handle_error_sync(
+        self,
+        error: Exception,
+        component: str,
+        operation: str,
+        recovery_strategy: Callable | None = None,
+        **kwargs,
+    ) -> bool:
+        """
+        Synchronous version of handle_error for use in non-async contexts.
+        
+        Args:
+            error: The exception to handle
+            component: Component where error occurred
+            operation: Operation being performed
+            recovery_strategy: Optional recovery strategy
+            **kwargs: Additional context data
+            
+        Returns:
+            bool: True if error was recovered, False otherwise
+        """
+        import asyncio
+        
+        # Get or create event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # Already in async context, create task
+            future = asyncio.ensure_future(
+                self.handle_error(error, component, operation, recovery_strategy, **kwargs)
+            )
+            # Can't wait synchronously in running loop
+            self.logger.warning(
+                "handle_error_sync called from async context, scheduled as task",
+                component=component,
+                operation=operation,
+            )
+            return False  # Can't wait for result
+        except RuntimeError:
+            # No running loop, safe to use run_until_complete
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(
+                    self.handle_error(error, component, operation, recovery_strategy, **kwargs)
+                )
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
 
     def _update_error_patterns(self, context: ErrorContext) -> None:
         """Update error pattern tracking for analytics with optimized storage."""
@@ -648,6 +699,27 @@ class ErrorHandler:
         return severity_mapping.get(severity, SensitivityLevel.MEDIUM)
 
 
+# Module-level error handler instance
+_error_handler: ErrorHandler | None = None
+
+
+def init_error_handler(config: Config) -> None:
+    """Initialize the module-level error handler instance."""
+    global _error_handler
+    _error_handler = ErrorHandler(config)
+
+
+def get_error_handler() -> ErrorHandler:
+    """Get the error handler instance, creating one if needed."""
+    global _error_handler
+    if _error_handler is None:
+        # Create a default instance if not initialized
+        from src.core.config import Config
+
+        _error_handler = ErrorHandler(Config())
+    return _error_handler
+
+
 def error_handler_decorator(
     component: str,
     operation: str,
@@ -662,18 +734,7 @@ def error_handler_decorator(
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
-                # Get error handler from dependency injection
-                from src.core.dependency_injection import get_container
-
-                try:
-                    container = get_container()
-                    handler = container.get(ErrorHandler)
-                except Exception:
-                    # Fallback to creating with Config if DI not available
-                    from src.core.config import Config
-
-                    config = Config()
-                    handler = ErrorHandler(config)
+                handler = get_error_handler()
 
                 context = handler.create_error_context(
                     error=e, component=component, operation=operation, **kwargs
@@ -687,18 +748,7 @@ def error_handler_decorator(
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                # Get error handler from dependency injection
-                from src.core.dependency_injection import get_container
-
-                try:
-                    container = get_container()
-                    handler = container.get(ErrorHandler)
-                except Exception:
-                    # Fallback to creating with Config if DI not available
-                    from src.core.config import Config
-
-                    config = Config()
-                    handler = ErrorHandler(config)
+                handler = get_error_handler()
 
                 context = handler.create_error_context(
                     error=e, component=component, operation=operation, **kwargs

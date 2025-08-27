@@ -5,7 +5,7 @@ This module provides drift detection capabilities for monitoring changes
 in data distribution and model performance over time.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import numpy as np
@@ -106,7 +106,9 @@ class DriftDetectionService(BaseService):
             # Check if drift detection is working within reasonable time
             last_detection = self.drift_history[-1].get("timestamp")
             if last_detection and isinstance(last_detection, datetime):
-                hours_since_last = (datetime.utcnow() - last_detection).total_seconds() / 3600
+                hours_since_last = (
+                    datetime.now(timezone.utc) - last_detection
+                ).total_seconds() / 3600
                 if hours_since_last > 24:  # No drift detection in 24 hours
                     return HealthStatus.DEGRADED
 
@@ -197,7 +199,7 @@ class DriftDetectionService(BaseService):
             ]
 
             overall_result = {
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "drift_type": "feature_drift",
                 "overall_drift_detected": overall_drift_detected,
                 "features_checked": len(feature_columns),
@@ -312,7 +314,7 @@ class DriftDetectionService(BaseService):
             drift_score = max(ks_statistic, 1 - min(drift_tests["mann_whitney_test"]["p_value"], 1))
 
             prediction_drift_result = {
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "drift_type": "prediction_drift",
                 "model_name": model_name,
                 "drift_detected": drift_detected,
@@ -429,7 +431,7 @@ class DriftDetectionService(BaseService):
             drift_score = np.mean(relative_changes) if relative_changes else 0
 
             performance_drift_result = {
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "drift_type": "performance_drift",
                 "model_name": model_name,
                 "drift_detected": drift_detected,
@@ -685,7 +687,7 @@ class DriftDetectionService(BaseService):
         """
         try:
             # Time filter
-            cutoff_date = datetime.utcnow() - timedelta(days=days_back)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
 
             filtered_history = []
             for result in self.drift_history:
@@ -725,7 +727,7 @@ class DriftDetectionService(BaseService):
         try:
             self.reference_data[data_type] = {
                 "data": reference_data.copy(),
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "stats": {},
             }
 
@@ -846,7 +848,7 @@ class DriftDetectionService(BaseService):
             )
 
             monitoring_results = {
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_name": model_name,
                 "monitoring_type": "continuous",
                 "current_samples": len(current_data),

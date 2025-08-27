@@ -226,8 +226,8 @@ class OptimizationIntegration(BaseComponent):
         # Configure backtesting parameters
         backtest_config = {
             "strategy_config": strategy_config,
-            "start_date": start_date or (datetime.now() - timedelta(days=365)),
-            "end_date": end_date or datetime.now(),
+            "start_date": start_date or (datetime.now(timezone.utc) - timedelta(days=365)),
+            "end_date": end_date or datetime.now(timezone.utc),
             "initial_capital": initial_capital,
             "trading_mode": TradingMode.BACKTEST,
         }
@@ -407,7 +407,12 @@ class OptimizationIntegration(BaseComponent):
                         "performance": sample_result.get("sharpe_ratio", 0),
                     }
                     optimization_history.append(sample_entry)
-                except:
+                except (ValueError, KeyError, TypeError) as e:
+                    self.logger.debug(f"Failed to evaluate sample parameters: {e}")
+                    continue  # Skip this sample
+                except Exception as e:
+                    self.logger.warning(f"Unexpected error evaluating sample parameters: {e}")
+                    # Continue with other samples, but track failures
                     continue
 
             # Analyze results

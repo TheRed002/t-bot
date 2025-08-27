@@ -184,15 +184,11 @@ class ErrorContext:
 
             details = base_dict["details"]
             if details and isinstance(details, dict):
-                base_dict["details"] = sanitizer.sanitize_context(
-                    details, sensitivity_level
-                )
+                base_dict["details"] = sanitizer.sanitize_context(details, sensitivity_level)
 
             metadata = base_dict["metadata"]
             if metadata and isinstance(metadata, dict):
-                base_dict["metadata"] = sanitizer.sanitize_context(
-                    metadata, sensitivity_level
-                )
+                base_dict["metadata"] = sanitizer.sanitize_context(metadata, sensitivity_level)
 
         return base_dict
 
@@ -268,8 +264,17 @@ class ErrorContext:
 
         # Separate known fields from additional context
         known_fields = {
-            "user_id", "bot_id", "symbol", "order_id", "module", "function_name",
-            "severity", "category", "stack_trace", "details", "metadata"
+            "user_id",
+            "bot_id",
+            "symbol",
+            "order_id",
+            "module",
+            "function_name",
+            "severity",
+            "category",
+            "stack_trace",
+            "details",
+            "metadata",
         }
 
         context_kwargs = {}

@@ -164,14 +164,14 @@ class SmartOrderRouter(BaseAlgorithm):
 
             # Register execution as running
             self.current_executions[execution_id] = execution_result
-            self.is_running = True
+            # is_running is managed by BaseComponent/BaseAlgorithm
             execution_result.status = ExecutionStatus.RUNNING
 
             self.logger.info(
                 "Starting Smart Router execution",
                 execution_id=execution_id,
                 symbol=instruction.order.symbol,
-                quantity=float(instruction.order.quantity),
+                quantity=str(instruction.order.quantity),
             )
 
             # Get exchange factory
@@ -200,7 +200,7 @@ class SmartOrderRouter(BaseAlgorithm):
                 "Smart Router execution completed",
                 execution_id=execution_id,
                 status=execution_result.status.value,
-                filled_quantity=float(execution_result.total_filled_quantity),
+                filled_quantity=str(execution_result.total_filled_quantity),
                 exchanges_used=len(routing_plan["routes"]),
             )
 
@@ -225,7 +225,8 @@ class SmartOrderRouter(BaseAlgorithm):
             raise ExecutionError(f"Smart Router execution failed: {e}")
 
         finally:
-            self.is_running = False
+            # is_running is managed by BaseComponent/BaseAlgorithm
+            pass
 
     async def cancel_execution(self, execution_id: str) -> bool:
         """
@@ -497,11 +498,11 @@ class SmartOrderRouter(BaseAlgorithm):
             spread_bps = (spread / market_data.price) * 10000
 
             # Calculate volume score
-            volume_score = min(1.0, float(market_data.volume) / 1000000)  # Normalize by 1M
+            volume_score = min(1.0, str(market_data.volume) / 1000000)  # Normalize by 1M
 
             # Calculate spread score (tighter spreads = higher score)
             max_spread_bps = 100  # 1% maximum expected spread
-            spread_score = max(0.0, (max_spread_bps - float(spread_bps)) / max_spread_bps)
+            spread_score = max(0.0, (max_spread_bps - str(spread_bps)) / max_spread_bps)
 
             # Combine volume and spread scores
             liquidity_score = (volume_score * 0.6) + (spread_score * 0.4)
@@ -590,7 +591,7 @@ class SmartOrderRouter(BaseAlgorithm):
                 {
                     "exchange": exchange_name,
                     "quantity": allocation_quantity,
-                    "allocation_pct": float(allocation_quantity / instruction.order.quantity),
+                    "allocation_pct": str(allocation_quantity / instruction.order.quantity),
                     "priority": i + 1,
                     "score": score,
                 }
@@ -692,7 +693,7 @@ class SmartOrderRouter(BaseAlgorithm):
                     f"Exchange error placing order on {route['exchange']}: {e}",
                     exchange=route["exchange"],
                     symbol=order.symbol,
-                    quantity=float(order.quantity),
+                    quantity=str(order.quantity),
                 )
                 # Mark route as failed and continue
                 execution_result.add_fill(
@@ -712,7 +713,7 @@ class SmartOrderRouter(BaseAlgorithm):
             self.logger.info(
                 "Smart router single exchange execution completed",
                 exchange=route["exchange"],
-                quantity=float(route["quantity"]),
+                quantity=str(route["quantity"]),
                 order_id=order_response.id,
             )
 
@@ -801,7 +802,7 @@ class SmartOrderRouter(BaseAlgorithm):
                     f"Exchange error placing order on {route['exchange']}: {e}",
                     exchange=route["exchange"],
                     symbol=order.symbol,
-                    quantity=float(order.quantity),
+                    quantity=str(order.quantity),
                 )
                 # Mark route as failed and continue
                 execution_result.add_fill(
@@ -821,7 +822,7 @@ class SmartOrderRouter(BaseAlgorithm):
             self.logger.info(
                 "Route executed successfully",
                 exchange=route["exchange"],
-                quantity=float(route["quantity"]),
+                quantity=str(route["quantity"]),
                 allocation_pct=route["allocation_pct"],
                 order_id=order_response.id,
             )
@@ -857,7 +858,7 @@ class SmartOrderRouter(BaseAlgorithm):
                     execution_result.total_filled_quantity
                     / execution_result.original_order.quantity
                 )
-                execution_result.metadata["smart_routing_fill_rate"] = float(fill_rate)
+                execution_result.metadata["smart_routing_fill_rate"] = str(fill_rate)
                 execution_result.metadata["multi_exchange_execution"] = (
                     len(execution_result.child_orders) > 1
                 )

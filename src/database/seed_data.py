@@ -10,7 +10,7 @@ IMPORTANT: This should only be run in development mode!
 
 import asyncio
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -395,7 +395,7 @@ class DatabaseSeeder:
                 continue
 
             # Create sample trades
-            base_time = datetime.utcnow() - timedelta(days=7)
+            base_time = datetime.now(timezone.utc) - timedelta(days=7)
 
             for i in range(10):
                 trade_time = base_time + timedelta(hours=i * 12)

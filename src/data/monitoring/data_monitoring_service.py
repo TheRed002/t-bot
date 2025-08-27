@@ -130,7 +130,7 @@ class DataQualityMonitor:
             if quality_score < self.quality_thresholds["min_quality_score"]:
                 alerts.append(
                     Alert(
-                        alert_id=f"quality_score_{datetime.now().timestamp()}",
+                        alert_id=f"quality_score_{datetime.now(timezone.utc).timestamp()}",
                         severity=(
                             AlertSeverity.WARNING if quality_score > 70 else AlertSeverity.ERROR
                         ),
@@ -150,7 +150,7 @@ class DataQualityMonitor:
                 if error_rate > self.quality_thresholds["max_error_rate"]:
                     alerts.append(
                         Alert(
-                            alert_id=f"error_rate_{datetime.now().timestamp()}",
+                            alert_id=f"error_rate_{datetime.now(timezone.utc).timestamp()}",
                             severity=(
                                 AlertSeverity.ERROR if error_rate > 0.1 else AlertSeverity.WARNING
                             ),
@@ -168,7 +168,7 @@ class DataQualityMonitor:
             if throughput < self.quality_thresholds["min_throughput_per_second"]:
                 alerts.append(
                     Alert(
-                        alert_id=f"throughput_{datetime.now().timestamp()}",
+                        alert_id=f"throughput_{datetime.now(timezone.utc).timestamp()}",
                         severity=AlertSeverity.WARNING,
                         message=f"Throughput below threshold: {throughput:.1f} records/sec",
                         component="performance",
@@ -184,7 +184,7 @@ class DataQualityMonitor:
         except Exception as e:
             return [
                 Alert(
-                    alert_id=f"monitor_error_{datetime.now().timestamp()}",
+                    alert_id=f"monitor_error_{datetime.now(timezone.utc).timestamp()}",
                     severity=AlertSeverity.ERROR,
                     message=f"Data quality monitoring failed: {e}",
                     component="monitoring",
@@ -225,7 +225,7 @@ class PerformanceMonitor:
             if avg_response_time > self.performance_thresholds["max_response_time_ms"]:
                 alerts.append(
                     Alert(
-                        alert_id=f"response_time_{datetime.now().timestamp()}",
+                        alert_id=f"response_time_{datetime.now(timezone.utc).timestamp()}",
                         severity=(
                             AlertSeverity.WARNING
                             if avg_response_time < 1000
@@ -249,7 +249,7 @@ class PerformanceMonitor:
                 ):
                     alerts.append(
                         Alert(
-                            alert_id=f"queue_size_{queue_name}_{datetime.now().timestamp()}",
+                            alert_id=f"queue_size_{queue_name}_{datetime.now(timezone.utc).timestamp()}",
                             severity=AlertSeverity.WARNING if size < 15000 else AlertSeverity.ERROR,
                             message=f"Queue size above threshold: {queue_name} = {size}",
                             component="performance",
@@ -266,7 +266,7 @@ class PerformanceMonitor:
         except Exception as e:
             return [
                 Alert(
-                    alert_id=f"perf_monitor_error_{datetime.now().timestamp()}",
+                    alert_id=f"perf_monitor_error_{datetime.now(timezone.utc).timestamp()}",
                     severity=AlertSeverity.ERROR,
                     message=f"Performance monitoring failed: {e}",
                     component="monitoring",
@@ -362,7 +362,7 @@ class SLAMonitor:
                 # Generate alert for SLA violation
                 alerts.append(
                     Alert(
-                        alert_id=f"sla_{sla.name}_{datetime.now().timestamp()}",
+                        alert_id=f"sla_{sla.name}_{datetime.now(timezone.utc).timestamp()}",
                         severity=severity,
                         message=f"SLA {sla.status.value}: {sla.name} = {sla.current_value:.2f} (target: {sla.target_value:.2f})",
                         component="sla",
@@ -380,7 +380,7 @@ class SLAMonitor:
         except Exception as e:
             return [
                 Alert(
-                    alert_id=f"sla_monitor_error_{datetime.now().timestamp()}",
+                    alert_id=f"sla_monitor_error_{datetime.now(timezone.utc).timestamp()}",
                     severity=AlertSeverity.ERROR,
                     message=f"SLA monitoring failed: {e}",
                     component="monitoring",

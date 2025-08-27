@@ -25,7 +25,10 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.utils import normalize_price, round_to_precision, ValidationFramework
+from src.utils import ValidationFramework, normalize_price, round_to_precision
+
+# Logger setup
+from src.core.logging import get_logger
 
 # Note: Using generic Exception handling for REST API as no specific
 # exceptions are documented
@@ -53,12 +56,15 @@ class CoinbaseOrderManager:
         """
         self.config = config
         self.exchange_name = exchange_name
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = ErrorHandler(config)
+        
+        # Initialize logger
+        self.logger = get_logger(self.__class__.__module__)
 
         # Coinbase-specific configuration
-        self.api_key = config.exchanges.coinbase_api_key
-        self.api_secret = config.exchanges.coinbase_api_secret
-        self.sandbox = config.exchanges.coinbase_sandbox
+        self.api_key = config.exchange.coinbase_api_key
+        self.api_secret = config.exchange.coinbase_api_secret
+        self.sandbox = config.exchange.coinbase_sandbox
 
         # REST client
         self.client: RESTClient | None = None
@@ -419,8 +425,10 @@ class CoinbaseOrderManager:
                 return False
 
             # Additional Coinbase-specific validation
-            if not ValidationFramework.validate_symbol(order.symbol):
-                self.logger.error("Invalid symbol format for Coinbase")
+            try:
+                ValidationFramework.validate_symbol(order.symbol)
+            except (ValueError, ValidationError) as e:
+                self.logger.error(f"Invalid symbol format for Coinbase: {e}")
                 return False
 
             # Check symbol format (Coinbase uses format like "BTC-USD")
@@ -454,22 +462,22 @@ class CoinbaseOrderManager:
         if order.order_type == OrderType.MARKET:
             coinbase_order["order_configuration"] = {
                 "market_market_ioc": {
-                    "quote_size": str(round_to_precision(float(order.quantity), 8))
+                    "quote_size": str(round_to_precision(order.quantity, 8))
                 }
             }
         elif order.order_type == OrderType.LIMIT:
             coinbase_order["order_configuration"] = {
                 "limit_limit_gtc": {
-                    "base_size": str(round_to_precision(float(order.quantity), 8)),
-                    "limit_price": str(normalize_price(float(order.price), order.symbol)),
+                    "base_size": str(round_to_precision(order.quantity, 8)),
+                    "limit_price": str(normalize_price(order.price, order.symbol)),
                 }
             }
         elif order.order_type == OrderType.STOP_LOSS:
             coinbase_order["order_configuration"] = {
                 "stop_limit_stop_limit_gtc": {
-                    "base_size": str(round_to_precision(float(order.quantity), 8)),
-                    "limit_price": str(normalize_price(float(order.price), order.symbol)),
-                    "stop_price": str(normalize_price(float(order.stop_price), order.symbol)),
+                    "base_size": str(round_to_precision(order.quantity, 8)),
+                    "limit_price": str(normalize_price(order.price, order.symbol)),
+                    "stop_price": str(normalize_price(order.stop_price, order.symbol)),
                 }
             }
 

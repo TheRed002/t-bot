@@ -1,7 +1,7 @@
 """Order management component for exchanges."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -62,7 +62,7 @@ class OrderManager:
             "type": order_type.upper(),
             "quantity": str(quantity),
             "clientOrderId": client_order_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         if price is not None:

@@ -27,8 +27,6 @@ from src.core.exceptions import DataError
 from src.core.types import MarketData, ProcessingStep
 
 # Import from P-002A error handling
-from src.error_handling.error_handler import ErrorHandler
-
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
 from src.utils.helpers import calculate_percentage_change
@@ -150,7 +148,7 @@ class DataProcessor:
         Returns:
             ProcessingResult: Processing result with transformed data
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
         steps_applied = []
         processed_data = data
 
@@ -164,7 +162,7 @@ class DataProcessor:
                 else:
                     self.logger.warning(f"Unknown processing step: {step}")
 
-            processing_time = (datetime.now() - start_time).total_seconds()
+            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             # Update statistics
             self.stats["total_processed"] += 1
@@ -206,7 +204,7 @@ class DataProcessor:
                 original_data=data,
                 processed_data=data,  # Return original on failure
                 steps_applied=steps_applied,
-                processing_time=(datetime.now() - start_time).total_seconds(),
+                processing_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 metadata={"error": str(e)},
                 success=False,
                 error_message=str(e),
@@ -250,7 +248,7 @@ class DataProcessor:
         self, data: Any, data_type: str, steps: list[ProcessingStep] | None = None
     ) -> ProcessingResult:
         """Process generic data through the pipeline."""
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
         steps_applied = []
         processed_data = data
 
@@ -262,7 +260,7 @@ class DataProcessor:
                     processed_data = await self.processors[step](processed_data, data_type)
                     steps_applied.append(step.value)
 
-            processing_time = (datetime.now() - start_time).total_seconds()
+            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             return ProcessingResult(
                 original_data=data,
@@ -281,7 +279,7 @@ class DataProcessor:
                 original_data=data,
                 processed_data=data,
                 steps_applied=steps_applied,
-                processing_time=(datetime.now() - start_time).total_seconds(),
+                processing_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 metadata={"error": str(e), "data_type": data_type},
                 success=False,
                 error_message=str(e),
@@ -496,7 +494,7 @@ class DataProcessor:
                         ValidationFramework.validate_price(data.price)
                     except ValueError as e:
                         is_valid = False
-                        validation_errors.append(f"Invalid price: {str(e)}")
+                        validation_errors.append(f"Invalid price: {e!s}")
 
                 # Volume validation
                 if data.volume:
@@ -504,7 +502,7 @@ class DataProcessor:
                         ValidationFramework.validate_quantity(data.volume)
                     except ValueError as e:
                         is_valid = False
-                        validation_errors.append(f"Invalid volume: {str(e)}")
+                        validation_errors.append(f"Invalid volume: {e!s}")
 
                 # Symbol validation
                 if not data.symbol or len(data.symbol) < 3:

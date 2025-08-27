@@ -52,13 +52,13 @@ class CoinbaseWebSocketHandler:
         """
         self.config = config
         self.exchange_name = exchange_name
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = ErrorHandler(config)
 
         # Coinbase-specific configuration
-        self.api_key = config.exchanges.coinbase_api_key
-        self.api_secret = config.exchanges.coinbase_api_secret
+        self.api_key = config.exchange.coinbase_api_key
+        self.api_secret = config.exchange.coinbase_api_secret
         self.passphrase = getattr(config.exchanges, "coinbase_passphrase", "")
-        self.sandbox = config.exchanges.coinbase_sandbox
+        self.sandbox = config.exchange.coinbase_sandbox
 
         # WebSocket URLs
         if self.sandbox:
@@ -341,32 +341,23 @@ class CoinbaseWebSocketHandler:
             stream_info = self.active_streams[stream_key]
 
             # Build unsubscribe message based on stream type
-            unsubscribe_msg = {
-                "type": "unsubscribe",
-                "channels": []
-            }
-            
+            unsubscribe_msg = {"type": "unsubscribe", "channels": []}
+
             if stream_info["type"] == "ticker":
-                unsubscribe_msg["channels"].append({
-                    "name": "ticker",
-                    "product_ids": [stream_info["symbol"]]
-                })
+                unsubscribe_msg["channels"].append(
+                    {"name": "ticker", "product_ids": [stream_info["symbol"]]}
+                )
             elif stream_info["type"] == "orderbook":
-                unsubscribe_msg["channels"].append({
-                    "name": "level2",
-                    "product_ids": [stream_info["symbol"]]
-                })
+                unsubscribe_msg["channels"].append(
+                    {"name": "level2", "product_ids": [stream_info["symbol"]]}
+                )
             elif stream_info["type"] == "trades":
-                unsubscribe_msg["channels"].append({
-                    "name": "matches",
-                    "product_ids": [stream_info["symbol"]]
-                })
+                unsubscribe_msg["channels"].append(
+                    {"name": "matches", "product_ids": [stream_info["symbol"]]}
+                )
             elif stream_info["type"] == "user_data":
-                unsubscribe_msg["channels"].append({
-                    "name": "user",
-                    "product_ids": ["*"]
-                })
-            
+                unsubscribe_msg["channels"].append({"name": "user", "product_ids": ["*"]})
+
             # Send unsubscribe message
             await self.ws.send(json.dumps(unsubscribe_msg))
 

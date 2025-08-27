@@ -12,7 +12,7 @@ import asyncio
 import time
 from collections import defaultdict
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 # LoggerMixin not needed - BaseComponent already provides logging
@@ -20,6 +20,7 @@ from src.core.config import Config
 
 # MANDATORY: Import from P-001
 from src.core.exceptions import ExchangeConnectionError, ValidationError
+from src.core.logging import get_logger
 
 # Logger is provided by BaseExchange (via BaseComponent)
 from src.core.types import ConnectionType
@@ -30,11 +31,12 @@ from src.error_handling.error_handler import ErrorHandler
 
 # Recovery scenarios - imported at top level for better performance
 from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
+
 # MANDATORY: Import from P-007 (advanced rate limiting)
 from src.exchanges.advanced_rate_limiter import get_global_rate_limiter
 from src.exchanges.health_monitor import ConnectionHealthMonitor
 from src.exchanges.high_performance_websocket import WebSocketConnectionPool
-from src.utils import TIMEOUTS, log_calls, retry, measure_latency, test_connection
+from src.utils import TIMEOUTS, log_calls, measure_latency, retry, test_connection
 
 
 class WebSocketConnection:
@@ -57,7 +59,8 @@ class WebSocketConnection:
         self.url = url
         self.exchange_name = exchange_name
         self.config = config
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = ErrorHandler(config)
+        self.logger = get_logger(self.__class__.__name__)
 
         # Connection state
         self.connected = False
@@ -108,7 +111,7 @@ class WebSocketConnection:
 
                 self.connected = True
                 self.connecting = False
-                self.last_heartbeat = datetime.now()
+                self.last_heartbeat = datetime.now(timezone.utc)
 
                 if self.on_connect:
                     await self.on_connect()
@@ -234,7 +237,7 @@ class WebSocketConnection:
             success = await self.send_message(heartbeat_message)
 
             if success:
-                self.last_heartbeat = datetime.now()
+                self.last_heartbeat = datetime.now(timezone.utc)
 
             return success
 
@@ -256,7 +259,7 @@ class WebSocketConnection:
             return True  # No heartbeat yet, assume healthy
 
         # Check if heartbeat is within acceptable range
-        time_since_heartbeat = datetime.now() - self.last_heartbeat
+        time_since_heartbeat = datetime.now(timezone.utc) - self.last_heartbeat
         return time_since_heartbeat.total_seconds() < self.heartbeat_interval * 2
 
     async def process_queued_messages(self) -> int:
@@ -300,8 +303,9 @@ class ConnectionManager:
         """
         self.config = config
         self.exchange_name = exchange_name
-        self.error_handler = ErrorHandler(config.error_handling)
-        self.error_connection_manager = ErrorConnectionManager(config.error_handling)
+        self.logger = get_logger(__name__)
+        self.error_handler = ErrorHandler(config)
+        self.error_connection_manager = ErrorConnectionManager(config)
 
         # P-007: Advanced rate limiting and connection management integration
         self.advanced_rate_limiter = get_global_rate_limiter(config)
@@ -320,7 +324,7 @@ class ConnectionManager:
 
         # Connection monitoring
         self.connection_health: dict[str, bool] = defaultdict(lambda: True)
-        self.last_health_check = datetime.now()
+        self.last_health_check = datetime.now(timezone.utc)
         self.health_check_interval = 60.0  # seconds
 
         # Connection limits
@@ -620,7 +624,7 @@ class ConnectionManager:
                 self.logger.error(f"WebSocket health check failed for {connection_id}: {e!s}")
                 health_status[f"ws_{connection_id}"] = False
 
-        self.last_health_check = datetime.now()
+        self.last_health_check = datetime.now(timezone.utc)
         return health_status
 
     async def check_network_health(self) -> dict[str, Any]:
@@ -649,13 +653,15 @@ class ConnectionManager:
                         port = 80
 
                     # Test connection using utils helpers
-                    is_connected = test_connection(host, port, timeout=TIMEOUTS.get("short", 5.0))
-                    latency = measure_latency(host, port, timeout=TIMEOUTS.get("short", 5.0))
+                    is_connected = await test_connection(
+                        host, port, timeout=TIMEOUTS.get("short", 5.0)
+                    )
+                    latency = await measure_latency(host, port, timeout=TIMEOUTS.get("short", 5.0))
 
                     network_health[f"network_{endpoint}"] = {
                         "connected": is_connected,
                         "latency_ms": latency,
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
                 except Exception as e:
@@ -664,7 +670,7 @@ class ConnectionManager:
                         "connected": False,
                         "latency_ms": -1,
                         "error": str(e),
-                        "timestamp": datetime.now().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
             return network_health

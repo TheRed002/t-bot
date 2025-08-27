@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.base import BaseComponent
 from src.core.config import Config
@@ -123,8 +123,7 @@ class ValidationPipelineResult(BaseModel):
     execution_time_ms: int
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class DataValidationPipeline(BaseComponent):

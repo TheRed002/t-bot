@@ -253,12 +253,12 @@ class DataValidator(BaseComponent):
                     )
                 )
 
-            # Confidence validation
-            if not (0.0 <= signal.confidence <= 1.0):
+            # Strength validation
+            if not (0.0 <= signal.strength <= 1.0):
                 issues.append(
                     ValidationIssue(
                         field="confidence",
-                        value=signal.confidence,
+                        value=signal.strength,
                         expected="0.0_to_1.0",
                         message="Signal confidence must be between 0 and 1",
                         level=ValidationLevel.HIGH,
@@ -379,7 +379,7 @@ class DataValidator(BaseComponent):
 
         try:
             # Required fields validation
-            required_fields = ["symbol", "price", "volume", "timestamp"]
+            required_fields = ["symbol", "close", "volume", "timestamp"]
             for field in required_fields:
                 if not hasattr(data, field) or getattr(data, field) is None:
                     issues.append(
@@ -410,13 +410,13 @@ class DataValidator(BaseComponent):
                     )
                 )
 
-            if not isinstance(data.price, Decimal):
+            if not isinstance(data.close, Decimal):
                 issues.append(
                     ValidationIssue(
-                        field="price",
-                        value=type(data.price),
+                        field="close",
+                        value=type(data.close),
                         expected="Decimal",
-                        message="Price must be a Decimal",
+                        message="Close price must be a Decimal",
                         level=ValidationLevel.CRITICAL,
                         timestamp=datetime.now(timezone.utc),
                         source="DataValidator",
@@ -483,11 +483,11 @@ class DataValidator(BaseComponent):
 
         try:
             # Price range validation
-            if data.price <= 0:
+            if data.close <= 0:
                 issues.append(
                     ValidationIssue(
                         field="price",
-                        value=float(data.price),
+                        value=float(data.close),
                         expected="positive_value",
                         message="Price must be positive",
                         level=ValidationLevel.CRITICAL,
@@ -515,7 +515,7 @@ class DataValidator(BaseComponent):
             # Price change validation (if previous price exists)
             if data.symbol in self.price_history and len(self.price_history[data.symbol]) > 0:
                 prev_price = Decimal(str(self.price_history[data.symbol][-1]))
-                price_change = abs(data.price - prev_price) / prev_price
+                price_change = abs(data.close - prev_price) / prev_price
 
                 if price_change > self.price_change_threshold:
                     issues.append(
@@ -529,7 +529,7 @@ class DataValidator(BaseComponent):
                             source="DataValidator",
                             metadata={
                                 "previous_price": prev_price,
-                                "current_price": float(data.price),
+                                "current_price": float(data.close),
                                 "change_percentage": price_change,
                             },
                         )
@@ -618,11 +618,11 @@ class DataValidator(BaseComponent):
                 )
 
             # Price precision validation (basic check)
-            if data.price and len(str(data.price).split(".")[-1]) > 8:
+            if data.close and len(str(data.close).split(".")[-1]) > 8:
                 issues.append(
                     ValidationIssue(
                         field="price",
-                        value=float(data.price),
+                        value=float(data.close),
                         expected="reasonable_precision",
                         message="Price precision exceeds 8 decimal places",
                         level=ValidationLevel.MEDIUM,
@@ -735,7 +735,7 @@ class DataValidator(BaseComponent):
                 return issues  # Need sufficient history for outlier detection
 
             price_history = self.price_history[data.symbol]
-            current_price = float(data.price)
+            current_price = float(data.close)
 
             # Calculate statistics
             mean_price = statistics.mean(price_history)
@@ -927,7 +927,7 @@ class DataValidator(BaseComponent):
             if data.symbol not in self.price_history:
                 self.price_history[data.symbol] = []
 
-            self.price_history[data.symbol].append(float(data.price))
+            self.price_history[data.symbol].append(float(data.close))
 
             # Maintain history size
             if len(self.price_history[data.symbol]) > self.max_history_size:
@@ -994,7 +994,7 @@ class DataValidator(BaseComponent):
                 )
 
             # Price consistency check
-            price_diff = abs(primary_data.price - secondary_data.price) / primary_data.price
+            price_diff = abs(primary_data.close - secondary_data.close) / primary_data.close
 
             if price_diff > self.consistency_threshold:
                 issues.append(
@@ -1007,8 +1007,8 @@ class DataValidator(BaseComponent):
                         timestamp=datetime.now(timezone.utc),
                         source="DataValidator",
                         metadata={
-                            "primary_price": float(primary_data.price),
-                            "secondary_price": float(secondary_data.price),
+                            "primary_price": float(primary_data.close),
+                            "secondary_price": float(secondary_data.close),
                             "difference_percentage": price_diff,
                             "threshold": self.consistency_threshold,
                         },

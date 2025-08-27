@@ -5,7 +5,7 @@ This module provides comprehensive bot management functionality including
 creation, configuration, lifecycle management, and monitoring.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -14,10 +14,10 @@ from pydantic import BaseModel, Field
 
 from src.core.caching import CacheKeys, cached
 from src.core.exceptions import (
-    ValidationError,
-    ServiceError,
-    ExecutionError,
     EntityNotFoundError,
+    ExecutionError,
+    ServiceError,
+    ValidationError,
 )
 from src.core.logging import get_logger
 from src.core.types import BotConfiguration, BotPriority, BotStatus, BotType
@@ -222,7 +222,7 @@ async def create_bot(bot_request: CreateBotRequest, current_user: User = Depends
             auto_start=bot_request.auto_start,
             strategy_config=bot_request.configuration,
             metadata={"created_by": current_user.user_id},
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
         )
 
         # Create bot through bot service
@@ -260,36 +260,30 @@ async def create_bot(bot_request: CreateBotRequest, current_user: User = Depends
     except ValidationError as e:
         logger.error(f"Bot validation failed: {e}", user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Validation error: {str(e)}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Validation error: {e!s}"
         )
     except ServiceError as e:
         logger.error(f"Bot service error: {e}", user=current_user.username)
         # Check for specific error types
         if "maximum bot limit" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail=str(e)
-            )
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
         elif "already exists" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail=str(e)
-            )
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
         elif "failed to allocate capital" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
-            )
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
         else:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {str(e)}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
             )
     except ExecutionError as e:
         logger.error(f"Bot execution error: {e}", user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Execution error: {str(e)}"
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Execution error: {e!s}"
         )
     except Exception as e:
         logger.error(f"Bot creation failed: {e}", user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot creation failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot creation failed: {e!s}"
         )
 
 
@@ -382,12 +376,12 @@ async def list_bots(
     except ServiceError as e:
         logger.error(f"Bot service error during listing: {e}", user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {str(e)}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
         )
     except Exception as e:
         logger.error(f"Bot listing failed: {e}", user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to list bots: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to list bots: {e!s}"
         )
 
 
@@ -442,8 +436,7 @@ async def get_bot(bot_id: str, current_user: User = Depends(get_current_user)):
                 )
             # Other service errors
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Service error: {str(e)}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
             )
         except Exception as e:
             # For backward compatibility, still check for "not found" in string
@@ -505,8 +498,7 @@ async def update_bot(
                 )
             # Other service errors
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"Service error: {str(e)}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
             )
         except Exception as e:
             # For backward compatibility, still check for "not found" in string
@@ -562,19 +554,23 @@ async def update_bot(
     except HTTPException:
         raise
     except ValidationError as e:
-        logger.error(f"Bot update validation failed: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot update validation failed: {e}", bot_id=bot_id, user=current_user.username
+        )
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Validation error: {str(e)}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Validation error: {e!s}"
         )
     except ServiceError as e:
-        logger.error(f"Bot service error during update: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot service error during update: {e}", bot_id=bot_id, user=current_user.username
+        )
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {str(e)}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
         )
     except Exception as e:
         logger.error(f"Bot update failed: {e}", bot_id=bot_id, user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot update failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot update failed: {e!s}"
         )
 
 
@@ -619,7 +615,9 @@ async def start_bot(bot_id: str, current_user: User = Depends(get_trading_user))
     except HTTPException:
         raise
     except ServiceError as e:
-        logger.error(f"Bot service error during start: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot service error during start: {e}", bot_id=bot_id, user=current_user.username
+        )
         # Check for specific error conditions
         if "not found" in str(e).lower():
             raise HTTPException(
@@ -631,17 +629,19 @@ async def start_bot(bot_id: str, current_user: User = Depends(get_trading_user))
             )
         else:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {str(e)}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
             )
     except ExecutionError as e:
-        logger.error(f"Bot execution error during start: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot execution error during start: {e}", bot_id=bot_id, user=current_user.username
+        )
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to start bot: {str(e)}"
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to start bot: {e!s}"
         )
     except Exception as e:
         logger.error(f"Bot start failed: {e}", bot_id=bot_id, user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot start failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot start failed: {e!s}"
         )
 
 
@@ -686,29 +686,31 @@ async def stop_bot(bot_id: str, current_user: User = Depends(get_trading_user)):
     except HTTPException:
         raise
     except ServiceError as e:
-        logger.error(f"Bot service error during stop: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot service error during stop: {e}", bot_id=bot_id, user=current_user.username
+        )
         # Check for specific error conditions
         if "not found" in str(e).lower():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Bot not found: {bot_id}"
             )
         elif "not running" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Bot is not running"
-            )
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Bot is not running")
         else:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {str(e)}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
             )
     except ExecutionError as e:
-        logger.error(f"Bot execution error during stop: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot execution error during stop: {e}", bot_id=bot_id, user=current_user.username
+        )
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to stop bot: {str(e)}"
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to stop bot: {e!s}"
         )
     except Exception as e:
         logger.error(f"Bot stop failed: {e}", bot_id=bot_id, user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot stop failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot stop failed: {e!s}"
         )
 
 
@@ -751,7 +753,9 @@ async def pause_bot(bot_id: str, current_user: User = Depends(get_trading_user))
     except HTTPException:
         raise
     except ExecutionError as e:
-        logger.error(f"Bot execution error during pause: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot execution error during pause: {e}", bot_id=bot_id, user=current_user.username
+        )
         # Check for specific error conditions
         if "not running" in str(e).lower():
             raise HTTPException(
@@ -759,22 +763,25 @@ async def pause_bot(bot_id: str, current_user: User = Depends(get_trading_user))
             )
         else:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to pause bot: {str(e)}"
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Failed to pause bot: {e!s}",
             )
     except ServiceError as e:
-        logger.error(f"Bot service error during pause: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot service error during pause: {e}", bot_id=bot_id, user=current_user.username
+        )
         if "not found" in str(e).lower():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Bot not found: {bot_id}"
             )
         else:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {str(e)}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
             )
     except Exception as e:
         logger.error(f"Bot pause failed: {e}", bot_id=bot_id, user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot pause failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot pause failed: {e!s}"
         )
 
 
@@ -817,7 +824,9 @@ async def resume_bot(bot_id: str, current_user: User = Depends(get_trading_user)
     except HTTPException:
         raise
     except ExecutionError as e:
-        logger.error(f"Bot execution error during resume: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot execution error during resume: {e}", bot_id=bot_id, user=current_user.username
+        )
         # Check for specific error conditions
         if "not paused" in str(e).lower():
             raise HTTPException(
@@ -825,22 +834,25 @@ async def resume_bot(bot_id: str, current_user: User = Depends(get_trading_user)
             )
         else:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Failed to resume bot: {str(e)}"
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Failed to resume bot: {e!s}",
             )
     except ServiceError as e:
-        logger.error(f"Bot service error during resume: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot service error during resume: {e}", bot_id=bot_id, user=current_user.username
+        )
         if "not found" in str(e).lower():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Bot not found: {bot_id}"
             )
         else:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {str(e)}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
             )
     except Exception as e:
         logger.error(f"Bot resume failed: {e}", bot_id=bot_id, user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot resume failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot resume failed: {e!s}"
         )
 
 
@@ -894,7 +906,9 @@ async def delete_bot(
     except HTTPException:
         raise
     except ServiceError as e:
-        logger.error(f"Bot service error during deletion: {e}", bot_id=bot_id, user=current_user.username)
+        logger.error(
+            f"Bot service error during deletion: {e}", bot_id=bot_id, user=current_user.username
+        )
         # Check for specific error conditions
         if "not found" in str(e).lower():
             raise HTTPException(
@@ -902,16 +916,17 @@ async def delete_bot(
             )
         elif "running" in str(e).lower() and not force:
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT, detail="Cannot delete running bot without force=true"
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot delete running bot without force=true",
             )
         else:
             raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {str(e)}"
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"Service error: {e!s}"
             )
     except Exception as e:
         logger.error(f"Bot deletion failed: {e}", bot_id=bot_id, user=current_user.username)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot deletion failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Bot deletion failed: {e!s}"
         )
 
 
@@ -940,10 +955,12 @@ async def get_orchestrator_status(current_user: User = Depends(get_current_user)
         # Add service health check
         # Note: health check should be done through public API
         # For now, we'll check if the service is running
-        service_healthy = hasattr(current_bot_service, 'is_running') and current_bot_service.is_running
+        service_healthy = (
+            hasattr(current_bot_service, "is_running") and current_bot_service.is_running
+        )
         health_check = {
             "status": "healthy" if service_healthy else "unhealthy",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         bot_status = {
@@ -953,7 +970,7 @@ async def get_orchestrator_status(current_user: User = Depends(get_current_user)
                 "health_check": health_check,
             },
             "bots": all_bots_status,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         return {"success": True, "status": bot_status}
@@ -962,11 +979,11 @@ async def get_orchestrator_status(current_user: User = Depends(get_current_user)
         logger.error(f"Bot service error during status retrieval: {e}", user=current_user.username)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Service error: {str(e)}",
+            detail=f"Service error: {e!s}",
         )
     except Exception as e:
         logger.error(f"Orchestrator status retrieval failed: {e}", user=current_user.username)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get orchestrator status: {str(e)}",
+            detail=f"Failed to get orchestrator status: {e!s}",
         )

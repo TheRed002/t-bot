@@ -15,7 +15,7 @@ Key Features:
 - Performance attribution and analytics
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -80,7 +80,7 @@ class StrategyAllocation:
         self.beta = 1.0
 
         # Allocation metadata
-        self.last_rebalance = datetime.now()
+        self.last_rebalance = datetime.now(timezone.utc)
         self.rebalance_threshold = 0.05  # 5% weight deviation triggers rebalance
         self.performance_lookback_days = 30
 
@@ -124,7 +124,7 @@ class PortfolioAllocator:
         self.strategy_queue: list[BaseStrategyInterface] = []  # Strategies waiting for allocation
 
         # Portfolio state
-        self.last_rebalance = datetime.now()
+        self.last_rebalance = datetime.now(timezone.utc)
         self.portfolio_value = total_capital
         self.available_capital = total_capital
         self.allocated_capital = Decimal("0")
@@ -241,7 +241,7 @@ class PortfolioAllocator:
                 test_signal = Signal(
                     direction=SignalDirection.BUY,
                     strength=0.8,
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(timezone.utc),
                     symbol="BTCUSDT",
                     source=strategy.name,
                     metadata={},
@@ -316,13 +316,13 @@ class PortfolioAllocator:
             rebalancing_actions = await self._execute_rebalancing(adjusted_weights)
 
             # Update portfolio state
-            self.last_rebalance = datetime.now()
+            self.last_rebalance = datetime.now(timezone.utc)
 
             # Calculate portfolio metrics
             portfolio_metrics = await self._calculate_portfolio_metrics()
 
             return {
-                "rebalance_timestamp": datetime.now().isoformat(),
+                "rebalance_timestamp": datetime.now(timezone.utc).isoformat(),
                 "optimal_weights": optimal_weights,
                 "adjusted_weights": adjusted_weights,
                 "actions": rebalancing_actions,
@@ -594,7 +594,7 @@ class PortfolioAllocator:
                     allocation.allocated_capital += capital_change
                     allocation.current_weight = target_weight
                     allocation.target_weight = target_weight
-                    allocation.last_rebalance = datetime.now()
+                    allocation.last_rebalance = datetime.now(timezone.utc)
 
                     # Track action
                     actions.append(
@@ -804,7 +804,7 @@ class PortfolioAllocator:
         """
         try:
             # Time-based rebalancing
-            if datetime.now() - self.last_rebalance > self.rebalance_frequency:
+            if datetime.now(timezone.utc) - self.last_rebalance > self.rebalance_frequency:
                 return True
 
             # Weight drift rebalancing

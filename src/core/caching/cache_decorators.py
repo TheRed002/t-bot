@@ -44,79 +44,157 @@ def cached(
     """
 
     def decorator(func: Callable):
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            cache_manager = get_cache_manager()
+        cache_config = {
+            "ttl": ttl,
+            "namespace": namespace,
+            "data_type": data_type,
+            "key_generator": key_generator,
+            "invalidate_on_error": invalidate_on_error,
+            "use_lock": use_lock,
+            "lock_timeout": lock_timeout,
+        }
 
-            # Generate cache key
-            if key_generator:
-                cache_key = key_generator(*args, **kwargs)
-            else:
-                func_name = f"{func.__module__}.{func.__name__}"
-                cache_key = f"{func_name}:{_create_cache_key(*args, **kwargs)}"
-
-            # Try to get from cache first
-            try:
-                cached_result = await cache_manager.get(cache_key, namespace)
-                if cached_result is not None:
-                    return cached_result
-            except Exception as e:
-                cache_manager.logger.warning(f"Cache get failed for {cache_key}: {e}")
-
-            # Function to execute the actual function
-            async def execute_function():
-                if asyncio.iscoroutinefunction(func):
-                    return await func(*args, **kwargs)
-                else:
-                    return func(*args, **kwargs)
-
-            # Execute with or without lock
-            try:
-                if use_lock:
-                    lock_resource = f"func_exec:{cache_key}"
-                    result = await cache_manager.with_lock(
-                        lock_resource, execute_function, timeout=lock_timeout
-                    )
-                else:
-                    result = await execute_function()
-
-                # Cache the result
-                try:
-                    await cache_manager.set(
-                        cache_key, result, namespace=namespace, ttl=ttl, data_type=data_type
-                    )
-                except Exception as e:
-                    cache_manager.logger.warning(f"Cache set failed for {cache_key}: {e}")
-
-                return result
-
-            except Exception:
-                if invalidate_on_error:
-                    try:
-                        await cache_manager.delete(cache_key, namespace)
-                    except Exception:
-                        pass  # Ignore invalidation errors
-                raise
-
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            # For sync functions, we need to run the async operations in event loop
-            loop = None
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
-            return loop.run_until_complete(async_wrapper(*args, **kwargs))
-
-        # Return appropriate wrapper based on function type
         if asyncio.iscoroutinefunction(func):
-            return async_wrapper
+            return _create_async_cached_wrapper(func, cache_config)
         else:
-            return sync_wrapper
+            return _create_sync_cached_wrapper(func, cache_config)
 
     return decorator
+
+
+def _create_async_cached_wrapper(func: Callable, config: dict) -> Callable:
+    """Create async wrapper for cached function."""
+
+    @wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        cache_manager = get_cache_manager()
+        cache_key = _generate_cache_key(func, config["key_generator"], *args, **kwargs)
+
+        # Try cache first
+        cached_result = await _try_get_from_cache(cache_manager, cache_key, config["namespace"])
+        if cached_result is not None:
+            return cached_result
+
+        # Execute function and handle result
+        return await _execute_and_cache_async(
+            func, cache_manager, cache_key, config, *args, **kwargs
+        )
+
+    return async_wrapper
+
+
+def _create_sync_cached_wrapper(func: Callable, config: dict) -> Callable:
+    """Create sync wrapper for cached function."""
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        async_wrapper = _create_async_cached_wrapper(_make_func_async(func), config)
+        return _run_in_event_loop(async_wrapper, *args, **kwargs)
+
+    return sync_wrapper
+
+
+def _generate_cache_key(func: Callable, key_generator: Callable | None, *args, **kwargs) -> str:
+    """Generate cache key for function call."""
+    if key_generator:
+        return key_generator(*args, **kwargs)
+    else:
+        func_name = f"{func.__module__}.{func.__name__}"
+        return f"{func_name}:{_create_cache_key(*args, **kwargs)}"
+
+
+async def _try_get_from_cache(cache_manager, cache_key: str, namespace: str):
+    """Try to get result from cache."""
+    try:
+        cached_result = await cache_manager.get(cache_key, namespace)
+        return cached_result
+    except Exception as e:
+        cache_manager.logger.warning(f"Cache get failed for {cache_key}: {e}")
+        return None
+
+
+async def _execute_and_cache_async(
+    func: Callable, cache_manager, cache_key: str, config: dict, *args, **kwargs
+):
+    """Execute function and cache result."""
+    try:
+        # Execute function
+        if config["use_lock"]:
+            result = await _execute_with_lock(
+                func, cache_manager, cache_key, config["lock_timeout"], *args, **kwargs
+            )
+        else:
+            result = await func(*args, **kwargs)
+
+        # Cache result
+        await _store_result_in_cache(
+            cache_manager,
+            cache_key,
+            result,
+            config["namespace"],
+            config["ttl"],
+            config["data_type"],
+        )
+
+        return result
+
+    except Exception:
+        if config["invalidate_on_error"]:
+            await _safe_invalidate_cache(cache_manager, cache_key, config["namespace"])
+        raise
+
+
+async def _execute_with_lock(
+    func: Callable, cache_manager, cache_key: str, lock_timeout: int, *args, **kwargs
+):
+    """Execute function with distributed lock."""
+    lock_resource = f"func_exec:{cache_key}"
+
+    async def execute_function():
+        return await func(*args, **kwargs)
+
+    return await cache_manager.with_lock(lock_resource, execute_function, timeout=lock_timeout)
+
+
+async def _store_result_in_cache(
+    cache_manager, cache_key: str, result, namespace: str, ttl: int | None, data_type: str
+):
+    """Store result in cache with error handling."""
+    try:
+        await cache_manager.set(
+            cache_key, result, namespace=namespace, ttl=ttl, data_type=data_type
+        )
+    except Exception as e:
+        cache_manager.logger.warning(f"Cache set failed for {cache_key}: {e}")
+
+
+async def _safe_invalidate_cache(cache_manager, cache_key: str, namespace: str):
+    """Safely invalidate cache entry."""
+    try:
+        await cache_manager.delete(cache_key, namespace)
+    except Exception:
+        pass  # Ignore invalidation errors
+
+
+def _make_func_async(func: Callable) -> Callable:
+    """Convert sync function to async for uniform handling."""
+
+    async def async_func(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    return async_func
+
+
+def _run_in_event_loop(async_func: Callable, *args, **kwargs):
+    """Run async function in event loop."""
+    loop = None
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    return loop.run_until_complete(async_func(*args, **kwargs))
 
 
 def cache_invalidate(
@@ -134,52 +212,73 @@ def cache_invalidate(
     """
 
     def decorator(func: Callable):
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            # Execute the function first
-            if asyncio.iscoroutinefunction(func):
-                result = await func(*args, **kwargs)
-            else:
-                result = func(*args, **kwargs)
-
-            # Invalidate cache after successful execution
-            cache_manager = get_cache_manager()
-
-            try:
-                # Invalidate specific keys
-                if keys:
-                    key_list = [keys] if isinstance(keys, str) else keys
-                    for key in key_list:
-                        await cache_manager.delete(key, namespace)
-
-                # Invalidate by patterns
-                if patterns:
-                    pattern_list = [patterns] if isinstance(patterns, str) else patterns
-                    for pattern in pattern_list:
-                        await cache_manager.invalidate_pattern(pattern, namespace)
-
-            except Exception as e:
-                cache_manager.logger.warning(f"Cache invalidation failed: {e}")
-
-            return result
-
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            loop = None
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
-            return loop.run_until_complete(async_wrapper(*args, **kwargs))
+        invalidation_config = {"patterns": patterns, "namespace": namespace, "keys": keys}
 
         if asyncio.iscoroutinefunction(func):
-            return async_wrapper
+            return _create_async_invalidation_wrapper(func, invalidation_config)
         else:
-            return sync_wrapper
+            return _create_sync_invalidation_wrapper(func, invalidation_config)
 
     return decorator
+
+
+def _create_async_invalidation_wrapper(func: Callable, config: dict) -> Callable:
+    """Create async wrapper for cache invalidation."""
+
+    @wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        # Execute function first
+        result = await func(*args, **kwargs)
+
+        # Invalidate cache after successful execution
+        await _perform_cache_invalidation(config)
+
+        return result
+
+    return async_wrapper
+
+
+def _create_sync_invalidation_wrapper(func: Callable, config: dict) -> Callable:
+    """Create sync wrapper for cache invalidation."""
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        async_wrapper = _create_async_invalidation_wrapper(_make_func_async(func), config)
+        return _run_in_event_loop(async_wrapper, *args, **kwargs)
+
+    return sync_wrapper
+
+
+async def _perform_cache_invalidation(config: dict):
+    """Perform cache invalidation based on configuration."""
+    cache_manager = get_cache_manager()
+    namespace = config["namespace"]
+
+    try:
+        # Invalidate specific keys
+        if config["keys"]:
+            await _invalidate_specific_keys(cache_manager, config["keys"], namespace)
+
+        # Invalidate by patterns
+        if config["patterns"]:
+            await _invalidate_by_patterns(cache_manager, config["patterns"], namespace)
+
+    except Exception as e:
+        cache_manager.logger.warning(f"Cache invalidation failed: {e}")
+
+
+async def _invalidate_specific_keys(cache_manager, keys, namespace: str):
+    """Invalidate specific cache keys."""
+    key_list = [keys] if isinstance(keys, str) else keys
+    for key in key_list:
+        await cache_manager.delete(key, namespace)
+
+
+async def _invalidate_by_patterns(cache_manager, patterns, namespace: str):
+    """Invalidate cache keys by patterns."""
+    pattern_list = [patterns] if isinstance(patterns, str) else patterns
+    for pattern in pattern_list:
+        await cache_manager.invalidate_pattern(pattern, namespace)
 
 
 def cache_warm(
@@ -196,50 +295,74 @@ def cache_warm(
     """
 
     def decorator(func: Callable):
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            cache_manager = get_cache_manager()
-
-            # Execute function to get warming data
-            if asyncio.iscoroutinefunction(func):
-                warming_data = await func(*args, **kwargs)
-            else:
-                warming_data = func(*args, **kwargs)
-
-            # Warm cache with the data
-            if isinstance(warming_data, dict):
-                warming_functions = {}
-
-                key_list = [warming_keys] if isinstance(warming_keys, str) else warming_keys
-
-                for key in key_list:
-                    if key in warming_data:
-                        warming_functions[key] = lambda data=warming_data[key]: data
-
-                if warming_functions:
-                    await cache_manager.warm_cache(
-                        warming_functions, batch_size=batch_size, delay_between_batches=delay
-                    )
-
-            return warming_data
-
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            loop = None
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
-            return loop.run_until_complete(async_wrapper(*args, **kwargs))
+        warming_config = {
+            "warming_keys": warming_keys,
+            "namespace": namespace,
+            "batch_size": batch_size,
+            "delay": delay,
+        }
 
         if asyncio.iscoroutinefunction(func):
-            return async_wrapper
+            return _create_async_warming_wrapper(func, warming_config)
         else:
-            return sync_wrapper
+            return _create_sync_warming_wrapper(func, warming_config)
 
     return decorator
+
+
+def _create_async_warming_wrapper(func: Callable, config: dict) -> Callable:
+    """Create async wrapper for cache warming."""
+
+    @wraps(func)
+    async def async_wrapper(*args, **kwargs):
+        # Execute function to get warming data
+        warming_data = await func(*args, **kwargs)
+
+        # Warm cache with the data
+        await _perform_cache_warming(warming_data, config)
+
+        return warming_data
+
+    return async_wrapper
+
+
+def _create_sync_warming_wrapper(func: Callable, config: dict) -> Callable:
+    """Create sync wrapper for cache warming."""
+
+    @wraps(func)
+    def sync_wrapper(*args, **kwargs):
+        async_wrapper = _create_async_warming_wrapper(_make_func_async(func), config)
+        return _run_in_event_loop(async_wrapper, *args, **kwargs)
+
+    return sync_wrapper
+
+
+async def _perform_cache_warming(warming_data, config: dict):
+    """Perform cache warming with the provided data."""
+    if not isinstance(warming_data, dict):
+        return
+
+    cache_manager = get_cache_manager()
+    warming_functions = _build_warming_functions(warming_data, config["warming_keys"])
+
+    if warming_functions:
+        await cache_manager.warm_cache(
+            warming_functions,
+            batch_size=config["batch_size"],
+            delay_between_batches=config["delay"],
+        )
+
+
+def _build_warming_functions(warming_data: dict, warming_keys) -> dict:
+    """Build warming functions from data and keys."""
+    warming_functions = {}
+    key_list = [warming_keys] if isinstance(warming_keys, str) else warming_keys
+
+    for key in key_list:
+        if key in warming_data:
+            warming_functions[key] = lambda data=warming_data[key]: data
+
+    return warming_functions
 
 
 # Specialized decorators for trading system components

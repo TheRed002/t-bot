@@ -9,7 +9,7 @@ CRITICAL: This strategy requires ultra-low latency execution and careful
 rate limit management across multiple exchanges.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -17,7 +17,14 @@ from src.core.exceptions import ArbitrageError
 
 # Logger is provided by BaseStrategy (via BaseComponent)
 # From P-001 - Use existing types
-from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyStatus, StrategyType
+from src.core.types import (
+    MarketData,
+    Position,
+    Signal,
+    SignalDirection,
+    StrategyStatus,
+    StrategyType,
+)
 
 # MANDATORY: Import from P-011 - NEVER recreate the base strategy
 from src.strategies.base import BaseStrategy
@@ -69,7 +76,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         # State tracking
         self.active_arbitrages: dict[str, dict] = {}
         self.exchange_prices: dict[str, dict[str, MarketData]] = {}
-        self.last_opportunity_check = datetime.now()
+        self.last_opportunity_check = datetime.now(timezone.utc)
 
         self.logger.info(
             "Cross-exchange arbitrage strategy initialized",
@@ -222,7 +229,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
                             direction=SignalDirection.BUY,  # Buy on lower price exchange
                             # Scale confidence with profit
                             confidence=min(0.9, net_profit_percentage / 2),
-                            timestamp=datetime.now(),
+                            timestamp=datetime.now(timezone.utc),
                             symbol=symbol,
                             strategy_name=self.name,
                             metadata={
@@ -345,7 +352,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
         """
         try:
             # Check if we have recent price data
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
             max_age = timedelta(milliseconds=self.latency_threshold)
 
             for exchange in self.exchanges:
@@ -476,7 +483,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
             max_size = total_capital * Decimal(str(max_position_size))
             if base_size > max_size:
                 base_size = max_size
-                
+
             # CRITICAL FIX: Ensure position size doesn't exceed 10% of total capital
             absolute_max = total_capital * Decimal("0.1")  # 10% hard limit
             if base_size > absolute_max:
@@ -553,7 +560,7 @@ class CrossExchangeArbitrageStrategy(BaseStrategy):
 
             # Check execution timeout
             execution_timeout = position.metadata.get("execution_timeout", self.max_execution_time)
-            position_age = (datetime.now() - position.timestamp).total_seconds() * 1000
+            position_age = (datetime.now(timezone.utc) - position.timestamp).total_seconds() * 1000
 
             if position_age > execution_timeout:
                 self.logger.info(

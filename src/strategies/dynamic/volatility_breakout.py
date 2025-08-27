@@ -16,7 +16,7 @@ Refactoring improvements:
 CRITICAL: This strategy follows the perfect architecture from Day 12.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -294,7 +294,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             last_breakout = last_breakout_times[symbol]
             cooldown_period = timedelta(minutes=self.breakout_cooldown_minutes)
 
-            return (datetime.now() - last_breakout) < cooldown_period
+            return (datetime.now(timezone.utc) - last_breakout) < cooldown_period
 
         except Exception as e:
             self.logger.error(
@@ -331,7 +331,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             self._strategy_state["regime_history"][symbol].append(
                 {
                     "regime": regime,
-                    "timestamp": datetime.now(),
+                    "timestamp": datetime.now(timezone.utc),
                 }
             )
 
@@ -903,7 +903,9 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                 return signals
 
             last_breakout = last_breakout_times[symbol]
-            time_since_breakout = (datetime.now() - last_breakout).total_seconds() / 3600  # Hours
+            time_since_breakout = (
+                datetime.now(timezone.utc) - last_breakout
+            ).total_seconds() / 3600  # Hours
 
             # Enhanced time decay calculation
             base_decay = self.time_decay_factor**time_since_breakout
@@ -987,7 +989,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             if "consolidation_score" in indicators:
                 self._strategy_state["consolidation_scores"][symbol] = {
                     "score": indicators["consolidation_score"],
-                    "timestamp": datetime.now(),
+                    "timestamp": datetime.now(timezone.utc),
                 }
 
             # Update performance metrics
@@ -1084,7 +1086,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                     return False
 
             # Validate signal freshness (within last 5 minutes)
-            signal_age = (datetime.now() - signal.timestamp).total_seconds()
+            signal_age = (datetime.now(timezone.utc) - signal.timestamp).total_seconds()
             if signal_age > 300:  # 5 minutes
                 self.logger.warning(
                     "Signal too old for validation",

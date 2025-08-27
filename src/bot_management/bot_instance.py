@@ -292,8 +292,11 @@ class BotInstance:
             config_service = ConfigService()
             config_service._config = config  # Set the config directly (as done in state factory)
 
-            # Create ValidationService
-            validation_service = ValidationService()
+            # Get ValidationService from dependency injection container
+            from src.core.dependency_injection import get_container
+
+            container = get_container()
+            validation_service = container.get("validation_service", ValidationService())
 
             # Now create DatabaseService with proper parameters
             return DatabaseService(config_service, validation_service)

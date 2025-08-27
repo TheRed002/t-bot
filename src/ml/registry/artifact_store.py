@@ -11,7 +11,7 @@ import hashlib
 import json
 import shutil
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -201,7 +201,7 @@ class ArtifactStore(BaseService):
             artifact_dir.mkdir(parents=True, exist_ok=True)
 
             # Generate artifact filename
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             base_filename = f"{artifact_name}_{timestamp}"
 
             # Save artifact to file in thread pool
@@ -236,7 +236,7 @@ class ArtifactStore(BaseService):
                 "file_size_bytes": final_path.stat().st_size,
                 "file_hash": file_hash,
                 "compressed": compress and self.artifact_config.compression_enabled,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
                 "metadata": metadata or {},
             }
 
@@ -622,7 +622,7 @@ class ArtifactStore(BaseService):
     async def _cleanup_old_artifacts_impl(self, days_to_keep: int) -> int:
         """Internal cleanup implementation."""
         try:
-            cutoff_date = datetime.utcnow() - timedelta(days=days_to_keep)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_to_keep)
             cleanup_count = 0
 
             if not self.artifact_config.enable_persistence:
@@ -925,7 +925,7 @@ class ArtifactStore(BaseService):
 
         audit_entry = {
             "event_type": event_type,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "details": details,
             "service": "ArtifactStore",
         }

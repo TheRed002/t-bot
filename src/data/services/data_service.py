@@ -294,8 +294,9 @@ class DataService(BaseComponent):
                 if "data_list" in locals() and data_list:
                     self._metrics.records_invalid += len(data_list)
                     # Record invalid metrics to Prometheus
-                    if (self.metrics_collector and
-                        hasattr(self.metrics_collector, "increment_counter")):
+                    if self.metrics_collector and hasattr(
+                        self.metrics_collector, "increment_counter"
+                    ):
                         self.metrics_collector.increment_counter(
                             "data_records_invalid_total",
                             value=len(data_list),
@@ -307,8 +308,9 @@ class DataService(BaseComponent):
                         )
                 else:
                     self._metrics.records_invalid += 1
-                    if (self.metrics_collector and
-                        hasattr(self.metrics_collector, "increment_counter")):
+                    if self.metrics_collector and hasattr(
+                        self.metrics_collector, "increment_counter"
+                    ):
                         self.metrics_collector.increment_counter(
                             "data_records_invalid_total",
                             value=1,
@@ -701,6 +703,7 @@ class DataService(BaseComponent):
         try:
             async with get_async_session() as session:
                 from sqlalchemy import text
+
                 await session.execute(text("SELECT 1"))
             health["components"]["database"] = "healthy"
         except Exception as e:

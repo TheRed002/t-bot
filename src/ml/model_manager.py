@@ -5,7 +5,7 @@ This module provides centralized management for the entire ML model lifecycle
 including training, validation, deployment, monitoring, and retirement.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -84,7 +84,7 @@ class ModelManagerService(BaseService):
         self.drift_detection_service: Any = None
         self.inference_service: Any = None
         self.batch_prediction_service: Any = None
-        
+
         # Legacy service references (will be mapped to actual services)
         self.trainer: Any = None
         self.validator: Any = None
@@ -123,7 +123,7 @@ class ModelManagerService(BaseService):
         self.drift_detection_service = self.resolve_dependency("DriftDetectionService")
         self.inference_service = self.resolve_dependency("InferenceService")
         self.batch_prediction_service = self.resolve_dependency("BatchPredictionService")
-        
+
         # Map legacy references to actual services
         self.trainer = self.training_service
         self.validator = self.validation_service
@@ -203,8 +203,10 @@ class ModelManagerService(BaseService):
             model_params = model_params or {}
 
             # This should be replaced with proper model factory service
-            model_instance_info = await self._create_model_instance(model_type, model_name, model_params)
-            
+            model_instance_info = await self._create_model_instance(
+                model_type, model_name, model_params
+            )
+
             # For now, create a placeholder model object
             # In production, this would come from a model factory service
             model = model_instance_info  # Placeholder model
@@ -229,7 +231,7 @@ class ModelManagerService(BaseService):
                 self.active_models[model_name] = {
                     "model": model,
                     "model_info": model_info,
-                    "created_at": datetime.utcnow(),
+                    "created_at": datetime.now(timezone.utc),
                     "symbol": symbol,
                     "status": "active",
                 }
@@ -326,7 +328,7 @@ class ModelManagerService(BaseService):
                 "model_name": model_name,
                 "model_id": model_info["id"],
                 "deployment_stage": deployment_stage,
-                "deployment_timestamp": datetime.utcnow(),
+                "deployment_timestamp": datetime.now(timezone.utc),
                 "pre_deployment_checks": pre_deployment_checks,
                 "promotion_result": promotion_result,
             }
@@ -440,7 +442,7 @@ class ModelManagerService(BaseService):
             )
 
             final_monitoring_result = {
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_name": model_name,
                 "monitoring_samples": len(monitoring_data),
                 "overall_drift_detected": overall_drift_detected,
@@ -496,7 +498,7 @@ class ModelManagerService(BaseService):
                     {
                         "status": "retired",
                         "retirement_reason": reason,
-                        "retired_at": datetime.utcnow(),
+                        "retired_at": datetime.now(timezone.utc),
                     },
                 )
 
@@ -508,7 +510,7 @@ class ModelManagerService(BaseService):
             retirement_result = {
                 "success": True,
                 "model_name": model_name,
-                "retirement_timestamp": datetime.utcnow(),
+                "retirement_timestamp": datetime.now(timezone.utc),
                 "reason": reason,
             }
 
@@ -608,7 +610,7 @@ class ModelManagerService(BaseService):
             validation_timestamp = model_info.get("metadata", {}).get("last_validation", None)
             if validation_timestamp:
                 validation_age = (
-                    datetime.utcnow() - datetime.fromisoformat(validation_timestamp)
+                    datetime.now(timezone.utc) - datetime.fromisoformat(validation_timestamp)
                 ).days
                 checks["recent_validation"] = validation_age <= 7  # Validated within last 7 days
             else:
@@ -641,7 +643,7 @@ class ModelManagerService(BaseService):
             # Create monitoring job (placeholder implementation)
             self.monitoring_jobs[model_name] = {
                 "model": model,
-                "start_time": datetime.utcnow(),
+                "start_time": datetime.now(timezone.utc),
                 "status": "active",
             }
 
@@ -655,7 +657,7 @@ class ModelManagerService(BaseService):
         try:
             if model_name in self.monitoring_jobs:
                 self.monitoring_jobs[model_name]["status"] = "stopped"
-                self.monitoring_jobs[model_name]["stop_time"] = datetime.utcnow()
+                self.monitoring_jobs[model_name]["stop_time"] = datetime.now(timezone.utc)
                 del self.monitoring_jobs[model_name]
 
             self._logger.info(f"Monitoring stopped for model {model_name}")
@@ -675,7 +677,7 @@ class ModelManagerService(BaseService):
                     {
                         "type": "drift_detected",
                         "model_name": model_name,
-                        "timestamp": datetime.utcnow(),
+                        "timestamp": datetime.now(timezone.utc),
                         "severity": "high",
                         "message": f"Drift detected for model {model_name}",
                         "details": monitoring_results,
@@ -718,7 +720,7 @@ class ModelManagerService(BaseService):
         """Perform health check of the ML system."""
         try:
             health_status = {
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "status": "healthy",
                 "components": {},
                 "active_models": len(self.active_models),
@@ -751,7 +753,7 @@ class ModelManagerService(BaseService):
 
         except Exception as e:
             self._logger.error(f"Health check failed: {e}")
-            return {"timestamp": datetime.utcnow(), "status": "unhealthy", "error": str(e)}
+            return {"timestamp": datetime.now(timezone.utc), "status": "unhealthy", "error": str(e)}
 
     # Helper Methods
     async def _create_model_instance(

@@ -341,7 +341,13 @@ class EnhancedDataPipeline(BaseComponent):
     - Regulatory compliance and data lineage tracking
     """
 
-    def __init__(self, config: Config, data_service=None, feature_store=None, metrics_collector: MetricsCollector | None = None):
+    def __init__(
+        self,
+        config: Config,
+        data_service=None,
+        feature_store=None,
+        metrics_collector: MetricsCollector | None = None,
+    ):
         """Initialize the Enhanced Data Pipeline."""
         super().__init__()
         self.config = config
@@ -459,7 +465,7 @@ class EnhancedDataPipeline(BaseComponent):
                         "data_count": len(data) if isinstance(data, list) else 1,
                         "priority": priority,
                         "processing_mode": self.processing_config["processing_mode"].value,
-                    }
+                    },
                 )
             except Exception as e:
                 self.logger.warning(f"Failed to start span: {e}")
@@ -500,19 +506,21 @@ class EnhancedDataPipeline(BaseComponent):
                 self.metrics.total_records_processed += len(pipeline_records)
 
                 # Record metrics to Prometheus
-                if (self.metrics_collector and
-                    hasattr(self.metrics_collector, "increment_counter")):
+                if self.metrics_collector and hasattr(self.metrics_collector, "increment_counter"):
                     self.metrics_collector.increment_counter(
                         "data_pipeline_records_accepted_total",
                         value=len(pipeline_records),
-                        labels={"pipeline": "data_pipeline", "stage": "ingestion"}
+                        labels={"pipeline": "data_pipeline", "stage": "ingestion"},
                     )
 
                 # Add span event
                 if span:
                     span.add_event(
                         "records_accepted",
-                        attributes={"record_count": len(pipeline_records), "queue_size": self._ingestion_queue.qsize()}
+                        attributes={
+                            "record_count": len(pipeline_records),
+                            "queue_size": self._ingestion_queue.qsize(),
+                        },
                     )
 
                 return {
@@ -530,11 +538,14 @@ class EnhancedDataPipeline(BaseComponent):
                     span.set_status(Status(StatusCode.ERROR, str(e)))
 
                 # Record error metrics
-                if (self.metrics_collector and
-                    hasattr(self.metrics_collector, "increment_counter")):
+                if self.metrics_collector and hasattr(self.metrics_collector, "increment_counter"):
                     self.metrics_collector.increment_counter(
                         "data_pipeline_errors_total",
-                        labels={"pipeline": "data_pipeline", "stage": "ingestion", "error_type": type(e).__name__}
+                        labels={
+                            "pipeline": "data_pipeline",
+                            "stage": "ingestion",
+                            "error_type": type(e).__name__,
+                        },
                     )
 
                 return {"status": "failed", "error": str(e), "records_count": 0}

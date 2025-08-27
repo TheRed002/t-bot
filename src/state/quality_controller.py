@@ -13,6 +13,7 @@ detailed insights for continuous improvement of trading strategies.
 """
 
 import asyncio
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -22,18 +23,28 @@ from uuid import uuid4
 import numpy as np
 from scipy import stats
 
-from src.base import BaseComponent
-from src.core.base.interfaces import ServiceComponent
-
-# Core framework imports
+from src.core.base.component import BaseComponent
 from src.core.config.main import Config
 from src.core.exceptions import StateError, ValidationError
 from src.core.types import ExecutionResult, MarketData, OrderRequest
-
-# Service layer imports for proper abstraction
 from src.database.service import DatabaseService
 
-# Import utilities through centralized import handler
+# Backward compatibility imports for tests
+try:
+    from src.database.manager import DatabaseManager
+except ImportError:
+    DatabaseManager = None
+
+try:
+    from src.database.redis_client import RedisClient
+except ImportError:
+    RedisClient = None
+
+try:
+    from src.database.influxdb_client import InfluxDBClient
+except ImportError:
+    InfluxDBClient = None
+
 from .utils_imports import time_execution
 
 # Removed unused validate_order_data import
@@ -154,7 +165,7 @@ class QualityTrend:
     alert_level: str = "none"  # none, warning, critical
 
 
-class MetricsStorage(ServiceComponent):
+class MetricsStorage(ABC):
     """
     Abstract interface for metrics storage operations.
 
@@ -163,14 +174,17 @@ class MetricsStorage(ServiceComponent):
     without tight coupling.
     """
 
+    @abstractmethod
     async def store_validation_metrics(self, validation_data: dict[str, Any]) -> bool:
         """Store validation metrics."""
         raise NotImplementedError
 
+    @abstractmethod
     async def store_analysis_metrics(self, analysis_data: dict[str, Any]) -> bool:
         """Store analysis metrics."""
         raise NotImplementedError
 
+    @abstractmethod
     async def get_historical_metrics(
         self, metric_type: str, start_time: datetime, end_time: datetime
     ) -> list[dict[str, Any]]:
@@ -227,7 +241,7 @@ class InfluxDBMetricsStorage(MetricsStorage):
             if "timestamp" in validation_data:
                 point.time(validation_data["timestamp"])
 
-            return self._influx_client.write_point(point)
+            return await self._influx_client.write_point(point)
 
         except Exception:
             return False
@@ -267,7 +281,7 @@ class InfluxDBMetricsStorage(MetricsStorage):
             if "timestamp" in analysis_data:
                 point.time(analysis_data["timestamp"])
 
-            return self._influx_client.write_point(point)
+            return await self._influx_client.write_point(point)
 
         except Exception:
             return False
@@ -336,7 +350,9 @@ class QualityController(BaseComponent):
             database_service: Optional database service for data operations
             metrics_storage: Optional metrics storage service for logging metrics
         """
-        super().__init__()  # Initialize BaseComponent
+        super().__init__(
+            name="QualityController", config=config.__dict__ if hasattr(config, "__dict__") else {}
+        )
         self.config = config
         # Logger is already provided by BaseComponent
 
@@ -360,8 +376,9 @@ class QualityController(BaseComponent):
         self.market_impact_threshold_bps = 10.0
 
         # Try to load quality config from various possible config locations
-        if hasattr(config, "risk") and hasattr(config.risk, "quality"):
-            quality_config = config.risk.quality
+        risk_config = getattr(config, "risk", {})
+        if risk_config and hasattr(risk_config, "quality"):
+            quality_config = getattr(risk_config, "quality", {})
             self.min_quality_score = getattr(quality_config, "min_quality_score", 70.0)
             self.slippage_threshold_bps = getattr(quality_config, "slippage_threshold_bps", 20.0)
             self.execution_time_threshold_seconds = getattr(
@@ -380,6 +397,9 @@ class QualityController(BaseComponent):
             "correlation": {"max_correlation": 0.8, "weight": 10.0},
             "risk_limits": {"max_var": 0.02, "weight": 15.0},
         }
+
+        # Consistency rules for test compatibility
+        self.consistency_rules: list = []
 
         # Benchmarks
         self.benchmarks = {
@@ -1581,7 +1601,7 @@ class QualityController(BaseComponent):
     def get_quality_metrics(self) -> dict[str, Any]:
         """
         Get current quality metrics.
-        
+
         Returns:
             Dictionary containing quality metrics with proper types
         """
@@ -1592,11 +1612,13 @@ class QualityController(BaseComponent):
             "failed_validations": self.quality_metrics.get("failed_validations", 0),
             "average_quality_score": float(self.quality_metrics.get("average_quality_score", 0.0)),
             "total_analyses": self.quality_metrics.get("total_analyses", 0),
-            "average_execution_quality": float(self.quality_metrics.get("average_execution_quality", 0.0)),
+            "average_execution_quality": float(
+                self.quality_metrics.get("average_execution_quality", 0.0)
+            ),
             "slippage_incidents": self.quality_metrics.get("slippage_incidents", 0),
             "execution_time_violations": self.quality_metrics.get("execution_time_violations", 0),
             "avg_validation_time_ms": float(self._calculate_avg_validation_time()),
-            "avg_analysis_time_ms": float(self._calculate_avg_analysis_time())
+            "avg_analysis_time_ms": float(self._calculate_avg_analysis_time()),
         }
 
     async def get_summary_statistics(
@@ -1604,11 +1626,11 @@ class QualityController(BaseComponent):
     ) -> dict[str, Any]:
         """
         Get summary statistics for quality control.
-        
+
         Args:
             hours: Time period in hours to analyze
             bot_id: Optional bot ID filter
-            
+
         Returns:
             Summary statistics dictionary
         """
@@ -1616,31 +1638,24 @@ class QualityController(BaseComponent):
             # Calculate time boundaries
             end_time = datetime.now(timezone.utc)
             start_time = end_time - timedelta(hours=hours)
-            
+
             # Filter validation history
-            recent_validations = [
-                v for v in self.validation_history
-                if v.timestamp >= start_time
-            ]
-            
+            recent_validations = [v for v in self.validation_history if v.timestamp >= start_time]
+
             # Filter analysis history
-            recent_analyses = [
-                a for a in self.analysis_history
-                if a.timestamp >= start_time
-            ]
-            
+            recent_analyses = [a for a in self.analysis_history if a.timestamp >= start_time]
+
             # Calculate statistics
             total_validations = len(recent_validations)
             passed_validations = sum(
-                1 for v in recent_validations 
-                if v.overall_result == ValidationResult.PASSED
+                1 for v in recent_validations if v.overall_result == ValidationResult.PASSED
             )
-            
+
             total_analyses = len(recent_analyses)
-            avg_quality_score = (
-                sum(a.overall_quality_score for a in recent_analyses) / max(total_analyses, 1)
+            avg_quality_score = sum(a.overall_quality_score for a in recent_analyses) / max(
+                total_analyses, 1
             )
-            
+
             return {
                 "total_validations": total_validations,
                 "passed_validations": passed_validations,
@@ -1648,9 +1663,9 @@ class QualityController(BaseComponent):
                 "total_analyses": total_analyses,
                 "average_quality_score": avg_quality_score,
                 "period_hours": hours,
-                "bot_id": bot_id
+                "bot_id": bot_id,
             }
-            
+
         except Exception as e:
             self.logger.error(f"Failed to get summary statistics: {e}")
             return {
@@ -1660,14 +1675,14 @@ class QualityController(BaseComponent):
                 "total_analyses": 0,
                 "average_quality_score": 0.0,
                 "period_hours": hours,
-                "bot_id": bot_id
+                "bot_id": bot_id,
             }
 
     def _calculate_avg_validation_time(self) -> float:
         """Calculate average validation time in milliseconds."""
         if not self.validation_history:
             return 0.0
-        
+
         recent_validations = self.validation_history[-100:]  # Last 100 validations
         total_time = sum(v.validation_time_ms for v in recent_validations)
         return total_time / len(recent_validations)
@@ -1676,6 +1691,213 @@ class QualityController(BaseComponent):
         """Calculate average analysis time in milliseconds."""
         if not self.analysis_history:
             return 0.0
-        
+
         # Post-trade analysis doesn't track time, so return a default
         return 50.0  # Default 50ms for analysis
+
+    async def validate_state_consistency(self, state: Any) -> bool:
+        """
+        Validate state consistency.
+
+        Args:
+            state: State to validate
+
+        Returns:
+            True if state is consistent
+        """
+        try:
+            if not state:
+                return False
+
+            # Check if it's a portfolio state with required fields
+            if hasattr(state, "total_value") and hasattr(state, "available_cash"):
+                # Basic consistency checks for portfolio state
+                total_value = getattr(state, "total_value", 0)
+                available_cash = getattr(state, "available_cash", 0)
+                total_positions_value = getattr(state, "total_positions_value", 0)
+
+                # Total value should be sum of cash and positions
+                expected_total = available_cash + total_positions_value
+                tolerance = abs(expected_total * 0.01)  # 1% tolerance
+
+                if abs(total_value - expected_total) > tolerance:
+                    return False
+
+            return True
+
+        except Exception as e:
+            self.logger.warning(f"State consistency validation error: {e}")
+            return False
+
+    async def validate_portfolio_balance(self, portfolio_state: Any) -> bool:
+        """
+        Validate portfolio balance.
+
+        Args:
+            portfolio_state: Portfolio state to validate
+
+        Returns:
+            True if portfolio balance is valid
+        """
+        try:
+            if not portfolio_state:
+                return False
+
+            # Check for negative cash
+            available_cash = getattr(portfolio_state, "available_cash", 0)
+            if available_cash < 0:
+                return False
+
+            # Check for reasonable total value
+            total_value = getattr(portfolio_state, "total_value", 0)
+            if total_value < 0:
+                return False
+
+            # Check positions are reasonable
+            positions = getattr(portfolio_state, "positions", {})
+            if positions:
+                for position in positions.values():
+                    if hasattr(position, "quantity") and position.quantity <= 0:
+                        return False
+
+            return True
+
+        except Exception as e:
+            self.logger.warning(f"Portfolio balance validation error: {e}")
+            return False
+
+    async def validate_position_consistency(self, position: Any, related_orders: list) -> bool:
+        """
+        Validate position consistency with related orders.
+
+        Args:
+            position: Position to validate
+            related_orders: Related orders
+
+        Returns:
+            True if position is consistent
+        """
+        try:
+            if not position or not related_orders:
+                return True  # No validation needed if no data
+
+            # Check if filled quantity matches position quantity
+            total_filled = sum(
+                order.filled_quantity
+                for order in related_orders
+                if hasattr(order, "filled_quantity") and order.filled_quantity > 0
+            )
+
+            position_quantity = getattr(position, "quantity", Decimal("0"))
+            tolerance = abs(position_quantity * Decimal("0.01"))  # 1% tolerance
+
+            return abs(total_filled - position_quantity) <= tolerance
+
+        except Exception as e:
+            self.logger.warning(f"Position consistency validation error: {e}")
+            return False
+
+    async def run_integrity_checks(self, state: Any) -> dict[str, Any]:
+        """
+        Run comprehensive integrity checks.
+
+        Args:
+            state: State to check
+
+        Returns:
+            Integrity check results
+        """
+        try:
+            results = {"passed_checks": 0, "failed_checks": 0, "warnings": []}
+
+            # Run state consistency check
+            if await self.validate_state_consistency(state):
+                results["passed_checks"] += 1
+            else:
+                results["failed_checks"] += 1
+                results["warnings"].append("State consistency check failed")
+
+            # Run portfolio balance check if applicable
+            if hasattr(state, "available_cash"):
+                if await self.validate_portfolio_balance(state):
+                    results["passed_checks"] += 1
+                else:
+                    results["failed_checks"] += 1
+                    results["warnings"].append("Portfolio balance check failed")
+
+            return results
+
+        except Exception as e:
+            return {
+                "passed_checks": 0,
+                "failed_checks": 1,
+                "warnings": [f"Integrity check error: {e}"],
+            }
+
+    async def suggest_corrections(self, state: Any) -> list[dict[str, Any]]:
+        """
+        Suggest corrections for problematic state.
+
+        Args:
+            state: State to analyze
+
+        Returns:
+            List of correction suggestions
+        """
+        try:
+            corrections = []
+
+            # Check for negative cash
+            if hasattr(state, "available_cash") and state.available_cash < 0:
+                corrections.append(
+                    {
+                        "field": "available_cash",
+                        "issue": "Negative cash balance",
+                        "description": "Available cash should not be negative",
+                        "suggested_action": "Review recent transactions and adjust balance",
+                    }
+                )
+
+            # Check for inconsistent total value
+            if (
+                hasattr(state, "total_value")
+                and hasattr(state, "available_cash")
+                and hasattr(state, "total_positions_value")
+            ):
+                expected_total = state.available_cash + state.total_positions_value
+                if abs(state.total_value - expected_total) > expected_total * 0.01:
+                    corrections.append(
+                        {
+                            "field": "total_value",
+                            "issue": "Inconsistent total value calculation",
+                            "description": "Total value does not match sum of cash and positions",
+                            "suggested_action": "Recalculate total value from components",
+                        }
+                    )
+
+            return corrections
+
+        except Exception as e:
+            return [
+                {
+                    "field": "unknown",
+                    "issue": "Analysis error",
+                    "description": f"Error analyzing state: {e}",
+                    "suggested_action": "Check state data integrity",
+                }
+            ]
+
+    def add_validation_rule(self, name: str, rule: callable) -> None:
+        """
+        Add a custom validation rule.
+
+        Args:
+            name: Rule name
+            rule: Validation function
+        """
+        try:
+            self.consistency_rules.append({"name": name, "rule": rule, "weight": 10.0})
+            self.logger.info(f"Added validation rule: {name}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to add validation rule {name}: {e}")

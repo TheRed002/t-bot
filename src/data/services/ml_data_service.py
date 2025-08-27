@@ -5,7 +5,7 @@ This module provides ML-specific data operations including model metadata,
 feature set storage, and prediction persistence.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.core.base.interfaces import HealthStatus
@@ -18,7 +18,7 @@ from src.utils.decorators import UnifiedDecorator
 class MLDataService(BaseService):
     """
     ML-specific data service providing storage and retrieval for ML artifacts.
-    
+
     This service extends the base DataService with ML-specific operations
     for model registry, feature store, and prediction storage.
     """
@@ -34,7 +34,7 @@ class MLDataService(BaseService):
             config=config,
             correlation_id=correlation_id,
         )
-        
+
         # In-memory storage for MVP
         # In production, these would be persisted to database
         self._model_metadata: dict[str, dict[str, Any]] = {}
@@ -59,10 +59,10 @@ class MLDataService(BaseService):
         model_id = metadata.get("model_id")
         if not model_id:
             raise DataError("model_id is required")
-        
+
         self._model_metadata[model_id] = {
             **metadata,
-            "stored_at": datetime.utcnow().isoformat(),
+            "stored_at": datetime.now(timezone.utc).isoformat(),
         }
         self._logger.info(f"Stored model metadata for {model_id}")
 
@@ -71,11 +71,13 @@ class MLDataService(BaseService):
         """Update model metadata."""
         if model_id not in self._model_metadata:
             raise DataError(f"Model {model_id} not found")
-        
-        self._model_metadata[model_id].update({
-            **metadata,
-            "updated_at": datetime.utcnow().isoformat(),
-        })
+
+        self._model_metadata[model_id].update(
+            {
+                **metadata,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         self._logger.info(f"Updated model metadata for {model_id}")
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
@@ -92,23 +94,24 @@ class MLDataService(BaseService):
     ) -> list[dict[str, Any]]:
         """Get all models with optional filtering."""
         models = list(self._model_metadata.values())
-        
+
         if model_type:
             models = [m for m in models if m.get("model_type") == model_type]
-        
+
         if stage:
             models = [m for m in models if m.get("stage") == stage]
-        
+
         if not include_archived:
             models = [m for m in models if not m.get("archived", False)]
-        
+
         return models
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
     async def get_models_by_name_and_type(self, name: str, model_type: str) -> list[dict[str, Any]]:
         """Get models by name and type."""
         return [
-            m for m in self._model_metadata.values()
+            m
+            for m in self._model_metadata.values()
             if m.get("name") == name and m.get("model_type") == model_type
         ]
 
@@ -122,22 +125,21 @@ class MLDataService(BaseService):
     ) -> list[dict[str, Any]]:
         """Find models by criteria."""
         models = list(self._model_metadata.values())
-        
+
         if name:
             models = [m for m in models if m.get("name") == name]
-        
+
         if model_type:
             models = [m for m in models if m.get("model_type") == model_type]
-        
+
         if stage:
             models = [m for m in models if m.get("stage") == stage]
-        
+
         if tags:
             models = [
-                m for m in models
-                if all(m.get("tags", {}).get(k) == v for k, v in tags.items())
+                m for m in models if all(m.get("tags", {}).get(k) == v for k, v in tags.items())
             ]
-        
+
         return models
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
@@ -165,7 +167,7 @@ class MLDataService(BaseService):
             "feature_data": feature_data,
             "metadata": metadata,
             "version": version or "latest",
-            "stored_at": datetime.utcnow().isoformat(),
+            "stored_at": datetime.now(timezone.utc).isoformat(),
         }
         self._logger.info(f"Stored feature set {key}")
 
@@ -190,7 +192,7 @@ class MLDataService(BaseService):
         for key, data in self._feature_sets.items():
             if data["feature_set_id"] == feature_set_id:
                 data["metadata"].update(metadata_updates)
-                data["updated_at"] = datetime.utcnow().isoformat()
+                data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
     async def list_feature_sets(
@@ -201,20 +203,19 @@ class MLDataService(BaseService):
     ) -> list[dict[str, Any]]:
         """List feature sets."""
         feature_sets = list(self._feature_sets.values())
-        
+
         if symbol:
             feature_sets = [fs for fs in feature_sets if fs["symbol"] == symbol]
-        
+
         if not include_expired:
             # Filter expired based on metadata TTL
             feature_sets = [
-                fs for fs in feature_sets
-                if not fs.get("metadata", {}).get("expired", False)
+                fs for fs in feature_sets if not fs.get("metadata", {}).get("expired", False)
             ]
-        
+
         if limit:
             feature_sets = feature_sets[:limit]
-        
+
         return feature_sets
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
@@ -227,20 +228,19 @@ class MLDataService(BaseService):
     ) -> int:
         """Delete feature set."""
         deleted_count = 0
-        
+
         if delete_all_versions:
             keys_to_delete = [
-                k for k in self._feature_sets.keys()
-                if k.startswith(f"{symbol}:{feature_set_id}:")
+                k for k in self._feature_sets.keys() if k.startswith(f"{symbol}:{feature_set_id}:")
             ]
         else:
             keys_to_delete = [f"{symbol}:{feature_set_id}:{version or 'latest'}"]
-        
+
         for key in keys_to_delete:
             if key in self._feature_sets:
                 del self._feature_sets[key]
                 deleted_count += 1
-        
+
         self._logger.info(f"Deleted {deleted_count} feature sets")
         return deleted_count
 
@@ -253,12 +253,12 @@ class MLDataService(BaseService):
         """Get all versions of a feature set."""
         versions = []
         prefix = f"{symbol}:{feature_set_id}:"
-        
+
         for key in self._feature_sets.keys():
             if key.startswith(prefix):
                 version = key.split(":")[-1]
                 versions.append(version)
-        
+
         return sorted(versions)
 
     # Artifact Store Operations
@@ -271,10 +271,10 @@ class MLDataService(BaseService):
             f"{artifact_metadata.get('artifact_type', 'unknown')}:"
             f"{artifact_metadata.get('version', 'latest')}"
         )
-        
+
         self._artifacts[artifact_key] = {
             **artifact_metadata,
-            "stored_at": datetime.utcnow().isoformat(),
+            "stored_at": datetime.now(timezone.utc).isoformat(),
         }
         self._logger.info(f"Stored artifact info {artifact_key}")
 
@@ -299,19 +299,18 @@ class MLDataService(BaseService):
     ) -> list[dict[str, Any]]:
         """List artifacts."""
         artifacts = list(self._artifacts.values())
-        
+
         if model_id:
             artifacts = [a for a in artifacts if a.get("model_id") == model_id]
-        
+
         if artifact_type:
             artifacts = [a for a in artifacts if a.get("artifact_type") == artifact_type]
-        
+
         if tags:
             artifacts = [
-                a for a in artifacts
-                if all(a.get("tags", {}).get(k) == v for k, v in tags.items())
+                a for a in artifacts if all(a.get("tags", {}).get(k) == v for k, v in tags.items())
             ]
-        
+
         return artifacts
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
@@ -332,43 +331,45 @@ class MLDataService(BaseService):
     @UnifiedDecorator.enhance(log=True, monitor=True)
     async def save_ml_predictions(self, prediction_data: dict[str, Any]) -> None:
         """Save ML predictions."""
-        self._predictions.append({
-            **prediction_data,
-            "saved_at": datetime.utcnow().isoformat(),
-        })
-        self._logger.info(
-            f"Saved predictions for model {prediction_data.get('model_id')}"
+        self._predictions.append(
+            {
+                **prediction_data,
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+            }
         )
+        self._logger.info(f"Saved predictions for model {prediction_data.get('model_id')}")
 
     # Audit Operations
     @UnifiedDecorator.enhance(log=True, monitor=True)
     async def store_audit_entry(self, service: str, audit_entry: dict[str, Any]) -> None:
         """Store audit log entry."""
-        self._audit_log.append({
-            "service": service,
-            **audit_entry,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        self._audit_log.append(
+            {
+                "service": service,
+                **audit_entry,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
     # Service Health
     async def _service_health_check(self) -> HealthStatus:
         """ML data service specific health check."""
-        
+
         try:
             # Check storage capacity
             total_items = (
-                len(self._model_metadata) +
-                len(self._feature_sets) +
-                len(self._artifacts) +
-                len(self._predictions)
+                len(self._model_metadata)
+                + len(self._feature_sets)
+                + len(self._artifacts)
+                + len(self._predictions)
             )
-            
+
             # Warn if too many items in memory
             if total_items > 10000:
                 return HealthStatus.DEGRADED
-            
+
             return HealthStatus.HEALTHY
-            
+
         except Exception as e:
             self._logger.error("ML data service health check failed", error=str(e))
             return HealthStatus.UNHEALTHY

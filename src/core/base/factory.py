@@ -9,7 +9,7 @@ dependency injection, and type-safe object creation.
 import inspect
 import threading
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import (
     Any,
     Generic,
@@ -183,7 +183,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
             except Exception as e:
                 raise RegistrationError(
                     f"Failed to register creator '{name}' in factory {self._name}: {e}"
-                )
+                ) from e
 
     def unregister(self, name: str) -> None:
         """
@@ -222,7 +222,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
             except Exception as e:
                 raise RegistrationError(
                     f"Failed to unregister creator '{name}' in factory {self._name}: {e}"
-                )
+                ) from e
 
     def update_creator_config(self, name: str, config: dict[str, Any]) -> None:
         """
@@ -268,7 +268,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
             CreationError: If creation fails
             RegistrationError: If creator not found
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         with self._creation_lock:
             if name not in self._creators:
@@ -317,7 +317,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                     self._singletons[name] = instance
 
                 # Record successful creation
-                execution_time = (datetime.utcnow() - start_time).total_seconds()
+                execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
                 self._record_creation_success(name, execution_time)
 
                 self._logger.info(
@@ -331,7 +331,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                 return instance
 
             except Exception as e:
-                execution_time = (datetime.utcnow() - start_time).total_seconds()
+                execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
                 self._record_creation_failure(name, execution_time, e)
 
                 self._logger.error(
@@ -345,7 +345,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
 
                 raise CreationError(
                     f"Failed to create instance using creator '{name}' in factory {self._name}: {e}"
-                )
+                ) from e
 
     def create_batch(self, requests: list[dict[str, Any]]) -> list[T]:
         """
@@ -392,7 +392,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                     except Exception:
                         pass  # Ignore cleanup errors
 
-            raise CreationError(f"Batch creation failed in factory {self._name}: {e}")
+            raise CreationError(f"Batch creation failed in factory {self._name}: {e}") from e
 
     # Creator Execution
     def _execute_creator(
@@ -422,7 +422,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                 raise CreationError(f"Invalid creator type: {type(creator).__name__}")
 
         except Exception as e:
-            raise CreationError(f"Creator execution failed: {e}")
+            raise CreationError(f"Creator execution failed: {e}") from e
 
     # Dependency Injection
     def _inject_dependencies(self, creator_name: str, kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -532,7 +532,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                         )
 
         except Exception as e:
-            raise RegistrationError(f"Creator validation failed for '{name}': {e}")
+            raise RegistrationError(f"Creator validation failed for '{name}': {e}") from e
 
     def _validate_product(self, creator_name: str, instance: Any) -> None:
         """
@@ -711,7 +711,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
         """Record successful creation metrics."""
         self._creation_metrics["total_creations"] += 1
         self._creation_metrics["successful_creations"] += 1
-        self._creation_metrics["last_creation_time"] = datetime.utcnow()
+        self._creation_metrics["last_creation_time"] = datetime.now(timezone.utc)
         self._creation_metrics["active_instances"] += 1
 
         # Track per-creator timing
@@ -731,7 +731,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
         """Record failed creation metrics."""
         self._creation_metrics["total_creations"] += 1
         self._creation_metrics["failed_creations"] += 1
-        self._creation_metrics["last_creation_time"] = datetime.utcnow()
+        self._creation_metrics["last_creation_time"] = datetime.now(timezone.utc)
 
     def get_metrics(self) -> dict[str, Any]:
         """Get combined component and factory metrics."""

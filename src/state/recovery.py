@@ -18,17 +18,15 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.exceptions import StateError
 from src.error_handling import (
     ErrorContext,
-    ErrorHandler,
     ErrorSeverity,
     with_circuit_breaker,
     with_retry,
 )
 
-# Import utilities through centralized import handler
 from .utils_imports import time_execution
 
 
@@ -191,7 +189,7 @@ class StateRecoveryManager(BaseComponent):
         Args:
             state_service: Reference to the main state service
         """
-        super().__init__()
+        super().__init__(name="StateRecoveryManager")
         self.state_service = state_service
 
         # Audit trail storage
@@ -214,6 +212,7 @@ class StateRecoveryManager(BaseComponent):
         self._audit_cleanup_task: asyncio.Task | None = None
         self._auto_recovery_task: asyncio.Task | None = None
         self._corruption_monitor_task: asyncio.Task | None = None
+        self._recovery_tasks: list[asyncio.Task] = []  # Store recovery execution tasks
         self._running = False
 
         # Performance tracking
@@ -248,11 +247,12 @@ class StateRecoveryManager(BaseComponent):
                 e,
                 component="StateRecoveryManager",
                 operation="initialize",
-                severity=ErrorSeverity.CRITICAL
+                severity=ErrorSeverity.CRITICAL,
             )
             error_context.details = {"error": str(e), "error_code": "RECOVERY_INIT_FAILED"}
-            ErrorHandler.log_error(error_context, e)
-            raise StateError(f"Failed to initialize StateRecoveryManager: {e}")
+            handler = self.state_service.error_handler
+            await handler.handle_error(e, error_context)
+            raise StateError(f"Failed to initialize StateRecoveryManager: {e}") from e
 
     async def cleanup(self) -> None:
         """Cleanup recovery manager resources."""
@@ -350,7 +350,7 @@ class StateRecoveryManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to record state change: {e}")
-            raise StateError(f"Audit recording failed: {e}")
+            raise StateError(f"Audit recording failed: {e}") from e
 
     async def get_audit_trail(
         self,
@@ -406,7 +406,7 @@ class StateRecoveryManager(BaseComponent):
 
     @time_execution
     @with_retry(max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateError,))
-    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60.0, expected_exception=StateError)
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60, expected_exception=StateError)
     async def create_recovery_point(self, description: str = "") -> str:
         """
         Create a point-in-time recovery point.
@@ -453,7 +453,7 @@ class StateRecoveryManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to create recovery point: {e}")
-            raise StateError(f"Recovery point creation failed: {e}")
+            raise StateError(f"Recovery point creation failed: {e}") from e
 
     async def list_recovery_points(
         self, start_time: datetime | None = None, end_time: datetime | None = None, limit: int = 100
@@ -491,7 +491,7 @@ class StateRecoveryManager(BaseComponent):
 
     @time_execution
     @with_retry(max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateError,))
-    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60.0, expected_exception=StateError)
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60, expected_exception=StateError)
     async def recover_to_point(
         self,
         recovery_point_id: str,
@@ -530,8 +530,10 @@ class StateRecoveryManager(BaseComponent):
             self._active_operations[operation.operation_id] = operation
 
             # Start recovery in background
-            asyncio.create_task(
-                self._execute_recovery(operation, recovery_point, validate_before_restore)
+            self._recovery_tasks.append(
+                asyncio.create_task(
+                    self._execute_recovery(operation, recovery_point, validate_before_restore)
+                )
             )
 
             # Record audit event
@@ -552,7 +554,7 @@ class StateRecoveryManager(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to start recovery: {e}")
-            raise StateError(f"Recovery initiation failed: {e}")
+            raise StateError(f"Recovery initiation failed: {e}") from e
 
     async def get_recovery_status(self, operation_id: str) -> RecoveryOperation | None:
         """Get status of a recovery operation."""
@@ -608,7 +610,7 @@ class StateRecoveryManager(BaseComponent):
             return []
 
     @with_retry(max_attempts=2, base_delay=0.5, backoff_factor=2.0, exceptions=(StateError,))
-    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60.0, expected_exception=StateError)
+    @with_circuit_breaker(failure_threshold=3, recovery_timeout=60, expected_exception=StateError)
     async def repair_corruption(self, report_id: str, repair_method: str = "auto") -> bool:
         """
         Repair detected state corruption.

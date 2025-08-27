@@ -82,34 +82,30 @@ except ImportError:
         def get_tracer_provider(self):
             return None
 
-    trace = MockTrace()
-    metrics = None
-    Status = type("MockStatus", (), {})()
-    StatusCode = type("MockStatusCode", (), {"OK": "ok", "ERROR": "error"})()
+    trace: Any = MockTrace()
+    metrics: Any = None
+    Status: Any = type("MockStatus", (), {})()
+    StatusCode: Any = type("MockStatusCode", (), {"OK": "ok", "ERROR": "error"})()
 
     # Mock other classes
-    TracerProvider = Span = BatchSpanProcessor = ConsoleSpanExporter = None
-    MeterProvider = Resource = JaegerExporter = OTLPSpanExporter = None
-    FastAPIInstrumentor = RequestsInstrumentor = AioHttpClientInstrumentor = None
-    AsyncPGInstrumentor = RedisInstrumentor = SQLAlchemyInstrumentor = None
-    get_excluded_urls = SpanAttributes = None
+    TracerProvider: Any = None
+    Span: Any = None
+    BatchSpanProcessor: Any = None
+    ConsoleSpanExporter: Any = None
+    MeterProvider: Any = None
+    Resource: Any = None
+    JaegerExporter: Any = None
+    OTLPSpanExporter: Any = None
+    FastAPIInstrumentor: Any = None
+    RequestsInstrumentor: Any = None
+    AioHttpClientInstrumentor: Any = None
+    AsyncPGInstrumentor: Any = None
+    RedisInstrumentor: Any = None
+    SQLAlchemyInstrumentor: Any = None
+    get_excluded_urls: Any = None
+    SpanAttributes: Any = None
 
-try:
-    from src.core import MonitoringError, get_logger
-except ImportError:
-    # Fallback definitions
-    import logging
-
-    def get_logger(name: str):
-        """Fallback logger."""
-        return logging.getLogger(name)
-
-    class MonitoringError(Exception):
-        """Monitoring error fallback."""
-
-        def __init__(self, message: str, error_code: str = "MONITORING_000"):
-            super().__init__(message)
-            self.error_code = error_code
+from src.core import MonitoringError, get_logger
 
 
 from src.error_handling import (
@@ -119,7 +115,14 @@ from src.error_handling import (
     with_retry,
 )
 
-logger = get_logger(__name__)
+# Initialize logger with error handling
+try:
+    logger = get_logger(__name__)
+except Exception:
+    # Fallback to basic logging if get_logger fails
+    import logging
+
+    logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -361,16 +364,27 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
                     )
                     exporters.append(jaeger_exporter)
                     logger.info("Jaeger exporter configured")
-                except Exception as e:
+                except (ImportError, ConnectionError, OSError) as e:
                     if error_handler:
                         error_handler.handle_error_sync(
                             e,
-                            ErrorContext(
-                                component="Telemetry",
-                                operation="configure_jaeger_exporter",
-                            ),
+                            component="Telemetry",
+                            operation="configure_jaeger_exporter",
+                            details={"error_type": type(e).__name__},
                         )
                     logger.warning(f"Failed to configure Jaeger exporter: {e}")
+                except Exception as e:
+                    logger.error(f"Unexpected error configuring Jaeger exporter: {e}")
+                    if error_handler:
+                        error_handler.handle_error_sync(
+                            e,
+                            component="Telemetry",
+                            operation="configure_jaeger_exporter",
+                            details={
+                                "error_type": "unexpected",
+                                "error_class": type(e).__name__,
+                            },
+                        )
 
             # OTLP exporter
             if config.otlp_enabled:
@@ -382,10 +396,8 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
                     if error_handler:
                         error_handler.handle_error_sync(
                             e,
-                            ErrorContext(
-                                component="Telemetry",
-                                operation="configure_otlp_exporter",
-                            ),
+                            component="Telemetry",
+                            operation="configure_otlp_exporter",
                         )
                     logger.warning(f"Failed to configure OTLP exporter: {e}")
 
@@ -425,11 +437,9 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
         if error_handler:
             error_handler.handle_error_sync(
                 e,
-                ErrorContext(
-                    component="Telemetry",
-                    operation="setup_telemetry",
-                    service_name=config.service_name,
-                ),
+                component="Telemetry",
+                operation="setup_telemetry",
+                service_name=config.service_name,
             )
         raise MonitoringError(
             f"Failed to setup OpenTelemetry: {e}", error_code="MONITORING_003"
@@ -446,18 +456,37 @@ def _setup_auto_instrumentation(config: OpenTelemetryConfig) -> None:
     try:
         # FastAPI instrumentation
         if config.instrument_fastapi:
-            # Get excluded URLs safely
+            # Get excluded URLs safely with deprecation handling
             try:
-                excluded_urls = get_excluded_urls("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") or ""
-                if hasattr(excluded_urls, "split"):
-                    excluded_urls_param = excluded_urls
-                else:
-                    # Convert ExcludeList or other objects to string
-                    excluded_urls_param = str(excluded_urls) if excluded_urls else ""
-            except Exception:
-                excluded_urls_param = ""
+                # Handle both old and new API formats
+                if hasattr(FastAPIInstrumentor(), "instrument"):
+                    excluded_urls = get_excluded_urls("OTEL_PYTHON_FASTAPI_EXCLUDED_URLS") or ""
 
-            FastAPIInstrumentor().instrument(excluded_urls=excluded_urls_param)
+                    # Convert to proper format based on OpenTelemetry version
+                    try:
+                        if hasattr(excluded_urls, "split"):
+                            excluded_urls_param = excluded_urls
+                        else:
+                            # Handle ExcludeList or other objects
+                            excluded_urls_param = str(excluded_urls) if excluded_urls else ""
+
+                        FastAPIInstrumentor().instrument(excluded_urls=excluded_urls_param)
+                    except TypeError:
+                        # Fallback for newer versions that may have different parameter format
+                        try:
+                            FastAPIInstrumentor().instrument()
+                        except Exception as fallback_error:
+                            logger.debug(
+                                f"FastAPI instrumentation fallback failed: {fallback_error}"
+                            )
+
+            except Exception as e:
+                logger.debug(f"FastAPI instrumentation configuration failed: {e}")
+                # Try basic instrumentation without excluded URLs
+                try:
+                    FastAPIInstrumentor().instrument()
+                except Exception as basic_error:
+                    logger.warning(f"Basic FastAPI instrumentation failed: {basic_error}")
             logger.debug("FastAPI instrumentation enabled")
 
         # HTTP client instrumentation

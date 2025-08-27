@@ -5,17 +5,17 @@ This repository handles all database operations for ML-related models including
 predictions, model metadata, and training jobs.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.ml import MLModelMetadata, MLPrediction, MLTrainingJob
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 
-class MLPredictionRepository(BaseRepository):
+class MLPredictionRepository(DatabaseRepository):
     """Repository for ML predictions."""
 
     def __init__(self, session: AsyncSession):
@@ -73,7 +73,7 @@ class MLPredictionRepository(BaseRepository):
         """
         from datetime import timedelta
 
-        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         query = select(MLPrediction).where(
             and_(
@@ -106,7 +106,7 @@ class MLPredictionRepository(BaseRepository):
         """
         from datetime import timedelta
 
-        cutoff_time = datetime.utcnow() - timedelta(days=days)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=days)
 
         query = select(
             func.count(MLPrediction.id).label("total_predictions"),
@@ -159,13 +159,13 @@ class MLPredictionRepository(BaseRepository):
         if prediction:
             prediction.actual_value = actual_value
             prediction.prediction_error = abs(prediction.prediction_value - actual_value)
-            prediction.updated_at = datetime.utcnow()
+            prediction.updated_at = datetime.now(timezone.utc)
             await self.session.commit()
             await self.session.refresh(prediction)
         return prediction
 
 
-class MLModelMetadataRepository(BaseRepository):
+class MLModelMetadataRepository(DatabaseRepository):
     """Repository for ML model metadata."""
 
     def __init__(self, session: AsyncSession):
@@ -177,9 +177,7 @@ class MLModelMetadataRepository(BaseRepository):
         """
         super().__init__(session, MLModelMetadata)
 
-    async def get_latest_model(
-        self, model_name: str, model_type: str
-    ) -> MLModelMetadata | None:
+    async def get_latest_model(self, model_name: str, model_type: str) -> MLModelMetadata | None:
         """
         Get the latest version of a model.
 
@@ -253,7 +251,7 @@ class MLModelMetadataRepository(BaseRepository):
 
             for model in models_to_deactivate:
                 model.is_active = False
-                model.updated_at = datetime.utcnow()
+                model.updated_at = datetime.now(timezone.utc)
 
             await self.session.commit()
             return len(models_to_deactivate)
@@ -261,7 +259,7 @@ class MLModelMetadataRepository(BaseRepository):
         return 0
 
 
-class MLTrainingJobRepository(BaseRepository):
+class MLTrainingJobRepository(DatabaseRepository):
     """Repository for ML training jobs."""
 
     def __init__(self, session: AsyncSession):
@@ -337,15 +335,13 @@ class MLTrainingJobRepository(BaseRepository):
             if error_message:
                 job.error_message = error_message
             if status in ["completed", "failed"]:
-                job.completed_at = datetime.utcnow()
-            job.updated_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
+            job.updated_at = datetime.now(timezone.utc)
             await self.session.commit()
             await self.session.refresh(job)
         return job
 
-    async def get_successful_jobs(
-        self, days: int = 30, limit: int = 100
-    ) -> list[MLTrainingJob]:
+    async def get_successful_jobs(self, days: int = 30, limit: int = 100) -> list[MLTrainingJob]:
         """
         Get successful training jobs within specified days.
 
@@ -358,7 +354,7 @@ class MLTrainingJobRepository(BaseRepository):
         """
         from datetime import timedelta
 
-        cutoff_time = datetime.utcnow() - timedelta(days=days)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=days)
 
         result = await self.session.execute(
             select(MLTrainingJob)

@@ -5,9 +5,13 @@ This module provides adapters and integration components to connect the
 state management system with the central monitoring infrastructure.
 """
 
+from datetime import datetime
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
+from src.core.exceptions import StateError
+from src.error_handling.context import ErrorContext
+from src.error_handling.decorators import with_retry
 from src.monitoring import MetricsCollector, get_alert_manager
 from src.monitoring.alerting import (
     Alert as MonitoringAlert,
@@ -58,6 +62,27 @@ class StateMetricsAdapter(BaseComponent):
             metric: State module metric to record
         """
         try:
+            # Validate metric data
+            if metric.value is None:
+                self.logger.warning(f"Skipping metric {metric.name} with None value")
+                return
+
+            # Ensure value is numeric
+            if not isinstance(metric.value, int | float):
+                self.logger.error(
+                    f"Invalid metric value type for {metric.name}: {type(metric.value)}"
+                )
+                return
+
+            # Check for NaN or Inf
+            import math
+
+            if math.isnan(metric.value) or math.isinf(metric.value):
+                self.logger.warning(
+                    f"Skipping metric {metric.name} with NaN/Inf value: {metric.value}"
+                )
+                return
+
             # Map metric type
             metric_type = self._metric_type_map.get(metric.metric_type, "gauge")
 
@@ -66,7 +91,9 @@ class StateMetricsAdapter(BaseComponent):
 
             # Record to central metrics based on type
             if metric_type == "counter":
-                self.metrics_collector.increment_counter(f"state.{metric.name}", labels, metric.value)
+                self.metrics_collector.increment_counter(
+                    f"state.{metric.name}", labels, metric.value
+                )
             elif metric_type == "gauge":
                 self.metrics_collector.set_gauge(f"state.{metric.name}", metric.value, labels)
             elif metric_type == "histogram":
@@ -74,8 +101,15 @@ class StateMetricsAdapter(BaseComponent):
                     f"state.{metric.name}", metric.value, labels
                 )
 
+        except AttributeError as e:
+            self.logger.error(f"Missing required attribute in metric {metric.name}: {e}")
+        except ValueError as e:
+            self.logger.error(f"Invalid value for metric {metric.name}: {e}")
         except Exception as e:
-            self.logger.error(f"Failed to record state metric: {e}")
+            self.logger.error(f"Failed to record state metric {metric.name}: {e}")
+            # Re-raise critical errors but not data validation errors
+            if not isinstance(e, AttributeError | ValueError):
+                raise
 
     def record_operation_time(self, operation: str, duration_ms: float) -> None:
         """Record state operation timing to central metrics."""
@@ -94,9 +128,7 @@ class StateMetricsAdapter(BaseComponent):
             HealthStatus.UNKNOWN: -1.0,
         }.get(status, -1.0)
 
-        self.metrics_collector.set_gauge(
-            "state.health.status", health_value, {"check": check_name}
-        )
+        self.metrics_collector.set_gauge("state.health.status", health_value, {"check": check_name})
 
 
 class StateAlertAdapter(BaseComponent):
@@ -114,9 +146,10 @@ class StateAlertAdapter(BaseComponent):
         self._alert_manager = None
 
         # Map alert severities from state to monitoring module
+        # Now properly aligned with monitoring module's severity levels
         self._severity_map = {
-            AlertSeverity.INFO: MonitoringAlertSeverity.MEDIUM,
-            AlertSeverity.WARNING: MonitoringAlertSeverity.HIGH,
+            AlertSeverity.INFO: MonitoringAlertSeverity.LOW,
+            AlertSeverity.WARNING: MonitoringAlertSeverity.MEDIUM,
             AlertSeverity.ERROR: MonitoringAlertSeverity.HIGH,
             AlertSeverity.CRITICAL: MonitoringAlertSeverity.CRITICAL,
         }
@@ -130,6 +163,7 @@ class StateAlertAdapter(BaseComponent):
             self._alert_manager = get_alert_manager()
         return self._alert_manager
 
+    @with_retry(max_attempts=3, base_delay=0.5, backoff_factor=2.0)
     async def send_alert(self, alert: Alert) -> None:
         """
         Send a state alert through central alerting.
@@ -140,6 +174,19 @@ class StateAlertAdapter(BaseComponent):
         try:
             if not self.alert_manager:
                 self.logger.warning("No alert manager available")
+                return
+
+            # Validate alert data
+            if not alert.message:
+                self.logger.error("Alert missing required message field")
+                return
+
+            if alert.severity not in AlertSeverity:
+                self.logger.error(f"Invalid alert severity: {alert.severity}")
+                return
+
+            if not isinstance(alert.timestamp, datetime):
+                self.logger.error(f"Invalid alert timestamp type: {type(alert.timestamp)}")
                 return
 
             # Convert state alert to monitoring alert
@@ -156,8 +203,12 @@ class StateAlertAdapter(BaseComponent):
                 annotations={
                     "title": alert.title,
                     "metric_name": alert.metric_name,
+                    # Keep numeric values as strings for Prometheus compatibility
+                    # but preserve precision and type information
                     "current_value": str(alert.current_value),
                     "threshold_value": str(alert.threshold_value),
+                    "current_value_type": type(alert.current_value).__name__,
+                    "threshold_value_type": type(alert.threshold_value).__name__,
                 },
                 starts_at=alert.timestamp,
             )
@@ -166,7 +217,26 @@ class StateAlertAdapter(BaseComponent):
             await self.alert_manager.fire_alert(monitoring_alert)
 
         except Exception as e:
-            self.logger.error(f"Failed to send state alert: {e}")
+            # Create error context for proper error tracking
+            error_context = ErrorContext(
+                component="StateAlertAdapter",
+                operation="send_alert",
+                error_type=type(e).__name__,
+                error_message=str(e),
+                context_data={
+                    "alert_id": alert.alert_id,
+                    "alert_source": alert.source,
+                    "alert_severity": alert.severity.value if alert.severity else None,
+                    "alert_category": alert.category,
+                },
+            )
+
+            self.logger.error(
+                f"Failed to send state alert: {e}", extra={"error_context": error_context.to_dict()}
+            )
+
+            # Re-raise critical alerting failures with context
+            raise StateError(f"Alert delivery failed for {alert.alert_id}: {e}") from e
 
 
 class EnhancedStateMonitoringService(StateMonitoringService):

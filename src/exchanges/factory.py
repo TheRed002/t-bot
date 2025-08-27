@@ -11,7 +11,7 @@ and P-002A (error handling) components.
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from src.core.base import BaseComponent
@@ -124,7 +124,9 @@ class HealthMonitor:
             # Extract values safely
             self.health_check_interval = getattr(health_config, "health_check_interval_seconds", 30)
             self.unhealthy_threshold = getattr(health_config, "unhealthy_threshold", 3)
-            self.recovery_check_interval = getattr(health_config, "recovery_check_interval_seconds", 60)
+            self.recovery_check_interval = getattr(
+                health_config, "recovery_check_interval_seconds", 60
+            )
             self.timeout_seconds = getattr(health_config, "timeout_seconds", 10)
         else:
             # Use defaults if not an object
@@ -166,7 +168,7 @@ class HealthMonitor:
                     failure_count = 0
                     self.health_status[exchange_name] = {
                         "status": "healthy",
-                        "last_check": datetime.now(),
+                        "last_check": datetime.now(timezone.utc),
                         "consecutive_failures": 0,
                     }
                 else:
@@ -175,7 +177,7 @@ class HealthMonitor:
                         "status": (
                             "unhealthy" if failure_count >= self.unhealthy_threshold else "degraded"
                         ),
-                        "last_check": datetime.now(),
+                        "last_check": datetime.now(timezone.utc),
                         "consecutive_failures": failure_count,
                     }
 
@@ -185,7 +187,7 @@ class HealthMonitor:
                 failure_count += 1
                 self.health_status[exchange_name] = {
                     "status": "error",
-                    "last_check": datetime.now(),
+                    "last_check": datetime.now(timezone.utc),
                     "consecutive_failures": failure_count,
                     "error": str(e),
                 }
@@ -217,7 +219,7 @@ class ExchangeFactory(BaseComponent):
         """
         super().__init__()
         self.config = config
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = ErrorHandler(config)
 
         # Dependency injection container
         self.container = ServiceContainer()
@@ -244,7 +246,8 @@ class ExchangeFactory(BaseComponent):
         self._performance_metrics: dict[str, dict] = {}
         self._last_metrics_update: datetime | None = None
 
-        self.initialize()
+        # Mark as initialized
+        self._initialized = True
         self.logger.info("Initialized enhanced exchange factory with dependency injection")
 
     def _register_core_services(self) -> None:
@@ -259,7 +262,13 @@ class ExchangeFactory(BaseComponent):
         self.container.register_singleton(
             "health_monitor", lambda config: HealthMonitor(config), ["config"]
         )
-        
+
+        # Register metrics collector
+        from src.monitoring import get_metrics_collector
+        self.container.register_singleton(
+            "metrics_collector", lambda: get_metrics_collector(), []
+        )
+
         # Register state service and trade lifecycle manager as None initially
         # They will be set later via register_state_services method
         self.container.register_instance("state_service", None)
@@ -295,10 +304,10 @@ class ExchangeFactory(BaseComponent):
         # Register exchange factory in container with state services
         self.container.register_transient(
             f"exchange_{exchange_name}",
-            lambda config, error_handler, state_service, trade_lifecycle_manager: exchange_class(
-                config, exchange_name, state_service, trade_lifecycle_manager
+            lambda config, error_handler, state_service, trade_lifecycle_manager, metrics_collector: exchange_class(
+                config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector
             ),
-            ["config", "error_handler", "state_service", "trade_lifecycle_manager"],
+            ["config", "error_handler", "state_service", "trade_lifecycle_manager", "metrics_collector"],
         )
 
         self.logger.info(f"Registered exchange with DI container: {exchange_name}")
@@ -308,7 +317,7 @@ class ExchangeFactory(BaseComponent):
     ) -> None:
         """
         Register state management services for exchange integration.
-        
+
         Args:
             state_service: StateService instance for state persistence
             trade_lifecycle_manager: TradeLifecycleManager instance for trade tracking
@@ -316,7 +325,7 @@ class ExchangeFactory(BaseComponent):
         # Validate and update container with state services
         if state_service is not None:
             # Validate state_service has required methods
-            if not hasattr(state_service, 'set_state') or not hasattr(state_service, 'get_state'):
+            if not hasattr(state_service, "set_state") or not hasattr(state_service, "get_state"):
                 raise ValueError(
                     "Invalid state_service: must have 'set_state' and 'get_state' methods"
                 )
@@ -326,10 +335,10 @@ class ExchangeFactory(BaseComponent):
             self.logger.warning(
                 "No StateService registered - exchanges will use in-memory fallback"
             )
-            
+
         if trade_lifecycle_manager is not None:
             # Validate trade_lifecycle_manager has required methods
-            if not hasattr(trade_lifecycle_manager, 'update_trade_event'):
+            if not hasattr(trade_lifecycle_manager, "update_trade_event"):
                 raise ValueError(
                     "Invalid trade_lifecycle_manager: must have 'update_trade_event' method"
                 )
@@ -357,13 +366,13 @@ class ExchangeFactory(BaseComponent):
             List[str]: List of configured exchange names
         """
         available = []
-        if hasattr(self.config, "exchanges") and self.config.exchanges:
+        if hasattr(self.config, "exchange") and self.config.exchange:
             # Check which exchanges have API keys configured
-            if self.config.exchanges.binance_api_key:
+            if self.config.exchange.binance_api_key:
                 available.append("binance")
-            if self.config.exchanges.okx_api_key:
+            if self.config.exchange.okx_api_key:
                 available.append("okx")
-            if self.config.exchanges.coinbase_api_key:
+            if self.config.exchange.coinbase_api_key:
                 available.append("coinbase")
         return available
 
@@ -413,8 +422,9 @@ class ExchangeFactory(BaseComponent):
                 exchange_class = self._exchange_registry[exchange_name]
                 state_service = self.container._services.get("state_service")
                 trade_lifecycle_manager = self.container._services.get("trade_lifecycle_manager")
+                metrics_collector = self.container.resolve("metrics_collector")
                 exchange = exchange_class(
-                    self.config, exchange_name, state_service, trade_lifecycle_manager
+                    self.config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector
                 )
                 self.logger.debug(f"Created exchange using direct instantiation: {exchange_name}")
 
@@ -425,7 +435,7 @@ class ExchangeFactory(BaseComponent):
 
             # Store exchange metadata
             self._exchange_metadata[exchange_name] = {
-                "created_at": datetime.now(),
+                "created_at": datetime.now(timezone.utc),
                 "connection_method": "container" if use_container else "direct",
                 "status": "connected",
             }
@@ -439,7 +449,7 @@ class ExchangeFactory(BaseComponent):
         except Exception as e:
             # Update metadata on failure
             self._exchange_metadata[exchange_name] = {
-                "created_at": datetime.now(),
+                "created_at": datetime.now(timezone.utc),
                 "status": "failed",
                 "error": str(e),
             }
@@ -474,7 +484,9 @@ class ExchangeFactory(BaseComponent):
             if health_status.get("status") == "healthy" or await exchange.health_check():
                 # Update last accessed time
                 if exchange_name in self._exchange_metadata:
-                    self._exchange_metadata[exchange_name]["last_accessed"] = datetime.now()
+                    self._exchange_metadata[exchange_name]["last_accessed"] = datetime.now(
+                        timezone.utc
+                    )
                 return exchange
             else:
                 self.logger.warning(
@@ -571,7 +583,7 @@ class ExchangeFactory(BaseComponent):
             exchange_name: Name of the exchange
             operation: Type of operation (created, failed, removed)
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         if exchange_name not in self._performance_metrics:
             self._performance_metrics[exchange_name] = {
@@ -619,7 +631,9 @@ class ExchangeFactory(BaseComponent):
 
                 # Update metadata
                 if exchange_name in self._exchange_metadata:
-                    self._exchange_metadata[exchange_name]["removed_at"] = datetime.now()
+                    self._exchange_metadata[exchange_name]["removed_at"] = datetime.now(
+                        timezone.utc
+                    )
                     self._exchange_metadata[exchange_name]["status"] = "removed"
 
                 # Update performance metrics
@@ -680,7 +694,7 @@ class ExchangeFactory(BaseComponent):
                 health_status[exchange_name] = {
                     "active_instance": {
                         "healthy": is_healthy,
-                        "last_check": datetime.now(),
+                        "last_check": datetime.now(timezone.utc),
                         "cached_status": cached_status,
                     }
                 }
@@ -690,7 +704,7 @@ class ExchangeFactory(BaseComponent):
                     "active_instance": {
                         "healthy": False,
                         "error": str(e),
-                        "last_check": datetime.now(),
+                        "last_check": datetime.now(timezone.utc),
                     }
                 }
 
@@ -816,7 +830,7 @@ class ExchangeFactory(BaseComponent):
             return None
 
         # Get rate limits from config
-        rate_limits = self.config.exchanges.rate_limits.get(exchange_name, {})
+        rate_limits = self.config.exchange.rate_limits.get(exchange_name, {})
 
         return ExchangeInfo(
             name=exchange_name,

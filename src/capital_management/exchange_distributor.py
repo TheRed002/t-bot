@@ -481,8 +481,14 @@ class ExchangeDistributor(BaseComponent):
                     status = await exchange.fetch_status()
                     if status.get("status") == "ok":
                         reliability_score += 0.2
-                except Exception:
-                    pass
+                except (ExchangeConnectionError, NetworkError) as e:
+                    self.logger.debug(f"Exchange {exchange_name} status check failed: {e}")
+                    reliability_score -= 0.1  # Penalize for connectivity issues
+                except Exception as e:
+                    self.logger.debug(
+                        f"Unexpected error checking exchange {exchange_name} status: {e}"
+                    )
+                    # Don't penalize for unexpected errors, just skip status bonus
 
             # Check if exchange has required methods
             required_methods = ["fetch_ticker", "fetch_order_book", "create_order", "cancel_order"]

@@ -1,6 +1,6 @@
 """Cache key management for consistent Redis key naming."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -181,18 +181,18 @@ class CacheKeys:
     @classmethod
     def time_window_key(cls, base_key: str, window_minutes: int = 5) -> str:
         """Create time-windowed key that auto-expires."""
-        timestamp = datetime.utcnow().timestamp()
+        timestamp = datetime.now(timezone.utc).timestamp()
         window_timestamp = int(timestamp // (window_minutes * 60)) * (window_minutes * 60)
         return f"{base_key}:window:{window_timestamp}"
 
     @classmethod
     def daily_key(cls, base_key: str) -> str:
         """Create daily key that resets each day."""
-        date_str = datetime.utcnow().strftime("%Y%m%d")
+        date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
         return f"{base_key}:daily:{date_str}"
 
     @classmethod
     def hourly_key(cls, base_key: str) -> str:
         """Create hourly key that resets each hour."""
-        hour_str = datetime.utcnow().strftime("%Y%m%d%H")
+        hour_str = datetime.now(timezone.utc).strftime("%Y%m%d%H")
         return f"{base_key}:hourly:{hour_str}"

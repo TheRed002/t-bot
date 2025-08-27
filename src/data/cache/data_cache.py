@@ -24,7 +24,7 @@ from enum import Enum
 from typing import Any
 
 import redis.asyncio as redis
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.base import BaseComponent
 from src.core.config import Config
@@ -116,8 +116,7 @@ class CacheConfig(BaseModel):
     serialization_format: str = "json"  # json, pickle, msgpack
     key_prefix: str = "tbot"
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class L1MemoryCache(BaseComponent):
@@ -306,15 +305,16 @@ class L2RedisCache(BaseComponent):
 
     async def initialize(self) -> None:
         """Initialize Redis connection.
-        
+
         SECURITY NOTE: Redis password should be provided via environment variables
         or secure vault, not hardcoded in configuration files.
         """
         try:
             # Get password from environment or config
             import os
+
             redis_password = os.environ.get("REDIS_PASSWORD") or self.redis_config.get("password")
-            
+
             self._redis_client = redis.Redis(
                 host=self.redis_config.get("host", "localhost"),
                 port=self.redis_config.get("port", 6379),
@@ -536,7 +536,7 @@ class DataCache(BaseComponent):
         self._warming_enabled = True
         self._prefetch_queue: asyncio.Queue = asyncio.Queue()
         self._background_tasks: list[asyncio.Task] = []
-        
+
         # Add lock for batch operations to prevent race conditions
         self._batch_lock = asyncio.Lock()
 

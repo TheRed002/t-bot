@@ -5,7 +5,7 @@ This module provides ML model management, training, deployment, and inference
 functionality for AI-powered trading strategies.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -198,9 +198,9 @@ async def list_models(
                 "validation_samples": 10000,
                 "features_count": 25,
                 "target_symbol": "BTCUSDT",
-                "created_at": datetime.utcnow() - timedelta(days=30),
-                "updated_at": datetime.utcnow() - timedelta(days=2),
-                "last_prediction_at": datetime.utcnow() - timedelta(minutes=5),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=30),
+                "updated_at": datetime.now(timezone.utc) - timedelta(days=2),
+                "last_prediction_at": datetime.now(timezone.utc) - timedelta(minutes=5),
                 "prediction_count": 12543,
             },
             {
@@ -219,9 +219,9 @@ async def list_models(
                 "validation_samples": 15000,
                 "features_count": 18,
                 "target_symbol": "ETHUSDT",
-                "created_at": datetime.utcnow() - timedelta(days=45),
-                "updated_at": datetime.utcnow() - timedelta(days=5),
-                "last_prediction_at": datetime.utcnow() - timedelta(minutes=2),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=45),
+                "updated_at": datetime.now(timezone.utc) - timedelta(days=5),
+                "last_prediction_at": datetime.now(timezone.utc) - timedelta(minutes=2),
                 "prediction_count": 8921,
             },
             {
@@ -240,8 +240,8 @@ async def list_models(
                 "validation_samples": 8000,
                 "features_count": 32,
                 "target_symbol": "BTCUSDT",
-                "created_at": datetime.utcnow() - timedelta(days=3),
-                "updated_at": datetime.utcnow() - timedelta(hours=2),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=3),
+                "updated_at": datetime.now(timezone.utc) - timedelta(hours=2),
                 "last_prediction_at": None,
                 "prediction_count": 0,
             },
@@ -261,9 +261,9 @@ async def list_models(
                 "validation_samples": 20000,
                 "features_count": 15,
                 "target_symbol": None,  # Multi-symbol model
-                "created_at": datetime.utcnow() - timedelta(days=60),
-                "updated_at": datetime.utcnow() - timedelta(days=10),
-                "last_prediction_at": datetime.utcnow() - timedelta(minutes=15),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=60),
+                "updated_at": datetime.now(timezone.utc) - timedelta(days=10),
+                "last_prediction_at": datetime.now(timezone.utc) - timedelta(minutes=15),
                 "prediction_count": 3456,
             },
         ]
@@ -341,7 +341,7 @@ async def create_model(
             "model_type": model_request.model_type,
             "status": "created",
             "created_by": current_user.username,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
@@ -385,9 +385,9 @@ async def get_model(model_id: str, current_user: User = Depends(get_current_user
                 "validation_samples": 10000,
                 "features_count": 25,
                 "target_symbol": "BTCUSDT",
-                "created_at": datetime.utcnow() - timedelta(days=30),
-                "updated_at": datetime.utcnow() - timedelta(days=2),
-                "last_prediction_at": datetime.utcnow() - timedelta(minutes=5),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=30),
+                "updated_at": datetime.now(timezone.utc) - timedelta(days=2),
+                "last_prediction_at": datetime.now(timezone.utc) - timedelta(minutes=5),
                 "prediction_count": 12543,
             }
             return ModelResponse(**model_data)
@@ -446,8 +446,8 @@ async def train_model(
             model_name="btc_price_predictor_v2",  # Mock model name
             status="starting",
             progress=0.0,
-            started_at=datetime.utcnow(),
-            estimated_completion=datetime.utcnow() + timedelta(hours=2),
+            started_at=datetime.now(timezone.utc),
+            estimated_completion=datetime.now(timezone.utc) + timedelta(hours=2),
             completed_at=None,
             training_samples=training_samples,
             validation_samples=validation_samples,
@@ -505,7 +505,7 @@ async def get_training_jobs(
             job_id = f"job_{i + 1:03d}"
             status = ["completed", "failed", "running"][i % 3]
 
-            start_time = datetime.utcnow() - timedelta(days=i * 7, hours=i * 2)
+            start_time = datetime.now(timezone.utc) - timedelta(days=i * 7, hours=i * 2)
             completion_time = start_time + timedelta(hours=2) if status == "completed" else None
 
             mock_job = TrainingJobResponse(
@@ -600,7 +600,7 @@ async def predict(
             prediction_type=prediction_type,
             prediction_horizon=prediction_request.prediction_horizon,
             features_used=list(prediction_request.features.keys()),
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             metadata={
                 "model_version": "2.1.0",
                 "feature_count": len(prediction_request.features),
@@ -678,7 +678,7 @@ async def get_model_performance(
                 "false_negative_rate": 0.16,
             },
             drift_detected=False,
-            last_evaluated=datetime.utcnow(),
+            last_evaluated=datetime.now(timezone.utc),
         )
 
         return performance
@@ -737,7 +737,7 @@ async def deploy_model(
             "deployment_stage": deployment_request.deployment_stage,
             "auto_fallback": deployment_request.auto_fallback,
             "deployed_by": current_user.username,
-            "deployed_at": datetime.utcnow().isoformat(),
+            "deployed_at": datetime.now(timezone.utc).isoformat(),
             "health_check_url": f"/api/ml/{model_id}/health",
         }
 
@@ -789,7 +789,7 @@ async def retire_model(
             "model_id": model_id,
             "reason": reason,
             "retired_by": current_user.username,
-            "retired_at": datetime.utcnow().isoformat(),
+            "retired_at": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
@@ -817,7 +817,7 @@ async def get_ml_system_health(current_user: User = Depends(get_current_user)):
         # Mock health check (in production, check actual system health)
         health_status = {
             "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "components": {
                 "model_manager": "healthy",
                 "inference_engine": "healthy",

@@ -16,17 +16,17 @@ class CapitalManagementConfig(BaseModel):
         default="USDT", description="Base currency for all calculations", pattern=r"^[A-Z]{3,10}$"
     )
 
-    total_capital: float = Field(
-        default_factory=lambda: float(os.getenv("CAPITAL_TOTAL", "100000.0")),
+    total_capital: Decimal = Field(
+        default_factory=lambda: Decimal(os.getenv("CAPITAL_TOTAL", "100000.0")),
         description="Total capital available for trading",
         gt=0,
     )
 
-    emergency_reserve_pct: float = Field(
-        default_factory=lambda: float(os.getenv("CAPITAL_EMERGENCY_RESERVE_PCT", "0.1")),
+    emergency_reserve_pct: Decimal = Field(
+        default_factory=lambda: Decimal(os.getenv("CAPITAL_EMERGENCY_RESERVE_PCT", "0.1")),
         description="Percentage of capital to keep as emergency reserve",
-        ge=0.0,
-        le=1.0,
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
     allocation_strategy: AllocationStrategy = Field(
@@ -40,32 +40,32 @@ class CapitalManagementConfig(BaseModel):
         gt=0,
     )
 
-    min_allocation_pct: float = Field(
-        default_factory=lambda: float(os.getenv("CAPITAL_MIN_ALLOCATION_PCT", "0.05")),
+    min_allocation_pct: Decimal = Field(
+        default_factory=lambda: Decimal(os.getenv("CAPITAL_MIN_ALLOCATION_PCT", "0.05")),
         description="Minimum allocation percentage per exchange/strategy",
         ge=0.0,
         le=1.0,
     )
 
-    max_allocation_pct: float = Field(
-        default_factory=lambda: float(os.getenv("CAPITAL_MAX_ALLOCATION_PCT", "0.5")),
+    max_allocation_pct: Decimal = Field(
+        default_factory=lambda: Decimal(os.getenv("CAPITAL_MAX_ALLOCATION_PCT", "0.5")),
         description="Maximum allocation percentage per exchange/strategy",
-        ge=0.0,
-        le=1.0,
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
-    max_drawdown_threshold: float = Field(
-        default_factory=lambda: float(os.getenv("CAPITAL_MAX_DRAWDOWN", "0.2")),
+    max_drawdown_threshold: Decimal = Field(
+        default_factory=lambda: Decimal(os.getenv("CAPITAL_MAX_DRAWDOWN", "0.2")),
         description="Maximum drawdown before triggering emergency controls",
-        ge=0.0,
-        le=1.0,
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
-    funding_threshold: float = Field(
-        default_factory=lambda: float(os.getenv("CAPITAL_FUNDING_THRESHOLD", "0.8")),
+    funding_threshold: Decimal = Field(
+        default_factory=lambda: Decimal(os.getenv("CAPITAL_FUNDING_THRESHOLD", "0.8")),
         description="Threshold for triggering funding operations",
-        ge=0.0,
-        le=1.0,
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
     withdrawal_limits: dict[str, float] = Field(

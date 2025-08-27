@@ -6,7 +6,7 @@ different authentication providers and handles user sessions.
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.base import BaseComponent
@@ -362,7 +362,7 @@ class AuthManager(BaseComponent):
         # In production, hash and compare passwords properly
 
         # Update password hash (placeholder)
-        user.metadata["password_updated"] = datetime.utcnow()
+        user.metadata["password_updated"] = datetime.now(timezone.utc)
 
         self.logger.info(f"Password changed for user: {user.username}")
         return True

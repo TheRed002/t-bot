@@ -3,7 +3,7 @@
 from decimal import Decimal
 
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import DatabaseError
 from src.database.models.audit import CapitalAuditLog
@@ -13,15 +13,21 @@ from src.database.models.capital import (
     ExchangeAllocationDB,
     FundFlowDB,
 )
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 
-class CapitalAllocationRepository(BaseRepository[CapitalAllocationDB]):
+class CapitalAllocationRepository(DatabaseRepository[CapitalAllocationDB, str]):
     """Repository for CapitalAllocationDB entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize capital allocation repository."""
-        super().__init__(session, CapitalAllocationDB)
+        super().__init__(
+            session=session,
+            model=CapitalAllocationDB,
+            entity_type=CapitalAllocationDB,
+            key_type=str,
+            name="CapitalAllocationRepository",
+        )
 
     async def get_by_strategy(self, strategy_id: str) -> list[CapitalAllocationDB]:
         """Get allocations by strategy."""
@@ -37,8 +43,7 @@ class CapitalAllocationRepository(BaseRepository[CapitalAllocationDB]):
         """Find allocation by strategy and exchange using proper query."""
         try:
             result = await self.get_all(
-                filters={"strategy_id": strategy_id, "exchange": exchange},
-                limit=1
+                filters={"strategy_id": strategy_id, "exchange": exchange}, limit=1
             )
             return result[0] if result else None
         except (IntegrityError, OperationalError) as e:
@@ -55,12 +60,18 @@ class CapitalAllocationRepository(BaseRepository[CapitalAllocationDB]):
         return sum(Decimal(str(alloc.available_amount)) for alloc in allocations)
 
 
-class FundFlowRepository(BaseRepository[FundFlowDB]):
+class FundFlowRepository(DatabaseRepository[FundFlowDB, str]):
     """Repository for FundFlowDB entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize fund flow repository."""
-        super().__init__(session, FundFlowDB)
+        super().__init__(
+            session=session,
+            model=FundFlowDB,
+            entity_type=FundFlowDB,
+            key_type=str,
+            name="FundFlowRepository",
+        )
 
     async def get_by_from_strategy(self, strategy_id: str) -> list[FundFlowDB]:
         """Get flows from a strategy."""
@@ -86,12 +97,18 @@ class FundFlowRepository(BaseRepository[FundFlowDB]):
         return await self.get_all(filters={"currency": currency}, order_by="-timestamp")
 
 
-class CurrencyExposureRepository(BaseRepository[CurrencyExposureDB]):
+class CurrencyExposureRepository(DatabaseRepository[CurrencyExposureDB, str]):
     """Repository for CurrencyExposureDB entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize currency exposure repository."""
-        super().__init__(session, CurrencyExposureDB)
+        super().__init__(
+            session=session,
+            model=CurrencyExposureDB,
+            entity_type=CurrencyExposureDB,
+            key_type=str,
+            name="CurrencyExposureRepository",
+        )
 
     async def get_by_currency(self, currency: str) -> CurrencyExposureDB | None:
         """Get exposure by currency."""
@@ -107,12 +124,18 @@ class CurrencyExposureRepository(BaseRepository[CurrencyExposureDB]):
         return sum(exp.base_currency_equivalent for exp in exposures)
 
 
-class ExchangeAllocationRepository(BaseRepository[ExchangeAllocationDB]):
+class ExchangeAllocationRepository(DatabaseRepository[ExchangeAllocationDB, str]):
     """Repository for ExchangeAllocationDB entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize exchange allocation repository."""
-        super().__init__(session, ExchangeAllocationDB)
+        super().__init__(
+            session=session,
+            model=ExchangeAllocationDB,
+            entity_type=ExchangeAllocationDB,
+            key_type=str,
+            name="ExchangeAllocationRepository",
+        )
 
     async def get_by_exchange(self, exchange: str) -> ExchangeAllocationDB | None:
         """Get allocation by exchange."""
@@ -141,12 +164,18 @@ class ExchangeAllocationRepository(BaseRepository[ExchangeAllocationDB]):
         ]
 
 
-class CapitalAuditLogRepository(BaseRepository[CapitalAuditLog]):
+class CapitalAuditLogRepository(DatabaseRepository[CapitalAuditLog, str]):
     """Repository for capital audit log entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize capital audit repository."""
-        super().__init__(session, CapitalAuditLog)
+        super().__init__(
+            session=session,
+            model=CapitalAuditLog,
+            entity_type=CapitalAuditLog,
+            key_type=str,
+            name="CapitalAuditLogRepository",
+        )
 
     async def get_by_operation_id(self, operation_id: str) -> CapitalAuditLog | None:
         """Get audit log by operation ID."""
@@ -162,8 +191,4 @@ class CapitalAuditLogRepository(BaseRepository[CapitalAuditLog]):
 
     async def get_failed_operations(self, limit: int = 100) -> list[CapitalAuditLog]:
         """Get failed audit operations."""
-        return await self.get_all(
-            filters={"success": False},
-            order_by="-created_at",
-            limit=limit
-        )
+        return await self.get_all(filters={"success": False}, order_by="-created_at", limit=limit)

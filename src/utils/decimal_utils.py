@@ -19,14 +19,30 @@ from src.core.exceptions import ValidationError
 # Module level logger for static methods
 
 
-def safe_decimal(value: Any) -> Decimal:
-    """Safely convert a value to Decimal."""
+def safe_decimal(value: Any, default: Decimal | None = None) -> Decimal:
+    """
+    Safely convert a value to Decimal with a default fallback.
+
+    Args:
+        value: Value to convert
+        default: Default value to return on conversion failure (default: ZERO)
+
+    Returns:
+        Decimal representation or default value
+
+    Note:
+        This function is deprecated. Use to_decimal() for proper validation.
+    """
     if isinstance(value, Decimal):
         return value
     try:
         return Decimal(str(value))
     except Exception:
-        return Decimal("0")
+        default_val = default if default is not None else Decimal("0")
+        logger.warning(
+            f"safe_decimal: Failed to convert {type(value).__name__} '{value}' to Decimal, returning {default_val}"
+        )
+        return default_val
 
 
 logger = logging.getLogger(__name__)
@@ -116,13 +132,34 @@ def to_decimal(value: str | int | float | Decimal, context: Context | None = Non
             result = ctx.create_decimal(str(value))
         else:
             # Direct conversion for strings and integers
-            result = ctx.create_decimal(str(value))
+            str_value = str(value).strip()
+
+            # Check for common invalid string patterns
+            if not str_value or str_value.lower() in [
+                "nan",
+                "inf",
+                "-inf",
+                "infinity",
+                "-infinity",
+            ]:
+                raise ValidationError(f"Invalid numeric string: '{str_value}'")
+
+            result = ctx.create_decimal(str_value)
+
+        # Validate the result isn't NaN or infinity
+        if result.is_nan():
+            raise ValidationError("Conversion resulted in NaN")
+        if result.is_infinite():
+            raise ValidationError("Conversion resulted in infinity")
 
         return result
 
+    except ValidationError:
+        # Re-raise our own validation errors
+        raise
     except Exception as e:
         logger.error(f"Failed to convert {type(value).__name__} to Decimal: {value}")
-        raise ValidationError(f"Invalid Decimal conversion: {e}")
+        raise ValidationError(f"Invalid Decimal conversion: {e}") from e
 
 
 def decimal_to_str(value: Decimal, precision: int | None = None) -> str:
@@ -406,7 +443,8 @@ def decimal_to_float(value: Decimal) -> float:
     # FloatDeprecationWarning is defined later in the file
     # Direct warning for now
     warnings.warn(
-        "decimal_to_float conversion: Use Decimal for all financial calculations to prevent precision loss.",
+        "decimal_to_float conversion: Use Decimal for all financial calculations to prevent "
+        "precision loss.",
         DeprecationWarning,
         stacklevel=2,
     )

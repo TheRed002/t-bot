@@ -6,7 +6,7 @@ time series cross-validation, nested cross-validation, and custom validation str
 """
 
 from collections.abc import Generator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -493,7 +493,7 @@ class CrossValidationService(BaseService):
                 "mean_score": mean_score,
                 "std_score": std_score,
                 "fold_predictions": fold_predictions,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             self._logger.info(
@@ -643,7 +643,7 @@ class CrossValidationService(BaseService):
                 "mean_score": mean_score,
                 "std_score": std_score,
                 "best_params_per_fold": best_params_per_fold,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             self._logger.info(
@@ -905,7 +905,7 @@ class CrossValidationService(BaseService):
                 "test_scores": test_scores,
                 "mean_test_score": np.mean(test_scores),
                 "std_test_score": np.std(test_scores),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             if len(train_scores) > 0:
@@ -924,7 +924,7 @@ class CrossValidationService(BaseService):
                 "cv_strategy": cv_strategy,
                 "cv_folds": cv_folds,
                 "scoring": scoring,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             for metric in scoring:

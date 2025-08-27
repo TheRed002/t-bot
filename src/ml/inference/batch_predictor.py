@@ -5,7 +5,7 @@ This module provides efficient batch prediction capabilities for processing
 large datasets with optimized memory usage and parallel processing.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -193,7 +193,7 @@ class BatchPredictorService(BaseService):
             # Add metadata
             result_df["model_name"] = model_name
             result_df["symbol"] = symbol
-            result_df["prediction_timestamp"] = datetime.utcnow()
+            result_df["prediction_timestamp"] = datetime.now(timezone.utc)
 
             # Save to database if requested (using DataService)
             if save_to_db and self.bp_config.save_to_database:
@@ -482,7 +482,7 @@ class BatchPredictorService(BaseService):
                         float(row["confidence"]) if not pd.isna(row["confidence"]) else None
                     ),
                     "features_hash": hash(str(row.to_dict())),  # Simple hash of features
-                    "prediction_timestamp": datetime.utcnow().isoformat(),
+                    "prediction_timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 prediction_data.append(prediction_record)
 

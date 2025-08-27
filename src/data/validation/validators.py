@@ -145,7 +145,7 @@ class TimestampValidator(DataValidatorInterface):
         """
         self.require_ordered = require_ordered
         self.errors: list[str] = []
-        self.last_timestamp = None
+        self.last_timestamp: int | float | str | None = None
 
     def validate(self, data: Any) -> bool:
         """Validate timestamp data."""

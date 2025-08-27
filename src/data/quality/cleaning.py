@@ -25,6 +25,7 @@ from typing import Any
 
 import numpy as np
 
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 
 # Import from P-001 core components
@@ -69,7 +70,7 @@ class CleaningResult:
     metadata: dict[str, Any]
 
 
-class DataCleaner:
+class DataCleaner(BaseComponent):
     """
     Comprehensive data cleaning system for market data preprocessing.
 
@@ -281,11 +282,11 @@ class DataCleaner:
                     removed_count += 1
                     continue
 
-                # Clean signal confidence
-                cleaned_confidence = await self._clean_confidence(signal.confidence)
-                if cleaned_confidence != signal.confidence:
+                # Clean signal strength
+                cleaned_strength = await self._clean_confidence(signal.strength)
+                if cleaned_strength != signal.strength:
                     adjusted_count += 1
-                    signal.confidence = cleaned_confidence
+                    signal.strength = cleaned_strength
 
                 # Remove duplicate signals (same symbol, direction, timestamp)
                 if not await self._is_duplicate_signal(signal, cleaned_signals):
@@ -353,10 +354,10 @@ class DataCleaner:
             return None, imputed_count
 
         # Price imputation
-        if not data.price or data.price == 0:
+        if not data.close or data.close == 0:
             imputed_price = await self._impute_price(data.symbol)
             if imputed_price:
-                data.price = imputed_price
+                data.close = imputed_price
                 imputed_count += 1
 
         # Volume imputation
@@ -367,27 +368,27 @@ class DataCleaner:
                 imputed_count += 1
 
         # OHLC imputation
-        if not data.open_price and data.price:
-            data.open_price = data.price
+        if not data.open and data.close:
+            data.open = data.close
             imputed_count += 1
 
-        if not data.high_price and data.price:
-            data.high_price = data.price
+        if not data.high and data.close:
+            data.high = data.close
             imputed_count += 1
 
-        if not data.low_price and data.price:
-            data.low_price = data.price
+        if not data.low and data.close:
+            data.low = data.close
             imputed_count += 1
 
         # Bid/Ask imputation
-        if not data.bid and data.price:
-            spread = data.price * Decimal("0.001")  # 0.1% spread
-            data.bid = data.price - spread
+        if not data.bid_price and data.close:
+            spread = data.close * Decimal("0.001")  # 0.1% spread
+            data.bid_price = data.close - spread
             imputed_count += 1
 
-        if not data.ask and data.price:
-            spread = data.price * Decimal("0.001")  # 0.1% spread
-            data.ask = data.price + spread
+        if not data.ask_price and data.close:
+            spread = data.close * Decimal("0.001")  # 0.1% spread
+            data.ask_price = data.close + spread
             imputed_count += 1
 
         return data, imputed_count
@@ -397,7 +398,7 @@ class DataCleaner:
         removed_count = 0
         adjusted_count = 0
 
-        if not data.symbol or not data.price:
+        if not data.symbol or not data.close:
             return data, removed_count, adjusted_count
 
         # Initialize history if needed
@@ -405,7 +406,7 @@ class DataCleaner:
             self.price_history[data.symbol] = []
 
         price_history = self.price_history[data.symbol]
-        current_price = float(data.price)
+        current_price = float(data.close)
 
         # Add current price to history
         price_history.append(current_price)
@@ -428,7 +429,7 @@ class DataCleaner:
                         adjusted_price = mean_price + (
                             self.outlier_threshold * std_price * np.sign(current_price - mean_price)
                         )
-                        data.price = Decimal(str(adjusted_price))
+                        data.close = Decimal(str(adjusted_price))
                         adjusted_count += 1
                         self.logger.warning(
                             "Price outlier adjusted",
@@ -439,7 +440,7 @@ class DataCleaner:
                         )
                     else:
                         # Strategy: remove by setting to None
-                        data.price = None
+                        data.close = None
                         removed_count += 1
                         self.logger.warning(
                             "Price outlier removed",
@@ -485,7 +486,7 @@ class DataCleaner:
 
     async def _smooth_data(self, data: MarketData) -> MarketData:
         """Apply smoothing to reduce noise in data"""
-        if not data.symbol or not data.price:
+        if not data.symbol or not data.close:
             return data
 
         # Initialize history if needed
@@ -493,7 +494,7 @@ class DataCleaner:
             self.price_history[data.symbol] = []
 
         price_history = self.price_history[data.symbol]
-        current_price = float(data.price)
+        current_price = float(data.close)
 
         # Add current price to history
         price_history.append(current_price)
@@ -506,7 +507,7 @@ class DataCleaner:
         if len(price_history) >= self.smoothing_window:
             # Simple moving average smoothing
             smoothed_price = statistics.mean(price_history[-self.smoothing_window :])
-            data.price = Decimal(str(smoothed_price))
+            data.close = Decimal(str(smoothed_price))
 
             # Smooth volume if available
             if data.volume and data.symbol in self.volume_history:
@@ -549,9 +550,9 @@ class DataCleaner:
             data.symbol = data.symbol.upper()
 
         # Ensure price precision
-        if data.price:
+        if data.close:
             # Round to 8 decimal places for crypto
-            data.price = Decimal(str(float(data.price))).quantize(Decimal("0.00000001"))
+            data.close = Decimal(str(float(data.close))).quantize(Decimal("0.00000001"))
 
         # Ensure volume precision
         if data.volume:
@@ -592,7 +593,7 @@ class DataCleaner:
         if not signal.direction or not signal.symbol:
             return False
 
-        if not (0.0 <= signal.confidence <= 1.0):
+        if not (0.0 <= signal.strength <= 1.0):
             return False
 
         if signal.timestamp > datetime.now(timezone.utc) + timedelta(seconds=60):
@@ -628,7 +629,7 @@ class DataCleaner:
         # Create hash from key fields
         hash_data = {
             "symbol": data.symbol,
-            "price": float(data.price) if data.price else 0,
+            "price": float(data.close) if data.close else 0,
             "volume": float(data.volume) if data.volume else 0,
             "timestamp": data.timestamp.isoformat() if data.timestamp else "",
         }

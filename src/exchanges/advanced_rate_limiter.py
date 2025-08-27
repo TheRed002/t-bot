@@ -10,7 +10,7 @@ P-002A (error handling), and P-003+ (exchange interfaces).
 
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from src.core.base import BaseComponent
@@ -209,7 +209,7 @@ class AdvancedRateLimiter(BaseComponent):
     async def _check_global_limits(self, exchange: str, endpoint: str, weight: int) -> bool:
         """Check global rate limits across all exchanges."""
         try:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
 
             # Check global request rate limits
             global_key = "global:requests_per_minute"
@@ -268,14 +268,14 @@ class AdvancedRateLimiter(BaseComponent):
 
     def _record_request(self, exchange: str, endpoint: str, weight: int) -> None:
         """Record request for tracking."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         key = f"{exchange}:{endpoint}"
         self.request_history[key].append(now)
 
         # Clean old history - remove entries older than 1 hour AND keep max 1000 requests
         hour_ago = now - timedelta(hours=1)
         self.request_history[key] = [t for t in self.request_history[key] if t > hour_ago]
-        
+
         # If still too many, keep only the most recent 1000
         if len(self.request_history[key]) > 1000:
             self.request_history[key] = self.request_history[key][-1000:]
@@ -335,11 +335,13 @@ class BinanceRateLimiter:
                 raise ValidationError(f"Weight {weight} exceeds limit {self.weight_limit}")
 
             # Check weight-based limits
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             minute_ago = now - timedelta(minutes=1)
 
             # Clean old entries
-            self.weight_usage[endpoint] = [(t, w) for t, w in self.weight_usage[endpoint] if t > minute_ago]
+            self.weight_usage[endpoint] = [
+                (t, w) for t, w in self.weight_usage[endpoint] if t > minute_ago
+            ]
 
             # Calculate current weight usage (sum of all weights)
             current_weight = sum(w for _, w in self.weight_usage[endpoint])
@@ -361,7 +363,11 @@ class BinanceRateLimiter:
 
             # Record the request with its weight
             self.weight_usage[endpoint].append((now, weight))
-            
+
+            # Record order if applicable
+            if "order" in endpoint.lower():
+                self.order_usage.append(now)
+
             self.logger.debug("Binance rate limit check passed", endpoint=endpoint, weight=weight)
             return True
 
@@ -387,11 +393,13 @@ class BinanceRateLimiter:
                 raise ValidationError("Endpoint is required")
 
             # Calculate wait time based on current usage
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             minute_ago = now - timedelta(minutes=1)
 
             # Clean old entries
-            self.weight_usage[endpoint] = [(t, w) for t, w in self.weight_usage[endpoint] if t > minute_ago]
+            self.weight_usage[endpoint] = [
+                (t, w) for t, w in self.weight_usage[endpoint] if t > minute_ago
+            ]
 
             # Calculate time until reset
             if self.weight_usage[endpoint]:
@@ -417,15 +425,23 @@ class BinanceRateLimiter:
 
     async def _check_order_limits(self) -> bool:
         """Check order-specific rate limits."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         ten_seconds_ago = now - timedelta(seconds=10)
         day_ago = now - timedelta(days=1)
 
-        # Clean old entries
-        self.order_usage = [t for t in self.order_usage if t > day_ago]
+        # Clean old entries - ensure timezone-aware comparison
+        self.order_usage = [
+            t
+            for t in self.order_usage
+            if (t.replace(tzinfo=timezone.utc) if t.tzinfo is None else t) > day_ago
+        ]
 
-        # Check 10-second limit
-        recent_orders = [t for t in self.order_usage if t > ten_seconds_ago]
+        # Check 10-second limit - ensure timezone-aware comparison
+        recent_orders = [
+            t
+            for t in self.order_usage
+            if (t.replace(tzinfo=timezone.utc) if t.tzinfo is None else t) > ten_seconds_ago
+        ]
         if len(recent_orders) >= self.order_limit_10s:
             self.logger.warning(
                 "Binance order limit exceeded(10s)",
@@ -502,7 +518,7 @@ class OKXRateLimiter:
             endpoint_type = self._get_endpoint_type(endpoint)
 
             # Check limits
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             window_seconds = self.limits[endpoint_type]["window"]
             max_requests = self.limits[endpoint_type]["requests"]
 
@@ -553,7 +569,7 @@ class OKXRateLimiter:
             endpoint_type = self._get_endpoint_type(endpoint)
             window_seconds = self.limits[endpoint_type]["window"]
 
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             window_start = now - timedelta(seconds=window_seconds)
 
             # Clean old entries
@@ -648,7 +664,7 @@ class CoinbaseRateLimiter:
             points = self._calculate_points(endpoint)
 
             # Check points limit
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             minute_ago = now - timedelta(minutes=1)
 
             # Clean old entries
@@ -705,7 +721,7 @@ class CoinbaseRateLimiter:
                 raise ValidationError("Endpoint is required")
 
             # Calculate wait time based on points usage
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             minute_ago = now - timedelta(minutes=1)
 
             # Clean old entries
@@ -759,7 +775,7 @@ class CoinbaseRateLimiter:
 
     async def _check_private_limit(self) -> bool:
         """Check private endpoint rate limits."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         second_ago = now - timedelta(seconds=1)
 
         # Clean old entries
@@ -777,7 +793,7 @@ class CoinbaseRateLimiter:
 
     async def _check_public_limit(self) -> bool:
         """Check public endpoint rate limits."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         second_ago = now - timedelta(seconds=1)
 
         # Clean old entries

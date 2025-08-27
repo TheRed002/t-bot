@@ -9,7 +9,7 @@ without direct database access.
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import numpy as np
@@ -222,7 +222,7 @@ class FeatureStoreService(BaseService):
     ) -> FeatureStoreResponse:
         """Internal feature storage implementation."""
         async with self._operation_semaphore:
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
 
             try:
                 if not request.feature_set:
@@ -254,13 +254,14 @@ class FeatureStoreService(BaseService):
                     feature_names=request.feature_set.feature_names,
                     feature_count=len(request.feature_set.feature_names),
                     data_points=len(request.feature_set.features),
-                    creation_timestamp=datetime.utcnow(),
+                    creation_timestamp=datetime.now(timezone.utc),
                     version=version,
                     tags=request.tags,
                     statistics=statistics,
                     storage_format="json",
                     compressed=request.compress,
-                    expires_at=datetime.utcnow() + timedelta(hours=self.fs_config.cache_ttl_hours),
+                    expires_at=datetime.now(timezone.utc)
+                    + timedelta(hours=self.fs_config.cache_ttl_hours),
                 )
 
                 # Generate data hash
@@ -290,7 +291,7 @@ class FeatureStoreService(BaseService):
                         request.symbol, request.feature_set.feature_set_id
                     )
 
-                processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
                 self._logger.info(
                     "Features stored successfully",
@@ -311,7 +312,7 @@ class FeatureStoreService(BaseService):
                 )
 
             except Exception as e:
-                processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
                 self._logger.error(
                     "Feature storage failed",
@@ -369,7 +370,7 @@ class FeatureStoreService(BaseService):
     async def _retrieve_features_impl(self, request: FeatureStoreRequest) -> FeatureStoreResponse:
         """Internal feature retrieval implementation."""
         async with self._operation_semaphore:
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
             cache_hit = False
 
             try:
@@ -383,7 +384,9 @@ class FeatureStoreService(BaseService):
                         feature_set, metadata = cached_result
                         cache_hit = True
 
-                        processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                        processing_time = (
+                            datetime.now(timezone.utc) - start_time
+                        ).total_seconds() * 1000
 
                         return FeatureStoreResponse(
                             success=True,
@@ -415,7 +418,7 @@ class FeatureStoreService(BaseService):
                 feature_set = await self._reconstruct_feature_set(feature_data, metadata)
 
                 # Update last accessed timestamp
-                metadata.last_accessed = datetime.utcnow()
+                metadata.last_accessed = datetime.now(timezone.utc)
                 await self.data_service.update_feature_set_metadata(
                     feature_set_id=metadata.feature_set_id,
                     symbol=request.symbol,
@@ -427,7 +430,7 @@ class FeatureStoreService(BaseService):
                 if self.fs_config.enable_caching:
                     await self._cache_features(feature_set, metadata)
 
-                processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
                 self._logger.info(
                     "Features retrieved successfully",
@@ -450,7 +453,7 @@ class FeatureStoreService(BaseService):
                 )
 
             except Exception as e:
-                processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+                processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
                 self._logger.error(
                     "Feature retrieval failed",
@@ -502,7 +505,7 @@ class FeatureStoreService(BaseService):
         self, request: FeatureStoreRequest, include_expired: bool, limit: int | None
     ) -> FeatureStoreResponse:
         """Internal feature set listing implementation."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Get feature sets from data service
@@ -525,7 +528,7 @@ class FeatureStoreService(BaseService):
             # Sort by creation timestamp (newest first)
             feature_sets_metadata.sort(key=lambda x: x.creation_timestamp, reverse=True)
 
-            processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             self._logger.info(
                 "Feature sets listed successfully",
@@ -543,7 +546,7 @@ class FeatureStoreService(BaseService):
             )
 
         except Exception as e:
-            processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             self._logger.error("Feature set listing failed", symbol=request.symbol, error=str(e))
 
@@ -592,7 +595,7 @@ class FeatureStoreService(BaseService):
         self, request: FeatureStoreRequest, delete_all_versions: bool
     ) -> FeatureStoreResponse:
         """Internal feature deletion implementation."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             deleted_count = await self.data_service.delete_feature_set(
@@ -605,7 +608,7 @@ class FeatureStoreService(BaseService):
             # Remove from caches
             await self._remove_from_cache(request.symbol, request.feature_set_id, request.version)
 
-            processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             self._logger.info(
                 "Features deleted successfully",
@@ -624,7 +627,7 @@ class FeatureStoreService(BaseService):
             )
 
         except Exception as e:
-            processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            processing_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
 
             self._logger.error(
                 "Feature deletion failed",
@@ -740,7 +743,7 @@ class FeatureStoreService(BaseService):
 
         except Exception:
             # Fallback to timestamp-based version
-            return f"1.0.{int(datetime.utcnow().timestamp())}"
+            return f"1.0.{int(datetime.now(timezone.utc).timestamp())}"
 
     async def _generate_data_hash(self, feature_set: FeatureSet) -> str:
         """Generate hash for feature data."""
@@ -827,11 +830,11 @@ class FeatureStoreService(BaseService):
         cache_key = self._generate_cache_key(
             metadata.symbol, metadata.feature_set_id, metadata.version
         )
-        self._feature_cache[cache_key] = (feature_set, metadata, datetime.utcnow())
+        self._feature_cache[cache_key] = (feature_set, metadata, datetime.now(timezone.utc))
 
         # Also cache metadata separately
         metadata_key = f"meta_{cache_key}"
-        self._metadata_cache[metadata_key] = (metadata, datetime.utcnow())
+        self._metadata_cache[metadata_key] = (metadata, datetime.now(timezone.utc))
 
     async def _get_cached_features(
         self, cache_key: str
@@ -843,7 +846,7 @@ class FeatureStoreService(BaseService):
         feature_set, metadata, timestamp = self._feature_cache[cache_key]
         ttl_hours = self.fs_config.cache_ttl_hours
 
-        if datetime.utcnow() - timestamp < timedelta(hours=ttl_hours):
+        if datetime.now(timezone.utc) - timestamp < timedelta(hours=ttl_hours):
             return feature_set, metadata
         else:
             # Remove expired entry
@@ -926,7 +929,7 @@ class FeatureStoreService(BaseService):
     async def _clean_expired_cache(self) -> None:
         """Clean expired cache entries."""
         ttl_hours = self.fs_config.cache_ttl_hours
-        cutoff_time = datetime.utcnow() - timedelta(hours=ttl_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=ttl_hours)
 
         # Clean feature cache
         expired_feature_keys = [

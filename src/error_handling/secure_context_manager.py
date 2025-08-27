@@ -10,6 +10,7 @@ configuration details, and other sensitive system information in error reports.
 
 import hashlib
 import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -387,7 +388,7 @@ class SecureErrorContextManager:
         debug_info = {
             "error_type": type(error).__name__,
             "error_module": error.__class__.__module__,
-            "python_version": os.sys.version,
+            "python_version": sys.version,
             "process_id": os.getpid(),
         }
 
@@ -463,7 +464,7 @@ class SecureErrorContextManager:
     def _get_error_code(self, error: Exception, security_context: SecurityContext) -> str | None:
         """Get standardized error code."""
         error_category = self._categorize_error(error)
-        error_type = type(error).__name__
+        type(error).__name__
 
         # Generate standardized error code
         code_mapping = {

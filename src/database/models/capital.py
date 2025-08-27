@@ -25,7 +25,9 @@ class CapitalAllocationDB(Base, TimestampMixin):
 
     # Allocation metadata
     allocation_percentage = Column(Float, default=0.0)  # Added field expected by service
-    allocation_type = Column(String(50), nullable=False, default="dynamic")  # fixed, percentage, dynamic
+    allocation_type = Column(
+        String(50), nullable=False, default="dynamic"
+    )  # fixed, percentage, dynamic
     priority = Column(Integer, default=5)  # 1-10 priority scale
 
     # Performance tracking
@@ -33,7 +35,9 @@ class CapitalAllocationDB(Base, TimestampMixin):
     utilization_ratio = Column(Float, default=0)
 
     # Rebalancing
-    last_rebalance = Column(DateTime(timezone=True), nullable=True)  # Added field expected by service
+    last_rebalance = Column(
+        DateTime(timezone=True), nullable=True
+    )  # Added field expected by service
 
     # Additional data
     metadata_json = Column(JSONB, default={})
@@ -44,7 +48,9 @@ class CapitalAllocationDB(Base, TimestampMixin):
         Index("idx_capital_exchange", "exchange"),
         Index("idx_capital_type", "allocation_type"),
         Index("idx_capital_created", "created_at"),
-        Index("idx_capital_strategy_exchange", "strategy_id", "exchange"),  # Composite index for lookups
+        Index(
+            "idx_capital_strategy_exchange", "strategy_id", "exchange"
+        ),  # Composite index for lookups
     )
 
     def __repr__(self):

@@ -24,6 +24,7 @@ Legacy Usage (Backward Compatibility):
 """
 
 from .base import BaseConfig
+from .bot_management import BotManagementConfig
 from .capital import CapitalManagementConfig
 from .database import DatabaseConfig
 from .exchange import ExchangeConfig
@@ -43,6 +44,7 @@ from .service import (
     register_config_service_in_container,
     shutdown_config_service,
 )
+from .state_management import StateManagementConfig
 from .strategy import StrategyConfig
 
 
@@ -63,6 +65,7 @@ def load_config(config_file: str | None = None) -> Config:
 __all__ = [
     # Legacy configuration classes
     "BaseConfig",
+    "BotManagementConfig",
     "CapitalManagementConfig",
     "Config",
     "ConfigCache",
@@ -77,6 +80,7 @@ __all__ = [
     "FileConfigProvider",
     "RiskConfig",
     "SecurityConfig",
+    "StateManagementConfig",
     "StrategyConfig",
     "get_config",
     "get_config_service",

@@ -33,7 +33,10 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
-from src.utils import normalize_price, round_to_precision, ValidationFramework
+from src.utils import ValidationFramework, normalize_price, round_to_precision
+
+# Logger setup
+from src.core.logging import get_logger
 
 
 class OKXOrderManager:
@@ -58,6 +61,9 @@ class OKXOrderManager:
         """
         self.config = config
         self.trade_client = trade_client
+        
+        # Initialize logger
+        self.logger = get_logger(self.__class__.__module__)
 
         # Order tracking
         self.active_orders: dict[str, dict] = {}
@@ -68,7 +74,7 @@ class OKXOrderManager:
         self.taker_fee_rate = Decimal("0.001")  # 0.1% taker fee
 
         # Initialize error handling
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = ErrorHandler(config)
 
         self.logger.info("Initialized OKX order manager")
 
@@ -410,18 +416,18 @@ class OKXOrderManager:
             "tdMode": "cash",  # Spot trading
             "side": order.side.value.lower(),
             "ordType": self._convert_order_type_to_okx(order.order_type),
-            "sz": str(round_to_precision(float(order.quantity), 8)),
+            "sz": str(round_to_precision(order.quantity, 8)),
         }
 
         # Add price for limit orders
         if order.price:
-            okx_order["px"] = str(normalize_price(float(order.price), order.symbol))
+            okx_order["px"] = str(normalize_price(order.price, order.symbol))
 
         # Add stop price for stop orders
         if order.stop_price:
-            okx_order["slTriggerPx"] = str(normalize_price(float(order.stop_price), order.symbol))
+            okx_order["slTriggerPx"] = str(normalize_price(order.stop_price, order.symbol))
             okx_order["slOrdPx"] = str(
-                normalize_price(float(order.price or order.stop_price), order.symbol)
+                normalize_price(order.price or order.stop_price, order.symbol)
             )
 
         # Add client order ID if provided

@@ -15,7 +15,7 @@ Key Features:
 - Health monitoring and automated switching
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -23,6 +23,7 @@ from typing import Any
 import numpy as np
 
 from src.core.logging import get_logger
+
 # MANDATORY: Import from P-001
 from src.core.types import MarketData, Position, Signal, SignalDirection, StrategyType
 
@@ -184,7 +185,7 @@ class FailureDetector:
 
     def detect_technical_issues(self) -> dict[str, Any]:
         """Detect technical issues that could cause failures."""
-        current_time = datetime.now()
+        current_time = datetime.now(timezone.utc)
 
         # Error rate check
         recent_errors_1h = [
@@ -451,7 +452,7 @@ class FallbackStrategy(BaseStrategy):
         # Fallback state
         self.current_mode = FallbackMode.PRIMARY
         self.mode_history = []
-        self.last_mode_change = datetime.now()
+        self.last_mode_change = datetime.now(timezone.utc)
         self.failure_count = 0
         self.recovery_attempts = 0
 
@@ -524,13 +525,13 @@ class FallbackStrategy(BaseStrategy):
                 "Error in fallback signal generation", symbol=data.symbol, error=str(e)
             )
             # Record error for failure detection
-            self.failure_detector.add_error("signal_generation", datetime.now())
+            self.failure_detector.add_error("signal_generation", datetime.now(timezone.utc))
             return []
 
     async def _check_and_update_mode(self, data: MarketData) -> None:
         """Check for failures and update fallback mode."""
         try:
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
 
             # Skip if recently changed mode (stability period)
             if current_time - self.last_mode_change < timedelta(minutes=5):
@@ -642,7 +643,7 @@ class FallbackStrategy(BaseStrategy):
         try:
             old_mode = self.current_mode
             self.current_mode = new_mode
-            self.last_mode_change = datetime.now()
+            self.last_mode_change = datetime.now(timezone.utc)
 
             # Record mode change
             mode_change = {
@@ -681,7 +682,7 @@ class FallbackStrategy(BaseStrategy):
     async def _check_recovery_conditions(self) -> None:
         """Check if conditions are suitable for recovery to primary strategy."""
         try:
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
 
             # Must be in fallback mode for minimum duration
             if current_time - self.last_mode_change < timedelta(minutes=15):
@@ -803,7 +804,7 @@ class FallbackStrategy(BaseStrategy):
                 error=str(e),
             )
             # Record error and potentially switch to safe mode
-            self.failure_detector.add_error("signal_generation", datetime.now())
+            self.failure_detector.add_error("signal_generation", datetime.now(timezone.utc))
             if self.current_mode != FallbackMode.SAFE_MODE:
                 await self._switch_mode(
                     FallbackMode.SAFE_MODE,
@@ -950,7 +951,7 @@ class FallbackStrategy(BaseStrategy):
     def update_trade_result(self, return_pct: float, trade_info: dict[str, Any]) -> None:
         """Update trade result for failure detection."""
         try:
-            timestamp = trade_info.get("timestamp", datetime.now())
+            timestamp = trade_info.get("timestamp", datetime.now(timezone.utc))
             self.failure_detector.add_trade_result(return_pct, timestamp)
 
             self.logger.debug(

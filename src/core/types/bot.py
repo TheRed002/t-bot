@@ -53,6 +53,7 @@ class ResourceType(Enum):
     DISK = "disk"
     API_CALLS = "api_calls"
     WEBSOCKET_CONNECTIONS = "websocket_connections"
+    DATABASE_CONNECTIONS = "database_connections"
     CAPITAL = "capital"
 
 

@@ -744,7 +744,7 @@ class FeatureStore(BaseComponent):
             # Calculate EMAs for all prices
             fast_ema_values = []
             slow_ema_values = []
-            
+
             # Calculate EMA values for each price point
             for i in range(len(prices)):
                 if i < fast - 1:
@@ -756,7 +756,7 @@ class FeatureStore(BaseComponent):
                     for j in range(1, i + 1):
                         ema = (prices[j] * multiplier) + (ema * (1 - multiplier))
                     fast_ema_values.append(ema)
-                    
+
                 if i < slow - 1:
                     slow_ema_values.append(None)
                 else:
@@ -766,7 +766,7 @@ class FeatureStore(BaseComponent):
                     for j in range(1, i + 1):
                         ema = (prices[j] * multiplier) + (ema * (1 - multiplier))
                     slow_ema_values.append(ema)
-            
+
             # Calculate MACD line values
             macd_values = []
             for i in range(len(prices)):
@@ -774,20 +774,20 @@ class FeatureStore(BaseComponent):
                     macd_values.append(fast_ema_values[i] - slow_ema_values[i])
                 else:
                     macd_values.append(None)
-            
+
             # Find first valid MACD value index
             first_valid_idx = next((i for i, v in enumerate(macd_values) if v is not None), None)
             if first_valid_idx is None or len(macd_values) - first_valid_idx < signal:
                 return None
-                
+
             # Calculate signal line (EMA of MACD line)
             valid_macd = [v for v in macd_values if v is not None]
             signal_ema = valid_macd[0]
             multiplier = 2 / (signal + 1)
-            
+
             for i in range(1, len(valid_macd)):
                 signal_ema = (valid_macd[i] * multiplier) + (signal_ema * (1 - multiplier))
-            
+
             # Use latest values
             macd_line = macd_values[-1]
             signal_line = signal_ema

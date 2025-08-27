@@ -207,14 +207,12 @@ class HighPerformanceDataBuffer:
         """Setup memory-mapped buffer for large datasets."""
         try:
             # Create memory-mapped array with secure filename
-            import tempfile
             import os
-            
+            import tempfile
+
             # Use secure temporary file creation
             fd, self.mmap_file = tempfile.mkstemp(
-                prefix="market_data_buffer_",
-                suffix=".dat",
-                dir="/tmp"
+                prefix="market_data_buffer_", suffix=".dat", dir="/tmp"
             )
             os.close(fd)  # Close the file descriptor
             self.mmap_buffer = np.memmap(
@@ -269,7 +267,7 @@ class IndicatorCache:
     data: dict[str, np.ndarray]
     last_updated: float
     cache_duration: float = 60.0  # 1 minute cache
-    _lock: threading.Lock = None
+    _lock: threading.Lock | None = None
 
     def __post_init__(self):
         self._lock = threading.Lock()
@@ -311,14 +309,14 @@ class VectorizedProcessor:
         )  # price, volume, timestamp, side
 
         # Indicator caches
-        self.indicator_cache = IndicatorCache(data={})
+        self.indicator_cache = IndicatorCache(data={}, last_updated=time.time())
 
         # Thread pool for parallel processing
         # Get processing threads from config safely
         processing_threads = 4  # default
         if hasattr(config, "data") and hasattr(config.data, "processing_threads"):
             processing_threads = config.data.processing_threads or 4
-        
+
         self.thread_pool = ThreadPoolExecutor(
             max_workers=min(8, processing_threads),
             thread_name_prefix="vectorized-processor",
@@ -542,7 +540,7 @@ class VectorizedProcessor:
 
             # Cleanup memory-mapped files
             import os
-            
+
             if hasattr(self.price_buffer, "mmap_file") and self.price_buffer.mmap_file:
                 try:
                     # Close memory map first if it exists

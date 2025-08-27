@@ -7,7 +7,7 @@ dependency injection, health checks, and monitoring.
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from src.core.base.component import BaseComponent
@@ -142,7 +142,7 @@ class BaseService(BaseComponent, ServiceComponent):
             )
 
         operation_id = f"{operation_name}_{len(self._operation_history)}"
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         self._active_operations[operation_id] = start_time
 
         try:
@@ -157,7 +157,7 @@ class BaseService(BaseComponent, ServiceComponent):
             result = await self._execute_with_retry(operation_func, operation_name, *args, **kwargs)
 
             # Record successful operation
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             self._record_operation_success(operation_name, execution_time)
 
             self._logger.debug(
@@ -172,7 +172,7 @@ class BaseService(BaseComponent, ServiceComponent):
 
         except Exception as e:
             # Record failed operation
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             self._record_operation_failure(operation_name, execution_time, e)
 
             self._logger.error(
@@ -192,7 +192,7 @@ class BaseService(BaseComponent, ServiceComponent):
                     "execution_time": execution_time,
                     "error_type": type(e).__name__,
                 },
-            )
+            ) from e
 
         finally:
             self._active_operations.pop(operation_id, None)
@@ -266,7 +266,7 @@ class BaseService(BaseComponent, ServiceComponent):
         if not self._circuit_breaker_enabled:
             return True
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Check if circuit breaker should transition from OPEN to HALF_OPEN
         if (
@@ -287,7 +287,7 @@ class BaseService(BaseComponent, ServiceComponent):
         """Record successful operation for metrics and circuit breaker."""
         self._service_metrics["operations_count"] += 1
         self._service_metrics["operations_success"] += 1
-        self._service_metrics["last_operation_time"] = datetime.utcnow()
+        self._service_metrics["last_operation_time"] = datetime.now(timezone.utc)
 
         # Update average response time
         current_avg = self._service_metrics["average_response_time"]
@@ -311,7 +311,7 @@ class BaseService(BaseComponent, ServiceComponent):
                 "operation": operation_name,
                 "status": "success",
                 "execution_time": execution_time,
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
             }
         )
 
@@ -321,12 +321,12 @@ class BaseService(BaseComponent, ServiceComponent):
         """Record failed operation for metrics and circuit breaker."""
         self._service_metrics["operations_count"] += 1
         self._service_metrics["operations_error"] += 1
-        self._service_metrics["last_operation_time"] = datetime.utcnow()
+        self._service_metrics["last_operation_time"] = datetime.now(timezone.utc)
 
         # Update circuit breaker
         if self._circuit_breaker_enabled:
             self._circuit_breaker_failures += 1
-            self._circuit_breaker_last_failure = datetime.utcnow()
+            self._circuit_breaker_last_failure = datetime.now(timezone.utc)
 
             if (
                 self._circuit_breaker_failures >= self._circuit_breaker_threshold
@@ -349,7 +349,7 @@ class BaseService(BaseComponent, ServiceComponent):
                 "execution_time": execution_time,
                 "error": str(error),
                 "error_type": type(error).__name__,
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
             }
         )
 
@@ -390,14 +390,14 @@ class BaseService(BaseComponent, ServiceComponent):
         except Exception as e:
             raise DependencyError(
                 f"Failed to resolve dependency '{dependency_name}' for service {self._name}: {e}"
-            )
+            ) from e
 
     # Health Checks
     async def _health_check_internal(self) -> HealthStatus:
         """Service-specific health check implementation."""
         try:
             # Check active operations
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             stuck_operations = [
                 op_id
                 for op_id, start_time in self._active_operations.items()

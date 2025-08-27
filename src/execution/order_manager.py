@@ -18,7 +18,7 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 
 # Caching imports
 from src.core.caching import CacheKeys, cached, get_cache_manager
@@ -26,9 +26,11 @@ from src.core.config import Config
 from src.core.exceptions import (
     ExchangeConnectionError,
     ExchangeError,
+    ExchangeInsufficientFundsError,
     ExchangeRateLimitError,
     ExecutionError,
     NetworkError,
+    StateError,
     ValidationError,
 )
 
@@ -338,18 +340,28 @@ class OrderManager(BaseComponent):
             "total_fees": Decimal("0"),
         }
 
-        # Cleanup task
+        # Task management
         self._cleanup_task: asyncio.Task | None = None
         self._cleanup_started = False
+        self._is_running = False
+        self._background_tasks: set[asyncio.Task] = set()
+        self._websocket_tasks: dict[str, asyncio.Task] = {}  # exchange -> task
 
         self.logger.info(
             "Order manager initialized with lifecycle management",
             has_state_service=self.state_service is not None,
         )
 
+        # Register cleanup for proper resource management
+        import weakref
+
+        weakref.finalize(self, self._cleanup_on_del)
+
     async def start(self) -> None:
         """Start the order manager and its background tasks."""
         if not self._cleanup_started:
+            self._is_running = True
+
             # Start idempotency manager
             await self.idempotency_manager.start()
 
@@ -370,20 +382,29 @@ class OrderManager(BaseComponent):
         """Start the periodic cleanup task."""
 
         async def cleanup_periodically():
-            while True:
+            while self._is_running:
                 try:
                     await asyncio.sleep(3600)  # Run every hour
-                    await self._cleanup_old_orders()
+                    if self._is_running:  # Check again after sleep
+                        await self._cleanup_old_orders()
                 except asyncio.CancelledError:
+                    self.logger.debug("Cleanup task cancelled")
                     break
                 except Exception as e:
                     self.logger.error(f"Cleanup task error: {e}")
+                    # Continue running unless explicitly stopped
+                    if not self._is_running:
+                        break
 
         self._cleanup_task = asyncio.create_task(cleanup_periodically())
+        self._background_tasks.add(self._cleanup_task)
+
+        # Clean up completed tasks
+        self._cleanup_task.add_done_callback(self._background_tasks.discard)
 
     @with_error_context(component="OrderManager", operation="submit_order")
     @with_circuit_breaker(failure_threshold=10, recovery_timeout=60)
-    @with_retry(max_attempts=3, exceptions=(NetworkError, ExchangeError))
+    @with_retry(max_attempts=3, exceptions=(NetworkError, ExchangeError, StateError))
     @time_execution
     async def submit_order(
         self,
@@ -579,10 +600,24 @@ class OrderManager(BaseComponent):
 
             return managed_order
 
-        except Exception as e:
-            self.logger.error(f"Order submission failed: {e}")
-
+        except ValidationError as e:
+            self.logger.error(f"Order validation failed: {e}")
             # Mark idempotency key as failed if we have a client_order_id
+            if "client_order_id" in locals() and client_order_id:
+                await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
+            raise  # Re-raise validation errors
+        except ExchangeInsufficientFundsError as e:
+            self.logger.error(f"Insufficient funds for order: {e}")
+            if "client_order_id" in locals() and client_order_id:
+                await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
+            raise  # Re-raise for proper handling
+        except ExchangeError as e:
+            self.logger.error(f"Exchange error during order submission: {e}")
+            if "client_order_id" in locals() and client_order_id:
+                await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
+            raise ExecutionError(f"Order submission failed: {e}") from e
+        except Exception as e:
+            self.logger.error(f"Unexpected error during order submission: {e}", exc_info=True)
             if "client_order_id" in locals() and client_order_id:
                 await self.idempotency_manager.mark_order_failed(client_order_id, str(e))
 
@@ -596,7 +631,7 @@ class OrderManager(BaseComponent):
                 except Exception as callback_error:
                     self.logger.error(f"Error callback failed: {callback_error}")
 
-            raise ExecutionError(f"Order submission failed: {e}")
+            raise ExecutionError(f"Order submission failed: {e}") from e
 
     # ========== P-020 Enhanced Order Management Methods ==========
 
@@ -670,9 +705,18 @@ class OrderManager(BaseComponent):
 
             return managed_order
 
+        except ValidationError as e:
+            self.logger.error(f"Order validation failed: {e}")
+            raise  # Re-raise validation errors
+        except ExchangeInsufficientFundsError as e:
+            self.logger.error(f"Insufficient funds for routed order: {e}")
+            raise  # Re-raise for proper handling
+        except ExchangeError as e:
+            self.logger.error(f"Exchange error during routed order submission: {e}")
+            raise ExecutionError(f"Order submission with routing failed: {e}") from e
         except Exception as e:
-            self.logger.error(f"Order submission with routing failed: {e}")
-            raise ExecutionError(f"Order submission with routing failed: {e}")
+            self.logger.error(f"Unexpected error during routed order submission: {e}", exc_info=True)
+            raise ExecutionError(f"Order submission with routing failed: {e}") from e
 
     @log_calls
     async def modify_order(self, modification_request: OrderModificationRequest) -> bool:
@@ -722,14 +766,14 @@ class OrderManager(BaseComponent):
                 managed_order.add_audit_entry(
                     "order_modified",
                     {
-                        "old_quantity": (float(old_quantity) if old_quantity is not None else None),
+                        "old_quantity": (str(old_quantity) if old_quantity is not None else None),
                         "new_quantity": (
-                            float(modification_request.new_quantity)
+                            str(modification_request.new_quantity)
                             if modification_request.new_quantity
                             else None
                         ),
                         "new_price": (
-                            float(modification_request.new_price)
+                            str(modification_request.new_price)
                             if modification_request.new_price
                             else None
                         ),
@@ -743,7 +787,8 @@ class OrderManager(BaseComponent):
                 # For now, simulate successful modification
 
                 self.logger.info(
-                    f"Order modified successfully: {order_id}, reason: {modification_request.modification_reason}"
+                    f"Order modified successfully: {order_id}, "
+                    f"reason: {modification_request.modification_reason}"
                 )
                 return True
 
@@ -834,7 +879,7 @@ class OrderManager(BaseComponent):
                             "aggregated",
                             {
                                 "parent_execution_id": aggregated_order.execution_id,
-                                "net_quantity": float(net_quantity),
+                                "net_quantity": str(net_quantity),
                             },
                         )
 
@@ -842,13 +887,14 @@ class OrderManager(BaseComponent):
                         "order_created_from_aggregation",
                         {
                             "child_order_count": len(pending_order_ids),
-                            "net_quantity": float(net_quantity),
+                            "net_quantity": str(net_quantity),
                             "symbol": symbol,
                         },
                     )
 
                     self.logger.info(
-                        f"Orders aggregated for {symbol}: {len(pending_order_ids)} orders -> net {net_quantity}"
+                        f"Orders aggregated for {symbol}: "
+                        f"{len(pending_order_ids)} orders -> net {net_quantity}"
                     )
 
                     return aggregated_order
@@ -876,8 +922,13 @@ class OrderManager(BaseComponent):
                         "subscriptions": [],
                     }
 
-                    # Start WebSocket message handler
-                    asyncio.create_task(self._handle_websocket_messages(exchange))
+                    # Start WebSocket message handler and track it
+                    task = asyncio.create_task(self._handle_websocket_messages(exchange))
+                    self._websocket_tasks[exchange] = task
+                    self._background_tasks.add(task)
+
+                    # Clean up completed tasks
+                    task.add_done_callback(lambda t: self._background_tasks.discard(t))
 
                     self.logger.info(f"WebSocket connection initialized for {exchange}")
 
@@ -890,10 +941,14 @@ class OrderManager(BaseComponent):
     async def _handle_websocket_messages(self, exchange: str) -> None:
         """Handle incoming WebSocket messages for order updates."""
         try:
-            while self.websocket_enabled:
+            while self.websocket_enabled and self._is_running:
                 # Simulate receiving WebSocket messages
                 # In reality, this would listen to actual WebSocket streams
                 await asyncio.sleep(1)
+
+                # Check if still running after sleep
+                if not self._is_running:
+                    break
 
                 # Process any pending WebSocket updates
                 # This is where real-time order status updates would be handled
@@ -902,6 +957,10 @@ class OrderManager(BaseComponent):
             self.logger.debug(f"WebSocket handler cancelled for {exchange}")
         except Exception as e:
             self.logger.error(f"WebSocket handler error for {exchange}: {e}")
+        finally:
+            # Clean up WebSocket task reference
+            if exchange in self._websocket_tasks:
+                del self._websocket_tasks[exchange]
 
     async def _process_websocket_order_update(self, update: WebSocketOrderUpdate) -> None:
         """Process a WebSocket order update."""
@@ -919,8 +978,8 @@ class OrderManager(BaseComponent):
                     {
                         "source": "websocket",
                         "exchange": update.exchange,
-                        "filled_quantity": float(update.filled_quantity),
-                        "remaining_quantity": float(update.remaining_quantity),
+                        "filled_quantity": str(update.filled_quantity),
+                        "remaining_quantity": str(update.remaining_quantity),
                     },
                 )
 
@@ -934,7 +993,8 @@ class OrderManager(BaseComponent):
                     await self._handle_status_change(managed_order, old_status, update.status)
 
                 self.logger.debug(
-                    f"WebSocket order update processed: {update.order_id}, status: {update.status.value}"
+                    f"WebSocket order update processed: {update.order_id}, "
+                    f"status: {update.status.value}"
                 )
 
         except Exception as e:
@@ -1056,8 +1116,18 @@ class OrderManager(BaseComponent):
                             ]:
                                 break
 
+                        except ExchangeRateLimitError as e:
+                            self.logger.warning(f"Rate limit hit during status check for {order_id}: {e}")
+                            await asyncio.sleep(e.retry_after if hasattr(e, 'retry_after') else 60)
+                        except ExchangeConnectionError as e:
+                            self.logger.warning(f"Connection error during status check for {order_id}: {e}")
+                            await asyncio.sleep(5)  # Brief pause before retry
+                        except ExchangeError as e:
+                            self.logger.warning(f"Exchange error during status check for {order_id}: {e}")
+                            # Log but continue monitoring
                         except Exception as e:
-                            self.logger.warning(f"Status check failed for {order_id}: {e}")
+                            self.logger.error(f"Unexpected error during status check for {order_id}: {e}")
+                            # For truly unexpected errors, log and continue
 
                     await asyncio.sleep(1)  # Small sleep to prevent busy waiting
 
@@ -1072,10 +1142,14 @@ class OrderManager(BaseComponent):
                     except Exception:
                         pass
 
-        # Start monitoring task
+        # Start monitoring task and track it
         task = asyncio.create_task(monitor_order())
         if managed_order.order_id:
             self.monitoring_tasks[managed_order.order_id] = task
+            self._background_tasks.add(task)
+
+            # Clean up completed tasks
+            task.add_done_callback(lambda t: self._background_tasks.discard(t))
 
     async def _check_order_status(
         self, managed_order: ManagedOrder, exchange: ExchangeInterface
@@ -1148,8 +1222,18 @@ class OrderManager(BaseComponent):
                 # Handle specific status changes
                 await self._handle_status_change(managed_order, old_status, current_status)
 
+        except ExchangeRateLimitError as e:
+            self.logger.warning(f"Rate limit error during status check: {e}")
+            raise  # Re-raise for proper handling upstream
+        except ExchangeConnectionError as e:
+            self.logger.warning(f"Connection error during status check: {e}")
+            raise  # Re-raise for retry logic
+        except ExchangeError as e:
+            self.logger.warning(f"Exchange error during status check: {e}")
+            # Don't raise - status check failure is not critical
         except Exception as e:
-            self.logger.warning(f"Status check failed: {e}")
+            self.logger.error(f"Unexpected error during status check: {e}", exc_info=True)
+            # Don't raise - continue with current status
 
     async def _handle_status_change(
         self, managed_order: ManagedOrder, old_status: OrderStatus, new_status: OrderStatus
@@ -1168,7 +1252,7 @@ class OrderManager(BaseComponent):
                 await self._add_order_event(
                     managed_order,
                     "order_filled",
-                    {"filled_quantity": float(managed_order.filled_quantity)},
+                    {"filled_quantity": str(managed_order.filled_quantity)},
                 )
 
                 # Mark idempotency key as completed
@@ -1280,10 +1364,10 @@ class OrderManager(BaseComponent):
                 managed_order,
                 "partial_fill",
                 {
-                    "fill_quantity": float(fill_quantity),
-                    "fill_price": float(fill_price),
-                    "cumulative_filled": float(managed_order.filled_quantity),
-                    "remaining": float(managed_order.remaining_quantity),
+                    "fill_quantity": str(fill_quantity),
+                    "fill_price": str(fill_price),
+                    "cumulative_filled": str(managed_order.filled_quantity),
+                    "remaining": str(managed_order.remaining_quantity),
                 },
             )
 
@@ -1322,7 +1406,7 @@ class OrderManager(BaseComponent):
 
     @log_calls
     @with_error_context(component="OrderManager", operation="cancel_order")
-    @with_retry(max_attempts=3, exceptions=(NetworkError, ExchangeError))
+    @with_retry(max_attempts=3, exceptions=(NetworkError, ExchangeError, StateError))
     async def cancel_order(self, order_id: str, reason: str = "manual") -> bool:
         """
         Cancel a managed order.
@@ -1554,7 +1638,8 @@ class OrderManager(BaseComponent):
 
         self.order_aggregation_rules[symbol] = rule
         self.logger.info(
-            f"Aggregation rule set for {symbol}: {min_order_count} orders, {aggregation_window_seconds}s window"
+            f"Aggregation rule set for {symbol}: {min_order_count} orders, "
+            f"{aggregation_window_seconds}s window"
         )
 
     @log_calls
@@ -1608,7 +1693,7 @@ class OrderManager(BaseComponent):
                 total_execution_time += route_info.expected_execution_time_seconds
                 count += 1
 
-            avg_cost_bps = float(total_cost_bps / count) if count > 0 else 0.0
+            avg_cost_bps = str(total_cost_bps / count) if count > 0 else 0.0
             avg_execution_time = total_execution_time / count if count > 0 else 0.0
 
             return {
@@ -1667,9 +1752,9 @@ class OrderManager(BaseComponent):
 
                     opportunities[symbol] = {
                         "pending_order_count": len(pending_orders),
-                        "buy_quantity": float(buy_quantity),
-                        "sell_quantity": float(sell_quantity),
-                        "net_quantity": float(net_quantity),
+                        "buy_quantity": str(buy_quantity),
+                        "sell_quantity": str(sell_quantity),
+                        "net_quantity": str(net_quantity),
                         "can_aggregate": (
                             rule is None or len(pending_orders) >= rule.min_order_count
                         ),
@@ -1733,24 +1818,24 @@ class OrderManager(BaseComponent):
                         "symbol": order.order_request.symbol,
                         "side": order.order_request.side.value,
                         "order_type": order.order_request.order_type.value,
-                        "quantity": float(order.order_request.quantity),
+                        "quantity": str(order.order_request.quantity),
                         "price": (
-                            float(order.order_request.price) if order.order_request.price else None
+                            str(order.order_request.price) if order.order_request.price else None
                         ),
                         "status": order.status.value,
-                        "filled_quantity": float(order.filled_quantity),
-                        "remaining_quantity": float(order.remaining_quantity),
+                        "filled_quantity": str(order.filled_quantity),
+                        "remaining_quantity": str(order.remaining_quantity),
                         "average_fill_price": (
-                            float(order.average_fill_price) if order.average_fill_price else None
+                            str(order.average_fill_price) if order.average_fill_price else None
                         ),
-                        "total_fees": float(order.total_fees),
+                        "total_fees": str(order.total_fees),
                         "created_at": order.created_at.isoformat(),
                         "updated_at": order.updated_at.isoformat(),
                         "routing_info": (
                             {
                                 "selected_exchange": order.route_info.selected_exchange,
                                 "routing_reason": order.route_info.routing_reason,
-                                "expected_cost_bps": float(order.route_info.expected_cost_bps),
+                                "expected_cost_bps": str(order.route_info.expected_cost_bps),
                             }
                             if order.route_info
                             else None
@@ -1758,7 +1843,7 @@ class OrderManager(BaseComponent):
                         "modifications_count": len(order.modification_history),
                         "parent_order_id": order.parent_order_id,
                         "child_order_count": len(order.child_order_ids),
-                        "net_position_impact": float(order.net_position_impact),
+                        "net_position_impact": str(order.net_position_impact),
                         "compliance_tags": order.compliance_tags,
                         "audit_entries_count": len(order.audit_trail),
                     }
@@ -1820,8 +1905,8 @@ class OrderManager(BaseComponent):
                     "rejection_rate": rejection_rate,
                     "cancellation_rate": cancel_rate,
                     "average_fill_time_seconds": self.order_statistics["average_fill_time_seconds"],
-                    "total_volume": float(self.order_statistics["total_volume"]),
-                    "total_fees": float(self.order_statistics["total_fees"]),
+                    "total_volume": str(self.order_statistics["total_volume"]),
+                    "total_fees": str(self.order_statistics["total_fees"]),
                 },
                 # P-020 Enhanced sections
                 "routing_statistics": routing_stats,
@@ -1914,20 +1999,24 @@ class OrderManager(BaseComponent):
                     "symbol": managed_order.order_request.symbol,
                     "side": managed_order.order_request.side.value,
                     "order_type": managed_order.order_request.order_type.value,
-                    "quantity": float(managed_order.order_request.quantity),
-                    "price": float(managed_order.order_request.price)
-                    if managed_order.order_request.price
-                    else None,
+                    "quantity": str(managed_order.order_request.quantity),
+                    "price": (
+                        str(managed_order.order_request.price)
+                        if managed_order.order_request.price
+                        else None
+                    ),
                     "time_in_force": managed_order.order_request.time_in_force,
                     "client_order_id": managed_order.order_request.client_order_id,
                 },
                 "status": managed_order.status.value,
-                "filled_quantity": float(managed_order.filled_quantity),
-                "remaining_quantity": float(managed_order.remaining_quantity),
-                "average_fill_price": float(managed_order.average_fill_price)
-                if managed_order.average_fill_price
-                else None,
-                "total_fees": float(managed_order.total_fees),
+                "filled_quantity": str(managed_order.filled_quantity),
+                "remaining_quantity": str(managed_order.remaining_quantity),
+                "average_fill_price": (
+                    str(managed_order.average_fill_price)
+                    if managed_order.average_fill_price
+                    else None
+                ),
+                "total_fees": str(managed_order.total_fees),
                 "created_at": managed_order.created_at.isoformat(),
                 "updated_at": managed_order.updated_at.isoformat(),
                 "timeout_minutes": managed_order.timeout_minutes,
@@ -1950,7 +2039,7 @@ class OrderManager(BaseComponent):
                 state_data["route_info"] = {
                     "selected_exchange": managed_order.route_info.selected_exchange,
                     "routing_reason": managed_order.route_info.routing_reason,
-                    "expected_cost_bps": float(managed_order.route_info.expected_cost_bps),
+                    "expected_cost_bps": str(managed_order.route_info.expected_cost_bps),
                 }
 
             # Save to StateService
@@ -1972,6 +2061,10 @@ class OrderManager(BaseComponent):
             self.logger.error(
                 f"Failed to persist order state: {e}", order_id=managed_order.order_id
             )
+            # CRITICAL: Propagate state persistence failures to maintain data integrity
+            raise ExecutionError(
+                f"Failed to persist order state for {managed_order.order_id}: {str(e)}"
+            ) from e
 
     async def _restore_orders_from_state(self) -> None:
         """Restore active orders from StateService on startup."""
@@ -1995,10 +2088,10 @@ class OrderManager(BaseComponent):
                     else:
                         state_data = state_item
                         metadata = {}
-                    
+
                     # Get state_id from metadata
                     state_id = metadata.get("state_id", "")
-                    
+
                     # Skip if not an order state
                     if not state_id.startswith("order_"):
                         continue
@@ -2007,7 +2100,7 @@ class OrderManager(BaseComponent):
                     order_id = state_data.get("order_id")
                     if not order_id or order_id in self.managed_orders:
                         continue
-                    
+
                     # Skip if not an active order
                     status = state_data.get("status", "")
                     if status not in ["PENDING", "PARTIAL", "PARTIALLY_FILLED"]:
@@ -2020,9 +2113,11 @@ class OrderManager(BaseComponent):
                         side=OrderSide(order_req_data.get("side", "BUY")),
                         order_type=OrderType(order_req_data.get("order_type", "MARKET")),
                         quantity=Decimal(str(order_req_data.get("quantity", 0))),
-                        price=Decimal(str(order_req_data.get("price", 0)))
-                        if order_req_data.get("price")
-                        else None,
+                        price=(
+                            Decimal(str(order_req_data.get("price", 0)))
+                            if order_req_data.get("price")
+                            else None
+                        ),
                         time_in_force=order_req_data.get("time_in_force"),
                         client_order_id=order_req_data.get("client_order_id"),
                     )
@@ -2096,11 +2191,33 @@ class OrderManager(BaseComponent):
         except Exception as e:
             self.logger.error(f"Failed to restore orders from state: {e}")
 
-    async def shutdown(self) -> None:
-        """Shutdown order manager and cleanup resources."""
+    async def stop(self) -> None:
+        """Stop the order manager and cleanup all resources."""
         try:
-            # Disable WebSocket connections
+            self.logger.info("Stopping order manager...")
+
+            # Signal shutdown to all background tasks
+            self._is_running = False
             self.websocket_enabled = False
+            self._cleanup_started = False
+
+            # Cancel WebSocket tasks first
+            websocket_tasks_to_cancel = list(self._websocket_tasks.values())
+            for task in websocket_tasks_to_cancel:
+                if not task.done():
+                    task.cancel()
+
+            # Wait for WebSocket tasks to complete
+            if websocket_tasks_to_cancel:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*websocket_tasks_to_cancel, return_exceptions=True),
+                        timeout=3.0,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("WebSocket tasks did not complete within timeout")
+
+            self._websocket_tasks.clear()
 
             # Close WebSocket connections
             for exchange, connection_info in self.websocket_connections.items():
@@ -2112,19 +2229,42 @@ class OrderManager(BaseComponent):
                     self.logger.warning(f"Error closing WebSocket for {exchange}: {e}")
 
             # Cancel all monitoring tasks
-            for task in self.monitoring_tasks.values():
-                task.cancel()
+            monitoring_tasks_to_cancel = list(self.monitoring_tasks.values())
+            for task in monitoring_tasks_to_cancel:
+                if not task.done():
+                    task.cancel()
 
             # Cancel cleanup task
-            if self._cleanup_task:
+            if self._cleanup_task and not self._cleanup_task.done():
                 self._cleanup_task.cancel()
 
-            # Wait for tasks to complete
-            if self.monitoring_tasks:
-                await asyncio.gather(*self.monitoring_tasks.values(), return_exceptions=True)
+            # Cancel all background tasks
+            if self._background_tasks:
+                self.logger.debug(f"Cancelling {len(self._background_tasks)} background tasks")
+                for task in list(self._background_tasks):
+                    if not task.done():
+                        task.cancel()
+
+            # Wait for all tasks to complete with timeout
+            all_tasks = list(self._background_tasks) + monitoring_tasks_to_cancel
+            if self._cleanup_task:
+                all_tasks.append(self._cleanup_task)
+
+            if all_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*all_tasks, return_exceptions=True), timeout=10.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Some tasks did not complete within shutdown timeout")
+
+            # Clear all task tracking
+            self.monitoring_tasks.clear()
+            self._background_tasks.clear()
+            self._cleanup_task = None
 
             # Shutdown idempotency manager
-            await self.idempotency_manager.shutdown()
+            await self.idempotency_manager.stop()
 
             # Export final order history for compliance
             try:
@@ -2133,7 +2273,36 @@ class OrderManager(BaseComponent):
             except Exception as e:
                 self.logger.warning(f"Final history export failed: {e}")
 
-            self.logger.info("Order manager shutdown completed with P-020 features and idempotency")
+            self.logger.info("Order manager stopped successfully")
 
         except Exception as e:
-            self.logger.error(f"Order manager shutdown failed: {e}")
+            self.logger.error(f"Order manager stop failed: {e}")
+            raise
+
+    async def shutdown(self) -> None:
+        """Shutdown order manager (alias for stop)."""
+        await self.stop()
+
+    def _cleanup_on_del(self) -> None:
+        """Emergency cleanup when object is deleted."""
+        try:
+            # Cancel cleanup task
+            if self._cleanup_task and not self._cleanup_task.done():
+                self._cleanup_task.cancel()
+
+            # Cancel all monitoring tasks
+            for task in self.monitoring_tasks.values():
+                if not task.done():
+                    task.cancel()
+
+            # Cancel WebSocket tasks
+            for task in self._websocket_tasks.values():
+                if not task.done():
+                    task.cancel()
+
+            # Cancel all background tasks
+            for task in self._background_tasks:
+                if not task.done():
+                    task.cancel()
+        except Exception:
+            pass  # Ignore errors during emergency cleanup

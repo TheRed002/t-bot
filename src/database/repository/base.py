@@ -78,7 +78,7 @@ class BaseRepository(RepositoryInterface[T]):
             return result.scalar_one_or_none()
         except Exception as e:
             self._logger.error(f"Error getting {self.model.__name__} by ID {id}: {e}")
-            return None
+            raise
 
     async def get_by(self, **kwargs) -> T | None:
         """Get entity by attributes."""
@@ -90,7 +90,7 @@ class BaseRepository(RepositoryInterface[T]):
             return result.scalar_one_or_none()
         except Exception as e:
             self._logger.error(f"Error getting {self.model.__name__} by {kwargs}: {e}")
-            return None
+            raise
 
     async def get_all(
         self,
@@ -143,7 +143,7 @@ class BaseRepository(RepositoryInterface[T]):
 
         except Exception as e:
             self._logger.error(f"Error getting all {self.model.__name__}: {e}")
-            return []
+            raise
 
     async def create(self, entity: T) -> T:
         """Create new entity."""
@@ -203,7 +203,7 @@ class BaseRepository(RepositoryInterface[T]):
         except Exception as e:
             self._logger.error(f"Error deleting {self.model.__name__} {id}: {e}")
             await self.session.rollback()
-            return False
+            raise
 
     async def soft_delete(self, id: Any, deleted_by: str | None = None) -> bool:
         """Soft delete entity if it supports it."""
@@ -216,7 +216,7 @@ class BaseRepository(RepositoryInterface[T]):
             return False
         except Exception as e:
             self._logger.error(f"Error soft deleting {self.model.__name__} {id}: {e}")
-            return False
+            raise
 
     async def exists(self, id: Any) -> bool:
         """Check if entity exists."""
@@ -226,12 +226,13 @@ class BaseRepository(RepositoryInterface[T]):
             return result.scalar() is not None
         except Exception as e:
             self._logger.error(f"Error checking existence of {self.model.__name__} {id}: {e}")
-            return False
+            raise
 
     async def count(self, filters: dict[str, Any] | None = None) -> int:
         """Count entities."""
         try:
             from sqlalchemy import func
+
             stmt = select(func.count()).select_from(self.model)
 
             if filters:
@@ -243,7 +244,7 @@ class BaseRepository(RepositoryInterface[T]):
             return result.scalar() or 0
         except Exception as e:
             self._logger.error(f"Error counting {self.model.__name__}: {e}")
-            return 0
+            raise
 
     async def begin(self):
         """Begin transaction."""
@@ -256,6 +257,33 @@ class BaseRepository(RepositoryInterface[T]):
     async def rollback(self):
         """Rollback transaction."""
         await self.session.rollback()
+    
+    # Methods to comply with core Repository protocol
+    async def list(
+        self,
+        limit: int | None = None,
+        offset: int | None = None,
+        filters: dict[str, Any] | None = None,
+    ) -> list[T]:
+        """
+        List entities with optional pagination and filtering.
+        
+        This is an alias for get_all() to match core protocol interface.
+        """
+        return await self.get_all(
+            filters=filters,
+            order_by=None,
+            limit=limit,
+            offset=offset
+        )
+    
+    async def get_by_id(self, entity_id: Any) -> T | None:
+        """
+        Get entity by ID.
+        
+        This is an alias for get() to match core protocol interface.
+        """
+        return await self.get(entity_id)
 
     async def refresh(self, entity: T):
         """Refresh entity from database."""

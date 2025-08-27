@@ -23,16 +23,34 @@ async def test_connection(host: str, port: int, timeout: float = 5.0) -> bool:
     Returns:
         True if connection successful, False otherwise
     """
+    reader = None
+    writer = None
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port), timeout=timeout
-        )
-        writer.close()
-        await writer.wait_closed()
-        return True
+        # Create connection task
+        conn_task = asyncio.create_task(asyncio.open_connection(host, port))
+        try:
+            reader, writer = await asyncio.wait_for(conn_task, timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            # Cancel the connection task if it times out
+            conn_task.cancel()
+            try:
+                await conn_task
+            except asyncio.CancelledError:
+                pass
+            logger.debug(f"Connection test timed out for {host}:{port}")
+            return False
     except Exception as e:
         logger.debug(f"Connection test failed for {host}:{port}: {e!s}")
         return False
+    finally:
+        if writer:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                # Ignore errors during cleanup
+                pass
 
 
 async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
@@ -50,25 +68,43 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
     Raises:
         ValidationError: If connection fails
     """
+    reader = None
+    writer = None
     try:
         loop = asyncio.get_running_loop()
         start_time = loop.time()
 
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port), timeout=timeout
-        )
+        # Create connection task
+        conn_task = asyncio.create_task(asyncio.open_connection(host, port))
+        try:
+            reader, writer = await asyncio.wait_for(conn_task, timeout=timeout)
+        except asyncio.TimeoutError:
+            # Cancel the connection task if it times out
+            conn_task.cancel()
+            try:
+                await conn_task
+            except asyncio.CancelledError:
+                pass
+            raise ValidationError(f"Connection timeout to {host}:{port}") from None
 
         end_time = loop.time()
         latency_ms = (end_time - start_time) * 1000
 
-        writer.close()
-        await writer.wait_closed()
-
         return latency_ms
 
+    except ValidationError:
+        raise
     except Exception as e:
         logger.error(f"Failed to measure latency for {host}:{port}: {e!s}")
-        raise ValidationError(f"Cannot measure latency to {host}:{port}: {e!s}")
+        raise ValidationError(f"Cannot measure latency to {host}:{port}: {e!s}") from e
+    finally:
+        if writer:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                # Ignore errors during cleanup
+                pass
 
 
 async def ping_host(host: str, count: int = 3, port: int = 80) -> dict[str, Any]:
@@ -185,7 +221,7 @@ def parse_url(url: str) -> dict[str, Any]:
         }
 
     except Exception as e:
-        raise ValidationError(f"Failed to parse URL '{url}': {e!s}")
+        raise ValidationError(f"Failed to parse URL '{url}': {e!s}") from e
 
 
 async def wait_for_service(

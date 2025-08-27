@@ -15,6 +15,14 @@ from uuid import uuid4
 
 from packaging import version
 
+try:
+    from packaging.version import LegacyVersion
+except (ImportError, AttributeError):
+    # Fallback for older packaging versions or when LegacyVersion doesn't exist
+    class LegacyVersion:
+        """Fallback LegacyVersion class for compatibility"""
+        pass
+
 from src.core.exceptions import StateError
 
 
@@ -48,7 +56,7 @@ class StateVersion:
     patch: int = 0
     build: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Parse version string into components."""
         try:
             parsed = version.parse(self.version_string)
@@ -56,7 +64,7 @@ class StateVersion:
                 self.major = parsed.major
                 self.minor = parsed.minor
                 self.patch = parsed.micro
-            elif isinstance(parsed, version.LegacyVersion):
+            elif isinstance(parsed, LegacyVersion):
                 # Handle legacy version strings
                 parts = str(parsed).split(".")
                 self.major = int(parts[0]) if len(parts) > 0 else 0
@@ -80,7 +88,9 @@ class StateVersion:
     def __ge__(self, other: "StateVersion") -> bool:
         return version.parse(self.version_string) >= version.parse(other.version_string)
 
-    def __eq__(self, other: "StateVersion") -> bool:
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, StateVersion):
+            return NotImplemented
         return version.parse(self.version_string) == version.parse(other.version_string)
 
     def is_compatible_with(self, other: "StateVersion") -> bool:
@@ -98,8 +108,8 @@ class MigrationRecord:
     migration_type: MigrationType = MigrationType.SCHEMA_UPGRADE
 
     # Version information
-    from_version: StateVersion = None
-    to_version: StateVersion = None
+    from_version: StateVersion | None = None
+    to_version: StateVersion | None = None
 
     # Execution details
     status: MigrationStatus = MigrationStatus.PENDING
@@ -296,7 +306,7 @@ class StateVersioningSystem:
             return []
 
         # Build migration graph
-        migration_graph = {}
+        migration_graph: dict[StateVersion, list[tuple[StateVersion, str]]] = {}
         for migration_id, migration in self._migrations.items():
             from_ver = migration.from_version
             to_ver = migration.to_version
@@ -308,7 +318,7 @@ class StateVersioningSystem:
         # Find path using BFS
         from collections import deque
 
-        queue = deque([(from_version, [])])
+        queue: deque[tuple[StateVersion, list[str]]] = deque([(from_version, [])])
         visited = {from_version}
 
         while queue:
@@ -431,7 +441,7 @@ class StateVersioningSystem:
                 self.logger.error(f"Migration failed: {migration_id}: {e}")
 
                 # Rollback previous migrations if needed
-                if migration.rollback:
+                if hasattr(migration, "rollback") and callable(migration.rollback):
                     try:
                         migrated_data = await migration.rollback(migrated_data, metadata)
                         record.status = MigrationStatus.ROLLED_BACK
@@ -544,7 +554,7 @@ class StateVersioningSystem:
     async def get_version_statistics(self) -> dict[str, Any]:
         """Get version and migration statistics."""
         # Get version distribution from database
-        version_counts = {}
+        version_counts: dict[str, dict[str, int]] = {}
 
         try:
             if not self._metadata_repository:

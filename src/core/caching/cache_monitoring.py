@@ -9,7 +9,7 @@ cache optimization recommendations.
 import asyncio
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -71,7 +71,7 @@ class CacheHealthReport:
     # Namespace-specific metrics
     namespace_metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class CacheMonitor(BaseComponent):
@@ -110,6 +110,7 @@ class CacheMonitor(BaseComponent):
 
         # Monitoring state
         self._monitoring_active = False
+        self._monitoring_task: asyncio.Task | None = None
         self._last_health_check = None
         self._health_check_interval = 30  # seconds
 
@@ -123,12 +124,18 @@ class CacheMonitor(BaseComponent):
             return
 
         self._monitoring_active = True
-        asyncio.create_task(self._monitoring_loop())
+        self._monitoring_task = asyncio.create_task(self._monitoring_loop())
         self.logger.info("Cache monitoring started")
 
     async def stop_monitoring(self) -> None:
         """Stop cache monitoring."""
         self._monitoring_active = False
+        if self._monitoring_task and not self._monitoring_task.done():
+            self._monitoring_task.cancel()
+            try:
+                await self._monitoring_task
+            except asyncio.CancelledError:
+                pass
         self.logger.info("Cache monitoring stopped")
 
     async def _monitoring_loop(self) -> None:
@@ -152,7 +159,7 @@ class CacheMonitor(BaseComponent):
             # Check for alerts
             await self._check_alerts(health_data)
 
-            self._last_health_check = datetime.utcnow()
+            self._last_health_check = datetime.now(timezone.utc)
 
         except Exception as e:
             self.logger.error(f"Health check failed: {e}")
@@ -160,7 +167,7 @@ class CacheMonitor(BaseComponent):
     def _update_performance_history(self, health_data: dict[str, Any]) -> None:
         """Update performance history for trend analysis."""
         history_point = {
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "ping_time": health_data.get("ping_time", 0),
             "memory_used": health_data.get("used_memory_human", "0B"),
             "connected_clients": health_data.get("connected_clients", 0),
@@ -235,7 +242,7 @@ class CacheMonitor(BaseComponent):
             message=message,
             threshold_value=threshold,
             current_value=current_value,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             namespace=namespace,
         )
 
@@ -394,7 +401,8 @@ class CacheMonitor(BaseComponent):
 
         if hit_rate < 0.70:
             recommendations.append(
-                "Consider reviewing cache TTL settings - low hit rate suggests data expires too quickly"
+                "Consider reviewing cache TTL settings - "
+                "low hit rate suggests data expires too quickly"
             )
 
         if hit_rate < 0.60:
@@ -456,7 +464,7 @@ class CacheMonitor(BaseComponent):
 
     async def get_performance_trends(self, hours: int = 24) -> dict[str, Any]:
         """Get performance trends over specified time period."""
-        cutoff_time = datetime.utcnow() - timedelta(hours=hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
 
         # Filter history to requested timeframe
         filtered_history = [

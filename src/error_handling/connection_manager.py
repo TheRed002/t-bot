@@ -191,6 +191,13 @@ class ConnectionManager:
             "last_cleanup": datetime.now(timezone.utc),
         }
 
+        # Synchronization locks to prevent race conditions
+        self._connections_lock = asyncio.Lock()
+        self._health_monitors_lock = asyncio.Lock()
+        self._message_queues_lock = asyncio.Lock()
+        self._tasks_lock = asyncio.Lock()
+        self._stats_lock = asyncio.Lock()
+
         # Cleanup task - will be started when needed
         self._cleanup_task = None
         # Don't start cleanup task immediately - start it when first connection is made
@@ -230,30 +237,33 @@ class ConnectionManager:
                 # Attempt connection
                 connection = await connect_func(**kwargs)
 
-                # Initialize connection tracking
-                self.connections[connection_id] = {
-                    "connection": connection,
-                    "type": connection_type,
-                    "state": ConnectionState.CONNECTED,
-                    "established_at": datetime.now(timezone.utc),
-                    "last_activity": datetime.now(timezone.utc),
-                    "reconnect_count": 0,
-                }
+                # Initialize connection tracking with proper locking
+                async with self._connections_lock:
+                    self.connections[connection_id] = {
+                        "connection": connection,
+                        "type": connection_type,
+                        "state": ConnectionState.CONNECTED,
+                        "established_at": datetime.now(timezone.utc),
+                        "last_activity": datetime.now(timezone.utc),
+                        "reconnect_count": 0,
+                    }
 
-                # Initialize health monitoring
-                self.health_monitors[connection_id] = ConnectionHealth(
-                    last_heartbeat=datetime.now(timezone.utc),
-                    latency_ms=0.0,
-                    packet_loss=0.0,
-                    connection_quality=1.0,
-                    uptime_seconds=0,
-                    reconnect_count=0,
-                )
+                # Initialize health monitoring with proper locking
+                async with self._health_monitors_lock:
+                    self.health_monitors[connection_id] = ConnectionHealth(
+                        last_heartbeat=datetime.now(timezone.utc),
+                        latency_ms=0.0,
+                        packet_loss=0.0,
+                        connection_quality=1.0,
+                        uptime_seconds=0,
+                        reconnect_count=0,
+                    )
 
-                # Start health monitoring
-                self._health_monitor_tasks[connection_id] = asyncio.create_task(
-                    self._monitor_connection_health(connection_id)
-                )
+                # Start health monitoring with proper locking
+                async with self._tasks_lock:
+                    self._health_monitor_tasks[connection_id] = asyncio.create_task(
+                        self._monitor_connection_health(connection_id)
+                    )
 
                 self.logger.info(
                     "Connection established successfully",
@@ -485,12 +495,22 @@ class ConnectionManager:
         try:
             if self._cleanup_task is None or self._cleanup_task.done():
                 self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+                # Add done callback to handle any exceptions
+                self._cleanup_task.add_done_callback(self._cleanup_task_done_callback)
         except RuntimeError:
             # No event loop running, cleanup task will be started on first use
             self.logger.debug(
                 "No event loop available for cleanup task - will be started on first connection"
             )
             pass
+
+    def _cleanup_task_done_callback(self, task: asyncio.Task) -> None:
+        """Handle cleanup task completion."""
+        if task.exception():
+            self.logger.error(f"Cleanup task failed: {task.exception()}")
+        # Reset task reference so it can be restarted if needed
+        if self._cleanup_task is task:
+            self._cleanup_task = None
 
     async def _periodic_cleanup(self) -> None:
         """Periodic cleanup of connection data and metrics."""
@@ -551,20 +571,27 @@ class ConnectionManager:
     async def queue_message(self, connection_id: str, message: dict[str, Any]) -> bool:
         """Queue a message for later transmission when connection is restored."""
 
-        if connection_id not in self.message_queues:
-            self.message_queues[connection_id] = MessageQueue(
-                max_size=1000, ttl_seconds=900
-            )  # 15 min TTL
+        async with self._message_queues_lock:
+            if connection_id not in self.message_queues:
+                self.message_queues[connection_id] = MessageQueue(
+                    max_size=1000, ttl_seconds=900
+                )  # 15 min TTL
 
-        success = self.message_queues[connection_id].add_message(message)
+            success = self.message_queues[connection_id].add_message(message)
 
         if success:
-            self._connection_stats["total_messages_queued"] += 1
+            async with self._stats_lock:
+                self._connection_stats["total_messages_queued"] += 1
+
+            # Get queue size safely
+            async with self._message_queues_lock:
+                queue_size = self.message_queues[connection_id].size()
+
             self.logger.info(
                 "Message queued",
                 connection_id=connection_id,
                 message_type=message.get("type", "unknown"),
-                queue_size=self.message_queues[connection_id].size(),
+                queue_size=queue_size,
             )
 
         return success
@@ -572,11 +599,12 @@ class ConnectionManager:
     async def flush_message_queue(self, connection_id: str) -> int:
         """Flush queued messages for a connection."""
 
-        if connection_id not in self.message_queues:
-            return 0
+        async with self._message_queues_lock:
+            if connection_id not in self.message_queues:
+                return 0
 
-        message_queue = self.message_queues[connection_id]
-        messages = message_queue.get_messages()  # Get valid (non-expired) messages
+            message_queue = self.message_queues[connection_id]
+            messages = message_queue.get_messages()  # Get valid (non-expired) messages
 
         if not messages:
             return 0

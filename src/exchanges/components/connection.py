@@ -1,7 +1,7 @@
 """Connection management component for exchanges."""
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
@@ -64,7 +64,7 @@ class ConnectionManager:
         self.session = aiohttp.ClientSession(connector=connector, timeout=timeout_config)
 
         self._connected = True
-        self._connection_time = datetime.utcnow()
+        self._connection_time = datetime.now(timezone.utc)
         self._logger.info(f"Connected to {self.base_url}")
 
     async def disconnect(self) -> None:

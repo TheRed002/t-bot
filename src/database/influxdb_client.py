@@ -9,25 +9,32 @@ used by all subsequent prompts for time series data storage.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.query_api import QueryApi
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
 
 # Import core components from P-001
+from src.core.config import Config
 from src.core.exceptions import DataError, DataSourceError
 
+# Import error handling from P-002A
+from src.error_handling.error_handler import ErrorHandler
+from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
+
 # Import utils from P-007A
+from src.utils.decorators import circuit_breaker, retry, time_execution
 from src.utils.formatters import format_api_response
 
 
 class InfluxDBClientWrapper(BaseComponent):
     """InfluxDB client wrapper with trading-specific utilities."""
 
-    def __init__(self, url: str, token: str, org: str, bucket: str):
+    def __init__(self, url: str, token: str, org: str, bucket: str, config: Config | None = None):
         super().__init__()  # Initialize BaseComponent
         self.url = url
         self.token = token
@@ -36,8 +43,13 @@ class InfluxDBClientWrapper(BaseComponent):
         self.client: InfluxDBClient | None = None
         self.write_api: Any | None = None
         self.query_api: QueryApi | None = None
+        self.config = config
+        self.error_handler = ErrorHandler(config) if config else None
 
-    def connect(self) -> None:
+    @time_execution
+    @retry(max_attempts=3)
+    @circuit_breaker(failure_threshold=3, recovery_timeout=30)
+    async def connect(self) -> None:
         """Connect to InfluxDB."""
         try:
             self.client = InfluxDBClient(url=self.url, token=self.token, org=self.org)
@@ -51,17 +63,53 @@ class InfluxDBClientWrapper(BaseComponent):
                 self.client.ping()
                 self.logger.info("InfluxDB connection established")
             except Exception as e:
-                raise DataSourceError(f"InfluxDB health check failed: {e!s}")
+                raise DataSourceError(f"InfluxDB health check failed: {e!s}") from e
 
         except Exception as e:
-            self.logger.error("InfluxDB connection failed", error=str(e))
-            raise DataSourceError(f"InfluxDB connection failed: {e!s}")
+            if self.error_handler and self.config:
+                # Create error context for comprehensive error handling
+                error_context = self.error_handler.create_error_context(
+                    error=e,
+                    component="influxdb_client",
+                    operation="connect",
+                    details={"influxdb_url": self.url, "org": self.org, "bucket": self.bucket},
+                )
+
+                # Use ErrorHandler for sophisticated error management
+                recovery_scenario = NetworkDisconnectionRecovery(self.config)
+                handled = await self.error_handler.handle_error(e, error_context, recovery_scenario)
+
+                if not handled:
+                    self.logger.error("InfluxDB connection failed", error=str(e))
+                    raise DataSourceError(f"InfluxDB connection failed: {e!s}") from e
+                else:
+                    self.logger.info("InfluxDB connection recovered after error handling")
+                    # Retry connection after recovery
+                    await self.connect()
+            else:
+                self.logger.error("InfluxDB connection failed", error=str(e))
+                raise DataSourceError(f"InfluxDB connection failed: {e!s}") from e
 
     def disconnect(self) -> None:
         """Disconnect from InfluxDB."""
         if self.client:
             self.client.close()
             self.logger.info("InfluxDB connection closed")
+
+    def _decimal_to_float(self, value: Any) -> float:
+        """
+        Convert Decimal to float for InfluxDB storage.
+
+        WARNING: This method intentionally loses precision for time-series storage.
+        InfluxDB requires float types, so we accept precision loss for historical data.
+        Financial calculations should always use Decimal types before calling this.
+        """
+        if isinstance(value, Decimal):
+            return float(value)
+        elif isinstance(value, (int, float)):
+            return float(value)
+        else:
+            return float(value or 0)
 
     def _create_point(
         self,
@@ -120,13 +168,13 @@ class InfluxDBClientWrapper(BaseComponent):
         """Write market data point."""
         tags = {"symbol": symbol, "data_type": "market_data"}
         fields = {
-            "price": float(data.get("price", 0)),
-            "volume": float(data.get("volume", 0)),
-            "bid": float(data.get("bid", 0)),
-            "ask": float(data.get("ask", 0)),
-            "open": float(data.get("open", 0)),
-            "high": float(data.get("high", 0)),
-            "low": float(data.get("low", 0)),
+            "price": self._decimal_to_float(data.get("price", 0)),
+            "volume": self._decimal_to_float(data.get("volume", 0)),
+            "bid": self._decimal_to_float(data.get("bid", 0)),
+            "ask": self._decimal_to_float(data.get("ask", 0)),
+            "open": self._decimal_to_float(data.get("open", 0)),
+            "high": self._decimal_to_float(data.get("high", 0)),
+            "low": self._decimal_to_float(data.get("low", 0)),
         }
 
         point = self._create_point("market_data", tags, fields, timestamp)
@@ -143,25 +191,25 @@ class InfluxDBClientWrapper(BaseComponent):
                 # Handle dict format
                 symbol = data.get("symbol", "")
                 fields = {
-                    "price": float(data.get("price", 0)),
-                    "volume": float(data.get("volume", 0)),
-                    "bid": float(data.get("bid", 0)),
-                    "ask": float(data.get("ask", 0)),
-                    "open": float(data.get("open", 0)),
-                    "high": float(data.get("high", 0)),
-                    "low": float(data.get("low", 0)),
+                    "price": self._decimal_to_float(data.get("price", 0)),
+                    "volume": self._decimal_to_float(data.get("volume", 0)),
+                    "bid": self._decimal_to_float(data.get("bid", 0)),
+                    "ask": self._decimal_to_float(data.get("ask", 0)),
+                    "open": self._decimal_to_float(data.get("open", 0)),
+                    "high": self._decimal_to_float(data.get("high", 0)),
+                    "low": self._decimal_to_float(data.get("low", 0)),
                 }
             else:
                 # Handle MarketData object format
                 symbol = getattr(data, "symbol", "")
                 fields = {
-                    "price": float(getattr(data, "price", 0)),
-                    "volume": float(getattr(data, "volume", 0) or 0),
-                    "bid": float(getattr(data, "bid", 0) or 0),
-                    "ask": float(getattr(data, "ask", 0) or 0),
-                    "high": float(getattr(data, "high_price", 0) or 0),
-                    "low": float(getattr(data, "low_price", 0) or 0),
-                    "open": float(getattr(data, "open_price", 0) or 0),
+                    "price": self._decimal_to_float(getattr(data, "price", 0)),
+                    "volume": self._decimal_to_float(getattr(data, "volume", 0) or 0),
+                    "bid": self._decimal_to_float(getattr(data, "bid", 0) or 0),
+                    "ask": self._decimal_to_float(getattr(data, "ask", 0) or 0),
+                    "high": self._decimal_to_float(getattr(data, "high_price", 0) or 0),
+                    "low": self._decimal_to_float(getattr(data, "low_price", 0) or 0),
+                    "open": self._decimal_to_float(getattr(data, "open_price", 0) or 0),
                 }
 
             tags = {"symbol": symbol, "data_type": "market_data"}
@@ -182,11 +230,11 @@ class InfluxDBClientWrapper(BaseComponent):
         }
 
         fields = {
-            "quantity": float(trade_data.get("quantity", 0)),
-            "price": float(trade_data.get("price", 0)),
-            "executed_price": float(trade_data.get("executed_price", 0)),
-            "fee": float(trade_data.get("fee", 0)),
-            "pnl": float(trade_data.get("pnl", 0)),
+            "quantity": self._decimal_to_float(trade_data.get("quantity", 0)),
+            "price": self._decimal_to_float(trade_data.get("price", 0)),
+            "executed_price": self._decimal_to_float(trade_data.get("executed_price", 0)),
+            "fee": self._decimal_to_float(trade_data.get("fee", 0)),
+            "pnl": self._decimal_to_float(trade_data.get("pnl", 0)),
         }
 
         point = self._create_point("trades", tags, fields, timestamp)
@@ -202,13 +250,13 @@ class InfluxDBClientWrapper(BaseComponent):
             "total_trades": int(metrics.get("total_trades", 0)),
             "winning_trades": int(metrics.get("winning_trades", 0)),
             "losing_trades": int(metrics.get("losing_trades", 0)),
-            "total_pnl": float(metrics.get("total_pnl", 0)),
-            "realized_pnl": float(metrics.get("realized_pnl", 0)),
-            "unrealized_pnl": float(metrics.get("unrealized_pnl", 0)),
-            "win_rate": float(metrics.get("win_rate", 0)),
-            "profit_factor": float(metrics.get("profit_factor", 0)),
-            "sharpe_ratio": float(metrics.get("sharpe_ratio", 0)),
-            "max_drawdown": float(metrics.get("max_drawdown", 0)),
+            "total_pnl": self._decimal_to_float(metrics.get("total_pnl", 0)),
+            "realized_pnl": self._decimal_to_float(metrics.get("realized_pnl", 0)),
+            "unrealized_pnl": self._decimal_to_float(metrics.get("unrealized_pnl", 0)),
+            "win_rate": self._decimal_to_float(metrics.get("win_rate", 0)),
+            "profit_factor": self._decimal_to_float(metrics.get("profit_factor", 0)),
+            "sharpe_ratio": self._decimal_to_float(metrics.get("sharpe_ratio", 0)),
+            "max_drawdown": self._decimal_to_float(metrics.get("max_drawdown", 0)),
         }
 
         point = self._create_point("performance_metrics", tags, fields, timestamp)
@@ -239,13 +287,13 @@ class InfluxDBClientWrapper(BaseComponent):
         tags = {"bot_id": bot_id, "data_type": "risk_metrics"}
 
         fields = {
-            "var_1d": float(risk_data.get("var_1d", 0)),
-            "var_5d": float(risk_data.get("var_5d", 0)),
-            "expected_shortfall": float(risk_data.get("expected_shortfall", 0)),
-            "max_drawdown": float(risk_data.get("max_drawdown", 0)),
-            "current_drawdown": float(risk_data.get("current_drawdown", 0)),
+            "var_1d": self._decimal_to_float(risk_data.get("var_1d", 0)),
+            "var_5d": self._decimal_to_float(risk_data.get("var_5d", 0)),
+            "expected_shortfall": self._decimal_to_float(risk_data.get("expected_shortfall", 0)),
+            "max_drawdown": self._decimal_to_float(risk_data.get("max_drawdown", 0)),
+            "current_drawdown": self._decimal_to_float(risk_data.get("current_drawdown", 0)),
             "position_count": int(risk_data.get("position_count", 0)),
-            "portfolio_exposure": float(risk_data.get("portfolio_exposure", 0)),
+            "portfolio_exposure": self._decimal_to_float(risk_data.get("portfolio_exposure", 0)),
         }
 
         point = self._create_point("risk_metrics", tags, fields, timestamp)
@@ -348,16 +396,16 @@ class InfluxDBClientWrapper(BaseComponent):
 
         try:
             result = self.query_api.query(query, org=self.org)
-            total_pnl = 0.0
+            total_pnl = Decimal("0")
 
             for table in result:
                 for record in table.records:
-                    total_pnl = float(record.get_value())
+                    total_pnl = Decimal(str(record.get_value()))
 
             return {"total_pnl": total_pnl}
         except Exception as e:
             self.logger.error("Failed to get daily P&L", error=str(e))
-            return {"total_pnl": 0.0}
+            return {"total_pnl": Decimal("0")}
 
     def get_win_rate(self, bot_id: str, start_time: datetime, end_time: datetime) -> float:
         """Get win rate for a bot within a time range."""
@@ -436,6 +484,5 @@ class InfluxDBClientWrapper(BaseComponent):
             )
 
 
-# Backward compatibility alias
-InfluxDBClient = InfluxDBClientWrapper
-
+# Export wrapper class
+__all__ = ["InfluxDBClientWrapper"]

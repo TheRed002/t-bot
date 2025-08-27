@@ -213,7 +213,15 @@ class StateServiceFactory:
     @staticmethod
     async def _create_validation_service() -> ValidationService:
         """Create and configure ValidationService."""
-        return ValidationService()
+        from src.core.dependency_injection import get_container
+
+        container = get_container()
+        validation_service = container.get("validation_service")
+        if not validation_service:
+            validation_service = ValidationService()
+            container.register("validation_service", validation_service, singleton=True)
+        await validation_service.initialize()
+        return validation_service
 
     @staticmethod
     async def create_state_service_for_testing(

@@ -18,7 +18,7 @@ Key Features:
 import asyncio
 import json
 from collections import defaultdict, deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -1733,7 +1733,11 @@ class RealtimeAnalyticsEngine(BaseComponent):
                         set(p.strategy for p in self._positions.values() if hasattr(p, "strategy"))
                     ),
                     "total_trades_today": len(
-                        [t for t in self._trades if t.entry_time.date() == datetime.now().date()]
+                        [
+                            t
+                            for t in self._trades
+                            if t.entry_time.date() == datetime.now(timezone.utc).date()
+                        ]
                     ),
                 },
                 # Performance summary

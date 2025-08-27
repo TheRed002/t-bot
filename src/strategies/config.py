@@ -6,7 +6,7 @@ and environment-specific configurations for all strategies.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ import yaml
 
 from src.core.exceptions import ConfigurationError
 from src.core.logging import get_logger
+
 # MANDATORY: Import from P-001
 from src.core.types import StrategyConfig, StrategyType
 
@@ -202,7 +203,7 @@ class StrategyConfigurationManager:
 
             # Add metadata
             config_dict["_metadata"] = {
-                "last_updated": datetime.now().isoformat(),
+                "last_updated": datetime.now(timezone.utc).isoformat(),
                 "version": "1.0.0",
             }
 

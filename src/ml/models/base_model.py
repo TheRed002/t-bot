@@ -7,7 +7,7 @@ ensuring consistency, proper lifecycle management, and integration with the ML i
 
 import abc
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -95,8 +95,8 @@ class BaseMLModel(BaseService, abc.ABC):
         self.metrics: dict[str, float] = {}
         self.training_history: list[dict[str, Any]] = []
         self.metadata: dict[str, Any] = {
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "training_data_hash": None,
             "hyperparameters": {},
         }
@@ -280,9 +280,11 @@ class BaseMLModel(BaseService, abc.ABC):
             # Update training history
             if self.ml_config.enable_training_history:
                 training_record = {
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "metrics": all_metrics,
-                    "hyperparameters": self.model.get_params() if hasattr(self.model, "get_params") else {},
+                    "hyperparameters": (
+                        self.model.get_params() if hasattr(self.model, "get_params") else {}
+                    ),
                     "data_hash": data_hash,
                 }
                 self.training_history.append(training_record)
@@ -294,7 +296,7 @@ class BaseMLModel(BaseService, abc.ABC):
 
             # Mark as trained
             self.is_trained = True
-            self.metadata["updated_at"] = datetime.utcnow().isoformat()
+            self.metadata["updated_at"] = datetime.now(timezone.utc).isoformat()
 
             self._logger.info(
                 "Model training completed", model_name=self.model_name, metrics=all_metrics

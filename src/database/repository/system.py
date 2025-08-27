@@ -1,8 +1,8 @@
 """System repositories implementation."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.system import (
     Alert,
@@ -10,15 +10,18 @@ from src.database.models.system import (
     BalanceSnapshot,
     PerformanceMetrics,
 )
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 
-class AlertRepository(BaseRepository[Alert]):
+class AlertRepository(DatabaseRepository[Alert, str]):
     """Repository for Alert entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize alert repository."""
-        super().__init__(session, Alert)
+
+        super().__init__(
+            session=session, model=Alert, entity_type=Alert, key_type=str, name="AlertRepository"
+        )
 
     async def get_by_user(self, user_id: str) -> list[Alert]:
         """Get alerts by user."""
@@ -62,12 +65,19 @@ class AlertRepository(BaseRepository[Alert]):
         return count
 
 
-class AuditLogRepository(BaseRepository[AuditLog]):
+class AuditLogRepository(DatabaseRepository[AuditLog, str]):
     """Repository for AuditLog entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize audit log repository."""
-        super().__init__(session, AuditLog)
+
+        super().__init__(
+            session=session,
+            model=AuditLog,
+            entity_type=AuditLog,
+            key_type=str,
+            name="AuditLogRepository",
+        )
 
     async def get_by_user(self, user_id: str) -> list[AuditLog]:
         """Get audit logs by user."""
@@ -90,16 +100,23 @@ class AuditLogRepository(BaseRepository[AuditLog]):
 
     async def get_recent_logs(self, hours: int = 24) -> list[AuditLog]:
         """Get recent audit logs."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         return await self.get_all(filters={"timestamp": {"gte": since}}, order_by="-timestamp")
 
 
-class PerformanceMetricsRepository(BaseRepository[PerformanceMetrics]):
+class PerformanceMetricsRepository(DatabaseRepository[PerformanceMetrics, str]):
     """Repository for PerformanceMetrics entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize performance metrics repository."""
-        super().__init__(session, PerformanceMetrics)
+
+        super().__init__(
+            session=session,
+            model=PerformanceMetrics,
+            entity_type=PerformanceMetrics,
+            key_type=str,
+            name="PerformanceMetricsRepository",
+        )
 
     async def get_by_bot(self, bot_id: str) -> list[PerformanceMetrics]:
         """Get performance metrics by bot."""
@@ -126,12 +143,19 @@ class PerformanceMetricsRepository(BaseRepository[PerformanceMetrics]):
         return await self.get_all(order_by="-total_pnl", limit=limit)
 
 
-class BalanceSnapshotRepository(BaseRepository[BalanceSnapshot]):
+class BalanceSnapshotRepository(DatabaseRepository[BalanceSnapshot, str]):
     """Repository for BalanceSnapshot entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize balance snapshot repository."""
-        super().__init__(session, BalanceSnapshot)
+
+        super().__init__(
+            session=session,
+            model=BalanceSnapshot,
+            entity_type=BalanceSnapshot,
+            key_type=str,
+            name="BalanceSnapshotRepository",
+        )
 
     async def get_by_user(self, user_id: str) -> list[BalanceSnapshot]:
         """Get balance snapshots by user."""
@@ -160,7 +184,7 @@ class BalanceSnapshotRepository(BaseRepository[BalanceSnapshot]):
         self, user_id: str, exchange: str, currency: str, days: int = 30
     ) -> list[BalanceSnapshot]:
         """Get balance history for specified period."""
-        end_date = datetime.utcnow()
+        end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
         return await self.get_all(
             filters={

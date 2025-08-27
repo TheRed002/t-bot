@@ -5,8 +5,7 @@ import time
 from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
-from src.base import BaseComponent
-from src.core.logging import get_logger
+from src.core import BaseComponent
 from src.error_handling.security_rate_limiter import (
     get_security_rate_limiter,
     record_recovery_failure,
@@ -54,8 +53,7 @@ class RetryRecovery(BaseComponent):
             max_delay: Maximum delay between retries
             exponential_base: Base for exponential backoff
         """
-        super().__init__()  # Initialize BaseComponent
-        self._logger = get_logger(self.__class__.__module__)
+        super().__init__(name="RetryRecovery", config={})
         self._max_attempts = max_attempts
         self.base_delay = base_delay
         self.max_delay = max_delay
@@ -139,8 +137,7 @@ class CircuitBreakerRecovery(BaseComponent):
             timeout: Time before attempting half-open state
             half_open_requests: Requests allowed in half-open state
         """
-        super().__init__()  # Initialize BaseComponent
-        self._logger = get_logger(self.__class__.__module__)
+        super().__init__(name="CircuitBreakerRecovery", config={})
         self._max_attempts = 1  # Circuit breaker doesn't retry
         self.failure_threshold = failure_threshold
         self.timeout = timeout
@@ -248,8 +245,7 @@ class FallbackRecovery(BaseComponent):
             fallback_function: Function to call as fallback
             max_attempts: Maximum fallback attempts
         """
-        super().__init__()  # Initialize BaseComponent
-        self._logger = get_logger(self.__class__.__module__)
+        super().__init__(name="FallbackRecovery", config={})
         self.fallback_function = fallback_function
         self._max_attempts = max_attempts
 

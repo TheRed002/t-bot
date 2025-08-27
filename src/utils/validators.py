@@ -14,6 +14,7 @@ Dependencies:
 - P-001: Core types, exceptions, logging
 """
 
+import math
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -26,7 +27,7 @@ from src.utils.validation.core import ValidationFramework as CoreValidationFrame
 
 def validate_decimal_precision(value: Decimal | float | str, places: int = 8) -> bool:
     """
-    Validate decimal precision for financial data.
+    Validate decimal precision for financial data with enhanced parameter validation.
 
     Args:
         value: The value to check
@@ -34,8 +35,21 @@ def validate_decimal_precision(value: Decimal | float | str, places: int = 8) ->
 
     Returns:
         bool: True if precision is within limits
+
+    Raises:
+        ValidationError: If parameters are invalid
     """
+    # Validate places parameter
+    if not isinstance(places, int) or places < 0:
+        raise ValidationError(f"places must be a non-negative integer, got: {places}")
+
+    if places > 28:  # Maximum practical decimal precision
+        raise ValidationError(f"places cannot exceed 28 decimal places, got: {places}")
+
     try:
+        if value is None:
+            return False
+
         decimal_value = Decimal(str(value))
         # Check if it's a special value (NaN, Infinity, etc.)
         if not decimal_value.is_finite():
@@ -54,6 +68,323 @@ def validate_decimal_precision(value: Decimal | float | str, places: int = 8) ->
         return False
 
 
+def validate_ttl(ttl: int | float | None, max_ttl: int = 86400) -> int:
+    """
+    Validate TTL (Time To Live) parameter with comprehensive checks.
+
+    Args:
+        ttl: TTL value in seconds
+        max_ttl: Maximum allowed TTL (default: 24 hours)
+
+    Returns:
+        int: Validated TTL value
+
+    Raises:
+        ValidationError: If TTL is invalid
+    """
+    if ttl is None:
+        raise ValidationError("TTL cannot be None")
+
+    try:
+        ttl_int = int(ttl)
+    except (ValueError, TypeError, OverflowError):
+        raise ValidationError(f"TTL must be convertible to integer, got: {type(ttl).__name__}")
+
+    if ttl_int < 0:
+        raise ValidationError(f"TTL must be non-negative, got: {ttl_int}")
+
+    if ttl_int == 0:
+        raise ValidationError("TTL cannot be zero (would expire immediately)")
+
+    if ttl_int > max_ttl:
+        raise ValidationError(f"TTL exceeds maximum allowed value of {max_ttl}s, got: {ttl_int}")
+
+    return ttl_int
+
+
+def validate_precision_range(
+    precision: int, min_precision: int = 0, max_precision: int = 28
+) -> int:
+    """
+    Validate precision parameter is within acceptable range.
+
+    Args:
+        precision: Precision value to validate
+        min_precision: Minimum allowed precision
+        max_precision: Maximum allowed precision
+
+    Returns:
+        int: Validated precision value
+
+    Raises:
+        ValidationError: If precision is out of range
+    """
+    if not isinstance(precision, int):
+        raise ValidationError(f"Precision must be an integer, got: {type(precision).__name__}")
+
+    if precision < min_precision:
+        raise ValidationError(f"Precision below minimum: {precision} < {min_precision}")
+
+    if precision > max_precision:
+        raise ValidationError(f"Precision above maximum: {precision} > {max_precision}")
+
+    return precision
+
+
+def validate_financial_range(
+    value: Decimal | float,
+    min_value: Decimal | float | None = None,
+    max_value: Decimal | float | None = None,
+    field_name: str = "value",
+) -> Decimal:
+    """
+    Validate financial value is within acceptable range with dynamic bounds.
+
+    Args:
+        value: Financial value to validate
+        min_value: Minimum allowed value (adaptive)
+        max_value: Maximum allowed value (adaptive)
+        field_name: Name of field for error messages
+
+    Returns:
+        Decimal: Validated value as Decimal
+
+    Raises:
+        ValidationError: If value is out of range or invalid
+    """
+    if value is None:
+        raise ValidationError(f"{field_name} cannot be None")
+
+    try:
+        if isinstance(value, Decimal):
+            decimal_value = value
+        else:
+            decimal_value = Decimal(str(value))
+    except (ValueError, InvalidOperation, OverflowError):
+        raise ValidationError(f"Invalid {field_name}: cannot convert to Decimal")
+
+    if not decimal_value.is_finite():
+        raise ValidationError(f"{field_name} must be finite, got: {decimal_value}")
+
+    # Dynamic range validation
+    if min_value is not None:
+        min_decimal = Decimal(str(min_value)) if not isinstance(min_value, Decimal) else min_value
+        if decimal_value < min_decimal:
+            raise ValidationError(f"{field_name} below minimum: {decimal_value} < {min_decimal}")
+
+    if max_value is not None:
+        max_decimal = Decimal(str(max_value)) if not isinstance(max_value, Decimal) else max_value
+        if decimal_value > max_decimal:
+            raise ValidationError(f"{field_name} above maximum: {decimal_value} > {max_decimal}")
+
+    return decimal_value
+
+
+def validate_null_handling(value: Any, allow_null: bool = False, field_name: str = "value") -> Any:
+    """
+    Comprehensive null/None value handling with explicit policies.
+
+    Args:
+        value: Value to check for null
+        allow_null: Whether null values are allowed
+        field_name: Name of field for error messages
+
+    Returns:
+        Any: The original value if valid
+
+    Raises:
+        ValidationError: If null handling policy is violated
+    """
+    if value is None:
+        if allow_null:
+            return None
+        else:
+            raise ValidationError(f"{field_name} cannot be None")
+
+    # Check for other null-like values
+    if isinstance(value, str) and value.strip() == "":
+        if allow_null:
+            return None
+        else:
+            raise ValidationError(f"{field_name} cannot be empty string")
+
+    # Check for NaN values
+    if isinstance(value, float) and math.isnan(value):
+        if allow_null:
+            return None
+        else:
+            raise ValidationError(f"{field_name} cannot be NaN")
+
+    return value
+
+
+def validate_type_conversion(
+    value: Any, target_type: type, field_name: str = "value", strict: bool = True
+) -> Any:
+    """
+    Validate type conversion with comprehensive error handling.
+
+    Args:
+        value: Value to convert
+        target_type: Target type for conversion
+        field_name: Name of field for error messages
+        strict: Whether to enforce strict type conversion
+
+    Returns:
+        Any: Converted value
+
+    Raises:
+        ValidationError: If conversion fails
+    """
+    if value is None:
+        raise ValidationError(f"Cannot convert None {field_name} to {target_type.__name__}")
+
+    try:
+        if target_type == Decimal:
+            if isinstance(value, Decimal):
+                return value
+            elif isinstance(value, (int, float)):
+                if isinstance(value, float):
+                    if not math.isfinite(value):
+                        raise ValidationError(
+                            f"Cannot convert non-finite float {field_name} to Decimal"
+                        )
+                return Decimal(str(value))
+            elif isinstance(value, str):
+                return Decimal(value.strip())
+            else:
+                raise ValidationError(f"Cannot convert {type(value).__name__} to Decimal")
+
+        elif target_type == float:
+            if isinstance(value, float):
+                if not math.isfinite(value):
+                    raise ValidationError(f"Invalid float {field_name}: {value}")
+                return value
+            elif isinstance(value, (int, Decimal)):
+                result = float(value)
+                if not math.isfinite(result):
+                    raise ValidationError(
+                        f"Conversion of {field_name} to float resulted in non-finite value"
+                    )
+                return result
+            else:
+                return float(value)  # Let Python handle the conversion
+
+        elif target_type == int:
+            if isinstance(value, int):
+                return value
+            elif isinstance(value, (float, Decimal)):
+                if isinstance(value, float) and not math.isfinite(value):
+                    raise ValidationError(f"Cannot convert non-finite float {field_name} to int")
+                result = int(value)
+                if not strict:
+                    return result
+                # Strict mode: check for precision loss
+                if float(result) != float(value):
+                    raise ValidationError(
+                        f"Precision loss converting {field_name} to int: {value} -> {result}"
+                    )
+                return result
+            else:
+                return int(value)  # Let Python handle the conversion
+
+        else:
+            return target_type(value)
+
+    except (ValueError, TypeError, OverflowError, InvalidOperation) as e:
+        raise ValidationError(f"Failed to convert {field_name} to {target_type.__name__}: {e}")
+
+
+def validate_market_conditions(
+    price: Decimal | float,
+    volume: Decimal | float = None,
+    spread: Decimal | float = None,
+    symbol: str = "unknown",
+) -> dict[str, Decimal]:
+    """
+    Dynamic range validation based on market conditions.
+
+    Args:
+        price: Current price
+        volume: Trading volume (optional)
+        spread: Bid-ask spread (optional)
+        symbol: Trading symbol for context
+
+    Returns:
+        dict: Validated values as Decimals
+
+    Raises:
+        ValidationError: If market conditions are invalid
+    """
+    result = {}
+
+    # Validate price with dynamic ranges based on asset type
+    price_decimal = validate_financial_range(
+        price,
+        min_value=Decimal("0.00000001"),  # Minimum for crypto
+        max_value=Decimal("10000000"),  # $10M per unit maximum
+        field_name=f"price for {symbol}",
+    )
+    result["price"] = price_decimal
+
+    # Validate volume if provided
+    if volume is not None:
+        volume_decimal = validate_financial_range(
+            volume,
+            min_value=Decimal("0"),
+            max_value=Decimal("1000000000"),  # $1B volume limit
+            field_name=f"volume for {symbol}",
+        )
+        result["volume"] = volume_decimal
+
+    # Validate spread if provided
+    if spread is not None:
+        spread_decimal = validate_financial_range(
+            spread,
+            min_value=Decimal("0"),
+            max_value=price_decimal * Decimal("0.1"),  # Max 10% spread
+            field_name=f"spread for {symbol}",
+        )
+        result["spread"] = spread_decimal
+
+    return result
+
+
+def _validate_symbol(data: dict[str, Any]) -> None:
+    """Validate symbol field in market data."""
+    if not data.get("symbol"):
+        raise ValidationError("MarketData symbol is required")
+
+    symbol = data.get("symbol")
+    if not isinstance(symbol, str) or not symbol.strip():
+        raise ValidationError("MarketData symbol must be a non-empty string")
+
+
+def _validate_numeric_field(data: dict[str, Any], field: str) -> None:
+    """Validate a numeric field in market data."""
+    if field in data and data[field] is not None:
+        try:
+            field_val = float(data[field])
+            if field_val < 0:
+                raise ValidationError(f"MarketData {field} cannot be negative")
+        except (ValueError, TypeError) as e:
+            raise ValidationError(f"Invalid MarketData {field}: {e}") from e
+
+
+def _validate_bid_ask_relationship(data: dict[str, Any]) -> None:
+    """Validate bid/ask price relationship."""
+    if "bid" in data and "ask" in data and data["bid"] is not None and data["ask"] is not None:
+        if float(data["bid"]) > float(data["ask"]):
+            raise ValidationError("MarketData bid cannot be greater than ask")
+
+
+def _validate_timestamp(data: dict[str, Any]) -> None:
+    """Validate timestamp field."""
+    if "timestamp" in data and data["timestamp"] is not None:
+        if not isinstance(data["timestamp"], int | float | str):
+            raise ValidationError("MarketData timestamp must be numeric or string")
+
+
 def validate_market_data(data: dict[str, Any]) -> bool:
     """
     Comprehensive validation for market data.
@@ -67,59 +398,19 @@ def validate_market_data(data: dict[str, Any]) -> bool:
     Raises:
         ValidationError: If validation fails
     """
-    # Check required fields
-    if not data.get("symbol"):
-        raise ValidationError("MarketData symbol is required")
+    # Check required fields and validate symbol
+    _validate_symbol(data)
 
-    # Validate symbol format
-    symbol = data.get("symbol")
-    if not isinstance(symbol, str) or not symbol.strip():
-        raise ValidationError("MarketData symbol must be a non-empty string")
-
-    # Validate price
-    if "price" in data and data["price"] is not None:
-        try:
-            price_val = float(data["price"])
-            if price_val < 0:
-                raise ValidationError("MarketData price cannot be negative")
-        except (ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid MarketData price: {e}") from e
-
-    # Validate volume
-    if "volume" in data and data["volume"] is not None:
-        try:
-            volume_val = float(data["volume"])
-            if volume_val < 0:
-                raise ValidationError("MarketData volume cannot be negative")
-        except (ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid MarketData volume: {e}") from e
-
-    # Validate bid/ask if present
-    if "bid" in data and data["bid"] is not None:
-        try:
-            bid_val = float(data["bid"])
-            if bid_val < 0:
-                raise ValidationError("MarketData bid cannot be negative")
-        except (ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid MarketData bid: {e}") from e
-
-    if "ask" in data and data["ask"] is not None:
-        try:
-            ask_val = float(data["ask"])
-            if ask_val < 0:
-                raise ValidationError("MarketData ask cannot be negative")
-        except (ValueError, TypeError) as e:
-            raise ValidationError(f"Invalid MarketData ask: {e}") from e
+    # Validate numeric fields
+    numeric_fields = ["price", "volume", "bid", "ask"]
+    for field in numeric_fields:
+        _validate_numeric_field(data, field)
 
     # Validate bid/ask relationship
-    if "bid" in data and "ask" in data and data["bid"] is not None and data["ask"] is not None:
-        if float(data["bid"]) > float(data["ask"]):
-            raise ValidationError("MarketData bid cannot be greater than ask")
+    _validate_bid_ask_relationship(data)
 
-    # Validate timestamp if present
-    if "timestamp" in data and data["timestamp"] is not None:
-        if not isinstance(data["timestamp"], (int, float, str)):
-            raise ValidationError("MarketData timestamp must be numeric or string")
+    # Validate timestamp
+    _validate_timestamp(data)
 
     return True
 
@@ -177,7 +468,7 @@ class ValidationFramework:
             raise
 
     @staticmethod
-    def validate_price(price: Any, max_price: float = 1_000_000) -> bool:
+    def validate_price(price: Any, max_price: float = 1_000_000) -> float:
         """
         Validate and normalize price using core validation.
 
@@ -186,7 +477,7 @@ class ValidationFramework:
             max_price: Maximum allowed price
 
         Returns:
-            True if valid
+            Normalized price value (rounded to 8 decimals)
 
         Raises:
             ValidationError: If price is invalid
@@ -199,7 +490,7 @@ class ValidationFramework:
             raise
 
     @staticmethod
-    def validate_quantity(quantity: Any, min_qty: float = 0.00000001) -> bool:
+    def validate_quantity(quantity: Any, min_qty: float = 0.00000001) -> float:
         """
         Validate and normalize quantity using core validation.
 
@@ -208,7 +499,7 @@ class ValidationFramework:
             min_qty: Minimum allowed quantity
 
         Returns:
-            True if valid
+            Normalized quantity value
 
         Raises:
             ValidationError: If quantity is invalid
@@ -221,7 +512,7 @@ class ValidationFramework:
             raise
 
     @staticmethod
-    def validate_symbol(symbol: str) -> bool:
+    def validate_symbol(symbol: str) -> str:
         """
         Validate and normalize trading symbol using core validation.
 
@@ -229,7 +520,7 @@ class ValidationFramework:
             symbol: Trading symbol to validate
 
         Returns:
-            True if valid
+            Normalized symbol string
 
         Raises:
             ValidationError: If symbol is invalid
@@ -342,9 +633,12 @@ ValidationUtilities = ValidationFramework
 
 
 # Standalone validation functions for backward compatibility
+# NOTE: These functions are deprecated. Use ValidationService instead.
 def validate_decimal(value: Any) -> Decimal:
     """
     Validate and convert value to Decimal.
+
+    DEPRECATED: Use ValidationService.validate_decimal() instead.
 
     Args:
         value: Value to validate
@@ -355,14 +649,10 @@ def validate_decimal(value: Any) -> Decimal:
     Raises:
         ValidationError: If value cannot be converted to Decimal
     """
+    # Use ValidationService internally to avoid duplication
+    from src.utils.validation.service import get_validation_service
 
-    if isinstance(value, Decimal):
-        return value
-
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError, TypeError) as e:
-        raise ValidationError(f"Invalid decimal value: {value}") from e
+    return get_validation_service().validate_decimal(value)
 
 
 def validate_positive_number(value: Any) -> float:

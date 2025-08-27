@@ -1,22 +1,24 @@
 """Bot-specific repository implementations."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging import get_logger
 from src.database.models.bot import Bot, BotLog, Signal, Strategy
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 logger = get_logger(__name__)
 
 
-class BotRepository(BaseRepository[Bot]):
+class BotRepository(DatabaseRepository[Bot, str]):
     """Repository for Bot entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(session, Bot)
+        super().__init__(
+            session=session, model=Bot, entity_type=Bot, key_type=str, name="BotRepository"
+        )
 
     async def get_active_bots(self) -> list[Bot]:
         """Get all active bots."""
@@ -100,11 +102,17 @@ class BotRepository(BaseRepository[Bot]):
         }
 
 
-class StrategyRepository(BaseRepository[Strategy]):
+class StrategyRepository(DatabaseRepository[Strategy, str]):
     """Repository for Strategy entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(session, Strategy)
+        super().__init__(
+            session=session,
+            model=Strategy,
+            entity_type=Strategy,
+            key_type=str,
+            name="StrategyRepository",
+        )
 
     async def get_active_strategies(self, bot_id: str | None = None) -> list[Strategy]:
         """Get active strategies."""
@@ -161,11 +169,13 @@ class StrategyRepository(BaseRepository[Strategy]):
         return False
 
 
-class SignalRepository(BaseRepository[Signal]):
+class SignalRepository(DatabaseRepository[Signal, str]):
     """Repository for Signal entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(session, Signal)
+        super().__init__(
+            session=session, model=Signal, entity_type=Signal, key_type=str, name="SignalRepository"
+        )
 
     async def get_unexecuted_signals(self, strategy_id: str | None = None) -> list[Signal]:
         """Get unexecuted signals."""
@@ -186,13 +196,13 @@ class SignalRepository(BaseRepository[Signal]):
     ) -> list[Signal]:
         """Get recent signals."""
         from sqlalchemy import select
-        
-        since = datetime.utcnow() - timedelta(hours=hours)
+
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         stmt = select(Signal).where(Signal.created_at >= since)
-        
+
         if strategy_id:
             stmt = stmt.where(Signal.strategy_id == strategy_id)
-            
+
         stmt = stmt.order_by(Signal.created_at.desc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -211,7 +221,10 @@ class SignalRepository(BaseRepository[Signal]):
         return False
 
     async def update_signal_outcome(
-        self, signal_id: str, outcome: str, pnl: float | None = None
+        self,
+        signal_id: str,
+        outcome: str,
+        pnl: float | None = None,  # TODO: Should be Decimal
     ) -> bool:
         """Update signal outcome."""
         signal = await self.get(signal_id)
@@ -228,12 +241,12 @@ class SignalRepository(BaseRepository[Signal]):
     ) -> dict[str, Any]:
         """Get signal statistics for a strategy."""
         from sqlalchemy import select
-        
+
         stmt = select(Signal).where(Signal.strategy_id == strategy_id)
-        
+
         if since:
             stmt = stmt.where(Signal.created_at >= since)
-            
+
         result = await self.session.execute(stmt)
         signals = list(result.scalars().all())
 
@@ -263,11 +276,13 @@ class SignalRepository(BaseRepository[Signal]):
         }
 
 
-class BotLogRepository(BaseRepository[BotLog]):
+class BotLogRepository(DatabaseRepository[BotLog, str]):
     """Repository for BotLog entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(session, BotLog)
+        super().__init__(
+            session=session, model=BotLog, entity_type=BotLog, key_type=str, name="BotLogRepository"
+        )
 
     async def get_logs_by_bot(
         self, bot_id: str, level: str | None = None, limit: int = 100
@@ -282,16 +297,15 @@ class BotLogRepository(BaseRepository[BotLog]):
     async def get_error_logs(self, bot_id: str | None = None, hours: int = 24) -> list[BotLog]:
         """Get error logs."""
         from sqlalchemy import select
-        
-        since = datetime.utcnow() - timedelta(hours=hours)
+
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         stmt = select(BotLog).where(
-            BotLog.level.in_(["ERROR", "CRITICAL"]), 
-            BotLog.created_at >= since
+            BotLog.level.in_(["ERROR", "CRITICAL"]), BotLog.created_at >= since
         )
-        
+
         if bot_id:
             stmt = stmt.where(BotLog.bot_id == bot_id)
-            
+
         stmt = stmt.order_by(BotLog.created_at.desc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -314,8 +328,8 @@ class BotLogRepository(BaseRepository[BotLog]):
     async def cleanup_old_logs(self, days: int = 30) -> int:
         """Delete logs older than specified days."""
         from sqlalchemy import delete
-        
-        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = delete(BotLog).where(BotLog.created_at < cutoff)
         result = await self.session.execute(stmt)
         await self.session.flush()

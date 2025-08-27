@@ -6,7 +6,7 @@ order history, and trade analysis functionality.
 """
 
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -314,7 +314,11 @@ async def place_order(
                     # Recovery was successful
                     logger.info(
                         "Order error recovered by global handler",
-                        order_id=execution_result.execution_id if "execution_result" in locals() else None,
+                        order_id=(
+                            execution_result.execution_id
+                            if "execution_result" in locals()
+                            else None
+                        ),
                         recovery_method=error_context.details.get("recovery_method", "unknown"),
                     )
                     return {
@@ -484,8 +488,8 @@ async def get_orders(
                 commission_asset="USDT",
                 exchange=order_exchange,
                 bot_id=f"bot_{(i % 3) + 1:03d}" if i % 4 != 0 else None,
-                created_at=datetime.utcnow() - timedelta(hours=i),
-                updated_at=datetime.utcnow() - timedelta(hours=i, minutes=30),
+                created_at=datetime.now(timezone.utc) - timedelta(hours=i),
+                updated_at=datetime.now(timezone.utc) - timedelta(hours=i, minutes=30),
             )
 
             # Apply bot_id filter
@@ -542,8 +546,8 @@ async def get_order(
             commission_asset="USDT",
             exchange=exchange,
             bot_id="bot_001",
-            created_at=datetime.utcnow() - timedelta(hours=2),
-            updated_at=datetime.utcnow() - timedelta(hours=1),
+            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            updated_at=datetime.now(timezone.utc) - timedelta(hours=1),
             fills=[
                 {
                     "trade_id": "trade_001",
@@ -551,7 +555,7 @@ async def get_order(
                     "price": "44950.00",
                     "commission": "0.1",
                     "commission_asset": "USDT",
-                    "executed_at": (datetime.utcnow() - timedelta(hours=1)).isoformat(),
+                    "executed_at": (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
                 }
             ],
         )
@@ -605,7 +609,7 @@ async def get_trades(
             trade_symbol = symbols[i % len(symbols)]
             trade_exchange = exchanges[i % len(exchanges)]
 
-            executed_at = datetime.utcnow() - timedelta(hours=i, minutes=i * 5)
+            executed_at = datetime.now(timezone.utc) - timedelta(hours=i, minutes=i * 5)
 
             # Apply date filters
             if start_date and executed_at < start_date:
@@ -691,7 +695,7 @@ async def get_market_data(
             change_24h_percentage=float((current_price - base_price) / base_price * 100),
             high_24h=current_price * Decimal("1.05"),
             low_24h=current_price * Decimal("0.95"),
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
 
         return mock_data
@@ -747,7 +751,11 @@ async def get_order_book(
             asks.append([price, quantity])
 
         return OrderBookResponse(
-            symbol=symbol, exchange=exchange, bids=bids, asks=asks, timestamp=datetime.utcnow()
+            symbol=symbol,
+            exchange=exchange,
+            bids=bids,
+            asks=asks,
+            timestamp=datetime.now(timezone.utc),
         )
 
     except Exception as e:

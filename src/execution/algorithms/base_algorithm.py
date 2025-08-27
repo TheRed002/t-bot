@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import ExecutionError, ValidationError
 
@@ -35,6 +35,9 @@ from src.execution.execution_state import ExecutionState
 
 # Import internal execution instruction type
 from src.execution.types import ExecutionInstruction
+
+# Import result wrapper for backward compatibility
+from src.execution.execution_result_wrapper import ExecutionResultWrapper
 
 # MANDATORY: Import from P-007A
 from src.utils import log_calls, time_execution
@@ -66,7 +69,7 @@ class BaseAlgorithm(BaseComponent, ABC):
         self.config = config
 
         # Algorithm state
-        self.is_running = False
+        # is_running is managed by BaseComponent
         self.current_executions: dict[str, ExecutionState] = {}
 
         # Performance tracking
@@ -78,15 +81,15 @@ class BaseAlgorithm(BaseComponent, ABC):
 
     async def start(self) -> None:
         """Start the execution algorithm."""
-        self.is_running = True
+        await super().start()  # This sets _is_running = True
         self.logger.info(f"Started {self.__class__.__name__} execution algorithm")
 
     async def stop(self) -> None:
         """Stop the execution algorithm."""
-        self.is_running = False
         # Cancel any running executions
         for execution_id in list(self.current_executions.keys()):
             await self.cancel_execution(execution_id)
+        await super().stop()  # This sets _is_running = False
         self.logger.info(f"Stopped {self.__class__.__name__} execution algorithm")
 
     @abstractmethod
@@ -267,8 +270,8 @@ class BaseAlgorithm(BaseComponent, ABC):
         return state
 
     def _state_to_result(self, state: ExecutionState) -> ExecutionResult:
-        """Convert ExecutionState to core ExecutionResult."""
-        return ExecutionResultAdapter.to_core_result(
+        """Convert ExecutionState to core ExecutionResult and wrap for compatibility."""
+        core_result = ExecutionResultAdapter.to_core_result(
             execution_id=state.execution_id,
             original_order=state.original_order,
             algorithm=state.algorithm,
@@ -283,6 +286,8 @@ class BaseAlgorithm(BaseComponent, ABC):
             error_message=state.error_message,
             metadata=state.metadata,
         )
+        # Always wrap the result for backward compatibility
+        return ExecutionResultWrapper(core_result, state.original_order, state.algorithm)
 
     async def _update_execution_state(
         self,
@@ -317,6 +322,60 @@ class BaseAlgorithm(BaseComponent, ABC):
             execution_state.set_completed(datetime.now(timezone.utc))
 
         return execution_state
+
+    async def _create_execution_result(
+        self, instruction: ExecutionInstruction, execution_id: str | None = None
+    ) -> ExecutionResult:
+        """
+        Create an initial execution result for tracking.
+        This is a convenience method that creates a state and converts it to result.
+        
+        Args:
+            instruction: Execution instruction
+            execution_id: Optional execution ID (generated if not provided)
+        
+        Returns:
+            ExecutionResult: Initial execution result with execution_id property
+        """
+        state = await self._create_execution_state(instruction, execution_id)
+        # Register the state
+        self.current_executions[state.execution_id] = state
+        # _state_to_result already returns wrapped result
+        return self._state_to_result(state)
+        
+    async def _update_execution_result(
+        self,
+        execution_result: ExecutionResult,
+        status: ExecutionStatus | None = None,
+        child_order: OrderResponse | None = None,
+        error_message: str | None = None,
+    ) -> ExecutionResult:
+        """
+        Update an execution result with new information.
+        This method updates the underlying state and returns the updated result.
+        
+        Args:
+            execution_result: Execution result to update
+            status: New status (optional)
+            child_order: New child order to add (optional)
+            error_message: Error message if failed (optional)
+        
+        Returns:
+            ExecutionResult: Updated execution result
+        """
+        # Find the corresponding state
+        # Get execution_id from either property or attribute
+        execution_id = getattr(execution_result, 'execution_id', None) or execution_result.instruction_id
+        state = self.current_executions.get(execution_id)
+        if not state:
+            # If no state found, create one from the result
+            raise ExecutionError(f"No execution state found for {execution_id}")
+            
+        # Update the state
+        await self._update_execution_state(state, status, child_order, error_message)
+        
+        # _state_to_result already returns wrapped result
+        return self._state_to_result(state)
 
     async def _calculate_slippage_metrics(
         self, execution_state: ExecutionState, expected_price: Decimal | None = None
@@ -363,9 +422,9 @@ class BaseAlgorithm(BaseComponent, ABC):
                 "Slippage metrics calculated",
                 execution_id=execution_state.execution_id,
                 price_slippage=(
-                    float(execution_state.price_slippage) if execution_state.price_slippage else 0
+                    str(execution_state.price_slippage) if execution_state.price_slippage else 0
                 ),
-                total_fees=float(execution_state.total_fees),
+                total_fees=str(execution_state.total_fees),
             )
 
         except (ValidationError, ExecutionError) as e:
@@ -433,3 +492,32 @@ class BaseAlgorithm(BaseComponent, ABC):
                 removed_count=len(to_remove),
                 remaining_count=len(self.current_executions),
             )
+
+    # Abstract methods required by BaseComponent
+    async def _do_start(self) -> None:
+        """Component-specific startup logic."""
+        # Override in subclasses if needed
+        pass
+
+    async def _do_stop(self) -> None:
+        """Component-specific cleanup logic."""
+        # Cancel any running executions
+        for execution_id in list(self.current_executions.keys()):
+            try:
+                await self.cancel_execution(execution_id)
+            except Exception as e:
+                self.logger.error(f"Error cancelling execution {execution_id}: {e}")
+
+    async def _health_check_internal(self) -> Any:
+        """Component-specific health checks."""
+        # Basic health: check if we have too many stuck executions
+        stuck_count = sum(
+            1 for state in self.current_executions.values()
+            if state.status == ExecutionStatus.RUNNING
+            and (datetime.now(timezone.utc) - state.start_time).total_seconds() > 300  # 5 minutes
+        )
+
+        if stuck_count > 5:
+            return {"status": "unhealthy", "reason": f"{stuck_count} stuck executions"}
+
+        return {"status": "healthy", "active_executions": len(self.current_executions)}

@@ -34,6 +34,9 @@ from pydantic import BaseModel, Field
 from scipy import stats
 from scipy.stats import pearsonr
 
+from src.core.exceptions import (
+    DataProcessingError,
+)
 from src.core.logging import get_logger
 from src.utils.decorators import time_execution
 
@@ -427,8 +430,12 @@ class ParameterImportanceAnalyzer:
                     corr, _ = pearsonr(subset_params, subset_performance)
                     if not math.isnan(corr):
                         correlations.append(corr)
-                except:
-                    pass
+                except (ValueError, RuntimeWarning) as e:
+                    logger.debug(f"Correlation calculation failed for parameter stability: {e}")
+                    # Skip this subset - not enough valid data points
+                except Exception as e:
+                    logger.warning(f"Unexpected error in parameter stability correlation: {e}")
+                    # Continue analysis with other subsets
 
         if len(correlations) < 2:
             return 0.0
@@ -834,7 +841,11 @@ class PerformanceAnalyzer:
 
         try:
             return stats.skew(returns)
-        except:
+        except (ValueError, RuntimeWarning) as e:
+            logger.debug(f"Skewness calculation failed: {e}")
+            return 0.0
+        except Exception as e:
+            logger.warning(f"Unexpected error calculating returns skewness: {e}")
             return 0.0
 
     def _calculate_kurtosis(self, returns: list[float]) -> float:
@@ -844,7 +855,11 @@ class PerformanceAnalyzer:
 
         try:
             return stats.kurtosis(returns)
-        except:
+        except (ValueError, RuntimeWarning) as e:
+            logger.debug(f"Kurtosis calculation failed: {e}")
+            return 0.0
+        except Exception as e:
+            logger.warning(f"Unexpected error calculating returns kurtosis: {e}")
             return 0.0
 
     def _calculate_recovery_factor(self, total_return: float, max_drawdown: float) -> float:
@@ -869,7 +884,11 @@ class PerformanceAnalyzer:
         try:
             correlation, _ = pearsonr(first_half, second_half[: len(first_half)])
             return max(0.0, correlation)
-        except:
+        except (ValueError, RuntimeWarning) as e:
+            logger.debug(f"Returns consistency calculation failed: {e}")
+            return 0.0
+        except Exception as e:
+            logger.warning(f"Unexpected error in returns consistency analysis: {e}")
             return 0.0
 
     def _calculate_consistency_score(self, returns: list[float]) -> float:
@@ -1076,7 +1095,13 @@ class ResultsAnalyzer:
                     try:
                         corr, _ = pearsonr(parameter_data[param1], parameter_data[param2])
                         correlation_matrix[param1][param2] = corr if not math.isnan(corr) else 0.0
-                    except:
+                    except (ValueError, RuntimeWarning) as e:
+                        logger.debug(f"Parameter correlation failed for {param1}-{param2}: {e}")
+                        correlation_matrix[param1][param2] = 0.0
+                    except Exception as e:
+                        logger.warning(
+                            f"Unexpected error in parameter correlation {param1}-{param2}: {e}"
+                        )
                         correlation_matrix[param1][param2] = 0.0
                 else:
                     correlation_matrix[param1][param2] = 0.0
@@ -1133,7 +1158,11 @@ class ResultsAnalyzer:
 
             # Ruggedness is inverse of autocorrelation
             return max(0.0, 1.0 - autocorr)
-        except:
+        except (ValueError, IndexError, RuntimeWarning) as e:
+            logger.debug(f"Landscape ruggedness calculation failed: {e}")
+            return 0.0
+        except Exception as e:
+            logger.warning(f"Unexpected error calculating landscape ruggedness: {e}")
             return 0.0
 
     def _detect_multimodality(self, sorted_performance: list[float]) -> dict[str, Any]:
@@ -1246,8 +1275,16 @@ class ResultsAnalyzer:
                 "trend_significance": p_value,
             }
 
-        except:
+        except (ValueError, KeyError, TypeError) as e:
+            logger.warning(f"Improvement potential analysis failed: {e}")
             return {"improvement_potential": "medium"}
+        except Exception as e:
+            logger.error(f"Critical error in improvement potential analysis: {e}")
+            raise DataProcessingError(
+                "Failed to analyze improvement potential",
+                processing_step="improvement_analysis",
+                input_data_sample={"results_count": len(optimization_results)},
+            ) from e
 
     def _analyze_best_result(self, best_result: dict[str, Any]) -> dict[str, Any]:
         """Analyze the best optimization result in detail."""

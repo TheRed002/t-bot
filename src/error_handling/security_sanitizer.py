@@ -10,6 +10,7 @@ wallet addresses, personal information, and internal system architecture details
 
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -32,7 +33,7 @@ class SanitizationRule:
 
     name: str
     pattern: str
-    replacement: str
+    replacement: str | Callable[[re.Match[str]], str]
     flags: int = re.IGNORECASE | re.MULTILINE
     description: str = ""
     enabled: bool = True
@@ -79,7 +80,7 @@ class SecurityDataSanitizer:
     - Network topology information
     """
 
-    def __init__(self, config: SanitizationConfig = None):
+    def __init__(self, config: SanitizationConfig | None = None):
         self.config = config or SanitizationConfig()
         self.logger = get_logger(self.__class__.__module__)
 
@@ -91,17 +92,38 @@ class SecurityDataSanitizer:
 
         # Core sensitive data patterns
         self.rules = [
-            # API Keys and Tokens
+            # Stripe-style API Keys (sk_test_, sk_live_, pk_test_, pk_live_, etc.)
+            SanitizationRule(
+                name="stripe_api_keys",
+                pattern=r"(sk_test_|sk_live_|pk_test_|pk_live_|rk_test_|rk_live_)([a-zA-Z0-9]{1,})",
+                replacement=lambda m: f"{m.group(1)}{self._mask_value(m.group(2))}",
+                description="Stripe-style API keys",
+            ),
+            # Generic API Keys and Tokens
             SanitizationRule(
                 name="api_keys",
-                pattern=r"(?i)(api[_\-]?key|access[_\-]?key|secret[_\-]?key|auth[_\-]?key)['\"\s]*[:=]['\"\s]*([a-zA-Z0-9\-_+/=]{20,})",
+                pattern=r"(?i)(api[_\-]?key|access[_\-]?key|secret[_\-]?key|auth[_\-]?key)['\"\s]*[:=]['\"\s]*([a-zA-Z0-9\-_+/=]{8,})",
                 replacement=lambda m: f"{m.group(1)}={self._mask_value(m.group(2))}",
-                description="API keys and access tokens",
+                description="Generic API keys and access tokens",
+            ),
+            # Generic secrets (like 'secret is abc123xyz')
+            SanitizationRule(
+                name="generic_secrets",
+                pattern=r"(?i)\b(secret|password|key)\s+is\s+([a-zA-Z0-9\-_+/=]{6,})",
+                replacement=lambda m: f"{m.group(1)} is {self._mask_value(m.group(2))}",
+                description="Generic secret values in text",
+            ),
+            # Standalone API keys (when they appear alone without context)
+            SanitizationRule(
+                name="standalone_api_keys",
+                pattern=r"^(sk_test_|sk_live_|pk_test_|pk_live_|rk_test_|rk_live_)([a-zA-Z0-9]{1,})$",
+                replacement=lambda m: f"{m.group(1)}{self._mask_value(m.group(2))}",
+                description="Standalone API keys without context",
             ),
             # JWT Tokens
             SanitizationRule(
                 name="jwt_tokens",
-                pattern=r"(?i)(bearer\s+|token['\"\s]*[:=]['\"\s]*)(ey[a-zA-Z0-9\-_=]+\.[a-zA-Z0-9\-_=]+\.[a-zA-Z0-9\-_=]*)",
+                pattern=r"(?i)(bearer\s+|token['\"\s]*[:=]['\"\s]*)(ey[a-zA-Z0-9\-_=]+\.[a-zA-Z0-9\-_=]+\.?[a-zA-Z0-9\-_=]*)",
                 replacement=lambda m: f"{m.group(1)}{self._mask_value(m.group(2))}",
                 description="JWT tokens",
             ),
@@ -110,20 +132,35 @@ class SecurityDataSanitizer:
                 name="passwords",
                 pattern=r"(?i)(password|pwd|passwd|pass)['\"\s]*[:=]['\"\s]*([^\s'\";,}]{6,})",
                 replacement=lambda m: f"{m.group(1)}={self._mask_value(m.group(2))}",
-                description="Passwords",
+                description="Passwords with assignment",
+            ),
+            # Password in text (like 'with password secret123')
+            SanitizationRule(
+                name="password_in_text",
+                pattern=r"(?i)\b(password|pwd|passwd|pass)\s+([a-zA-Z0-9\-_+/=@#$%^&*!]{6,})",
+                replacement=lambda m: f"{m.group(1)} {self._mask_value(m.group(2))}",
+                description="Passwords in natural text",
             ),
             # Database Connection Strings
             SanitizationRule(
                 name="db_connections",
                 pattern=r"(?i)(postgresql|mysql|mongodb|redis)://([^:]+):([^@]+)@([^/]+)",
-                replacement=lambda m: f"{m.group(1)}://{self._mask_value(m.group(2))}:{self._mask_value(m.group(3))}@{self._sanitize_host(m.group(4))}",
+                replacement=lambda m: (
+                    f"{m.group(1)}://{self._mask_value(m.group(2))}:"
+                    f"{self._mask_value(m.group(3))}@{self._sanitize_host(m.group(4))}"
+                ),
                 description="Database connection strings",
             ),
             # Private Keys
             SanitizationRule(
                 name="private_keys",
-                pattern=r"(?i)(-----BEGIN [^-]+ PRIVATE KEY-----.*?-----END [^-]+ PRIVATE KEY-----)",
-                replacement=lambda m: "-----BEGIN PRIVATE KEY-----[REDACTED]-----END PRIVATE KEY-----",
+                pattern=(
+                    r"(-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----.*?"
+                    r"-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----)"
+                ),
+                replacement=lambda m: (
+                    "-----BEGIN PRIVATE KEY-----[REDACTED]-----END PRIVATE KEY-----"
+                ),
                 flags=re.IGNORECASE | re.DOTALL,
                 description="Private keys",
             ),
@@ -180,7 +217,10 @@ class SecurityDataSanitizer:
             SanitizationRule(
                 name="urls_with_auth",
                 pattern=r"(https?://)([^:]+):([^@]+)@([^/]+)",
-                replacement=lambda m: f"{m.group(1)}{self._mask_value(m.group(2))}:{self._mask_value(m.group(3))}@{self._sanitize_host(m.group(4))}",
+                replacement=lambda m: (
+                    f"{m.group(1)}{self._mask_value(m.group(2))}:"
+                    f"{self._mask_value(m.group(3))}@{self._sanitize_host(m.group(4))}"
+                ),
                 description="URLs with authentication",
             ),
             # Exchange API Secrets
@@ -291,8 +331,8 @@ class SecurityDataSanitizer:
             # Sanitize key
             sanitized_key = self._sanitize_context_key(key, sensitivity_level)
 
-            # Sanitize value
-            sanitized_value = self._sanitize_context_value(value, sensitivity_level)
+            # Sanitize value with context awareness
+            sanitized_value = self._sanitize_context_value_with_key(key, value, sensitivity_level)
 
             sanitized_context[sanitized_key] = sanitized_value
 
@@ -306,16 +346,21 @@ class SecurityDataSanitizer:
             return [
                 rule
                 for rule in self.rules
-                if rule.name in ["api_keys", "jwt_tokens", "passwords", "private_keys"]
+                if rule.name
+                in [
+                    "stripe_api_keys",
+                    "standalone_api_keys",
+                    "api_keys",
+                    "generic_secrets",
+                    "jwt_tokens",
+                    "passwords",
+                    "password_in_text",
+                    "private_keys",
+                ]
             ]
         elif level == SensitivityLevel.MEDIUM:
-            # Standard sanitization
-            return [
-                rule
-                for rule in self.rules
-                if rule.name
-                not in ["email_addresses", "phone_numbers"]  # Keep these for medium level
-            ]
+            # Standard sanitization - include all rules
+            return self.rules
         elif level == SensitivityLevel.HIGH:
             # Comprehensive sanitization except internal paths
             return self.rules
@@ -470,24 +515,57 @@ class SecurityDataSanitizer:
     def _sanitize_context_key(self, key: str, sensitivity_level: SensitivityLevel) -> str:
         """Sanitize context dictionary key."""
         # Generally, keys are safe to show as they indicate data structure
-        # But for critical level, we might want to sanitize some keys
-        if sensitivity_level == SensitivityLevel.CRITICAL:
-            sensitive_keys = [
-                "password",
-                "secret",
-                "key",
-                "token",
-                "credential",
-                "private",
-                "wallet",
-                "signature",
-                "seed",
-            ]
-
-            if any(sensitive in key.lower() for sensitive in sensitive_keys):
-                return f"[SENSITIVE_KEY_{hashlib.sha256(key.encode()).hexdigest()[:8]}]"
-
+        # We preserve keys to maintain context structure readability
+        # Only in extreme cases might we want to sanitize key names themselves
         return key
+
+    def _sanitize_context_value_with_key(
+        self, key: str, value: Any, sensitivity_level: SensitivityLevel
+    ) -> Any:
+        """Sanitize context dictionary value with awareness of the key name."""
+        # Check if key suggests the value is sensitive
+        sensitive_key_patterns = [
+            "password",
+            "pwd",
+            "passwd",
+            "pass",
+            "secret",
+            "key",
+            "token",
+            "auth",
+            "credential",
+            "private",
+            "wallet",
+            "signature",
+            "seed",
+            "phrase",
+            "api",
+        ]
+
+        is_sensitive_key = any(pattern in key.lower() for pattern in sensitive_key_patterns)
+
+        if isinstance(value, str):
+            if is_sensitive_key:
+                # For sensitive keys, always mask the value
+                return self._mask_value(value)
+            else:
+                # For non-sensitive keys, apply normal sanitization
+                return self.sanitize_error_message(value, sensitivity_level)
+        elif isinstance(value, dict):
+            return self.sanitize_context(value, sensitivity_level)
+        elif isinstance(value, list | tuple):
+            return type(value)(
+                self._sanitize_context_value_with_key(f"{key}[{i}]", item, sensitivity_level)
+                for i, item in enumerate(value)
+            )
+        else:
+            # For non-string values, convert to string and sanitize if needed
+            str_value = str(value)
+            if is_sensitive_key or len(str_value) > 20:  # Sanitize if sensitive key or long string
+                sanitized_str = self.sanitize_error_message(str_value, sensitivity_level)
+                if sanitized_str != str_value:
+                    return sanitized_str
+            return value
 
     def _sanitize_context_value(self, value: Any, sensitivity_level: SensitivityLevel) -> Any:
         """Sanitize context dictionary value."""
@@ -495,7 +573,7 @@ class SecurityDataSanitizer:
             return self.sanitize_error_message(value, sensitivity_level)
         elif isinstance(value, dict):
             return self.sanitize_context(value, sensitivity_level)
-        elif isinstance(value, (list, tuple)):
+        elif isinstance(value, list | tuple):
             return type(value)(
                 self._sanitize_context_value(item, sensitivity_level) for item in value
             )
@@ -544,7 +622,7 @@ class SecurityDataSanitizer:
 _global_sanitizer = None
 
 
-def get_security_sanitizer(config: SanitizationConfig = None) -> SecurityDataSanitizer:
+def get_security_sanitizer(config: SanitizationConfig | None = None) -> SecurityDataSanitizer:
     """Get global security sanitizer instance."""
     global _global_sanitizer
     if _global_sanitizer is None:

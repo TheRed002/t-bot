@@ -213,9 +213,18 @@ class PricePredictor(BaseModel):
             if not pd.api.types.is_numeric_dtype(X[col]):
                 try:
                     X[col] = pd.to_numeric(X[col], errors="coerce")
-                except:
-                    self.logger.warning(f"Could not convert column {col} to numeric, dropping")
+                except (ValueError, TypeError) as e:
+                    self.logger.warning(
+                        f"Could not convert column {col} to numeric: {e}, dropping column"
+                    )
                     X = X.drop(columns=[col])
+                except Exception as e:
+                    self.logger.error(f"Unexpected error converting column {col}: {e}")
+                    raise DataValidationError(
+                        f"Failed to process column {col}",
+                        validation_rule="numeric_conversion",
+                        invalid_fields=[col],
+                    ) from e
 
         # Fill any remaining NaN values from conversion
         X = X.fillna(0)
@@ -240,8 +249,18 @@ class PricePredictor(BaseModel):
             try:
                 y = pd.to_numeric(y, errors="coerce")
                 y = y.fillna(0)
-            except:
-                raise ValidationError("Could not convert targets to numeric")
+            except (ValueError, TypeError) as e:
+                raise DataValidationError(
+                    "Could not convert targets to numeric",
+                    validation_rule="target_numeric_conversion",
+                    invalid_fields=["targets"],
+                ) from e
+            except Exception as e:
+                self.logger.error(f"Unexpected error in target validation: {e}")
+                raise ModelError(
+                    "Critical error in target preprocessing",
+                    model_name=self.__class__.__name__,
+                ) from e
 
         return y
 

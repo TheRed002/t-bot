@@ -4,6 +4,7 @@ from decimal import Decimal
 from functools import lru_cache
 
 import numpy as np
+from numpy.typing import NDArray
 
 # Epsilon for float comparisons to handle floating-point precision issues
 EPSILON = 1e-10
@@ -11,17 +12,12 @@ EPSILON = 1e-10
 
 class FinancialCalculator:
     """
-    Singleton class for all financial calculations.
+    Class for all financial calculations.
     Uses caching to avoid redundant computations.
+
+    Note: This class uses static methods with caching, so no instance
+    is needed. The caching is shared across all uses.
     """
-
-    _instance = None
-
-    def __new__(cls):
-        """Ensure only one instance exists (singleton pattern)."""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
 
     @staticmethod
     @lru_cache(maxsize=128)
@@ -56,7 +52,7 @@ class FinancialCalculator:
         if abs(std_excess) < EPSILON:
             return 0.0
 
-        return (mean_excess / std_excess) * np.sqrt(periods_per_year)
+        return float((mean_excess / std_excess) * np.sqrt(periods_per_year))
 
     @staticmethod
     @lru_cache(maxsize=128)
@@ -93,7 +89,7 @@ class FinancialCalculator:
             return 0.0
 
         mean_excess = np.mean(excess_returns)
-        return (mean_excess / downside_std) * np.sqrt(periods_per_year)
+        return float((mean_excess / downside_std) * np.sqrt(periods_per_year))
 
     @staticmethod
     @lru_cache(maxsize=128)
@@ -128,7 +124,7 @@ class FinancialCalculator:
         n_periods = len(returns_array)
         annualized_return = (1 + total_return) ** (periods_per_year / n_periods) - 1
 
-        return annualized_return / max_drawdown
+        return float(annualized_return / max_drawdown)
 
     @staticmethod
     @lru_cache(maxsize=256)
@@ -166,7 +162,7 @@ class FinancialCalculator:
             raise ValueError(f"Unknown MA type: {ma_type}")
 
     @staticmethod
-    def max_drawdown(prices: list[float] | np.ndarray) -> tuple[float, int, int]:
+    def max_drawdown(prices: list[float] | NDArray[np.float64]) -> tuple[float, int, int]:
         """
         Calculate maximum drawdown and duration.
 
@@ -197,7 +193,7 @@ class FinancialCalculator:
                 start_idx = i
                 break
 
-        return abs(max_dd), start_idx, max_dd_idx
+        return float(abs(max_dd)), int(start_idx), int(max_dd_idx)
 
     @staticmethod
     @lru_cache(maxsize=128)
@@ -271,7 +267,9 @@ class FinancialCalculator:
         return Decimal(str(round(adjusted_size, 8)))
 
     @staticmethod
-    def calculate_returns(prices: list[float] | np.ndarray, method: str = "simple") -> np.ndarray:
+    def calculate_returns(
+        prices: list[float] | NDArray[np.float64], method: str = "simple"
+    ) -> NDArray[np.float64]:
         """
         Calculate returns from prices.
 
@@ -282,11 +280,12 @@ class FinancialCalculator:
         Returns:
             Array of returns
         """
-        prices_array = np.array(prices)
+        prices_array = np.array(prices, dtype=np.float64)
 
         if len(prices_array) < 2:
-            return np.array([])
+            return np.array([], dtype=np.float64)
 
+        returns: NDArray[np.float64]
         if method == "simple":
             returns = np.diff(prices_array) / prices_array[:-1]
         elif method == "log":
@@ -294,7 +293,7 @@ class FinancialCalculator:
         else:
             raise ValueError(f"Unknown return method: {method}")
 
-        return returns
+        return returns.astype(np.float64)
 
     @staticmethod
     def risk_reward_ratio(entry_price: float, stop_loss: float, take_profit: float) -> float:

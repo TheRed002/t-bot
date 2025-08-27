@@ -1,8 +1,9 @@
 """Cache metrics and monitoring for performance tracking."""
 
+import threading
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.base import BaseComponent
@@ -10,7 +11,7 @@ from src.base import BaseComponent
 
 @dataclass
 class CacheStats:
-    """Cache statistics for monitoring."""
+    """Cache statistics for monitoring with memory tracking."""
 
     hits: int = 0
     misses: int = 0
@@ -19,6 +20,15 @@ class CacheStats:
     errors: int = 0
     total_time: float = 0.0
     avg_response_time: float = 0.0
+
+    # Memory tracking
+    memory_used_bytes: int = 0
+    memory_allocated_bytes: int = 0
+    cache_entries: int = 0
+
+    # Cleanup tracking
+    cleanups_performed: int = 0
+    last_cleanup_time: float = field(default_factory=time.time)
 
     @property
     def hit_rate(self) -> float:
@@ -33,64 +43,133 @@ class CacheStats:
 
 
 class CacheMetrics(BaseComponent):
-    """Cache metrics collector and reporter."""
+    """Cache metrics collector and reporter with memory accounting."""
 
     def __init__(self):
         super().__init__()
         self._stats: dict[str, CacheStats] = defaultdict(CacheStats)
-        self._recent_operations: dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
+        self._recent_operations: dict[str, deque] = defaultdict(
+            lambda: deque(maxlen=100)
+        )  # Reduced from 1000
         self._start_time = time.time()
 
-    def record_hit(self, namespace: str, response_time: float = 0.0):
-        """Record cache hit."""
-        stats = self._stats[namespace]
-        stats.hits += 1
-        stats.total_time += response_time
-        stats.avg_response_time = stats.total_time / (stats.hits + stats.misses + stats.sets)
+        # Memory tracking
+        self._memory_lock = threading.Lock()
+        self._cleanup_interval = 300  # 5 minutes
+        self._last_cleanup = time.time()
+        self._max_memory_bytes = 50 * 1024 * 1024  # 50MB memory limit
 
-        self._recent_operations[namespace].append(
-            {"type": "hit", "timestamp": time.time(), "response_time": response_time}
-        )
+        # Register cleanup callback to prevent memory leaks
+        self._cleanup_timer = None
+        self._shutdown = False
+
+    def record_hit(self, namespace: str, response_time: float = 0.0):
+        """Record cache hit with memory accounting."""
+        with self._memory_lock:
+            stats = self._stats[namespace]
+            stats.hits += 1
+            stats.total_time += response_time
+            total_ops = stats.hits + stats.misses + stats.sets
+            if total_ops > 0:
+                stats.avg_response_time = stats.total_time / total_ops
+
+            self._record_operation(namespace, "hit", response_time)
+            self._cleanup_if_needed()
+
+    def _record_operation(self, namespace: str, op_type: str, response_time: float = 0.0, **kwargs):
+        """Record operation with memory-bounded storage."""
+        operation = {
+            "type": op_type,
+            "timestamp": time.time(),
+            "response_time": response_time,
+            **kwargs,
+        }
+
+        # Add to bounded deque - automatically removes oldest when full
+        self._recent_operations[namespace].append(operation)
+
+    def _cleanup_if_needed(self):
+        """Perform cleanup if memory limits are approaching."""
+        current_time = time.time()
+
+        if current_time - self._last_cleanup > self._cleanup_interval:
+            self._perform_cleanup()
+
+    def _perform_cleanup(self):
+        """Perform memory cleanup."""
+        current_time = time.time()
+        cleanup_count = 0
+
+        # Clean old operations (older than 1 hour)
+        cutoff_time = current_time - 3600
+
+        for namespace in list(self._recent_operations.keys()):
+            operations = self._recent_operations[namespace]
+
+            # Remove old operations
+            while operations and operations[0]["timestamp"] < cutoff_time:
+                operations.popleft()
+                cleanup_count += 1
+
+        # Update cleanup stats
+        for stats in self._stats.values():
+            stats.cleanups_performed += 1
+            stats.last_cleanup_time = current_time
+
+        self._last_cleanup = current_time
+
+        if cleanup_count > 0:
+            self.logger.debug(f"Cleaned up {cleanup_count} old cache operations")
 
     def record_miss(self, namespace: str, response_time: float = 0.0):
-        """Record cache miss."""
-        stats = self._stats[namespace]
-        stats.misses += 1
-        stats.total_time += response_time
-        stats.avg_response_time = stats.total_time / (stats.hits + stats.misses + stats.sets)
+        """Record cache miss with memory accounting."""
+        with self._memory_lock:
+            stats = self._stats[namespace]
+            stats.misses += 1
+            stats.total_time += response_time
+            total_ops = stats.hits + stats.misses + stats.sets
+            if total_ops > 0:
+                stats.avg_response_time = stats.total_time / total_ops
 
-        self._recent_operations[namespace].append(
-            {"type": "miss", "timestamp": time.time(), "response_time": response_time}
-        )
+            self._record_operation(namespace, "miss", response_time)
+            self._cleanup_if_needed()
 
-    def record_set(self, namespace: str, response_time: float = 0.0):
-        """Record cache set operation."""
-        stats = self._stats[namespace]
-        stats.sets += 1
-        stats.total_time += response_time
-        stats.avg_response_time = stats.total_time / (stats.hits + stats.misses + stats.sets)
+    def record_set(self, namespace: str, response_time: float = 0.0, memory_bytes: int = 0):
+        """Record cache set operation with memory tracking."""
+        with self._memory_lock:
+            stats = self._stats[namespace]
+            stats.sets += 1
+            stats.total_time += response_time
+            stats.cache_entries += 1
+            stats.memory_used_bytes += memory_bytes
 
-        self._recent_operations[namespace].append(
-            {"type": "set", "timestamp": time.time(), "response_time": response_time}
-        )
+            total_ops = stats.hits + stats.misses + stats.sets
+            if total_ops > 0:
+                stats.avg_response_time = stats.total_time / total_ops
 
-    def record_delete(self, namespace: str, response_time: float = 0.0):
-        """Record cache delete operation."""
-        stats = self._stats[namespace]
-        stats.deletes += 1
+            self._record_operation(namespace, "set", response_time, memory_bytes=memory_bytes)
+            self._cleanup_if_needed()
 
-        self._recent_operations[namespace].append(
-            {"type": "delete", "timestamp": time.time(), "response_time": response_time}
-        )
+    def record_delete(self, namespace: str, response_time: float = 0.0, memory_freed: int = 0):
+        """Record cache delete operation with memory tracking."""
+        with self._memory_lock:
+            stats = self._stats[namespace]
+            stats.deletes += 1
+            if stats.cache_entries > 0:
+                stats.cache_entries -= 1
+            stats.memory_used_bytes = max(0, stats.memory_used_bytes - memory_freed)
+
+            self._record_operation(namespace, "delete", response_time, memory_freed=memory_freed)
+            self._cleanup_if_needed()
 
     def record_error(self, namespace: str, error_type: str = "unknown"):
-        """Record cache error."""
-        stats = self._stats[namespace]
-        stats.errors += 1
+        """Record cache error with memory accounting."""
+        with self._memory_lock:
+            stats = self._stats[namespace]
+            stats.errors += 1
 
-        self._recent_operations[namespace].append(
-            {"type": "error", "timestamp": time.time(), "error_type": error_type}
-        )
+            self._record_operation(namespace, "error", error_type=error_type)
+            self._cleanup_if_needed()
 
     def get_stats(self, namespace: str | None = None) -> dict[str, Any]:
         """Get cache statistics."""
@@ -191,6 +270,22 @@ class CacheMetrics(BaseComponent):
             }
 
         return summary
+
+    def shutdown(self):
+        """Shutdown metrics collector and cleanup resources."""
+        with self._memory_lock:
+            self._shutdown = True
+
+            # Cancel any pending cleanup timer
+            if self._cleanup_timer:
+                self._cleanup_timer.cancel()
+                self._cleanup_timer = None
+
+            # Clear all data to free memory
+            self._stats.clear()
+            self._recent_operations.clear()
+
+            self.logger.info("Cache metrics shutdown completed")
 
     def reset_stats(self, namespace: str | None = None):
         """Reset statistics."""

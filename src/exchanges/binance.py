@@ -13,7 +13,7 @@ This eliminates all duplication and leverages:
 
 import asyncio
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 # Binance-specific imports
@@ -47,7 +47,7 @@ from src.core.types import (
 from src.exchanges.base import EnhancedBaseExchange
 
 # MANDATORY: Import from P-007A (utils)
-# NOTE: utils.constants doesn't exist, removing this import
+from src.utils import API_ENDPOINTS
 
 
 class BinanceExchange(EnhancedBaseExchange):
@@ -67,6 +67,7 @@ class BinanceExchange(EnhancedBaseExchange):
         exchange_name: str = "binance",
         state_service: Any | None = None,
         trade_lifecycle_manager: Any | None = None,
+        metrics_collector: Any | None = None,
     ):
         """
         Initialize enhanced Binance exchange.
@@ -77,12 +78,12 @@ class BinanceExchange(EnhancedBaseExchange):
             state_service: Optional state service for persistence
             trade_lifecycle_manager: Optional trade lifecycle manager
         """
-        super().__init__(config, exchange_name, state_service, trade_lifecycle_manager)
+        super().__init__(config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector)
 
         # Binance-specific configuration
-        self.api_key = config.exchanges.binance_api_key
-        self.api_secret = config.exchanges.binance_api_secret
-        self.testnet = config.exchanges.binance_testnet
+        self.api_key = config.exchange.binance_api_key
+        self.api_secret = config.exchange.binance_api_secret
+        self.testnet = config.exchange.binance_testnet
 
         # Binance API URLs from constants
         binance_config = API_ENDPOINTS["binance"]
@@ -469,12 +470,13 @@ class BinanceExchange(EnhancedBaseExchange):
             kline = klines[0]
             market_data = MarketData(
                 symbol=symbol,
-                price=Decimal(str(kline[4])),  # Close price
-                volume=Decimal(str(kline[5])),  # Volume
+                exchange=self.name,
                 timestamp=datetime.fromtimestamp(kline[6] / 1000, tz=timezone.utc),
-                open_price=Decimal(str(kline[1])),
-                high_price=Decimal(str(kline[2])),
-                low_price=Decimal(str(kline[3])),
+                open=Decimal(str(kline[1])),
+                high=Decimal(str(kline[2])),
+                low=Decimal(str(kline[3])),
+                close=Decimal(str(kline[4])),
+                volume=Decimal(str(kline[5])),
             )
 
             return market_data
@@ -774,8 +776,10 @@ class BinanceExchange(EnhancedBaseExchange):
                         # Calculate how many steps from min_qty
                         steps = (order.quantity - min_qty) / step_size
                         # Round to nearest integer and check if it's a whole number
-                        rounded_steps = steps.quantize(Decimal('1'), rounding=ROUND_HALF_UP)
-                        if abs(steps - rounded_steps) > Decimal('0.0000000001'):  # Small epsilon for float precision
+                        rounded_steps = steps.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+                        if abs(steps - rounded_steps) > Decimal(
+                            "0.0000000001"
+                        ):  # Small epsilon for float precision
                             # Calculate the nearest valid quantity
                             nearest_valid = min_qty + (rounded_steps * step_size)
                             raise ValidationError(
@@ -837,3 +841,25 @@ class BinanceExchange(EnhancedBaseExchange):
             "orders_per_24_hours": 160000,
             "weight_per_minute": 1200,
         }
+
+    # === COMPATIBILITY PROPERTIES ===
+
+    @property
+    def client(self) -> Any:
+        """Compatibility property for binance_client."""
+        return self.binance_client
+
+    @client.setter
+    def client(self, value: Any) -> None:
+        """Compatibility setter for binance_client."""
+        self.binance_client = value
+
+    @property
+    def ws_manager(self) -> Any:
+        """Compatibility property for binance_ws_manager."""
+        return self.binance_ws_manager
+
+    @ws_manager.setter
+    def ws_manager(self, value: Any) -> None:
+        """Compatibility setter for binance_ws_manager."""
+        self.binance_ws_manager = value

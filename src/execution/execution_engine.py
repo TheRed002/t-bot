@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import (
     ExchangeError,
@@ -46,6 +46,7 @@ from src.execution.service import ExecutionService
 
 # Import internal execution instruction type
 from src.execution.types import ExecutionInstruction
+from src.execution.execution_result_wrapper import ExecutionResultWrapper
 
 # Import monitoring components
 from src.monitoring import MetricsCollector, get_tracer
@@ -167,8 +168,8 @@ class ExecutionEngine(BaseComponent):
         }
 
         # Engine state (local tracking only)
-        self.is_running = False
-        self.active_executions: dict[str, ExecutionResult] = {}
+        # is_running is managed by BaseComponent
+        self.active_executions: dict[str, ExecutionResultWrapper] = {}
 
         # Algorithm selection thresholds from config
         self.large_order_threshold = Decimal(config.execution.get("large_order_threshold", "10000"))
@@ -217,7 +218,7 @@ class ExecutionEngine(BaseComponent):
             # Start order manager
             await self.order_manager.start()
 
-            self.is_running = True
+            self._is_running = True  # Set internal state for BaseComponent
             self.local_statistics["engine_starts"] += 1
 
             self.logger.info("Execution engine started successfully")
@@ -250,7 +251,7 @@ class ExecutionEngine(BaseComponent):
             # Stop order manager
             await self.order_manager.shutdown()
 
-            self.is_running = False
+            self._is_running = False  # Set internal state for BaseComponent
 
             self.logger.info("Execution engine stopped successfully")
 
@@ -268,7 +269,7 @@ class ExecutionEngine(BaseComponent):
         market_data: MarketData,
         bot_id: str | None = None,
         strategy_name: str | None = None,
-    ) -> ExecutionResult:
+    ) -> ExecutionResultWrapper:
         """
         Execute an order using appropriate algorithm and record via ExecutionService.
 
@@ -279,7 +280,7 @@ class ExecutionEngine(BaseComponent):
             strategy_name: Strategy that generated the order
 
         Returns:
-            ExecutionResult: Result of execution with full audit trail
+            ExecutionResultWrapper: Result of execution with full audit trail
 
         Raises:
             ExecutionError: If execution fails
@@ -302,8 +303,8 @@ class ExecutionEngine(BaseComponent):
                     price=instruction.order.price,
                     metadata={
                         "algorithm": instruction.algorithm.value,
-                        "market_price": float(market_data.price),
-                        "market_volume": float(market_data.volume) if market_data.volume else 0,
+                        "market_price": str(market_data.close),
+                        "market_volume": str(market_data.volume) if market_data.volume else 0,
                     },
                 )
                 self.logger.debug(
@@ -371,8 +372,8 @@ class ExecutionEngine(BaseComponent):
                 timestamp=datetime.now(timezone.utc),
                 source="ExecutionEngine",
                 metadata={
-                    "quantity": float(instruction.order.quantity),
-                    "price": float(instruction.order.price or market_data.price),
+                    "quantity": str(instruction.order.quantity),
+                    "price": str(instruction.order.price or market_data.close),
                     "order_type": instruction.order.order_type.value,
                     "bot_id": bot_id,
                     "strategy_name": strategy_name,
@@ -388,7 +389,7 @@ class ExecutionEngine(BaseComponent):
             position_size = await self.risk_service.calculate_position_size(
                 signal=trading_signal,
                 available_capital=None,  # Will be fetched by RiskService
-                current_price=market_data.price,  # Use Decimal directly
+                current_price=market_data.close,  # Use Decimal directly
             )
 
             # Update order quantity based on risk management
@@ -396,7 +397,7 @@ class ExecutionEngine(BaseComponent):
                 instruction.order.quantity = Decimal(str(position_size))
                 self.logger.info(
                     "Position size adjusted by risk management",
-                    original_quantity=float(instruction.order.quantity),
+                    original_quantity=str(instruction.order.quantity),
                     adjusted_quantity=position_size,
                     symbol=instruction.order.symbol,
                 )
@@ -414,7 +415,7 @@ class ExecutionEngine(BaseComponent):
                     event="order_created",
                     data={
                         "order_type": instruction.order.order_type.value,
-                        "quantity": float(instruction.order.quantity),
+                        "quantity": str(instruction.order.quantity),
                         "algorithm": selected_algorithm.__class__.__name__,
                     },
                 )
@@ -434,9 +435,9 @@ class ExecutionEngine(BaseComponent):
                         event="complete_fill",
                         data={
                             "execution_id": execution_result.execution_id,
-                            "filled_quantity": float(execution_result.total_filled_quantity),
+                            "filled_quantity": str(execution_result.total_filled_quantity),
                             "average_price": (
-                                float(execution_result.average_fill_price)
+                                str(execution_result.average_fill_price)
                                 if execution_result.average_fill_price
                                 else None
                             ),
@@ -448,8 +449,8 @@ class ExecutionEngine(BaseComponent):
                         event="partial_fill",
                         data={
                             "execution_id": execution_result.execution_id,
-                            "filled_quantity": float(execution_result.total_filled_quantity),
-                            "remaining_quantity": float(
+                            "filled_quantity": str(execution_result.total_filled_quantity),
+                            "remaining_quantity": str(
                                 instruction.order.quantity - execution_result.total_filled_quantity
                             ),
                         },
@@ -476,26 +477,38 @@ class ExecutionEngine(BaseComponent):
                 execution_result, market_data, validation_results
             )
 
-            await self.execution_service.record_trade_execution(
-                execution_result=execution_result,
-                market_data=market_data,
-                bot_id=bot_id,
-                strategy_name=strategy_name,
-                pre_trade_analysis=validation_results,
-                post_trade_analysis=post_trade_analysis,
-            )
+            # CRITICAL: Coordinate state operations to ensure consistency
+            try:
+                # Record trade execution first
+                await self.execution_service.record_trade_execution(
+                    execution_result=execution_result,
+                    market_data=market_data,
+                    bot_id=bot_id,
+                    strategy_name=strategy_name,
+                    pre_trade_analysis=validation_results,
+                    post_trade_analysis=post_trade_analysis,
+                )
 
-            # Complete trade attribution if using lifecycle manager and trade is filled
-            if (
-                self.trade_lifecycle_manager
-                and trade_context
-                and execution_result.status == ExecutionStatus.COMPLETED
-            ):
-                await self.trade_lifecycle_manager.complete_trade_attribution(
+                # Complete trade attribution if using lifecycle manager and trade is filled
+                if (
+                    self.trade_lifecycle_manager
+                    and trade_context
+                    and execution_result.status == ExecutionStatus.COMPLETED
+                ):
+                    await self.trade_lifecycle_manager.complete_trade_attribution(
                     trade_id=trade_context.trade_id,
                     execution_result=execution_result,
                     post_trade_analysis=post_trade_analysis,
                 )
+            except Exception as state_error:
+                # If trade execution was recorded but attribution failed, log it
+                # but don't fail the entire execution as the trade was successful
+                self.logger.error(
+                    f"Failed to complete trade attribution: {state_error}",
+                    execution_id=execution_result.execution_id,
+                    trade_id=trade_context.trade_id if trade_context else None,
+                )
+                # Could implement compensation logic here if needed
 
             # Remove from active executions
             self.active_executions.pop(execution_result.execution_id, None)
@@ -506,7 +519,7 @@ class ExecutionEngine(BaseComponent):
                 algorithm=selected_algorithm.__class__.__name__,
                 symbol=instruction.order.symbol,
                 side=instruction.order.side.value,
-                filled_quantity=float(execution_result.total_filled_quantity),
+                filled_quantity=str(execution_result.total_filled_quantity),
                 status=execution_result.status.value,
             )
 
@@ -610,7 +623,7 @@ class ExecutionEngine(BaseComponent):
             }
 
     @time_execution
-    async def get_active_executions(self) -> dict[str, ExecutionResult]:
+    async def get_active_executions(self) -> dict[str, ExecutionResultWrapper]:
         """
         Get currently active executions.
 
@@ -653,7 +666,7 @@ class ExecutionEngine(BaseComponent):
 
             # Intelligent algorithm selection based on order characteristics
             order_value = instruction.order.quantity * (
-                instruction.order.price or market_data.price
+                instruction.order.price or market_data.close
             )
             risk_level = validation_results.get("risk_level", "medium")
 
@@ -689,7 +702,7 @@ class ExecutionEngine(BaseComponent):
 
     async def _perform_post_trade_analysis(
         self,
-        execution_result: ExecutionResult,
+        execution_result: ExecutionResultWrapper,
         market_data: MarketData,
         pre_trade_analysis: dict[str, Any],
     ) -> dict[str, Any]:
@@ -716,12 +729,12 @@ class ExecutionEngine(BaseComponent):
 
             # Calculate slippage if possible
             slippage_bps = 0.0
-            if execution_result.average_fill_price and market_data.price:
-                price_diff = execution_result.average_fill_price - market_data.price
-                slippage_bps = abs(float(price_diff / market_data.price)) * 10000
+            if execution_result.average_fill_price and market_data.close:
+                price_diff = execution_result.average_fill_price - market_data.close
+                slippage_bps = abs(price_diff / market_data.close) * 10000
 
             # Fill rate
-            fill_rate = float(
+            fill_rate = (
                 execution_result.total_filled_quantity / execution_result.original_order.quantity
             )
 
@@ -747,18 +760,14 @@ class ExecutionEngine(BaseComponent):
                 "slippage_bps": slippage_bps,
                 "fill_rate": fill_rate,
                 "quality_score": quality_score,
-                "fees_paid": float(execution_result.total_fees),
+                "fees_paid": str(execution_result.total_fees),
                 "algorithm_used": (
                     execution_result.algorithm.value if execution_result.algorithm else "unknown"
                 ),
                 "market_conditions": {
-                    "price": float(market_data.price),
-                    "volume": float(market_data.volume) if market_data.volume else 0,
-                    "spread": (
-                        float(market_data.ask - market_data.bid)
-                        if (market_data.ask and market_data.bid)
-                        else None
-                    ),
+                    "price": str(market_data.close),
+                    "volume": str(market_data.volume) if market_data.volume else 0,
+                    "spread": None,  # Spread is available in Ticker, not MarketData
                 },
                 "validation_context": {
                     "pre_trade_risk_level": pre_trade_analysis.get("risk_level", "unknown"),
@@ -782,7 +791,7 @@ class ExecutionEngine(BaseComponent):
 
     def _generate_execution_recommendations(
         self,
-        execution_result: ExecutionResult,
+        execution_result: ExecutionResultWrapper,
         quality_score: float,
         slippage_bps: float,
         fill_rate: float,
@@ -846,3 +855,31 @@ class ExecutionEngine(BaseComponent):
         except Exception as e:
             self.logger.error(f"Failed to get algorithm performance: {e}")
             return {}
+
+    # Abstract methods required by BaseComponent
+    async def _do_start(self) -> None:
+        """Component-specific startup logic."""
+        # Start algorithms
+        for algorithm in self.algorithms.values():
+            await algorithm.start()
+
+    async def _do_stop(self) -> None:
+        """Component-specific cleanup logic."""
+        # Stop algorithms
+        for algorithm in self.algorithms.values():
+            await algorithm.stop()
+
+    async def _health_check_internal(self) -> Any:
+        """Component-specific health checks."""
+        # Check algorithms health
+        healthy_count = 0
+        for algo_name, algorithm in self.algorithms.items():
+            if algorithm.is_running:
+                healthy_count += 1
+
+        return {
+            "status": "healthy" if healthy_count == len(self.algorithms) else "degraded",
+            "algorithms_healthy": healthy_count,
+            "algorithms_total": len(self.algorithms),
+            "active_executions": len(self.active_executions)
+        }

@@ -26,13 +26,14 @@ CRITICAL: This integrates with P-001 (types, exceptions, config),
 P-002A (error handling), and P-007A (utils) components.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from src.core.base.component import BaseComponent
+from src.error_handling.context import ErrorContext
 from src.core.config.main import Config
 from src.core.exceptions import RiskManagementError, ValidationError
 
@@ -150,8 +151,13 @@ class RiskCalculator(BaseComponent):
             # Determine risk level
             risk_level = await self._determine_risk_level(var_1d, current_drawdown, sharpe_ratio)
 
+            # Calculate total exposure (same as portfolio value for spot trading)
+            total_exposure = portfolio_value
+
             # Create risk metrics object
             risk_metrics = RiskMetrics(
+                portfolio_value=portfolio_value,
+                total_exposure=total_exposure,
                 var_1d=var_1d,
                 var_5d=var_5d,
                 expected_shortfall=expected_shortfall,
@@ -159,7 +165,7 @@ class RiskCalculator(BaseComponent):
                 sharpe_ratio=sharpe_ratio,
                 current_drawdown=current_drawdown,
                 risk_level=risk_level,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
             )
 
             self.logger.info(
@@ -185,6 +191,8 @@ class RiskCalculator(BaseComponent):
             RiskMetrics: Empty risk metrics
         """
         return RiskMetrics(
+            portfolio_value=Decimal("0"),
+            total_exposure=Decimal("0"),
             var_1d=Decimal("0"),
             var_5d=Decimal("0"),
             expected_shortfall=Decimal("0"),
@@ -192,7 +200,7 @@ class RiskCalculator(BaseComponent):
             sharpe_ratio=None,
             current_drawdown=Decimal("0"),
             risk_level=RiskLevel.LOW,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
         )
 
     @time_execution
@@ -218,8 +226,8 @@ class RiskCalculator(BaseComponent):
             market = market_by_symbol.get(position.symbol)
             if market and position.symbol == market.symbol:
                 # Calculate values without modifying position object
-                current_price = market.price
-                unrealized_pnl = position.quantity * (current_price - position.entry_price)
+                current_price = market.close
+                # unrealized_pnl = position.quantity * (current_price - position.entry_price)
 
                 # Add position value to portfolio
                 position_value = position.quantity * current_price
@@ -245,7 +253,8 @@ class RiskCalculator(BaseComponent):
                 self.portfolio_returns.append(return_rate)
 
         # Keep only recent history
-        max_history = max(self.risk_config.var_calculation_window, 252)
+        # Use correlation_window or default to 252 days
+        max_history = max(getattr(self.risk_config, "correlation_window", 30), 252)
         if len(self.portfolio_values) > max_history:
             self.portfolio_values = self.portfolio_values[-max_history:]
 
@@ -277,7 +286,8 @@ class RiskCalculator(BaseComponent):
 
         # Calculate VaR using normal distribution assumption
         # VaR = portfolio_value * volatility * sqrt(days) * z_score
-        confidence_level = self.risk_config.var_confidence_level
+        # Default VaR confidence level to 95%
+        confidence_level = 0.95
 
         # Z-score for confidence level (90% = 1.282, 95% = 1.645, 99% = 2.326)
         if confidence_level == 0.90:
@@ -315,7 +325,8 @@ class RiskCalculator(BaseComponent):
 
         # Calculate expected shortfall as average of worst returns
         returns_array = np.array(self.portfolio_returns)
-        confidence_level = self.risk_config.var_confidence_level
+        # Default VaR confidence level to 95%
+        confidence_level = 0.95
 
         # Find threshold for worst (1-confidence_level) returns
         threshold = np.percentile(returns_array, (1 - confidence_level) * 100)

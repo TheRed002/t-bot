@@ -6,7 +6,7 @@ using Optuna with pruning, parallel execution, and result tracking.
 """
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -130,7 +130,7 @@ class HyperparameterOptimizationService(BaseService):
 
             # Generate study name if not provided
             if study_name is None:
-                timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 study_name = f"{model_class.__name__}_{timestamp}"
 
             self._logger.info(
@@ -187,7 +187,7 @@ class HyperparameterOptimizationService(BaseService):
                 - study.trials[0].datetime_start,
                 "study": study,
                 "optimized_model": optimized_model,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
             # Store study and history

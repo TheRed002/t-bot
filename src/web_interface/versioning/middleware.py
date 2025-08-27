@@ -12,17 +12,14 @@ from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.base import BaseComponent
-
 from .version_manager import get_version_manager
 
 
-class VersioningMiddleware(BaseHTTPMiddleware, BaseComponent):
+class VersioningMiddleware(BaseHTTPMiddleware):
     """Middleware to handle API versioning."""
 
     def __init__(self, app, version_header: str = "X-API-Version"):
-        super(BaseHTTPMiddleware, self).__init__(app)
-        BaseComponent.__init__(self)
+        super().__init__(app)
         self.version_header = version_header
         self.version_manager = get_version_manager()
 
@@ -171,12 +168,11 @@ class VersioningMiddleware(BaseHTTPMiddleware, BaseComponent):
         )
 
 
-class VersionRoutingMiddleware(BaseHTTPMiddleware, BaseComponent):
+class VersionRoutingMiddleware(BaseHTTPMiddleware):
     """Middleware to handle version-specific routing."""
 
     def __init__(self, app):
-        super(BaseHTTPMiddleware, self).__init__(app)
-        BaseComponent.__init__(self)
+        super().__init__(app)
         self.version_manager = get_version_manager()
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:

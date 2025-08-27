@@ -5,7 +5,7 @@ This module provides a unified interface to all trading system services,
 abstracting away the complexity of the underlying implementations.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -347,7 +347,7 @@ class APIFacade(BaseComponent):
         return {
             "status": "healthy" if self._initialized else "not_initialized",
             "services": services,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def get_service_status(self, service_name: str) -> dict[str, Any]:

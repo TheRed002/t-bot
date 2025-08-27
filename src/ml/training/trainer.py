@@ -5,7 +5,7 @@ This module provides comprehensive training orchestration for ML models includin
 data preparation, training pipeline management, and result tracking.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -157,7 +157,9 @@ class TrainingService(BaseService):
             ValidationError: If input validation fails
         """
         # Generate unique run ID
-        self.current_run_id = f"train_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{symbol}"
+        self.current_run_id = (
+            f"train_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{symbol}"
+        )
 
         try:
             # Validate inputs
@@ -236,7 +238,7 @@ class TrainingService(BaseService):
                 "validation_size": validation_size,
                 "feature_selection": feature_selection,
                 "preprocessing": preprocessing,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "training_kwargs": training_kwargs,
             }
 

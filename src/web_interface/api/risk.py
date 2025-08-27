@@ -5,7 +5,7 @@ This module provides risk monitoring, limits management, and risk analysis
 functionality for the trading system.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -189,7 +189,7 @@ async def get_risk_metrics(current_user: User = Depends(get_current_user)):
             correlation_btc=0.85,  # Correlation with BTC
             risk_score=risk_score,
             risk_level=risk_level,
-            last_updated=datetime.utcnow(),
+            last_updated=datetime.now(timezone.utc),
         )
 
     except Exception as e:
@@ -286,7 +286,7 @@ async def update_risk_limits(
             "message": "Risk limits updated successfully",
             "updated_fields": updated_fields,
             "updated_by": current_user.username,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
@@ -326,7 +326,7 @@ async def get_risk_alerts(
                 "alert_type": "drawdown_limit",
                 "severity": "high",
                 "message": "Portfolio drawdown exceeded 12% threshold",
-                "triggered_at": datetime.utcnow() - timedelta(hours=2),
+                "triggered_at": datetime.now(timezone.utc) - timedelta(hours=2),
                 "current_value": 13.2,
                 "threshold_value": 12.0,
                 "affected_positions": ["BTCUSDT", "ETHUSDT"],
@@ -339,7 +339,7 @@ async def get_risk_alerts(
                 "alert_type": "var_limit",
                 "severity": "medium",
                 "message": "Daily VaR approaching limit",
-                "triggered_at": datetime.utcnow() - timedelta(hours=4),
+                "triggered_at": datetime.now(timezone.utc) - timedelta(hours=4),
                 "current_value": 7200.0,
                 "threshold_value": 7500.0,
                 "affected_positions": None,
@@ -352,20 +352,20 @@ async def get_risk_alerts(
                 "alert_type": "concentration_risk",
                 "severity": "medium",
                 "message": "BTC concentration exceeds 35% of portfolio",
-                "triggered_at": datetime.utcnow() - timedelta(hours=6),
+                "triggered_at": datetime.now(timezone.utc) - timedelta(hours=6),
                 "current_value": 37.5,
                 "threshold_value": 35.0,
                 "affected_positions": ["BTCUSDT"],
                 "recommended_action": "Diversify holdings or reduce BTC exposure",
                 "is_resolved": True,
-                "resolved_at": datetime.utcnow() - timedelta(hours=1),
+                "resolved_at": datetime.now(timezone.utc) - timedelta(hours=1),
             },
             {
                 "alert_id": "alert_004",
                 "alert_type": "leverage_limit",
                 "severity": "low",
                 "message": "Portfolio leverage increased to 2.8x",
-                "triggered_at": datetime.utcnow() - timedelta(hours=8),
+                "triggered_at": datetime.now(timezone.utc) - timedelta(hours=8),
                 "current_value": 2.8,
                 "threshold_value": 3.0,
                 "affected_positions": None,
@@ -560,7 +560,7 @@ async def run_stress_test(
             time_horizons=time_horizons,
             portfolio_resilience_score=resilience_score,
             recommendations=recommendations,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
         )
 
         logger.info(
@@ -639,7 +639,7 @@ async def get_correlation_matrix(
             "lowest_correlation": min(
                 correlation_matrix[s1][s2] for s1 in symbols for s2 in symbols if s1 != s2
             ),
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:

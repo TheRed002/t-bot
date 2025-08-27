@@ -37,6 +37,9 @@ from pydantic import BaseModel, Field, field_validator
 from scipy import stats
 from sklearn.model_selection import TimeSeriesSplit
 
+from src.core.exceptions import (
+    OptimizationError,
+)
 from src.core.logging import get_logger
 from src.utils.decorators import time_execution
 
@@ -780,8 +783,16 @@ class RobustnessAnalyzer:
                     original_score = Decimal(str(original_result.get("total_return", 0)))
                 else:
                     original_score = Decimal(str(original_result))
-            except:
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"Failed to calculate original score with optimal parameters: {e}")
                 original_score = Decimal("0")
+            except Exception as e:
+                logger.error(f"Unexpected error in robustness validation objective function: {e}")
+                raise OptimizationError(
+                    "Critical error in robustness validation",
+                    optimization_stage="robustness_validation",
+                    parameters=optimal_parameters,
+                ) from e
 
             # Robustness score (higher is better)
             if original_score != 0:
@@ -1030,8 +1041,16 @@ class ValidationEngine:
                     score = Decimal(str(result))
 
                 return score, score  # Same for both if no date split
-            except:
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"Failed to evaluate parameters in out-of-sample test: {e}")
                 return Decimal("0"), Decimal("0")
+            except Exception as e:
+                logger.error(f"Critical error in out-of-sample validation: {e}")
+                raise OptimizationError(
+                    "Out-of-sample validation failed",
+                    optimization_stage="out_of_sample_validation",
+                    parameters=parameters,
+                ) from e
 
         # Calculate split point
         total_days = (end_date - start_date).days

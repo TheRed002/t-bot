@@ -7,7 +7,7 @@ brute force testing, and hyperparameter tuning with proper overfitting preventio
 
 import asyncio
 import itertools
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -253,7 +253,9 @@ async def create_optimization_job(
 
         # Estimate completion time (rough estimate: 10 seconds per combination)
         estimated_duration_minutes = (total_combinations * 10) / 60
-        estimated_completion = datetime.utcnow() + timedelta(minutes=estimated_duration_minutes)
+        estimated_completion = datetime.now(timezone.utc) + timedelta(
+            minutes=estimated_duration_minutes
+        )
 
         # Create job data
         job_data = {
@@ -262,7 +264,7 @@ async def create_optimization_job(
             "status": "created",
             "user_id": user.id,
             "request": request.dict(),
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
             "total_combinations": total_combinations,
             "completed_combinations": 0,
             "results": [],
@@ -327,7 +329,7 @@ async def start_optimization_job(
 
         # Update job status
         job["status"] = "starting"
-        job["started_at"] = datetime.utcnow()
+        job["started_at"] = datetime.now(timezone.utc)
 
         # Start optimization in background
         background_tasks.add_task(_run_optimization_job, job_id)
@@ -369,7 +371,7 @@ async def get_optimization_job_status(
             )
 
         start_time = job.get("started_at", job["created_at"])
-        elapsed_minutes = (datetime.utcnow() - start_time).total_seconds() / 60
+        elapsed_minutes = (datetime.now(timezone.utc) - start_time).total_seconds() / 60
 
         completed = job["completed_combinations"]
         total = job["total_combinations"]
@@ -396,7 +398,7 @@ async def get_optimization_job_status(
             cpu_usage_percent=metrics.get("cpu_usage_percent", 0.0),
             current_parameters=metrics.get("current_parameters", {}),
             best_metric_value=metrics.get("best_metric_value", 0.0),
-            last_update=datetime.utcnow(),
+            last_update=datetime.now(timezone.utc),
         )
 
     except HTTPException:
@@ -449,7 +451,9 @@ async def get_optimization_job_results(
         # Create optimization summary
         optimization_summary = {
             "total_runtime_minutes": (
-                (job.get("completed_at", datetime.utcnow()) - job["started_at"]).total_seconds()
+                (
+                    job.get("completed_at", datetime.now(timezone.utc)) - job["started_at"]
+                ).total_seconds()
                 / 60
                 if job.get("started_at")
                 else 0
@@ -495,7 +499,7 @@ async def get_optimization_job_results(
                     out_sample_sharpe=result.get("out_sample_sharpe", 0.0),
                     stability_score=result.get("stability_score", 0.0),
                     execution_time_seconds=result.get("execution_time_seconds", 0.0),
-                    completed_at=result.get("completed_at", datetime.utcnow()),
+                    completed_at=result.get("completed_at", datetime.now(timezone.utc)),
                 )
             )
 
@@ -543,7 +547,7 @@ async def stop_optimization_job(
 
         # Update job status
         job["status"] = "stopping"
-        job["completed_at"] = datetime.utcnow()
+        job["completed_at"] = datetime.now(timezone.utc)
 
         # In real implementation, signal the optimization process to stop
         await asyncio.sleep(0.1)  # Small delay to simulate stopping
@@ -652,7 +656,7 @@ async def list_optimization_jobs(
                     out_sample_sharpe=best.get("out_sample_sharpe", 0.0),
                     stability_score=best.get("stability_score", 0.0),
                     execution_time_seconds=best.get("execution_time_seconds", 0.0),
-                    completed_at=best.get("completed_at", datetime.utcnow()),
+                    completed_at=best.get("completed_at", datetime.now(timezone.utc)),
                 )
 
             user_jobs.append(
@@ -741,7 +745,7 @@ async def _run_optimization_job(job_id: str):
 
         # Finalize job
         job["status"] = "completed"
-        job["completed_at"] = datetime.utcnow()
+        job["completed_at"] = datetime.now(timezone.utc)
         job["completed_combinations"] = len(combinations)
 
         logger.info(f"Completed optimization job {job_id} with {len(job['results'])} results")
@@ -751,7 +755,7 @@ async def _run_optimization_job(job_id: str):
         job = active_optimization_jobs.get(job_id)
         if job:
             job["status"] = "failed"
-            job["completed_at"] = datetime.utcnow()
+            job["completed_at"] = datetime.now(timezone.utc)
 
 
 def _generate_parameter_combinations(request_data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -810,7 +814,7 @@ async def _run_parameter_combination(
 ) -> dict[str, Any]:
     """Run a single parameter combination and return results."""
 
-    start_time = datetime.utcnow()
+    start_time = datetime.now(timezone.utc)
     combination_id = str(uuid4())
 
     try:
@@ -847,7 +851,7 @@ async def _run_parameter_combination(
             and stability_score >= 0.5  # Reasonable consistency
         )
 
-        execution_time = (datetime.utcnow() - start_time).total_seconds()
+        execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
         return {
             "combination_id": combination_id,
@@ -866,7 +870,7 @@ async def _run_parameter_combination(
             "out_sample_sharpe": out_sample_sharpe,
             "stability_score": stability_score,
             "execution_time_seconds": execution_time,
-            "completed_at": datetime.utcnow(),
+            "completed_at": datetime.now(timezone.utc),
             "is_valid": is_valid,
         }
 

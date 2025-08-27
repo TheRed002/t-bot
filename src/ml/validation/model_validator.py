@@ -6,7 +6,7 @@ performance validation, statistical tests, and production readiness checks.
 """
 
 import warnings
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -230,7 +230,7 @@ class ModelValidationService(BaseService):
 
             # Overall validation result
             validation_result = {
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_name": model.model_name,
                 "model_type": model.model_type,
                 "test_samples": len(X_test),
@@ -370,7 +370,7 @@ class ModelValidationService(BaseService):
             )
 
             stability_result = {
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_name": model.model_name,
                 "time_periods_analyzed": len(performance_over_time),
                 "stability_metrics": stability_metrics,
@@ -482,7 +482,7 @@ class ModelValidationService(BaseService):
             readiness_score = passed_checks / total_checks
 
             readiness_result = {
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
                 "model_name": model.model_name,
                 "readiness_checks": readiness_checks,
                 "critical_checks_passed": critical_passed,
@@ -614,7 +614,7 @@ class ModelValidationService(BaseService):
             )
 
             overfitting_result = {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "model_name": model.model_name,
                 "overfitting_indicators": overfitting_indicators,
                 "overfitting_score": overfitting_score,
@@ -626,7 +626,7 @@ class ModelValidationService(BaseService):
             # Store alert if high risk
             if risk_level in ["high", "critical"]:
                 alert = {
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "model_name": model.model_name,
                     "risk_level": risk_level,
                     "overfitting_score": overfitting_score,

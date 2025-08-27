@@ -3,7 +3,7 @@
 import asyncio
 import random
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from src.core.exceptions import ExchangeError, ExchangeInsufficientFundsError, ExchangeOrderError
@@ -12,6 +12,8 @@ from src.core.types import (
     MarketData,
     Order,
     OrderBook,
+    OrderRequest,
+    OrderResponse,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -19,6 +21,7 @@ from src.core.types import (
     Ticker,
     TimeInForce,
     Trade,
+    ExchangeInfo,
 )
 from src.exchanges.base import BaseExchange
 
@@ -27,11 +30,7 @@ class MockExchange(BaseExchange):
     """Mock exchange for development and testing without real API keys."""
 
     def __init__(
-        self, 
-        config, 
-        exchange_id: str = "mock", 
-        state_service=None, 
-        trade_lifecycle_manager=None
+        self, config, exchange_id: str = "mock", state_service=None, trade_lifecycle_manager=None, metrics_collector=None
     ):
         """Initialize mock exchange."""
         # Import Config here to avoid circular imports
@@ -44,7 +43,7 @@ class MockExchange(BaseExchange):
             config_obj = config
 
         # Skip API key validation for mock mode
-        super().__init__(config_obj, exchange_id, state_service, trade_lifecycle_manager)
+        super().__init__(config_obj, exchange_id, state_service, trade_lifecycle_manager, metrics_collector)
 
         # Initialize logger
         # Logger is provided by BaseExchange (via BaseComponent)
@@ -65,15 +64,31 @@ class MockExchange(BaseExchange):
 
     def _initialize_balances(self) -> dict[str, Balance]:
         """Initialize mock balances."""
+        now = datetime.now(timezone.utc)
         return {
             "USDT": Balance(
-                currency="USDT", free=Decimal("10000"), locked=Decimal("0"), total=Decimal("10000")
+                currency="USDT", 
+                available=Decimal("10000"), 
+                locked=Decimal("0"), 
+                total=Decimal("10000"),
+                exchange=self.exchange_id,
+                updated_at=now
             ),
             "BTC": Balance(
-                currency="BTC", free=Decimal("0.5"), locked=Decimal("0"), total=Decimal("0.5")
+                currency="BTC", 
+                available=Decimal("0.5"), 
+                locked=Decimal("0"), 
+                total=Decimal("0.5"),
+                exchange=self.exchange_id,
+                updated_at=now
             ),
             "ETH": Balance(
-                currency="ETH", free=Decimal("5"), locked=Decimal("0"), total=Decimal("5")
+                currency="ETH", 
+                available=Decimal("5"), 
+                locked=Decimal("0"), 
+                total=Decimal("5"),
+                exchange=self.exchange_id,
+                updated_at=now
             ),
         }
 
@@ -88,16 +103,14 @@ class MockExchange(BaseExchange):
         }
 
     async def connect(self) -> bool:
-        """Simulate connection to mock exchange."""
-        await asyncio.sleep(0.1)  # Simulate network delay
-        self.is_connected = True
-        self.logger.info(f"Connected to mock exchange: {self.exchange_id}")
-        return True
+        """Connect to mock exchange using BaseExchange connection logic."""
+        # Call parent class connect() which handles all the connection logic
+        return await super().connect()
 
     async def disconnect(self) -> None:
-        """Simulate disconnection from mock exchange."""
-        self.is_connected = False
-        self.logger.info(f"Disconnected from mock exchange: {self.exchange_id}")
+        """Disconnect from mock exchange using BaseExchange disconnect logic."""
+        # Call parent class disconnect() which handles all the cleanup
+        await super().disconnect()
 
     async def get_balance(self, currency: str | None = None) -> dict[str, Balance]:
         """Get mock account balance."""
@@ -115,22 +128,48 @@ class MockExchange(BaseExchange):
         if not self.is_connected:
             await self.connect()
 
-        if symbol not in self.market_prices:
+        # Handle both BTC/USDT and BTCUSDT formats
+        normalized_symbol = symbol
+        if "/" not in symbol and len(symbol) >= 6:
+            # Try to parse BTCUSDT -> BTC/USDT format
+            if symbol.endswith("USDT"):
+                base = symbol[:-4]
+                normalized_symbol = f"{base}/USDT"
+            elif symbol.endswith("BTC"):
+                base = symbol[:-3]
+                normalized_symbol = f"{base}/BTC"
+        
+        if normalized_symbol not in self.market_prices:
             raise ExchangeError(f"Symbol {symbol} not found")
 
-        base_price = self.market_prices[symbol]
+        base_price = self.market_prices[normalized_symbol]
         # Add some random variation
         variation = Decimal(random.uniform(-0.01, 0.01))
         current_price = base_price * (Decimal("1") + variation)
 
+        # Generate some volume and quantity data
+        bid_quantity = Decimal(random.uniform(0.1, 2.0))
+        ask_quantity = Decimal(random.uniform(0.1, 2.0))
+        volume = Decimal(random.uniform(1000, 10000))
+        price_change = Decimal(random.uniform(-100, 100))
+        
         return Ticker(
             symbol=symbol,
-            bid=current_price - Decimal("1"),
-            ask=current_price + Decimal("1"),
+            bid_price=current_price - Decimal("1"),
+            bid_quantity=bid_quantity,
+            ask_price=current_price + Decimal("1"),
+            ask_quantity=ask_quantity,
             last_price=current_price,
-            volume_24h=Decimal(random.uniform(1000, 10000)),
-            price_change_24h=Decimal(random.uniform(-100, 100)),
-            timestamp=datetime.now(),
+            last_quantity=Decimal(random.uniform(0.01, 1.0)),
+            open_price=base_price,
+            high_price=current_price + Decimal("5"),
+            low_price=current_price - Decimal("5"),
+            volume=volume,
+            quote_volume=volume * current_price,
+            timestamp=datetime.now(timezone.utc),
+            exchange=self.exchange_id,
+            price_change=price_change,
+            price_change_percent=float(price_change / base_price * 100) if base_price != 0 else 0.0,
         )
 
     async def get_order_book(self, symbol: str, limit: int = 100) -> OrderBook:
@@ -138,11 +177,25 @@ class MockExchange(BaseExchange):
         if not self.is_connected:
             await self.connect()
 
-        if symbol not in self.market_prices:
+        # Handle both BTC/USDT and BTCUSDT formats
+        normalized_symbol = symbol
+        if "/" not in symbol and len(symbol) >= 6:
+            # Try to parse BTCUSDT -> BTC/USDT format
+            if symbol.endswith("USDT"):
+                base = symbol[:-4]
+                normalized_symbol = f"{base}/USDT"
+            elif symbol.endswith("BTC"):
+                base = symbol[:-3]
+                normalized_symbol = f"{base}/BTC"
+        
+        if normalized_symbol not in self.market_prices:
             raise ExchangeError(f"Symbol {symbol} not found")
 
-        base_price = self.market_prices[symbol]
+        base_price = self.market_prices[normalized_symbol]
 
+        # Import OrderBookLevel
+        from src.core.types import OrderBookLevel
+        
         # Generate mock bids and asks
         bids = []
         asks = []
@@ -151,10 +204,24 @@ class MockExchange(BaseExchange):
             bid_price = base_price - Decimal(i + 1) * Decimal("0.5")
             ask_price = base_price + Decimal(i + 1) * Decimal("0.5")
 
-            bids.append([bid_price, Decimal(random.uniform(0.1, 2.0))])
-            asks.append([ask_price, Decimal(random.uniform(0.1, 2.0))])
+            bids.append(OrderBookLevel(
+                price=bid_price,
+                quantity=Decimal(random.uniform(0.1, 2.0)),
+                order_count=random.randint(1, 10)
+            ))
+            asks.append(OrderBookLevel(
+                price=ask_price,
+                quantity=Decimal(random.uniform(0.1, 2.0)),
+                order_count=random.randint(1, 10)
+            ))
 
-        return OrderBook(symbol=symbol, bids=bids, asks=asks, timestamp=datetime.now())
+        return OrderBook(
+            symbol=symbol,
+            bids=bids,
+            asks=asks,
+            timestamp=datetime.now(timezone.utc),
+            exchange=self.exchange_id
+        )
 
     async def place_order(
         self,
@@ -170,6 +237,17 @@ class MockExchange(BaseExchange):
         if not self.is_connected:
             await self.connect()
 
+        # Handle both BTC/USDT and BTCUSDT formats
+        normalized_symbol = symbol
+        if "/" not in symbol and len(symbol) >= 6:
+            # Try to parse BTCUSDT -> BTC/USDT format
+            if symbol.endswith("USDT"):
+                base = symbol[:-4]
+                normalized_symbol = f"{base}/USDT"
+            elif symbol.endswith("BTC"):
+                base = symbol[:-3]
+                normalized_symbol = f"{base}/BTC"
+
         # Generate order ID
         order_id = client_order_id or str(uuid.uuid4())
 
@@ -182,31 +260,32 @@ class MockExchange(BaseExchange):
             raise ExchangeError("Price required for limit orders")
 
         # Check balance
-        base, quote = symbol.split("/")
+        base, quote = normalized_symbol.split("/")
         if side == OrderSide.BUY:
             required = amount * price
             quote_balance = self.balances.get(quote)
-            if not quote_balance or quote_balance.free < required:
+            if not quote_balance or quote_balance.available < required:
                 raise ExchangeInsufficientFundsError(f"Insufficient {quote} balance")
         else:
             base_balance = self.balances.get(base)
-            if not base_balance or base_balance.free < amount:
+            if not base_balance or base_balance.available < amount:
                 raise ExchangeInsufficientFundsError(f"Insufficient {base} balance")
 
         # Create order
         order = Order(
-            id=order_id,
+            order_id=order_id,
             client_order_id=client_order_id,
             symbol=symbol,
-            type=order_type,
+            order_type=order_type,
             side=side,
             price=price,
-            amount=amount,
-            filled=Decimal("0"),
-            remaining=amount,
-            status=OrderStatus.NEW,
-            timestamp=datetime.now(),
+            quantity=amount,
+            filled_quantity=Decimal("0"),
+            status=OrderStatus.OPEN,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
             time_in_force=time_in_force,
+            exchange=self.exchange_id,
         )
 
         self.orders[order_id] = order
@@ -217,7 +296,7 @@ class MockExchange(BaseExchange):
 
         return order
 
-    async def cancel_order(self, order_id: str, symbol: str | None = None) -> Order:
+    async def cancel_order(self, order_id: str) -> bool:
         """Cancel mock order."""
         if not self.is_connected:
             await self.connect()
@@ -227,22 +306,34 @@ class MockExchange(BaseExchange):
 
         order = self.orders[order_id]
 
-        if order.status in [OrderStatus.FILLED, OrderStatus.CANCELED]:
+        if order.status in [OrderStatus.FILLED, OrderStatus.CANCELLED]:
             raise ExchangeError(f"Order {order_id} cannot be canceled")
 
-        order.status = OrderStatus.CANCELED
+        order.status = OrderStatus.CANCELLED
 
         # Release locked funds
-        base, quote = order.symbol.split("/")
-        if order.side == OrderSide.BUY:
-            locked_amount = order.remaining * order.price
-            self.balances[quote].locked -= locked_amount
-            self.balances[quote].free += locked_amount
+        # Handle both BTC/USDT and BTCUSDT formats
+        if "/" in order.symbol:
+            base, quote = order.symbol.split("/")
         else:
-            self.balances[base].locked -= order.remaining
-            self.balances[base].free += order.remaining
+            # Try to parse BTCUSDT -> BTC/USDT format
+            if order.symbol.endswith("USDT"):
+                base = order.symbol[:-4]
+                quote = "USDT"
+            elif order.symbol.endswith("BTC"):
+                base = order.symbol[:-3]
+                quote = "BTC"
+            else:
+                raise ExchangeError(f"Cannot parse symbol: {order.symbol}")
+        if order.side == OrderSide.BUY:
+            locked_amount = (order.quantity - order.filled_quantity) * order.price
+            self.balances[quote].locked -= locked_amount
+            self.balances[quote].available += locked_amount
+        else:
+            self.balances[base].locked -= (order.quantity - order.filled_quantity)
+            self.balances[base].available += (order.quantity - order.filled_quantity)
 
-        return order
+        return True
 
     async def get_order(self, order_id: str, symbol: str | None = None) -> Order:
         """Get mock order status."""
@@ -254,7 +345,7 @@ class MockExchange(BaseExchange):
 
         # Randomly fill some pending limit orders
         order = self.orders[order_id]
-        if order.status == OrderStatus.NEW and order.type == OrderType.LIMIT:
+        if order.status == OrderStatus.OPEN and order.order_type == OrderType.LIMIT:
             if random.random() < 0.3:  # 30% chance to fill
                 await self._fill_order(order_id)
 
@@ -268,7 +359,7 @@ class MockExchange(BaseExchange):
         open_orders = [
             order
             for order in self.orders.values()
-            if order.status in [OrderStatus.NEW, OrderStatus.PARTIALLY_FILLED]
+            if order.status in [OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]
         ]
 
         if symbol:
@@ -301,15 +392,17 @@ class MockExchange(BaseExchange):
         for order in self.orders.values():
             if order.status == OrderStatus.FILLED:
                 trade = Trade(
-                    id=f"trade_{order.id}",
-                    order_id=order.id,
+                    trade_id=f"trade_{order.order_id}",
+                    order_id=order.order_id,
                     symbol=order.symbol,
                     side=order.side,
                     price=order.price,
-                    amount=order.filled,
-                    fee=order.filled * order.price * self.taker_fee,
+                    quantity=order.filled_quantity,
+                    fee=order.filled_quantity * order.price * self.taker_fee,
                     fee_currency="USDT",
-                    timestamp=order.timestamp,
+                    timestamp=order.created_at,
+                    exchange=self.exchange_id,
+                    is_maker=order.order_type == OrderType.LIMIT,
                 )
                 trades.append(trade)
 
@@ -325,36 +418,52 @@ class MockExchange(BaseExchange):
             await self.connect()
 
         return list(self.positions.values())
+    
+    async def get_trade_history(self, symbol: str, limit: int = 100) -> list[Trade]:
+        """Get trade history - alias for get_trades."""
+        return await self.get_trades(symbol, limit)
 
     async def _fill_order(self, order_id: str) -> None:
         """Simulate order fill."""
         order = self.orders[order_id]
 
-        if order.status != OrderStatus.NEW:
+        if order.status != OrderStatus.OPEN:
             return
 
-        base, quote = order.symbol.split("/")
+        # Handle both BTC/USDT and BTCUSDT formats
+        if "/" in order.symbol:
+            base, quote = order.symbol.split("/")
+        else:
+            # Try to parse BTCUSDT -> BTC/USDT format
+            if order.symbol.endswith("USDT"):
+                base = order.symbol[:-4]
+                quote = "USDT"
+            elif order.symbol.endswith("BTC"):
+                base = order.symbol[:-3]
+                quote = "BTC"
+            else:
+                raise ExchangeError(f"Cannot parse symbol: {order.symbol}")
 
         # Update balances
         if order.side == OrderSide.BUY:
-            cost = order.amount * order.price
+            cost = order.quantity * order.price
             fee = cost * self.taker_fee
 
-            self.balances[quote].free -= cost + fee
-            self.balances[base].free += order.amount
+            self.balances[quote].available -= cost + fee
+            self.balances[base].available += order.quantity
         else:
-            fee = order.amount * order.price * self.taker_fee
+            fee = order.quantity * order.price * self.taker_fee
 
-            self.balances[base].free -= order.amount
-            self.balances[quote].free += order.amount * order.price - fee
+            self.balances[base].available -= order.quantity
+            self.balances[quote].available += order.quantity * order.price - fee
 
         # Update order
-        order.filled = order.amount
-        order.remaining = Decimal("0")
+        order.filled_quantity = order.quantity
+        order.updated_at = datetime.now(timezone.utc)
         order.status = OrderStatus.FILLED
 
         self.logger.info(
-            f"Mock order {order_id} filled: {order.amount} {order.symbol} @ {order.price}"
+            f"Mock order {order_id} filled: {order.quantity} {order.symbol} @ {order.price}"
         )
 
     async def get_market_data(self, symbol: str) -> MarketData:
@@ -362,19 +471,33 @@ class MockExchange(BaseExchange):
         if not self.is_connected:
             await self.connect()
 
+        # Handle both BTC/USDT and BTCUSDT formats
+        normalized_symbol = symbol
+        if "/" not in symbol and len(symbol) >= 6:
+            # Try to parse BTCUSDT -> BTC/USDT format
+            if symbol.endswith("USDT"):
+                base = symbol[:-4]
+                normalized_symbol = f"{base}/USDT"
+            elif symbol.endswith("BTC"):
+                base = symbol[:-3]
+                normalized_symbol = f"{base}/BTC"
+        
+        if normalized_symbol not in self.market_prices:
+            raise ExchangeError(f"Symbol {symbol} not found")
+
         ticker = await self.get_ticker(symbol)
         order_book = await self.get_order_book(symbol, limit=10)
 
         return MarketData(
             symbol=symbol,
-            timestamp=datetime.now(),
-            open=ticker.last_price * Decimal("0.98"),
-            high=ticker.last_price * Decimal("1.02"),
-            low=ticker.last_price * Decimal("0.97"),
+            timestamp=datetime.now(timezone.utc),
+            open=ticker.open_price,
+            high=ticker.high_price,
+            low=ticker.low_price,
             close=ticker.last_price,
-            volume=ticker.volume_24h,
-            bid=ticker.bid,
-            ask=ticker.ask,
+            volume=ticker.volume,
+            bid=ticker.bid_price,
+            ask=ticker.ask_price,
             order_book=order_book,
         )
 
@@ -382,9 +505,16 @@ class MockExchange(BaseExchange):
         """Check if mock exchange is connected."""
         return self.is_connected
 
+    async def _connect_to_exchange(self) -> bool:
+        """Connect to mock exchange."""
+        self.is_connected = True
+        self.logger.info(f"Connected to mock exchange: {self.exchange_id}")
+        return True
+
     async def _disconnect_from_exchange(self) -> None:
         """Disconnect from mock exchange."""
-        pass  # Nothing to do for mock
+        self.is_connected = False
+        self.logger.info(f"Disconnected from mock exchange: {self.exchange_id}")
 
     async def _get_market_data_from_exchange(self, symbol: str, timeframe: str = "1m"):
         """Get market data from mock exchange."""
@@ -393,22 +523,123 @@ class MockExchange(BaseExchange):
     async def _get_trade_history_from_exchange(self, symbol: str, limit: int = 100):
         """Get trade history from mock exchange."""
         return await self.get_trades(symbol, limit)
+    
+    async def _place_order_on_exchange(self, order: OrderRequest) -> OrderResponse:
+        """Place order on mock exchange."""
+        # Convert OrderRequest to our place_order parameters
+        placed_order = await self.place_order(
+            symbol=order.symbol,
+            side=order.side,
+            order_type=order.type,
+            amount=order.quantity,
+            price=order.price,
+            time_in_force=order.time_in_force,
+            client_order_id=order.client_order_id,
+        )
+        
+        # Convert Order to OrderResponse
+        return OrderResponse(
+            order_id=placed_order.order_id,
+            client_order_id=placed_order.client_order_id,
+            symbol=placed_order.symbol,
+            side=placed_order.side,
+            type=placed_order.order_type,
+            price=placed_order.price,
+            amount=placed_order.quantity,
+            status=placed_order.status,
+            timestamp=placed_order.created_at,
+        )
+    
+    async def _create_websocket_stream(self, symbol: str, stream_name: str):
+        """Create mock websocket stream."""
+        # For mock, we just return a dummy stream object
+        return {"symbol": symbol, "stream": stream_name, "active": True}
+    
+    async def _handle_exchange_stream(self, stream_name: str, stream) -> None:
+        """Handle mock exchange stream."""
+        # Mock implementation - just log
+        self.logger.debug(f"Handling mock stream: {stream_name}")
+        await asyncio.sleep(0.1)
+    
+    async def _close_exchange_stream(self, stream_name: str, stream) -> None:
+        """Close mock exchange stream."""
+        # Mock implementation
+        if isinstance(stream, dict):
+            stream["active"] = False
+        self.logger.debug(f"Closed mock stream: {stream_name}")
 
     async def get_account_balance(self):
         """Get account balance from mock exchange."""
-        return {currency: balance.free for currency, balance in self.balances.items()}
+        return {currency: balance.available for currency, balance in self.balances.items()}
 
-    async def get_exchange_info(self):
+    async def get_exchange_info(self) -> list[ExchangeInfo]:
         """Get exchange information."""
-        return {
-            "name": "mock",
-            "trading_pairs": list(self.market_prices.keys()),
-            "fees": {"maker": float(self.maker_fee), "taker": float(self.taker_fee)},
+        info_list = []
+        
+        # Define trading rules for each symbol
+        symbol_info = {
+            "BTC/USDT": {
+                "base": "BTC",
+                "quote": "USDT",
+                "min_quantity": Decimal("0.0001"),
+                "step_size": Decimal("0.0001"),
+                "tick_size": Decimal("0.01"),
+            },
+            "ETH/USDT": {
+                "base": "ETH", 
+                "quote": "USDT",
+                "min_quantity": Decimal("0.001"),
+                "step_size": Decimal("0.001"),
+                "tick_size": Decimal("0.01"),
+            },
+            "BNB/USDT": {
+                "base": "BNB",
+                "quote": "USDT", 
+                "min_quantity": Decimal("0.01"),
+                "step_size": Decimal("0.01"),
+                "tick_size": Decimal("0.01"),
+            },
+            "SOL/USDT": {
+                "base": "SOL",
+                "quote": "USDT",
+                "min_quantity": Decimal("0.1"),
+                "step_size": Decimal("0.1"),
+                "tick_size": Decimal("0.01"),
+            },
+            "ADA/USDT": {
+                "base": "ADA",
+                "quote": "USDT",
+                "min_quantity": Decimal("1"),
+                "step_size": Decimal("1"),
+                "tick_size": Decimal("0.0001"),
+            },
         }
+        
+        for symbol, info in symbol_info.items():
+            info_list.append(
+                ExchangeInfo(
+                    symbol=symbol,
+                    base_asset=info["base"],
+                    quote_asset=info["quote"],
+                    status="TRADING",
+                    min_price=Decimal("0.01"),
+                    max_price=Decimal("1000000"),
+                    tick_size=info["tick_size"],
+                    min_quantity=info["min_quantity"],
+                    max_quantity=Decimal("10000000"),
+                    step_size=info["step_size"],
+                    min_notional=Decimal("10"),
+                    exchange=self.exchange_id,
+                    is_trading=True,
+                )
+            )
+        
+        return info_list
 
-    async def get_order_status(self, order_id: str):
+    async def get_order_status(self, order_id: str) -> OrderStatus:
         """Get order status."""
-        return await self.get_order(order_id)
+        order = await self.get_order(order_id)
+        return order.status
 
     async def subscribe_to_stream(self, symbol: str, callback):
         """Subscribe to mock data stream."""

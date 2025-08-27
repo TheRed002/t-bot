@@ -17,7 +17,8 @@ from typing import Any
 
 import numpy as np
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
+from src.error_handling.context import ErrorContext
 from src.core.config.main import Config
 from src.core.exceptions import PositionLimitError, ValidationError
 
@@ -26,6 +27,12 @@ from src.core.types import Position, PositionLimits
 
 # MANDATORY: Import from P-002A
 from src.error_handling import ErrorHandler
+from src.utils.decimal_utils import (
+    ZERO,
+    format_decimal,
+    safe_divide,
+    to_decimal,
+)
 
 # MANDATORY: Import from P-007A
 from src.utils.decorators import time_execution
@@ -102,27 +109,27 @@ class PortfolioLimits(BaseComponent):
                 raise ValidationError("Invalid position for portfolio limit check")
 
             # Check total position count limit
-            if not await self._check_total_positions_limit(new_position):
+            if not self._check_total_positions_limit(new_position):
                 return False
 
             # Check positions per symbol limit
-            if not await self._check_positions_per_symbol_limit(new_position):
+            if not self._check_positions_per_symbol_limit(new_position):
                 return False
 
             # Check portfolio exposure limit
-            if not await self._check_portfolio_exposure_limit(new_position):
+            if not self._check_portfolio_exposure_limit(new_position):
                 return False
 
             # Check sector exposure limit
-            if not await self._check_sector_exposure_limit(new_position):
+            if not self._check_sector_exposure_limit(new_position):
                 return False
 
             # Check correlation exposure limit
-            if not await self._check_correlation_exposure_limit(new_position):
+            if not self._check_correlation_exposure_limit(new_position):
                 return False
 
             # Check leverage limit
-            if not await self._check_leverage_limit(new_position):
+            if not self._check_leverage_limit(new_position):
                 return False
 
             self.logger.info(
@@ -142,7 +149,7 @@ class PortfolioLimits(BaseComponent):
             raise PositionLimitError(f"Portfolio limits check failed: {e}")
 
     @time_execution
-    async def _check_total_positions_limit(self, new_position: Position) -> bool:
+    def _check_total_positions_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed total positions limit.
 
@@ -156,7 +163,7 @@ class PortfolioLimits(BaseComponent):
         max_positions = self.risk_config.max_total_positions
 
         if current_positions >= max_positions:
-            await self._log_risk_violation(
+            self._log_risk_violation_sync(
                 "total_positions_limit",
                 {
                     "current_positions": current_positions,
@@ -169,7 +176,7 @@ class PortfolioLimits(BaseComponent):
         return True
 
     @time_execution
-    async def _check_positions_per_symbol_limit(self, new_position: Position) -> bool:
+    def _check_positions_per_symbol_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed positions per symbol limit.
 
@@ -184,7 +191,7 @@ class PortfolioLimits(BaseComponent):
         max_positions_per_symbol = self.risk_config.max_positions_per_symbol
 
         if current_symbol_positions >= max_positions_per_symbol:
-            await self._log_risk_violation(
+            self._log_risk_violation_sync(
                 "positions_per_symbol_limit",
                 {
                     "symbol": symbol,
@@ -197,7 +204,7 @@ class PortfolioLimits(BaseComponent):
         return True
 
     @time_execution
-    async def _check_portfolio_exposure_limit(self, new_position: Position) -> bool:
+    def _check_portfolio_exposure_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed portfolio exposure limit.
 
@@ -207,22 +214,36 @@ class PortfolioLimits(BaseComponent):
         Returns:
             bool: True if within portfolio exposure limit
         """
-        if not self.total_portfolio_value or self.total_portfolio_value == 0:
+        if not self.total_portfolio_value or self.total_portfolio_value <= ZERO:
+            self.logger.warning("No valid portfolio value to check exposure against")
             return True  # No portfolio value to check against
 
-        # Calculate current portfolio exposure
-        current_exposure = sum(abs(pos.quantity * pos.current_price) for pos in self.positions)
+        # Validate new position values
+        if new_position.quantity <= ZERO or new_position.current_price <= ZERO:
+            self.logger.warning(
+                "Invalid new position values",
+                quantity=format_decimal(new_position.quantity),
+                price=format_decimal(new_position.current_price),
+            )
+            return False
+
+        # Calculate current portfolio exposure with validation
+        current_exposure = ZERO
+        for pos in self.positions:
+            if pos.quantity > ZERO and pos.current_price > ZERO:
+                position_exposure = abs(pos.quantity * pos.current_price)
+                current_exposure += position_exposure
 
         # Add new position exposure
         new_exposure = abs(new_position.quantity * new_position.current_price)
         total_exposure = current_exposure + new_exposure
 
-        # Calculate exposure percentage
-        exposure_percentage = total_exposure / self.total_portfolio_value
+        # Calculate exposure percentage with safe division
+        exposure_percentage = safe_divide(total_exposure, self.total_portfolio_value, ZERO)
         max_exposure = Decimal(str(self.risk_config.max_portfolio_exposure))
 
         if exposure_percentage > max_exposure:
-            await self._log_risk_violation(
+            self._log_risk_violation_sync(
                 "portfolio_exposure_limit",
                 {
                     "current_exposure": float(current_exposure),
@@ -238,7 +259,7 @@ class PortfolioLimits(BaseComponent):
         return True
 
     @time_execution
-    async def _check_sector_exposure_limit(self, new_position: Position) -> bool:
+    def _check_sector_exposure_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed sector exposure limit.
 
@@ -273,7 +294,7 @@ class PortfolioLimits(BaseComponent):
         max_sector_exposure = Decimal(str(self.risk_config.max_sector_exposure))
 
         if sector_exposure_percentage > max_sector_exposure:
-            await self._log_risk_violation(
+            self._log_risk_violation_sync(
                 "sector_exposure_limit",
                 {
                     "sector": sector,
@@ -289,7 +310,7 @@ class PortfolioLimits(BaseComponent):
         return True
 
     @time_execution
-    async def _check_correlation_exposure_limit(self, new_position: Position) -> bool:
+    def _check_correlation_exposure_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed correlation exposure limit.
 
@@ -324,7 +345,7 @@ class PortfolioLimits(BaseComponent):
             max_correlation_exposure = Decimal(str(self.risk_config.max_correlation_exposure))
 
             if correlated_exposure_percentage > max_correlation_exposure:
-                await self._log_risk_violation(
+                self._log_risk_violation_sync(
                     "correlation_exposure_limit",
                     {
                         "current_correlated_exposure": float(high_correlation_exposure),
@@ -339,7 +360,7 @@ class PortfolioLimits(BaseComponent):
         return True
 
     @time_execution
-    async def _check_leverage_limit(self, new_position: Position) -> bool:
+    def _check_leverage_limit(self, new_position: Position) -> bool:
         """
         Check if adding position would exceed leverage limit.
 
@@ -414,26 +435,36 @@ class PortfolioLimits(BaseComponent):
         )
 
     @time_execution
-    async def update_return_history(self, symbol: str, price: float) -> None:
+    async def update_return_history(self, symbol: str, price: Decimal) -> None:
         """
         Update return history for correlation calculations.
 
         Args:
             symbol: Trading symbol
-            price: Current price
+            price: Current price as Decimal for financial precision
         """
+        # Convert price to Decimal if needed
+        price_decimal = to_decimal(price) if not isinstance(price, Decimal) else price
+        
+        # Validate price
+        if price_decimal <= ZERO:
+            self.logger.warning(f"Invalid price for {symbol}: {price_decimal}")
+            return
         if symbol not in self.return_history:
             self.return_history[symbol] = []
             self.price_history[symbol] = []
 
-        # Store the current price
-        self.price_history[symbol].append(price)
+        # Store the current price (convert to float for numpy compatibility)
+        self.price_history[symbol].append(float(price_decimal))
 
         # Calculate return if we have previous price
         if len(self.price_history[symbol]) > 1:
-            prev_price = self.price_history[symbol][-2]
-            if prev_price > 0:
-                return_rate = (price - prev_price) / prev_price
+            prev_price_decimal = Decimal(str(self.price_history[symbol][-2]))
+            if prev_price_decimal > ZERO:
+                return_rate_decimal = safe_divide(
+                    price_decimal - prev_price_decimal, prev_price_decimal, ZERO
+                )
+                return_rate = float(return_rate_decimal)
                 self.return_history[symbol].append(return_rate)
 
         # Keep only recent history
@@ -496,6 +527,19 @@ class PortfolioLimits(BaseComponent):
     async def _log_risk_violation(self, violation_type: str, details: dict[str, Any]) -> None:
         """
         Log risk violation for monitoring and alerting.
+
+        Args:
+            violation_type: Type of risk violation
+            details: Additional violation details
+        """
+        self.logger.warning(
+            "Portfolio limit violation detected", violation_type=violation_type, details=details
+        )
+
+    @time_execution
+    def _log_risk_violation_sync(self, violation_type: str, details: dict[str, Any]) -> None:
+        """
+        Log risk violation for monitoring and alerting (synchronous version).
 
         Args:
             violation_type: Type of risk violation

@@ -3,13 +3,154 @@
 import asyncio
 import functools
 import logging
+import threading
 import time
-import traceback
+import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, ClassVar, ParamSpec, TypeVar, cast
 
+from src.core.exceptions import ValidationError
+
 # Note: Validation should be done via dependency injection, not global import
+
+# Exception classification for retry logic
+class ExceptionCategory:
+    """Classification of exceptions for intelligent retry behavior."""
+    
+    # Permanent failures - should not be retried
+    PERMANENT = {
+        ValidationError,
+        TypeError,
+        KeyError,
+        AttributeError,
+        NotImplementedError,
+        PermissionError,
+        FileNotFoundError,
+    }
+    
+    # Authentication/Authorization errors - usually permanent
+    AUTH_ERRORS = {
+        "Unauthorized",
+        "Forbidden", 
+        "Invalid API key",
+        "Authentication failed",
+        "Access denied",
+        "Token expired",
+    }
+    
+    # Network errors - usually transient, good for retry
+    NETWORK_ERRORS = {
+        "ConnectionError",
+        "TimeoutError", 
+        "ConnectTimeout",
+        "ReadTimeout",
+        "HTTPError",
+        "NetworkError",
+        "SocketError",
+        "DNSError",
+    }
+    
+    # Resource errors - may be transient or permanent
+    RESOURCE_ERRORS = {
+        "MemoryError",
+        "DiskSpaceError", 
+        "ResourceExhausted",
+        "RateLimitExceeded",
+        "ServiceUnavailable",
+    }
+    
+    # Trading-specific errors
+    TRADING_TRANSIENT = {
+        "MarketClosed",
+        "InsufficientLiquidity",
+        "PriceOutOfBounds",
+        "ExchangeUnavailable",
+        "OrderBookEmpty",
+    }
+    
+    TRADING_PERMANENT = {
+        "InvalidSymbol",
+        "UnsupportedOrderType",
+        "InsufficientBalance", 
+        "MarketNotFound",
+        "InvalidOrderSize",
+    }
+    
+    @classmethod
+    def should_retry(cls, exception: Exception) -> bool:
+        """Determine if an exception should be retried."""
+        exc_type = type(exception)
+        exc_message = str(exception)
+        
+        # Check for permanent exception types
+        if exc_type in cls.PERMANENT:
+            return False
+            
+        # Check for trading permanent errors
+        if any(pattern in exc_message for pattern in cls.TRADING_PERMANENT):
+            return False
+            
+        # Check for authentication errors
+        if any(pattern in exc_message for pattern in cls.AUTH_ERRORS):
+            return False
+            
+        # Network errors are generally retryable
+        if any(pattern in exc_type.__name__ for pattern in cls.NETWORK_ERRORS):
+            return True
+            
+        # Trading transient errors are retryable
+        if any(pattern in exc_message for pattern in cls.TRADING_TRANSIENT):
+            return True
+            
+        # Resource errors - depends on the specific error
+        if any(pattern in exc_type.__name__ for pattern in cls.RESOURCE_ERRORS):
+            # Rate limits and service unavailable are retryable
+            if "RateLimit" in exc_message or "ServiceUnavailable" in exc_message:
+                return True
+            # Memory errors are usually not retryable
+            if "MemoryError" in exc_type.__name__:
+                return False
+            # Default to retryable for other resource errors
+            return True
+            
+        # Default: retry for unknown exceptions (conservative approach)
+        return True
+        
+    @classmethod
+    def get_retry_delay(cls, exception: Exception, attempt: int, base_delay: float) -> float:
+        """Get appropriate retry delay based on exception type and attempt."""
+        exc_type = type(exception)
+        exc_message = str(exception)
+        
+        # Rate limiting errors - use longer delays
+        if "RateLimit" in exc_message or "TooManyRequests" in exc_message:
+            # Extract rate limit reset time if available
+            if "retry after" in exc_message.lower():
+                try:
+                    # Try to extract seconds from message
+                    import re
+                    match = re.search(r"retry after (\d+)", exc_message.lower())
+                    if match:
+                        return float(match.group(1))
+                except Exception:
+                    pass
+            # Default rate limit backoff
+            return base_delay * (3 ** attempt)  # More aggressive backoff
+            
+        # Network errors - standard exponential backoff with jitter
+        if any(pattern in exc_type.__name__ for pattern in cls.NETWORK_ERRORS):
+            import random
+            jitter = random.uniform(0.1, 0.3) * base_delay
+            return (base_delay * (2 ** attempt)) + jitter
+            
+        # Service unavailable - moderate backoff
+        if "ServiceUnavailable" in exc_message:
+            return base_delay * (2.5 ** attempt)
+            
+        # Default exponential backoff
+        return base_delay * (2 ** attempt)
 
 # Define proper type variables
 P = ParamSpec("P")
@@ -23,9 +164,13 @@ class UnifiedDecorator:
     Provides retry, validation, logging, caching, and monitoring capabilities.
     """
 
-    # Class-level cache storage
+    # Class-level cache storage with proper memory management
     _cache: ClassVar[dict[str, Any]] = {}
     _cache_timestamps: ClassVar[dict[str, datetime]] = {}
+    _last_cache_cleanup: ClassVar[datetime] = datetime.now(timezone.utc)
+    _max_cache_entries: ClassVar[int] = 1000  # Reduced from 10000 to prevent unbounded growth
+    _cache_lock: ClassVar[threading.Lock] = threading.Lock()  # Thread-safe access
+    _cleanup_in_progress: ClassVar[bool] = False  # Prevent concurrent cleanups
 
     @classmethod
     def _get_cache_key(
@@ -47,10 +192,16 @@ class UnifiedDecorator:
         result: Any,
         ttl: int,
     ) -> None:
-        """Cache function result with TTL."""
+        """Cache function result with TTL and automatic cleanup."""
         key = cls._get_cache_key(func, args, kwargs)
-        cls._cache[key] = result
-        cls._cache_timestamps[key] = datetime.now(timezone.utc) + timedelta(seconds=ttl)
+
+        with cls._cache_lock:
+            # Force cleanup if cache is getting too large
+            if len(cls._cache) >= cls._max_cache_entries:
+                cls._force_cache_cleanup()
+
+            cls._cache[key] = result
+            cls._cache_timestamps[key] = datetime.now(timezone.utc) + timedelta(seconds=ttl)
 
     @classmethod
     def _get_cached_result(
@@ -59,15 +210,98 @@ class UnifiedDecorator:
         """Get cached result if still valid."""
         key = cls._get_cache_key(func, args, kwargs)
 
-        if key in cls._cache:
-            if datetime.now(timezone.utc) < cls._cache_timestamps.get(key, datetime.min):
-                return cls._cache[key]
-            else:
-                # Cache expired, remove it
-                del cls._cache[key]
-                del cls._cache_timestamps[key]
+        with cls._cache_lock:
+            # Periodically cleanup expired entries (non-blocking)
+            cls._cleanup_cache_if_needed()
+
+            if key in cls._cache:
+                expiry_time = cls._cache_timestamps.get(key, datetime.min)
+                if datetime.now(timezone.utc) < expiry_time:
+                    return cls._cache[key]
+                else:
+                    # Cache expired, remove it immediately
+                    cls._cache.pop(key, None)
+                    cls._cache_timestamps.pop(key, None)
 
         return None
+
+    @classmethod
+    def _cleanup_cache_if_needed(cls) -> None:
+        """Clean up expired cache entries if needed (non-blocking)."""
+        # Only run if not already in progress and enough time has passed
+        if cls._cleanup_in_progress:
+            return
+
+        now = datetime.now(timezone.utc)
+
+        # Cleanup every 30 minutes or when cache is getting large
+        should_cleanup = (
+            now - cls._last_cache_cleanup > timedelta(minutes=30)
+            or len(cls._cache) > cls._max_cache_entries * 0.8  # 80% threshold
+        )
+
+        if should_cleanup:
+            cls._cleanup_in_progress = True
+            try:
+                # Remove expired entries
+                expired_keys = [
+                    key for key, timestamp in cls._cache_timestamps.items() if now >= timestamp
+                ]
+
+                for key in expired_keys:
+                    cls._cache.pop(key, None)
+                    cls._cache_timestamps.pop(key, None)
+
+                # If still too many entries, remove oldest 20%
+                if len(cls._cache) > cls._max_cache_entries * 0.8:
+                    sorted_items = sorted(
+                        cls._cache_timestamps.items(), key=lambda x: x[1], reverse=True
+                    )
+                    # Keep 80% of max entries
+                    keep_count = int(cls._max_cache_entries * 0.8)
+                    keep_keys = {k for k, _ in sorted_items[:keep_count]}
+
+                    # Remove entries not in keep_keys
+                    cls._cache = {k: v for k, v in cls._cache.items() if k in keep_keys}
+                    cls._cache_timestamps = {
+                        k: v for k, v in cls._cache_timestamps.items() if k in keep_keys
+                    }
+
+                cls._last_cache_cleanup = now
+            finally:
+                cls._cleanup_in_progress = False
+
+    @classmethod
+    def _force_cache_cleanup(cls) -> None:
+        """Force immediate cache cleanup when at capacity."""
+        now = datetime.now(timezone.utc)
+
+        # Remove expired entries first
+        expired_keys = [key for key, timestamp in cls._cache_timestamps.items() if now >= timestamp]
+
+        for key in expired_keys:
+            cls._cache.pop(key, None)
+            cls._cache_timestamps.pop(key, None)
+
+        # If still at capacity, remove oldest 30%
+        if len(cls._cache) >= cls._max_cache_entries:
+            sorted_items = sorted(cls._cache_timestamps.items(), key=lambda x: x[1], reverse=True)
+            # Keep only 70% of entries
+            keep_count = int(cls._max_cache_entries * 0.7)
+            keep_keys = {k for k, _ in sorted_items[:keep_count]}
+
+            cls._cache = {k: v for k, v in cls._cache.items() if k in keep_keys}
+            cls._cache_timestamps = {
+                k: v for k, v in cls._cache_timestamps.items() if k in keep_keys
+            }
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Clear all cached results - useful for testing and cleanup."""
+        with cls._cache_lock:
+            cls._cache.clear()
+            cls._cache_timestamps.clear()
+            cls._last_cache_cleanup = datetime.now(timezone.utc)
 
     @classmethod
     async def _with_retry(
@@ -79,9 +313,10 @@ class UnifiedDecorator:
         retry_delay: float,
         logger: Any | None = None,
     ) -> Any:
-        """Execute function with retry logic."""
+        """Execute function with intelligent retry logic and exception classification."""
         last_exception = None
-
+        correlation_id = str(uuid.uuid4())[:8]
+        
         for attempt in range(retry_times):
             try:
                 if asyncio.iscoroutinefunction(func):
@@ -90,18 +325,59 @@ class UnifiedDecorator:
                     return func(*args, **kwargs)
             except Exception as e:
                 last_exception = e
+                
+                # Enhanced exception classification
+                should_retry = ExceptionCategory.should_retry(e)
+                
+                if not should_retry:
+                    if logger:
+                        logger.error(
+                            f"Permanent failure in {func.__name__} (not retrying): "
+                            f"{type(e).__name__}: {e}. Correlation: {correlation_id}"
+                        )
+                    # Add correlation ID to exception for tracking
+                    if not hasattr(e, 'correlation_id'):
+                        e.correlation_id = correlation_id
+                    raise
+                
                 if logger:
                     logger.warning(
-                        f"Attempt {attempt + 1}/{retry_times} failed for {func.__name__}: {e}"
+                        f"Attempt {attempt + 1}/{retry_times} failed for {func.__name__}: "
+                        f"{type(e).__name__}: {e}. Correlation: {correlation_id}"
                     )
-
+                
+                # Check if we should continue retrying
                 if attempt < retry_times - 1:
-                    await asyncio.sleep(retry_delay * (2**attempt))  # Exponential backoff
-
+                    # Calculate intelligent retry delay
+                    delay = ExceptionCategory.get_retry_delay(e, attempt, retry_delay)
+                    
+                    if logger:
+                        logger.debug(
+                            f"Retrying {func.__name__} in {delay:.2f}s (attempt {attempt + 1}/{retry_times}). "
+                            f"Correlation: {correlation_id}"
+                        )
+                    
+                    await asyncio.sleep(delay)
+                else:
+                    # Final attempt failed
+                    if logger:
+                        logger.error(
+                            f"All {retry_times} retry attempts failed for {func.__name__}. "
+                            f"Final error: {type(e).__name__}: {e}. Correlation: {correlation_id}"
+                        )
+        
         if last_exception:
+            # Add correlation ID for final tracking
+            if not hasattr(last_exception, 'correlation_id'):
+                last_exception.correlation_id = correlation_id
             raise last_exception
         else:
-            raise RuntimeError(f"Failed to execute {func.__name__} after {retry_times} attempts")
+            final_error = RuntimeError(
+                f"Failed to execute {func.__name__} after {retry_times} attempts. "
+                f"Correlation: {correlation_id}"
+            )
+            final_error.correlation_id = correlation_id
+            raise final_error
 
     @classmethod
     def _record_metrics(cls, func: Callable[..., Any], result: Any, execution_time: float) -> None:
@@ -112,50 +388,189 @@ class UnifiedDecorator:
         base_logger.debug(f"Metrics: {func.__name__} completed in {execution_time:.3f}s")
 
     @classmethod
+    def _bind_function_arguments(
+        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> Any:
+        """Bind function arguments and apply defaults."""
+        import inspect
+
+        sig = inspect.signature(func)
+        try:
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+            return bound
+        except TypeError as e:
+            raise ValueError(f"Invalid arguments for {func.__name__}: {e}") from e
+
+    @classmethod
+    def _validate_numeric_param(cls, param_name: str, value: Any) -> None:
+        """Validate numeric parameters like price and quantity."""
+        if not isinstance(value, int | float | Decimal):
+            raise ValueError(f"{param_name} must be numeric, got {type(value).__name__}")
+        # Use Decimal for comparison to maintain precision
+        if Decimal(str(value)) <= 0:
+            raise ValueError(f"{param_name} must be positive")
+
+    @classmethod
+    def _validate_symbol_param(cls, param_name: str, value: Any) -> None:
+        """Validate symbol parameters."""
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{param_name} must be a non-empty string")
+
+    @classmethod
+    def _validate_single_param(cls, param_name: str, value: Any) -> None:
+        """Validate a single parameter based on its name and value."""
+        if value is None:
+            return
+
+        try:
+            # Basic type validation only
+            if "price" in param_name.lower() or "quantity" in param_name.lower():
+                cls._validate_numeric_param(param_name, value)
+            elif "symbol" in param_name.lower():
+                cls._validate_symbol_param(param_name, value)
+        except Exception as validation_error:
+            raise ValueError(
+                f"Validation failed for {param_name}: {validation_error}"
+            ) from validation_error
+
+    @classmethod
     def _validate_args(
         cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> None:
         """Validate function arguments based on annotations."""
-        # Get function signature
         import inspect
 
         sig = inspect.signature(func)
-
-        # Bind arguments
-        try:
-            bound = sig.bind(*args, **kwargs)
-            bound.apply_defaults()
-        except TypeError as e:
-            raise ValueError(f"Invalid arguments for {func.__name__}: {e}") from e
+        bound = cls._bind_function_arguments(func, args, kwargs)
 
         # Validate based on type hints
         for param_name, param in sig.parameters.items():
             if param.annotation != param.empty:
                 value = bound.arguments.get(param_name)
-
                 # Special validation for common types - lazy import to avoid circular deps
                 # NOTE: This is kept simple to avoid circular dependencies
                 # For full validation, use the ValidationService via dependency injection
-                if value is not None:
-                    try:
-                        # Basic type validation only
-                        if "price" in param_name.lower() or "quantity" in param_name.lower():
-                            if not isinstance(value, int | float):
-                                raise ValueError(
-                                    f"{param_name} must be numeric, got {type(value).__name__}"
-                                )
-                            if float(value) <= 0:
-                                raise ValueError(f"{param_name} must be positive")
-                        elif "symbol" in param_name.lower():
-                            if not isinstance(value, str) or not value.strip():
-                                raise ValueError(f"{param_name} must be a non-empty string")
-                    except Exception as validation_error:
-                        raise ValueError(
-                            f"Validation failed for {param_name}: {validation_error}"
-                        ) from validation_error
+                cls._validate_single_param(param_name, value)
 
-    @staticmethod
+    @classmethod
+    def _create_enhancement_config(
+        cls,
+        retry: bool = False,
+        retry_times: int = 3,
+        retry_delay: float = 1.0,
+        validate: bool = False,
+        log: bool = False,
+        log_level: str = "debug",
+        cache: bool = False,
+        cache_ttl: int = 60,
+        monitor: bool = False,
+        timeout: float | None = None,
+        fallback: Callable[..., Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create configuration for function enhancement."""
+        return {
+            "retry": retry,
+            "retry_times": retry_times,
+            "retry_delay": retry_delay,
+            "validate": validate,
+            "log": log,
+            "log_level": log_level,
+            "cache": cache,
+            "cache_ttl": cache_ttl,
+            "monitor": monitor,
+            "timeout": timeout,
+            "fallback": fallback,
+        }
+
+    @classmethod
+    def _prepare_execution_context(
+        cls, func: Callable[..., Any], config: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Prepare execution context for enhanced function."""
+        logger = logging.getLogger(func.__module__) if config["log"] else None
+        start_time = time.time()
+        return {"logger": logger, "start_time": start_time}
+
+    @classmethod
+    def _handle_validation(
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        config: dict[str, Any],
+        context: dict[str, Any],
+    ) -> None:
+        """Handle argument validation if enabled."""
+        if config["validate"]:
+            try:
+                cls._validate_args(func, args, kwargs)
+            except Exception as e:
+                if context["logger"]:
+                    context["logger"].error(f"Validation failed for {func.__name__}: {e}")
+                raise
+
+    @classmethod
+    def _handle_pre_execution_logging(
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        config: dict[str, Any],
+        context: dict[str, Any],
+    ) -> None:
+        """Handle logging before function execution."""
+        if config["log"] and context["logger"]:
+            log_method = getattr(context["logger"], config["log_level"], context["logger"].debug)
+            log_method(f"Calling {func.__name__} with args={args}, kwargs={kwargs}")
+
+    @classmethod
+    def _handle_cache_check(
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        config: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Check cache for existing result."""
+        if config["cache"]:
+            cached_result = cls._get_cached_result(func, args, kwargs)
+            if cached_result is not None:
+                if context["logger"]:
+                    context["logger"].debug(f"Cache hit for {func.__name__}")
+                return cached_result
+        return None
+
+    @classmethod
+    def _handle_post_execution(
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        result: Any,
+        config: dict[str, Any],
+        context: dict[str, Any],
+    ) -> None:
+        """Handle post-execution tasks like caching, monitoring, and logging."""
+        # Cache result
+        if config["cache"]:
+            cls._cache_result(func, args, kwargs, result, config["cache_ttl"])
+
+        # Monitor
+        if config["monitor"]:
+            execution_time = time.time() - context["start_time"]
+            cls._record_metrics(func, result, execution_time)
+
+        # Log success
+        if config["log"] and context["logger"]:
+            execution_time = time.time() - context["start_time"]
+            log_method = getattr(context["logger"], config["log_level"], context["logger"].debug)
+            log_method(f"{func.__name__} completed in {execution_time:.3f}s")
+
+    @classmethod
     def enhance(
+        cls,
         retry: bool = False,
         retry_times: int = 3,
         retry_delay: float = 1.0,
@@ -189,178 +604,27 @@ class UnifiedDecorator:
         """
 
         def decorator(func: F) -> F:
+            config = cls._create_enhancement_config(
+                retry,
+                retry_times,
+                retry_delay,
+                validate,
+                log,
+                log_level,
+                cache,
+                cache_ttl,
+                monitor,
+                timeout,
+                fallback,
+            )
+
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-                logger = logging.getLogger(func.__module__) if log else None
-                start_time = time.time()
-
-                # Validation
-                if validate:
-                    try:
-                        UnifiedDecorator._validate_args(func, args, kwargs)
-                    except Exception as e:
-                        if logger:
-                            logger.error(f"Validation failed for {func.__name__}: {e}")
-                        raise
-
-                # Logging
-                if log and logger:
-                    log_method = getattr(logger, log_level, logger.debug)
-                    log_method(f"Calling {func.__name__} with args={args}, kwargs={kwargs}")
-
-                # Check cache
-                if cache:
-                    cached_result = UnifiedDecorator._get_cached_result(func, args, kwargs)
-                    if cached_result is not None:
-                        if logger:
-                            logger.debug(f"Cache hit for {func.__name__}")
-                        return cached_result
-
-                try:
-                    # Apply timeout if specified
-                    if timeout:
-                        result = await asyncio.wait_for(
-                            UnifiedDecorator._execute_with_retry(
-                                func, args, kwargs, retry, retry_times, retry_delay, logger
-                            ),
-                            timeout=timeout,
-                        )
-                    else:
-                        result = await UnifiedDecorator._execute_with_retry(
-                            func, args, kwargs, retry, retry_times, retry_delay, logger
-                        )
-
-                    # Cache result
-                    if cache:
-                        UnifiedDecorator._cache_result(func, args, kwargs, result, cache_ttl)
-
-                    # Monitor
-                    if monitor:
-                        execution_time = time.time() - start_time
-                        UnifiedDecorator._record_metrics(func, result, execution_time)
-
-                    # Log success
-                    if log and logger:
-                        execution_time = time.time() - start_time
-                        log_method(f"{func.__name__} completed in {execution_time:.3f}s")
-
-                    return result
-
-                except Exception as e:
-                    if logger:
-                        logger.error(f"{func.__name__} failed: {e}\n{traceback.format_exc()}")
-
-                    # Use fallback if provided
-                    if fallback:
-                        if logger:
-                            logger.info(f"Using fallback for {func.__name__}")
-                        if asyncio.iscoroutinefunction(fallback):
-                            return await fallback(*args, **kwargs)
-                        else:
-                            return fallback(*args, **kwargs)
-
-                    raise
+                return await cls._execute_async_enhanced(func, args, kwargs, config)
 
             @functools.wraps(func)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
-                """Wrapper for synchronous functions."""
-                # For sync functions, check if we're in an async context
-                try:
-                    # Try to get the running loop (Python 3.7+)
-                    loop = asyncio.get_running_loop()
-                    # If we're here, we're inside an event loop
-                    # Log warning as sync functions shouldn't be decorated with async features
-                    logger = logging.getLogger(func.__module__) if log else None
-                    if logger:
-                        logger.warning(
-                            f"Sync function {func.__name__} decorated with async features "
-                            "but called from async context. Consider using async version."
-                        )
-                except RuntimeError:
-                    # No running event loop - this is the normal case for sync functions
-                    pass
-
-                # For sync functions, just execute them directly with basic features
-                logger = logging.getLogger(func.__module__) if log else None
-                start_time = time.time()
-
-                # Validation
-                if validate:
-                    try:
-                        UnifiedDecorator._validate_args(func, args, kwargs)
-                    except Exception as e:
-                        if logger:
-                            logger.error(f"Validation failed for {func.__name__}: {e}")
-                        raise
-
-                # Logging
-                if log and logger:
-                    log_method = getattr(logger, log_level, logger.debug)
-                    log_method(f"Calling {func.__name__} with args={args}, kwargs={kwargs}")
-
-                # Check cache
-                if cache:
-                    cached_result = UnifiedDecorator._get_cached_result(func, args, kwargs)
-                    if cached_result is not None:
-                        if logger:
-                            logger.debug(f"Cache hit for {func.__name__}")
-                        return cached_result
-
-                try:
-                    # Execute with retry if needed
-                    if retry:
-                        last_exception = None
-                        for attempt in range(retry_times):
-                            try:
-                                result = func(*args, **kwargs)
-                                break
-                            except Exception as e:
-                                last_exception = e
-                                if logger:
-                                    logger.warning(
-                                        f"Attempt {attempt + 1}/{retry_times} failed "
-                                        f"for {func.__name__}: {e}"
-                                    )
-                                if attempt < retry_times - 1:
-                                    time.sleep(retry_delay * (2**attempt))
-                        else:
-                            if last_exception:
-                                raise last_exception
-                            else:
-                                raise RuntimeError(
-                                    f"Failed to execute {func.__name__} after "
-                                    f"{retry_times} attempts"
-                                )
-                    else:
-                        result = func(*args, **kwargs)
-
-                    # Cache result
-                    if cache:
-                        UnifiedDecorator._cache_result(func, args, kwargs, result, cache_ttl)
-
-                    # Monitor
-                    if monitor:
-                        execution_time = time.time() - start_time
-                        UnifiedDecorator._record_metrics(func, result, execution_time)
-
-                    # Log success
-                    if log and logger:
-                        execution_time = time.time() - start_time
-                        log_method(f"{func.__name__} completed in {execution_time:.3f}s")
-
-                    return result
-
-                except Exception as e:
-                    if logger:
-                        logger.error(f"{func.__name__} failed: {e}")
-
-                    # Use fallback if provided
-                    if fallback:
-                        if logger:
-                            logger.info(f"Using fallback for {func.__name__}")
-                        return fallback(*args, **kwargs)
-
-                    raise
+                return cls._execute_sync_enhanced(func, args, kwargs, config)
 
             # Return appropriate wrapper based on function type
             if asyncio.iscoroutinefunction(func):
@@ -369,6 +633,249 @@ class UnifiedDecorator:
                 return cast(F, sync_wrapper)
 
         return decorator
+
+    @classmethod
+    async def _execute_async_enhanced(
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        config: dict[str, Any],
+    ) -> Any:
+        """Execute async function with enhancements."""
+        context = cls._prepare_execution_context(func, config)
+
+        cls._handle_validation(func, args, kwargs, config, context)
+        cls._handle_pre_execution_logging(func, args, kwargs, config, context)
+
+        cached_result = cls._handle_cache_check(func, args, kwargs, config, context)
+        if cached_result is not None:
+            return cached_result
+
+        try:
+            # Execute function
+            if config["timeout"]:
+                result = await asyncio.wait_for(
+                    cls._execute_with_retry(
+                        func,
+                        args,
+                        kwargs,
+                        config["retry"],
+                        config["retry_times"],
+                        config["retry_delay"],
+                        context["logger"],
+                    ),
+                    timeout=config["timeout"],
+                )
+            else:
+                result = await cls._execute_with_retry(
+                    func,
+                    args,
+                    kwargs,
+                    config["retry"],
+                    config["retry_times"],
+                    config["retry_delay"],
+                    context["logger"],
+                )
+
+            cls._handle_post_execution(func, args, kwargs, result, config, context)
+            return result
+
+        except Exception as e:
+            return await cls._handle_execution_error_async(func, args, kwargs, e, config, context)
+
+    @classmethod
+    def _execute_sync_enhanced(
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        config: dict[str, Any],
+    ) -> Any:
+        """Execute sync function with enhancements."""
+        context = cls._prepare_execution_context(func, config)
+
+        cls._handle_validation(func, args, kwargs, config, context)
+        cls._handle_pre_execution_logging(func, args, kwargs, config, context)
+
+        cached_result = cls._handle_cache_check(func, args, kwargs, config, context)
+        if cached_result is not None:
+            return cached_result
+
+        try:
+            result = cls._execute_sync_with_retry(func, args, kwargs, config, context)
+            cls._handle_post_execution(func, args, kwargs, result, config, context)
+            return result
+
+        except Exception as e:
+            return cls._handle_execution_error_sync(func, args, kwargs, e, config, context)
+
+    @classmethod
+    def _execute_sync_with_retry(
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        config: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Execute sync function with intelligent retry logic."""
+        if not config["retry"]:
+            return func(*args, **kwargs)
+        
+        last_exception = None
+        correlation_id = str(uuid.uuid4())[:8]
+        
+        for attempt in range(config["retry_times"]):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                last_exception = e
+                
+                # Enhanced exception classification
+                should_retry = ExceptionCategory.should_retry(e)
+                
+                if not should_retry:
+                    if context["logger"]:
+                        context["logger"].error(
+                            f"Permanent failure in {func.__name__} (not retrying): "
+                            f"{type(e).__name__}: {e}. Correlation: {correlation_id}"
+                        )
+                    # Add correlation ID to exception
+                    if not hasattr(e, 'correlation_id'):
+                        e.correlation_id = correlation_id
+                    raise
+                
+                if context["logger"]:
+                    context["logger"].warning(
+                        f"Attempt {attempt + 1}/{config['retry_times']} failed for "
+                        f"{func.__name__}: {type(e).__name__}: {e}. Correlation: {correlation_id}"
+                    )
+                
+                if attempt < config["retry_times"] - 1:
+                    # Calculate intelligent retry delay
+                    delay = ExceptionCategory.get_retry_delay(e, attempt, config["retry_delay"])
+                    
+                    if context["logger"]:
+                        context["logger"].debug(
+                            f"Retrying {func.__name__} in {delay:.2f}s (attempt {attempt + 1}/{config['retry_times']}). "
+                            f"Correlation: {correlation_id}"
+                        )
+                    
+                    time.sleep(delay)
+                else:
+                    # Final attempt failed
+                    if context["logger"]:
+                        context["logger"].error(
+                            f"All {config['retry_times']} retry attempts failed for {func.__name__}. "
+                            f"Final error: {type(e).__name__}: {e}. Correlation: {correlation_id}"
+                        )
+        
+        if last_exception:
+            # Add correlation ID for final tracking
+            if not hasattr(last_exception, 'correlation_id'):
+                last_exception.correlation_id = correlation_id
+            raise last_exception
+        else:
+            final_error = RuntimeError(
+                f"Failed to execute {func.__name__} after {config['retry_times']} attempts. "
+                f"Correlation: {correlation_id}"
+            )
+            final_error.correlation_id = correlation_id
+            raise final_error
+
+    @classmethod
+    async def _handle_execution_error_async(
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        error: Exception,
+        config: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Handle execution errors and fallbacks for async functions with correlation tracking."""
+        correlation_id = getattr(error, 'correlation_id', str(uuid.uuid4())[:8])
+        
+        if context["logger"]:
+            context["logger"].error(
+                f"{func.__name__} failed: {type(error).__name__}: {error}. "
+                f"Correlation: {correlation_id}"
+            )
+
+        # Use fallback if provided
+        if config["fallback"]:
+            if context["logger"]:
+                context["logger"].info(
+                    f"Using fallback for {func.__name__}. Correlation: {correlation_id}"
+                )
+
+            try:
+                fallback_result = config["fallback"](*args, **kwargs)
+                # If fallback is async, await it
+                if asyncio.iscoroutine(fallback_result):
+                    return await fallback_result
+                return fallback_result
+            except Exception as fallback_error:
+                if context["logger"]:
+                    context["logger"].error(
+                        f"Fallback for {func.__name__} also failed: {type(fallback_error).__name__}: {fallback_error}. "
+                        f"Correlation: {correlation_id}"
+                    )
+                # Chain the original error with fallback error
+                fallback_error.__cause__ = error
+                if not hasattr(fallback_error, 'correlation_id'):
+                    fallback_error.correlation_id = correlation_id
+                raise fallback_error
+
+        # Ensure error has correlation ID before raising
+        if not hasattr(error, 'correlation_id'):
+            error.correlation_id = correlation_id
+        raise error
+
+    @classmethod
+    def _handle_execution_error_sync(
+        cls,
+        func: Callable[..., Any],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        error: Exception,
+        config: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Any:
+        """Handle execution errors and fallbacks for sync functions with correlation tracking."""
+        correlation_id = getattr(error, 'correlation_id', str(uuid.uuid4())[:8])
+        
+        if context["logger"]:
+            context["logger"].error(
+                f"{func.__name__} failed: {type(error).__name__}: {error}. "
+                f"Correlation: {correlation_id}"
+            )
+
+        # Use fallback if provided
+        if config["fallback"]:
+            if context["logger"]:
+                context["logger"].info(
+                    f"Using fallback for {func.__name__}. Correlation: {correlation_id}"
+                )
+            try:
+                return config["fallback"](*args, **kwargs)
+            except Exception as fallback_error:
+                if context["logger"]:
+                    context["logger"].error(
+                        f"Fallback for {func.__name__} also failed: {type(fallback_error).__name__}: {fallback_error}. "
+                        f"Correlation: {correlation_id}"
+                    )
+                # Chain the original error with fallback error
+                fallback_error.__cause__ = error
+                if not hasattr(fallback_error, 'correlation_id'):
+                    fallback_error.correlation_id = correlation_id
+                raise fallback_error
+
+        # Ensure error has correlation ID before raising
+        if not hasattr(error, 'correlation_id'):
+            error.correlation_id = correlation_id
+        raise error
 
     @classmethod
     async def _execute_with_retry(
@@ -422,7 +929,7 @@ def logged(level: str = "info") -> Callable[[F], F]:
 
 def monitored() -> Callable[[F], F]:
     """Monitoring decorator."""
-    return dec.enhance(monitor=True)
+    return dec.enhance(monitor=True, log=True, log_level="debug")
 
 
 def timeout(seconds: float) -> Callable[[F], F]:

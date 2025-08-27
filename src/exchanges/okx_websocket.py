@@ -62,10 +62,10 @@ class OKXWebSocketManager:
         self.exchange_name = exchange_name
 
         # OKX API credentials
-        self.api_key = config.exchanges.okx_api_key
-        self.api_secret = config.exchanges.okx_api_secret
-        self.passphrase = config.exchanges.okx_passphrase
-        self.sandbox = config.exchanges.okx_sandbox
+        self.api_key = config.exchange.okx_api_key
+        self.api_secret = config.exchange.okx_api_secret
+        self.passphrase = config.exchange.okx_passphrase
+        self.sandbox = config.exchange.okx_sandbox
 
         # WebSocket URLs
         if self.sandbox:
@@ -112,7 +112,7 @@ class OKXWebSocketManager:
         self.message_queue: list[dict] = []
 
         # Initialize error handling
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = ErrorHandler(config)
 
         # Initialize logger
         self.logger = get_logger(f"okx.websocket.{exchange_name}")

@@ -9,7 +9,7 @@ Strategies are designed specifically for financial trading data patterns.
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -94,9 +94,15 @@ class CacheWarmer(BaseComponent):
         self._warming_tasks: dict[str, WarmingTask] = {}
         self._active_warmers: dict[str, asyncio.Task] = {}
 
+        # Queue management for proper task lifecycle
+        self._task_queue: asyncio.Queue[WarmingTask] = asyncio.Queue()
+        self._worker_tasks: list[asyncio.Task] = []
+        self._shutdown_event = asyncio.Event()
+
         # Warming state
         self._warming_active = False
         self._startup_warming_complete = False
+        self._scheduler_task: asyncio.Task | None = None
 
         # Configuration
         self.batch_size = 10
@@ -118,30 +124,134 @@ class CacheWarmer(BaseComponent):
         }
 
     async def start_warming(self) -> None:
-        """Start the cache warming system."""
+        """Start the cache warming system with proper queue management."""
         if self._warming_active:
             return
 
         self._warming_active = True
+        self._shutdown_event.clear()
+
+        # Start worker tasks for queue processing
+        self._worker_tasks = [
+            asyncio.create_task(self._queue_worker(f"worker-{i}"))
+            for i in range(self.concurrent_limit)
+        ]
 
         # Start immediate warming tasks
         await self._run_immediate_warming()
 
         # Start scheduled warming loop
-        asyncio.create_task(self._warming_scheduler())
+        self._scheduler_task = asyncio.create_task(self._warming_scheduler())
 
-        self.logger.info("Cache warming system started")
+        self.logger.info(f"Cache warming system started with {len(self._worker_tasks)} workers")
 
     async def stop_warming(self) -> None:
-        """Stop cache warming system."""
+        """Stop cache warming system with proper cleanup."""
+        self.logger.info("Stopping cache warming system...")
+
+        # Signal shutdown
         self._warming_active = False
+        self._shutdown_event.set()
+
+        # Cancel scheduler task
+        if self._scheduler_task and not self._scheduler_task.done():
+            self._scheduler_task.cancel()
+            try:
+                await asyncio.wait_for(self._scheduler_task, timeout=10.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+
+        # Stop worker tasks gracefully
+        if self._worker_tasks:
+            # Cancel all workers
+            for worker in self._worker_tasks:
+                if not worker.done():
+                    worker.cancel()
+
+            try:
+                # Wait for workers to finish
+                await asyncio.wait_for(
+                    asyncio.gather(*self._worker_tasks, return_exceptions=True), timeout=15.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Some worker tasks did not complete within timeout")
+
+            self._worker_tasks.clear()
 
         # Cancel active warming tasks
-        for _task_id, task in self._active_warmers.items():
-            task.cancel()
+        if self._active_warmers:
+            for _task_id, task in self._active_warmers.items():
+                if not task.done():
+                    task.cancel()
+
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._active_warmers.values(), return_exceptions=True),
+                    timeout=10.0,
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Some warming tasks did not complete within timeout")
 
         self._active_warmers.clear()
+
+        # Clear any remaining queue items
+        while not self._task_queue.empty():
+            try:
+                self._task_queue.get_nowait()
+                self._task_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
+
         self.logger.info("Cache warming system stopped")
+
+    async def _queue_worker(self, worker_name: str) -> None:
+        """Worker task that processes warming tasks from the queue."""
+        self.logger.debug(f"Starting queue worker: {worker_name}")
+
+        try:
+            while not self._shutdown_event.is_set():
+                try:
+                    # Get task from queue with timeout
+                    task = await asyncio.wait_for(
+                        self._task_queue.get(),
+                        timeout=1.0,  # Check shutdown every second
+                    )
+
+                    try:
+                        # Execute the warming task
+                        self.logger.debug(f"Worker {worker_name} executing task: {task.name}")
+                        success = await self._execute_single_warming_task(task)
+
+                        # Update stats
+                        if success:
+                            self._warming_stats["successful_tasks"] += 1
+                        else:
+                            self._warming_stats["failed_tasks"] += 1
+
+                    except Exception as e:
+                        self.logger.error(
+                            f"Worker {worker_name} failed to execute task {task.name}: {e}"
+                        )
+                        self._warming_stats["failed_tasks"] += 1
+                    finally:
+                        # CRITICAL: Always mark task as done
+                        self._task_queue.task_done()
+
+                except asyncio.TimeoutError:
+                    # Timeout is expected when checking for shutdown
+                    continue
+                except asyncio.CancelledError:
+                    # Worker was cancelled - clean shutdown
+                    self.logger.debug(f"Worker {worker_name} cancelled")
+                    break
+                except Exception as e:
+                    self.logger.error(f"Unexpected error in worker {worker_name}: {e}")
+                    # Continue processing to prevent worker death
+
+        except asyncio.CancelledError:
+            self.logger.debug(f"Worker {worker_name} cancelled during shutdown")
+        finally:
+            self.logger.debug(f"Queue worker {worker_name} stopped")
 
     def register_warming_task(self, task: WarmingTask) -> None:
         """Register a cache warming task."""
@@ -273,10 +383,10 @@ class CacheWarmer(BaseComponent):
         # Sort by priority
         immediate_tasks.sort(key=lambda t: list(WarmingPriority).index(t.priority))
 
-        # Execute in batches
+        # Execute in batches using the queue
         for i in range(0, len(immediate_tasks), self.batch_size):
             batch = immediate_tasks[i : i + self.batch_size]
-            await self._execute_warming_batch(batch)
+            await self._queue_warming_batch(batch)
 
             if self.warming_delay > 0:
                 await asyncio.sleep(self.warming_delay)
@@ -284,43 +394,75 @@ class CacheWarmer(BaseComponent):
         self._startup_warming_complete = True
         self.logger.info("Immediate warming completed")
 
+    async def _queue_warming_batch(self, tasks: list[WarmingTask]) -> None:
+        """Queue a batch of warming tasks for processing."""
+        for task in tasks:
+            await self._task_queue.put(task)
+
+        self.logger.debug(f"Queued {len(tasks)} tasks for warming")
+
     async def _warming_scheduler(self) -> None:
-        """Main warming scheduler loop."""
-        while self._warming_active:
-            try:
-                current_time = datetime.utcnow()
+        """Main warming scheduler loop with proper queue management."""
+        try:
+            while self._warming_active and not self._shutdown_event.is_set():
+                try:
+                    current_time = datetime.now(timezone.utc)
+                    tasks_to_schedule = []
 
-                # Check for scheduled tasks
-                for task in self._warming_tasks.values():
-                    if not task.enabled:
+                    # Check for scheduled tasks
+                    for task in self._warming_tasks.values():
+                        if not task.enabled:
+                            continue
+
+                        should_run = False
+
+                        if task.strategy == WarmingStrategy.MARKET_HOURS:
+                            should_run = await self._should_run_market_hours_task(
+                                task, current_time
+                            )
+                        elif task.strategy == WarmingStrategy.SCHEDULED:
+                            should_run = await self._should_run_scheduled_task(task, current_time)
+                        elif task.strategy == WarmingStrategy.PROGRESSIVE:
+                            should_run = await self._should_run_progressive_task(task, current_time)
+
+                        if should_run and task.task_id not in self._active_warmers:
+                            tasks_to_schedule.append(task)
+
+                    # Queue scheduled tasks
+                    if tasks_to_schedule:
+                        await self._queue_warming_batch(tasks_to_schedule)
+
+                    # Clean up completed tasks
+                    completed = [
+                        task_id for task_id, task in self._active_warmers.items() if task.done()
+                    ]
+                    for task_id in completed:
+                        del self._active_warmers[task_id]
+
+                    # Use cancellable sleep
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.sleep(60),  # Check every minute
+                            timeout=61.0,
+                        )
+                    except asyncio.TimeoutError:
                         continue
+                    except asyncio.CancelledError:
+                        break
 
-                    should_run = False
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    self.logger.error(f"Error in warming scheduler: {e}")
+                    try:
+                        await asyncio.sleep(60)
+                    except asyncio.CancelledError:
+                        break
 
-                    if task.strategy == WarmingStrategy.MARKET_HOURS:
-                        should_run = await self._should_run_market_hours_task(task, current_time)
-                    elif task.strategy == WarmingStrategy.SCHEDULED:
-                        should_run = await self._should_run_scheduled_task(task, current_time)
-                    elif task.strategy == WarmingStrategy.PROGRESSIVE:
-                        should_run = await self._should_run_progressive_task(task, current_time)
-
-                    if should_run and task.task_id not in self._active_warmers:
-                        # Create warming task
-                        warmer = asyncio.create_task(self._execute_single_warming_task(task))
-                        self._active_warmers[task.task_id] = warmer
-
-                # Clean up completed tasks
-                completed = [
-                    task_id for task_id, task in self._active_warmers.items() if task.done()
-                ]
-                for task_id in completed:
-                    del self._active_warmers[task_id]
-
-                await asyncio.sleep(60)  # Check every minute
-
-            except Exception as e:
-                self.logger.error(f"Error in warming scheduler: {e}")
-                await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            self.logger.debug("Warming scheduler cancelled")
+        finally:
+            self.logger.debug("Warming scheduler stopped")
 
     async def _should_run_market_hours_task(
         self, task: WarmingTask, current_time: datetime
@@ -407,7 +549,7 @@ class CacheWarmer(BaseComponent):
         start_time = asyncio.get_event_loop().time()
 
         try:
-            task.last_run = datetime.utcnow()
+            task.last_run = datetime.now(timezone.utc)
             task.total_runs += 1
 
             # Execute warming function
@@ -434,7 +576,7 @@ class CacheWarmer(BaseComponent):
                 )
 
             # Update success tracking
-            task.last_success = datetime.utcnow()
+            task.last_success = datetime.now(timezone.utc)
             task.failure_count = 0
 
             # Update stats
@@ -474,7 +616,7 @@ class CacheWarmer(BaseComponent):
             "symbol": symbol,
             "exchange": exchange,
             "price": 100.0,  # Would fetch real price
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "volume": 1000.0,
         }
 
@@ -487,7 +629,7 @@ class CacheWarmer(BaseComponent):
             "exchange": exchange,
             "bids": [],  # Would fetch real order book
             "asks": [],
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     async def _warm_bot_status(self, bot_id: str) -> dict[str, Any] | None:
@@ -495,7 +637,7 @@ class CacheWarmer(BaseComponent):
         return {
             "bot_id": bot_id,
             "status": "running",  # Would fetch real status
-            "last_update": datetime.utcnow().isoformat(),
+            "last_update": datetime.now(timezone.utc).isoformat(),
             "health": "healthy",
         }
 
@@ -504,7 +646,7 @@ class CacheWarmer(BaseComponent):
         return {
             "bot_id": bot_id,
             "config": {},  # Would fetch real config
-            "last_modified": datetime.utcnow().isoformat(),
+            "last_modified": datetime.now(timezone.utc).isoformat(),
         }
 
     async def _warm_risk_metrics(self, bot_id: str, timeframe: str) -> dict[str, Any] | None:
@@ -513,7 +655,7 @@ class CacheWarmer(BaseComponent):
             "bot_id": bot_id,
             "timeframe": timeframe,
             "metrics": {},  # Would calculate real metrics
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     async def _warm_strategy_performance(self, strategy_id: str) -> dict[str, Any] | None:
@@ -521,7 +663,7 @@ class CacheWarmer(BaseComponent):
         return {
             "strategy_id": strategy_id,
             "performance": {},  # Would calculate real performance
-            "calculated_at": datetime.utcnow().isoformat(),
+            "calculated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     async def get_warming_status(self) -> dict[str, Any]:
@@ -563,7 +705,10 @@ class CacheWarmer(BaseComponent):
 
         self.logger.info(f"Warming {len(critical_tasks)} critical tasks immediately")
 
-        await self._execute_warming_batch(critical_tasks)
+        await self._queue_warming_batch(critical_tasks)
+
+        # Wait for tasks to complete
+        await self._task_queue.join()
 
         return {
             "message": f"Warmed {len(critical_tasks)} critical tasks",

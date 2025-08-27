@@ -8,11 +8,11 @@ through selection, crossover, and mutation operations.
 import asyncio
 import logging
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.backtesting.engine import BacktestConfig, BacktestEngine
 from src.core.exceptions import OptimizationError
@@ -38,8 +38,8 @@ class GeneticConfig(BaseModel):
     )
     diversity_threshold: float = Field(default=0.1, description="Minimum population diversity")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "population_size": 100,
                 "generations": 50,
@@ -47,6 +47,7 @@ class GeneticConfig(BaseModel):
                 "crossover_rate": 0.8,
             }
         }
+    )
 
 
 class GeneticAlgorithm:
@@ -441,7 +442,7 @@ class GeneticAlgorithm:
             "avg_fitness": np.mean(fitnesses),
             "std_fitness": np.std(fitnesses),
             "diversity": self._calculate_diversity(),
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
         self.evolution_history.append(stats)

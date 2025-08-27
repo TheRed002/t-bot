@@ -75,70 +75,19 @@ class ServiceManager:
             return self._services[service_name]
 
         config = self._service_configs[service_name]
-        service_class = config["class"]
-        service_config = config["config"]
-        dependencies = config["dependencies"]
-
         self._logger.debug(f"Creating service: {service_name}")
 
-        # Resolve dependencies
-        resolved_deps = {}
-        for dep_name in dependencies:
-            if dep_name not in self._service_configs:
-                raise DependencyError(f"Unknown dependency: {dep_name}")
-
-            # Get dependency from injector (may recursively create)
-            resolved_deps[dep_name] = self._injector.resolve(dep_name)
-
-        # Create service instance
         try:
-            # Try different constructor patterns
-            if hasattr(service_class, "__init__"):
-                import inspect
+            # Resolve dependencies
+            resolved_deps = self._resolve_dependencies(service_name, config["dependencies"])
 
-                sig = inspect.signature(service_class.__init__)
-                params = list(sig.parameters.keys())[1:]  # Skip 'self'
+            # Create service instance
+            service_instance = self._instantiate_service(config, resolved_deps)
 
-                # Build constructor arguments based on signature
-                constructor_args = {}
+            # Configure service
+            self._configure_service_instance(service_instance)
 
-                # Map common parameter names to dependencies
-                param_mapping = {
-                    "DatabaseService": "DatabaseService",
-                    "StateService": "StateService",
-                    "ConfigService": "ConfigService",
-                    "ValidationService": "ValidationService",
-                    "Config": "Config",
-                    "correlation_id": None,  # Skip correlation_id
-                    # Legacy support (will be removed)
-                    "database_service": "DatabaseService",
-                    "state_service": "StateService",
-                    "config_service": "ConfigService",
-                    "validation_service": "ValidationService",
-                    "config": "Config",
-                }
-
-                for param in params:
-                    if param in param_mapping:
-                        dep_name = param_mapping[param]
-                        if dep_name and dep_name in resolved_deps:
-                            constructor_args[param] = resolved_deps[dep_name]
-                    elif param in resolved_deps:
-                        constructor_args[param] = resolved_deps[param]
-
-                # Add config if it exists and is expected
-                if "config" in params and "config" in service_config:
-                    constructor_args["config"] = service_config["config"]
-
-                service_instance = service_class(**constructor_args)
-            else:
-                service_instance = service_class()
-
-            # Set dependency container for the service
-            if hasattr(service_instance, "_dependency_container"):
-                service_instance._dependency_container = self._injector
-
-            # Store service instance
+            # Store service if singleton
             if config["singleton"]:
                 self._services[service_name] = service_instance
 
@@ -147,6 +96,85 @@ class ServiceManager:
         except Exception as e:
             self._logger.error(f"Failed to create service {service_name}: {e}")
             raise ServiceError(f"Service creation failed: {service_name}") from e
+
+    def _resolve_dependencies(self, service_name: str, dependencies: list[str]) -> dict[str, Any]:
+        """Resolve service dependencies."""
+        resolved_deps = {}
+        for dep_name in dependencies:
+            if dep_name not in self._service_configs:
+                raise DependencyError(f"Unknown dependency: {dep_name}")
+            resolved_deps[dep_name] = self._injector.resolve(dep_name)
+        return resolved_deps
+
+    def _instantiate_service(self, config: dict[str, Any], resolved_deps: dict[str, Any]) -> Any:
+        """Instantiate service with proper constructor arguments."""
+        service_class = config["class"]
+        service_config = config["config"]
+
+        if not hasattr(service_class, "__init__"):
+            return service_class()
+
+        constructor_args = self._build_constructor_args(
+            service_class, service_config, resolved_deps
+        )
+        return service_class(**constructor_args)
+
+    def _build_constructor_args(
+        self, service_class: type, service_config: dict[str, Any], resolved_deps: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Build constructor arguments based on service signature."""
+        import inspect
+
+        sig = inspect.signature(service_class.__init__)
+        params = list(sig.parameters.keys())[1:]  # Skip 'self'
+
+        constructor_args = {}
+        param_mapping = self._get_parameter_mapping()
+
+        # Map parameters to dependencies
+        for param in params:
+            if self._should_skip_parameter(param):
+                continue
+
+            if param in param_mapping:
+                dep_name = param_mapping[param]
+                if dep_name and dep_name in resolved_deps:
+                    constructor_args[param] = resolved_deps[dep_name]
+            elif param in resolved_deps:
+                constructor_args[param] = resolved_deps[param]
+
+        # Add service config if expected
+        if "config" in params and "config" in service_config:
+            constructor_args["config"] = service_config["config"]
+
+        return constructor_args
+
+    def _get_parameter_mapping(self) -> dict[str, str | None]:
+        """Get mapping of parameter names to dependency names."""
+        return {
+            "DatabaseService": "DatabaseService",
+            "StateService": "StateService",
+            "ConfigService": "ConfigService",
+            "ValidationService": "ValidationService",
+            "Config": "Config",
+            "correlation_id": None,  # Skip correlation_id
+            # Legacy support (will be removed)
+            "database_service": "DatabaseService",
+            "state_service": "StateService",
+            "config_service": "ConfigService",
+            "validation_service": "ValidationService",
+            "config": "Config",
+        }
+
+    def _should_skip_parameter(self, param: str) -> bool:
+        """Check if parameter should be skipped during dependency injection."""
+        skip_params = {"correlation_id"}
+        return param in skip_params
+
+    def _configure_service_instance(self, service_instance: Any) -> None:
+        """Configure service instance after creation."""
+        if hasattr(service_instance, "_dependency_container"):
+            service_instance._dependency_container = self._injector
 
     def _calculate_startup_order(self) -> list[str]:
         """Calculate the correct service startup order based on dependencies."""
@@ -286,7 +314,7 @@ class ServiceManager:
         try:
             return self._injector.resolve(service_name)
         except KeyError:
-            raise ServiceError(f"Service not found: {service_name}")
+            raise ServiceError(f"Service not found: {service_name}") from None
 
     def is_service_running(self, service_name: str) -> bool:
         """Check if a service is currently running."""

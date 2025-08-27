@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from src.core.exceptions import ValidationError
@@ -66,6 +67,48 @@ class ValidationFramework:
         return True
 
     @staticmethod
+    def _validate_common_params(params: dict[str, Any]) -> None:
+        """Validate common strategy parameters."""
+        if "timeframe" in params:
+            valid_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+            if params["timeframe"] not in valid_timeframes:
+                raise ValidationError(f"Invalid timeframe. Must be one of {valid_timeframes}")
+
+    @staticmethod
+    def _validate_mean_reversion_params(params: dict[str, Any]) -> None:
+        """Validate mean reversion strategy parameters."""
+        required = ["window_size", "num_std", "entry_threshold"]
+        for field in required:
+            if field not in params:
+                raise ValidationError(f"{field} is required for MEAN_REVERSION strategy")
+
+        if params["window_size"] < 2:
+            raise ValidationError("window_size must be at least 2")
+        if params["num_std"] <= 0:
+            raise ValidationError("num_std must be positive")
+
+    @staticmethod
+    def _validate_momentum_params(params: dict[str, Any]) -> None:
+        """Validate momentum strategy parameters."""
+        required = ["lookback_period", "momentum_threshold"]
+        for field in required:
+            if field not in params:
+                raise ValidationError(f"{field} is required for MOMENTUM strategy")
+
+        if params["lookback_period"] < 1:
+            raise ValidationError("lookback_period must be at least 1")
+
+    @staticmethod
+    def _validate_market_making_params(params: dict[str, Any]) -> None:
+        """Validate market making strategy parameters."""
+        if "bid_spread" in params and params["bid_spread"] < 0:
+            raise ValidationError("bid_spread must be non-negative")
+        if "ask_spread" in params and params["ask_spread"] < 0:
+            raise ValidationError("ask_spread must be non-negative")
+        if "order_size" in params and params["order_size"] <= 0:
+            raise ValidationError("order_size must be positive")
+
+    @staticmethod
     def validate_strategy_params(params: dict[str, Any]) -> bool:
         """
         Single source for strategy parameter validation.
@@ -85,45 +128,20 @@ class ValidationFramework:
         strategy_type = params["strategy_type"]
 
         # Common validations
-        if "timeframe" in params:
-            valid_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
-            if params["timeframe"] not in valid_timeframes:
-                raise ValidationError(f"Invalid timeframe. Must be one of {valid_timeframes}")
+        ValidationFramework._validate_common_params(params)
 
         # Strategy-specific validations
         if strategy_type == "MEAN_REVERSION":
-            required = ["window_size", "num_std", "entry_threshold"]
-            for field in required:
-                if field not in params:
-                    raise ValidationError(f"{field} is required for MEAN_REVERSION strategy")
-
-            if params["window_size"] < 2:
-                raise ValidationError("window_size must be at least 2")
-            if params["num_std"] <= 0:
-                raise ValidationError("num_std must be positive")
-
+            ValidationFramework._validate_mean_reversion_params(params)
         elif strategy_type == "MOMENTUM":
-            required = ["lookback_period", "momentum_threshold"]
-            for field in required:
-                if field not in params:
-                    raise ValidationError(f"{field} is required for MOMENTUM strategy")
-
-            if params["lookback_period"] < 1:
-                raise ValidationError("lookback_period must be at least 1")
-
+            ValidationFramework._validate_momentum_params(params)
         elif strategy_type == "market_making":
-            # Validate market making specific parameters
-            if "bid_spread" in params and params["bid_spread"] < 0:
-                raise ValidationError("bid_spread must be non-negative")
-            if "ask_spread" in params and params["ask_spread"] < 0:
-                raise ValidationError("ask_spread must be non-negative")
-            if "order_size" in params and params["order_size"] <= 0:
-                raise ValidationError("order_size must be positive")
+            ValidationFramework._validate_market_making_params(params)
 
         return True
 
     @staticmethod
-    def validate_price(price: Any, max_price: float = 1_000_000) -> bool:
+    def validate_price(price: Any, max_price: float = 1_000_000) -> float:
         """
         Validate and normalize price.
 
@@ -132,14 +150,22 @@ class ValidationFramework:
             max_price: Maximum allowed price
 
         Returns:
-            True if valid
+            Normalized price value (rounded to 8 decimals)
 
         Raises:
             ValidationError: If price is invalid
         """
+        if price is None:
+            raise ValidationError("Price cannot be None")
+
         try:
-            price_float = float(price)
-        except (TypeError, ValueError) as e:
+            # Use Decimal for precision, then convert to float for comparison
+            price_decimal = Decimal(str(price))
+            # Check if the Decimal is valid (not NaN or infinite)
+            if not price_decimal.is_finite():
+                raise ValidationError(f"Price must be a valid number, got {price}")
+            price_float = float(price_decimal)
+        except (TypeError, ValueError, InvalidOperation) as e:
             raise ValidationError(f"Price must be numeric, got {type(price)}") from e
 
         if price_float <= 0:
@@ -149,10 +175,11 @@ class ValidationFramework:
         if price_float == float("inf"):
             raise ValidationError("Price cannot be infinity")
 
-        return True
+        # Round to 8 decimals for crypto precision
+        return round(price_float, 8)
 
     @staticmethod
-    def validate_quantity(quantity: Any, min_qty: float = 0.00000001) -> bool:
+    def validate_quantity(quantity: Any, min_qty: float = 0.00000001) -> float:
         """
         Validate and normalize quantity.
 
@@ -161,14 +188,22 @@ class ValidationFramework:
             min_qty: Minimum allowed quantity
 
         Returns:
-            True if valid
+            Normalized quantity value
 
         Raises:
             ValidationError: If quantity is invalid
         """
+        if quantity is None:
+            raise ValidationError("Quantity cannot be None")
+
         try:
-            qty_float = float(quantity)
-        except (TypeError, ValueError) as e:
+            # Use Decimal for precision, then convert to float for comparison
+            qty_decimal = Decimal(str(quantity))
+            # Check if the Decimal is valid (not NaN or infinite)
+            if not qty_decimal.is_finite():
+                raise ValidationError(f"Quantity must be a valid number, got {quantity}")
+            qty_float = float(qty_decimal)
+        except (TypeError, ValueError, InvalidOperation) as e:
             raise ValidationError(f"Quantity must be numeric, got {type(quantity)}") from e
 
         if qty_float <= 0:
@@ -178,10 +213,10 @@ class ValidationFramework:
         if qty_float == float("inf"):
             raise ValidationError("Quantity cannot be infinity")
 
-        return True
+        return qty_float
 
     @staticmethod
-    def validate_symbol(symbol: str) -> bool:
+    def validate_symbol(symbol: str) -> str:
         """
         Validate and normalize trading symbol.
 
@@ -189,7 +224,7 @@ class ValidationFramework:
             symbol: Trading symbol to validate
 
         Returns:
-            True if valid
+            Normalized symbol string
 
         Raises:
             ValidationError: If symbol is invalid
@@ -204,7 +239,7 @@ class ValidationFramework:
         if not re.match(r"^[A-Z]+(/|_|-)?[A-Z]+$", symbol_norm):
             raise ValidationError(f"Invalid symbol format: {symbol}")
 
-        return True
+        return symbol_norm
 
     @staticmethod
     def validate_exchange_credentials(credentials: dict[str, Any]) -> bool:
@@ -290,7 +325,11 @@ class ValidationFramework:
                 lambda x: 0 < x <= 1,
                 "Max position size must be between 0 and 1",
             ),
-            ("stop_loss_pct", lambda x: 0 < x < 1, "Stop loss percentage must be between 0 and 1"),
+            (
+                "stop_loss_pct",
+                lambda x: 0 < x < 0.5,
+                "Stop loss percentage must be between 0 and 0.5 (50%)",
+            ),
             (
                 "take_profit_pct",
                 lambda x: 0 < x < 10,

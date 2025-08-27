@@ -5,7 +5,7 @@ This module provides portfolio tracking, analysis, and reporting functionality
 including positions, balances, P&L, and performance metrics.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -202,7 +202,7 @@ async def get_portfolio_summary(current_user: User = Depends(get_current_user)):
             total_pnl_percentage=total_pnl_percentage,
             positions_count=positions_count,
             active_bots=active_bots,
-            last_updated=datetime.utcnow(),
+            last_updated=datetime.now(timezone.utc),
             daily_pnl=daily_pnl,
             weekly_pnl=weekly_pnl,
             monthly_pnl=monthly_pnl,
@@ -266,7 +266,7 @@ async def get_positions(
                         "quantity": Decimal("0.1"),
                         "entry_price": Decimal("45000.00"),
                         "current_price": Decimal("47000.00"),
-                        "created_at": datetime.utcnow() - timedelta(hours=2),
+                        "created_at": datetime.now(timezone.utc) - timedelta(hours=2),
                     },
                     {
                         "symbol": "ETHUSDT",
@@ -275,7 +275,7 @@ async def get_positions(
                         "quantity": Decimal("2.5"),
                         "entry_price": Decimal("3000.00"),
                         "current_price": Decimal("3100.00"),
-                        "created_at": datetime.utcnow() - timedelta(hours=1),
+                        "created_at": datetime.now(timezone.utc) - timedelta(hours=1),
                     },
                 ]
                 bot_positions = mock_positions
@@ -310,8 +310,8 @@ async def get_positions(
                     unrealized_pnl=unrealized_pnl,
                     unrealized_pnl_percentage=unrealized_pnl_percentage,
                     cost_basis=cost_basis,
-                    created_at=position.get("created_at", datetime.utcnow()),
-                    updated_at=datetime.utcnow(),
+                    created_at=position.get("created_at", datetime.now(timezone.utc)),
+                    updated_at=datetime.now(timezone.utc),
                     bot_id=current_bot_id,
                 )
                 positions.append(position_response)
@@ -398,7 +398,7 @@ async def get_balances(
                 available_balance=balance_data["available_balance"],
                 locked_balance=balance_data["locked_balance"],
                 usd_value=balance_data.get("usd_value"),
-                updated_at=datetime.utcnow(),
+                updated_at=datetime.now(timezone.utc),
             )
             balances.append(balance)
 
@@ -580,7 +580,7 @@ async def get_performance_chart(
     try:
         # Mock chart data (in production, get from time series database)
         import random
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         # Calculate number of data points
         resolution_minutes = {"5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440}
@@ -592,7 +592,7 @@ async def get_performance_chart(
         points = hours_in_period * 60 // minutes_per_point
 
         # Generate mock data
-        start_time = datetime.utcnow() - timedelta(hours=hours_in_period)
+        start_time = datetime.now(timezone.utc) - timedelta(hours=hours_in_period)
         start_value = 100000.0  # Starting portfolio value
 
         data_points = []

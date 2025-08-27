@@ -7,7 +7,7 @@ including users, roles, permissions, and tokens.
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -83,7 +83,7 @@ class Role:
     description: str
     permissions: set[Permission] = field(default_factory=set)
     is_system_role: bool = False
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __hash__(self) -> int:
         """Make Role hashable so it can be stored in sets."""
@@ -136,7 +136,7 @@ class User:
     full_name: str = ""
     status: UserStatus = UserStatus.PENDING_VERIFICATION
     roles: set[Role] = field(default_factory=set)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_login: datetime | None = None
     login_attempts: int = 0
     max_login_attempts: int = 5
@@ -178,7 +178,7 @@ class User:
         """Check if the user account is locked."""
         if self.status == UserStatus.LOCKED:
             return True
-        if self.lockout_until and datetime.utcnow() < self.lockout_until:
+        if self.lockout_until and datetime.now(timezone.utc) < self.lockout_until:
             return True
         return False
 
@@ -189,7 +189,7 @@ class User:
     def lock_account(self, duration_minutes: int = 30) -> None:
         """Lock the user account for a specified duration."""
         self.status = UserStatus.LOCKED
-        self.lockout_until = datetime.utcnow() + timedelta(minutes=duration_minutes)
+        self.lockout_until = datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)
 
     def unlock_account(self) -> None:
         """Unlock the user account."""
@@ -207,7 +207,7 @@ class User:
     def reset_login_attempts(self) -> None:
         """Reset login attempts after successful login."""
         self.login_attempts = 0
-        self.last_login = datetime.utcnow()
+        self.last_login = datetime.now(timezone.utc)
 
 
 class TokenType(Enum):
@@ -228,7 +228,7 @@ class AuthToken:
     token_type: TokenType = TokenType.ACCESS
     token_value: str = ""
     expires_at: datetime | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_used: datetime | None = None
     is_revoked: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -241,7 +241,7 @@ class AuthToken:
         """Check if the token is expired."""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def is_valid(self) -> bool:
         """Check if the token is valid (not expired or revoked)."""
@@ -253,7 +253,7 @@ class AuthToken:
 
     def touch(self) -> None:
         """Update the last used timestamp."""
-        self.last_used = datetime.utcnow()
+        self.last_used = datetime.now(timezone.utc)
 
 
 # Predefined system roles

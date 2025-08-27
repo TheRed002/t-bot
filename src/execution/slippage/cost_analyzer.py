@@ -19,7 +19,7 @@ Version: 2.0.0 - Refactored for service layer
 from datetime import datetime, timezone
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import ServiceError, ValidationError
 

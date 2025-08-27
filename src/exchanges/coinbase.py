@@ -89,6 +89,7 @@ class CoinbaseExchange(EnhancedBaseExchange):
         exchange_name: str = "coinbase",
         state_service: Any | None = None,
         trade_lifecycle_manager: Any | None = None,
+        metrics_collector: Any | None = None,
     ):
         """
         Initialize enhanced Coinbase exchange.
@@ -99,15 +100,15 @@ class CoinbaseExchange(EnhancedBaseExchange):
             state_service: Optional state service for persistence
             trade_lifecycle_manager: Optional trade lifecycle manager
         """
-        super().__init__(config, exchange_name, state_service, trade_lifecycle_manager)
+        super().__init__(config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector)
 
         # Coinbase-specific configuration
-        self.api_key = config.exchanges.coinbase_api_key
-        self.api_secret = config.exchanges.coinbase_api_secret
+        self.api_key = config.exchange.coinbase_api_key
+        self.api_secret = config.exchange.coinbase_api_secret
         self.passphrase = getattr(
-            config.exchanges, "coinbase_passphrase", None
+            config.exchange, "coinbase_passphrase", None
         )  # Optional for some APIs
-        self.sandbox = config.exchanges.coinbase_sandbox
+        self.sandbox = config.exchange.coinbase_sandbox
 
         # Coinbase API URLs from constants
         coinbase_config = API_ENDPOINTS.get("coinbase", {})
@@ -715,7 +716,7 @@ class CoinbaseExchange(EnhancedBaseExchange):
 
             # Mock response for now - replace with actual API call when library is available
             response_data = {
-                "order_id": f"coinbase_{int(datetime.now().timestamp())}",
+                "order_id": f"coinbase_{int(datetime.now(timezone.utc).timestamp())}",
                 "success": True,
                 "client_order_id": order.client_order_id,
             }
@@ -787,7 +788,7 @@ class CoinbaseExchange(EnhancedBaseExchange):
             else:
                 # Mock response when Pro client is not available
                 order_response = OrderResponse(
-                    id=f"cb_pro_{int(datetime.now().timestamp())}",
+                    id=f"cb_pro_{int(datetime.now(timezone.utc).timestamp())}",
                     client_order_id=order.client_order_id,
                     symbol=order.symbol,
                     side=order.side,

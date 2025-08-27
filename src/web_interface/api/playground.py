@@ -6,7 +6,7 @@ and simulation with different parameters, models, and settings.
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -220,7 +220,7 @@ async def create_playground_session(
             "bot_id": bot_id,
             "status": "created",
             "configuration": configuration,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
             "is_backtest": is_backtest,
             "is_sandbox": request.sandbox_mode,
             "user_id": user.id,
@@ -285,7 +285,7 @@ async def start_playground_session(
 
         # Update session status
         session["status"] = "starting"
-        session["started_at"] = datetime.utcnow()
+        session["started_at"] = datetime.now(timezone.utc)
 
         # Start the playground session in background
         background_tasks.add_task(_run_playground_session, session_id)
@@ -329,7 +329,7 @@ async def get_playground_session_status(
 
         metrics = session.get("metrics", {})
         start_time = session.get("started_at", session["created_at"])
-        runtime_minutes = (datetime.utcnow() - start_time).total_seconds() / 60
+        runtime_minutes = (datetime.now(timezone.utc) - start_time).total_seconds() / 60
 
         return PlaygroundStatusResponse(
             session_id=session_id,
@@ -344,7 +344,7 @@ async def get_playground_session_status(
             runtime_minutes=runtime_minutes,
             memory_usage_mb=metrics.get("memory_usage_mb", 0.0),
             cpu_usage_percent=metrics.get("cpu_usage_percent", 0.0),
-            last_update=datetime.utcnow(),
+            last_update=datetime.now(timezone.utc),
         )
 
     except HTTPException:
@@ -403,7 +403,7 @@ async def get_playground_session_results(
             total_fees=Decimal(str(results.get("total_fees", "0"))),
             average_trade_duration=results.get("average_trade_duration", 0.0),
             profit_factor=results.get("profit_factor", 0.0),
-            completed_at=session.get("completed_at", datetime.utcnow()),
+            completed_at=session.get("completed_at", datetime.now(timezone.utc)),
             runtime_minutes=results.get("runtime_minutes", 0.0),
         )
 
@@ -507,7 +507,7 @@ async def stop_playground_session(
                 logger.warning(f"Error stopping playground bot {session['bot_id']}: {e!s}")
 
         session["status"] = "stopped"
-        session["completed_at"] = datetime.utcnow()
+        session["completed_at"] = datetime.now(timezone.utc)
 
         logger.info(f"Stopped playground session {session_id}")
 
@@ -652,7 +652,7 @@ async def _run_playground_session(session_id: str):
         session = active_sessions.get(session_id)
         if session:
             session["status"] = "failed"
-            session["completed_at"] = datetime.utcnow()
+            session["completed_at"] = datetime.now(timezone.utc)
             _add_session_log(session_id, "ERROR", f"Session failed: {e!s}")
 
 
@@ -670,10 +670,12 @@ async def _run_backtest_session(session_id: str, config: dict[str, Any]):
         start_date = (
             datetime.fromisoformat(config["start_date"])
             if config["start_date"]
-            else datetime.utcnow() - timedelta(days=30)
+            else datetime.now(timezone.utc) - timedelta(days=30)
         )
         end_date = (
-            datetime.fromisoformat(config["end_date"]) if config["end_date"] else datetime.utcnow()
+            datetime.fromisoformat(config["end_date"])
+            if config["end_date"]
+            else datetime.now(timezone.utc)
         )
 
         # Simulate backtest progress
@@ -731,11 +733,12 @@ async def _run_backtest_session(session_id: str, config: dict[str, Any]):
             "total_fees": float(config["allocated_capital"]) * 0.001,  # 0.1% in fees
             "average_trade_duration": 1440.0,  # 1 day in minutes
             "profit_factor": 2.0 if current_pnl > 0 else 0.5,  # Mock value
-            "runtime_minutes": (datetime.utcnow() - session["started_at"]).total_seconds() / 60,
+            "runtime_minutes": (datetime.now(timezone.utc) - session["started_at"]).total_seconds()
+            / 60,
         }
 
         session["status"] = "completed"
-        session["completed_at"] = datetime.utcnow()
+        session["completed_at"] = datetime.now(timezone.utc)
 
         _add_session_log(session_id, "INFO", f"Backtest completed. Final P&L: ${current_pnl:.2f}")
 
@@ -793,7 +796,7 @@ async def _run_sandbox_session(session_id: str, config: dict[str, Any]):
         # Session completed or stopped
         if session["status"] == "running":
             session["status"] = "completed"
-            session["completed_at"] = datetime.utcnow()
+            session["completed_at"] = datetime.now(timezone.utc)
             _add_session_log(session_id, "INFO", "Sandbox session completed")
 
     except Exception as e:
@@ -816,7 +819,7 @@ def _add_session_log(
             session["logs"] = []
 
         log_entry = {
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "level": level,
             "message": message,
             "context": context or {},
@@ -916,9 +919,9 @@ async def save_configuration(
     try:
         if not config.id:
             config.id = str(uuid4())
-            config.createdAt = datetime.utcnow()
+            config.createdAt = datetime.now(timezone.utc)
 
-        config.updatedAt = datetime.utcnow()
+        config.updatedAt = datetime.now(timezone.utc)
         playground_configurations[config.id] = config
 
         logger.info(f"Saved playground configuration {config.id} for user {user.username}")
@@ -990,11 +993,11 @@ async def control_execution(
             _add_session_log(session_id, "INFO", "Execution resumed")
         elif action == "stop":
             session["status"] = "stopped"
-            session["completed_at"] = datetime.utcnow()
+            session["completed_at"] = datetime.now(timezone.utc)
             _add_session_log(session_id, "INFO", "Execution stopped")
         elif action == "restart":
             session["status"] = "running"
-            session["started_at"] = datetime.utcnow()
+            session["started_at"] = datetime.now(timezone.utc)
             session["metrics"] = {"progress": 0.0}
             _add_session_log(session_id, "INFO", "Execution restarted")
 
@@ -1066,7 +1069,7 @@ async def create_ab_test(
     """Create a new A/B test."""
     try:
         ab_test.id = str(uuid4())
-        ab_test.createdAt = datetime.utcnow()
+        ab_test.createdAt = datetime.now(timezone.utc)
         ab_tests[ab_test.id] = ab_test
 
         logger.info(f"Created A/B test {ab_test.id} for user {user.username}")
@@ -1116,7 +1119,7 @@ async def start_batch_optimization(
     """Start batch optimization."""
     try:
         batch.id = str(uuid4())
-        batch.startTime = datetime.utcnow()
+        batch.startTime = datetime.now(timezone.utc)
         batch.status = "running"
         batch_optimizations[batch.id] = batch
 
@@ -1149,7 +1152,7 @@ async def get_batch_progress(
 
         # Mock progress calculation
         if batch.status == "running":
-            runtime_minutes = (datetime.utcnow() - batch.startTime).total_seconds() / 60
+            runtime_minutes = (datetime.now(timezone.utc) - batch.startTime).total_seconds() / 60
             estimated_total = len(batch.configurations) * 2  # 2 minutes per config
             progress = min(runtime_minutes / estimated_total * 100, 95)  # Cap at 95% until complete
         elif batch.status == "completed":
@@ -1254,7 +1257,7 @@ async def _run_batch_optimization(batch_id: str):
         }
 
         batch.status = "completed"
-        batch.endTime = datetime.utcnow()
+        batch.endTime = datetime.now(timezone.utc)
 
         logger.info(f"Batch optimization {batch_id} completed")
     except Exception as e:

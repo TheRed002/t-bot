@@ -15,12 +15,12 @@ TODO: Update the following modules to use enhanced trading types:
 - Portfolio management modules (update balance handling)
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SignalDirection(Enum):
@@ -112,6 +112,14 @@ class OrderRequest(BaseModel):
     client_order_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, v: str) -> str:
+        """Validate symbol is not empty."""
+        if not v or not v.strip():
+            raise ValueError("Symbol cannot be empty")
+        return v.strip()
+
     @field_validator("quantity")
     @classmethod
     def validate_quantity(cls, v: Decimal) -> Decimal:
@@ -132,7 +140,7 @@ class OrderRequest(BaseModel):
 class OrderResponse(BaseModel):
     """Response from order creation."""
 
-    order_id: str
+    order_id: str = Field(alias="id", validation_alias="id")
     client_order_id: str | None = None
     symbol: str
     side: OrderSide
@@ -146,6 +154,17 @@ class OrderResponse(BaseModel):
     updated_at: datetime | None = None
     exchange: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def id(self) -> str:
+        """Alias for order_id for backward compatibility."""
+        return self.order_id
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        str_strip_whitespace=True,
+        use_enum_values=False,
+    )
 
 
 class Order(BaseModel):
@@ -274,7 +293,7 @@ class ArbitrageOpportunity(BaseModel):
         """Check if opportunity has expired."""
         if self.expires_at is None:
             return False
-        return datetime.now() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def calculate_profit(self) -> Decimal:
         """Calculate total profit from this opportunity."""

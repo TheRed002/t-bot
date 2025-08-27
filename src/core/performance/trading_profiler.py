@@ -35,7 +35,7 @@ import tracemalloc
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -101,7 +101,7 @@ class TradingBenchmark:
     performance_score: float  # 0-100, higher is better
     meets_target: bool
     improvement_potential_ms: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class TradingProfiler:
@@ -142,7 +142,7 @@ class TradingProfiler:
 
         results = {
             "execution_time_ms": execution_time_ms,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "memory_usage_bytes": 0,
             "hot_functions": [],
             "bottlenecks": [],
@@ -162,7 +162,7 @@ class TradingProfiler:
         # Update profile data
         self.profile.execution_times.append(execution_time_ms)
         self.profile.memory_usage.append(results["memory_usage_bytes"])
-        self.profile.last_profiled = datetime.utcnow()
+        self.profile.last_profiled = datetime.now(timezone.utc)
         self.profile.profile_count += 1
 
         return results
@@ -358,13 +358,12 @@ class TradingOperationOptimizer(BaseComponent):
             # Run initial benchmarks
             await self._run_initial_benchmarks()
 
-            self.logger.info(
-                f"Trading operation optimizer initialized with {self.optimization_level.value} level"
-            )
+            level_name = self.optimization_level.value
+            self.logger.info(f"Trading operation optimizer initialized with {level_name} level")
 
         except Exception as e:
             self.logger.error(f"Failed to initialize trading optimizer: {e}")
-            raise PerformanceError(f"Trading optimizer initialization failed: {e}")
+            raise PerformanceError(f"Trading optimizer initialization failed: {e}") from e
 
     async def _start_background_optimization(self) -> None:
         """Start background optimization task."""
@@ -443,7 +442,7 @@ class TradingOperationOptimizer(BaseComponent):
                 execution_time = (time.perf_counter() - start_time) * 1000
                 profiling_data = {
                     "execution_time_ms": execution_time,
-                    "timestamp": datetime.utcnow(),
+                    "timestamp": datetime.now(timezone.utc),
                     "lightweight_mode": True,
                 }
                 profiler.profile.execution_times.append(execution_time)
@@ -467,7 +466,7 @@ class TradingOperationOptimizer(BaseComponent):
             profiling_data = {
                 "error": str(e),
                 "execution_time_ms": 0,
-                "timestamp": datetime.utcnow(),
+                "timestamp": datetime.now(timezone.utc),
             }
             raise
 
@@ -543,7 +542,7 @@ class TradingOperationOptimizer(BaseComponent):
     ) -> None:
         """Queue an optimization recommendation."""
         recommendation = {
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "operation": operation.value,
             "function": func_name,
             "current_latency_ms": profiling_data["execution_time_ms"],
@@ -665,7 +664,10 @@ class TradingOperationOptimizer(BaseComponent):
                                 "function": func_name,
                                 "call_count": call_count,
                                 "avg_time_ms": avg_time,
-                                "suggestion": "High-frequency function with significant execution time - consider optimization",
+                                "suggestion": (
+                                    "High-frequency function with significant execution time - "
+                                    "consider optimization"
+                                ),
                                 "priority": "high",
                             }
                             self.optimization_queue.append(recommendation)
@@ -746,7 +748,7 @@ class TradingOperationOptimizer(BaseComponent):
     async def get_optimization_report(self) -> dict[str, Any]:
         """Get comprehensive optimization report."""
         report = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "optimization_level": self.optimization_level.value,
             "performance_targets": {
                 op.value: target for op, target in self.performance_targets.items()
@@ -797,7 +799,7 @@ class TradingOperationOptimizer(BaseComponent):
         self.logger.info("Starting forced optimization analysis")
 
         analysis_results = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "analysis_type": "forced",
             "performance_trends": await self._analyze_performance_trends(),
             "recommendations_generated": 0,
@@ -817,32 +819,92 @@ class TradingOperationOptimizer(BaseComponent):
         return analysis_results
 
     async def cleanup(self) -> None:
-        """Cleanup optimizer resources."""
-        try:
-            # Cancel background optimization
-            if self._optimization_task:
+        """Cleanup optimizer resources with guaranteed cleanup."""
+        cleanup_errors = []
+
+        # Cancel background optimization task with timeout
+        if self._optimization_task:
+            try:
                 self._optimization_task.cancel()
+                # Give the task a chance to cleanup gracefully with timeout
                 try:
-                    await self._optimization_task
-                except asyncio.CancelledError:
-                    pass
+                    await asyncio.wait_for(self._optimization_task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Optimization task did not complete within timeout, forcing termination"
+                    )
+            except asyncio.CancelledError:
+                pass  # Expected when task is cancelled
+            except Exception as e:
+                cleanup_errors.append(f"optimization_task: {e}")
+                self.logger.error(f"Error cancelling optimization task: {e}")
+            finally:
+                self._optimization_task = None
 
-            # Clear profiling data
-            for profiler in self.profilers.values():
-                profiler.profile.execution_times.clear()
-                profiler.profile.memory_usage.clear()
-                profiler.profile.hot_paths.clear()
-
-            # Clear optimization data
-            self.optimization_queue.clear()
-            self.hot_paths.clear()
-            self.function_call_counts.clear()
-            self.function_timing.clear()
-
-            self.logger.info("Trading operation optimizer cleaned up")
-
+        # Clear profiling data with error handling
+        try:
+            for operation, profiler in self.profilers.items():
+                try:
+                    profiler.profile.execution_times.clear()
+                    profiler.profile.memory_usage.clear()
+                    profiler.profile.hot_paths.clear()
+                    profiler.profile.bottlenecks.clear()
+                    profiler.profile.optimization_suggestions.clear()
+                except Exception as e:
+                    cleanup_errors.append(f"profiler_{operation.value}: {e}")
+                    self.logger.error(f"Error clearing profiler for {operation.value}: {e}")
         except Exception as e:
-            self.logger.error(f"Trading optimizer cleanup error: {e}")
+            cleanup_errors.append(f"profilers: {e}")
+            self.logger.error(f"Error clearing profilers: {e}")
+
+        # Clear optimization data with error handling
+        try:
+            self.optimization_queue.clear()
+        except Exception as e:
+            cleanup_errors.append(f"optimization_queue: {e}")
+            self.logger.error(f"Error clearing optimization queue: {e}")
+
+        try:
+            self.hot_paths.clear()
+        except Exception as e:
+            cleanup_errors.append(f"hot_paths: {e}")
+            self.logger.error(f"Error clearing hot paths: {e}")
+
+        try:
+            self.function_call_counts.clear()
+        except Exception as e:
+            cleanup_errors.append(f"function_call_counts: {e}")
+            self.logger.error(f"Error clearing function call counts: {e}")
+
+        try:
+            self.function_timing.clear()
+        except Exception as e:
+            cleanup_errors.append(f"function_timing: {e}")
+            self.logger.error(f"Error clearing function timing: {e}")
+
+        # Clear benchmarks
+        try:
+            self.benchmarks.clear()
+        except Exception as e:
+            cleanup_errors.append(f"benchmarks: {e}")
+            self.logger.error(f"Error clearing benchmarks: {e}")
+
+        # Stop any active tracemalloc if running
+        try:
+            if tracemalloc.is_tracing():
+                tracemalloc.stop()
+        except Exception as e:
+            cleanup_errors.append(f"tracemalloc: {e}")
+            self.logger.error(f"Error stopping tracemalloc: {e}")
+
+        # Log final cleanup status
+        if cleanup_errors:
+            self.logger.warning(
+                f"Trading operation optimizer cleanup completed with {len(cleanup_errors)} errors: "
+                f"{cleanup_errors}"
+            )
+        else:
+            self.logger.info("Trading operation optimizer cleaned up successfully")
 
 
 # Context manager for trading operation profiling

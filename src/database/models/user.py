@@ -50,9 +50,9 @@ class User(Base, TimestampMixin, MetadataMixin):
         """Get full name."""
         if self.first_name and self.last_name:
             return f"{self.first_name} {self.last_name}"
-        return self.username
+        return str(self.username)
 
     @property
     def is_authenticated(self) -> bool:
         """Check if user is authenticated."""
-        return self.is_active and self.is_verified
+        return bool(self.is_active) and bool(self.is_verified)

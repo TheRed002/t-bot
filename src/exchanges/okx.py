@@ -68,6 +68,7 @@ class OKXExchange(EnhancedBaseExchange):
         exchange_name: str = "okx",
         state_service: Any | None = None,
         trade_lifecycle_manager: Any | None = None,
+        metrics_collector: Any | None = None,
     ):
         """
         Initialize enhanced OKX exchange.
@@ -78,13 +79,13 @@ class OKXExchange(EnhancedBaseExchange):
             state_service: Optional state service for persistence
             trade_lifecycle_manager: Optional trade lifecycle manager
         """
-        super().__init__(config, exchange_name, state_service, trade_lifecycle_manager)
+        super().__init__(config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector)
 
         # OKX-specific configuration
-        self.api_key = config.exchanges.okx_api_key
-        self.api_secret = config.exchanges.okx_api_secret
-        self.passphrase = config.exchanges.okx_passphrase
-        self.sandbox = config.exchanges.okx_sandbox
+        self.api_key = config.exchange.okx_api_key
+        self.api_secret = config.exchange.okx_api_secret
+        self.passphrase = config.exchange.okx_passphrase
+        self.sandbox = config.exchange.okx_testnet  # Use okx_testnet, not okx_sandbox
 
         # OKX API URLs from constants
         okx_config = API_ENDPOINTS["okx"]

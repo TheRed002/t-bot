@@ -7,7 +7,7 @@ comprehensive manager that handles all real-time communications.
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -99,7 +99,7 @@ class MarketDataHandler(WebSocketEventHandler):
                 # Mock data for now - in production, get from facade
                 market_data = {
                     "type": "market_update",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "data": {
                         "BTC/USDT": {"price": 45000.00, "volume": 1234567890, "change_24h": 2.5},
                         "ETH/USDT": {"price": 2500.00, "volume": 987654321, "change_24h": -1.2},
@@ -143,7 +143,7 @@ class BotStatusHandler(WebSocketEventHandler):
                 # Mock data for now
                 bot_status = {
                     "type": "bot_status_update",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "data": {
                         "active_bots": 3,
                         "total_profit": 1234.56,
@@ -190,7 +190,7 @@ class PortfolioHandler(WebSocketEventHandler):
                 # Mock portfolio data
                 portfolio_data = {
                     "type": "portfolio_update",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "data": {
                         "total_value": 10000.00,
                         "daily_pnl": 123.45,
@@ -259,11 +259,11 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
 
         # Store client info
         self.connected_clients[sid] = {
-            "connected_at": datetime.utcnow(),
+            "connected_at": datetime.now(timezone.utc),
             "authenticated": False,
             "user_id": None,
             "permissions": set(),
-            "last_activity": datetime.utcnow(),
+            "last_activity": datetime.now(timezone.utc),
         }
 
         self.session_subscriptions[sid] = set()
@@ -277,7 +277,7 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
             "welcome",
             {
                 "message": "Connected to T-Bot Trading System",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "version": "2.0.0",
                 "session_id": sid,
             },
@@ -328,7 +328,7 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
                         "status": "success",
                         "user_id": "user123",
                         "permissions": list(self.connected_clients[sid]["permissions"]),
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     },
                     room=sid,
                 )
@@ -366,7 +366,7 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
             {
                 "successful": successful_subscriptions,
                 "failed": failed_subscriptions,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
             room=sid,
         )
@@ -384,7 +384,7 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
 
         await self.emit(
             "unsubscribed",
-            {"channels": channels, "timestamp": datetime.utcnow().isoformat()},
+            {"channels": channels, "timestamp": datetime.now(timezone.utc).isoformat()},
             room=sid,
         )
 
@@ -455,12 +455,12 @@ class UnifiedWebSocketNamespace(AsyncNamespace):
 
     async def on_ping(self, sid: str, data: dict[str, Any] | None = None):
         """Handle ping for connection health check."""
-        self.connected_clients[sid]["last_activity"] = datetime.utcnow()
+        self.connected_clients[sid]["last_activity"] = datetime.now(timezone.utc)
 
         await self.emit(
             "pong",
             {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "latency": data.get("timestamp") if data else None,
             },
             room=sid,
@@ -549,7 +549,7 @@ class UnifiedWebSocketManager(BaseComponent):
                 channel.value: len(handler.subscribers)
                 for channel, handler in self.namespace.handlers.items()
             },
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
 

@@ -5,7 +5,7 @@ This module provides strategy configuration, deployment, and management
 functionality for trading strategies.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -159,8 +159,8 @@ async def list_strategies(
                 },
                 "performance_metrics": {"30d_return": 15.2, "win_rate": 0.65, "sharpe_ratio": 1.45},
                 "is_active": True,
-                "created_at": datetime.utcnow() - timedelta(days=30),
-                "updated_at": datetime.utcnow() - timedelta(days=1),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=30),
+                "updated_at": datetime.now(timezone.utc) - timedelta(days=1),
             },
             {
                 "strategy_name": "mean_reversion",
@@ -181,8 +181,8 @@ async def list_strategies(
                 },
                 "performance_metrics": {"30d_return": 22.8, "win_rate": 0.58, "sharpe_ratio": 1.72},
                 "is_active": True,
-                "created_at": datetime.utcnow() - timedelta(days=45),
-                "updated_at": datetime.utcnow() - timedelta(days=2),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=45),
+                "updated_at": datetime.now(timezone.utc) - timedelta(days=2),
             },
             {
                 "strategy_name": "arbitrage_scanner",
@@ -201,8 +201,8 @@ async def list_strategies(
                 },
                 "performance_metrics": {"30d_return": 8.5, "win_rate": 0.89, "sharpe_ratio": 2.15},
                 "is_active": True,
-                "created_at": datetime.utcnow() - timedelta(days=60),
-                "updated_at": datetime.utcnow() - timedelta(hours=6),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=60),
+                "updated_at": datetime.now(timezone.utc) - timedelta(hours=6),
             },
             {
                 "strategy_name": "market_making",
@@ -222,8 +222,8 @@ async def list_strategies(
                 },
                 "performance_metrics": {"30d_return": 12.3, "win_rate": 0.72, "sharpe_ratio": 1.89},
                 "is_active": False,
-                "created_at": datetime.utcnow() - timedelta(days=20),
-                "updated_at": datetime.utcnow() - timedelta(days=5),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=20),
+                "updated_at": datetime.now(timezone.utc) - timedelta(days=5),
             },
         ]
 
@@ -309,8 +309,8 @@ async def get_strategy(strategy_name: str, current_user: User = Depends(get_curr
                     "largest_loss": -425.0,
                 },
                 "is_active": True,
-                "created_at": datetime.utcnow() - timedelta(days=30),
-                "updated_at": datetime.utcnow() - timedelta(days=1),
+                "created_at": datetime.now(timezone.utc) - timedelta(days=30),
+                "updated_at": datetime.now(timezone.utc) - timedelta(days=1),
             }
             return StrategyResponse(**strategy_data)
         else:
@@ -365,7 +365,7 @@ async def configure_strategy(
             "strategy_name": strategy_name,
             "updated_parameters": config_request.parameters,
             "updated_by": current_user.username,
-            "updated_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
@@ -505,8 +505,8 @@ async def start_backtest(
             trades_count=trades_count,
             win_rate=0.68,
             profit_factor=2.25,
-            started_at=datetime.utcnow(),
-            completed_at=datetime.utcnow() + timedelta(seconds=30),  # Mock completion
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc) + timedelta(seconds=30),  # Mock completion
             status="completed",
         )
 

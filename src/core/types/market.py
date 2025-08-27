@@ -32,6 +32,40 @@ class MarketData(BaseModel):
     vwap: Decimal | None = None
     exchange: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Optional bid/ask for ticker-like data
+    bid_price: Decimal | None = None
+    ask_price: Decimal | None = None
+
+    # Legacy attribute compatibility properties
+    @property
+    def price(self) -> Decimal:
+        """Alias for close price for backward compatibility."""
+        return self.close
+
+    @property
+    def high_price(self) -> Decimal:
+        """Alias for high for backward compatibility."""
+        return self.high
+
+    @property
+    def low_price(self) -> Decimal:
+        """Alias for low for backward compatibility."""
+        return self.low
+
+    @property
+    def open_price(self) -> Decimal:
+        """Alias for open for backward compatibility."""
+        return self.open
+
+    @property
+    def bid(self) -> Decimal | None:
+        """Alias for bid_price for backward compatibility."""
+        return self.bid_price
+
+    @property
+    def ask(self) -> Decimal | None:
+        """Alias for ask_price for backward compatibility."""
+        return self.ask_price
 
 
 class Ticker(BaseModel):

@@ -25,7 +25,7 @@ from enum import Enum
 from typing import Any
 
 import websockets
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from src.base import BaseComponent
@@ -100,8 +100,7 @@ class StreamConfig(BaseModel):
     enable_deduplication: bool = True
     max_latency_ms: int = Field(1000, ge=10, le=10000)
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class StreamBuffer:
@@ -192,7 +191,7 @@ class WebSocketConnection:
 
     async def connect(self) -> bool:
         """Connect to WebSocket.
-        
+
         SECURITY NOTE: API keys should be provided via environment variables
         or secure vault, not hardcoded in configuration.
         """
@@ -203,8 +202,11 @@ class WebSocketConnection:
             headers = {}
             if self.config.auth_required:
                 import os
+
                 # Try to get API key from environment first
-                api_key = os.environ.get(f"{self.config.exchange.upper()}_API_KEY") or self.config.api_key
+                api_key = (
+                    os.environ.get(f"{self.config.exchange.upper()}_API_KEY") or self.config.api_key
+                )
                 if api_key:
                     headers["Authorization"] = f"Bearer {api_key}"
 

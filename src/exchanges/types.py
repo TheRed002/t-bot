@@ -9,7 +9,7 @@ exchange-specific extensions.
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -195,7 +195,7 @@ class ExchangeErrorResponse(BaseModel):
     code: int
     message: str
     details: dict[str, Any] | None = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now())
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class ExchangeHealthStatus(BaseModel):

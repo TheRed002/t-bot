@@ -33,15 +33,15 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
 import psutil
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 
-from src.base import BaseComponent
-from src.core.config import Config
+from src.core.base.component import BaseComponent
+from src.core.config.main import Config
 from src.core.exceptions import PerformanceError
 from src.core.logging import get_logger
 from src.utils.decorators import time_execution
@@ -423,7 +423,7 @@ class PerformanceMonitor(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to initialize performance monitoring: {e}")
-            raise PerformanceError(f"Performance monitoring initialization failed: {e}")
+            raise PerformanceError(f"Performance monitoring initialization failed: {e}") from e
 
     async def _start_monitoring(self) -> None:
         """Start background monitoring tasks."""
@@ -579,7 +579,7 @@ class PerformanceMonitor(BaseComponent):
             connections = len(process.connections())
 
             stats = ResourceUsageStats(
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 cpu_percent=cpu_percent,
                 memory_percent=memory.percent,
                 memory_mb=process_memory.rss / (1024 * 1024),
@@ -606,7 +606,16 @@ class PerformanceMonitor(BaseComponent):
         alerts_to_add = []
         alerts_to_remove = []
 
-        # Check latency alerts
+        # Check different types of alerts
+        await self._check_latency_alerts(alerts_to_add, alerts_to_remove)
+        self._check_resource_usage_alerts(alerts_to_add)
+        self._check_error_rate_alerts(alerts_to_add)
+
+        # Process all collected alerts
+        await self._process_alerts(alerts_to_add, alerts_to_remove)
+
+    async def _check_latency_alerts(self, alerts_to_add: list, alerts_to_remove: list) -> None:
+        """Check latency alerts for all operation types."""
         for op_type, tracker in self.latency_trackers.items():
             stats = tracker.get_stats()
             if stats.count == 0:
@@ -615,105 +624,162 @@ class PerformanceMonitor(BaseComponent):
             alert_id = f"latency_{op_type.value}"
             threshold_warning, threshold_critical = self._get_latency_thresholds(op_type)
 
-            if stats.p95 > threshold_critical:
-                alert = PerformanceAlert(
-                    alert_id=alert_id,
-                    level=AlertLevel.CRITICAL,
-                    title=f"Critical latency for {op_type.value}",
-                    description=f"95th percentile latency ({stats.p95:.1f}ms) exceeds critical threshold ({threshold_critical}ms)",
-                    threshold=threshold_critical,
-                    current_value=stats.p95,
-                    timestamp=datetime.utcnow(),
-                )
-                alerts_to_add.append(alert)
-            elif stats.p95 > threshold_warning:
-                alert = PerformanceAlert(
-                    alert_id=alert_id,
-                    level=AlertLevel.WARNING,
-                    title=f"High latency for {op_type.value}",
-                    description=f"95th percentile latency ({stats.p95:.1f}ms) exceeds warning threshold ({threshold_warning}ms)",
-                    threshold=threshold_warning,
-                    current_value=stats.p95,
-                    timestamp=datetime.utcnow(),
-                )
-                alerts_to_add.append(alert)
-            else:
-                # Clear alert if it exists
-                if alert_id in self.active_alerts:
-                    alerts_to_remove.append(alert_id)
+            alert = self._create_latency_alert_if_needed(
+                alert_id, op_type, stats.p95, threshold_warning, threshold_critical
+            )
 
-        # Check resource usage alerts
-        if self.resource_history:
-            latest_stats = self.resource_history[-1]
-
-            # CPU usage alert
-            if latest_stats.cpu_percent > self.thresholds.CPU_USAGE_CRITICAL:
-                alert = PerformanceAlert(
-                    alert_id="cpu_usage",
-                    level=AlertLevel.CRITICAL,
-                    title="Critical CPU usage",
-                    description=f"CPU usage ({latest_stats.cpu_percent:.1f}%) exceeds critical threshold",
-                    threshold=self.thresholds.CPU_USAGE_CRITICAL,
-                    current_value=latest_stats.cpu_percent,
-                    timestamp=datetime.utcnow(),
-                )
+            if alert:
                 alerts_to_add.append(alert)
-            elif latest_stats.cpu_percent > self.thresholds.CPU_USAGE_WARNING:
-                alert = PerformanceAlert(
-                    alert_id="cpu_usage",
-                    level=AlertLevel.WARNING,
-                    title="High CPU usage",
-                    description=f"CPU usage ({latest_stats.cpu_percent:.1f}%) exceeds warning threshold",
-                    threshold=self.thresholds.CPU_USAGE_WARNING,
-                    current_value=latest_stats.cpu_percent,
-                    timestamp=datetime.utcnow(),
-                )
-                alerts_to_add.append(alert)
+            elif alert_id in self.active_alerts:
+                alerts_to_remove.append(alert_id)
 
-            # Memory usage alert
-            if latest_stats.memory_percent > self.thresholds.MEMORY_USAGE_CRITICAL:
-                alert = PerformanceAlert(
-                    alert_id="memory_usage",
-                    level=AlertLevel.CRITICAL,
-                    title="Critical memory usage",
-                    description=f"Memory usage ({latest_stats.memory_percent:.1f}%) exceeds critical threshold",
-                    threshold=self.thresholds.MEMORY_USAGE_CRITICAL,
-                    current_value=latest_stats.memory_percent,
-                    timestamp=datetime.utcnow(),
-                )
-                alerts_to_add.append(alert)
+    def _create_latency_alert_if_needed(
+        self,
+        alert_id: str,
+        op_type,
+        p95_latency: float,
+        threshold_warning: float,
+        threshold_critical: float,
+    ):
+        """Create latency alert if thresholds are exceeded."""
+        if p95_latency > threshold_critical:
+            return PerformanceAlert(
+                alert_id=alert_id,
+                level=AlertLevel.CRITICAL,
+                title=f"Critical latency for {op_type.value}",
+                description=(
+                    f"95th percentile latency ({p95_latency:.1f}ms) "
+                    f"exceeds critical threshold ({threshold_critical}ms)"
+                ),
+                threshold=threshold_critical,
+                current_value=p95_latency,
+                timestamp=datetime.now(timezone.utc),
+            )
+        elif p95_latency > threshold_warning:
+            return PerformanceAlert(
+                alert_id=alert_id,
+                level=AlertLevel.WARNING,
+                title=f"High latency for {op_type.value}",
+                description=(
+                    f"95th percentile latency ({p95_latency:.1f}ms) "
+                    f"exceeds warning threshold ({threshold_warning}ms)"
+                ),
+                threshold=threshold_warning,
+                current_value=p95_latency,
+                timestamp=datetime.now(timezone.utc),
+            )
+        return None
 
-        # Check error rate alerts
+    def _check_resource_usage_alerts(self, alerts_to_add: list) -> None:
+        """Check resource usage alerts (CPU and memory)."""
+        if not self.resource_history:
+            return
+
+        latest_stats = self.resource_history[-1]
+
+        # Check CPU usage
+        cpu_alert = self._create_resource_alert(
+            "cpu_usage",
+            "CPU usage",
+            latest_stats.cpu_percent,
+            self.thresholds.CPU_USAGE_WARNING,
+            self.thresholds.CPU_USAGE_CRITICAL,
+        )
+        if cpu_alert:
+            alerts_to_add.append(cpu_alert)
+
+        # Check memory usage
+        memory_alert = self._create_resource_alert(
+            "memory_usage",
+            "Memory usage",
+            latest_stats.memory_percent,
+            self.thresholds.MEMORY_USAGE_WARNING,
+            self.thresholds.MEMORY_USAGE_CRITICAL,
+        )
+        if memory_alert:
+            alerts_to_add.append(memory_alert)
+
+    def _create_resource_alert(
+        self,
+        alert_id: str,
+        resource_name: str,
+        current_value: float,
+        warning_threshold: float,
+        critical_threshold: float,
+    ):
+        """Create resource usage alert if thresholds are exceeded."""
+        if current_value > critical_threshold:
+            return PerformanceAlert(
+                alert_id=alert_id,
+                level=AlertLevel.CRITICAL,
+                title=f"Critical {resource_name.lower()}",
+                description=f"{resource_name} ({current_value:.1f}%) exceeds critical threshold",
+                threshold=critical_threshold,
+                current_value=current_value,
+                timestamp=datetime.now(timezone.utc),
+            )
+        elif current_value > warning_threshold:
+            return PerformanceAlert(
+                alert_id=alert_id,
+                level=AlertLevel.WARNING,
+                title=f"High {resource_name.lower()}",
+                description=f"{resource_name} ({current_value:.1f}%) exceeds warning threshold",
+                threshold=warning_threshold,
+                current_value=current_value,
+                timestamp=datetime.now(timezone.utc),
+            )
+        return None
+
+    def _check_error_rate_alerts(self, alerts_to_add: list) -> None:
+        """Check error rate alerts for all operation types."""
         for op_type in OperationType:
-            if self.total_operations[op_type] > 0:
-                error_rate = (self.error_counts[op_type] / self.total_operations[op_type]) * 100
-                alert_id = f"error_rate_{op_type.value}"
+            if self.total_operations[op_type] <= 0:
+                continue
 
-                if error_rate > self.thresholds.ERROR_RATE_CRITICAL:
-                    alert = PerformanceAlert(
-                        alert_id=alert_id,
-                        level=AlertLevel.CRITICAL,
-                        title=f"Critical error rate for {op_type.value}",
-                        description=f"Error rate ({error_rate:.1f}%) exceeds critical threshold",
-                        threshold=self.thresholds.ERROR_RATE_CRITICAL,
-                        current_value=error_rate,
-                        timestamp=datetime.utcnow(),
-                    )
-                    alerts_to_add.append(alert)
-                elif error_rate > self.thresholds.ERROR_RATE_WARNING:
-                    alert = PerformanceAlert(
-                        alert_id=alert_id,
-                        level=AlertLevel.WARNING,
-                        title=f"High error rate for {op_type.value}",
-                        description=f"Error rate ({error_rate:.1f}%) exceeds warning threshold",
-                        threshold=self.thresholds.ERROR_RATE_WARNING,
-                        current_value=error_rate,
-                        timestamp=datetime.utcnow(),
-                    )
-                    alerts_to_add.append(alert)
+            error_rate = (self.error_counts[op_type] / self.total_operations[op_type]) * 100
+            alert_id = f"error_rate_{op_type.value}"
 
-        # Process alerts
-        await self._process_alerts(alerts_to_add, alerts_to_remove)
+            alert = self._create_error_rate_alert(
+                alert_id,
+                op_type,
+                error_rate,
+                self.thresholds.ERROR_RATE_WARNING,
+                self.thresholds.ERROR_RATE_CRITICAL,
+            )
+
+            if alert:
+                alerts_to_add.append(alert)
+
+    def _create_error_rate_alert(
+        self,
+        alert_id: str,
+        op_type,
+        error_rate: float,
+        warning_threshold: float,
+        critical_threshold: float,
+    ):
+        """Create error rate alert if thresholds are exceeded."""
+        if error_rate > critical_threshold:
+            return PerformanceAlert(
+                alert_id=alert_id,
+                level=AlertLevel.CRITICAL,
+                title=f"Critical error rate for {op_type.value}",
+                description=f"Error rate ({error_rate:.1f}%) exceeds critical threshold",
+                threshold=critical_threshold,
+                current_value=error_rate,
+                timestamp=datetime.now(timezone.utc),
+            )
+        elif error_rate > warning_threshold:
+            return PerformanceAlert(
+                alert_id=alert_id,
+                level=AlertLevel.WARNING,
+                title=f"High error rate for {op_type.value}",
+                description=f"Error rate ({error_rate:.1f}%) exceeds warning threshold",
+                threshold=warning_threshold,
+                current_value=error_rate,
+                timestamp=datetime.now(timezone.utc),
+            )
+        return None
 
     def _get_latency_thresholds(self, operation_type: OperationType) -> tuple[float, float]:
         """Get latency thresholds for operation type."""
@@ -807,7 +873,7 @@ class PerformanceMonitor(BaseComponent):
     async def get_performance_summary(self) -> dict[str, Any]:
         """Get comprehensive performance summary."""
         summary = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "latency_stats": {},
             "throughput_stats": {},
             "resource_usage": {},

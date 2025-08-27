@@ -20,10 +20,11 @@ TODO: Update the following modules to use consolidated types:
 
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TradingMode(Enum):
@@ -74,7 +75,9 @@ class TradingMode(Enum):
             return cls(value.lower())
         except ValueError:
             valid_modes = [mode.value for mode in cls]
-            raise ValueError(f"Invalid trading mode '{value}'. Valid modes: {valid_modes}")
+            raise ValueError(
+                f"Invalid trading mode '{value}'. Valid modes: {valid_modes}"
+            ) from None
 
 
 class ExchangeType(Enum):
@@ -426,4 +429,89 @@ class BaseValidatedModel(BaseModel):
         use_enum_values=True,
         validate_assignment=True,
         arbitrary_types_allowed=True,
+        json_encoders={
+            Decimal: str,  # Encode Decimals as strings for JSON serialization
+            datetime: lambda dt: dt.isoformat(),
+        },
+    )
+
+
+class FinancialBaseModel(BaseValidatedModel):
+    """
+    Base model for financial data with Decimal precision handling.
+
+    This model ensures all financial calculations maintain precision by:
+    - Using Decimal types for monetary values
+    - Validating financial ranges
+    - Providing conversion utilities
+    - Maintaining audit trails for financial data
+    """
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def convert_financial_floats(cls, v: Any, info) -> Any:
+        """
+        Convert float values to Decimal for financial fields to prevent precision loss.
+
+        This validator runs before field validation and converts float values
+        to Decimal strings to maintain precision in financial calculations.
+        """
+        if info.field_name and "price" in info.field_name.lower():
+            if isinstance(v, float):
+                return Decimal(str(v))
+        elif info.field_name and any(
+            term in info.field_name.lower()
+            for term in ["amount", "value", "cost", "fee", "balance", "pnl", "volume"]
+        ):
+            if isinstance(v, float):
+                return Decimal(str(v))
+        return v
+
+    def to_dict_with_decimals(self) -> dict[str, Any]:
+        """
+        Convert model to dictionary preserving Decimal types.
+
+        Returns:
+            dict: Model data with Decimals preserved
+        """
+        data = self.model_dump()
+
+        # Convert Decimal strings back to Decimals
+        def restore_decimals(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                return {k: restore_decimals(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [restore_decimals(item) for item in obj]
+            elif isinstance(obj, str):
+                # Try to convert back to Decimal if it looks like a financial value
+                try:
+                    return Decimal(obj)
+                except (ValueError, TypeError, ArithmeticError):
+                    return obj
+            return obj
+
+        return restore_decimals(data)
+
+    def validate_financial_precision(self) -> bool:
+        """
+        Validate that all financial fields maintain proper precision.
+
+        Returns:
+            bool: True if all financial fields have acceptable precision
+        """
+        for _field_name, field_value in self.model_dump().items():
+            if isinstance(field_value, Decimal):
+                # Check precision requirements
+                if field_value.as_tuple().exponent < -12:  # More than 12 decimal places
+                    return False
+        return True
+
+    model_config = ConfigDict(
+        use_enum_values=True,
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+        json_encoders={
+            Decimal: str,  # Always encode Decimals as strings
+            datetime: lambda dt: dt.isoformat(),
+        },
     )

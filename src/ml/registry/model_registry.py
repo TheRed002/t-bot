@@ -8,7 +8,7 @@ for ML models using proper service patterns without direct database access.
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,8 +59,8 @@ class ModelMetadata(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     feature_names: list[str] = Field(default_factory=list)
     training_data_info: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     is_active: bool = True
     file_path: str | None = None
 
@@ -475,14 +475,14 @@ class ModelRegistryService(BaseService):
 
             # Update stage
             metadata.stage = stage
-            metadata.updated_at = datetime.utcnow()
+            metadata.updated_at = datetime.now(timezone.utc)
 
             # Update in data service
             await self._update_model_metadata(metadata)
 
             # Update cache
             if model_id in self._model_metadata_cache:
-                self._model_metadata_cache[model_id] = (metadata, datetime.utcnow())
+                self._model_metadata_cache[model_id] = (metadata, datetime.now(timezone.utc))
 
             # Update registry file
             if self.registry_config.enable_persistence:
@@ -550,14 +550,14 @@ class ModelRegistryService(BaseService):
 
             # Update active status
             metadata.is_active = False
-            metadata.updated_at = datetime.utcnow()
+            metadata.updated_at = datetime.now(timezone.utc)
 
             # Update in data service
             await self._update_model_metadata(metadata)
 
             # Update cache
             if model_id in self._model_metadata_cache:
-                self._model_metadata_cache[model_id] = (metadata, datetime.utcnow())
+                self._model_metadata_cache[model_id] = (metadata, datetime.now(timezone.utc))
 
             # Remove from model cache since it's no longer active
             if model_id in self._model_cache:
@@ -738,7 +738,7 @@ class ModelRegistryService(BaseService):
             new_version = "1.0.0"
 
         # Generate model ID
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         model_id = f"{name}_{model_type}_{new_version}_{timestamp}"
 
         return model_id, new_version
@@ -777,7 +777,7 @@ class ModelRegistryService(BaseService):
         if model_id in self._model_metadata_cache:
             metadata, timestamp = self._model_metadata_cache[model_id]
             ttl_hours = self.registry_config.cache_ttl_hours
-            if (datetime.utcnow() - timestamp).total_seconds() < ttl_hours * 3600:
+            if (datetime.now(timezone.utc) - timestamp).total_seconds() < ttl_hours * 3600:
                 return metadata
             else:
                 del self._model_metadata_cache[model_id]
@@ -790,7 +790,7 @@ class ModelRegistryService(BaseService):
         metadata = ModelMetadata(**model_data)
 
         # Cache it
-        self._model_metadata_cache[model_id] = (metadata, datetime.utcnow())
+        self._model_metadata_cache[model_id] = (metadata, datetime.now(timezone.utc))
 
         return metadata
 
@@ -887,7 +887,10 @@ class ModelRegistryService(BaseService):
                     metadata = ModelMetadata(**registry_data)
 
                     # Cache metadata
-                    self._model_metadata_cache[metadata.model_id] = (metadata, datetime.utcnow())
+                    self._model_metadata_cache[metadata.model_id] = (
+                        metadata,
+                        datetime.now(timezone.utc),
+                    )
 
                 except Exception as e:
                     self._logger.warning(f"Failed to load registry entry from {file_path}: {e}")
@@ -897,8 +900,8 @@ class ModelRegistryService(BaseService):
 
     async def _cache_model(self, model_id: str, metadata: ModelMetadata, model: Any) -> None:
         """Cache model and metadata."""
-        self._model_cache[model_id] = (metadata, model, datetime.utcnow())
-        self._model_metadata_cache[model_id] = (metadata, datetime.utcnow())
+        self._model_cache[model_id] = (metadata, model, datetime.now(timezone.utc))
+        self._model_metadata_cache[model_id] = (metadata, datetime.now(timezone.utc))
 
     async def _get_cached_model(self, model_id: str) -> Any | None:
         """Get cached model."""
@@ -906,7 +909,7 @@ class ModelRegistryService(BaseService):
             metadata, model, timestamp = self._model_cache[model_id]
             ttl_hours = self.registry_config.cache_ttl_hours
 
-            if (datetime.utcnow() - timestamp).total_seconds() < ttl_hours * 3600:
+            if (datetime.now(timezone.utc) - timestamp).total_seconds() < ttl_hours * 3600:
                 return model
             else:
                 # Remove expired entry
@@ -924,7 +927,7 @@ class ModelRegistryService(BaseService):
         audit_entry = {
             "event_type": event_type,
             "model_id": model_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "details": details,
             "service": "ModelRegistryService",
         }
@@ -957,7 +960,7 @@ class ModelRegistryService(BaseService):
     async def _clean_expired_cache(self) -> None:
         """Clean expired cache entries."""
         ttl_hours = self.registry_config.cache_ttl_hours
-        cutoff_time = datetime.utcnow() - timedelta(hours=ttl_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=ttl_hours)
 
         # Clean model cache
         expired_model_keys = [

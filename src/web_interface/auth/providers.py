@@ -7,7 +7,7 @@ JWT tokens, session-based auth, and API key authentication.
 
 import secrets
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
@@ -104,13 +104,15 @@ class JWTAuthProvider(AuthProvider, BaseComponent):
     async def create_token(self, user: User) -> AuthToken:
         """Create a JWT access token for the user."""
         # Create access token
-        access_expires = datetime.utcnow() + timedelta(minutes=self.access_token_expire_minutes)
+        access_expires = datetime.now(timezone.utc) + timedelta(
+            minutes=self.access_token_expire_minutes
+        )
         access_payload = {
             "user_id": user.user_id,
             "username": user.username,
             "roles": [role.name for role in user.roles],
             "exp": access_expires,
-            "iat": datetime.utcnow(),
+            "iat": datetime.now(timezone.utc),
             "type": "access",
         }
 
@@ -131,12 +133,14 @@ class JWTAuthProvider(AuthProvider, BaseComponent):
 
     async def create_refresh_token(self, user: User) -> AuthToken:
         """Create a JWT refresh token for the user."""
-        refresh_expires = datetime.utcnow() + timedelta(days=self.refresh_token_expire_days)
+        refresh_expires = datetime.now(timezone.utc) + timedelta(
+            days=self.refresh_token_expire_days
+        )
         refresh_payload = {
             "user_id": user.user_id,
             "username": user.username,
             "exp": refresh_expires,
-            "iat": datetime.utcnow(),
+            "iat": datetime.now(timezone.utc),
             "type": "refresh",
         }
 
@@ -328,16 +332,16 @@ class SessionAuthProvider(AuthProvider, BaseComponent):
         """Create a session token."""
         # Generate session ID
         session_id = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(minutes=self.session_timeout_minutes)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=self.session_timeout_minutes)
 
         # Store session data
         session_data = {
             "user_id": user.user_id,
             "username": user.username,
             "roles": [role.name for role in user.roles],
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
             "expires_at": expires_at,
-            "last_activity": datetime.utcnow(),
+            "last_activity": datetime.now(timezone.utc),
         }
 
         self.active_sessions[session_id] = session_data
@@ -358,13 +362,13 @@ class SessionAuthProvider(AuthProvider, BaseComponent):
             return None
 
         # Check expiration
-        if datetime.utcnow() > session_data["expires_at"]:
+        if datetime.now(timezone.utc) > session_data["expires_at"]:
             # Remove expired session
             self.active_sessions.pop(token_value, None)
             return None
 
         # Update last activity
-        session_data["last_activity"] = datetime.utcnow()
+        session_data["last_activity"] = datetime.now(timezone.utc)
 
         # Create user object from session data
         from .models import create_system_roles
@@ -393,7 +397,7 @@ class SessionAuthProvider(AuthProvider, BaseComponent):
 
     async def cleanup_expired_sessions(self) -> int:
         """Remove expired sessions and return count."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired_sessions = [
             session_id
             for session_id, data in self.active_sessions.items()
@@ -431,7 +435,7 @@ class APIKeyAuthProvider(AuthProvider, BaseComponent):
             "user_id": user.user_id,
             "username": user.username,
             "roles": [role.name for role in user.roles],
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
             "last_used": None,
             "is_active": True,
         }
@@ -455,7 +459,7 @@ class APIKeyAuthProvider(AuthProvider, BaseComponent):
             return None
 
         # Update last used time
-        key_data["last_used"] = datetime.utcnow()
+        key_data["last_used"] = datetime.now(timezone.utc)
 
         # Create user object from API key data
         from .models import create_system_roles

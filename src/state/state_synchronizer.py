@@ -9,7 +9,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.exceptions import StateError
 
 if TYPE_CHECKING:
@@ -66,7 +66,7 @@ class StateSynchronizer(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"StateSynchronizer initialization failed: {e}")
-            raise StateError(f"Failed to initialize StateSynchronizer: {e}")
+            raise StateError(f"Failed to initialize StateSynchronizer: {e}") from e
 
     async def cleanup(self) -> None:
         """Cleanup synchronizer resources."""

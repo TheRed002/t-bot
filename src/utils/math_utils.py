@@ -298,4 +298,102 @@ def calculate_sortino_ratio(
         return 0.0
 
     mean_excess = np.mean(excess_returns)
-    return (mean_excess / downside_std) * np.sqrt(periods_per_year)
+    return float((mean_excess / downside_std) * np.sqrt(periods_per_year))
+
+
+def safe_min(*args: float, default: float | None = None) -> float:
+    """
+    Safely calculate minimum value, handling None and invalid inputs.
+    
+    Args:
+        *args: Numeric values to compare
+        default: Default value if all inputs are None/invalid
+        
+    Returns:
+        Minimum value or default
+        
+    Raises:
+        ValidationError: If no valid values and no default provided
+    """
+    valid_values = []
+    for arg in args:
+        if arg is not None:
+            try:
+                val = float(arg)
+                if not np.isnan(val) and not np.isinf(val):
+                    valid_values.append(val)
+            except (TypeError, ValueError):
+                continue
+    
+    if not valid_values:
+        if default is not None:
+            return default
+        raise ValidationError("No valid values provided and no default specified")
+    
+    return float(min(valid_values))
+
+
+def safe_max(*args: float, default: float | None = None) -> float:
+    """
+    Safely calculate maximum value, handling None and invalid inputs.
+    
+    Args:
+        *args: Numeric values to compare
+        default: Default value if all inputs are None/invalid
+        
+    Returns:
+        Maximum value or default
+        
+    Raises:
+        ValidationError: If no valid values and no default provided
+    """
+    valid_values = []
+    for arg in args:
+        if arg is not None:
+            try:
+                val = float(arg)
+                if not np.isnan(val) and not np.isinf(val):
+                    valid_values.append(val)
+            except (TypeError, ValueError):
+                continue
+    
+    if not valid_values:
+        if default is not None:
+            return default
+        raise ValidationError("No valid values provided and no default specified")
+    
+    return float(max(valid_values))
+
+
+def safe_percentage(value: float, total: float, default: float = 0.0) -> float:
+    """
+    Safely calculate percentage, handling zero division and invalid inputs.
+    
+    Args:
+        value: Numerator value
+        total: Denominator value
+        default: Default value if calculation fails
+        
+    Returns:
+        Percentage as decimal (e.g., 0.15 for 15%)
+    """
+    try:
+        # Handle None values
+        if value is None or total is None:
+            return default
+            
+        # Convert to float
+        value_f = float(value)
+        total_f = float(total)
+        
+        # Handle invalid values
+        if np.isnan(value_f) or np.isnan(total_f) or np.isinf(value_f) or np.isinf(total_f):
+            return default
+            
+        # Handle zero division
+        if total_f == 0:
+            return default
+            
+        return float(value_f / total_f)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return default

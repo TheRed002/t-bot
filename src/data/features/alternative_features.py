@@ -204,7 +204,7 @@ class AlternativeFeatureCalculator:
         Returns:
             AlternativeResult: Calculation result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
 
         try:
             lookback_hours = lookback_hours or self.default_lookbacks["news_sentiment"]
@@ -220,7 +220,7 @@ class AlternativeFeatureCalculator:
                         "lookback_hours": lookback_hours,
                         "reason": "news_source_not_available",
                     },
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             news_articles = await self.news_source.get_news_for_symbol(
@@ -234,7 +234,7 @@ class AlternativeFeatureCalculator:
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"lookback_hours": lookback_hours, "reason": "no_news_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Process sentiment scores
@@ -263,7 +263,7 @@ class AlternativeFeatureCalculator:
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"lookback_hours": lookback_hours, "reason": "no_sentiment_scores"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Calculate sentiment features
@@ -302,7 +302,7 @@ class AlternativeFeatureCalculator:
                     "lookback_hours": lookback_hours,
                     "sources_count": len(set(a.get("source", "") for a in news_articles)),
                 },
-                calculation_time=(datetime.now() - start_time).total_seconds(),
+                calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
 
         except Exception as e:
@@ -325,7 +325,7 @@ class AlternativeFeatureCalculator:
         Returns:
             AlternativeResult: Calculation result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
 
         try:
             lookback_hours = lookback_hours or self.default_lookbacks["social_sentiment"]
@@ -341,7 +341,7 @@ class AlternativeFeatureCalculator:
                         "lookback_hours": lookback_hours,
                         "reason": "social_source_not_available",
                     },
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             social_sentiment = await self.social_source.get_social_sentiment(
@@ -358,7 +358,7 @@ class AlternativeFeatureCalculator:
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"lookback_hours": lookback_hours, "reason": "no_social_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Process social sentiment scores
@@ -412,7 +412,7 @@ class AlternativeFeatureCalculator:
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"lookback_hours": lookback_hours, "reason": "no_sentiment_scores"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Calculate overall social sentiment features
@@ -462,7 +462,7 @@ class AlternativeFeatureCalculator:
                     "lookback_hours": lookback_hours,
                     "platforms": list(social_sentiment.keys()),
                 },
-                calculation_time=(datetime.now() - start_time).total_seconds(),
+                calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
 
         except Exception as e:
@@ -485,7 +485,7 @@ class AlternativeFeatureCalculator:
         Returns:
             AlternativeResult: Calculation result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
 
         try:
             lookback_hours = lookback_hours or self.default_lookbacks["economic"]
@@ -501,7 +501,7 @@ class AlternativeFeatureCalculator:
                         "lookback_hours": lookback_hours,
                         "reason": "alt_data_source_not_available",
                     },
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             economic_data = await self.alt_data_source.get_economic_indicators(
@@ -516,7 +516,7 @@ class AlternativeFeatureCalculator:
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"lookback_hours": lookback_hours, "reason": "no_economic_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Process economic indicators
@@ -583,7 +583,7 @@ class AlternativeFeatureCalculator:
                 timestamp=datetime.now(timezone.utc),
                 value=economic_values,
                 metadata={"lookback_hours": lookback_hours, "indicators_count": len(economic_data)},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
+                calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
 
         except Exception as e:
@@ -635,7 +635,7 @@ class AlternativeFeatureCalculator:
         Returns:
             AlternativeResult: Calculation result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
 
         try:
             lookback_hours = lookback_hours or self.default_lookbacks["microstructure"]
@@ -658,7 +658,7 @@ class AlternativeFeatureCalculator:
                 timestamp=datetime.now(timezone.utc),
                 value=microstructure_values,
                 metadata={"lookback_hours": lookback_hours, "status": "placeholder_implementation"},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
+                calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
 
         except Exception as e:

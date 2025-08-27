@@ -229,7 +229,7 @@ class StatisticalFeatures(BaseComponent):
         Returns:
             StatisticalResult: Calculation result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
 
         try:
             if symbol not in self.price_data:
@@ -245,7 +245,7 @@ class StatisticalFeatures(BaseComponent):
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"window": window, "field": field, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Calculate rolling statistics
@@ -288,7 +288,7 @@ class StatisticalFeatures(BaseComponent):
                 timestamp=datetime.now(timezone.utc),
                 value=statistical_values,
                 metadata={"window": window, "field": field},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
+                calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
 
         except Exception as e:
@@ -312,7 +312,7 @@ class StatisticalFeatures(BaseComponent):
         Returns:
             StatisticalResult: Calculation result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
 
         try:
             if symbol not in self.price_data:
@@ -328,7 +328,7 @@ class StatisticalFeatures(BaseComponent):
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"max_lags": max_lags, "field": field, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Calculate autocorrelations
@@ -374,7 +374,7 @@ class StatisticalFeatures(BaseComponent):
                 timestamp=datetime.now(timezone.utc),
                 value=autocorr_values,
                 metadata={"max_lags": max_lags, "field": field, "n_observations": len(data_series)},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
+                calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
 
         except Exception as e:
@@ -398,7 +398,7 @@ class StatisticalFeatures(BaseComponent):
         Returns:
             StatisticalResult: Calculation result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
 
         try:
             if symbol not in self.price_data:
@@ -414,7 +414,7 @@ class StatisticalFeatures(BaseComponent):
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"window": window, "field": field, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Get recent data
@@ -423,8 +423,9 @@ class StatisticalFeatures(BaseComponent):
             returns = recent_data["returns"]
 
             # Calculate trend indicators
-            price_trend = ((prices.iloc[-1] - prices.iloc[0]) / prices.iloc[0] 
-                          if prices.iloc[0] != 0 else 0)
+            price_trend = (
+                (prices.iloc[-1] - prices.iloc[0]) / prices.iloc[0] if prices.iloc[0] != 0 else 0
+            )
             returns_mean = returns.mean()
             returns_std = returns.std()
 
@@ -485,7 +486,7 @@ class StatisticalFeatures(BaseComponent):
                 timestamp=datetime.now(timezone.utc),
                 value=regime_values,
                 metadata={"window": window, "field": field, "threshold": self.regime_threshold},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
+                calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
 
         except Exception as e:
@@ -510,7 +511,7 @@ class StatisticalFeatures(BaseComponent):
         Returns:
             StatisticalResult: Calculation result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
 
         try:
             if symbol1 not in self.price_data or symbol2 not in self.price_data:
@@ -539,7 +540,7 @@ class StatisticalFeatures(BaseComponent):
                         "field": field,
                         "reason": "insufficient_common_data",
                     },
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Get data series
@@ -596,7 +597,7 @@ class StatisticalFeatures(BaseComponent):
                     "field": field,
                     "n_observations": len(merged),
                 },
-                calculation_time=(datetime.now() - start_time).total_seconds(),
+                calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
 
         except Exception as e:
@@ -619,7 +620,7 @@ class StatisticalFeatures(BaseComponent):
         Returns:
             StatisticalResult: Calculation result
         """
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
 
         try:
             if symbol not in self.price_data:
@@ -635,7 +636,7 @@ class StatisticalFeatures(BaseComponent):
                     timestamp=datetime.now(timezone.utc),
                     value=None,
                     metadata={"field": field, "reason": "insufficient_data"},
-                    calculation_time=(datetime.now() - start_time).total_seconds(),
+                    calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
                 )
 
             # Prepare time series with datetime index
@@ -700,7 +701,7 @@ class StatisticalFeatures(BaseComponent):
                 timestamp=datetime.now(timezone.utc),
                 value=seasonality_values,
                 metadata={"field": field, "n_observations": len(data_series)},
-                calculation_time=(datetime.now() - start_time).total_seconds(),
+                calculation_time=(datetime.now(timezone.utc) - start_time).total_seconds(),
             )
 
         except Exception as e:

@@ -11,7 +11,7 @@ This module provides robust validation for:
 
 import asyncio
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -163,7 +163,7 @@ class SignalValidator(BaseValidator):
 
     async def _validate_timestamp(self, signal: Signal, result: ValidationResult) -> None:
         """Validate signal timestamp."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         age_seconds = (now - signal.timestamp).total_seconds()
 
         if age_seconds > self.max_signal_age_seconds:
@@ -416,7 +416,7 @@ class MarketConditionValidator(BaseValidator):
     ) -> None:
         """Validate market trading hours."""
         # This would be extended with actual market hours logic
-        current_hour = datetime.now().hour
+        current_hour = datetime.now(timezone.utc).hour
 
         # Basic check for major market hours (approximate)
         if current_hour < 6 or current_hour > 22:  # Outside major trading hours

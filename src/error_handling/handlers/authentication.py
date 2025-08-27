@@ -156,8 +156,8 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
         # Extract client information (sanitize first)
         client_ip = self._extract_client_ip(context)
         user_id = self._extract_user_id(context)
-        session_id = self._extract_session_id(context)
-        user_agent = self._extract_user_agent(context)
+        self._extract_session_id(context)
+        self._extract_user_agent(context)
 
         # Create sanitized context
         sanitized_context = self._sanitize_auth_context(context)
@@ -303,7 +303,7 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
     def _categorize_auth_error(self, error: Exception) -> str:
         """Categorize authentication error for appropriate response."""
         error_message = str(error).lower()
-        error_type = type(error).__name__.lower()
+        type(error).__name__.lower()
 
         # Invalid credentials
         if any(
@@ -449,7 +449,9 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
             user_key = f"user:{user_id}"
             user_failures = len(self._failed_attempts.get(user_key, []))
             if user_failures > self.max_failed_attempts * 2:
-                threat_level = max(threat_level, SecurityThreat.HIGH)
+                # Upgrade threat level if needed
+                if threat_level == SecurityThreat.LOW or threat_level == SecurityThreat.MEDIUM:
+                    threat_level = SecurityThreat.HIGH
                 self._logger.warning(
                     "Brute force attack on user account detected",
                     user_id=user_id,

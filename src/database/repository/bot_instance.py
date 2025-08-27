@@ -5,17 +5,17 @@ This repository handles all database operations for bot instances,
 providing centralized data access for bot lifecycle management.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.bot_instance import BotInstance
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 
-class BotInstanceRepository(BaseRepository):
+class BotInstanceRepository(DatabaseRepository):
     """Repository for bot instance operations."""
 
     def __init__(self, session: AsyncSession):
@@ -37,9 +37,7 @@ class BotInstanceRepository(BaseRepository):
         Returns:
             Bot instance or None if not found
         """
-        result = await self.session.execute(
-            select(BotInstance).where(BotInstance.bot_id == bot_id)
-        )
+        result = await self.session.execute(select(BotInstance).where(BotInstance.bot_id == bot_id))
         return result.scalar_one_or_none()
 
     async def get_active_bots(self) -> list[BotInstance]:
@@ -139,8 +137,8 @@ class BotInstanceRepository(BaseRepository):
                 bot.error_count = (bot.error_count or 0) + 1
             if metrics:
                 bot.performance_metrics = metrics
-            bot.last_heartbeat = datetime.utcnow()
-            bot.updated_at = datetime.utcnow()
+            bot.last_heartbeat = datetime.now(timezone.utc)
+            bot.updated_at = datetime.now(timezone.utc)
             await self.session.commit()
             await self.session.refresh(bot)
         return bot
@@ -157,7 +155,7 @@ class BotInstanceRepository(BaseRepository):
         """
         bot = await self.get_by_bot_id(bot_id)
         if bot:
-            bot.last_heartbeat = datetime.utcnow()
+            bot.last_heartbeat = datetime.now(timezone.utc)
             await self.session.commit()
             return True
         return False
@@ -174,7 +172,7 @@ class BotInstanceRepository(BaseRepository):
         """
         from datetime import timedelta
 
-        cutoff_time = datetime.utcnow() - timedelta(seconds=heartbeat_timeout_seconds)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(seconds=heartbeat_timeout_seconds)
 
         result = await self.session.execute(
             select(BotInstance)
@@ -230,7 +228,7 @@ class BotInstanceRepository(BaseRepository):
         if bot:
             bot.error_count = 0
             bot.error_message = None
-            bot.updated_at = datetime.utcnow()
+            bot.updated_at = datetime.now(timezone.utc)
             await self.session.commit()
             return True
         return False
@@ -305,7 +303,7 @@ class BotInstanceRepository(BaseRepository):
         """
         from datetime import timedelta
 
-        cutoff_time = datetime.utcnow() - timedelta(days=days)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(days=days)
 
         # Find bots to delete
         result = await self.session.execute(
@@ -336,9 +334,7 @@ class BotInstanceRepository(BaseRepository):
             List of bot instances trading the symbol
         """
         result = await self.session.execute(
-            select(BotInstance)
-            .where(BotInstance.symbol == symbol)
-            .order_by(BotInstance.created_at)
+            select(BotInstance).where(BotInstance.symbol == symbol).order_by(BotInstance.created_at)
         )
         return list(result.scalars().all())
 
@@ -395,7 +391,7 @@ class BotInstanceRepository(BaseRepository):
                 bot.win_rate = win_rate
             if metrics:
                 bot.performance_metrics = metrics
-            bot.updated_at = datetime.utcnow()
+            bot.updated_at = datetime.now(timezone.utc)
             await self.session.commit()
             await self.session.refresh(bot)
         return bot

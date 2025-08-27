@@ -325,12 +325,12 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
     ) -> JSONResponse:
         """
         Handle errors that were recovered by the global error handler.
-        
+
         Args:
             request: HTTP request
             exception: Original exception
             error_context: Error context with recovery information
-            
+
         Returns:
             JSONResponse: Error response with recovery info
         """
@@ -354,9 +354,13 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
                 "recovery": {
                     "attempted": True,
                     "success": True,
-                    "method": recovery_details.get("method", error_context.details.get("recovery_method", "unknown")),
+                    "method": recovery_details.get(
+                        "method", error_context.details.get("recovery_method", "unknown")
+                    ),
                     "attempts": recovery_details.get("attempts", error_context.recovery_attempts),
-                    "max_attempts": recovery_details.get("max_attempts", error_context.max_recovery_attempts),
+                    "max_attempts": recovery_details.get(
+                        "max_attempts", error_context.max_recovery_attempts
+                    ),
                     "details": error_context.details.get("recovery_message", "Recovery successful"),
                 },
             }
@@ -410,9 +414,8 @@ class ErrorHandlerMiddleware(BaseHTTPMiddleware):
             "exception_mappings": {
                 exc.__name__: status for exc, status in self.exception_mapping.items()
             },
-            "handled_exception_types": [
-                exc.__name__ for exc in self.exception_mapping.keys()
-            ] + ["HTTPException", "TradingBotError", "UnexpectedException"],
+            "handled_exception_types": [exc.__name__ for exc in self.exception_mapping.keys()]
+            + ["HTTPException", "TradingBotError", "UnexpectedException"],
             "features": [
                 "structured_error_responses",
                 "detailed_logging",

@@ -10,7 +10,7 @@ This module provides:
 - Benchmark comparisons
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -444,7 +444,7 @@ class RealTimeMetricsTracker:
 
         # Update frequency
         self._update_interval = timedelta(seconds=config.get("update_interval_seconds", 60))
-        self._last_update = datetime.now()
+        self._last_update = datetime.now(timezone.utc)
 
         # Limits for data retention
         self._max_equity_points = config.get("max_equity_points", 10000)
@@ -460,7 +460,7 @@ class RealTimeMetricsTracker:
             timestamp: Optional timestamp (defaults to now)
         """
         if timestamp is None:
-            timestamp = datetime.now()
+            timestamp = datetime.now(timezone.utc)
 
         self._equity_points.append(
             {
@@ -507,7 +507,7 @@ class RealTimeMetricsTracker:
 
     async def _check_and_update_metrics(self) -> None:
         """Check if metrics need updating and update if necessary."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         if now - self._last_update >= self._update_interval:
             await self._update_metrics()
             self._last_update = now
@@ -566,7 +566,7 @@ class RealTimeMetricsTracker:
         self._equity_points.clear()
         self._trade_history.clear()
         self._signal_history.clear()
-        self._last_update = datetime.now()
+        self._last_update = datetime.now(timezone.utc)
 
         self._logger.info(f"Metrics reset for strategy {self.strategy_id}")
 
@@ -646,7 +646,7 @@ class StrategyComparator:
         ]
 
         return {
-            "comparison_timestamp": datetime.now().isoformat(),
+            "comparison_timestamp": datetime.now(timezone.utc).isoformat(),
             "strategies_compared": len(strategy_metrics),
             "rankings": rankings,
             "best_overall": overall_ranking[0][0] if overall_ranking else None,

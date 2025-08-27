@@ -154,7 +154,7 @@ async def get_state_service() -> StateService:
         logger.error(f"Failed to get StateService: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="State service temporarily unavailable"
+            detail="State service temporarily unavailable",
         )
 
 
@@ -171,7 +171,7 @@ async def get_checkpoint_manager() -> CheckpointManager:
         logger.error(f"Failed to get CheckpointManager: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Checkpoint manager temporarily unavailable"
+            detail="Checkpoint manager temporarily unavailable",
         )
 
 
@@ -188,7 +188,7 @@ async def get_lifecycle_manager() -> TradeLifecycleManager:
         logger.error(f"Failed to get TradeLifecycleManager: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Trade lifecycle manager temporarily unavailable"
+            detail="Trade lifecycle manager temporarily unavailable",
         )
 
 
@@ -201,6 +201,7 @@ async def get_quality_controller() -> QualityController:
         if not hasattr(get_quality_controller, "_instance"):
             # Get config from somewhere - for now use a basic config
             from src.core.config.main import Config
+
             config = Config()
             get_quality_controller._instance = QualityController(config)
         return get_quality_controller._instance
@@ -208,7 +209,7 @@ async def get_quality_controller() -> QualityController:
         logger.error(f"Failed to get QualityController: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Quality controller temporarily unavailable"
+            detail="Quality controller temporarily unavailable",
         )
 
 
@@ -235,9 +236,7 @@ async def get_bot_state(
     try:
         # Get state with optional version
         bot_state_data = await state_service.get_state(
-            state_type=StateType.BOT_STATE,
-            entity_id=bot_id,
-            version=version_id
+            state_type=StateType.BOT_STATE, entity_id=bot_id, version=version_id
         )
 
         if not bot_state_data:
@@ -293,7 +292,7 @@ async def save_bot_state(
                 "source_component": "WebAPI",
                 "priority": StatePriority.HIGH,
                 "reason": "API state update",
-            }
+            },
         )
 
         if not success:
@@ -303,9 +302,7 @@ async def save_bot_state(
             # Create snapshot through checkpoint manager instead
             checkpoint_manager = await get_checkpoint_manager()
             await checkpoint_manager.create_checkpoint(
-                bot_id=bot_id,
-                bot_state=state_obj,
-                checkpoint_type="manual"
+                bot_id=bot_id, bot_state=state_obj, checkpoint_type="manual"
             )
 
         # Generate version ID (simplified)
@@ -356,7 +353,9 @@ async def get_state_metrics(
             "bot_id": bot_id,
             "period_hours": hours,
             "total_operations": health_status.get("metrics", {}).get("total_operations", 0),
-            "successful_operations": health_status.get("metrics", {}).get("successful_operations", 0),
+            "successful_operations": health_status.get("metrics", {}).get(
+                "successful_operations", 0
+            ),
             "cache_hit_rate": health_status.get("metrics", {}).get("cache_hit_rate", 0.0),
             "active_states": health_status.get("active_states", 0),
             "memory_usage_mb": health_status.get("memory_usage_mb", 0.0),
@@ -393,27 +392,26 @@ async def create_checkpoint(
         # Get actual bot state from StateService
         state_service = await get_state_service()
         bot_state_data = await state_service.get_state(
-            state_type=StateType.BOT_STATE,
-            entity_id=request.bot_id
+            state_type=StateType.BOT_STATE, entity_id=request.bot_id
         )
 
         if not bot_state_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Bot state not found for bot {request.bot_id}"
+                detail=f"Bot state not found for bot {request.bot_id}",
             )
 
         # Convert to BotState object
         bot_state = BotState(**bot_state_data)
 
         checkpoint_id = await checkpoint_manager.create_checkpoint(
-            bot_id=request.bot_id,
-            bot_state=bot_state,
-            checkpoint_type=request.checkpoint_type
+            bot_id=request.bot_id, bot_state=bot_state, checkpoint_type=request.checkpoint_type
         )
 
         # Get checkpoint info from the list
-        all_checkpoints = await checkpoint_manager.list_checkpoints(bot_id=request.bot_id, limit=1000)
+        all_checkpoints = await checkpoint_manager.list_checkpoints(
+            bot_id=request.bot_id, limit=1000
+        )
         checkpoint_info = None
         for cp in all_checkpoints:
             if cp.get("checkpoint_id") == checkpoint_id:
@@ -423,7 +421,11 @@ async def create_checkpoint(
         return CheckpointResponse(
             checkpoint_id=checkpoint_id,
             bot_id=request.bot_id,
-            created_at=datetime.fromisoformat(checkpoint_info["created_at"]) if checkpoint_info else datetime.now(timezone.utc),
+            created_at=(
+                datetime.fromisoformat(checkpoint_info["created_at"])
+                if checkpoint_info
+                else datetime.now(timezone.utc)
+            ),
             size_bytes=checkpoint_info.get("size_bytes", 0) if checkpoint_info else 0,
             checkpoint_type=request.checkpoint_type,
         )
@@ -490,7 +492,7 @@ async def restore_from_checkpoint(
         if not restored_state:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Checkpoint {request.checkpoint_id} not found"
+                detail=f"Checkpoint {request.checkpoint_id} not found",
             )
 
         # Save restored state back to StateService
@@ -502,8 +504,8 @@ async def restore_from_checkpoint(
             metadata={
                 "source": "checkpoint_recovery",
                 "checkpoint_id": request.checkpoint_id,
-                "recovery_type": request.recovery_type
-            }
+                "recovery_type": request.recovery_type,
+            },
         )
 
         return {
@@ -593,7 +595,9 @@ async def get_trade_lifecycle(
             "symbol": trade_context.get("symbol", ""),
             "filled_quantity": trade_context.get("filled_quantity", 0.0),
             "remaining_quantity": trade_context.get("remaining_quantity", 0.0),
-            "signal_timestamp": trade_context.get("signal_timestamp", datetime.now(timezone.utc).isoformat()),
+            "signal_timestamp": trade_context.get(
+                "signal_timestamp", datetime.now(timezone.utc).isoformat()
+            ),
             "quality_score": trade_context.get("quality_score", 0.0),
         }
 
@@ -632,7 +636,7 @@ async def get_trade_history(
         # Get trade history from lifecycle manager
         all_history = await lifecycle_manager.get_trade_history(
             days=30,  # Get last 30 days of trades
-            include_details=True
+            include_details=True,
         )
 
         # Apply filters
@@ -689,8 +693,7 @@ async def get_trade_performance(
 
         if not trade_data:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Trade {trade_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Trade {trade_id} not found"
             )
 
         # Calculate basic performance metrics from trade data
@@ -709,8 +712,12 @@ async def get_trade_performance(
         exec_time = None
         if trade_data.get("completion_timestamp") and trade_data.get("signal_timestamp"):
             try:
-                completion = datetime.fromisoformat(trade_data["completion_timestamp"].replace("Z", "+00:00"))
-                signal = datetime.fromisoformat(trade_data["signal_timestamp"].replace("Z", "+00:00"))
+                completion = datetime.fromisoformat(
+                    trade_data["completion_timestamp"].replace("Z", "+00:00")
+                )
+                signal = datetime.fromisoformat(
+                    trade_data["signal_timestamp"].replace("Z", "+00:00")
+                )
                 exec_time = (completion - signal).total_seconds()
             except:
                 exec_time = None
@@ -764,7 +771,7 @@ async def validate_pre_trade(
         validation = await quality_controller.validate_pre_trade(
             order_request=order_request,
             market_data=market_data,
-            portfolio_context=request.portfolio_context
+            portfolio_context=request.portfolio_context,
         )
 
         return TradeValidationResponse(
@@ -822,7 +829,7 @@ async def analyze_post_trade(
             trade_id=request.trade_id,
             execution_result=execution_result,
             market_data_before=market_data_before,
-            market_data_after=market_data_after
+            market_data_after=market_data_after,
         )
 
         return PostTradeAnalysisResponse(
@@ -871,10 +878,7 @@ async def get_quality_summary(
 
         # Get summary data from the controller
         # The controller should provide aggregated data, not expose internal lists
-        summary_data = await quality_controller.get_summary_statistics(
-            hours=hours,
-            bot_id=bot_id
-        )
+        summary_data = await quality_controller.get_summary_statistics(hours=hours, bot_id=bot_id)
 
         # Build response using the summary data
         summary = {
@@ -890,7 +894,7 @@ async def get_quality_summary(
                 "avg_analysis_time_ms": metrics.avg_analysis_time_ms,
                 "total_validations": metrics.total_validations,
                 "total_analyses": metrics.total_analyses,
-            }
+            },
         }
         return summary
 
@@ -1013,9 +1017,7 @@ async def get_sync_metrics(
             "total_operations": total_ops,
             "successful_operations": successful_ops,
             "failed_operations": failed_ops,
-            "success_rate": (
-                (successful_ops / max(total_ops, 1)) * 100
-            ),
+            "success_rate": ((successful_ops / max(total_ops, 1)) * 100),
             "cache_hit_rate": metrics_data.get("cache_hit_rate", 0.0),
             "active_states": health_status.get("active_states", 0),
         }

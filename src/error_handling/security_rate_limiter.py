@@ -115,16 +115,18 @@ class SecurityRateLimiter:
     - Sliding window for smooth rate limiting
     """
 
-    def __init__(self, config: RateLimitConfig = None):
+    def __init__(self, config: RateLimitConfig | None = None):
         self.config = config or RateLimitConfig()
         self.logger = get_logger(self.__class__.__module__)
 
         # Rate limiting state
-        self._global_attempts = deque()  # Global attempt timestamps
-        self._component_attempts = defaultdict(deque)  # Per-component attempts
-        self._ip_attempts = defaultdict(deque)  # Per-IP attempts
-        self._blocked_components = {}  # Component -> block_until_time
-        self._blocked_ips = {}  # IP -> block_until_time
+        self._global_attempts: deque[float] = deque()  # Global attempt timestamps
+        self._component_attempts: dict[str, deque[float]] = defaultdict(
+            deque
+        )  # Per-component attempts
+        self._ip_attempts: dict[str, deque[float]] = defaultdict(deque)  # Per-IP attempts
+        self._blocked_components: dict[str, float] = {}  # Component -> block_until_time
+        self._blocked_ips: dict[str, float] = {}  # IP -> block_until_time
 
         # Token bucket state
         self._token_bucket = self.config.bucket_capacity
@@ -137,23 +139,34 @@ class SecurityRateLimiter:
 
         # Emergency state
         self._emergency_mode = False
-        self._emergency_start_time = None
+        self._emergency_start_time: float | None = None
 
         # Security metrics
         self._metrics = SecurityMetrics()
 
         # Cleanup task
-        self._cleanup_task = None
+        self._cleanup_task: asyncio.Task[None] | None = None
         # Don't start cleanup task immediately - start it when first rate limit check happens
 
     def _start_cleanup_task(self) -> None:
         """Start periodic cleanup of old data."""
         try:
             if self._cleanup_task is None or self._cleanup_task.done():
+                # Create and store the task for proper lifecycle management
                 self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+                # Add done callback to handle any exceptions
+                self._cleanup_task.add_done_callback(self._cleanup_task_done_callback)
         except RuntimeError:
             # No event loop running, cleanup task will be started on first use
             pass
+
+    def _cleanup_task_done_callback(self, task: asyncio.Task) -> None:
+        """Handle cleanup task completion."""
+        if task.exception():
+            self.logger.error(f"Cleanup task failed: {task.exception()}")
+        # Reset task reference so it can be restarted if needed
+        if self._cleanup_task is task:
+            self._cleanup_task = None
 
     async def _periodic_cleanup(self) -> None:
         """Periodic cleanup of expired data."""
@@ -534,7 +547,9 @@ class SecurityRateLimiter:
         time_elapsed = current_time - self._last_refill_time
         tokens_to_add = time_elapsed * self.config.refill_rate_per_second
 
-        self._token_bucket = min(self.config.bucket_capacity, self._token_bucket + tokens_to_add)
+        self._token_bucket = min(
+            self.config.bucket_capacity, int(self._token_bucket + tokens_to_add)
+        )
         self._last_refill_time = current_time
 
     def _consume_token(self) -> None:
@@ -668,6 +683,15 @@ class SecurityRateLimiter:
 
         self._metrics.threat_detections += 1
 
+        # Update adaptive multiplier based on new threat level
+        if self._threat_level == SecurityThreat.CRITICAL:
+            self._adaptive_multiplier = min(5.0, max(self._adaptive_multiplier, 3.0))
+        elif self._threat_level == SecurityThreat.HIGH:
+            self._adaptive_multiplier = min(3.0, max(self._adaptive_multiplier, 2.0))
+        elif self._threat_level == SecurityThreat.MEDIUM:
+            self._adaptive_multiplier = min(2.0, max(self._adaptive_multiplier, 1.5))
+        self._metrics.adaptive_adjustments += 1
+
     def _calculate_remaining_attempts(self, component: str) -> int:
         """Calculate remaining attempts for component."""
         current_time = time.time()
@@ -736,7 +760,7 @@ class SecurityRateLimiter:
 _global_rate_limiter = None
 
 
-def get_security_rate_limiter(config: RateLimitConfig = None) -> SecurityRateLimiter:
+def get_security_rate_limiter(config: RateLimitConfig | None = None) -> SecurityRateLimiter:
     """Get global security rate limiter instance."""
     global _global_rate_limiter
     if _global_rate_limiter is None:

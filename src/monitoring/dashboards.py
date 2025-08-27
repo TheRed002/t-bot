@@ -713,34 +713,43 @@ class GrafanaDashboardManager:
             True if deployment was successful
         """
         url = f"{self.grafana_url}/api/dashboards/db"
+        # Sanitized headers for logging - don't expose API key
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
+        session = None
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    json=dashboard.to_dict(),
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=30),
-                ) as response:
-                    if response.status in [200, 201]:
-                        return True
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"Grafana API error {response.status}: {error_text}")
+            session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30),
+                connector=aiohttp.TCPConnector(limit=10, limit_per_host=5),
+            )
+            async with session.post(
+                url,
+                json=dashboard.to_dict(),
+                headers=headers,
+            ) as response:
+                if response.status in [200, 201]:
+                    return True
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Grafana API error {response.status}: {error_text}")
 
-                        # Track deployment failures
-                        if self._error_handler:
-                            await self._error_handler.handle_error(
-                                Exception(f"Grafana API error {response.status}: {error_text}"),
-                                ErrorContext(
-                                    component="GrafanaDashboardManager",
-                                    operation="deploy_dashboard",
-                                    dashboard_title=dashboard.title,
-                                    status_code=response.status,
-                                ),
-                            )
-                        return False
+                    # Track deployment failures
+                    if self._error_handler:
+                        error_msg = f"Grafana API error {response.status}: {error_text}"
+                        await self._error_handler.handle_error(
+                            Exception(error_msg),
+                            ErrorContext(
+                                error=Exception(error_msg),
+                                component="GrafanaDashboardManager",
+                                operation="deploy_dashboard",
+                                details={
+                                    "dashboard_title": dashboard.title,
+                                    "status_code": response.status,
+                                    "error_text": error_text,
+                                },
+                            ),
+                        )
+                    return False
 
         except Exception as e:
             # Track deployment errors
@@ -748,14 +757,20 @@ class GrafanaDashboardManager:
                 await self._error_handler.handle_error(
                     e,
                     ErrorContext(
+                        error=e,
                         component="GrafanaDashboardManager",
                         operation="deploy_dashboard",
-                        dashboard_title=dashboard.title,
-                        grafana_url=self.grafana_url,
+                        details={
+                            "dashboard_title": dashboard.title,
+                            "grafana_url": self.grafana_url,
+                        },
                     ),
                 )
             logger.error(f"Error deploying dashboard to Grafana: {e}")
             raise  # Let retry decorator handle it
+        finally:
+            if session and not session.closed:
+                await session.close()
 
     def export_dashboards_to_files(self, output_dir: str) -> None:
         """
@@ -779,10 +794,12 @@ class GrafanaDashboardManager:
             filename = f"{dashboard.uid}.json"
             filepath = os.path.join(output_dir, filename)
 
-            with open(filepath, "w") as f:
-                json.dump(dashboard.to_dict(), f, indent=2)
-
-            logger.info(f"Exported dashboard to {filepath}")
+            try:
+                with open(filepath, "w", encoding="utf-8") as f:
+                    json.dump(dashboard.to_dict(), f, indent=2, ensure_ascii=False)
+                logger.info(f"Exported dashboard to {filepath}")
+            except Exception as e:
+                logger.error(f"Failed to export dashboard {dashboard.title} to {filepath}: {e}")
 
 
 def create_default_dashboards() -> list[Dashboard]:

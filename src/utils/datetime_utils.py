@@ -151,9 +151,9 @@ def convert_timezone(dt: datetime, target_tz: str) -> datetime:
 
         return converted_dt
     except pytz.exceptions.UnknownTimeZoneError:
-        raise ValidationError(f"Invalid timezone: {target_tz}")
+        raise ValidationError(f"Invalid timezone: {target_tz}") from None
     except Exception as e:
-        raise ValidationError(f"Error converting timezone: {e!s}")
+        raise ValidationError(f"Error converting timezone: {e!s}") from e
 
 
 def parse_datetime(dt_str: str, format_str: str | None = None) -> datetime:
@@ -176,7 +176,7 @@ def parse_datetime(dt_str: str, format_str: str | None = None) -> datetime:
         except ValueError as e:
             raise ValidationError(
                 f"Cannot parse datetime '{dt_str}' with format '{format_str}': {e!s}"
-            )
+            ) from e
 
     # Try common formats
     common_formats = [
@@ -194,3 +194,47 @@ def parse_datetime(dt_str: str, format_str: str | None = None) -> datetime:
             continue
 
     raise ValidationError(f"Cannot parse datetime string '{dt_str}' with any known format")
+
+
+def get_redis_key_ttl(key: str, default_ttl: int = 3600) -> int:
+    """
+    Get TTL for Redis key based on key pattern and current time.
+    
+    Args:
+        key: Redis key string
+        default_ttl: Default TTL in seconds
+        
+    Returns:
+        TTL in seconds
+    """
+    # Pattern-based TTL logic
+    key_lower = key.lower()
+    
+    if "metrics" in key_lower:
+        return 300  # 5 minutes for metrics
+    elif "cache" in key_lower:
+        return 1800  # 30 minutes for general cache
+    elif "session" in key_lower:
+        return 86400  # 24 hours for sessions
+    elif "temp" in key_lower or "tmp" in key_lower:
+        return 60  # 1 minute for temporary data
+    elif "state" in key_lower:
+        return 600  # 10 minutes for state data
+    elif "orderbook" in key_lower or "order_book" in key_lower:
+        return 5  # 5 seconds for order book data
+    elif "price" in key_lower or "ticker" in key_lower:
+        return 10  # 10 seconds for price data
+    elif "position" in key_lower:
+        return 300  # 5 minutes for position data
+    elif "balance" in key_lower:
+        return 300  # 5 minutes for balance data
+    elif "trade" in key_lower:
+        return 3600  # 1 hour for trade history
+    elif "candle" in key_lower or "kline" in key_lower:
+        return 60  # 1 minute for candle data
+    elif "lock" in key_lower:
+        return 30  # 30 seconds for distributed locks
+    elif "rate_limit" in key_lower:
+        return 60  # 1 minute for rate limit data
+    
+    return default_ttl

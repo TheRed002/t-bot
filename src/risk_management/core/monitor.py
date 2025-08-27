@@ -4,7 +4,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -73,7 +73,7 @@ class AlertingObserver(RiskObserver):
     async def on_risk_event(self, event: RiskEvent, data: dict[str, Any]) -> None:
         """Create alert for risk event."""
         alert = RiskAlert(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             event_type=event.value,
             severity=self._determine_severity(event),
             message=self._format_message(event, data),
@@ -111,11 +111,19 @@ class AlertingObserver(RiskObserver):
             RiskEvent.DRAWDOWN_EXCEEDED: f"Drawdown {data.get('drawdown', 0):.2%} exceeds limit",
             RiskEvent.VAR_EXCEEDED: f"VaR {data.get('var', 0):.2%} exceeded",
             RiskEvent.LOSS_LIMIT_REACHED: f"Loss limit {data.get('loss', 0):.2%} reached",
-            RiskEvent.POSITION_LIMIT_REACHED: f"Position limit reached: {data.get('positions', 0)} positions",
+            RiskEvent.POSITION_LIMIT_REACHED: (
+                f"Position limit reached: {data.get('positions', 0)} positions"
+            ),
             RiskEvent.CORRELATION_HIGH: f"Correlation {data.get('correlation', 0):.2f} is high",
-            RiskEvent.RISK_LEVEL_CHANGED: f"Risk level changed to {data.get('new_level', 'UNKNOWN')}",
-            RiskEvent.LIQUIDITY_LOW: f"Low liquidity detected: {data.get('liquidity_ratio', 0):.2f}",
-            RiskEvent.VOLATILITY_SPIKE: f"Volatility spike detected: {data.get('volatility', 0):.2%}",
+            RiskEvent.RISK_LEVEL_CHANGED: (
+                f"Risk level changed to {data.get('new_level', 'UNKNOWN')}"
+            ),
+            RiskEvent.LIQUIDITY_LOW: (
+                f"Low liquidity detected: {data.get('liquidity_ratio', 0):.2f}"
+            ),
+            RiskEvent.VOLATILITY_SPIKE: (
+                f"Volatility spike detected: {data.get('volatility', 0):.2%}"
+            ),
         }
 
         return messages.get(event, f"Risk event: {event.value}")
@@ -147,13 +155,13 @@ class CircuitBreakerObserver(RiskObserver):
 
         # Check if circuit breaker should reset
         if self.is_broken and self.break_time:
-            if datetime.utcnow() - self.break_time > self.break_duration:
+            if datetime.now(timezone.utc) - self.break_time > self.break_duration:
                 await self._reset_circuit_breaker()
 
     async def _trigger_circuit_breaker(self, event: RiskEvent, data: dict[str, Any]) -> None:
         """Trigger circuit breaker."""
         self.is_broken = True
-        self.break_time = datetime.utcnow()
+        self.break_time = datetime.now(timezone.utc)
 
         self._logger.critical(f"Circuit breaker triggered by {event.value}", data=data)
 
@@ -374,15 +382,23 @@ class RiskMonitor:
         self._logger.info(f"Started risk monitoring with {interval}s interval")
 
     async def stop_monitoring(self) -> None:
-        """Stop continuous monitoring."""
+        """Stop continuous monitoring with proper resource cleanup."""
         self._running = False
 
         if self._monitoring_task:
-            self._monitoring_task.cancel()
             try:
-                await self._monitoring_task
-            except asyncio.CancelledError:
-                pass
+                self._monitoring_task.cancel()
+                # Wait for task to be cancelled with timeout
+                await asyncio.wait_for(self._monitoring_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                self._logger.debug("Monitoring task cancelled")
+            except Exception as e:
+                self._logger.warning(f"Error cancelling monitoring task: {e}")
+            finally:
+                self._monitoring_task = None
+
+        # Clean up resources
+        await self._cleanup_resources()
 
         self._logger.info("Stopped risk monitoring")
 
@@ -395,6 +411,24 @@ class RiskMonitor:
                 await asyncio.sleep(interval)
             except Exception as e:
                 self._logger.error(f"Monitoring error: {e}")
+
+    async def _cleanup_resources(self) -> None:
+        """Clean up all resources used by the risk monitor."""
+        try:
+            # Clean up metrics history with size limit
+            if len(self._metrics_history) > 1000:
+                self._metrics_history = self._metrics_history[-100:]  # Keep last 100 metrics
+
+            # Clean up observer alerts
+            for observer in self._observers:
+                if isinstance(observer, AlertingObserver):
+                    if len(observer.alerts) > 1000:  # Prevent excessive memory usage
+                        observer.alerts = observer.alerts[-100:]  # Keep last 100 alerts
+
+            self._logger.info("Risk monitor resources cleaned up")
+
+        except Exception as e:
+            self._logger.error(f"Error cleaning up risk monitor resources: {e}")
 
     def get_alerts(self) -> list[RiskAlert]:
         """Get recent risk alerts."""

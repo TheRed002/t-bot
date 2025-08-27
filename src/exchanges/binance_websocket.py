@@ -83,7 +83,7 @@ class BinanceWebSocketHandler:
         self._reconnect_task: asyncio.Task | None = None
 
         # Error handling
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = ErrorHandler(config)
 
         # Keep track of listen key renewal task
         self.listen_key_task: asyncio.Task | None = None

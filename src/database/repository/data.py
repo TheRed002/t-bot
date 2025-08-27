@@ -1,23 +1,30 @@
 """Data pipeline repositories implementation."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.data import (
     DataPipelineRecord,
     DataQualityRecord,
     FeatureRecord,
 )
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 
-class FeatureRepository(BaseRepository[FeatureRecord]):
+class FeatureRepository(DatabaseRepository[FeatureRecord, str]):
     """Repository for FeatureRecord entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize feature repository."""
-        super().__init__(session, FeatureRecord)
+
+        super().__init__(
+            session=session,
+            model=FeatureRecord,
+            entity_type=FeatureRecord,
+            key_type=str,
+            name="FeatureRepository",
+        )
 
     async def get_by_symbol(self, symbol: str) -> list[FeatureRecord]:
         """Get features by symbol."""
@@ -60,12 +67,19 @@ class FeatureRepository(BaseRepository[FeatureRecord]):
         )
 
 
-class DataQualityRepository(BaseRepository[DataQualityRecord]):
+class DataQualityRepository(DatabaseRepository[DataQualityRecord, str]):
     """Repository for DataQualityRecord entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize data quality repository."""
-        super().__init__(session, DataQualityRecord)
+
+        super().__init__(
+            session=session,
+            model=DataQualityRecord,
+            entity_type=DataQualityRecord,
+            key_type=str,
+            name="DataQualityRepository",
+        )
 
     async def get_by_symbol(self, symbol: str) -> list[DataQualityRecord]:
         """Get quality records by symbol."""
@@ -95,7 +109,7 @@ class DataQualityRepository(BaseRepository[DataQualityRecord]):
 
     async def get_quality_trend(self, symbol: str, days: int = 30) -> list[DataQualityRecord]:
         """Get quality trend for symbol over specified days."""
-        end_date = datetime.utcnow()
+        end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
         return await self.get_all(
             filters={
@@ -106,12 +120,19 @@ class DataQualityRepository(BaseRepository[DataQualityRecord]):
         )
 
 
-class DataPipelineRepository(BaseRepository[DataPipelineRecord]):
+class DataPipelineRepository(DatabaseRepository[DataPipelineRecord, str]):
     """Repository for DataPipelineRecord entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize data pipeline repository."""
-        super().__init__(session, DataPipelineRecord)
+
+        super().__init__(
+            session=session,
+            model=DataPipelineRecord,
+            entity_type=DataPipelineRecord,
+            key_type=str,
+            name="DataPipelineRepository",
+        )
 
     async def get_by_pipeline_name(self, pipeline_name: str) -> list[DataPipelineRecord]:
         """Get records by pipeline name."""
@@ -142,7 +163,7 @@ class DataPipelineRepository(BaseRepository[DataPipelineRecord]):
         self, pipeline_name: str, days: int = 30
     ) -> list[DataPipelineRecord]:
         """Get pipeline performance over specified days."""
-        end_date = datetime.utcnow()
+        end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(days=days)
         return await self.get_all(
             filters={

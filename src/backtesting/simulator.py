@@ -7,7 +7,7 @@ order book modeling, market impact, and latency simulation.
 
 import asyncio
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -129,7 +129,7 @@ class TradeSimulator:
         simulated_order = SimulatedOrder(
             request=order_request,
             order_id=str(uuid.uuid4()),
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             execution_algorithm=execution_algorithm,
             algorithm_params=algorithm_params or {},
         )
@@ -183,7 +183,7 @@ class TradeSimulator:
             "symbol": order.request.symbol,
             "status": "rejected",
             "reason": reason,
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
             "filled_size": safe_decimal("0"),
             "average_price": None,
         }
@@ -231,7 +231,7 @@ class TradeSimulator:
             "requested_size": float(order.request.quantity),
             "filled_size": float(filled_size),
             "average_price": float(execution_price),
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
             "slippage": float(abs(execution_price - base_price) / base_price),
         }
 
@@ -269,7 +269,7 @@ class TradeSimulator:
                 "side": order.request.side.value,
                 "type": order.request.order_type.value,
                 "message": "Limit price not met",
-                "timestamp": datetime.now(),
+                "timestamp": datetime.now(timezone.utc),
             }
 
         # Execute the order
@@ -293,7 +293,7 @@ class TradeSimulator:
             "filled_size": float(filled_size),
             "average_price": float(execution_price),
             "limit_price": float(order.request.price),
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     async def _execute_stop_order(
@@ -332,7 +332,7 @@ class TradeSimulator:
                 "side": order.request.side.value,
                 "type": order.request.order_type.value,
                 "message": "Stop price not triggered",
-                "timestamp": datetime.now(),
+                "timestamp": datetime.now(timezone.utc),
             }
 
         # Execute as market order once triggered
@@ -419,7 +419,7 @@ class TradeSimulator:
             "requested_size": float(order.request.quantity),
             "filled_size": float(total_filled),
             "average_price": float(average_price),
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
             "num_slices": num_slices,
             "slippage": float(abs(average_price - base_price) / base_price),
         }
@@ -456,7 +456,7 @@ class TradeSimulator:
             "filled_size": float(order.request.quantity),
             "average_price": float(execution_price),
             "vwap_price": float(vwap_price),
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
             "slippage": float(abs(execution_price - base_price) / base_price),
         }
 
@@ -528,7 +528,7 @@ class TradeSimulator:
             "average_price": float(average_price),
             "visible_size": float(visible_qty),
             "hidden_size": float(hidden_qty),
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
             "slippage": float(
                 abs(average_price - safe_decimal(market_data["close"]))
                 / safe_decimal(market_data["close"])
@@ -544,7 +544,7 @@ class TradeSimulator:
             # Create a mock market data object for slippage calculation
             mock_market_data = CoreMarketData(
                 symbol="",  # Not needed for impact calculation
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 price=safe_decimal("1"),  # Normalized
                 volume=safe_decimal(volume),
                 bid=safe_decimal("0.999"),

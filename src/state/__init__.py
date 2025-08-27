@@ -60,8 +60,12 @@ from .recovery import (
     StateRecoveryManager,
 )
 
+# Backward compatibility
+from .state_manager import StateManager
+
 # Core consolidated state management
 from .state_service import StatePriority, StateService, StateType
+from .state_sync_manager import StateSyncManager, SyncEventType
 from .state_validator import StateValidator
 
 # Trading-specific components
@@ -73,7 +77,6 @@ __all__ = [
     "AlertSeverity",
     "AuditEntry",
     "AuditEventType",
-    # Legacy compatibility
     "CheckpointManager",
     "CorruptionReport",
     "HealthCheck",
@@ -85,19 +88,17 @@ __all__ = [
     "RecoveryOperation",
     "RecoveryPoint",
     "RecoveryStatus",
-    # Monitoring and health checks
+    "StateManager",
     "StateMonitoringService",
     "StatePriority",
-    # Recovery and audit system
     "StateRecoveryManager",
-    # Core StateService API
     "StateService",
-    # Enterprise factory and registry
     "StateServiceFactory",
     "StateServiceRegistry",
+    "StateSyncManager",
     "StateType",
     "StateValidator",
-    # Trading components
+    "SyncEventType",
     "TradeEvent",
     "TradeLifecycleManager",
     "create_default_state_service",

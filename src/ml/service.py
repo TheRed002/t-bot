@@ -8,7 +8,7 @@ ML operations in the trading system.
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pandas as pd
@@ -57,7 +57,7 @@ class MLPipelineRequest(BaseModel):
     """Request for ML pipeline processing."""
 
     request_id: str = Field(
-        default_factory=lambda: f"ml_{int(datetime.utcnow().timestamp() * 1000)}"
+        default_factory=lambda: f"ml_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
     )
     symbol: str
     market_data: dict[str, Any] | Any
@@ -88,14 +88,14 @@ class MLPipelineResponse(BaseModel):
     error: str | None = None
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class MLTrainingRequest(BaseModel):
     """Request for ML model training."""
 
     request_id: str = Field(
-        default_factory=lambda: f"train_{int(datetime.utcnow().timestamp() * 1000)}"
+        default_factory=lambda: f"train_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
     )
     training_data: dict[str, Any] | Any
     target_data: list | Any
@@ -264,7 +264,7 @@ class MLService(BaseService):
     async def _process_pipeline_impl(self, request: MLPipelineRequest) -> MLPipelineResponse:
         """Internal ML pipeline implementation."""
         async with self._operation_semaphore:
-            pipeline_start = datetime.utcnow()
+            pipeline_start = datetime.now(timezone.utc)
             processing_stages = {}
             warnings = []
 
@@ -287,7 +287,7 @@ class MLService(BaseService):
                     market_data_df = request.market_data
 
                 # Stage 1: Feature Engineering
-                stage_start = datetime.utcnow()
+                stage_start = datetime.now(timezone.utc)
                 feature_response = None
 
                 if self.feature_engineering_service:
@@ -306,26 +306,26 @@ class MLService(BaseService):
                         raise ModelError(f"Feature engineering failed: {feature_response.error}")
 
                     processing_stages["feature_engineering"] = (
-                        datetime.utcnow() - stage_start
+                        datetime.now(timezone.utc) - stage_start
                     ).total_seconds() * 1000
                 else:
                     warnings.append("Feature engineering service not available")
 
                 # Stage 2: Feature Store (optional)
                 if self.feature_store_service and feature_response:
-                    stage_start = datetime.utcnow()
+                    stage_start = datetime.now(timezone.utc)
                     try:
                         await self.feature_store_service.store_features(
                             request.symbol, feature_response.feature_set
                         )
                         processing_stages["feature_store"] = (
-                            datetime.utcnow() - stage_start
+                            datetime.now(timezone.utc) - stage_start
                         ).total_seconds() * 1000
                     except Exception as e:
                         warnings.append(f"Feature store operation failed: {e}")
 
                 # Stage 3: Model Loading and Inference
-                stage_start = datetime.utcnow()
+                stage_start = datetime.now(timezone.utc)
                 predictions = []
                 probabilities = None
                 confidence_scores = None
@@ -373,13 +373,15 @@ class MLService(BaseService):
                         warnings.append("No model specified for inference")
 
                     processing_stages["inference"] = (
-                        datetime.utcnow() - stage_start
+                        datetime.now(timezone.utc) - stage_start
                     ).total_seconds() * 1000
                 else:
                     warnings.append("Inference service not available")
 
                 # Calculate total processing time
-                total_processing_time = (datetime.utcnow() - pipeline_start).total_seconds() * 1000
+                total_processing_time = (
+                    datetime.now(timezone.utc) - pipeline_start
+                ).total_seconds() * 1000
 
                 # Create response
                 response = MLPipelineResponse(
@@ -421,7 +423,9 @@ class MLService(BaseService):
                 return response
 
             except Exception as e:
-                total_processing_time = (datetime.utcnow() - pipeline_start).total_seconds() * 1000
+                total_processing_time = (
+                    datetime.now(timezone.utc) - pipeline_start
+                ).total_seconds() * 1000
 
                 error_response = MLPipelineResponse(
                     request_id=request.request_id,
@@ -471,7 +475,7 @@ class MLService(BaseService):
     async def _train_model_impl(self, request: MLTrainingRequest) -> MLTrainingResponse:
         """Internal model training implementation."""
         async with self._operation_semaphore:
-            training_start = datetime.utcnow()
+            training_start = datetime.now(timezone.utc)
             warnings = []
 
             try:
@@ -573,7 +577,7 @@ class MLService(BaseService):
                     except Exception as e:
                         warnings.append(f"Model registration failed: {e}")
 
-                training_time = (datetime.utcnow() - training_start).total_seconds() * 1000
+                training_time = (datetime.now(timezone.utc) - training_start).total_seconds() * 1000
 
                 response = MLTrainingResponse(
                     request_id=request.request_id,
@@ -599,7 +603,7 @@ class MLService(BaseService):
                 return response
 
             except Exception as e:
-                training_time = (datetime.utcnow() - training_start).total_seconds() * 1000
+                training_time = (datetime.now(timezone.utc) - training_start).total_seconds() * 1000
 
                 self._logger.error(
                     "Model training failed",
@@ -729,7 +733,7 @@ class MLService(BaseService):
         if not requests:
             return []
 
-        batch_start = datetime.utcnow()
+        batch_start = datetime.now(timezone.utc)
 
         try:
             # Process requests concurrently, but respect the semaphore limit
@@ -756,7 +760,9 @@ class MLService(BaseService):
                 else:
                     final_responses.append(response)
 
-            batch_processing_time = (datetime.utcnow() - batch_start).total_seconds() * 1000
+            batch_processing_time = (
+                datetime.now(timezone.utc) - batch_start
+            ).total_seconds() * 1000
 
             self._logger.info(
                 "Batch pipeline processing completed",
@@ -807,7 +813,7 @@ class MLService(BaseService):
             response, timestamp = self._pipeline_cache[cache_key]
             ttl_minutes = self.ml_config.cache_ttl_minutes
 
-            if datetime.utcnow() - timestamp < timedelta(minutes=ttl_minutes):
+            if datetime.now(timezone.utc) - timestamp < timedelta(minutes=ttl_minutes):
                 return response
             else:
                 del self._pipeline_cache[cache_key]
@@ -816,7 +822,7 @@ class MLService(BaseService):
 
     async def _cache_pipeline(self, cache_key: str, response: MLPipelineResponse) -> None:
         """Cache pipeline response."""
-        self._pipeline_cache[cache_key] = (response, datetime.utcnow())
+        self._pipeline_cache[cache_key] = (response, datetime.now(timezone.utc))
 
         # Clean old cache entries
         await self._clean_pipeline_cache()
@@ -824,7 +830,7 @@ class MLService(BaseService):
     async def _clean_pipeline_cache(self) -> None:
         """Clean expired pipeline cache entries."""
         ttl_minutes = self.ml_config.cache_ttl_minutes
-        cutoff_time = datetime.utcnow() - timedelta(minutes=ttl_minutes)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=ttl_minutes)
 
         expired_keys = [
             key for key, (_, timestamp) in self._pipeline_cache.items() if timestamp < cutoff_time

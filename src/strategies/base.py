@@ -43,6 +43,7 @@ try:
         AlertSeverity,
         get_alert_manager,
     )
+
     ALERTING_AVAILABLE = True
 except ImportError:
     ALERTING_AVAILABLE = False
@@ -113,6 +114,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
 
         # Recovery scenarios for trading operations
         from src.core.config import get_config
+
         recovery_config = get_config()
         self._order_rejection_recovery = OrderRejectionRecovery(recovery_config)
         self._data_feed_recovery = DataFeedInterruptionRecovery(recovery_config)
@@ -122,7 +124,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
             "total_signals": 0,
             "valid_signals": 0,
             "execution_count": 0,
-            "last_performance_update": datetime.now(),
+            "last_performance_update": datetime.now(timezone.utc),
         }
 
         # Backtesting mode
@@ -144,17 +146,17 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
     def strategy_type(self) -> StrategyType:
         """Get the strategy type."""
         pass
-    
+
     @property
     def name(self) -> str:
         """Get the strategy name."""
         return self._name
-    
+
     @property
     def version(self) -> str:
         """Get the strategy version."""
         return self._version
-    
+
     @property
     def status(self) -> StrategyStatus:
         """Get the strategy status."""
@@ -201,7 +203,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
                     "strategy.name": self.name,
                     "strategy.type": self.strategy_type.value,
                     "market.symbol": data.symbol if data else "unknown",
-                }
+                },
             )
             span_context.__enter__()
 
@@ -238,15 +240,13 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
                 # Report total signals generated
                 if hasattr(self._metrics_collector.trading_metrics, "signals_generated"):
                     self._metrics_collector.trading_metrics.signals_generated.labels(
-                        strategy=self.name,
-                        strategy_type=self.strategy_type.value
+                        strategy=self.name, strategy_type=self.strategy_type.value
                     ).inc(len(signals))
 
                 # Report valid signals
                 if hasattr(self._metrics_collector.trading_metrics, "signals_validated"):
                     self._metrics_collector.trading_metrics.signals_validated.labels(
-                        strategy=self.name,
-                        strategy_type=self.strategy_type.value
+                        strategy=self.name, strategy_type=self.strategy_type.value
                     ).inc(len(validated_signals))
 
             # Store signal history
@@ -290,9 +290,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
                         await alert_manager.fire_alert(alert)
                     except Exception as alert_error:
                         self.logger.error(
-                            "Failed to fire alert",
-                            strategy=self.name,
-                            error=str(alert_error)
+                            "Failed to fire alert", strategy=self.name, error=str(alert_error)
                         )
 
             return []  # Graceful degradation
@@ -445,8 +443,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
                 # Report PnL
                 if hasattr(self._metrics_collector.trading_metrics, "trade_pnl"):
                     self._metrics_collector.trading_metrics.trade_pnl.labels(
-                        strategy=self.name,
-                        strategy_type=self.strategy_type.value
+                        strategy=self.name, strategy_type=self.strategy_type.value
                     ).observe(float(trade_result.pnl))
 
                 # Report trade completion
@@ -454,10 +451,10 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
                     self._metrics_collector.trading_metrics.trades_completed.labels(
                         strategy=self.name,
                         strategy_type=self.strategy_type.value,
-                        status="win" if trade_result.pnl > 0 else "loss"
+                        status="win" if trade_result.pnl > 0 else "loss",
                     ).inc()
 
-        self.metrics.last_updated = datetime.now()
+        self.metrics.last_updated = datetime.now(timezone.utc)
 
     # Dependency injection methods
     def set_risk_manager(self, risk_manager: BaseRiskManager) -> None:
@@ -619,7 +616,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
         self._backtest_metrics = {
             "signals_generated": 0,
             "signals_executed": 0,
-            "start_time": datetime.now(),
+            "start_time": datetime.now(timezone.utc),
         }
         await self._on_backtest_prepare()
         self.logger.info("Strategy prepared for backtesting", strategy=self.name)
@@ -733,7 +730,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
             "version": self.version,
             "parameters": self.config.parameters,
             "metrics": self.metrics.model_dump() if hasattr(self.metrics, "model_dump") else {},
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def get_performance_summary(self) -> dict[str, Any]:
@@ -782,7 +779,7 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
                 "total_signals": 0,
                 "valid_signals": 0,
                 "execution_count": 0,
-                "last_performance_update": datetime.now(),
+                "last_performance_update": datetime.now(timezone.utc),
             }
 
             self.logger.info("Strategy cleanup completed", strategy=self.name)

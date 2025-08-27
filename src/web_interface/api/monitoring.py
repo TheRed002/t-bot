@@ -16,7 +16,7 @@ Key Features:
 - Monitoring configuration
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -124,17 +124,14 @@ async def get_metrics_collector_dep() -> MetricsCollector:
             logger.warning("Metrics collector not initialized - service unavailable")
             raise HTTPException(
                 status_code=503,
-                detail="Metrics collector service is not available. Please check monitoring setup."
+                detail="Metrics collector service is not available. Please check monitoring setup.",
             )
         return collector
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get metrics collector: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal error accessing metrics collector"
-        )
+        raise HTTPException(status_code=500, detail="Internal error accessing metrics collector")
 
 
 async def get_alert_manager_dep() -> AlertManager:
@@ -145,17 +142,14 @@ async def get_alert_manager_dep() -> AlertManager:
             logger.warning("Alert manager not initialized - service unavailable")
             raise HTTPException(
                 status_code=503,
-                detail="Alert manager service is not available. Please check monitoring setup."
+                detail="Alert manager service is not available. Please check monitoring setup.",
             )
         return manager
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get alert manager: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal error accessing alert manager"
-        )
+        raise HTTPException(status_code=500, detail="Internal error accessing alert manager")
 
 
 async def get_profiler_dep() -> PerformanceProfiler:
@@ -166,17 +160,14 @@ async def get_profiler_dep() -> PerformanceProfiler:
             logger.warning("Performance profiler not initialized - service unavailable")
             raise HTTPException(
                 status_code=503,
-                detail="Performance profiler service is not available. Please check monitoring setup."
+                detail="Performance profiler service is not available. Please check monitoring setup.",
             )
         return profiler
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get performance profiler: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Internal error accessing performance profiler"
-        )
+        raise HTTPException(status_code=500, detail="Internal error accessing performance profiler")
 
 
 # Health and Status Endpoints
@@ -235,7 +226,10 @@ async def health_check():
             status = "partial"
 
         return HealthCheckResponse(
-            status=status, timestamp=datetime.now(), uptime_seconds=uptime, components=components
+            status=status,
+            timestamp=datetime.now(timezone.utc),
+            uptime_seconds=uptime,
+            components=components,
         )
 
     except Exception as e:
@@ -266,7 +260,7 @@ async def system_status():
             stats = alert_manager.get_alert_stats()
 
         return {
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
             "system": {
                 "cpu_percent": cpu_percent,
                 "memory_rss_mb": memory_info.rss / 1024 / 1024,
@@ -318,7 +312,7 @@ async def metrics_json(
         metrics_data = profiler.get_performance_summary()
 
         return MetricsResponse(
-            metrics=metrics_data, timestamp=datetime.now(), timeframe_minutes=timeframe
+            metrics=metrics_data, timestamp=datetime.now(timezone.utc), timeframe_minutes=timeframe
         )
 
     except Exception as e:
@@ -341,16 +335,16 @@ async def performance_stats(
     try:
         # Get the performance summary
         summary = profiler.get_performance_summary()
-        
+
         # Transform the data to match PerformanceStatsResponse structure
         stats = {
             "timeframe_minutes": timeframe,
             "function_performance": summary.get("latency_stats", {}),
             "query_performance": {},  # Would need database-specific metrics
             "cache_performance": {},  # Would need cache-specific metrics
-            "system_resources": summary.get("system_resources", {})
+            "system_resources": summary.get("system_resources", {}),
         }
-        
+
         return PerformanceStatsResponse(**stats)
 
     except Exception as e:
@@ -376,7 +370,7 @@ async def memory_report(
         if not resource_stats:
             raise HTTPException(
                 status_code=503,
-                detail="Resource statistics not available. Monitoring may not be started."
+                detail="Resource statistics not available. Monitoring may not be started.",
             )
 
         return {
@@ -388,13 +382,17 @@ async def memory_report(
             "cpu": {
                 "percent": resource_stats.cpu_percent if resource_stats else 0,
             },
-            "gc_stats": {
-                "count": gc_stats.count if gc_stats else {},
-                "collected": gc_stats.collected if gc_stats else {},
-                "uncollectable": gc_stats.uncollectable if gc_stats else {},
-                "collections_per_second": gc_stats.collections_per_second if gc_stats else {},
-            } if gc_stats else None,
-            "timestamp": datetime.now(),
+            "gc_stats": (
+                {
+                    "count": gc_stats.count if gc_stats else {},
+                    "collected": gc_stats.collected if gc_stats else {},
+                    "uncollectable": gc_stats.uncollectable if gc_stats else {},
+                    "collections_per_second": gc_stats.collections_per_second if gc_stats else {},
+                }
+                if gc_stats
+                else None
+            ),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     except HTTPException:
@@ -419,7 +417,7 @@ async def reset_performance_metrics(
 
         return {
             "message": "Performance metrics reset successfully",
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     except Exception as e:
@@ -447,7 +445,7 @@ async def database_query_stats(
 
         return {
             "database_queries": database_stats,
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     except Exception as e:
@@ -534,7 +532,7 @@ async def create_alert_rule(
         return {
             "message": f"Alert rule '{rule_request.name}' created successfully",
             "rule_name": rule_request.name,
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     except Exception as e:
@@ -564,7 +562,7 @@ async def delete_alert_rule(
 
         return {
             "message": f"Alert rule '{rule_name}' deleted successfully",
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     except HTTPException:
@@ -595,7 +593,7 @@ async def acknowledge_alert(
         return {
             "message": "Alert acknowledged successfully",
             "acknowledged_by": user.username,
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     except HTTPException:
@@ -610,7 +608,7 @@ async def alert_stats(alert_manager: AlertManager = Depends(get_alert_manager_de
     """Get alert system statistics."""
     try:
         stats = alert_manager.get_alert_stats()
-        return {"stats": stats, "timestamp": datetime.now()}
+        return {"stats": stats, "timestamp": datetime.now(timezone.utc)}
 
     except Exception as e:
         logger.error(f"Failed to get alert stats: {e}")
@@ -699,7 +697,7 @@ async def start_monitoring(user=Depends(require_permissions(["monitoring.write"]
         return {
             "message": "Monitoring services started",
             "results": results,
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     except Exception as e:
@@ -744,7 +742,7 @@ async def stop_monitoring(user=Depends(require_permissions(["monitoring.write"])
         return {
             "message": "Monitoring services stopped",
             "results": results,
-            "timestamp": datetime.now(),
+            "timestamp": datetime.now(timezone.utc),
         }
 
     except Exception as e:

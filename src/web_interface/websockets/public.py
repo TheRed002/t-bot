@@ -7,9 +7,10 @@ for features like public market data and system status.
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
 from src.core.logging import get_logger
 
@@ -44,7 +45,7 @@ async def public_websocket(websocket: WebSocket, token: str | None = Query(None)
                     if is_authenticated
                     else "Connected to T-Bot public stream"
                 ),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "client_id": client_id,
                 "authenticated": is_authenticated,
             }
@@ -60,7 +61,7 @@ async def public_websocket(websocket: WebSocket, token: str | None = Query(None)
                 # Handle different message types
                 if message.get("type") == "ping":
                     await websocket.send_json(
-                        {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
+                        {"type": "pong", "timestamp": datetime.now(timezone.utc).isoformat()}
                     )
                 elif message.get("type") == "subscribe":
                     # Send confirmation
@@ -68,7 +69,7 @@ async def public_websocket(websocket: WebSocket, token: str | None = Query(None)
                         {
                             "type": "subscribed",
                             "channels": message.get("channels", []),
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                         }
                     )
                 else:
@@ -77,14 +78,14 @@ async def public_websocket(websocket: WebSocket, token: str | None = Query(None)
                         {
                             "type": "echo",
                             "data": message,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                         }
                     )
 
             except asyncio.TimeoutError:
                 # Send heartbeat if no message received
                 await websocket.send_json(
-                    {"type": "heartbeat", "timestamp": datetime.utcnow().isoformat()}
+                    {"type": "heartbeat", "timestamp": datetime.now(timezone.utc).isoformat()}
                 )
 
     except WebSocketDisconnect:
@@ -92,6 +93,13 @@ async def public_websocket(websocket: WebSocket, token: str | None = Query(None)
     except Exception as e:
         logger.error(f"Error in WebSocket handler: {e}")
         try:
-            await websocket.close(code=1000)
-        except:
-            pass  # WebSocket might already be closed
+            # Only attempt to close if websocket is still connected
+            if websocket.client_state != WebSocketState.DISCONNECTED:
+                await websocket.close(code=1000)
+        except (WebSocketDisconnect, ConnectionError, RuntimeError) as ws_error:
+            # Expected WebSocket close errors - safe to ignore
+            logger.debug(f"WebSocket already closed during cleanup: {ws_error}")
+        except Exception as unexpected_error:
+            # Unexpected errors should be logged for debugging
+            logger.warning(f"Unexpected error during WebSocket cleanup: {unexpected_error}")
+            # Don't re-raise - this is cleanup code

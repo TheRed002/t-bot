@@ -6,7 +6,7 @@ providing concrete implementations that interact with the core system.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -18,8 +18,10 @@ except ImportError:
 
     class BaseComponent:
         """Minimal BaseComponent fallback."""
+
         def __init__(self):
             self.logger = logging.getLogger(self.__class__.__module__)
+
 
 try:
     from src.core.types import (
@@ -33,6 +35,7 @@ try:
 except ImportError as e:
     # Log error and provide minimal type definitions
     import logging
+
     logging.error(f"Failed to import core types: {e}")
     # Define minimal types for fallback
     from dataclasses import dataclass
@@ -194,8 +197,10 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
         """Create a new trading bot."""
         if not self.bot_orchestrator:
             self.logger.error("Bot orchestrator not available")
-            raise ServiceError("Bot orchestrator service is not available. Please check system configuration.")
-        
+            raise ServiceError(
+                "Bot orchestrator service is not available. Please check system configuration."
+            )
+
         try:
             # Use actual bot orchestrator
             bot_id = await self.bot_orchestrator.create_bot(config)
@@ -208,8 +213,10 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
         """Start a bot."""
         if not self.bot_orchestrator:
             self.logger.error("Bot orchestrator not available")
-            raise ServiceError("Bot orchestrator service is not available. Please check system configuration.")
-        
+            raise ServiceError(
+                "Bot orchestrator service is not available. Please check system configuration."
+            )
+
         try:
             # Use actual bot orchestrator
             success = await self.bot_orchestrator.start_bot(bot_id)
@@ -222,8 +229,10 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
         """Stop a bot."""
         if not self.bot_orchestrator:
             self.logger.error("Bot orchestrator not available")
-            raise ServiceError("Bot orchestrator service is not available. Please check system configuration.")
-        
+            raise ServiceError(
+                "Bot orchestrator service is not available. Please check system configuration."
+            )
+
         try:
             # Use actual bot orchestrator
             success = await self.bot_orchestrator.stop_bot(bot_id)
@@ -236,8 +245,10 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
         """Get bot status."""
         if not self.bot_orchestrator:
             self.logger.error("Bot orchestrator not available")
-            raise ServiceError("Bot orchestrator service is not available. Please check system configuration.")
-        
+            raise ServiceError(
+                "Bot orchestrator service is not available. Please check system configuration."
+            )
+
         try:
             # Use actual bot orchestrator's public method
             if hasattr(self.bot_orchestrator, "get_bot_status"):
@@ -254,8 +265,10 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
         """List all bots."""
         if not self.bot_orchestrator:
             self.logger.error("Bot orchestrator not available")
-            raise ServiceError("Bot orchestrator service is not available. Please check system configuration.")
-        
+            raise ServiceError(
+                "Bot orchestrator service is not available. Please check system configuration."
+            )
+
         try:
             # Use actual bot orchestrator
             bot_list = await self.bot_orchestrator.get_bot_list()
@@ -268,13 +281,21 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
                     # Convert to list format
                     bot_list = []
                     for bot_id, bot_data in all_status.get("bots", {}).items():
-                        bot_list.append({
-                            "bot_id": bot_id,
-                            "bot_name": bot_data.get("state", {}).get("configuration", {}).get("bot_name", bot_id),
-                            "status": bot_data.get("state", {}).get("status", "unknown"),
-                            "allocated_capital": str(bot_data.get("state", {}).get("configuration", {}).get("allocated_capital", 0)),
-                            "metrics": bot_data.get("metrics", {})
-                        })
+                        bot_list.append(
+                            {
+                                "bot_id": bot_id,
+                                "bot_name": bot_data.get("state", {})
+                                .get("configuration", {})
+                                .get("bot_name", bot_id),
+                                "status": bot_data.get("state", {}).get("status", "unknown"),
+                                "allocated_capital": str(
+                                    bot_data.get("state", {})
+                                    .get("configuration", {})
+                                    .get("allocated_capital", 0)
+                                ),
+                                "metrics": bot_data.get("metrics", {}),
+                            }
+                        )
                     return bot_list
                 else:
                     raise ServiceError("Bot orchestrator does not support listing bots")
@@ -289,8 +310,10 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
         """Get status of all bots."""
         if not self.bot_orchestrator:
             self.logger.error("Bot orchestrator not available")
-            raise ServiceError("Bot orchestrator service is not available. Please check system configuration.")
-        
+            raise ServiceError(
+                "Bot orchestrator service is not available. Please check system configuration."
+            )
+
         try:
             # Use actual bot orchestrator
             if hasattr(self.bot_orchestrator, "get_all_bots_status"):
@@ -306,11 +329,11 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
                             "status": bot.get("status", "unknown"),
                             "configuration": {
                                 "bot_name": bot.get("bot_name"),
-                                "allocated_capital": bot.get("allocated_capital")
-                            }
+                                "allocated_capital": bot.get("allocated_capital"),
+                            },
                         },
                         "metrics": bot.get("metrics", {}),
-                        "uptime": None
+                        "uptime": None,
                     }
                 return {"bots": bots_data}
         except Exception as e:
@@ -321,8 +344,10 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
         """Delete a bot."""
         if not self.bot_orchestrator:
             self.logger.error("Bot orchestrator not available")
-            raise ServiceError("Bot orchestrator service is not available. Please check system configuration.")
-        
+            raise ServiceError(
+                "Bot orchestrator service is not available. Please check system configuration."
+            )
+
         try:
             # Use actual bot orchestrator
             if hasattr(self.bot_orchestrator, "delete_bot"):
@@ -331,7 +356,9 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
                 # Fallback: stop and remove bot
                 if force or await self.stop_bot(bot_id):
                     # TODO: Implement actual removal once bot_orchestrator supports it
-                    self.logger.warning(f"Bot deletion not fully implemented - bot {bot_id} stopped but not removed")
+                    self.logger.warning(
+                        f"Bot deletion not fully implemented - bot {bot_id} stopped but not removed"
+                    )
                     return True
                 return False
         except Exception as e:
@@ -343,11 +370,8 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
         try:
             health_status = {
                 "status": "healthy",
-                "timestamp": datetime.utcnow().isoformat(),
-                "checks": {
-                    "orchestrator": self.bot_orchestrator is not None,
-                    "responsive": True
-                }
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "checks": {"orchestrator": self.bot_orchestrator is not None, "responsive": True},
             }
 
             if self.bot_orchestrator:
@@ -365,7 +389,7 @@ class BotManagementServiceImpl(BotManagementService, BaseComponent):
             return {
                 "status": "unhealthy",
                 "error": str(e),
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
     @property
@@ -400,7 +424,7 @@ class MarketDataServiceImpl(MarketDataService, BaseComponent):
                     symbol=symbol,
                     price=Decimal(str(ticker_data.get("price", 0))),
                     volume=Decimal(str(ticker_data.get("volume", 0))),
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     bid=Decimal(str(ticker_data.get("bid", 0))),
                     ask=Decimal(str(ticker_data.get("ask", 0))),
                 )
@@ -410,7 +434,7 @@ class MarketDataServiceImpl(MarketDataService, BaseComponent):
                     symbol=symbol,
                     price=Decimal("45000.00"),
                     volume=Decimal("1234567.89"),
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     bid=Decimal("44999.50"),
                     ask=Decimal("45000.50"),
                 )

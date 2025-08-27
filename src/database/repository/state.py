@@ -1,8 +1,8 @@
 """State management repositories implementation."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.state import (
     StateBackup,
@@ -11,15 +11,21 @@ from src.database.models.state import (
     StateMetadata,
     StateSnapshot,
 )
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 
-class StateSnapshotRepository(BaseRepository[StateSnapshot]):
+class StateSnapshotRepository(DatabaseRepository[StateSnapshot, str]):
     """Repository for StateSnapshot entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize state snapshot repository."""
-        super().__init__(session, StateSnapshot)
+        super().__init__(
+            session=session,
+            model=StateSnapshot,
+            entity_type=StateSnapshot,
+            key_type=str,
+            name="StateSnapshotRepository",
+        )
 
     async def get_by_bot(self, bot_id: str) -> list[StateSnapshot]:
         """Get state snapshots by bot."""
@@ -58,12 +64,18 @@ class StateSnapshotRepository(BaseRepository[StateSnapshot]):
         return count
 
 
-class StateCheckpointRepository(BaseRepository[StateCheckpoint]):
+class StateCheckpointRepository(DatabaseRepository[StateCheckpoint, str]):
     """Repository for StateCheckpoint entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize state checkpoint repository."""
-        super().__init__(session, StateCheckpoint)
+        super().__init__(
+            session=session,
+            model=StateCheckpoint,
+            entity_type=StateCheckpoint,
+            key_type=str,
+            name="StateCheckpointRepository",
+        )
 
     async def get_by_bot(self, bot_id: str) -> list[StateCheckpoint]:
         """Get checkpoints by bot."""
@@ -87,12 +99,18 @@ class StateCheckpointRepository(BaseRepository[StateCheckpoint]):
         )
 
 
-class StateHistoryRepository(BaseRepository[StateHistory]):
+class StateHistoryRepository(DatabaseRepository[StateHistory, str]):
     """Repository for StateHistory entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize state history repository."""
-        super().__init__(session, StateHistory)
+        super().__init__(
+            session=session,
+            model=StateHistory,
+            entity_type=StateHistory,
+            key_type=str,
+            name="StateHistoryRepository",
+        )
 
     async def get_by_entity(self, entity_type: str, entity_id: str) -> list[StateHistory]:
         """Get history by entity."""
@@ -111,7 +129,7 @@ class StateHistoryRepository(BaseRepository[StateHistory]):
         self, entity_type: str, entity_id: str, hours: int = 24
     ) -> list[StateHistory]:
         """Get recent changes for entity."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         return await self.get_all(
             filters={
                 "entity_type": entity_type,
@@ -135,12 +153,18 @@ class StateHistoryRepository(BaseRepository[StateHistory]):
         )
 
 
-class StateMetadataRepository(BaseRepository[StateMetadata]):
+class StateMetadataRepository(DatabaseRepository[StateMetadata, str]):
     """Repository for StateMetadata entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize state metadata repository."""
-        super().__init__(session, StateMetadata)
+        super().__init__(
+            session=session,
+            model=StateMetadata,
+            entity_type=StateMetadata,
+            key_type=str,
+            name="StateMetadataRepository",
+        )
 
     async def get_by_entity(self, entity_type: str, entity_id: str) -> StateMetadata | None:
         """Get metadata by entity."""
@@ -165,12 +189,18 @@ class StateMetadataRepository(BaseRepository[StateMetadata]):
         return await self.get_all(filters=filters)
 
 
-class StateBackupRepository(BaseRepository[StateBackup]):
+class StateBackupRepository(DatabaseRepository[StateBackup, str]):
     """Repository for StateBackup entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize state backup repository."""
-        super().__init__(session, StateBackup)
+        super().__init__(
+            session=session,
+            model=StateBackup,
+            entity_type=StateBackup,
+            key_type=str,
+            name="StateBackupRepository",
+        )
 
     async def get_by_bot(self, bot_id: str) -> list[StateBackup]:
         """Get backups by bot."""
@@ -198,7 +228,7 @@ class StateBackupRepository(BaseRepository[StateBackup]):
 
     async def cleanup_old_backups(self, bot_id: str, keep_days: int = 30) -> int:
         """Clean up old backups."""
-        cutoff_date = datetime.utcnow() - timedelta(days=keep_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=keep_days)
         old_backups = await self.get_all(
             filters={"bot_id": bot_id, "backup_timestamp": {"lt": cutoff_date}}
         )

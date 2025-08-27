@@ -10,9 +10,10 @@ import json
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.exceptions import DataError, ServiceError, StateError
-from src.database.connection import get_async_session
+
+# Removed direct database connection import - using database service instead
 from src.database.repository.state import (
     StateBackupRepository,
     StateMetadataRepository,
@@ -82,7 +83,7 @@ class StatePersistence(BaseComponent):
             self._running = True
             self._persistence_task = asyncio.create_task(self._persistence_loop())
 
-            await super().initialize()
+            super().initialize()
             self.logger.info("StatePersistence initialization completed")
 
         except Exception as e:
@@ -128,8 +129,12 @@ class StatePersistence(BaseComponent):
                 self.logger.warning("Database not available for load_state operation")
                 return None
 
-            # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            async with get_async_session() as session:
+            # PER-09 Fix: Use database service transaction instead of direct session
+            if self.database_service is None:
+                self.logger.warning("Database service not available, cannot load state")
+                return None
+
+            async with self.database_service.transaction() as session:
                 # Create temporary repository for this operation
                 snapshot_repo = StateSnapshotRepository(session)
 
@@ -178,7 +183,11 @@ class StatePersistence(BaseComponent):
                 return False
 
             # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            async with get_async_session() as session:
+            if self.database_service is None:
+                self.logger.warning("Database service not available, cannot save state")
+                return None
+
+            async with self.database_service.transaction() as session:
                 snapshot_repo = StateSnapshotRepository(session)
 
                 # Try to find existing snapshot
@@ -239,7 +248,11 @@ class StatePersistence(BaseComponent):
                 return False
 
             # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            async with get_async_session() as session:
+            if self.database_service is None:
+                self.logger.warning("Database service not available, cannot save state")
+                return None
+
+            async with self.database_service.transaction() as session:
                 snapshot_repo = StateSnapshotRepository(session)
 
                 # Find snapshots to delete
@@ -310,7 +323,11 @@ class StatePersistence(BaseComponent):
                 return []
 
             # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            async with get_async_session() as session:
+            if self.database_service is None:
+                self.logger.warning("Database service not available, cannot save state")
+                return None
+
+            async with self.database_service.transaction() as session:
                 snapshot_repo = StateSnapshotRepository(session)
 
                 snapshots = await snapshot_repo.get_all(
@@ -370,7 +387,11 @@ class StatePersistence(BaseComponent):
                 return []
 
             # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            async with get_async_session() as session:
+            if self.database_service is None:
+                self.logger.warning("Database service not available, cannot save state")
+                return None
+
+            async with self.database_service.transaction() as session:
                 snapshot_repo = StateSnapshotRepository(session)
 
                 filters = {}
@@ -413,7 +434,11 @@ class StatePersistence(BaseComponent):
                 return False
 
             # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            async with get_async_session() as session:
+            if self.database_service is None:
+                self.logger.warning("Database service not available, cannot save state")
+                return None
+
+            async with self.database_service.transaction() as session:
                 snapshot_repo = StateSnapshotRepository(session)
 
                 # Convert the StateSnapshot to database model
@@ -457,7 +482,11 @@ class StatePersistence(BaseComponent):
                 return None
 
             # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            async with get_async_session() as session:
+            if self.database_service is None:
+                self.logger.warning("Database service not available, cannot save state")
+                return None
+
+            async with self.database_service.transaction() as session:
                 snapshot_repo = StateSnapshotRepository(session)
 
                 db_snapshot = await snapshot_repo.get_by(snapshot_id=snapshot_id)
@@ -490,7 +519,11 @@ class StatePersistence(BaseComponent):
             self.logger.info("Loading states from persistence layer...")
 
             # Use repository pattern for loading states
-            async with get_async_session() as session:
+            if self.database_service is None:
+                self.logger.warning("Database service not available, cannot save state")
+                return None
+
+            async with self.database_service.transaction() as session:
                 snapshot_repo = StateSnapshotRepository(session)
 
                 # Load a limited batch of recent snapshots

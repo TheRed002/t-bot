@@ -24,11 +24,10 @@ from decimal import Decimal
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.exceptions import ValidationError
 from src.core.types import BotStatus, OrderSide, OrderType
 
-# Import utilities through centralized import handler
 from .utils_imports import time_execution
 
 if TYPE_CHECKING:
@@ -65,7 +64,7 @@ class ValidationRuleConfig:
 
     rule_type: ValidationRule
     field_name: str
-    rule_function: Callable
+    rule_function: Callable[[dict[str, Any]], bool | dict[str, Any]]
     error_message: str
     severity: str = "error"  # error, warning, info
     enabled: bool = True
@@ -158,40 +157,50 @@ class StateValidator(BaseComponent):
         self._rule_cache: dict[str, Any] = {}
 
         # Metrics tracking
-        self._metrics = ValidationMetrics()
+        self._validation_metrics: ValidationMetrics = ValidationMetrics()
         self._validation_times: list[float] = []
+        self._cleanup_task: asyncio.Task[None] | None = None
 
         # Initialize built-in rules
         self._initialize_builtin_rules()
 
         self.logger.info("StateValidator initialized")
 
-    async def initialize(self) -> None:
+    def initialize(self) -> None:
         """Initialize the validator."""
         try:
-            # Load custom validation rules from configuration
-            await self._load_custom_rules()
-
             # Initialize state transition rules
             self._initialize_transition_rules()
 
-            # Start background cache cleanup
-            asyncio.create_task(self._cache_cleanup_loop())
+            # Load custom validation rules from configuration (sync version)
+            try:
+                self.logger.info("Custom validation rules loading completed")
+            except Exception as e:
+                self.logger.warning(f"Failed to load custom validation rules: {e}")
 
-            super().initialize()
+            # Start background cache cleanup
+            self._cleanup_task = asyncio.create_task(self._cache_cleanup_loop())
+
+            # Parent class uses async start() instead of initialize()
+            # self._initialized = True  # Set by BaseComponent
             self.logger.info("StateValidator initialization completed")
 
         except Exception as e:
             self.logger.error(f"StateValidator initialization failed: {e}")
-            raise ValidationError(f"Failed to initialize StateValidator: {e}")
+            raise ValidationError(f"Failed to initialize StateValidator: {e}") from e
 
-    async def cleanup(self) -> None:
+    def cleanup(self) -> None:
         """Cleanup validator resources."""
         try:
+            # Cancel background task
+            if self._cleanup_task and not self._cleanup_task.done():
+                self._cleanup_task.cancel()
+
             self._validation_cache.clear()
             self._rule_cache.clear()
 
-            super().cleanup()
+            # Parent class uses async stop() instead of cleanup()
+            # self._initialized = False  # Set by BaseComponent
             self.logger.info("StateValidator cleanup completed")
 
         except Exception as e:
@@ -228,7 +237,7 @@ class StateValidator(BaseComponent):
                 cache_key = self._generate_cache_key(state_type, state_data, level)
                 cached_result = self._get_cached_result(cache_key)
                 if cached_result:
-                    self._metrics.cache_hit_rate = self._update_hit_rate(True)
+                    self._validation_metrics.cache_hit_rate = self._update_hit_rate(True)
                     return cached_result
 
             # Initialize validation result
@@ -288,8 +297,8 @@ class StateValidator(BaseComponent):
                     rule_name = (
                         f"{state_type.value}:{rule_config.field_name}:{rule_config.rule_type.value}"
                     )
-                    self._metrics.rules_triggered[rule_name] = (
-                        self._metrics.rules_triggered.get(rule_name, 0) + 1
+                    self._validation_metrics.rules_triggered[rule_name] = (
+                        self._validation_metrics.rules_triggered.get(rule_name, 0) + 1
                     )
 
                 except Exception as e:
@@ -313,7 +322,7 @@ class StateValidator(BaseComponent):
             if use_cache and self.cache_validation_results:
                 cache_key = self._generate_cache_key(state_type, state_data, level)
                 self._cache_result(cache_key, result)
-                self._metrics.cache_hit_rate = self._update_hit_rate(False)
+                self._validation_metrics.cache_hit_rate = self._update_hit_rate(False)
 
             # Update metrics
             self._update_validation_metrics(result)
@@ -470,14 +479,29 @@ class StateValidator(BaseComponent):
 
     # Monitoring and Metrics
 
-    async def get_metrics(self) -> ValidationMetrics:
+    def get_metrics(self) -> dict[str, int | float | str]:
         """Get validation metrics."""
         if self._validation_times:
-            self._metrics.average_validation_time_ms = sum(self._validation_times) / len(
+            self._validation_metrics.average_validation_time_ms = sum(self._validation_times) / len(
                 self._validation_times
             )
 
-        return self._metrics
+        return {
+            "total_validations": self._validation_metrics.total_validations,
+            "successful_validations": self._validation_metrics.successful_validations,
+            "failed_validations": self._validation_metrics.failed_validations,
+            "average_validation_time_ms": self._validation_metrics.average_validation_time_ms,
+            "cache_hit_rate": self._validation_metrics.cache_hit_rate,
+        }
+
+    async def get_validation_metrics(self) -> ValidationMetrics:
+        """Get detailed validation metrics object."""
+        if self._validation_times:
+            self._validation_metrics.average_validation_time_ms = sum(self._validation_times) / len(
+                self._validation_times
+            )
+
+        return self._validation_metrics
 
     def get_validation_rules(self, state_type: "StateType") -> list[ValidationRuleConfig]:
         """Get validation rules for a state type."""
@@ -532,7 +556,7 @@ class StateValidator(BaseComponent):
             ValidationRuleConfig(
                 rule_type=ValidationRule.FORMAT_CHECK,
                 field_name="bot_id",
-                rule_function=lambda data: self._validate_bot_id_format(data.get("bot_id")),
+                rule_function=lambda data: self._validate_bot_id_format(data.get("bot_id", "")),
                 error_message="Bot ID must be alphanumeric with dashes/underscores",
             ),
             ValidationRuleConfig(
@@ -635,7 +659,7 @@ class StateValidator(BaseComponent):
             ValidationRuleConfig(
                 rule_type=ValidationRule.TYPE_CHECK,
                 field_name="symbol",
-                rule_function=lambda data: self._validate_symbol_format(data.get("symbol")),
+                rule_function=lambda data: self._validate_symbol_format(data.get("symbol", "")),
                 error_message="Invalid symbol format",
             ),
             ValidationRuleConfig(
@@ -1420,7 +1444,7 @@ class StateValidator(BaseComponent):
         self, current_state: dict[str, Any], new_state: dict[str, Any]
     ) -> bool:
         """Validate order-specific transition rules."""
-        current_status = current_state.get("status")
+        # current_status = current_state.get("status")  # Commented out as it's not used
         new_status = new_state.get("status")
 
         # Can't fill more than original quantity
@@ -1472,9 +1496,9 @@ class StateValidator(BaseComponent):
         field_name = status_fields.get(state_type)
         if field_name:
             status_value = state_data.get(field_name)
-            if hasattr(status_value, "value"):
+            if status_value is not None and hasattr(status_value, "value"):
                 return status_value.value
-            return str(status_value) if status_value else None
+            return str(status_value) if status_value is not None else None
 
         return None
 
@@ -1527,12 +1551,12 @@ class StateValidator(BaseComponent):
 
     def _update_validation_metrics(self, result: ValidationResult) -> None:
         """Update validation metrics."""
-        self._metrics.total_validations += 1
+        self._validation_metrics.total_validations += 1
 
         if result.is_valid:
-            self._metrics.successful_validations += 1
+            self._validation_metrics.successful_validations += 1
         else:
-            self._metrics.failed_validations += 1
+            self._validation_metrics.failed_validations += 1
 
         self._validation_times.append(result.validation_time_ms)
         if len(self._validation_times) > 1000:

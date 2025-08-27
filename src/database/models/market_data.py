@@ -66,8 +66,8 @@ class MarketDataRecord(Base, TimestampMixin):
         return Decimal("0")
 
     @property
-    def price_change_percent(self) -> float:
+    def price_change_percent(self) -> Decimal:
         """Calculate percentage price change."""
         if self.open_price and self.close_price and self.open_price > 0:
-            return float((self.close_price - self.open_price) / self.open_price * 100)
-        return 0.0
+            return (self.close_price - self.open_price) / self.open_price * Decimal("100")
+        return Decimal("0")

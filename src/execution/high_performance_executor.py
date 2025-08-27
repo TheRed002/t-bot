@@ -379,7 +379,7 @@ class HighPerformanceExecutor:
                     "id": str(order.id),
                     "symbol": order.symbol,
                     "side": order.side.value,
-                    "quantity": float(order.quantity),
+                    "quantity": str(order.quantity),
                     "price": float(order.price) if order.price else None,
                     "type": order.type.value,
                     "timestamp": time.time(),

@@ -10,10 +10,10 @@ import asyncio
 import builtins
 from abc import abstractmethod
 from collections.abc import Callable
-from datetime import datetime
+from contextlib import AbstractAsyncContextManager
+from datetime import datetime, timezone
 from typing import (
     Any,
-    AsyncContextManager,
     Generic,
     TypeVar,
 )
@@ -161,7 +161,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             repository=self._name,
         )
 
-    async def get_connection(self) -> AsyncContextManager[Any]:
+    async def get_connection(self) -> AbstractAsyncContextManager[Any]:
         """
         Get database connection from pool.
 
@@ -177,7 +177,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         try:
             return self._connection_pool.get_connection(timeout=self._connection_timeout)
         except Exception as e:
-            raise DatabaseConnectionError(f"Failed to get database connection: {e}")
+            raise DatabaseConnectionError(f"Failed to get database connection: {e}") from e
 
     def set_transaction_manager(self, transaction_manager: Any) -> None:
         """
@@ -207,7 +207,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             RepositoryError: If creation fails
             DataValidationError: If entity data is invalid
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             self._logger.debug(
@@ -237,7 +237,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         except DataValidationError:
             raise
         except Exception as e:
-            raise RepositoryError(f"Failed to create entity in {self._name}: {e}")
+            raise RepositoryError(f"Failed to create entity in {self._name}: {e}") from e
         finally:
             self._record_query_metrics("create", start_time)
 
@@ -254,7 +254,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         Raises:
             RepositoryError: If query fails
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         cache_key = f"get_by_id_{entity_id}"
 
         try:
@@ -284,7 +284,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             return result
 
         except Exception as e:
-            raise RepositoryError(f"Failed to get entity by ID in {self._name}: {e}")
+            raise RepositoryError(f"Failed to get entity by ID in {self._name}: {e}") from e
         finally:
             self._record_query_metrics("get_by_id", start_time)
 
@@ -303,7 +303,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             EntityNotFoundError: If entity doesn't exist
             DataValidationError: If entity data is invalid
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             self._logger.debug(
@@ -339,7 +339,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         except (EntityNotFoundError, DataValidationError):
             raise
         except Exception as e:
-            raise RepositoryError(f"Failed to update entity in {self._name}: {e}")
+            raise RepositoryError(f"Failed to update entity in {self._name}: {e}") from e
         finally:
             self._record_query_metrics("update", start_time)
 
@@ -356,7 +356,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         Raises:
             RepositoryError: If deletion fails
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             self._logger.debug(
@@ -389,7 +389,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             return result
 
         except Exception as e:
-            raise RepositoryError(f"Failed to delete entity in {self._name}: {e}")
+            raise RepositoryError(f"Failed to delete entity in {self._name}: {e}") from e
         finally:
             self._record_query_metrics("delete", start_time)
 
@@ -417,7 +417,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         Raises:
             RepositoryError: If query fails
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         # Create cache key from parameters
         cache_key = self._create_list_cache_key(limit, offset, filters, order_by, order_desc)
@@ -458,7 +458,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             return result
 
         except Exception as e:
-            raise RepositoryError(f"Failed to list entities in {self._name}: {e}")
+            raise RepositoryError(f"Failed to list entities in {self._name}: {e}") from e
         finally:
             self._record_query_metrics("list", start_time)
 
@@ -475,7 +475,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         Raises:
             RepositoryError: If query fails
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         cache_key = f"count_{hash(str(filters))}"
 
         try:
@@ -503,7 +503,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             return result
 
         except Exception as e:
-            raise RepositoryError(f"Failed to count entities in {self._name}: {e}")
+            raise RepositoryError(f"Failed to count entities in {self._name}: {e}") from e
         finally:
             self._record_query_metrics("count", start_time)
 
@@ -524,7 +524,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         if not entities:
             return []
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             self._logger.debug(
@@ -555,7 +555,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             return result
 
         except Exception as e:
-            raise RepositoryError(f"Failed to bulk create entities in {self._name}: {e}")
+            raise RepositoryError(f"Failed to bulk create entities in {self._name}: {e}") from e
         finally:
             self._record_query_metrics("bulk_create", start_time)
 
@@ -575,7 +575,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         if not entities:
             return []
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             self._logger.debug(
@@ -606,7 +606,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             return result
 
         except Exception as e:
-            raise RepositoryError(f"Failed to bulk update entities in {self._name}: {e}")
+            raise RepositoryError(f"Failed to bulk update entities in {self._name}: {e}") from e
         finally:
             self._record_query_metrics("bulk_update", start_time)
 
@@ -641,7 +641,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
                 repository=self._name,
                 error=str(e),
             )
-            raise RepositoryError(f"Transaction failed in {self._name}: {e}")
+            raise RepositoryError(f"Transaction failed in {self._name}: {e}") from e
 
     # Cache Management
     def configure_cache(
@@ -679,7 +679,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             return None
 
         # Check expiration
-        age = (datetime.utcnow() - timestamp).total_seconds()
+        age = (datetime.now(timezone.utc) - timestamp).total_seconds()
         if age > self._cache_ttl:
             self._invalidate_cache(key)
             return None
@@ -692,7 +692,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             return
 
         self._cache_store[key] = value
-        self._cache_timestamps[key] = datetime.utcnow()
+        self._cache_timestamps[key] = datetime.now(timezone.utc)
 
     def _invalidate_cache(self, key: str) -> None:
         """Remove specific key from cache."""
@@ -748,7 +748,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
         self, operation_name: str, operation_func: Callable, *args, **kwargs
     ) -> Any:
         """Execute repository operation with monitoring."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Execute with timeout
@@ -756,7 +756,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
                 operation_func(*args, **kwargs), timeout=self._query_timeout
             )
 
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
             # Track slow queries
             if execution_time > self._slow_query_threshold:
@@ -785,7 +785,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
 
     def _record_query_metrics(self, operation: str, start_time: datetime) -> None:
         """Record query execution metrics."""
-        execution_time = (datetime.utcnow() - start_time).total_seconds()
+        execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
         self._query_metrics["total_queries"] += 1
 

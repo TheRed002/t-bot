@@ -100,7 +100,7 @@ class EnhancedBaseWebSocketManager(ABC):
         self._reconnect_task: asyncio.Task | None = None
 
         # Error handling
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = ErrorHandler(config)
 
         # Logger
         self._logger = get_logger(f"{exchange_name}.websocket.base")

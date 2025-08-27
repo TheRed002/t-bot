@@ -27,10 +27,19 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 from src.error_handling.recovery_scenarios import OrderRejectionRecovery
-from src.utils import FEE_STRUCTURES, PRECISION_LEVELS, to_decimal, normalize_price, round_to_precision_decimal
+from src.utils import (
+    FEE_STRUCTURES,
+    PRECISION_LEVELS,
+    normalize_price,
+    round_to_precision_decimal,
+    to_decimal,
+)
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.validators import ValidationFramework
+
+# Logger setup
+from src.core.logging import get_logger
 
 
 class BinanceOrderManager:
@@ -60,6 +69,9 @@ class BinanceOrderManager:
         self.config = config
         self.client = client
         self.exchange_name = exchange_name
+        
+        # Initialize logger
+        self.logger = get_logger(self.__class__.__module__)
 
         # Order tracking
         self.pending_orders: dict[str, dict] = {}
@@ -67,7 +79,7 @@ class BinanceOrderManager:
         self.cancelled_orders: dict[str, dict] = {}
 
         # Error handling
-        self.error_handler = ErrorHandler(config.error_handling)
+        self.error_handler = ErrorHandler(config)
 
         # Order monitoring
         self.order_monitor_task: asyncio.Task | None = None
@@ -466,8 +478,10 @@ class BinanceOrderManager:
         if order.order_type != OrderType.MARKET:
             raise ValidationError("Order type must be MARKET for market orders")
 
-        if not ValidationFramework.validate_quantity(order.quantity):
-            raise ValidationError("Market order must have valid quantity")
+        try:
+            ValidationFramework.validate_quantity(order.quantity)
+        except (ValueError, ValidationError) as e:
+            raise ValidationError(f"Market order must have valid quantity: {e}")
 
         if order.price:
             raise ValidationError("Market orders should not have a price")
@@ -477,36 +491,50 @@ class BinanceOrderManager:
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("Order type must be LIMIT for limit orders")
 
-        if not ValidationFramework.validate_quantity(order.quantity):
-            raise ValidationError("Limit order must have valid quantity")
+        try:
+            ValidationFramework.validate_quantity(order.quantity)
+        except (ValueError, ValidationError) as e:
+            raise ValidationError(f"Limit order must have valid quantity: {e}")
 
-        if not ValidationFramework.validate_price(order.price):
-            raise ValidationError("Limit order must have valid price")
+        try:
+            ValidationFramework.validate_price(order.price)
+        except (ValueError, ValidationError) as e:
+            raise ValidationError(f"Limit order must have valid price: {e}")
 
     def _validate_stop_loss_order(self, order: OrderRequest) -> None:
         """Validate stop-loss order parameters."""
         if order.order_type != OrderType.STOP_LOSS:
             raise ValidationError("Order type must be STOP_LOSS for stop-loss orders")
 
-        if not ValidationFramework.validate_quantity(order.quantity):
-            raise ValidationError("Stop-loss order must have valid quantity")
+        try:
+            ValidationFramework.validate_quantity(order.quantity)
+        except (ValueError, ValidationError) as e:
+            raise ValidationError(f"Stop-loss order must have valid quantity: {e}")
 
-        if not ValidationFramework.validate_price(order.stop_price):
-            raise ValidationError("Stop-loss order must have valid stop price")
+        try:
+            ValidationFramework.validate_price(order.stop_price)
+        except (ValueError, ValidationError) as e:
+            raise ValidationError(f"Stop-loss order must have valid stop price: {e}")
 
     def _validate_oco_order(self, order: OrderRequest) -> None:
         """Validate OCO order parameters."""
         if order.order_type != OrderType.LIMIT:
             raise ValidationError("OCO orders must be LIMIT type")
 
-        if not ValidationFramework.validate_quantity(order.quantity):
-            raise ValidationError("OCO order must have valid quantity")
+        try:
+            ValidationFramework.validate_quantity(order.quantity)
+        except (ValueError, ValidationError) as e:
+            raise ValidationError(f"OCO order must have valid quantity: {e}")
 
-        if not ValidationFramework.validate_price(order.price):
-            raise ValidationError("OCO order must have valid limit price")
+        try:
+            ValidationFramework.validate_price(order.price)
+        except (ValueError, ValidationError) as e:
+            raise ValidationError(f"OCO order must have valid limit price: {e}")
 
-        if not ValidationFramework.validate_price(order.stop_price):
-            raise ValidationError("OCO order must have valid stop price")
+        try:
+            ValidationFramework.validate_price(order.stop_price)
+        except (ValueError, ValidationError) as e:
+            raise ValidationError(f"OCO order must have valid stop price: {e}")
 
     # Conversion methods
 

@@ -8,7 +8,7 @@ rebalancing triggers, and emergency inventory liquidation procedures.
 CRITICAL: This integrates with the market making strategy and risk management framework.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -64,7 +64,7 @@ class InventoryManager:
         # State tracking
         self.current_inventory = Decimal("0")
         self.inventory_skew = 0.0  # -1 to 1
-        self.last_rebalance = datetime.now()
+        self.last_rebalance = datetime.now(timezone.utc)
         self.rebalance_count = 0
         self.emergency_count = 0
 
@@ -140,7 +140,7 @@ class InventoryManager:
                 return True
 
             # Check time-based rebalancing
-            time_since_rebalance = datetime.now() - self.last_rebalance
+            time_since_rebalance = datetime.now(timezone.utc) - self.last_rebalance
             if time_since_rebalance > timedelta(hours=self.rebalance_frequency_hours):
                 self.logger.info(
                     "Time-based rebalancing triggered",
@@ -193,7 +193,7 @@ class InventoryManager:
                     order_type=OrderType.MARKET,
                     quantity=abs(required_change),
                     price=None,  # Market order
-                    client_order_id=f"rebalance_{datetime.now().timestamp()}",
+                    client_order_id=f"rebalance_{datetime.now(timezone.utc).timestamp()}",
                 )
                 orders.append(order)
 
@@ -212,7 +212,7 @@ class InventoryManager:
                     order_type=OrderType.MARKET,
                     quantity=abs(required_change),
                     price=None,  # Market order
-                    client_order_id=f"rebalance_{datetime.now().timestamp()}",
+                    client_order_id=f"rebalance_{datetime.now(timezone.utc).timestamp()}",
                 )
                 orders.append(order)
 
@@ -283,7 +283,7 @@ class InventoryManager:
                     order_type=OrderType.MARKET,
                     quantity=self.current_inventory,
                     price=None,  # Market order
-                    client_order_id=f"emergency_{datetime.now().timestamp()}",
+                    client_order_id=f"emergency_{datetime.now(timezone.utc).timestamp()}",
                 )
                 orders.append(order)
 
@@ -301,7 +301,7 @@ class InventoryManager:
                     order_type=OrderType.MARKET,
                     quantity=abs(self.current_inventory),
                     price=None,  # Market order
-                    client_order_id=f"emergency_{datetime.now().timestamp()}",
+                    client_order_id=f"emergency_{datetime.now(timezone.utc).timestamp()}",
                 )
                 orders.append(order)
 
@@ -400,7 +400,7 @@ class InventoryManager:
         try:
             self.total_rebalance_cost += cost
             self.rebalance_count += 1
-            self.last_rebalance = datetime.now()
+            self.last_rebalance = datetime.now(timezone.utc)
 
             self.logger.info(
                 "Rebalancing recorded",

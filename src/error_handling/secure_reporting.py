@@ -187,6 +187,16 @@ class SecureErrorReporter:
         """Start background maintenance tasks."""
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._background_maintenance())
+            # Add done callback to handle any exceptions
+            self._cleanup_task.add_done_callback(self._background_task_done_callback)
+
+    def _background_task_done_callback(self, task: asyncio.Task) -> None:
+        """Handle background task completion."""
+        if task.exception():
+            self.logger.error(f"Background maintenance task failed: {task.exception()}")
+        # Reset task reference so it can be restarted if needed
+        if self._cleanup_task is task:
+            self._cleanup_task = None
 
     async def _background_maintenance(self) -> None:
         """Background maintenance tasks."""
@@ -589,19 +599,18 @@ class SecureErrorReporter:
         self, report: SecureErrorReport, security_context: SecurityContext
     ) -> None:
         """Send to audit trail."""
-        audit_entry = {
-            "timestamp": report.timestamp.isoformat(),
-            "error_id": report.error_id,
-            "component": report.component,
-            "operation": report.operation,
-            "user_id": security_context.user_id,
-            "user_role": security_context.user_role.value,
-            "client_ip": security_context.client_ip,
-            "information_level": report.information_level.value,
-            "action": "error_reported",
-        }
-
         # TODO: Store in secure audit system
+        # audit_entry = {
+        #     "timestamp": report.timestamp.isoformat(),
+        #     "error_id": report.error_id,
+        #     "component": report.component,
+        #     "operation": report.operation,
+        #     "user_id": security_context.user_id,
+        #     "user_role": security_context.user_role.value,
+        #     "client_ip": security_context.client_ip,
+        #     "information_level": report.information_level.value,
+        #     "action": "error_reported",
+        # }
         self.logger.info(f"Audit trail entry created for error {report.error_id}")
 
     def _check_report_access(

@@ -15,7 +15,7 @@ Refactoring improvements:
 CRITICAL: This strategy follows the perfect architecture from Day 12.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -289,7 +289,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             self._strategy_state["regime_history"][symbol].append(
                 {
                     "regime": regime,
-                    "timestamp": datetime.now(),
+                    "timestamp": datetime.now(timezone.utc),
                 }
             )
 
@@ -572,7 +572,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             # Update momentum scores
             self._strategy_state["momentum_scores"][symbol] = {
                 "score": indicators.get("combined_momentum_score", 0.0),
-                "timestamp": datetime.now(),
+                "timestamp": datetime.now(timezone.utc),
                 "components": {
                     "ma_momentum": indicators.get("ma_momentum", 0.0),
                     "price_momentum": indicators.get("price_momentum", 0.0),
@@ -584,7 +584,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             if signals:
                 self._strategy_state["last_signals"][symbol] = {
                     "signals": [s.model_dump() for s in signals],
-                    "timestamp": datetime.now(),
+                    "timestamp": datetime.now(timezone.utc),
                     "count": len(signals),
                 }
 
@@ -691,7 +691,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 return False
 
             # Validate signal freshness (within last 5 minutes)
-            signal_age = (datetime.now() - signal.timestamp).total_seconds()
+            signal_age = (datetime.now(timezone.utc) - signal.timestamp).total_seconds()
             if signal_age > 300:  # 5 minutes
                 self.logger.warning(
                     "Signal too old for validation",

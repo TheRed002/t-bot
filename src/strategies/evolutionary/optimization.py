@@ -26,7 +26,7 @@ import asyncio
 import math
 import random
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
@@ -498,7 +498,7 @@ class ParetoFrontierManager:
             "hypervolume": self._calculate_hypervolume(current),
             "spread": self._calculate_spread(current),
             "convergence": self._calculate_convergence(current, previous),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         self.convergence_metrics.append(metrics)
@@ -881,7 +881,7 @@ class NSGAIIOptimizer:
                 objectives=objectives,
                 constraint_violations=constraint_violations,
                 is_feasible=is_feasible,
-                metadata={"evaluation_timestamp": datetime.now()},
+                metadata={"evaluation_timestamp": datetime.now(timezone.utc)},
             )
 
         except Exception as e:
@@ -1153,7 +1153,7 @@ class NSGAIIOptimizer:
             "feasible_solutions": frontier_summary["feasible_solutions"],
             "average_crowding_distance": frontier_summary["average_crowding_distance"],
             "objective_stats": frontier_summary["objectives"],
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         self.evolution_history.append(stats)
@@ -1208,7 +1208,7 @@ class MultiObjectiveOptimizer:
         # Validate configuration
         for objective in config.objectives:
             objective.validate_direction()
-        
+
         self.logger = get_logger(__name__)
 
         self.logger.info(

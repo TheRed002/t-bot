@@ -19,10 +19,9 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.exceptions import StateError
 
-# Import utilities through centralized import handler
 from .utils_imports import time_execution
 
 
@@ -36,17 +35,20 @@ class HealthStatus(Enum):
     UNKNOWN = "unknown"
 
 
+# Use AlertSeverity from monitoring module to ensure compatibility
+# This maintains state-specific naming while using monitoring's actual implementation
 class AlertSeverity(Enum):
     """Alert severity levels."""
 
-    INFO = "info"
-    WARNING = "warning"
-    ERROR = "error"
-    CRITICAL = "critical"
+    # Map to monitoring module's severity levels
+    INFO = "low"  # Maps to monitoring LOW
+    WARNING = "medium"  # Maps to monitoring MEDIUM
+    ERROR = "high"  # Maps to monitoring HIGH
+    CRITICAL = "critical"  # Maps to monitoring CRITICAL
 
 
 class MetricType(Enum):
-    """Metric type enumeration."""
+    """Metric type enumeration for state metrics."""
 
     COUNTER = "counter"
     GAUGE = "gauge"
@@ -218,6 +220,7 @@ class StateMonitoringService(BaseComponent):
         self._metrics_collection_task: asyncio.Task | None = None
         self._alert_processing_task: asyncio.Task | None = None
         self._cleanup_task: asyncio.Task | None = None
+        self._alert_tasks: list[asyncio.Task] = []  # Store alert checking tasks
         self._running = False
 
         # Initialize built-in health checks
@@ -246,7 +249,7 @@ class StateMonitoringService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"StateMonitoringService initialization failed: {e}")
-            raise StateError(f"Failed to initialize StateMonitoringService: {e}")
+            raise StateError(f"Failed to initialize StateMonitoringService: {e}") from e
 
     async def cleanup(self) -> None:
         """Cleanup monitoring service resources."""
@@ -414,7 +417,7 @@ class StateMonitoringService(BaseComponent):
             self._update_metric_aggregates(name, value)
 
             # Check for alerts
-            asyncio.create_task(self._check_metric_alerts(name, value))
+            self._alert_tasks.append(asyncio.create_task(self._check_metric_alerts(name, value)))
 
         except Exception as e:
             self.logger.error(f"Failed to record metric {name}: {e}")

@@ -185,7 +185,7 @@ class QualityMonitor(BaseComponent):
                 return 1.0, []
 
             # Calculate signal quality metrics
-            confidence_scores = [signal.confidence for signal in signals]
+            confidence_scores = [signal.strength for signal in signals]
             avg_confidence = statistics.mean(confidence_scores)
 
             # Check for signal distribution drift
@@ -322,8 +322,8 @@ class QualityMonitor(BaseComponent):
         if data.symbol not in self.price_distributions:
             self.price_distributions[data.symbol] = []
 
-        if data.price:
-            self.price_distributions[data.symbol].append(float(data.price))
+        if data.close:
+            self.price_distributions[data.symbol].append(float(data.close))
 
             # Maintain distribution size
             if len(self.price_distributions[data.symbol]) > self.distribution_window:
@@ -348,13 +348,13 @@ class QualityMonitor(BaseComponent):
 
         # Completeness score (0-1)
         completeness_score = 0.0
-        required_fields = ["symbol", "price", "volume", "timestamp"]
+        required_fields = ["symbol", "close", "volume", "timestamp"]
         present_fields = 0
 
         # Check each field
         if data.symbol:
             present_fields += 1
-        if data.price and data.price > 0:
+        if data.close and data.close > 0:
             present_fields += 1
         if data.volume and data.volume > 0:
             present_fields += 1
@@ -366,12 +366,16 @@ class QualityMonitor(BaseComponent):
 
         # Validity score (0-1)
         validity_score = 1.0
-        if data.price and data.price <= 0:
+        if data.close and data.close <= 0:
             validity_score -= 0.9  # Very strong penalty for negative/zero prices
         if data.volume and data.volume <= 0:
             validity_score -= 0.6  # Strong penalty for negative/zero volume
         if data.bid and data.ask and data.bid >= data.ask:
             validity_score -= 0.3  # Penalty for invalid bid/ask spread
+        # Check OHLC validity - all same values indicate bad data
+        if data.open and data.high and data.low and data.close:
+            if data.open == data.high == data.low == data.close:
+                validity_score -= 0.8  # Strong penalty for flat OHLC
         score_components.append(max(0.0, validity_score) * 0.3)  # 30% weight
 
         # Freshness score (0-1)
@@ -390,8 +394,8 @@ class QualityMonitor(BaseComponent):
             and len(self.price_distributions[data.symbol]) >= 10
         ):
             recent_prices = self.price_distributions[data.symbol][-10:]
-            if data.price:
-                current_price = float(data.price)
+            if data.close:
+                current_price = float(data.close)
                 mean_price = statistics.mean(recent_prices)
                 std_price = statistics.stdev(recent_prices) if len(recent_prices) > 1 else 0
 
@@ -439,10 +443,10 @@ class QualityMonitor(BaseComponent):
                     if drift_score > self.drift_threshold:
                         alerts.append(
                             DriftAlert(
-                                drift_type=DriftType.COVARIATE_DRIFT,
+                                drift_type=DriftType.FEATURE,
                                 feature="price",
                                 severity=(
-                                    QualityLevel.POOR if drift_score > 0.2 else QualityLevel.FAIR
+                                    QualityLevel.POOR if drift_score > 0.2 else QualityLevel.ACCEPTABLE
                                 ),
                                 description=f"Price distribution drift detected: {drift_score:.3f}",
                                 timestamp=datetime.now(timezone.utc),
@@ -480,10 +484,10 @@ class QualityMonitor(BaseComponent):
                     if drift_score > self.drift_threshold:
                         alerts.append(
                             DriftAlert(
-                                drift_type=DriftType.COVARIATE_DRIFT,
+                                drift_type=DriftType.FEATURE,
                                 feature="volume",
                                 severity=(
-                                    QualityLevel.POOR if drift_score > 0.2 else QualityLevel.FAIR
+                                    QualityLevel.POOR if drift_score > 0.2 else QualityLevel.ACCEPTABLE
                                 ),
                                 description=(
                                     f"Volume distribution drift detected: {drift_score:.3f}"
@@ -514,7 +518,7 @@ class QualityMonitor(BaseComponent):
             return alerts
 
         # Analyze signal confidence distribution
-        confidences = [signal.confidence for signal in signals]
+        confidences = [signal.strength for signal in signals]
 
         if len(confidences) >= 10:
             mean_confidence = statistics.mean(confidences)
@@ -524,7 +528,7 @@ class QualityMonitor(BaseComponent):
             if mean_confidence < 0.6:  # Low average confidence
                 alerts.append(
                     DriftAlert(
-                        drift_type=DriftType.CONCEPT_DRIFT,
+                        drift_type=DriftType.CONCEPT,
                         feature="signal_confidence",
                         severity=QualityLevel.POOR,
                         description=f"Low signal confidence detected: {mean_confidence:.3f}",
@@ -541,9 +545,9 @@ class QualityMonitor(BaseComponent):
             if std_confidence > 0.3:  # High variance
                 alerts.append(
                     DriftAlert(
-                        drift_type=DriftType.CONCEPT_DRIFT,
+                        drift_type=DriftType.CONCEPT,
                         feature="signal_stability",
-                        severity=QualityLevel.FAIR,
+                        severity=QualityLevel.ACCEPTABLE,
                         description=(
                             f"Unstable signal confidence detected: std={std_confidence:.3f}"
                         ),

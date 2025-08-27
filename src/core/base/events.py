@@ -12,7 +12,7 @@ import threading
 import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from re import Pattern
 from typing import (
@@ -100,7 +100,7 @@ class EventHandler:
                 return True  # Filtered out, but not an error
 
             self.call_count += 1
-            self.last_called = datetime.utcnow()
+            self.last_called = datetime.now(timezone.utc)
 
             if self.is_async:
                 await self.handler(event_context.data)
@@ -192,6 +192,9 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             "queue_size": 0,
             "last_event_time": None,
         }
+
+        # Background task management
+        self._background_tasks: set[asyncio.Task] = set()
 
         # Configuration
         self._enable_history = True
@@ -482,10 +485,14 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         """
         if self._enable_async_processing:
             # Queue for async processing
-            asyncio.create_task(self.emit_async(event, data, priority, source, tags))
+            task = asyncio.create_task(self.emit_async(event, data, priority, source, tags))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
         else:
             # Process synchronously
-            asyncio.create_task(self._emit_sync(event, data, priority, source, tags))
+            task = asyncio.create_task(self._emit_sync(event, data, priority, source, tags))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
     async def emit_async(
         self,
@@ -516,7 +523,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         tags: dict[str, Any] | None = None,
     ) -> None:
         """Internal synchronous emission implementation."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         # Create event context
         metadata = EventMetadata(
@@ -583,7 +590,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
                 event=event,
                 handlers_executed=success_count,
                 total_handlers=len(handlers),
-                processing_time_ms=(datetime.utcnow() - start_time).total_seconds() * 1000,
+                processing_time_ms=(datetime.now(timezone.utc) - start_time).total_seconds() * 1000,
             )
 
         except Exception as e:
@@ -598,7 +605,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             if self._enable_metrics:
                 self._event_metrics["failed_events"] += 1
 
-            raise EventError(f"Failed to emit event '{event}': {e}")
+            raise EventError(f"Failed to emit event '{event}': {e}") from e
 
     # Handler Management
     def _collect_handlers(self, event: str) -> list[EventHandler]:
@@ -652,7 +659,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
                     # Final failure
                     raise EventHandlerError(
                         f"Handler {handler.name} failed after {handler.max_retries} retries"
-                    )
+                    ) from e
 
         return False
 
@@ -690,10 +697,10 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         success_count: int,
     ) -> None:
         """Record event processing metrics."""
-        processing_time = (datetime.utcnow() - start_time).total_seconds()
+        processing_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
         self._event_metrics["total_events"] += 1
-        self._event_metrics["last_event_time"] = datetime.utcnow()
+        self._event_metrics["last_event_time"] = datetime.now(timezone.utc)
 
         if success_count > 0:
             self._event_metrics["successful_events"] += 1
@@ -924,6 +931,15 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
                 await self._processing_task
             except asyncio.CancelledError:
                 pass
+
+        # Cancel all background tasks
+        for task in list(self._background_tasks):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._background_tasks.clear()
 
         # Clear all handlers
         self.remove_all_listeners()

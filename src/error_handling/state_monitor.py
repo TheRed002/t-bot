@@ -12,15 +12,17 @@ for state persistence and will be used by all subsequent prompts.
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from src.core.config import Config
+from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
+from src.utils.decimal_utils import to_decimal
 
 # MANDATORY: Import from P-001 core framework
 # MANDATORY: Import from P-007A utils framework
 from src.utils.decorators import retry, time_execution
-from src.utils.decimal_utils import to_decimal
 
 
 @dataclass
@@ -41,12 +43,18 @@ class StateMonitor:
         self.config = config
         self.logger = get_logger(self.__class__.__module__)
         # Create default state monitoring config if not present
-        self.state_monitoring_config = getattr(config, "error_handling", {
-            "state_validation_frequency": 60,
-            "max_state_drift_tolerance": 0.01,
-            "state_history_retention_days": 7
-        })
-        self.validation_frequency = self.state_monitoring_config.get("state_validation_frequency", 60)
+        self.state_monitoring_config = getattr(
+            config,
+            "error_handling",
+            {
+                "state_validation_frequency": 60,
+                "max_state_drift_tolerance": 0.01,
+                "state_history_retention_days": 7,
+            },
+        )
+        self.validation_frequency = self.state_monitoring_config.get(
+            "state_validation_frequency", 60
+        )
         self.consistency_checks = [
             "portfolio_balance_sync",
             "position_quantity_sync",
@@ -62,6 +70,22 @@ class StateMonitor:
         self.last_validation_results: dict[str, StateValidationResult] = {}
         self.state_history: list[StateValidationResult] = []
         self.reconciliation_attempts: dict[str, int] = {}
+
+    def _safe_to_decimal(self, value: Any, field_name: str = "value") -> Decimal:
+        """Safely convert value to Decimal with validation."""
+        if value is None:
+            raise ValidationError(f"{field_name} cannot be None for decimal conversion")
+
+        try:
+            return to_decimal(value)
+        except (ValueError, TypeError, ValidationError) as e:
+            self.logger.error(
+                "Failed to convert value to Decimal",
+                field_name=field_name,
+                value=value,
+                error=str(e),
+            )
+            raise ValidationError(f"Invalid {field_name} for decimal conversion: {value}")
 
     @time_execution
     @retry(max_attempts=2)
@@ -176,9 +200,10 @@ class StateMonitor:
                 for row in result:
                     key = f"{row.exchange}:{row.currency}"
                     db_balances[key] = {
-                        "available": to_decimal(row.available),
-                        "locked": to_decimal(row.locked),
-                        "total": to_decimal(row.available) + to_decimal(row.locked),
+                        "available": self._safe_to_decimal(row.available, "balance.available"),
+                        "locked": self._safe_to_decimal(row.locked, "balance.locked"),
+                        "total": self._safe_to_decimal(row.available, "balance.available")
+                        + self._safe_to_decimal(row.locked, "balance.locked"),
                     }
 
             # Get balances from Redis cache
@@ -191,24 +216,38 @@ class StateMonitor:
                     if len(parts) >= 3:
                         cache_key = f"{parts[1]}:{parts[2]}"
                         cache_balances[cache_key] = {
-                            "available": Decimal(str(balance_data.get("available", 0))),
-                            "locked": Decimal(str(balance_data.get("locked", 0))),
-                            "total": Decimal(str(balance_data.get("total", 0))),
+                            "available": self._safe_to_decimal(
+                                balance_data.get("available", 0), "cache.available"
+                            ),
+                            "locked": self._safe_to_decimal(
+                                balance_data.get("locked", 0), "cache.locked"
+                            ),
+                            "total": self._safe_to_decimal(
+                                balance_data.get("total", 0), "cache.total"
+                            ),
                         }
 
             # Get balances from exchanges (if connected)
             exchange_balances = {}
             try:
-                for exchange_name in getattr(self.config, "exchange", {}).get("enabled_exchanges", []):
+                for exchange_name in getattr(self.config, "exchange", {}).get(
+                    "enabled_exchanges", []
+                ):
                     exchange = ExchangeFactory.create(exchange_name, self.config)
                     if hasattr(exchange, "get_account_balance"):
                         balance = await exchange.get_account_balance()
                         for currency, amounts in balance.items():
                             key = f"{exchange_name}:{currency}"
                             exchange_balances[key] = {
-                                "available": Decimal(str(amounts.get("free", 0))),
-                                "locked": Decimal(str(amounts.get("used", 0))),
-                                "total": Decimal(str(amounts.get("total", 0))),
+                                "available": self._safe_to_decimal(
+                                    amounts.get("free", 0), "exchange.available"
+                                ),
+                                "locked": self._safe_to_decimal(
+                                    amounts.get("used", 0), "exchange.locked"
+                                ),
+                                "total": self._safe_to_decimal(
+                                    amounts.get("total", 0), "exchange.total"
+                                ),
                             }
             except Exception as e:
                 self.logger.warning(f"Could not fetch exchange balances: {e}")
@@ -219,12 +258,16 @@ class StateMonitor:
             )
 
             for key in all_keys:
-                db_val = db_balances.get(key, {"total": Decimal("0")})
-                cache_val = cache_balances.get(key, {"total": Decimal("0")})
-                exchange_val = exchange_balances.get(key, {"total": Decimal("0")})
+                db_val = db_balances.get(key, {"total": self._safe_to_decimal("0", "default")})
+                cache_val = cache_balances.get(
+                    key, {"total": self._safe_to_decimal("0", "default")}
+                )
+                exchange_val = exchange_balances.get(
+                    key, {"total": self._safe_to_decimal("0", "default")}
+                )
 
                 # Check for discrepancies (with tolerance for rounding)
-                tolerance = Decimal("0.00000001")
+                tolerance = self._safe_to_decimal("0.00000001", "tolerance")
 
                 if db_val["total"] > 0 or cache_val["total"] > 0 or exchange_val["total"] > 0:
                     max_diff = max(
@@ -232,12 +275,12 @@ class StateMonitor:
                         (
                             abs(db_val["total"] - exchange_val["total"])
                             if exchange_val["total"] > 0
-                            else Decimal("0")
+                            else self._safe_to_decimal("0", "default")
                         ),
                         (
                             abs(cache_val["total"] - exchange_val["total"])
                             if exchange_val["total"] > 0
-                            else Decimal("0")
+                            else self._safe_to_decimal("0", "default")
                         ),
                     )
 
@@ -255,13 +298,13 @@ class StateMonitor:
                         discrepancies.append(discrepancy)
 
                         # Determine severity based on difference
-                        if max_diff > Decimal("1.0"):
+                        if max_diff > self._safe_to_decimal("1.0", "severity_threshold"):
                             severity = "critical"
                             is_consistent = False
-                        elif max_diff > Decimal("0.1"):
+                        elif max_diff > self._safe_to_decimal("0.1", "severity_threshold"):
                             severity = "high" if severity != "critical" else severity
                             is_consistent = False
-                        elif max_diff > Decimal("0.01"):
+                        elif max_diff > self._safe_to_decimal("0.01", "severity_threshold"):
                             severity = (
                                 "medium" if severity not in ["critical", "high"] else severity
                             )
@@ -312,8 +355,10 @@ class StateMonitor:
                 for row in result:
                     key = f"{row.exchange}:{row.symbol}:{row.side}"
                     db_positions[key] = {
-                        "quantity": Decimal(str(row.quantity)),
-                        "entry_price": Decimal(str(row.entry_price)),
+                        "quantity": self._safe_to_decimal(row.quantity, "position.quantity"),
+                        "entry_price": self._safe_to_decimal(
+                            row.entry_price, "position.entry_price"
+                        ),
                     }
 
             # Get positions from Redis cache
@@ -326,22 +371,32 @@ class StateMonitor:
                     if len(parts) >= 4:
                         cache_key = f"{parts[1]}:{parts[2]}:{parts[3]}"
                         cache_positions[cache_key] = {
-                            "quantity": Decimal(str(position_data.get("quantity", 0))),
-                            "entry_price": Decimal(str(position_data.get("entry_price", 0))),
+                            "quantity": self._safe_to_decimal(
+                                position_data.get("quantity", 0), "cache.position.quantity"
+                            ),
+                            "entry_price": self._safe_to_decimal(
+                                position_data.get("entry_price", 0), "cache.position.entry_price"
+                            ),
                         }
 
             # Get positions from exchanges (if connected)
             exchange_positions = {}
             try:
-                for exchange_name in getattr(self.config, "exchange", {}).get("enabled_exchanges", []):
+                for exchange_name in getattr(self.config, "exchange", {}).get(
+                    "enabled_exchanges", []
+                ):
                     exchange = ExchangeFactory.create(exchange_name, self.config)
                     if hasattr(exchange, "get_positions"):
                         positions = await exchange.get_positions()
                         for pos in positions:
                             key = f"{exchange_name}:{pos.symbol}:{pos.side}"
                             exchange_positions[key] = {
-                                "quantity": Decimal(str(pos.quantity)),
-                                "entry_price": Decimal(str(pos.entry_price)),
+                                "quantity": self._safe_to_decimal(
+                                    pos.quantity, "exchange.position.quantity"
+                                ),
+                                "entry_price": self._safe_to_decimal(
+                                    pos.entry_price, "exchange.position.entry_price"
+                                ),
                             }
             except Exception as e:
                 self.logger.warning(f"Could not fetch exchange positions: {e}")
@@ -352,8 +407,12 @@ class StateMonitor:
                 risk_state = await risk_manager.get_current_state()
                 for pos_key, pos_data in risk_state.get("positions", {}).items():
                     risk_positions[pos_key] = {
-                        "quantity": Decimal(str(pos_data.get("quantity", 0))),
-                        "entry_price": Decimal(str(pos_data.get("entry_price", 0))),
+                        "quantity": self._safe_to_decimal(
+                            pos_data.get("quantity", 0), "risk.position.quantity"
+                        ),
+                        "entry_price": self._safe_to_decimal(
+                            pos_data.get("entry_price", 0), "risk.position.entry_price"
+                        ),
                     }
             except Exception as e:
                 self.logger.warning(f"Could not fetch risk positions: {e}")
@@ -367,8 +426,10 @@ class StateMonitor:
             )
 
             for key in all_keys:
-                db_pos = db_positions.get(key, {"quantity": Decimal("0")})
-                cache_pos = cache_positions.get(key, {"quantity": Decimal("0")})
+                db_pos = db_positions.get(key, {"quantity": self._safe_to_decimal("0", "default")})
+                cache_pos = cache_positions.get(
+                    key, {"quantity": self._safe_to_decimal("0", "default")}
+                )
                 exchange_pos = exchange_positions.get(key, {"quantity": Decimal("0")})
                 risk_pos = risk_positions.get(key, {"quantity": Decimal("0")})
 
@@ -506,7 +567,9 @@ class StateMonitor:
                     position_value = Decimal(str(row.quantity)) * Decimal(
                         str(row.current_price or row.entry_price)
                     )
-                    max_position_size = Decimal(str(getattr(self.config, "risk", {}).get("max_position_size", 1000000)))
+                    max_position_size = Decimal(
+                        str(getattr(self.config, "risk", {}).get("max_position_size", 1000000))
+                    )
 
                     if position_value > max_position_size:
                         discrepancy = {
@@ -522,7 +585,9 @@ class StateMonitor:
 
             # Check portfolio exposure limits
             total_exposure = Decimal(str(risk_metrics.get("total_exposure", 0)))
-            max_exposure = Decimal(str(getattr(self.config, "risk", {}).get("max_portfolio_exposure", 100000)))
+            max_exposure = Decimal(
+                str(getattr(self.config, "risk", {}).get("max_portfolio_exposure", 100000))
+            )
 
             if total_exposure > max_exposure:
                 discrepancy = {
@@ -586,7 +651,9 @@ class StateMonitor:
 
             # Check daily loss limit
             daily_loss = Decimal(str(risk_metrics.get("daily_pnl", 0)))
-            max_daily_loss = Decimal(str(getattr(self.config, "risk", {}).get("max_daily_loss", 1000)))
+            max_daily_loss = Decimal(
+                str(getattr(self.config, "risk", {}).get("max_daily_loss", 1000))
+            )
 
             if daily_loss < 0 and abs(daily_loss) > max_daily_loss:
                 discrepancy = {
@@ -601,7 +668,9 @@ class StateMonitor:
 
             # Check correlation limits
             correlation_risk = Decimal(str(risk_metrics.get("correlation_risk", 0)))
-            max_correlation = Decimal(str(getattr(self.config, "risk", {}).get("max_correlation_risk", 0.80)))
+            max_correlation = Decimal(
+                str(getattr(self.config, "risk", {}).get("max_correlation_risk", 0.80))
+            )
 
             if correlation_risk > max_correlation:
                 discrepancy = {
@@ -730,6 +799,7 @@ class StateMonitor:
                             }
 
                             # Update database
+                            # Note: Using str() to preserve Decimal precision in database
                             async with db_manager.get_session() as session:
                                 await session.execute(
                                     """UPDATE balances
@@ -737,8 +807,8 @@ class StateMonitor:
                                            updated_at = NOW()
                                        WHERE exchange = :exchange AND currency = :currency""",
                                     {
-                                        "available": float(true_balance["available"]),
-                                        "locked": float(true_balance["locked"]),
+                                        "available": str(true_balance["available"]),
+                                        "locked": str(true_balance["locked"]),
                                         "exchange": exchange_name,
                                         "currency": currency,
                                     },
@@ -763,9 +833,9 @@ class StateMonitor:
                                 measurement="balance_reconciliation",
                                 tags={"exchange": exchange_name, "currency": currency},
                                 fields={
-                                    "available": float(true_balance["available"]),
-                                    "locked": float(true_balance["locked"]),
-                                    "total": float(true_balance["total"]),
+                                    "available": str(true_balance["available"]),
+                                    "locked": str(true_balance["locked"]),
+                                    "total": str(true_balance["total"]),
                                 },
                             )
 
@@ -858,8 +928,8 @@ class StateMonitor:
                                          AND side = :side
                                          AND status = 'open'""",
                                     {
-                                        "quantity": float(true_position.quantity),
-                                        "current_price": float(true_position.current_price),
+                                        "quantity": str(true_position.quantity),
+                                        "current_price": str(true_position.current_price),
                                         "exchange": exchange_name,
                                         "symbol": symbol,
                                         "side": side,
@@ -1003,8 +1073,8 @@ class StateMonitor:
                                        WHERE order_id = :order_id""",
                                     {
                                         "status": true_order.status,
-                                        "filled": float(true_order.filled_quantity),
-                                        "remaining": float(true_order.remaining_quantity),
+                                        "filled": str(true_order.filled_quantity),
+                                        "remaining": str(true_order.remaining_quantity),
                                         "order_id": order_id,
                                     },
                                 )
@@ -1187,7 +1257,7 @@ class StateMonitor:
                                        SET stop_loss_price = :stop_loss
                                        WHERE position_id = :position_id""",
                                     {
-                                        "stop_loss": float(stop_loss_price),
+                                        "stop_loss": str(stop_loss_price),
                                         "position_id": row.position_id,
                                     },
                                 )

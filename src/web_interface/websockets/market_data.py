@@ -7,7 +7,7 @@ order book updates, trade feeds, and market statistics.
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel
@@ -191,7 +191,7 @@ async def market_data_websocket(websocket: WebSocket):
             "type": "welcome",
             "message": "Connected to T-Bot market data stream",
             "user_id": user.user_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "available_data_types": ["ticker", "orderbook", "trades", "candles"],
             "instructions": {
                 "subscribe": 'Send {"action": "subscribe", "symbols": ["BTCUSDT"], "data_types": ["ticker"]}',
@@ -221,7 +221,7 @@ async def market_data_websocket(websocket: WebSocket):
                         "type": "subscription_confirmed",
                         "symbols": symbols,
                         "data_types": data_types,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     await manager.send_to_user(user.user_id, response)
 
@@ -235,20 +235,23 @@ async def market_data_websocket(websocket: WebSocket):
                     response = {
                         "type": "unsubscription_confirmed",
                         "symbols": symbols,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     await manager.send_to_user(user.user_id, response)
 
                 elif message.get("action") == "ping":
                     # Respond to ping with pong
-                    pong_message = {"type": "pong", "timestamp": datetime.utcnow().isoformat()}
+                    pong_message = {
+                        "type": "pong",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
                     await manager.send_to_user(user.user_id, pong_message)
 
             except json.JSONDecodeError:
                 error_message = {
                     "type": "error",
                     "message": "Invalid JSON format",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 await manager.send_to_user(user.user_id, error_message)
 
@@ -257,7 +260,7 @@ async def market_data_websocket(websocket: WebSocket):
                 error_message = {
                     "type": "error",
                     "message": f"Message processing error: {e!s}",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 await manager.send_to_user(user.user_id, error_message)
 
@@ -282,7 +285,7 @@ async def send_initial_market_data(user_id: str, symbol: str, data_types: list[s
             ticker_data = {
                 "type": "ticker",
                 "symbol": symbol,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {
                     "price": current_price,
                     "bid": current_price * 0.9999,
@@ -311,7 +314,7 @@ async def send_initial_market_data(user_id: str, symbol: str, data_types: list[s
             orderbook_data = {
                 "type": "orderbook",
                 "symbol": symbol,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {"bids": bids, "asks": asks},
             }
             await manager.send_to_user(user_id, orderbook_data)
@@ -320,7 +323,7 @@ async def send_initial_market_data(user_id: str, symbol: str, data_types: list[s
             # Generate mock recent trades
             trades = []
             for i in range(5):
-                trade_time = datetime.utcnow()
+                trade_time = datetime.now(timezone.utc)
                 trades.append(
                     {
                         "id": f"trade_{i + 1}",
@@ -334,7 +337,7 @@ async def send_initial_market_data(user_id: str, symbol: str, data_types: list[s
             trades_data = {
                 "type": "trades",
                 "symbol": symbol,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "data": {"trades": trades},
             }
             await manager.send_to_user(user_id, trades_data)
@@ -363,7 +366,7 @@ async def market_data_simulator():
                     ticker_update = {
                         "type": "ticker_update",
                         "symbol": symbol,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                         "data": {
                             "price": current_price,
                             "bid": current_price * 0.9999,

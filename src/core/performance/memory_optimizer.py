@@ -27,7 +27,7 @@ import weakref
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -66,7 +66,7 @@ class GCStrategy(Enum):
 class MemoryStats:
     """Memory usage statistics."""
 
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     total_memory_mb: float = 0.0
     available_memory_mb: float = 0.0
     process_memory_mb: float = 0.0
@@ -204,7 +204,7 @@ class MemoryProfiler:
         """Take memory snapshot."""
         if self.enabled:
             snapshot = tracemalloc.take_snapshot()
-            self._snapshots.append((datetime.utcnow(), snapshot))
+            self._snapshots.append((datetime.now(timezone.utc), snapshot))
 
             # Keep only recent snapshots
             if len(self._snapshots) > 50:
@@ -337,7 +337,7 @@ class GarbageCollectionOptimizer:
         collection_time = (time.time() - start_time) * 1000  # Convert to ms
 
         stats = {
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "collection_time_ms": collection_time,
             "objects_collected": sum(collected),
             "before_counts": before_stats,
@@ -430,13 +430,13 @@ class MemoryOptimizer(BaseComponent):
 
         # List pool for order book levels
         self.object_pools["orderbook_levels"] = ObjectPool(
-            factory=list, reset_func=lambda l: l.clear(), max_size=500
+            factory=list, reset_func=lambda lst: lst.clear(), max_size=500
         )
 
         # Float list pool for price calculations
         self.object_pools["price_calculations"] = ObjectPool(
             factory=lambda: [0.0] * 100,  # Pre-sized float list
-            reset_func=lambda l: [0.0] * len(l),
+            reset_func=lambda price_list: [0.0] * len(price_list),
             max_size=200,
         )
 
@@ -462,7 +462,7 @@ class MemoryOptimizer(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to initialize memory optimizer: {e}")
-            raise PerformanceError(f"Memory optimizer initialization failed: {e}")
+            raise PerformanceError(f"Memory optimizer initialization failed: {e}") from e
 
     async def _start_monitoring(self) -> None:
         """Start background memory monitoring."""
@@ -731,7 +731,7 @@ class MemoryOptimizer(BaseComponent):
                 growth_trend.append(growth_rate)
 
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "current_stats": current_stats.__dict__,
             "memory_alerts": {
                 "alert_threshold_mb": self.memory_alert_threshold_mb,
@@ -761,7 +761,7 @@ class MemoryOptimizer(BaseComponent):
         self.logger.info("Starting forced memory optimization")
 
         optimization_results = {
-            "start_time": datetime.utcnow().isoformat(),
+            "start_time": datetime.now(timezone.utc).isoformat(),
             "initial_memory_mb": 0,
             "final_memory_mb": 0,
             "memory_freed_mb": 0,
@@ -794,8 +794,9 @@ class MemoryOptimizer(BaseComponent):
                 initial_stats.process_memory_mb - final_stats.process_memory_mb
             )
 
+            freed_mb = optimization_results["memory_freed_mb"]
             self.logger.info(
-                f"Memory optimization completed, freed {optimization_results['memory_freed_mb']:.1f}MB",
+                f"Memory optimization completed, freed {freed_mb:.1f}MB",
                 extra=optimization_results,
             )
 

@@ -5,13 +5,13 @@ This module defines the interface contracts for state services
 used by the exchange module to avoid circular dependencies.
 """
 
-from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Protocol
 
 
 class StateType(str, Enum):
     """State type enumeration (mirror of state module)."""
+
     ORDER_STATE = "order_state"
     BOT_STATE = "bot_state"
     POSITION_STATE = "position_state"
@@ -20,6 +20,7 @@ class StateType(str, Enum):
 
 class StatePriority(str, Enum):
     """State priority enumeration (mirror of state module)."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -28,6 +29,7 @@ class StatePriority(str, Enum):
 
 class TradeEvent(str, Enum):
     """Trade event enumeration (mirror of state module)."""
+
     ORDER_SUBMITTED = "order_submitted"
     ORDER_ACCEPTED = "order_accepted"
     ORDER_REJECTED = "order_rejected"
@@ -39,7 +41,7 @@ class TradeEvent(str, Enum):
 
 class IStateService(Protocol):
     """Interface for StateService used by exchanges."""
-    
+
     async def set_state(
         self,
         state_type: StateType,
@@ -51,24 +53,17 @@ class IStateService(Protocol):
     ) -> bool:
         """Set state data."""
         ...
-    
-    async def get_state(
-        self,
-        state_type: StateType,
-        state_id: str
-    ) -> dict[str, Any] | None:
+
+    async def get_state(self, state_type: StateType, state_id: str) -> dict[str, Any] | None:
         """Get state data."""
         ...
 
 
 class ITradeLifecycleManager(Protocol):
     """Interface for TradeLifecycleManager used by exchanges."""
-    
+
     async def update_trade_event(
-        self,
-        trade_id: str,
-        event: TradeEvent,
-        event_data: dict[str, Any]
+        self, trade_id: str, event: TradeEvent, event_data: dict[str, Any]
     ) -> None:
         """Update trade event."""
         ...

@@ -1,10 +1,11 @@
 """Trading-related database models."""
 
 import uuid
+from decimal import Decimal
 
-from sqlalchemy import CheckConstraint, Column, Float, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import DECIMAL, CheckConstraint, Column, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, relationship
 
 from src.database.models.base import AuditMixin, Base, MetadataMixin, TimestampMixin
 
@@ -22,10 +23,10 @@ class Order(Base, AuditMixin, MetadataMixin):
     type = Column(String(20), nullable=False)  # MARKET, LIMIT, STOP, etc.
     status = Column(String(20), nullable=False)  # PENDING, OPEN, FILLED, CANCELLED, etc.
 
-    price = Column(Float)
-    quantity = Column(Float, nullable=False)
-    filled_quantity = Column(Float, default=0)
-    average_fill_price = Column(Float)
+    price: Mapped[Decimal | None] = Column(DECIMAL(20, 8))  # 8 decimal places for crypto precision
+    quantity: Mapped[Decimal] = Column(DECIMAL(20, 8), nullable=False)
+    filled_quantity: Mapped[Decimal] = Column(DECIMAL(20, 8), default=0)
+    average_fill_price: Mapped[Decimal | None] = Column(DECIMAL(20, 8))
 
     bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id"))
     strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategies.id"))
@@ -62,7 +63,9 @@ class Order(Base, AuditMixin, MetadataMixin):
     @property
     def is_filled(self) -> bool:
         """Check if order is fully filled."""
-        return self.status == "FILLED" and self.filled_quantity >= self.quantity
+        if self.filled_quantity is None or self.quantity is None:
+            return False
+        return bool(self.status == "FILLED" and self.filled_quantity >= self.quantity)
 
     @property
     def is_active(self) -> bool:
@@ -70,9 +73,12 @@ class Order(Base, AuditMixin, MetadataMixin):
         return self.status in ("PENDING", "OPEN", "PARTIALLY_FILLED")
 
     @property
-    def remaining_quantity(self) -> float:
+    def remaining_quantity(self) -> Decimal:
         """Get remaining quantity to fill."""
-        return self.quantity - self.filled_quantity
+        if self.quantity is None:
+            return Decimal("0")
+        filled = self.filled_quantity if self.filled_quantity else Decimal("0")
+        return self.quantity - filled
 
 
 class Position(Base, AuditMixin, MetadataMixin):
@@ -86,21 +92,21 @@ class Position(Base, AuditMixin, MetadataMixin):
     side = Column(String(10), nullable=False)  # LONG, SHORT
     status = Column(String(20), nullable=False)  # OPEN, CLOSED, LIQUIDATED
 
-    quantity = Column(Float, nullable=False)
-    entry_price = Column(Float, nullable=False)
-    exit_price = Column(Float)
-    current_price = Column(Float)
+    quantity: Mapped[Decimal] = Column(DECIMAL(20, 8), nullable=False)
+    entry_price: Mapped[Decimal] = Column(DECIMAL(20, 8), nullable=False)
+    exit_price: Mapped[Decimal | None] = Column(DECIMAL(20, 8))
+    current_price: Mapped[Decimal | None] = Column(DECIMAL(20, 8))
 
-    realized_pnl = Column(Float, default=0)
-    unrealized_pnl = Column(Float, default=0)
+    realized_pnl: Mapped[Decimal] = Column(DECIMAL(20, 8), default=0)
+    unrealized_pnl: Mapped[Decimal] = Column(DECIMAL(20, 8), default=0)
 
     bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id"))
     strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategies.id"))
 
     # Risk management
-    stop_loss = Column(Float)
-    take_profit = Column(Float)
-    max_position_size = Column(Float)
+    stop_loss: Mapped[Decimal | None] = Column(DECIMAL(20, 8))
+    take_profit: Mapped[Decimal | None] = Column(DECIMAL(20, 8))
+    max_position_size: Mapped[Decimal | None] = Column(DECIMAL(20, 8))
 
     # Relationships
     bot = relationship("Bot", back_populates="positions")
@@ -121,22 +127,32 @@ class Position(Base, AuditMixin, MetadataMixin):
     @property
     def is_open(self) -> bool:
         """Check if position is open."""
-        return self.status == "OPEN"
+        return bool(self.status == "OPEN")
 
     @property
-    def value(self) -> float:
+    def value(self) -> Decimal:
         """Get current position value."""
         price = self.current_price or self.entry_price
+        if price is None or self.quantity is None:
+            return Decimal("0")
         return self.quantity * price
 
-    def calculate_pnl(self, current_price: float | None = None) -> float:
+    def calculate_pnl(self, current_price: Decimal | float | None = None) -> Decimal:
         """Calculate P&L."""
-        price = current_price or self.current_price or self.entry_price
+        if current_price is not None:
+            price = Decimal(str(current_price))
+        else:
+            price = self.current_price or self.entry_price
+            if price is None:
+                return Decimal("0")
+
+        entry_price = self.entry_price
+        quantity = self.quantity
 
         if self.side == "LONG":
-            return (price - self.entry_price) * self.quantity
+            return (price - entry_price) * quantity
         else:  # SHORT
-            return (self.entry_price - price) * self.quantity
+            return (entry_price - price) * quantity
 
 
 class OrderFill(Base, TimestampMixin):
@@ -148,9 +164,9 @@ class OrderFill(Base, TimestampMixin):
     order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"), nullable=False)
     exchange_fill_id = Column(String(255))
 
-    price = Column(Float, nullable=False)
-    quantity = Column(Float, nullable=False)
-    fee = Column(Float, default=0)
+    price: Mapped[Decimal] = Column(DECIMAL(20, 8), nullable=False)
+    quantity: Mapped[Decimal] = Column(DECIMAL(20, 8), nullable=False)
+    fee: Mapped[Decimal] = Column(DECIMAL(20, 8), default=0)
     fee_currency = Column(String(20))
 
     # Relationships
@@ -168,14 +184,17 @@ class OrderFill(Base, TimestampMixin):
         return f"<OrderFill {self.id}: {self.quantity} @ {self.price}>"
 
     @property
-    def value(self) -> float:
+    def value(self) -> Decimal:
         """Get fill value."""
+        if self.price is None or self.quantity is None:
+            return Decimal("0")
         return self.price * self.quantity
 
     @property
-    def net_value(self) -> float:
+    def net_value(self) -> Decimal:
         """Get fill value after fees."""
-        return self.value - (self.fee or 0)
+        fee = self.fee if self.fee else Decimal("0")
+        return self.value - fee
 
 
 class Trade(Base, TimestampMixin, MetadataMixin):
@@ -192,14 +211,14 @@ class Trade(Base, TimestampMixin, MetadataMixin):
     exit_order_id = Column(UUID(as_uuid=True), ForeignKey("orders.id"))
     position_id = Column(UUID(as_uuid=True), ForeignKey("positions.id"))
 
-    quantity = Column(Float, nullable=False)
-    entry_price = Column(Float, nullable=False)
-    exit_price = Column(Float, nullable=False)
+    quantity: Mapped[Decimal] = Column(DECIMAL(20, 8), nullable=False)
+    entry_price: Mapped[Decimal] = Column(DECIMAL(20, 8), nullable=False)
+    exit_price: Mapped[Decimal] = Column(DECIMAL(20, 8), nullable=False)
 
-    pnl = Column(Float, nullable=False)
-    pnl_percentage = Column(Float)
-    fees = Column(Float, default=0)
-    net_pnl = Column(Float)
+    pnl: Mapped[Decimal] = Column(DECIMAL(20, 8), nullable=False)
+    pnl_percentage: Mapped[Decimal | None] = Column(DECIMAL(10, 4))  # Percentage (4 decimals)
+    fees: Mapped[Decimal] = Column(DECIMAL(20, 8), default=0)
+    net_pnl: Mapped[Decimal | None] = Column(DECIMAL(20, 8))
 
     bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id"))
     strategy_id = Column(UUID(as_uuid=True), ForeignKey("strategies.id"))
@@ -234,11 +253,15 @@ class Trade(Base, TimestampMixin, MetadataMixin):
     @property
     def is_profitable(self) -> bool:
         """Check if trade was profitable."""
-        return self.pnl > 0
+        if self.pnl is None:
+            return False
+        return self.pnl > Decimal("0")
 
     @property
-    def return_percentage(self) -> float:
+    def return_percentage(self) -> Decimal:
         """Calculate return percentage."""
-        if self.entry_price == 0:
-            return 0
-        return ((self.exit_price - self.entry_price) / self.entry_price) * 100
+        if self.entry_price is None or self.entry_price == 0:
+            return Decimal("0")
+        entry = self.entry_price
+        exit_price = self.exit_price if self.exit_price else Decimal("0")
+        return ((exit_price - entry) / entry) * Decimal("100")

@@ -1,6 +1,6 @@
 """Strategy-related types for the T-Bot trading system."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -44,6 +44,9 @@ class MarketRegime(Enum):
     LOW_VOLATILITY = "low_volatility"
     UNKNOWN = "unknown"
 
+    HIGH_CORRELATION = "high_correlation"
+    MEDIUM_CORRELATION = "medium_correlation"
+    LOW_CORRELATION = "low_correlation"
 
 class NewsSentiment(Enum):
     """News sentiment classification."""
@@ -98,7 +101,7 @@ class StrategyConfig(BaseModel):
     spread_pct: float | None = None
     inventory_target: Decimal | None = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime | None = None
 
 
@@ -124,7 +127,7 @@ class StrategyMetrics(BaseModel):
     current_position: Decimal | None = None
     last_signal: str | None = None
     last_trade_at: datetime | None = None
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     def update_win_rate(self) -> None:
         """Update win rate based on trades."""

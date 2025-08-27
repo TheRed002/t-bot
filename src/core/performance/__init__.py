@@ -40,6 +40,7 @@ from .performance_monitor import (
     PerformanceMonitor,
     track_performance,
 )
+from .performance_optimizer import PerformanceOptimizer
 from .trading_profiler import (
     OptimizationLevel,
     TradingOperation,

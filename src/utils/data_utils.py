@@ -1,15 +1,17 @@
 """Data conversion and manipulation utilities for the T-Bot trading system."""
 
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 
 from src.core.exceptions import ValidationError
 from src.utils.decimal_utils import ZERO, to_decimal
 
 
-def dict_to_dataframe(data: dict | list[dict]) -> pd.DataFrame:
+def dict_to_dataframe(data: dict[str, Any] | list[dict[str, Any]]) -> pd.DataFrame:
     """
     Convert dictionary or list of dictionaries to DataFrame.
 
@@ -37,10 +39,10 @@ def dict_to_dataframe(data: dict | list[dict]) -> pd.DataFrame:
 
         return df
     except Exception as e:
-        raise ValidationError(f"Failed to convert to DataFrame: {e!s}")
+        raise ValidationError(f"Failed to convert to DataFrame: {e!s}") from e
 
 
-def normalize_array(arr: list | np.ndarray) -> np.ndarray:
+def normalize_array(arr: list[float] | NDArray[np.float64]) -> NDArray[np.float64]:
     """
     Normalize array to [0, 1] range.
 
@@ -162,7 +164,7 @@ def round_to_precision(value: float, precision: int) -> float:
         raise ValidationError("Precision must be non-negative")
 
     factor = 10**precision
-    return round(value * factor) / factor
+    return float(round(value * factor) / factor)
 
 
 def round_to_precision_decimal(value: Decimal, precision: int) -> Decimal:
@@ -187,7 +189,7 @@ def round_to_precision_decimal(value: Decimal, precision: int) -> Decimal:
     return value.quantize(factor, rounding=ROUND_HALF_UP)
 
 
-def flatten_dict(d: dict, parent_key: str = "", sep: str = ".") -> dict:
+def flatten_dict(d: dict[str, Any], parent_key: str = "", sep: str = ".") -> dict[str, Any]:
     """
     Flatten nested dictionary.
 
@@ -199,7 +201,7 @@ def flatten_dict(d: dict, parent_key: str = "", sep: str = ".") -> dict:
     Returns:
         Flattened dictionary
     """
-    items = []
+    items: list[tuple[str, Any]] = []
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
         if isinstance(v, dict):
@@ -209,7 +211,7 @@ def flatten_dict(d: dict, parent_key: str = "", sep: str = ".") -> dict:
     return dict(items)
 
 
-def unflatten_dict(d: dict, sep: str = ".") -> dict:
+def unflatten_dict(d: dict[str, Any], sep: str = ".") -> dict[str, Any]:
     """
     Unflatten dictionary with dot notation keys.
 
@@ -220,7 +222,7 @@ def unflatten_dict(d: dict, sep: str = ".") -> dict:
     Returns:
         Nested dictionary
     """
-    result = {}
+    result: dict[str, Any] = {}
     for key, value in d.items():
         parts = key.split(sep)
         current = result
@@ -232,7 +234,7 @@ def unflatten_dict(d: dict, sep: str = ".") -> dict:
     return result
 
 
-def merge_dicts(*dicts: dict) -> dict:
+def merge_dicts(*dicts: dict[str, Any]) -> dict[str, Any]:
     """
     Deep merge multiple dictionaries.
 
@@ -245,7 +247,7 @@ def merge_dicts(*dicts: dict) -> dict:
     if not dicts:
         return {}
 
-    result = {}
+    result: dict[str, Any] = {}
     for d in dicts:
         for key, value in d.items():
             if key in result and isinstance(result[key], dict) and isinstance(value, dict):
@@ -255,7 +257,7 @@ def merge_dicts(*dicts: dict) -> dict:
     return result
 
 
-def filter_none_values(d: dict) -> dict:
+def filter_none_values(d: dict[str, Any]) -> dict[str, Any]:
     """
     Remove None values from dictionary.
 
@@ -268,7 +270,7 @@ def filter_none_values(d: dict) -> dict:
     return {k: v for k, v in d.items() if v is not None}
 
 
-def chunk_list(lst: list, chunk_size: int) -> list[list]:
+def chunk_list(lst: list[Any], chunk_size: int) -> list[list[Any]]:
     """
     Split list into chunks of specified size.
 

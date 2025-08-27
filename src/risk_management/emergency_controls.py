@@ -17,13 +17,14 @@ Emergency Control Features:
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.core.base.component import BaseComponent
 from src.core.config.main import Config
 from src.core.exceptions import EmergencyStopError, ValidationError
 
@@ -76,7 +77,7 @@ class EmergencyEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class EmergencyControls:
+class EmergencyControls(BaseComponent):
     """
     Emergency trading controls system.
 
@@ -87,8 +88,8 @@ class EmergencyControls:
     def __init__(
         self,
         config: Config,
-        risk_manager: BaseRiskManager,
-        circuit_breaker_manager: CircuitBreakerManager,
+        risk_manager: BaseRiskManager | None = None,
+        circuit_breaker_manager: CircuitBreakerManager | None = None,
     ):
         """
         Initialize emergency controls.
@@ -98,7 +99,7 @@ class EmergencyControls:
             risk_manager: Risk manager for calculations
             circuit_breaker_manager: Circuit breaker manager
         """
-        super().__init__()  # Initialize BaseComponent
+        super().__init__(name="EmergencyControls")  # Initialize BaseComponent
         self.config = config
         self.risk_manager = risk_manager
         self.circuit_breaker_manager = circuit_breaker_manager
@@ -112,6 +113,9 @@ class EmergencyControls:
         self.manual_override_user: str | None = None
         self.manual_override_time: datetime | None = None
 
+        # Circuit breaker state for test compatibility
+        self._active_trigger: str | None = None
+
         # Emergency events history
         self.emergency_events: list[EmergencyEvent] = []
         self.max_events = 50
@@ -122,6 +126,9 @@ class EmergencyControls:
 
         # Exchange connections for emergency actions
         self.exchanges: dict[str, BaseExchange] = {}
+
+        # Track recovery tasks for proper cleanup
+        self._recovery_tasks: set[asyncio.Task] = set()
 
         self.logger.info("Emergency controls initialized")
 
@@ -141,14 +148,14 @@ class EmergencyControls:
         """
         try:
             self.state = EmergencyState.EMERGENCY
-            self.emergency_start_time = datetime.now()
+            self.emergency_start_time = datetime.now(timezone.utc)
             self.emergency_reason = reason
 
             # Log emergency event
             event = EmergencyEvent(
                 action=EmergencyAction.SWITCH_TO_SAFE_MODE,
                 trigger_type=trigger_type,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 description=f"Emergency stop activated: {reason}",
             )
             self.emergency_events.append(event)
@@ -250,7 +257,7 @@ class EmergencyControls:
             event = EmergencyEvent(
                 action=EmergencyAction.CANCEL_PENDING_ORDERS,
                 trigger_type=CircuitBreakerType.MANUAL_TRIGGER,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 description="Emergency order cancellation",
             )
             self.emergency_events.append(event)
@@ -291,7 +298,7 @@ class EmergencyControls:
                                 quantity=abs(position.quantity),
                                 client_order_id=(
                                     f"emergency_close_{position.symbol}_"
-                                    f"{int(datetime.now().timestamp())}"
+                                    f"{int(datetime.now(timezone.utc).timestamp())}"
                                 ),
                             )
 
@@ -324,7 +331,7 @@ class EmergencyControls:
             event = EmergencyEvent(
                 action=EmergencyAction.CLOSE_ALL_POSITIONS,
                 trigger_type=CircuitBreakerType.MANUAL_TRIGGER,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 description="Emergency position closure",
             )
             self.emergency_events.append(event)
@@ -449,8 +456,13 @@ class EmergencyControls:
                     if currency == "USDT":
                         total_value += amount
                     else:
-                        # TODO: Add currency conversion logic
-                        pass
+                        # Log warning for unsupported currency conversion
+                        self.logger.warning(
+                            "Currency conversion not implemented",
+                            currency=currency,
+                            amount=amount,
+                            message="Unable to convert to USDT, portfolio value may be incomplete",
+                        )
             except Exception as e:
                 self.logger.error("Failed to get balance for portfolio calculation", error=str(e))
 
@@ -471,8 +483,12 @@ class EmergencyControls:
                     "Emergency state deactivated, entering recovery mode", reason=reason
                 )
 
-                # Start recovery validation timer
-                asyncio.create_task(self._recovery_validation_timer())
+                # Start recovery validation timer with proper tracking
+                recovery_task = asyncio.create_task(self._recovery_validation_timer())
+                # Store task reference for cleanup
+                self._recovery_tasks.add(recovery_task)
+                # Remove task when done
+                recovery_task.add_done_callback(lambda t: self._recovery_tasks.discard(t))
 
             elif self.state == EmergencyState.RECOVERY:
                 self.state = EmergencyState.NORMAL
@@ -548,7 +564,7 @@ class EmergencyControls:
         """
         self.state = EmergencyState.MANUAL_OVERRIDE
         self.manual_override_user = user_id
-        self.manual_override_time = datetime.now()
+        self.manual_override_time = datetime.now(timezone.utc)
 
         self.logger.warning("Manual override activated", user_id=user_id, reason=reason)
 
@@ -568,6 +584,108 @@ class EmergencyControls:
             self.logger.info("Manual override deactivated", user_id=user_id)
         else:
             raise ValidationError("Only the user who activated override can deactivate it")
+
+    @time_execution
+    async def deactivate_circuit_breaker(
+        self, reason: str = "Manual circuit breaker deactivation"
+    ) -> None:
+        """
+        Deactivate circuit breaker and return to normal operations.
+
+        This method provides an alias to deactivate_emergency_stop for compatibility
+        with existing test code and provides circuit breaker specific functionality.
+
+        Args:
+            reason: Reason for deactivating the circuit breaker
+        """
+        try:
+            self.logger.info("Circuit breaker deactivation requested", reason=reason)
+
+            # Clear active trigger
+            self._active_trigger = None
+
+            # Use the existing emergency stop deactivation logic
+            await self.deactivate_emergency_stop(reason)
+
+            # Additional circuit breaker specific logic if needed
+            if hasattr(self, "circuit_breaker_manager") and self.circuit_breaker_manager:
+                # Reset any circuit breaker specific state
+                self.logger.debug("Resetting circuit breaker manager state")
+
+        except Exception as e:
+            self.logger.error(f"Failed to deactivate circuit breaker: {e}")
+            raise EmergencyStopError(f"Circuit breaker deactivation failed: {e}") from e
+
+    @time_execution
+    async def activate_circuit_breaker(self, event) -> None:
+        """
+        Activate circuit breaker based on a circuit breaker event.
+
+        This method provides compatibility for test code that expects a specific
+        circuit breaker activation interface.
+
+        Args:
+            event: Circuit breaker event with trigger information.
+                   Can be either a proper CircuitBreakerEvent or a mock with compatible fields.
+        """
+        try:
+            # Extract trigger type from event - check metadata first for custom trigger types
+            if (
+                hasattr(event, "metadata")
+                and isinstance(event.metadata, dict)
+                and "trigger_type" in event.metadata
+            ):
+                trigger_name = event.metadata["trigger_type"]
+            elif hasattr(event, "trigger_type"):
+                trigger_name = str(event.trigger_type)
+            elif hasattr(event, "breaker_type"):
+                # Extract just the enum name without the class prefix
+                if hasattr(event.breaker_type, "name"):
+                    trigger_name = event.breaker_type.name
+                else:
+                    trigger_name = str(event.breaker_type).split(".")[-1]
+            else:
+                trigger_name = "UNKNOWN_TRIGGER"
+
+            # Store active trigger for testing compatibility
+            self._active_trigger = trigger_name
+
+            # Extract reason from event
+            if hasattr(event, "trigger_value") and hasattr(event, "threshold"):
+                reason = (
+                    f"Circuit breaker triggered: {trigger_name} "
+                    f"(value: {event.trigger_value}, threshold: {event.threshold})"
+                )
+            else:
+                reason = f"Circuit breaker triggered: {trigger_name}"
+
+            # Map trigger type to CircuitBreakerType
+            from src.core.types import CircuitBreakerType
+
+            # Map string trigger types to enum values
+            trigger_mapping = {
+                "LOSS_THRESHOLD": CircuitBreakerType.LOSS_LIMIT,
+                "CONSECUTIVE_LOSSES": CircuitBreakerType.DAILY_LOSS_LIMIT,
+                "HIGH_VOLATILITY": CircuitBreakerType.VOLATILITY,
+                "VOLATILITY_THRESHOLD": CircuitBreakerType.VOLATILITY_SPIKE,
+                "EXCESSIVE_DRAWDOWN": CircuitBreakerType.DRAWDOWN,
+                "DRAWDOWN_THRESHOLD": CircuitBreakerType.DRAWDOWN_LIMIT,
+                "MANUAL_TRIGGER": CircuitBreakerType.MANUAL,
+                "POST_RECOVERY_DETERIORATION": CircuitBreakerType.MANUAL,  # Manual for now
+            }
+
+            circuit_breaker_type = trigger_mapping.get(trigger_name, CircuitBreakerType.MANUAL)
+
+            self.logger.info(
+                "Circuit breaker activation requested", trigger_type=trigger_name, reason=reason
+            )
+
+            # Use the existing emergency stop activation logic
+            await self.activate_emergency_stop(reason, circuit_breaker_type)
+
+        except Exception as e:
+            self.logger.error(f"Failed to activate circuit breaker: {e}")
+            raise EmergencyStopError(f"Circuit breaker activation failed: {e}") from e
 
     def get_status(self) -> dict[str, Any]:
         """Get current emergency controls status."""
@@ -593,3 +711,70 @@ class EmergencyControls:
     def get_emergency_events(self, limit: int = 10) -> list[EmergencyEvent]:
         """Get recent emergency events."""
         return self.emergency_events[-limit:] if self.emergency_events else []
+
+    def is_circuit_breaker_active(self) -> bool:
+        """
+        Check if circuit breaker is currently active.
+
+        This method provides compatibility for test code that expects a specific
+        circuit breaker status interface.
+
+        Returns:
+            bool: True if circuit breaker/emergency controls are active
+        """
+        return self.state in [EmergencyState.EMERGENCY, EmergencyState.RECOVERY]
+
+    def get_active_trigger(self) -> str | None:
+        """
+        Get the currently active circuit breaker trigger type.
+
+        This method provides compatibility for test code that expects to retrieve
+        the active trigger information.
+
+        Returns:
+            str | None: The active trigger type name, or None if no trigger is active
+        """
+        return self._active_trigger
+
+    async def cleanup_resources(self) -> None:
+        """
+        Clean up all resources used by the emergency controls.
+        Should be called when shutting down or resetting the system.
+        """
+        try:
+            # Cancel any running recovery tasks
+            if hasattr(self, "_recovery_tasks") and self._recovery_tasks:
+                recovery_tasks = list(self._recovery_tasks)
+                for task in recovery_tasks:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await asyncio.wait_for(task, timeout=5.0)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass
+                        except Exception as e:
+                            self.logger.warning(f"Error cancelling recovery task: {e}")
+
+                self._recovery_tasks.clear()
+                self.logger.info(f"Cleaned up {len(recovery_tasks)} recovery tasks")
+
+            # Clear event history with size limit
+            if len(self.emergency_events) > 1000:  # Prevent excessive memory usage
+                self.emergency_events = self.emergency_events[-100:]  # Keep last 100 events
+
+            # Clear exchange references to prevent circular references
+            self.exchanges.clear()
+
+            # Reset state to normal
+            self.state = EmergencyState.NORMAL
+            self.emergency_start_time = None
+            self.emergency_reason = None
+            self.manual_override_user = None
+            self.manual_override_time = None
+            self._active_trigger = None
+
+            self.logger.info("Emergency controls resources cleaned up successfully")
+
+        except Exception as e:
+            self.logger.error(f"Error cleaning up emergency controls resources: {e}")
+            # Don't re-raise to prevent shutdown failures

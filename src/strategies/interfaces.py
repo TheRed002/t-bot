@@ -311,7 +311,7 @@ class BaseStrategyInterface(ABC):
     async def get_state(self) -> dict[str, Any]:
         """
         Get current strategy state.
-        
+
         Returns:
             Dictionary containing strategy state information
         """
@@ -651,10 +651,10 @@ class MarketDataProviderInterface(Protocol):
     async def get_current_price(self, symbol: str) -> Decimal | None:
         """
         Get current market price for a symbol.
-        
+
         Args:
             symbol: Trading symbol
-            
+
         Returns:
             Current price or None if not available
         """
@@ -663,10 +663,10 @@ class MarketDataProviderInterface(Protocol):
     async def get_market_regime(self, symbol: str) -> MarketRegime:
         """
         Get current market regime.
-        
+
         Args:
             symbol: Trading symbol
-            
+
         Returns:
             Current market regime
         """
@@ -676,7 +676,7 @@ class MarketDataProviderInterface(Protocol):
 class StrategyDataRepositoryInterface(Protocol):
     """
     Interface for strategy data persistence.
-    
+
     This protocol defines the contract for accessing strategy-related
     data from the database without exposing database implementation details.
     """
@@ -684,10 +684,10 @@ class StrategyDataRepositoryInterface(Protocol):
     async def load_strategy_state(self, strategy_id: str) -> dict[str, Any] | None:
         """
         Load persisted strategy state.
-        
+
         Args:
             strategy_id: Strategy identifier
-            
+
         Returns:
             Strategy state or None if not found
         """
@@ -696,7 +696,7 @@ class StrategyDataRepositoryInterface(Protocol):
     async def save_strategy_state(self, strategy_id: str, state: dict[str, Any]) -> None:
         """
         Save strategy state.
-        
+
         Args:
             strategy_id: Strategy identifier
             state: Strategy state to persist
@@ -704,19 +704,16 @@ class StrategyDataRepositoryInterface(Protocol):
         ...
 
     async def get_strategy_trades(
-        self,
-        strategy_id: str,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None
+        self, strategy_id: str, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> list[dict[str, Any]]:
         """
         Get trades for a strategy.
-        
+
         Args:
             strategy_id: Strategy identifier
             start_time: Optional start time filter
             end_time: Optional end time filter
-            
+
         Returns:
             List of trades as dictionaries
         """
@@ -725,7 +722,7 @@ class StrategyDataRepositoryInterface(Protocol):
     async def save_trade(self, strategy_id: str, trade: dict[str, Any]) -> None:
         """
         Save a trade.
-        
+
         Args:
             strategy_id: Strategy identifier
             trade: Trade data to save
@@ -735,24 +732,21 @@ class StrategyDataRepositoryInterface(Protocol):
     async def get_strategy_positions(self, strategy_id: str) -> list[dict[str, Any]]:
         """
         Get current positions for a strategy.
-        
+
         Args:
             strategy_id: Strategy identifier
-            
+
         Returns:
             List of positions as dictionaries
         """
         ...
 
     async def save_performance_metrics(
-        self,
-        strategy_id: str,
-        metrics: dict[str, Any],
-        timestamp: datetime | None = None
+        self, strategy_id: str, metrics: dict[str, Any], timestamp: datetime | None = None
     ) -> None:
         """
         Save performance metrics.
-        
+
         Args:
             strategy_id: Strategy identifier
             metrics: Performance metrics
@@ -761,19 +755,16 @@ class StrategyDataRepositoryInterface(Protocol):
         ...
 
     async def load_performance_history(
-        self,
-        strategy_id: str,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None
+        self, strategy_id: str, start_time: datetime | None = None, end_time: datetime | None = None
     ) -> list[dict[str, Any]]:
         """
         Load historical performance metrics.
-        
+
         Args:
             strategy_id: Strategy identifier
             start_time: Optional start time filter
             end_time: Optional end time filter
-            
+
         Returns:
             List of historical metrics
         """

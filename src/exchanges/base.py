@@ -15,9 +15,9 @@ import asyncio
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 try:
     import aiohttp
@@ -83,6 +83,7 @@ except ImportError:
             self.code = code
             self.description = description
 
+
 # State management imports - lazy loading to avoid circular dependency
 if TYPE_CHECKING:
     from src.state import StateService, TradeLifecycleManager
@@ -125,6 +126,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         exchange_name: str,
         state_service: IStateService | None = None,
         trade_lifecycle_manager: ITradeLifecycleManager | None = None,
+        metrics_collector: Any = None,
     ):
         """
         Initialize the enhanced base exchange.
@@ -147,8 +149,8 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         self.trade_lifecycle_manager = trade_lifecycle_manager
 
         # Initialize error handling
-        self.error_handler = ErrorHandler(config.error_handling)
-        self.error_connection_manager = ErrorConnectionManager(config.error_handling)
+        self.error_handler = ErrorHandler(config)
+        self.error_connection_manager = ErrorConnectionManager(config)
 
         # P-007: Advanced rate limiting and connection management integration
         self.advanced_rate_limiter = get_global_rate_limiter(config)
@@ -196,22 +198,28 @@ class EnhancedBaseExchange(BaseComponent, ABC):
 
         # Rate limiting tracking
         self.rate_limit_windows: dict[str, list[float]] = {}
-        self.rate_limit_config = self.config.exchanges.rate_limits.get(exchange_name, {})
+        self.rate_limit_config = getattr(self.config.exchange, "rate_limits", {}).get(
+            exchange_name, {}
+        )
 
-        # Initialize connection pool and session management
-        self._init_task = asyncio.create_task(self._initialize_connection_infrastructure())
+        # Initialize connection pool and session management (lazy initialization)
+        self._init_task = None
         self._monitoring_tasks: list[asyncio.Task] = []
-        self._connector_lock = asyncio.Lock()
-        self._rate_limit_lock = asyncio.Lock()
+        self._connector_lock = None
+        self._rate_limit_lock = None
 
         # Initialize monitoring components
-        self.metrics_collector = MetricsCollector(config)
-        self.exchange_metrics = ExchangeMetrics(exchange_name)
+        if metrics_collector is None:
+            from src.monitoring import get_metrics_collector
+            self.metrics_collector = get_metrics_collector()
+        else:
+            self.metrics_collector = metrics_collector
+        self.exchange_metrics = ExchangeMetrics(self.metrics_collector)
         self.system_metrics = SystemMetrics(self.metrics_collector)
         self.tracer = get_tracer(__name__)
 
         # Mark as initialized
-        self.initialize()
+        self._initialized = True
 
         self.logger.info(
             f"Enhanced BaseExchange initialized for {exchange_name} with unified infrastructure"
@@ -295,7 +303,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         Create session manager for connection health monitoring.
         """
         return {
-            "created_at": datetime.now(),
+            "created_at": datetime.now(timezone.utc),
             "request_count": 0,
             "error_count": 0,
             "last_request": None,
@@ -341,7 +349,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
 
                     # Report health check metrics
                     self.exchange_metrics.record_health_check(
-                        success=health_status, duration=check_duration
+                        success=health_status, duration=check_duration, exchange=self.exchange_name
                     )
 
                     if not health_status:
@@ -354,7 +362,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
                             "exchange_health_status", 1.0, {"exchange": self.exchange_name}
                         )
 
-                    self.last_health_check = datetime.now()
+                    self.last_health_check = datetime.now(timezone.utc)
                 else:
                     # Report disconnected status
                     self.system_metrics.set_gauge(
@@ -364,7 +372,9 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             except Exception as e:
                 self.logger.error(f"Error in health monitor loop: {e!s}")
                 # Report health check error
-                self.exchange_metrics.record_health_check(success=False, duration=0)
+                self.exchange_metrics.record_health_check(
+                    success=False, duration=0, exchange=self.exchange_name
+                )
                 await asyncio.sleep(5)  # Brief pause before retry
 
     async def _monitor_connection_pool(self, connector) -> None:
@@ -375,28 +385,29 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             try:
                 await asyncio.sleep(10)  # Check every 10 seconds
 
-                async with self._connector_lock:
-                    if hasattr(connector, "_acquired"):
-                        # Report connection pool metrics
-                        self.system_metrics.set_gauge(
-                            "connection_pool_size",
-                            len(connector._acquired),
-                            {"exchange": self.exchange_name, "pool_type": "http"},
-                        )
+                if self._connector_lock:
+                    async with self._connector_lock:
+                        if hasattr(connector, "_acquired"):
+                            # Report connection pool metrics
+                            self.system_metrics.set_gauge(
+                                "connection_pool_size",
+                                len(connector._acquired),
+                                {"exchange": self.exchange_name, "pool_type": "http"},
+                            )
 
-                    if hasattr(connector, "_limit"):
-                        self.system_metrics.set_gauge(
-                            "connection_pool_limit",
-                            connector._limit,
-                            {"exchange": self.exchange_name, "pool_type": "http"},
-                        )
+                        if hasattr(connector, "_limit"):
+                            self.system_metrics.set_gauge(
+                                "connection_pool_limit",
+                                connector._limit,
+                                {"exchange": self.exchange_name, "pool_type": "http"},
+                            )
 
-                    if hasattr(connector, "_limit_per_host"):
-                        self.system_metrics.set_gauge(
-                            "connection_pool_limit_per_host",
-                            connector._limit_per_host,
-                            {"exchange": self.exchange_name, "pool_type": "http"},
-                        )
+                        if hasattr(connector, "_limit_per_host"):
+                            self.system_metrics.set_gauge(
+                                "connection_pool_limit_per_host",
+                                connector._limit_per_host,
+                                {"exchange": self.exchange_name, "pool_type": "http"},
+                            )
 
             except Exception as e:
                 self.logger.error(f"Error monitoring connection pool: {e!s}")
@@ -471,6 +482,12 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             try:
                 self.logger.info(f"Connecting to {self.exchange_name} exchange...")
 
+                # Initialize locks if not already done
+                if self._connector_lock is None:
+                    self._connector_lock = asyncio.Lock()
+                if self._rate_limit_lock is None:
+                    self._rate_limit_lock = asyncio.Lock()
+
                 # Ensure infrastructure is ready
                 if not self.connection_pool:
                     await self._initialize_connection_infrastructure()
@@ -481,7 +498,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
                 if connection_result:
                     self.connected = True
                     self.status = "connected"
-                    self.last_heartbeat = datetime.now()
+                    self.last_heartbeat = datetime.now(timezone.utc)
                     self.connection_retries = 0
 
                     # Initialize database and Redis connections
@@ -491,7 +508,9 @@ class EnhancedBaseExchange(BaseComponent, ABC):
                     self.logger.info(f"Successfully connected to {self.exchange_name}")
 
                     # Record connection success metric
-                    self.exchange_metrics.record_connection(success=True)
+                    self.exchange_metrics.record_connection(
+                        success=True, exchange=self.exchange_name
+                    )
                     span.set_attribute("connection.success", True)
 
                     return True
@@ -500,7 +519,9 @@ class EnhancedBaseExchange(BaseComponent, ABC):
                     self.status = "connection_failed"
 
                     # Record connection failure metric
-                    self.exchange_metrics.record_connection(success=False)
+                    self.exchange_metrics.record_connection(
+                        success=False, exchange=self.exchange_name
+                    )
                     span.set_attribute("connection.success", False)
 
                     return False
@@ -511,7 +532,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
                 self.status = "connection_error"
 
                 # Record connection error metric
-                self.exchange_metrics.record_connection(success=False)
+                self.exchange_metrics.record_connection(success=False, exchange=self.exchange_name)
                 span.record_exception(e)
                 span.set_status(Status(StatusCode.ERROR, str(e)))
 
@@ -583,7 +604,9 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             # Check unified rate limiter first
             if not await self._check_local_rate_limit(endpoint, weight):
                 # Record rate limit violation metric
-                self.exchange_metrics.record_rate_limit_violation(endpoint=endpoint)
+                self.exchange_metrics.record_rate_limit_violation(
+                    endpoint=endpoint, exchange=self.exchange_name
+                )
                 raise ExchangeRateLimitError(f"Local rate limit exceeded for {endpoint}")
 
             # Check advanced rate limiter
@@ -591,14 +614,18 @@ class EnhancedBaseExchange(BaseComponent, ABC):
                 self.exchange_name, endpoint, weight
             ):
                 # Record rate limit violation metric
-                self.exchange_metrics.record_rate_limit_violation(endpoint=endpoint)
+                self.exchange_metrics.record_rate_limit_violation(
+                    endpoint=endpoint, exchange=self.exchange_name
+                )
                 raise ExchangeRateLimitError(f"Advanced rate limit exceeded for {endpoint}")
 
             # Update local tracking
             await self._update_rate_limit_tracking(endpoint, weight)
 
             # Record successful rate limit check
-            self.exchange_metrics.record_rate_limit_check(endpoint=endpoint, weight=weight)
+            self.exchange_metrics.record_rate_limit_check(
+                endpoint=endpoint, weight=weight, exchange=self.exchange_name
+            )
 
             return True
 
@@ -622,26 +649,30 @@ class EnhancedBaseExchange(BaseComponent, ABC):
 
         current_time = time.time()
 
-        async with self._rate_limit_lock:
-            # Clean old requests from window
-            if endpoint not in self.rate_limit_windows:
-                self.rate_limit_windows[endpoint] = []
+        if self._rate_limit_lock:
+            async with self._rate_limit_lock:
+                # Clean old requests from window
+                if endpoint not in self.rate_limit_windows:
+                    self.rate_limit_windows[endpoint] = []
 
-            window = self.rate_limit_windows[endpoint]
+                window = self.rate_limit_windows[endpoint]
 
-            # Remove requests older than 60 seconds
-            self.rate_limit_windows[endpoint] = [
-                req_time for req_time in window if current_time - req_time < 60
-            ]
+                # Remove requests older than 60 seconds
+                self.rate_limit_windows[endpoint] = [
+                    req_time for req_time in window if current_time - req_time < 60
+                ]
 
-            # Check rate limit
-            endpoint_config = self.rate_limit_config.get(endpoint, {})
-            max_requests = endpoint_config.get("max_requests", 100)
+                # Check rate limit
+                endpoint_config = self.rate_limit_config.get(endpoint, {})
+                max_requests = endpoint_config.get("max_requests", 100)
 
-            if len(self.rate_limit_windows[endpoint]) + weight <= max_requests:
-                return True
+                if len(self.rate_limit_windows[endpoint]) + weight <= max_requests:
+                    return True
 
-            return False
+                return False
+
+        # If no lock available, just return True (don't block)
+        return True
 
     async def _update_rate_limit_tracking(self, endpoint: str, weight: int) -> None:
         """
@@ -649,15 +680,16 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         """
         current_time = time.time()
 
-        async with self._rate_limit_lock:
-            # Add weight number of timestamps
-            for _ in range(weight):
-                self.rate_limit_windows[endpoint].append(current_time)
+        if self._rate_limit_lock:
+            async with self._rate_limit_lock:
+                # Add weight number of timestamps
+                for _ in range(weight):
+                    self.rate_limit_windows[endpoint].append(current_time)
 
-            # Update session manager
-            if self.session_manager:
-                self.session_manager["request_count"] += weight
-                self.session_manager["last_request"] = datetime.now()
+                # Update session manager
+                if self.session_manager:
+                    self.session_manager["request_count"] += weight
+                    self.session_manager["last_request"] = datetime.now(timezone.utc)
 
     # === ORDER MANAGEMENT ===
 
@@ -701,7 +733,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
                 # Call exchange-specific order placement first
                 try:
                     order_response = await self._place_order_on_exchange(order)
-                except Exception as e:
+                except Exception:
                     # If order placement fails, no state is saved
                     raise
 
@@ -715,7 +747,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
                     "order_type": order.order_type.value,
                     "quantity": str(order.quantity),
                     "price": str(order.price) if order.price else None,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "status": order_response.status.value,
                     "exchange_order_id": order_response.id,
                     "filled_quantity": (
@@ -749,7 +781,11 @@ class EnhancedBaseExchange(BaseComponent, ABC):
 
                 # Record metrics
                 self.exchange_metrics.record_order(
-                    order_type=order.order_type, side=order.side, success=True
+                    order_type=order.order_type,
+                    side=order.side,
+                    success=True,
+                    exchange=self.exchange_name,
+                    symbol=order.symbol,
                 )
 
                 span.set_attribute("order.id", order_response.id)
@@ -760,7 +796,11 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             except Exception as e:
                 # Record failed order metric
                 self.exchange_metrics.record_order(
-                    order_type=order.order_type, side=order.side, success=False
+                    order_type=order.order_type,
+                    side=order.side,
+                    success=False,
+                    exchange=self.exchange_name,
+                    symbol=order.symbol,
                 )
                 span.record_exception(e)
                 span.set_status(Status(StatusCode.ERROR, str(e)))
@@ -846,7 +886,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
 
         Returns:
             True if saved successfully
-            
+
         Raises:
             ExchangeConnectionError: If state service operation fails
         """
@@ -867,9 +907,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             )
 
             if not success:
-                raise ExchangeConnectionError(
-                    f"Failed to save order {order_id} to state service"
-                )
+                raise ExchangeConnectionError(f"Failed to save order {order_id} to state service")
 
             # Also update in-memory cache for quick access
             self.pending_orders[order_id] = order_data
@@ -880,7 +918,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         except Exception as e:
             self.logger.error(f"Failed to save order to state: {e}")
             raise ExchangeConnectionError(
-                f"State service error saving order {order_id}: {str(e)}"
+                f"State service error saving order {order_id}: {e!s}"
             ) from e
 
     async def _update_order_state(
@@ -896,7 +934,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
 
         Returns:
             True if updated successfully
-            
+
         Raises:
             ExchangeConnectionError: If state service operation fails
         """
@@ -910,9 +948,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             # Get current order state
             current_state = await self._get_order_from_state(order_id)
             if not current_state:
-                raise ExchangeConnectionError(
-                    f"Order {order_id} not found in state service"
-                )
+                raise ExchangeConnectionError(f"Order {order_id} not found in state service")
 
             # Merge updates
             current_state.update(updates)
@@ -928,9 +964,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             )
 
             if not success:
-                raise ExchangeConnectionError(
-                    f"Failed to update order {order_id} in state service"
-                )
+                raise ExchangeConnectionError(f"Failed to update order {order_id} in state service")
 
             # Update in-memory cache
             self.pending_orders[order_id] = current_state
@@ -941,7 +975,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         except Exception as e:
             self.logger.error(f"Failed to update order state: {e}")
             raise ExchangeConnectionError(
-                f"State service error updating order {order_id}: {str(e)}"
+                f"State service error updating order {order_id}: {e!s}"
             ) from e
 
     async def _get_order_from_state(self, order_id: str) -> dict[str, Any] | None:
@@ -987,7 +1021,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             order_id: Order ID
             event: Event type (e.g., 'order_placed', 'order_filled')
             order_data: Order data
-            
+
         Raises:
             ExchangeConnectionError: If trade lifecycle notification fails
         """
@@ -1025,10 +1059,10 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             # Don't fail the order if lifecycle notification fails
             # This is a secondary operation that shouldn't block trading
             # But we should monitor these failures
-            if hasattr(self, 'metrics_collector') and self.metrics_collector:
+            if hasattr(self, "metrics_collector") and self.metrics_collector:
                 self.metrics_collector.increment_counter(
                     "exchange_errors_total",
-                    {"exchange": self.exchange_name, "error_type": "trade_lifecycle_notification"}
+                    {"exchange": self.exchange_name, "error_type": "trade_lifecycle_notification"},
                 )
 
     # === MARKET DATA MANAGEMENT ===
@@ -1093,7 +1127,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             cache_time = cached_entry.get("timestamp", datetime.min)
 
             # Check if cache is still valid
-            if (datetime.now() - cache_time).total_seconds() < self.cache_ttl:
+            if (datetime.now(timezone.utc) - cache_time).total_seconds() < self.cache_ttl:
                 return cached_entry.get("data")
             else:
                 # Remove expired cache entry
@@ -1109,13 +1143,16 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         Cache market data with timestamp.
         """
         try:
-            self.market_data_cache[cache_key] = {"data": data, "timestamp": datetime.now()}
+            self.market_data_cache[cache_key] = {
+                "data": data,
+                "timestamp": datetime.now(timezone.utc),
+            }
 
             # Only cache in Redis if available and connected with proper validation
             if self.redis_client:
                 try:
                     # Validate Redis client is connected before attempting cache operation
-                    if hasattr(self.redis_client, "client") and self.redis_client.client:
+                    if hasattr(self.redis_client, "ping") and self.redis_client:
                         await self._cache_market_data(
                             cache_key.split("_")[0],  # symbol
                             {
@@ -1332,13 +1369,13 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         """
         try:
             # Initialize RedisClient with config object - it will extract the URL properly
-            self.redis_client = RedisClient(self.config)
+            self.redis_client = RedisClient(self.config, auto_close=True)
             await self.redis_client.connect()
 
             # Test Redis connection with proper error handling
             try:
-                if self.redis_client.client:
-                    await self.redis_client.client.ping()
+                if self.redis_client:
+                    await self.redis_client.ping()
                     self.logger.debug(f"Redis initialized for {self.exchange_name}")
                 else:
                     raise Exception("Redis client not connected")
@@ -1547,7 +1584,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         try:
             # Basic health check - try to get account balance
             await self.get_account_balance()
-            self.last_heartbeat = datetime.now()
+            self.last_heartbeat = datetime.now(timezone.utc)
 
             # Check database health if available with proper error handling
             if self.db_queries:
@@ -1565,9 +1602,9 @@ class EnhancedBaseExchange(BaseComponent, ABC):
                     # Continue with other health checks
 
             # Check Redis health if available with proper error handling
-            if self.redis_client and self.redis_client.client:
+            if self.redis_client:
                 try:
-                    await self.redis_client.client.ping()
+                    await self.redis_client.ping()
                 except Exception as redis_error:
                     self.logger.warning(
                         f"Redis health check failed: {redis_error}", exchange=self.exchange_name
@@ -1612,7 +1649,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             return {
                 "exchange": self.exchange_name,
                 "error": str(e),
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
     def get_rate_limits(self) -> dict[str, int]:
@@ -1622,7 +1659,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         Returns:
             Dict[str, int]: Rate limits configuration
         """
-        return self.config.exchanges.rate_limits.get(self.exchange_name, {})
+        return getattr(self.config.exchange, "rate_limits", {}).get(self.exchange_name, {})
 
     # === UTILITY METHODS ===
 

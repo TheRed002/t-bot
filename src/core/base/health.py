@@ -7,7 +7,7 @@ and reporting for all components in the trading bot system.
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -205,7 +205,7 @@ class HealthCheckManager(BaseComponent):
             )
 
         except Exception as e:
-            raise HealthCheckError(f"Failed to register component '{name}': {e}")
+            raise HealthCheckError(f"Failed to register component '{name}': {e}") from e
 
     def unregister_component(self, name: str) -> None:
         """
@@ -240,7 +240,7 @@ class HealthCheckManager(BaseComponent):
             )
 
         except Exception as e:
-            raise HealthCheckError(f"Failed to unregister component '{name}': {e}")
+            raise HealthCheckError(f"Failed to unregister component '{name}': {e}") from e
 
     def enable_component_monitoring(self, name: str) -> None:
         """Enable monitoring for specific component."""
@@ -309,7 +309,7 @@ class HealthCheckManager(BaseComponent):
                 return cached_result
 
         try:
-            start_time = datetime.utcnow()
+            start_time = datetime.now(timezone.utc)
 
             # Perform health check based on type
             if check_type == HealthCheckType.HEALTH:
@@ -331,7 +331,7 @@ class HealthCheckManager(BaseComponent):
                 health_info.last_liveness_result = result
 
             # Record metrics
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
             self._record_check_metrics(health_info, execution_time, True)
 
             # Cache result
@@ -356,7 +356,7 @@ class HealthCheckManager(BaseComponent):
             result = HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
                 message=f"Health check timeout after {health_info.timeout}s",
-                check_time=datetime.utcnow(),
+                check_time=datetime.now(timezone.utc),
             )
 
             self._record_check_metrics(health_info, health_info.timeout, False)
@@ -369,7 +369,7 @@ class HealthCheckManager(BaseComponent):
                 status=HealthStatus.UNHEALTHY,
                 message=f"Health check error: {e}",
                 details={"error": str(e), "error_type": type(e).__name__},
-                check_time=datetime.utcnow(),
+                check_time=datetime.now(timezone.utc),
             )
 
             self._record_check_metrics(health_info, 0, False)
@@ -399,7 +399,7 @@ class HealthCheckManager(BaseComponent):
         Returns:
             Dictionary mapping component names to health results
         """
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         results = {}
 
         enabled_components = [name for name, info in self._components.items() if info.enabled]
@@ -429,7 +429,7 @@ class HealthCheckManager(BaseComponent):
                         results[name] = HealthCheckResult(
                             status=HealthStatus.UNHEALTHY,
                             message=f"Check failed: {result}",
-                            check_time=datetime.utcnow(),
+                            check_time=datetime.now(timezone.utc),
                         )
                     else:
                         results[name] = result
@@ -446,12 +446,12 @@ class HealthCheckManager(BaseComponent):
                         results[name] = HealthCheckResult(
                             status=HealthStatus.UNHEALTHY,
                             message=f"Check failed: {e}",
-                            check_time=datetime.utcnow(),
+                            check_time=datetime.now(timezone.utc),
                         )
 
-            execution_time = (datetime.utcnow() - start_time).total_seconds()
+            execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
-            self._health_metrics["last_full_check_time"] = datetime.utcnow()
+            self._health_metrics["last_full_check_time"] = datetime.now(timezone.utc)
 
             self._logger.info(
                 "All components health check completed",
@@ -469,7 +469,7 @@ class HealthCheckManager(BaseComponent):
                 manager=self._name,
                 error=str(e),
             )
-            raise HealthCheckError(f"Failed to check all components: {e}")
+            raise HealthCheckError(f"Failed to check all components: {e}") from e
 
     async def get_overall_health(self) -> HealthCheckResult:
         """
@@ -486,7 +486,7 @@ class HealthCheckManager(BaseComponent):
                 return HealthCheckResult(
                     status=HealthStatus.HEALTHY,
                     message="No components registered",
-                    check_time=datetime.utcnow(),
+                    check_time=datetime.now(timezone.utc),
                 )
 
             # Aggregate status
@@ -529,14 +529,14 @@ class HealthCheckManager(BaseComponent):
                 status=overall_status,
                 message=message,
                 details=details,
-                check_time=datetime.utcnow(),
+                check_time=datetime.now(timezone.utc),
             )
 
         except Exception as e:
             return HealthCheckResult(
                 status=HealthStatus.UNHEALTHY,
                 message=f"Failed to determine overall health: {e}",
-                check_time=datetime.utcnow(),
+                check_time=datetime.now(timezone.utc),
             )
 
     # Monitoring and Alerts
@@ -576,7 +576,7 @@ class HealthCheckManager(BaseComponent):
             health_info.consecutive_failures = 0
 
         health_info.total_checks += 1
-        health_info.last_check_time = datetime.utcnow()
+        health_info.last_check_time = datetime.now(timezone.utc)
 
         # Check for alert conditions
         should_alert = False
@@ -657,7 +657,7 @@ class HealthCheckManager(BaseComponent):
             return None
 
         # Check if cache is still valid
-        age = (datetime.utcnow() - timestamp).total_seconds()
+        age = (datetime.now(timezone.utc) - timestamp).total_seconds()
         if age > self._cache_ttl:
             # Remove expired cache entry
             self._health_cache.pop(cache_key, None)
@@ -672,7 +672,7 @@ class HealthCheckManager(BaseComponent):
         """Cache health check result."""
         cache_key = f"{component_name}_{check_type.value}"
         self._health_cache[cache_key] = result
-        self._cache_timestamps[cache_key] = datetime.utcnow()
+        self._cache_timestamps[cache_key] = datetime.now(timezone.utc)
 
     def clear_cache(self, component_name: str | None = None) -> None:
         """

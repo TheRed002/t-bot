@@ -18,7 +18,7 @@ Features:
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.base import BaseComponent
@@ -33,7 +33,8 @@ from src.core.performance.performance_monitor import AlertLevel, PerformanceMoni
 from src.core.performance.trading_profiler import TradingOperation, TradingOperationOptimizer
 from src.database.service import DatabaseService
 
-# from src.exchanges.connection_pool import ConnectionPoolManager  # Removed to fix circular dependency
+# from src.exchanges.connection_pool import ConnectionPoolManager
+# Removed to fix circular dependency
 
 logger = get_logger(__name__)
 
@@ -63,7 +64,8 @@ class PerformanceOptimizer(BaseComponent):
         self.trading_profiler: TradingOperationOptimizer | None = None
         self.cache_layer: UnifiedCacheLayer | None = None
         self.database_service: DatabaseService | None = None
-        # self.connection_pool_manager: ConnectionPoolManager | None = None  # Commented to fix circular dependency
+        # self.connection_pool_manager: ConnectionPoolManager | None = None
+        # Commented to fix circular dependency
 
         # Performance targets
         self.latency_targets = {
@@ -127,7 +129,7 @@ class PerformanceOptimizer(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to initialize performance optimizer: {e}")
-            raise PerformanceError(f"Performance optimizer initialization failed: {e}")
+            raise PerformanceError(f"Performance optimizer initialization failed: {e}") from e
 
     async def _initialize_performance_monitor(self) -> None:
         """Initialize performance monitoring component."""
@@ -161,7 +163,8 @@ class PerformanceOptimizer(BaseComponent):
 
     async def _initialize_connection_pools(self) -> None:
         """Initialize connection pool management."""
-        # self.connection_pool_manager = ConnectionPoolManager(self.config)  # Commented to fix circular dependency
+        # self.connection_pool_manager = ConnectionPoolManager(self.config)
+        # Commented to fix circular dependency
         await self.connection_pool_manager.initialize()
         self.logger.info("Connection pool manager initialized")
 
@@ -208,7 +211,7 @@ class PerformanceOptimizer(BaseComponent):
                 # Update performance history
                 self.performance_history.append(
                     {
-                        "timestamp": datetime.utcnow(),
+                        "timestamp": datetime.now(timezone.utc),
                         "metrics": metrics,
                         "actions": optimization_actions,
                     }
@@ -261,7 +264,7 @@ class PerformanceOptimizer(BaseComponent):
     async def _collect_comprehensive_metrics(self) -> dict[str, Any]:
         """Collect metrics from all optimization components."""
         metrics = {
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "performance_monitor": {},
             "memory_optimizer": {},
             "cache_layer": {},
@@ -273,9 +276,9 @@ class PerformanceOptimizer(BaseComponent):
         try:
             # Performance monitor metrics
             if self.performance_monitor:
-                metrics[
-                    "performance_monitor"
-                ] = await self.performance_monitor.get_performance_summary()
+                metrics["performance_monitor"] = (
+                    await self.performance_monitor.get_performance_summary()
+                )
 
             # Memory optimizer metrics
             if self.memory_optimizer:
@@ -324,7 +327,10 @@ class PerformanceOptimizer(BaseComponent):
                             "current_p95_ms": p95_latency,
                             "target_ms": target,
                             "priority": "high" if p95_latency > target * 2 else "medium",
-                            "recommendation": f"Optimize {operation} - current P95 {p95_latency:.1f}ms exceeds target {target}ms",
+                            "recommendation": (
+                                f"Optimize {operation} - current P95 {p95_latency:.1f}ms "
+                                f"exceeds target {target}ms"
+                            ),
                         }
                     )
 
@@ -338,7 +344,10 @@ class PerformanceOptimizer(BaseComponent):
                         "component": "memory_management",
                         "current_memory_mb": memory_mb,
                         "priority": "high" if memory_mb > 1800 else "medium",
-                        "recommendation": f"High memory usage {memory_mb:.0f}MB - consider garbage collection or memory cleanup",
+                        "recommendation": (
+                            f"High memory usage {memory_mb:.0f}MB - "
+                            "consider garbage collection or memory cleanup"
+                        ),
                     }
                 )
 
@@ -355,7 +364,10 @@ class PerformanceOptimizer(BaseComponent):
                                 "cache_level": level,
                                 "hit_rate": hit_rate,
                                 "priority": "medium",
-                                "recommendation": f"Low cache hit rate {hit_rate:.1%} for {level} - consider cache warming or TTL adjustment",
+                                "recommendation": (
+                                    f"Low cache hit rate {hit_rate:.1%} for {level} - "
+                                    "consider cache warming or TTL adjustment"
+                                ),
                             }
                         )
 
@@ -369,7 +381,10 @@ class PerformanceOptimizer(BaseComponent):
                         "component": "database",
                         "avg_query_time_ms": avg_query_time,
                         "priority": "high" if avg_query_time > 50 else "medium",
-                        "recommendation": f"Slow database queries {avg_query_time:.1f}ms average - consider indexing or query optimization",
+                        "recommendation": (
+                            f"Slow database queries {avg_query_time:.1f}ms average - "
+                            "consider indexing or query optimization"
+                        ),
                     }
                 )
 
@@ -394,11 +409,15 @@ class PerformanceOptimizer(BaseComponent):
 
                 if component == "memory_management" and self.memory_optimizer:
                     result = await self.memory_optimizer.force_memory_optimization()
-                    action_taken = f"Forced memory optimization: freed {result.get('memory_freed_mb', 0):.1f}MB"
+                    freed_mb = result.get("memory_freed_mb", 0)
+                    action_taken = f"Forced memory optimization: freed {freed_mb:.1f}MB"
 
                 elif component == "trading_operations" and self.trading_profiler:
                     result = await self.trading_profiler.force_optimization_analysis()
-                    action_taken = f"Forced trading optimization analysis: {result.get('recommendations_generated', 0)} recommendations"
+                    rec_count = result.get("recommendations_generated", 0)
+                    action_taken = (
+                        f"Forced trading optimization analysis: {rec_count} recommendations"
+                    )
 
                 elif component == "database" and self.database_service:
                     # Database optimizations are built into the service
@@ -412,7 +431,7 @@ class PerformanceOptimizer(BaseComponent):
                 if action_taken:
                     self.optimization_actions.append(
                         {
-                            "timestamp": datetime.utcnow(),
+                            "timestamp": datetime.now(timezone.utc),
                             "opportunity": opportunity,
                             "action_taken": action_taken,
                         }
@@ -426,7 +445,7 @@ class PerformanceOptimizer(BaseComponent):
     async def _handle_performance_alert(self, alert) -> None:
         """Handle performance alerts from the performance monitor."""
         alert_data = {
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "source": "performance_monitor",
             "alert": alert.__dict__,
             "handled": False,
@@ -458,7 +477,7 @@ class PerformanceOptimizer(BaseComponent):
     async def _handle_memory_alert(self, alert_level: str, message: str, stats) -> None:
         """Handle memory alerts from the memory optimizer."""
         alert_data = {
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "source": "memory_optimizer",
             "level": alert_level,
             "message": message,
@@ -487,8 +506,9 @@ class PerformanceOptimizer(BaseComponent):
             opportunities = await self._analyze_optimization_opportunities(baseline_metrics)
 
             # Log assessment results
+            opp_count = len(opportunities)
             self.logger.info(
-                f"Initial assessment complete: {len(opportunities)} optimization opportunities identified",
+                f"Initial assessment complete: {opp_count} optimization opportunities identified",
                 extra={
                     "high_priority_optimizations": len(
                         [o for o in opportunities if o.get("priority") == "high"]
@@ -519,7 +539,7 @@ class PerformanceOptimizer(BaseComponent):
     async def get_performance_report(self) -> dict[str, Any]:
         """Get comprehensive performance report."""
         report = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "system_status": "initialized" if self._initialized else "initializing",
             "latency_targets": self.latency_targets,
             "trading_latencies": {},
@@ -596,7 +616,7 @@ class PerformanceOptimizer(BaseComponent):
             recent_alerts = [
                 a
                 for a in self.alerts_history
-                if (datetime.utcnow() - a["timestamp"]).total_seconds() < 3600
+                if (datetime.now(timezone.utc) - a["timestamp"]).total_seconds() < 3600
             ]  # Last hour
             report["alert_summary"] = {
                 "active_count": len(recent_alerts),
@@ -611,7 +631,9 @@ class PerformanceOptimizer(BaseComponent):
                     opp["recommendation"]
                     for opp in latest_opportunities
                     if opp.get("priority") in ["high", "medium"]
-                ][:5]  # Top 5 recommendations
+                ][
+                    :5
+                ]  # Top 5 recommendations
 
         except Exception as e:
             self.logger.error(f"Error generating performance report: {e}")
@@ -624,7 +646,7 @@ class PerformanceOptimizer(BaseComponent):
         self.logger.info("Starting forced optimization across all components")
 
         results = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "memory_optimization": {},
             "trading_optimization": {},
             "cache_optimization": {},
@@ -634,15 +656,15 @@ class PerformanceOptimizer(BaseComponent):
         try:
             # Force memory optimization
             if self.memory_optimizer:
-                results[
-                    "memory_optimization"
-                ] = await self.memory_optimizer.force_memory_optimization()
+                results["memory_optimization"] = (
+                    await self.memory_optimizer.force_memory_optimization()
+                )
 
             # Force trading optimization analysis
             if self.trading_profiler:
-                results[
-                    "trading_optimization"
-                ] = await self.trading_profiler.force_optimization_analysis()
+                results["trading_optimization"] = (
+                    await self.trading_profiler.force_optimization_analysis()
+                )
 
             # Clear and optimize caches
             if self.cache_layer:
@@ -678,50 +700,84 @@ class PerformanceOptimizer(BaseComponent):
             self.logger.info("Cleaning up performance optimizer...")
 
             # Cancel background tasks
-            if self._coordinator_task:
-                self._coordinator_task.cancel()
-                try:
-                    await self._coordinator_task
-                except asyncio.CancelledError:
-                    pass
-
-            if self._reporting_task:
-                self._reporting_task.cancel()
-                try:
-                    await self._reporting_task
-                except asyncio.CancelledError:
-                    pass
+            await self._cleanup_background_tasks()
 
             # Cleanup components
-            if self.memory_optimizer:
-                await self.memory_optimizer.cleanup()
+            await self._cleanup_optimization_components()
 
-            if self.performance_monitor:
-                await self.performance_monitor.cleanup()
-
-            if self.trading_profiler:
-                await self.trading_profiler.cleanup()
-
-            if self.cache_layer:
-                await self.cache_layer.cleanup()
-
-            if self.database_service:
-                await self.database_service.stop()
-
-            if self.connection_pool_manager:
-                await self.connection_pool_manager.cleanup()
-
-            # Clear history
-            self.performance_history.clear()
-            self.alerts_history.clear()
-            self.optimization_actions.clear()
+            # Clear history data
+            self._clear_history_data()
 
             self._initialized = False
-
             self.logger.info("Performance optimizer cleaned up successfully")
 
         except Exception as e:
             self.logger.error(f"Performance optimizer cleanup error: {e}")
+
+    async def _cleanup_background_tasks(self) -> None:
+        """Cancel and cleanup background tasks."""
+        tasks_to_cancel = [
+            (self._coordinator_task, "coordinator"),
+            (self._reporting_task, "reporting"),
+        ]
+
+        for task, task_name in tasks_to_cancel:
+            if task:
+                await self._cancel_task_safely(task, task_name)
+
+    async def _cancel_task_safely(self, task, task_name: str) -> None:
+        """Safely cancel a single task."""
+        try:
+            task.cancel()
+            await task
+        except asyncio.CancelledError:
+            self.logger.debug(f"{task_name} task cancelled successfully")
+        except Exception as e:
+            self.logger.warning(f"Error cancelling {task_name} task: {e}")
+
+    async def _cleanup_optimization_components(self) -> None:
+        """Cleanup all optimization components."""
+        components = [
+            (self.memory_optimizer, "memory_optimizer"),
+            (self.performance_monitor, "performance_monitor"),
+            (self.trading_profiler, "trading_profiler"),
+            (self.cache_layer, "cache_layer"),
+            (self.connection_pool_manager, "connection_pool_manager"),
+        ]
+
+        for component, component_name in components:
+            if component:
+                await self._cleanup_single_component(component, component_name)
+
+        # Special case for database service
+        if self.database_service:
+            await self._cleanup_database_service()
+
+    async def _cleanup_single_component(self, component, component_name: str) -> None:
+        """Cleanup a single optimization component."""
+        try:
+            await component.cleanup()
+            self.logger.debug(f"{component_name} cleaned up successfully")
+        except Exception as e:
+            self.logger.warning(f"Error cleaning up {component_name}: {e}")
+
+    async def _cleanup_database_service(self) -> None:
+        """Cleanup database service specifically."""
+        try:
+            await self.database_service.stop()
+            self.logger.debug("Database service stopped successfully")
+        except Exception as e:
+            self.logger.warning(f"Error stopping database service: {e}")
+
+    def _clear_history_data(self) -> None:
+        """Clear all history data structures."""
+        try:
+            self.performance_history.clear()
+            self.alerts_history.clear()
+            self.optimization_actions.clear()
+            self.logger.debug("History data cleared successfully")
+        except Exception as e:
+            self.logger.warning(f"Error clearing history data: {e}")
 
     @property
     def is_initialized(self) -> bool:
@@ -730,11 +786,13 @@ class PerformanceOptimizer(BaseComponent):
 
     def get_component_status(self) -> dict[str, bool]:
         """Get status of all optimization components."""
-        return {
-            "memory_optimizer": self.memory_optimizer is not None,
-            "performance_monitor": self.performance_monitor is not None,
-            "trading_profiler": self.trading_profiler is not None,
-            "cache_layer": self.cache_layer is not None,
-            "database_service": self.database_service is not None,
-            "connection_pool_manager": self.connection_pool_manager is not None,
-        }
+        components = [
+            ("memory_optimizer", self.memory_optimizer),
+            ("performance_monitor", self.performance_monitor),
+            ("trading_profiler", self.trading_profiler),
+            ("cache_layer", self.cache_layer),
+            ("database_service", self.database_service),
+            ("connection_pool_manager", self.connection_pool_manager),
+        ]
+
+        return {name: component is not None for name, component in components}

@@ -16,7 +16,7 @@ Circuit Breaker Types:
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -89,7 +89,7 @@ class BaseCircuitBreaker(ABC):
         self.logger = logger.bind(component="circuit_breaker")
 
         # Circuit breaker state
-        self.state = CircuitBreakerStatus.CLOSED
+        self.state = CircuitBreakerStatus.ACTIVE
         self.trigger_time: datetime | None = None
         self.recovery_time: datetime | None = None
         self.trigger_count = 0
@@ -154,12 +154,15 @@ class BaseCircuitBreaker(ABC):
             bool: True if circuit breaker is triggered
         """
         try:
-            if self.state == CircuitBreakerStatus.OPEN:
+            if self.state == CircuitBreakerStatus.TRIGGERED:
                 # Check if recovery timeout has passed
-                if self.trigger_time and datetime.now() - self.trigger_time > self.recovery_timeout:
-                    self.state = CircuitBreakerStatus.HALF_OPEN
+                if (
+                    self.trigger_time
+                    and datetime.now(timezone.utc) - self.trigger_time > self.recovery_timeout
+                ):
+                    self.state = CircuitBreakerStatus.COOLDOWN
                     self.logger.info(
-                        "Circuit breaker transitioning to half-open state",
+                        "Circuit breaker transitioning to cooldown state",
                         breaker_type=self.__class__.__name__,
                     )
 
@@ -168,8 +171,8 @@ class BaseCircuitBreaker(ABC):
                 await self._trigger_circuit_breaker(data)
                 return True
 
-            # If half-open and condition passes, close circuit breaker
-            if self.state == CircuitBreakerStatus.HALF_OPEN:
+            # If cooling down and condition passes, reactivate circuit breaker
+            if self.state == CircuitBreakerStatus.COOLDOWN:
                 await self._close_circuit_breaker()
 
             return False
@@ -196,9 +199,9 @@ class BaseCircuitBreaker(ABC):
 
     async def _trigger_circuit_breaker(self, data: dict[str, Any]) -> None:
         """Trigger the circuit breaker and log the event."""
-        if self.state == CircuitBreakerStatus.CLOSED:
-            self.state = CircuitBreakerStatus.OPEN
-            self.trigger_time = datetime.now()
+        if self.state == CircuitBreakerStatus.ACTIVE:
+            self.state = CircuitBreakerStatus.TRIGGERED
+            self.trigger_time = datetime.now(timezone.utc)
             self.trigger_count += 1
 
             # Create event record
@@ -207,16 +210,22 @@ class BaseCircuitBreaker(ABC):
 
             # Use the breaker_type class attribute defined in each circuit
             # breaker class
-            breaker_type = getattr(
-                self.__class__, "breaker_type", CircuitBreakerType.MANUAL_TRIGGER
-            )
+            # Get the breaker type from class attribute
+            try:
+                breaker_type = self.__class__.breaker_type
+            except AttributeError:
+                # Fallback to MANUAL_TRIGGER if not defined
+                breaker_type = CircuitBreakerType.MANUAL_TRIGGER
 
             event = CircuitBreakerEvent(
-                trigger_type=breaker_type,
-                threshold=threshold_value,
-                actual_value=current_value,
-                timestamp=datetime.now(),
-                description=f"Circuit breaker triggered: {current_value} > {threshold_value}",
+                breaker_id=f"{self.__class__.__name__}_{id(self)}",
+                breaker_type=breaker_type,
+                status=CircuitBreakerStatus.TRIGGERED,
+                triggered_at=datetime.now(timezone.utc),
+                trigger_value=float(current_value),
+                threshold_value=float(threshold_value),
+                cooldown_period=int(self.recovery_timeout.total_seconds()),
+                reason=f"Circuit breaker triggered: {current_value} > {threshold_value}",
                 metadata={"trigger_count": self.trigger_count},
             )
 
@@ -245,12 +254,12 @@ class BaseCircuitBreaker(ABC):
             )
 
     async def _close_circuit_breaker(self) -> None:
-        """Close the circuit breaker after successful recovery."""
-        self.state = CircuitBreakerStatus.CLOSED
-        self.recovery_time = datetime.now()
+        """Reactivate the circuit breaker after successful recovery."""
+        self.state = CircuitBreakerStatus.ACTIVE
+        self.recovery_time = datetime.now(timezone.utc)
 
         self.logger.info(
-            "Circuit breaker closed after recovery",
+            "Circuit breaker reactivated after recovery",
             breaker_type=self.__class__.__name__,
             recovery_time=self.recovery_time,
         )
@@ -267,7 +276,7 @@ class BaseCircuitBreaker(ABC):
 
     def reset(self) -> None:
         """Reset circuit breaker to initial state."""
-        self.state = CircuitBreakerStatus.CLOSED
+        self.state = CircuitBreakerStatus.ACTIVE
         self.trigger_time = None
         self.recovery_time = None
         self.trigger_count = 0
@@ -288,7 +297,8 @@ class DailyLossLimitBreaker(BaseCircuitBreaker):
 
     def __init__(self, config: Config, risk_manager: BaseRiskManager):
         super().__init__(config, risk_manager)
-        self.threshold_pct = self.risk_config.max_daily_loss_pct
+        # Use percentage of capital as threshold (default to 5%)
+        self.threshold_pct = Decimal("0.05")  # Default 5% daily loss limit
         self.logger = logger.bind(breaker_type="daily_loss_limit")
 
     async def get_threshold_value(self) -> Decimal:
@@ -327,7 +337,7 @@ class DrawdownLimitBreaker(BaseCircuitBreaker):
 
     def __init__(self, config: Config, risk_manager: BaseRiskManager):
         super().__init__(config, risk_manager)
-        self.threshold_pct = self.risk_config.max_drawdown_pct
+        self.threshold_pct = Decimal(str(self.risk_config.max_drawdown))
         self.logger = logger.bind(breaker_type="drawdown_limit")
 
     async def get_threshold_value(self) -> Decimal:
@@ -401,9 +411,50 @@ class VolatilitySpikeBreaker(BaseCircuitBreaker):
 
         # Calculate volatility (standard deviation of returns)
         try:
-            vol_float = calculate_volatility([float(r) for r in returns])
+            # Convert returns to float list with error handling
+            float_returns = []
+            for r in returns:
+                try:
+                    float_returns.append(float(r))
+                except (TypeError, ValueError) as e:
+                    self.logger.warning(
+                        "Invalid return value in volatility calculation",
+                        return_value=r,
+                        error=str(e),
+                    )
+                    continue
+
+            if not float_returns:
+                self.logger.warning("No valid returns for volatility calculation")
+                return Decimal("0")
+
+            vol_float = calculate_volatility(float_returns)
+
+            # Validate the calculated volatility
+            if vol_float is None or vol_float < 0 or not isinstance(vol_float, int | float):
+                self.logger.warning("Invalid volatility calculated", volatility=vol_float)
+                return Decimal("0")
+
+            # Apply reasonable bounds (max 100% daily volatility)
+            vol_float = min(vol_float, 1.0)
+
             return Decimal(str(vol_float))
-        except Exception:
+        except ImportError as e:
+            self.logger.error("Missing dependency for volatility calculation", error=str(e))
+            return Decimal("0")
+        except (TypeError, ValueError, ArithmeticError) as e:
+            self.logger.error(
+                "Mathematical error in volatility calculation",
+                error=str(e),
+                returns_count=len(returns) if returns else 0,
+            )
+            return Decimal("0")
+        except Exception as e:
+            self.logger.error(
+                "Unexpected error in volatility calculation",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return Decimal("0")
 
     @time_execution
@@ -473,24 +524,62 @@ class SystemErrorRateBreaker(BaseCircuitBreaker):
 
     async def get_current_value(self, data: dict[str, Any]) -> Decimal:
         """Calculate current error rate."""
-        current_time = datetime.now()
+        current_time = datetime.now(timezone.utc)
         window_start = current_time - self.error_window
 
-        # Clean old errors
-        self.error_times = [t for t in self.error_times if t > window_start]
+        # Clean old errors with error handling
+        try:
+            self.error_times = [t for t in self.error_times if t > window_start]
+        except (TypeError, AttributeError) as e:
+            self.logger.warning("Error cleaning old error timestamps", error=str(e))
+            self.error_times = []  # Reset to empty list
 
-        # Add new error if provided
-        if data.get("error_occurred", False):
-            self.error_times.append(current_time)
+        # Add new error if provided with validation
+        try:
+            if data.get("error_occurred", False):
+                self.error_times.append(current_time)
+        except Exception as e:
+            self.logger.warning("Error adding new error timestamp", error=str(e))
 
         total_requests = data.get("total_requests", 1)
         error_count = len(self.error_times)
 
-        if total_requests <= 0:
-            return Decimal("0")
+        # Validate total requests
+        try:
+            if not isinstance(total_requests, int | float) or total_requests <= 0:
+                self.logger.warning(
+                    "Invalid total_requests value for error rate calculation",
+                    total_requests=total_requests,
+                    total_requests_type=type(total_requests).__name__,
+                )
+                return Decimal("0")
 
-        error_rate = Decimal(str(error_count)) / Decimal(str(total_requests))
-        return error_rate
+            error_rate = Decimal(str(error_count)) / Decimal(str(total_requests))
+
+            # Sanity check the result
+            if error_rate > Decimal("1.0"):
+                self.logger.warning(
+                    "Error rate exceeds 100%, capping at 100%",
+                    calculated_rate=str(error_rate),
+                    error_count=error_count,
+                    total_requests=total_requests,
+                )
+                error_rate = Decimal("1.0")
+
+            return error_rate
+        except (ValueError, TypeError, ArithmeticError) as e:
+            self.logger.error(
+                "Mathematical error calculating error rate",
+                error=str(e),
+                error_count=error_count,
+                total_requests=total_requests,
+            )
+            return Decimal("0")
+        except Exception as e:
+            self.logger.error(
+                "Unexpected error calculating error rate", error=str(e), error_type=type(e).__name__
+            )
+            return Decimal("0")
 
     @time_execution
     async def check_condition(self, data: dict[str, Any]) -> bool:
@@ -817,7 +906,7 @@ class CircuitBreakerManager:
         triggered = []
 
         for name, breaker in self.circuit_breakers.items():
-            if breaker.state == CircuitBreakerStatus.OPEN:
+            if breaker.state == CircuitBreakerStatus.TRIGGERED:
                 triggered.append(name)
 
         return triggered

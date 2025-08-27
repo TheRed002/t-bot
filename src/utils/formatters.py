@@ -40,7 +40,7 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-def format_currency(amount: float, currency: str = "USD", precision: int = 2) -> str:
+def format_currency(amount: float | int | Decimal, currency: str = "USD", precision: int = 2) -> str:
     """
     Format amount as currency string.
 
@@ -68,13 +68,13 @@ def format_currency(amount: float, currency: str = "USD", precision: int = 2) ->
 
     # Convert to Decimal for precise formatting
     decimal_amount = Decimal(str(amount))
-    
+
     # Create quantizer based on precision
     if precision > 0:
         quantizer = Decimal(10) ** -precision
     else:
         quantizer = Decimal("1")
-    
+
     formatted_amount = decimal_amount.quantize(quantizer, rounding=ROUND_HALF_UP)
 
     # Format with thousands separators
@@ -83,7 +83,7 @@ def format_currency(amount: float, currency: str = "USD", precision: int = 2) ->
     return f"{formatted} {currency.upper()}"
 
 
-def format_percentage(value: float, precision: int = 2) -> str:
+def format_percentage(value: float | int | Decimal, precision: int = 2) -> str:
     """
     Format value as percentage.
 
@@ -110,7 +110,7 @@ def format_percentage(value: float, precision: int = 2) -> str:
         return f"{percentage:.{precision}f}%"
 
 
-def format_pnl(pnl: float, currency: str = "USD") -> tuple[str, str]:
+def format_pnl(pnl: float | int | Decimal, currency: str = "USD") -> tuple[str, str]:
     """
     Format P&L with appropriate color coding info.
 
@@ -143,7 +143,7 @@ def format_pnl(pnl: float, currency: str = "USD") -> tuple[str, str]:
     return f"{symbol}{formatted}", color
 
 
-def format_quantity(quantity: float, symbol: str) -> str:
+def format_quantity(quantity: float | int | Decimal, symbol: str) -> str:
     """
     Format trading quantity with appropriate precision.
 
@@ -172,7 +172,7 @@ def format_quantity(quantity: float, symbol: str) -> str:
 
     # Convert to Decimal for precise formatting
     decimal_qty = Decimal(str(quantity))
-    
+
     # Create quantizer based on precision
     quantizer = Decimal(10) ** -precision
     formatted_qty = decimal_qty.quantize(quantizer, rounding=ROUND_HALF_UP)
@@ -180,7 +180,7 @@ def format_quantity(quantity: float, symbol: str) -> str:
     return f"{formatted_qty:,.{precision}f}"
 
 
-def format_price(price: float, symbol: str) -> str:
+def format_price(price: float | int | Decimal, symbol: str) -> str:
     """
     Format price with appropriate precision.
 
@@ -209,7 +209,7 @@ def format_price(price: float, symbol: str) -> str:
 
     # Convert to Decimal for precise formatting
     decimal_price = Decimal(str(price))
-    
+
     # Create quantizer based on precision
     quantizer = Decimal(10) ** -precision
     formatted_price = decimal_price.quantize(quantizer, rounding=ROUND_HALF_UP)
@@ -259,21 +259,23 @@ def format_error_response(error: Exception, error_code: str | None = None) -> di
     Returns:
         Formatted error response dictionary
     """
-    response = {
-        "success": False,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "error": {
-            "type": type(error).__name__,
-            "message": str(error),
-            "details": getattr(error, "details", {}),
-        },
+    error_dict: dict[str, Any] = {
+        "type": type(error).__name__,
+        "message": str(error),
+        "details": getattr(error, "details", {}),
     }
 
     if error_code:
-        response["error"]["code"] = error_code
+        error_dict["code"] = error_code
 
     if hasattr(error, "error_code"):
-        response["error"]["code"] = error.error_code
+        error_dict["code"] = error.error_code
+
+    response = {
+        "success": False,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "error": error_dict,
+    }
 
     return response
 
@@ -333,7 +335,7 @@ def format_paginated_response(
 # =============================================================================
 
 
-def format_log_entry(level: str, message: str, **kwargs) -> dict[str, Any]:
+def format_log_entry(level: str, message: str, **kwargs: Any) -> dict[str, Any]:
     """
     Format structured log entry.
 
@@ -377,7 +379,7 @@ def format_correlation_id(correlation_id: str) -> str:
 
 
 def format_structured_log(
-    level: str, message: str, correlation_id: str | None = None, **kwargs
+    level: str, message: str, correlation_id: str | None = None, **kwargs: Any
 ) -> str:
     """
     Format structured log as JSON string.
@@ -400,7 +402,7 @@ def format_structured_log(
 
 
 def format_performance_log(
-    function_name: str, execution_time_ms: float, success: bool, **kwargs
+    function_name: str, execution_time_ms: float, success: bool, **kwargs: Any
 ) -> dict[str, Any]:
     """
     Format performance log entry.
@@ -525,7 +527,7 @@ def format_chart_data(
     Returns:
         Formatted chart data dictionary
     """
-    chart_data = {
+    chart_data: dict[str, Any] = {
         "symbol": symbol,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "ohlcv": format_ohlcv_data(ohlcv_data),
@@ -752,7 +754,7 @@ def format_json_data(data: Any, pretty: bool = True) -> str:
         else:
             return json.dumps(data, default=str)
     except (TypeError, ValueError) as e:
-        raise ValidationError(f"Cannot serialize data to JSON: {e!s}")
+        raise ValidationError(f"Cannot serialize data to JSON: {e!s}") from e
 
 
 def export_to_file(data: Any, file_path: str, format_type: str = "json") -> None:
@@ -786,9 +788,9 @@ def export_to_file(data: Any, file_path: str, format_type: str = "json") -> None
         elif format_type.lower() == "excel":
             if not isinstance(data, list):
                 raise ValidationError("Excel export requires list of dictionaries")
-            content = format_excel_data(data)
+            content_bytes = format_excel_data(data)
             with open(path, "wb") as f:
-                f.write(content)
+                f.write(content_bytes)
 
         else:
             raise ValidationError(f"Unsupported export format: {format_type}")
@@ -796,4 +798,4 @@ def export_to_file(data: Any, file_path: str, format_type: str = "json") -> None
         logger.info(f"Data exported to {file_path} in {format_type} format")
 
     except Exception as e:
-        raise ValidationError(f"Export failed: {e!s}")
+        raise ValidationError(f"Export failed: {e!s}") from e

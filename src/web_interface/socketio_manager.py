@@ -10,7 +10,7 @@ This module provides centralized Socket.IO management with:
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import socketio
@@ -24,14 +24,16 @@ except ImportError:
 
     class BaseComponent:
         """Minimal BaseComponent fallback."""
+
         def __init__(self):
             self.logger = logging.getLogger(self.__class__.__module__)
+
+
 from src.core.exceptions import AuthenticationError
 from src.core.logging import correlation_context
 from src.error_handling import (
     ConnectionManager,
     ConnectionState,
-    ErrorSeverity,
     with_error_context,
 )
 from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
@@ -71,7 +73,7 @@ class TradingNamespace(AsyncNamespace):
             await self.connection_manager.add_connection(
                 connection_id=sid,
                 connection_type="socketio",
-                metadata={"client_ip": client_ip, "namespace": self.namespace}
+                metadata={"client_ip": client_ip, "namespace": self.namespace},
             )
             await self.connection_manager.update_state(sid, ConnectionState.CONNECTING)
         except Exception as e:
@@ -90,7 +92,7 @@ class TradingNamespace(AsyncNamespace):
 
         # Store client info
         self.connected_clients[sid] = {
-            "connected_at": datetime.utcnow().isoformat(),
+            "connected_at": datetime.now(timezone.utc).isoformat(),
             "authenticated": False,
             "user_id": None,
             "username": None,
@@ -130,7 +132,7 @@ class TradingNamespace(AsyncNamespace):
                 "auth_required",
                 {
                     "message": "Authentication required for secure features",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
                 room=sid,
             )
@@ -140,7 +142,7 @@ class TradingNamespace(AsyncNamespace):
             "welcome",
             {
                 "message": "Connected to T-Bot Trading System",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "version": "1.0.0",
                 "authenticated": self.connected_clients[sid]["authenticated"],
             },
@@ -149,9 +151,7 @@ class TradingNamespace(AsyncNamespace):
 
         return True
 
-    @with_error_context(
-        operation="socketio_disconnect"
-    )
+    @with_error_context(operation="socketio_disconnect")
     async def on_disconnect(self, sid: str):
         """Handle client disconnection."""
         self.logger.info(f"Client disconnected: {sid}")
@@ -186,9 +186,7 @@ class TradingNamespace(AsyncNamespace):
         except Exception as e:
             self.logger.warning(f"Failed to remove connection {sid} from manager: {e}")
 
-    @with_error_context(
-        operation="socketio_authenticate"
-    )
+    @with_error_context(operation="socketio_authenticate")
     async def on_authenticate(self, sid: str, data: dict[str, Any]):
         """Handle authentication request."""
         token = data.get("token")
@@ -201,7 +199,7 @@ class TradingNamespace(AsyncNamespace):
             self.authenticated_sessions.add(sid)
             await self.emit(
                 "authenticated",
-                {"status": "success", "timestamp": datetime.utcnow().isoformat()},
+                {"status": "success", "timestamp": datetime.now(timezone.utc).isoformat()},
                 room=sid,
             )
 
@@ -227,7 +225,7 @@ class TradingNamespace(AsyncNamespace):
             "subscribed",
             {
                 "channels": list(self.connected_clients[sid]["subscriptions"]),
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
             room=sid,
         )
@@ -242,7 +240,7 @@ class TradingNamespace(AsyncNamespace):
 
         await self.emit(
             "unsubscribed",
-            {"channels": channels, "timestamp": datetime.utcnow().isoformat()},
+            {"channels": channels, "timestamp": datetime.now(timezone.utc).isoformat()},
             room=sid,
         )
 
@@ -255,7 +253,7 @@ class TradingNamespace(AsyncNamespace):
 
         await self.emit(
             "pong",
-            {"timestamp": datetime.utcnow().isoformat(), "latency": latency},
+            {"timestamp": datetime.now(timezone.utc).isoformat(), "latency": latency},
             room=sid,
         )
 
@@ -280,9 +278,9 @@ class TradingNamespace(AsyncNamespace):
         await self.emit(
             "order_submitted",
             {
-                "order_id": f"ORD-{sid}-{datetime.utcnow().timestamp()}",
+                "order_id": f"ORD-{sid}-{datetime.now(timezone.utc).timestamp()}",
                 "status": "pending",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
             room=sid,
         )
@@ -307,7 +305,7 @@ class TradingNamespace(AsyncNamespace):
                     "pnl": 100.00,
                 }
             ],
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         await self.emit("portfolio_data", portfolio_data, room=sid)
@@ -462,7 +460,7 @@ class SocketIOManager(BaseComponent):
                                 "change_24h": -1.2,
                             },
                         },
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
                     if self.sio:
@@ -500,7 +498,7 @@ class SocketIOManager(BaseComponent):
                                 }
                             ],
                         },
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
                     if self.sio:
@@ -531,7 +529,7 @@ class SocketIOManager(BaseComponent):
                             "daily_pnl": 123.45,
                             "daily_pnl_percent": 1.25,
                         },
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
 
                     if self.sio:

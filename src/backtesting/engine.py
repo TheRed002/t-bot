@@ -82,12 +82,10 @@ class BacktestConfig(BaseModel):
     @classmethod
     def validate_rates(cls, v: Decimal) -> Decimal:
         """Validate commission and slippage rates."""
-        # Validate as a price-like value (rates are similar to prices)
-        try:
-            ValidationFramework.validate_price(v, max_price=0.1)
-            if v < 0:
-                raise ValueError("Rate must be non-negative")
-        except ValueError:
+        # Rates can be zero (no commission/slippage) but must be non-negative and <= 10%
+        if v < 0:
+            raise ValueError("Rate must be between 0 and 0.1 (10%)")
+        if v > Decimal("0.1"):
             raise ValueError("Rate must be between 0 and 0.1 (10%)")
         return v
 
@@ -173,9 +171,9 @@ class BacktestEngine:
             "BacktestEngine initialized",
             config=config.model_dump(),
             strategy=strategy.name,
-            strategy_type=strategy.strategy_type.value
-            if hasattr(strategy, "strategy_type")
-            else "unknown",
+            strategy_type=(
+                strategy.strategy_type.value if hasattr(strategy, "strategy_type") else "unknown"
+            ),
         )
 
     @time_execution
@@ -832,9 +830,11 @@ class BacktestEngine:
             metadata={
                 "config": self.config.model_dump(),
                 "strategy": self.strategy.name,
-                "strategy_type": self.strategy.strategy_type.value
-                if hasattr(self.strategy, "strategy_type")
-                else "unknown",
+                "strategy_type": (
+                    self.strategy.strategy_type.value
+                    if hasattr(self.strategy, "strategy_type")
+                    else "unknown"
+                ),
                 "backtest_duration": str(self.config.end_date - self.config.start_date),
                 "strategy_metrics": strategy_metrics,
             },

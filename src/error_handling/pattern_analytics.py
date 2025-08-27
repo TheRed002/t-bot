@@ -55,7 +55,7 @@ class OptimizedErrorHistory:
         self.max_size = max_size
         self.cleanup_interval_minutes = cleanup_interval_minutes
         self._history: deque[dict[str, Any]] = deque(maxlen=max_size)
-        self._last_cleanup = datetime.utcnow()
+        self._last_cleanup = datetime.now(timezone.utc)
         self._lock = threading.RLock()
         self._total_events = 0
 
@@ -86,12 +86,14 @@ class OptimizedErrorHistory:
 
     def _should_cleanup(self) -> bool:
         """Check if cleanup is needed."""
-        minutes_since_cleanup = (datetime.utcnow() - self._last_cleanup).total_seconds() / 60
+        minutes_since_cleanup = (
+            datetime.now(timezone.utc) - self._last_cleanup
+        ).total_seconds() / 60
         return minutes_since_cleanup >= self.cleanup_interval_minutes
 
     def _cleanup_old_events(self) -> None:
         """Remove events older than 48 hours."""
-        cutoff = datetime.utcnow() - timedelta(hours=48)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
         with self._lock:
             # Since we're using deque, we can only remove from left
             # This is acceptable since we want to remove oldest events
@@ -108,7 +110,7 @@ class OptimizedErrorHistory:
                 # Update logger reference from parent class
                 pass  # Will be logged by parent
 
-            self._last_cleanup = datetime.utcnow()
+            self._last_cleanup = datetime.now(timezone.utc)
 
     def size(self) -> int:
         """Get current history size."""
@@ -254,7 +256,7 @@ class ErrorPatternAnalytics:
             "total_events_processed": 0,
             "patterns_detected": 0,
             "correlations_found": 0,
-            "last_analytics_run": datetime.utcnow(),
+            "last_analytics_run": datetime.now(timezone.utc),
         }
 
         # Analytics settings
@@ -275,11 +277,22 @@ class ErrorPatternAnalytics:
     def _start_cleanup_task(self) -> None:
         """Start periodic cleanup task."""
         try:
+            loop = asyncio.get_running_loop()
             if self._cleanup_task is None or self._cleanup_task.done():
-                self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+                self._cleanup_task = loop.create_task(self._periodic_cleanup())
+                # Add done callback to handle any exceptions
+                self._cleanup_task.add_done_callback(self._cleanup_task_done_callback)
         except RuntimeError:
             # No event loop running, cleanup task will be started on first use
             pass
+
+    def _cleanup_task_done_callback(self, task: asyncio.Task) -> None:
+        """Handle cleanup task completion."""
+        if task.exception():
+            self.logger.error(f"Cleanup task failed: {task.exception()}")
+        # Reset task reference so it can be restarted if needed
+        if self._cleanup_task is task:
+            self._cleanup_task = None
 
     async def _periodic_cleanup(self) -> None:
         """Periodic cleanup of analytics data."""
@@ -322,13 +335,27 @@ class ErrorPatternAnalytics:
         # Start cleanup task if not already running
         self._start_cleanup_task()
 
+        # Sanitize details based on sensitivity level
+        component = error_context.get("component", "unknown")
+        severity = error_context.get("severity", "medium")
+        sensitivity_level = self._get_sensitivity_level(component, severity)
+
+        # Import sanitizer here to avoid circular imports
+        from src.error_handling.security_sanitizer import get_security_sanitizer
+
+        sanitizer = get_security_sanitizer()
+
+        # Sanitize the details before storing
+        raw_details = error_context.get("details", {})
+        sanitized_details = sanitizer.sanitize_context(raw_details, sensitivity_level)
+
         error_event = {
             "timestamp": datetime.now(timezone.utc),
-            "component": error_context.get("component", "unknown"),
+            "component": component,
             "error_type": error_context.get("error_type", "unknown"),
-            "severity": error_context.get("severity", "medium"),
+            "severity": severity,
             "operation": error_context.get("operation", "unknown"),
-            "details": error_context.get("details", {}),
+            "details": sanitized_details,
             "error_id": error_context.get("error_id", "unknown"),
         }
 
@@ -339,8 +366,24 @@ class ErrorPatternAnalytics:
             self._analytics_stats["total_events_processed"] = current_count + 1
 
         # Trigger pattern analysis (non-blocking)
-        if self._pattern_analysis_task is None or self._pattern_analysis_task.done():
-            self._pattern_analysis_task = asyncio.create_task(self._analyze_patterns())
+        try:
+            loop = asyncio.get_running_loop()
+            if self._pattern_analysis_task is None or self._pattern_analysis_task.done():
+                self._pattern_analysis_task = loop.create_task(self._analyze_patterns())
+                # Add done callback to handle any exceptions
+                self._pattern_analysis_task.add_done_callback(self._pattern_analysis_done_callback)
+        except RuntimeError:
+            # No event loop running, skip async pattern analysis
+            # This can happen in synchronous contexts like tests
+            pass
+
+    def _pattern_analysis_done_callback(self, task: asyncio.Task) -> None:
+        """Handle pattern analysis task completion."""
+        if task.exception():
+            self.logger.error(f"Pattern analysis task failed: {task.exception()}")
+        # Reset task reference so it can be restarted if needed
+        if self._pattern_analysis_task is task:
+            self._pattern_analysis_task = None
 
     @time_execution
     async def _analyze_patterns(self):
@@ -787,3 +830,10 @@ class ErrorPatternAnalytics:
         }
 
         return severity_mapping.get(severity.lower(), SensitivityLevel.MEDIUM)
+
+    def cleanup(self) -> None:
+        """Cleanup resources including async tasks."""
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+        if self._pattern_analysis_task and not self._pattern_analysis_task.done():
+            self._pattern_analysis_task.cancel()

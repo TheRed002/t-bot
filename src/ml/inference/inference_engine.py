@@ -9,7 +9,7 @@ service patterns without direct database access.
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import numpy as np
@@ -50,7 +50,7 @@ class InferencePredictionRequest(BaseModel):
     features: dict[str, Any]
     return_probabilities: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class InferencePredictionResponse(BaseModel):
@@ -63,7 +63,7 @@ class InferencePredictionResponse(BaseModel):
     processing_time_ms: float
     model_info: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class InferenceMetrics(BaseModel):
@@ -587,7 +587,7 @@ class InferenceService(BaseService):
         else:
             # If model_info is the model itself or doesn't have 'model' key
             model = model_info
-            
+
         if model is None:
             raise ModelError(f"Failed to load model {model_id}: No model returned")
 
@@ -666,7 +666,7 @@ class InferenceService(BaseService):
 
             # Check if expired
             ttl_hours = self.inference_config.model_cache_ttl_hours
-            if (datetime.utcnow() - timestamp).total_seconds() < ttl_hours * 3600:
+            if (datetime.now(timezone.utc) - timestamp).total_seconds() < ttl_hours * 3600:
                 return model
             else:
                 # Remove expired model
@@ -676,7 +676,7 @@ class InferenceService(BaseService):
 
     async def _cache_model(self, model_id: str, model: Any) -> None:
         """Cache model."""
-        self._model_cache[model_id] = (model, datetime.utcnow())
+        self._model_cache[model_id] = (model, datetime.now(timezone.utc))
 
         # Clean old cache entries
         await self._clean_model_cache()
@@ -687,7 +687,7 @@ class InferenceService(BaseService):
             response, timestamp = self._prediction_cache[cache_key]
 
             # Check if expired (5 minute TTL for predictions)
-            if (datetime.utcnow() - timestamp).total_seconds() < 300:
+            if (datetime.now(timezone.utc) - timestamp).total_seconds() < 300:
                 return response
             else:
                 del self._prediction_cache[cache_key]
@@ -698,7 +698,7 @@ class InferenceService(BaseService):
         self, cache_key: str, response: InferencePredictionResponse
     ) -> None:
         """Cache prediction response."""
-        self._prediction_cache[cache_key] = (response, datetime.utcnow())
+        self._prediction_cache[cache_key] = (response, datetime.now(timezone.utc))
 
         # Clean old cache entries to prevent memory issues
         await self._clean_prediction_cache()
@@ -706,7 +706,7 @@ class InferenceService(BaseService):
     async def _clean_model_cache(self) -> None:
         """Clean expired model cache entries."""
         ttl_hours = self.inference_config.model_cache_ttl_hours
-        cutoff_time = datetime.utcnow() - timedelta(hours=ttl_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=ttl_hours)
 
         expired_keys = [
             key for key, (_, timestamp) in self._model_cache.items() if timestamp < cutoff_time
@@ -720,7 +720,7 @@ class InferenceService(BaseService):
 
     async def _clean_prediction_cache(self) -> None:
         """Clean expired prediction cache entries."""
-        cutoff_time = datetime.utcnow() - timedelta(minutes=5)  # 5 minute TTL
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=5)  # 5 minute TTL
 
         expired_keys = [
             key for key, (_, timestamp) in self._prediction_cache.items() if timestamp < cutoff_time
@@ -783,7 +783,7 @@ class InferenceService(BaseService):
             responses = await self._predict_batch_impl(requests)
 
             # Set results
-            for future, response in zip(futures, responses):
+            for future, response in zip(futures, responses, strict=False):
                 if not future.done():
                     future.set_result(response)
 

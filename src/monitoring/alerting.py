@@ -21,15 +21,13 @@ import asyncio
 import hashlib
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
-try:
-    from src.core.base import BaseComponent
-except ImportError:
-    from src.base import BaseComponent
+from src.core import BaseComponent
 
 # Import utils decorators instead of error_handling directly
 from src.utils.decorators import logged, monitored, retry
@@ -46,8 +44,8 @@ except ImportError:
 # Try to import email modules, handle gracefully if missing
 try:
     import smtplib
-    from email.mime.multipart import MimeMultipart
-    from email.mime.text import MimeText
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
 
     EMAIL_AVAILABLE = True
 except ImportError:
@@ -85,8 +83,8 @@ except ImportError:
             pass
 
     smtplib = type("MockSMTPLib", (), {"SMTP": MockSMTP})()
-    MimeText = MockMimeText
-    MimeMultipart = MockMimeMultipart
+    MIMEText = MockMimeText
+    MIMEMultipart = MockMimeMultipart
 
 # Try to import yaml
 try:
@@ -96,6 +94,7 @@ try:
 except ImportError:
     YAML_AVAILABLE = False
     yaml = None
+
 
 import aiohttp
 
@@ -270,12 +269,14 @@ class AlertManager(BaseComponent):
         self._error_handler = error_handler or get_global_error_handler()
         self._rules: dict[str, AlertRule] = {}
         self._active_alerts: dict[str, Alert] = {}
-        self._alert_history: list[Alert] = []
+        self._alert_history: deque[Alert] = deque(maxlen=10000)  # Keep last 10k alerts
         self._suppression_rules: list[dict[str, Any]] = []
         self._escalation_policies: dict[str, EscalationPolicy] = {}
         self._running = False
         self._background_task: asyncio.Task | None = None
         self._notification_queue: asyncio.Queue[tuple[str, Alert]] = asyncio.Queue()
+        # Initialize HTTP session manager for connection pooling
+        self._http_session_manager = HTTPSessionManager()
 
         # Metrics for alerting system
         self._alerts_fired = 0
@@ -283,7 +284,7 @@ class AlertManager(BaseComponent):
         self._notifications_sent = 0
         self._escalations_triggered = 0
 
-        self.logger.info("AlertManager initialized")
+        self.logger.debug("AlertManager initialized")
 
     def add_rule(self, rule: AlertRule) -> None:
         """
@@ -358,7 +359,7 @@ class AlertManager(BaseComponent):
 
             # Add new alert
             self._active_alerts[alert.fingerprint] = alert
-            self._alert_history.append(alert)
+            self._alert_history.append(alert)  # Automatically drops oldest if full
             self._alerts_fired += 1
 
             # Queue notification
@@ -374,13 +375,14 @@ class AlertManager(BaseComponent):
             if hasattr(self, "_error_handler") and self._error_handler:
                 # Use proper ErrorContext object
                 from src.error_handling import ErrorContext
+
                 error_context = ErrorContext(
                     component="AlertManager",
                     operation="fire_alert",
                     details={
                         "alert_name": alert.rule_name,
                         "severity": alert.severity.value,
-                    }
+                    },
                 )
                 await self._error_handler.handle_error(e, error_context)
             self.logger.error(f"Error firing alert: {e}")
@@ -413,15 +415,32 @@ class AlertManager(BaseComponent):
         except Exception as e:
             if self._error_handler:
                 from src.error_handling import ErrorContext
+
                 error_context = ErrorContext(
                     component="AlertManager",
                     operation="resolve_alert",
                     details={
                         "fingerprint": fingerprint,
-                    }
+                    },
                 )
-                await self._error_handler.handle_error(e, error_context)
+                # Use proper async error handling
+                try:
+                    if hasattr(self._error_handler, "handle_error"):
+                        await self._error_handler.handle_error(e, error_context)
+                    elif hasattr(self._error_handler, "handle_error_sync"):
+                        self._error_handler.handle_error_sync(e, error_context)
+                    else:
+                        self.logger.error("No suitable error handler method available")
+                except Exception as handler_error:
+                    self.logger.error(f"Error handler call failed: {handler_error}")
+                    # Critical alert system errors should be escalated
+                    if isinstance(e, (ConnectionError, OSError, MemoryError)):
+                        self.logger.critical(f"Critical alert system error in resolve_alert: {e}")
+                        raise  # Re-raise critical errors
             self.logger.error(f"Error resolving alert: {e}")
+            # Re-raise critical system errors
+            if isinstance(e, (MemoryError, OSError)):
+                raise
 
     async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool:
         """
@@ -475,7 +494,9 @@ class AlertManager(BaseComponent):
         Returns:
             List of historical alerts
         """
-        return sorted(self._alert_history[-limit:], key=lambda x: x.starts_at, reverse=True)
+        # Convert deque to list and get last 'limit' items
+        alerts = list(self._alert_history)[-limit:]
+        return sorted(alerts, key=lambda x: x.starts_at, reverse=True)
 
     def get_alert_stats(self) -> dict[str, Any]:
         """
@@ -515,15 +536,51 @@ class AlertManager(BaseComponent):
         """Stop alert manager background tasks."""
         self._running = False
 
-        if self._background_task:
+        if self._background_task and not self._background_task.done():
             self._background_task.cancel()
             try:
-                await self._background_task
-            except asyncio.CancelledError:
-                pass
-            self._background_task = None
+                await asyncio.wait_for(self._background_task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                self.logger.warning("Background task did not terminate gracefully")
+            except Exception as e:
+                self.logger.error(f"Error stopping background task: {e}")
+            finally:
+                self._background_task = None
+
+        # Clear notification queue to prevent memory leaks
+        while not self._notification_queue.empty():
+            try:
+                self._notification_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
 
         self.logger.info("Alert manager stopped")
+
+    async def cleanup(self) -> None:
+        """Cleanup resources on shutdown."""
+        await self.stop()
+
+        # Close HTTP sessions
+        if hasattr(self, '_http_session_manager'):
+            await self._http_session_manager.close_all()
+
+        # Clear all data structures to prevent memory leaks
+        self._active_alerts.clear()
+        self._alert_history.clear()
+        self._rules.clear()
+        self._suppression_rules.clear()
+        self._escalation_policies.clear()
+
+        self.logger.info("Alert manager cleanup completed")
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.cleanup()
 
     def _is_suppressed(self, alert: Alert) -> bool:
         """
@@ -550,30 +607,51 @@ class AlertManager(BaseComponent):
         """Background loop for processing notifications and escalations."""
         while self._running:
             try:
-                # Process notification queue
+                # Process notification queue with timeout protection
                 try:
                     action, alert = await asyncio.wait_for(
                         self._notification_queue.get(), timeout=1.0
                     )
 
-                    if action == "fire":
-                        await self._send_notifications(alert)
-                    elif action == "resolve":
-                        await self._send_resolution_notifications(alert)
+                    # Process notifications with timeout to prevent deadlocks
+                    try:
+                        if action == "fire":
+                            await asyncio.wait_for(self._send_notifications(alert), timeout=30.0)
+                        elif action == "resolve":
+                            await asyncio.wait_for(
+                                self._send_resolution_notifications(alert), timeout=30.0
+                            )
+                    except asyncio.TimeoutError:
+                        self.logger.error(
+                            f"Notification processing timed out for alert: {alert.rule_name}"
+                        )
+                    except Exception as e:
+                        self.logger.error(f"Error processing notification: {e}")
 
                 except asyncio.TimeoutError:
                     pass
 
-                # Check for escalations
-                await self._check_escalations()
+                # Check for escalations with timeout protection
+                try:
+                    await asyncio.wait_for(self._check_escalations(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    self.logger.error("Escalation check timed out")
+                except Exception as e:
+                    self.logger.error(f"Error checking escalations: {e}")
 
-                await asyncio.sleep(10)  # Check every 10 seconds
+                try:
+                    await asyncio.sleep(10)  # Check every 10 seconds
+                except asyncio.CancelledError:
+                    break
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.logger.error(f"Error in alert processing loop: {e}")
-                await asyncio.sleep(5)
+                try:
+                    await asyncio.sleep(5)
+                except asyncio.CancelledError:
+                    break
 
     async def _send_notifications(self, alert: Alert) -> None:
         """
@@ -605,17 +683,24 @@ class AlertManager(BaseComponent):
                     if self._error_handler:
                         # Use proper ErrorContext object
                         from src.error_handling import ErrorContext
+
                         error_context = ErrorContext(
                             component="AlertManager",
                             operation="send_notification",
                             details={
                                 "channel": channel.value,
                                 "alert_name": alert.rule_name,
-                            }
+                            },
                         )
-                        # Properly await error handling
+                        # Properly await error handling with proper error checking
                         try:
-                            await self._error_handler.handle_error(e, error_context)
+                            if hasattr(self._error_handler, "handle_error"):
+                                await self._error_handler.handle_error(e, error_context)
+                            elif hasattr(self._error_handler, "handle_error_sync"):
+                                # Use sync version if async not available
+                                self._error_handler.handle_error_sync(e, error_context)
+                            else:
+                                self.logger.error("No suitable error handler method available")
                         except Exception as handler_error:
                             self.logger.error(f"Error handler failed: {handler_error}")
                     self.logger.error(f"Failed to send {channel.value} notification: {e}")
@@ -656,7 +741,7 @@ class AlertManager(BaseComponent):
             self.logger.error(f"Error sending resolution notifications: {e}")
 
     async def _send_email_notification(self, alert: Alert) -> None:
-        """Send email notification."""
+        """Send email notification using async executor to avoid blocking."""
         if not self.config.email_to:
             return
 
@@ -678,36 +763,72 @@ Annotations:
 Fingerprint: {alert.fingerprint}
         """
 
+        # Run email sending with retry logic
+        loop = asyncio.get_event_loop()
+        max_retries = 3
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                await loop.run_in_executor(None, self._send_email_sync, subject, body)
+                self.logger.debug(f"Email notification sent for alert: {alert.rule_name}")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"Failed to send email notification (attempt {attempt + 1}/{max_retries}): {e}")
+                    await asyncio.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+                else:
+                    self.logger.error(f"Failed to send email notification after {max_retries} attempts: {e}")
+                    raise
+
+    def _send_email_sync(self, subject: str, body: str) -> None:
+        """Synchronous email sending helper."""
         server = None
         try:
-            msg = MimeMultipart()
+            msg = MIMEMultipart()
             msg["From"] = self.config.email_from
             msg["To"] = ", ".join(self.config.email_to)
             msg["Subject"] = subject
 
-            msg.attach(MimeText(body, "plain"))
+            msg.attach(MIMEText(body, "plain"))
 
             server = smtplib.SMTP(self.config.email_smtp_server, self.config.email_smtp_port)
-            if self.config.email_use_tls:
-                server.starttls()
+            try:
+                if self.config.email_use_tls:
+                    server.starttls()
 
-            if self.config.email_username and self.config.email_password:
-                server.login(self.config.email_username, self.config.email_password)
+                if self.config.email_username and self.config.email_password:
+                    try:
+                        server.login(self.config.email_username, self.config.email_password)
+                    except Exception:
+                        # Sanitize error message to avoid logging credentials
+                        self.logger.error(
+                            "SMTP authentication failed for user "
+                            f"'{self.config.email_username[:3]}***'"
+                        )
+                        raise
 
-            server.send_message(msg)
-            self.logger.debug(f"Email notification sent for alert: {alert.rule_name}")
-
-        except Exception as e:
-            self.logger.error(f"Failed to send email notification: {e}")
+                server.send_message(msg)
+            except Exception:
+                # Ensure server is closed on any error during operations
+                if server:
+                    try:
+                        server.quit()
+                    except Exception as close_error:
+                        self.logger.warning(
+                            f"Failed to close SMTP server after error: {close_error}"
+                        )
+                    server = None
+                raise
         finally:
             if server:
                 try:
                     server.quit()
-                except Exception:
-                    pass
+                except Exception as close_error:
+                    self.logger.warning(f"Failed to properly close SMTP server: {close_error}")
 
     async def _send_email_resolution(self, alert: Alert) -> None:
-        """Send email resolution notification."""
+        """Send email resolution notification using async executor."""
         if not self.config.email_to:
             return
 
@@ -727,33 +848,13 @@ Started: {alert.starts_at.strftime("%Y-%m-%d %H:%M:%S UTC")}
 Fingerprint: {alert.fingerprint}
         """
 
-        server = None
+        # Run email sending in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
         try:
-            msg = MimeMultipart()
-            msg["From"] = self.config.email_from
-            msg["To"] = ", ".join(self.config.email_to)
-            msg["Subject"] = subject
-
-            msg.attach(MimeText(body, "plain"))
-
-            server = smtplib.SMTP(self.config.email_smtp_server, self.config.email_smtp_port)
-            if self.config.email_use_tls:
-                server.starttls()
-
-            if self.config.email_username and self.config.email_password:
-                server.login(self.config.email_username, self.config.email_password)
-
-            server.send_message(msg)
+            await loop.run_in_executor(None, self._send_email_sync, subject, body)
             self.logger.debug(f"Email resolution sent for alert: {alert.rule_name}")
-
         except Exception as e:
             self.logger.error(f"Failed to send email resolution: {e}")
-        finally:
-            if server:
-                try:
-                    server.quit()
-                except Exception:
-                    pass
 
     async def _send_slack_notification(self, alert: Alert) -> None:
         """Send Slack notification."""
@@ -797,22 +898,26 @@ Fingerprint: {alert.fingerprint}
             ],
         }
 
+        session = None
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.config.slack_webhook_url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    if response.status == 200:
-                        self.logger.debug(f"Slack notification sent for alert: {alert.rule_name}")
-                    else:
-                        self.logger.error(
-                            f"Slack notification failed with status {response.status}"
-                        )
+            session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10),
+                connector=aiohttp.TCPConnector(limit=10, limit_per_host=5),
+            )
+            async with session.post(
+                self.config.slack_webhook_url,
+                json=payload,
+            ) as response:
+                if response.status == 200:
+                    self.logger.debug(f"Slack notification sent for alert: {alert.rule_name}")
+                else:
+                    self.logger.error(f"Slack notification failed with status {response.status}")
 
         except Exception as e:
             self.logger.error(f"Failed to send Slack notification: {e}")
+        finally:
+            if session and not session.closed:
+                await session.close()
 
     async def _send_slack_resolution(self, alert: Alert) -> None:
         """Send Slack resolution notification."""
@@ -848,20 +953,26 @@ Fingerprint: {alert.fingerprint}
             ],
         }
 
+        session = None
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.config.slack_webhook_url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    if response.status == 200:
-                        self.logger.debug(f"Slack resolution sent for alert: {alert.rule_name}")
-                    else:
-                        self.logger.error(f"Slack resolution failed with status {response.status}")
+            session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10),
+                connector=aiohttp.TCPConnector(limit=10, limit_per_host=5),
+            )
+            async with session.post(
+                self.config.slack_webhook_url,
+                json=payload,
+            ) as response:
+                if response.status == 200:
+                    self.logger.debug(f"Slack resolution sent for alert: {alert.rule_name}")
+                else:
+                    self.logger.error(f"Slack resolution failed with status {response.status}")
 
         except Exception as e:
             self.logger.error(f"Failed to send Slack resolution: {e}")
+        finally:
+            if session and not session.closed:
+                await session.close()
 
     async def _send_webhook_notification(self, alert: Alert) -> None:
         """Send webhook notification."""
@@ -883,24 +994,42 @@ Fingerprint: {alert.fingerprint}
         }
 
         for webhook_url in self.config.webhook_urls:
-            try:
-                async with aiohttp.ClientSession() as session:
+            max_retries = 3
+            retry_delay = 1.0
+            
+            for attempt in range(max_retries):
+                try:
+                    # Use session manager for connection pooling
+                    session = await self._http_session_manager.get_session(
+                        "webhooks",
+                        timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout)
+                    )
                     async with session.post(
                         webhook_url,
                         json=payload,
-                        timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout),
                     ) as response:
                         if response.status == 200:
-                            self.logger.debug(
-                                f"Webhook notification sent for alert: {alert.rule_name}"
-                            )
+                            self.logger.debug(f"Webhook notification sent for alert: {alert.rule_name}")
+                            break
                         else:
                             self.logger.error(
                                 f"Webhook notification failed with status {response.status}"
                             )
+                            if response.status >= 500 and attempt < max_retries - 1:
+                                # Retry on server errors
+                                await asyncio.sleep(retry_delay * (2 ** attempt))
+                                continue
+                            break
 
-            except Exception as e:
-                self.logger.error(f"Failed to send webhook notification to {webhook_url}: {e}")
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        self.logger.warning(f"Failed to send webhook notification to {webhook_url} (attempt {attempt + 1}/{max_retries}): {e}")
+                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                    else:
+                        self.logger.error(f"Failed to send webhook notification to {webhook_url} after {max_retries} attempts: {e}")
+                finally:
+                    # Session is managed by the pool, don't close it
+                    pass
 
     async def _send_webhook_resolution(self, alert: Alert) -> None:
         """Send webhook resolution notification."""
@@ -924,24 +1053,28 @@ Fingerprint: {alert.fingerprint}
         }
 
         for webhook_url in self.config.webhook_urls:
+            session = None
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        webhook_url,
-                        json=payload,
-                        timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout),
-                    ) as response:
-                        if response.status == 200:
-                            self.logger.debug(
-                                f"Webhook resolution sent for alert: {alert.rule_name}"
-                            )
-                        else:
-                            self.logger.error(
-                                f"Webhook resolution failed with status {response.status}"
-                            )
+                session = aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout),
+                    connector=aiohttp.TCPConnector(limit=10, limit_per_host=5),
+                )
+                async with session.post(
+                    webhook_url,
+                    json=payload,
+                ) as response:
+                    if response.status == 200:
+                        self.logger.debug(f"Webhook resolution sent for alert: {alert.rule_name}")
+                    else:
+                        self.logger.error(
+                            f"Webhook resolution failed with status {response.status}"
+                        )
 
             except Exception as e:
                 self.logger.error(f"Failed to send webhook resolution to {webhook_url}: {e}")
+            finally:
+                if session and not session.closed:
+                    await session.close()
 
     async def _send_discord_notification(self, alert: Alert) -> None:
         """Send Discord notification."""
@@ -983,22 +1116,26 @@ Fingerprint: {alert.fingerprint}
             ]
         }
 
+        session = None
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.config.discord_webhook_url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    if response.status in [200, 204]:
-                        self.logger.debug(f"Discord notification sent for alert: {alert.rule_name}")
-                    else:
-                        self.logger.error(
-                            f"Discord notification failed with status {response.status}"
-                        )
+            session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10),
+                connector=aiohttp.TCPConnector(limit=10, limit_per_host=5),
+            )
+            async with session.post(
+                self.config.discord_webhook_url,
+                json=payload,
+            ) as response:
+                if response.status in [200, 204]:
+                    self.logger.debug(f"Discord notification sent for alert: {alert.rule_name}")
+                else:
+                    self.logger.error(f"Discord notification failed with status {response.status}")
 
         except Exception as e:
             self.logger.error(f"Failed to send Discord notification: {e}")
+        finally:
+            if session and not session.closed:
+                await session.close()
 
     async def _send_discord_resolution(self, alert: Alert) -> None:
         """Send Discord resolution notification."""
@@ -1035,22 +1172,26 @@ Fingerprint: {alert.fingerprint}
             ]
         }
 
+        session = None
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.config.discord_webhook_url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    if response.status in [200, 204]:
-                        self.logger.debug(f"Discord resolution sent for alert: {alert.rule_name}")
-                    else:
-                        self.logger.error(
-                            f"Discord resolution failed with status {response.status}"
-                        )
+            session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10),
+                connector=aiohttp.TCPConnector(limit=10, limit_per_host=5),
+            )
+            async with session.post(
+                self.config.discord_webhook_url,
+                json=payload,
+            ) as response:
+                if response.status in [200, 204]:
+                    self.logger.debug(f"Discord resolution sent for alert: {alert.rule_name}")
+                else:
+                    self.logger.error(f"Discord resolution failed with status {response.status}")
 
         except Exception as e:
             self.logger.error(f"Failed to send Discord resolution: {e}")
+        finally:
+            if session and not session.closed:
+                await session.close()
 
     async def _check_escalations(self) -> None:
         """Check for alerts that need escalation."""
@@ -1073,22 +1214,61 @@ Fingerprint: {alert.fingerprint}
 
     def _parse_duration_minutes(self, duration: str) -> int:
         """
-        Parse duration string to minutes (simplified implementation).
+        Parse duration string to minutes with proper financial time handling.
 
         Args:
-            duration: Duration string like "5m", "1h", "30s"
+            duration: Duration string like "5m", "1h", "30s", "1d"
 
         Returns:
             Duration in minutes
+
+        Raises:
+            ValueError: If duration format is invalid
         """
-        if duration.endswith("m"):
-            return int(duration[:-1])
-        elif duration.endswith("h"):
-            return int(duration[:-1]) * 60
-        elif duration.endswith("s"):
-            return max(1, int(duration[:-1]) // 60)
-        else:
-            return int(duration)  # Assume minutes
+        if not duration or not isinstance(duration, str):
+            raise ValueError("Duration must be a non-empty string")
+
+        duration = duration.strip().lower()
+
+        try:
+            if duration.endswith("s"):
+                seconds = int(duration[:-1])
+                if seconds <= 0:
+                    raise ValueError(f"Duration must be positive: {duration}")
+                return max(1, seconds // 60)  # Convert to minutes, minimum 1
+            elif duration.endswith("m"):
+                minutes = int(duration[:-1])
+                if minutes <= 0:
+                    raise ValueError(f"Duration must be positive: {duration}")
+                return max(1, minutes)  # Minimum 1 minute
+            elif duration.endswith("h"):
+                hours = int(duration[:-1])
+                if hours <= 0:
+                    raise ValueError(f"Duration must be positive: {duration}")
+                return max(1, hours * 60)  # Convert to minutes
+            elif duration.endswith("d"):
+                days = int(duration[:-1])
+                if days <= 0:
+                    raise ValueError(f"Duration must be positive: {duration}")
+                return max(1, days * 24 * 60)  # Convert to minutes (24h trading day)
+            elif duration.endswith("w"):
+                weeks = int(duration[:-1])
+                if weeks <= 0:
+                    raise ValueError(f"Duration must be positive: {duration}")
+                return max(1, weeks * 7 * 24 * 60)  # Convert to minutes
+            else:
+                # Try parsing as raw number (assume minutes)
+                minutes = int(duration)
+                if minutes <= 0:
+                    raise ValueError(f"Duration must be positive: {duration}")
+                return max(1, minutes)
+        except (ValueError, IndexError, TypeError) as e:
+            if isinstance(e, ValueError) and "must be positive" in str(e):
+                raise  # Re-raise our custom validation error
+            raise ValueError(
+                f"Invalid duration format: '{duration}'. Use format like '5m', '1h', '30s', '1d'. "
+                f"Original error: {e}"
+            ) from e
 
     async def _escalate_alert(self, alert: Alert) -> None:
         """
@@ -1181,6 +1361,65 @@ def load_alert_rules_from_file(file_path: str) -> list[AlertRule]:
 
     except Exception as e:
         raise MonitoringError(f"Failed to load alert rules from {file_path}: {e}") from e
+
+
+class HTTPSessionManager:
+    """Shared HTTP session manager for monitoring components."""
+
+    def __init__(self):
+        self._sessions: dict[str, aiohttp.ClientSession] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    async def get_session(self, key: str = "default", **session_kwargs) -> aiohttp.ClientSession:
+        """Get or create a shared HTTP session."""
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+
+        async with self._locks[key]:
+            if key not in self._sessions or self._sessions[key].closed:
+                session_config = {
+                    "connector": aiohttp.TCPConnector(
+                        limit=20,
+                        limit_per_host=10,
+                        ttl_dns_cache=300,
+                        use_dns_cache=True,
+                        keepalive_timeout=30,
+                        enable_cleanup_closed=True,
+                    ),
+                    "timeout": aiohttp.ClientTimeout(total=30),
+                    "raise_for_status": False,
+                }
+                session_config.update(session_kwargs)
+                self._sessions[key] = aiohttp.ClientSession(**session_config)
+
+        return self._sessions[key]
+
+    async def close_all(self):
+        """Close all sessions."""
+        for session in self._sessions.values():
+            if not session.closed:
+                await session.close()
+        self._sessions.clear()
+        self._locks.clear()
+
+
+# Global session manager
+_session_manager: HTTPSessionManager | None = None
+
+
+async def get_http_session(key: str = "default", **kwargs) -> aiohttp.ClientSession:
+    """Get a shared HTTP session."""
+    global _session_manager
+    if _session_manager is None:
+        _session_manager = HTTPSessionManager()
+    return await _session_manager.get_session(key, **kwargs)
+
+
+async def cleanup_http_sessions():
+    """Cleanup all HTTP sessions."""
+    global _session_manager
+    if _session_manager:
+        await _session_manager.close_all()
 
 
 # Global alert manager instance

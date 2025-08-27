@@ -28,6 +28,7 @@ from .alerting import (
 )
 from .metrics import (
     ExchangeMetrics,
+    MetricDefinition,
     MetricsCollector,
     RiskMetrics,
     SystemMetrics,
@@ -56,6 +57,7 @@ __all__ = [
     "AlertSeverity",
     "AlertStatus",
     "ExchangeMetrics",
+    "MetricDefinition",
     "MetricsCollector",
     "NotificationChannel",
     "NotificationConfig",

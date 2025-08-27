@@ -198,7 +198,7 @@ class BaseComponent(
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            raise ComponentError(f"Failed to start {self._name}: {e}")
+            raise ComponentError(f"Failed to start {self._name}: {e}") from e
 
         finally:
             self._is_starting = False
@@ -241,7 +241,7 @@ class BaseComponent(
                 error=str(e),
                 error_type=type(e).__name__,
             )
-            raise ComponentError(f"Failed to stop {self._name}: {e}")
+            raise ComponentError(f"Failed to stop {self._name}: {e}") from e
 
         finally:
             self._is_stopping = False

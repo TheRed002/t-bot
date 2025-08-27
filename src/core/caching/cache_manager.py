@@ -5,10 +5,10 @@ import hashlib
 import json
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.exceptions import CacheError
 from src.database.redis_client import RedisClient
 
@@ -32,6 +32,13 @@ class CacheManager(BaseComponent):
         self.config = config
         self.metrics = get_cache_metrics()
 
+        # Connection management
+        self._connection_lock = asyncio.Lock()
+        self._connection_retries = 0
+        self._max_connection_retries = 3
+        self._connection_retry_delay = 1.0
+        self._shutdown_requested = False
+
         # Default TTL values for different data types (in seconds)
         self.default_ttls = {
             "market_data": 5,  # 5 seconds for real-time data
@@ -49,15 +56,67 @@ class CacheManager(BaseComponent):
         self.lock_retry_delay = 0.1  # seconds
 
     async def _ensure_client(self):
-        """Ensure Redis client is available."""
-        if not self.redis_client:
-            if self.config:
-                self.redis_client = RedisClient(self.config)
-            else:
-                raise CacheError("Redis client not available and no config provided")
+        """Ensure Redis client is available with proper connection management."""
+        if self._shutdown_requested:
+            raise CacheError("Cache manager is shutting down")
 
-        if self.redis_client.client is None:
-            await self.redis_client.connect()
+        async with self._connection_lock:
+            if not self.redis_client:
+                if self.config:
+                    self.redis_client = RedisClient(self.config)
+                else:
+                    raise CacheError("Redis client not available and no config provided")
+
+            # Check if client is connected and healthy
+            if self.redis_client.client is None or not await self._is_client_healthy():
+                await self._reconnect_with_retries()
+
+    async def _is_client_healthy(self) -> bool:
+        """Check if Redis client is healthy."""
+        try:
+            if self.redis_client.client is None:
+                return False
+            # Simple ping to check connectivity
+            await asyncio.wait_for(await self.redis_client.ping(), timeout=2.0)
+            return True
+        except Exception:
+            return False
+
+    async def _reconnect_with_retries(self):
+        """Reconnect to Redis with exponential backoff."""
+        for attempt in range(self._max_connection_retries):
+            try:
+                if self.redis_client.client is not None:
+                    try:
+                        await self.redis_client.disconnect()
+                    except Exception:
+                        pass  # Ignore disconnection errors
+
+                await self.redis_client.connect()
+
+                # Test the connection
+                await asyncio.wait_for(await self.redis_client.ping(), timeout=2.0)
+
+                self._connection_retries = 0  # Reset on success
+                self.logger.info("Successfully reconnected to Redis")
+                return
+
+            except Exception as e:
+                self._connection_retries += 1
+                wait_time = self._connection_retry_delay * (2**attempt)
+
+                if attempt < self._max_connection_retries - 1:
+                    self.logger.warning(
+                        f"Redis connection attempt {attempt + 1} failed: {e}. "
+                        f"Retrying in {wait_time}s"
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    self.logger.error(f"All Redis connection attempts failed: {e}")
+                    raise CacheError(
+                        f"Failed to connect to Redis after {self._max_connection_retries} "
+                        f"attempts: {e}"
+                    ) from e
 
     def _get_ttl(self, data_type: str = "default") -> int:
         """Get TTL for specific data type."""
@@ -121,7 +180,7 @@ class CacheManager(BaseComponent):
         except Exception as e:
             self.logger.error(f"Cache get failed for key {key}: {e}")
             self.metrics.record_error(namespace, "get_error")
-            raise CacheError(f"Failed to get from cache: {e}")
+            raise CacheError(f"Failed to get from cache: {e}") from e
 
     async def set(
         self,
@@ -150,7 +209,7 @@ class CacheManager(BaseComponent):
         except Exception as e:
             self.logger.error(f"Cache set failed for key {key}: {e}")
             self.metrics.record_error(namespace, "set_error")
-            raise CacheError(f"Failed to set cache: {e}")
+            raise CacheError(f"Failed to set cache: {e}") from e
 
     async def delete(self, key: str, namespace: str = "cache") -> bool:
         """Delete key from cache."""
@@ -168,7 +227,7 @@ class CacheManager(BaseComponent):
         except Exception as e:
             self.logger.error(f"Cache delete failed for key {key}: {e}")
             self.metrics.record_error(namespace, "delete_error")
-            raise CacheError(f"Failed to delete from cache: {e}")
+            raise CacheError(f"Failed to delete from cache: {e}") from e
 
     async def exists(self, key: str, namespace: str = "cache") -> bool:
         """Check if key exists in cache."""
@@ -272,7 +331,7 @@ class CacheManager(BaseComponent):
             timeout = self.lock_timeout
 
         lock_key = CacheKeys._build_key(namespace, "lock", resource)
-        lock_value = f"{datetime.utcnow().isoformat()}_{id(self)}"
+        lock_value = f"{datetime.now(timezone.utc).isoformat()}_{id(self)}"
 
         try:
             await self._ensure_client()
@@ -451,6 +510,70 @@ class CacheManager(BaseComponent):
         except Exception as e:
             self.logger.error(f"Health check failed: {e}")
             return {"status": "unhealthy", "error": str(e), "cache_stats": self.metrics.get_stats()}
+
+    async def cleanup(self) -> None:
+        """Clean up cache manager resources with proper connection handling."""
+        async with self._connection_lock:
+            try:
+                self._shutdown_requested = True
+
+                if self.redis_client:
+                    self.logger.info("Cleaning up cache manager resources")
+
+                    # Properly close the connection with timeout
+                    if self.redis_client.client:
+                        try:
+                            await asyncio.wait_for(self.redis_client.disconnect(), timeout=10.0)
+                        except asyncio.TimeoutError:
+                            self.logger.warning("Redis disconnection timed out")
+                            # Force close if needed
+                            if hasattr(self.redis_client.client, "close"):
+                                await self.redis_client.client.close()
+                        except Exception as e:
+                            self.logger.warning(f"Error disconnecting Redis client: {e}")
+
+                    self.redis_client = None
+                    self.logger.info("Cache manager cleanup completed")
+
+            except Exception as e:
+                self.logger.error(f"Error during cache manager cleanup: {e}")
+                # Don't re-raise - we're in cleanup mode
+            finally:
+                self._shutdown_requested = True
+
+    async def shutdown(self) -> None:
+        """Shutdown cache manager and release all resources."""
+        try:
+            self.logger.info("Shutting down cache manager")
+            self._shutdown_requested = True
+
+            # Invalidate any active locks with timeout
+            try:
+                await asyncio.wait_for(
+                    self.invalidate_pattern("lock", namespace="locks"), timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Lock invalidation timed out during shutdown")
+            except Exception as e:
+                self.logger.warning(f"Failed to invalidate locks during shutdown: {e}")
+
+            # Perform cleanup
+            await self.cleanup()
+
+            # Clear global instance
+            global _cache_manager
+            if _cache_manager is self:
+                _cache_manager = None
+
+            self.logger.info("Cache manager shutdown completed")
+        except Exception as e:
+            self.logger.error(f"Error during cache manager shutdown: {e}")
+            # Don't re-raise during shutdown
+
+    def __del__(self):
+        """Ensure cleanup on deletion."""
+        if self.redis_client and self.redis_client.client:
+            self.logger.warning("Cache manager deleted without proper cleanup - resources may leak")
 
 
 # Global cache manager instance

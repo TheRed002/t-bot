@@ -213,7 +213,9 @@ class SecurePatternAnalytics:
 
         # Trigger immediate analysis for critical events
         if self._is_critical_event(sanitized_event):
-            asyncio.create_task(self._analyze_immediate_threats(sanitized_event))
+            threat_task = asyncio.create_task(self._analyze_immediate_threats(sanitized_event))
+            # Add done callback to log any exceptions in threat analysis
+            threat_task.add_done_callback(self._log_threat_analysis_exception)
 
     async def analyze_patterns(self) -> list[ErrorPattern]:
         """
@@ -330,7 +332,7 @@ class SecurePatternAnalytics:
 
             if key in safe_keys:
                 analytics_safe_context[key] = value
-            elif isinstance(value, (int, float, bool)):
+            elif isinstance(value, int | float | bool):
                 # Keep numeric and boolean values (less sensitive)
                 analytics_safe_context[key] = value
             elif isinstance(value, str) and len(value) < 50:
@@ -801,6 +803,15 @@ class SecurePatternAnalytics:
             component_hash=event["component_hash"],
             error_signature=event["error_signature"],
         )
+
+    def _log_threat_analysis_exception(self, task: asyncio.Task) -> None:
+        """Log exceptions that occur in threat analysis tasks."""
+        if task.exception():
+            self.logger.error(
+                "Exception in threat analysis task",
+                threat_analysis_exception=str(task.exception()),
+                exc_info=task.exception(),
+            )
 
     def _start_background_analysis(self) -> None:
         """Start background pattern analysis task."""

@@ -1,19 +1,27 @@
 """Market data repository implementation."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.market_data import MarketDataRecord
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 
-class MarketDataRepository(BaseRepository[MarketDataRecord]):
+class MarketDataRepository(DatabaseRepository[MarketDataRecord, str]):
     """Repository for MarketDataRecord entities."""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: AsyncSession):
         """Initialize market data repository."""
-        super().__init__(session, MarketDataRecord)
+
+        super().__init__(
+            session=session,
+            model=MarketDataRecord,
+            entity_type=MarketDataRecord,
+            key_type=str,
+            name="MarketDataRepository",
+        )
 
     async def get_by_symbol(self, symbol: str) -> list[MarketDataRecord]:
         """Get market data by symbol."""
@@ -55,7 +63,7 @@ class MarketDataRepository(BaseRepository[MarketDataRecord]):
         self, symbol: str, exchange: str, hours: int = 24
     ) -> list[MarketDataRecord]:
         """Get recent market data."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         return await self.get_all(
             filters={"symbol": symbol, "exchange": exchange, "timestamp": {"gte": since}},
             order_by="-timestamp",
@@ -80,7 +88,7 @@ class MarketDataRepository(BaseRepository[MarketDataRecord]):
 
     async def cleanup_old_data(self, days: int = 90) -> int:
         """Clean up old market data."""
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         old_records = await self.get_all(filters={"timestamp": {"lt": cutoff_date}})
 
         count = 0
@@ -105,7 +113,7 @@ class MarketDataRepository(BaseRepository[MarketDataRecord]):
         self, symbol: str, exchange: str, hours: int = 24
     ) -> tuple[float | None, float | None]:
         """Get price change and percentage change."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         records = await self.get_all(
             filters={"symbol": symbol, "exchange": exchange, "timestamp": {"gte": since}},
             order_by="timestamp",
@@ -120,7 +128,7 @@ class MarketDataRepository(BaseRepository[MarketDataRecord]):
         if not first_price or not last_price:
             return None, None
 
-        price_change = float(last_price - first_price)
-        percentage_change = (price_change / float(first_price)) * 100
+        price_change = last_price - first_price
+        percentage_change = (price_change / first_price) * Decimal("100")
 
         return price_change, percentage_change

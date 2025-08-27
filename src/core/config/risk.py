@@ -14,6 +14,9 @@ class RiskConfig(BaseConfig):
     position_sizing_method: str = Field(
         default="fixed", description="Position sizing method", alias="RISK_POSITION_METHOD"
     )
+    default_position_size_method: str = Field(
+        default="fixed_percentage", description="Default position sizing method"
+    )
     max_position_size: Decimal = Field(
         default=Decimal("1000"),
         description="Maximum position size in base currency",
@@ -116,6 +119,9 @@ class RiskConfig(BaseConfig):
     kelly_win_loss_ratio: float | None = Field(
         default=None, ge=0.1, le=10.0, description="Win/loss ratio for Kelly"
     )
+    kelly_lookback_days: int = Field(
+        default=30, ge=7, le=365, description="Number of days to look back for Kelly calculation"
+    )
 
     # Risk parity parameters (if used)
     risk_parity_target_volatility: float = Field(
@@ -131,6 +137,15 @@ class RiskConfig(BaseConfig):
     )
     min_portfolio_diversification: int = Field(
         default=3, ge=1, le=20, description="Minimum number of assets in portfolio"
+    )
+    max_portfolio_exposure: float = Field(
+        default=1.0, ge=0.1, le=2.0, description="Maximum total portfolio exposure"
+    )
+    max_sector_exposure: float = Field(
+        default=0.5, ge=0.1, le=1.0, description="Maximum exposure to single sector"
+    )
+    max_correlation_exposure: float = Field(
+        default=0.6, ge=0.1, le=1.0, description="Maximum correlated position exposure"
     )
 
     # Capital protection

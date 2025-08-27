@@ -5,10 +5,12 @@ It automatically detects available GPUs and provides fallback to CPU when needed
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 
 # Try to import GPU libraries with graceful fallbacks
 try:
@@ -59,14 +61,14 @@ logger = logging.getLogger(__name__)
 class GPUManager:
     """Manages GPU resources and provides utilities for GPU acceleration."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize GPU manager."""
         self._initialize_gpu_settings()
         self.gpu_available = self._check_gpu_availability()
         self.device_info = self._get_device_info()
         self._log_gpu_status()
 
-    def _initialize_gpu_settings(self):
+    def _initialize_gpu_settings(self) -> None:
         """Initialize GPU settings for available libraries."""
         global TORCH_DEVICE
 
@@ -106,28 +108,31 @@ class GPUManager:
             try:
                 if torch_module.cuda.is_available():
                     return True
-            except Exception:
+            except Exception as e:
+                logger.debug(f"PyTorch GPU check failed: {e}")
                 pass
 
         if TF_AVAILABLE and tf_module:
             try:
                 if tf_module.config.list_physical_devices("GPU"):
                     return True
-            except Exception:
+            except Exception as e:
+                logger.debug(f"TensorFlow GPU check failed: {e}")
                 pass
 
         if CUPY_AVAILABLE and cp_module:
             try:
                 cp_module.cuda.Device(0)
                 return True
-            except Exception:
+            except Exception as e:
+                logger.debug(f"CuPy GPU check failed: {e}")
                 pass
 
         return False
 
     def _get_device_info(self) -> dict[str, Any]:
         """Get information about available devices."""
-        info = {
+        info: dict[str, Any] = {
             "gpu_available": self.gpu_available,
             "cuda_available": False,
             "device_count": 0,
@@ -163,7 +168,7 @@ class GPUManager:
 
         return info
 
-    def _log_gpu_status(self):
+    def _log_gpu_status(self) -> None:
         """Log GPU status information."""
         if self.gpu_available:
             logger.info(
@@ -202,7 +207,7 @@ class GPUManager:
 
         return {"total": 0, "used": 0, "free": 0}
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         """Clear GPU cache to free memory."""
         if TORCH_AVAILABLE and torch_module:
             try:
@@ -246,7 +251,7 @@ class GPUManager:
 
         return data
 
-    def _convert_numpy_to_gpu(self, data: np.ndarray, dtype: str | None = None) -> Any:
+    def _convert_numpy_to_gpu(self, data: NDArray[np.float64], dtype: str | None = None) -> Any:
         """Convert NumPy array to GPU format."""
         if CUPY_AVAILABLE and cp_module:
             return cp_module.asarray(data, dtype=dtype)
@@ -305,7 +310,7 @@ class GPUManager:
 
         return data
 
-    def accelerate_computation(self, func, *args, **kwargs):
+    def accelerate_computation(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         """Decorator to automatically accelerate computations on GPU."""
         if not self.gpu_available:
             return func(*args, **kwargs)
@@ -352,7 +357,9 @@ def get_optimal_batch_size(data_size: int, memory_limit_gb: float = 4.0) -> int:
     return batch_size
 
 
-def parallel_apply(df: pd.DataFrame, func, axis: int = 0, use_gpu: bool = True) -> pd.DataFrame:
+def parallel_apply(
+    df: pd.DataFrame, func: Any, axis: int = 0, use_gpu: bool = True
+) -> pd.DataFrame:
     """Apply function to DataFrame with GPU acceleration if available."""
     if use_gpu and gpu_manager.gpu_available and RAPIDS_AVAILABLE and cudf_module:
         try:
@@ -367,14 +374,14 @@ def parallel_apply(df: pd.DataFrame, func, axis: int = 0, use_gpu: bool = True) 
     return df.apply(func, axis=axis)
 
 
-def gpu_accelerated_correlation(data: np.ndarray) -> np.ndarray:
+def gpu_accelerated_correlation(data: NDArray[np.float64]) -> NDArray[np.float64]:
     """Calculate correlation matrix with GPU acceleration."""
     if gpu_manager.gpu_available:
         try:
             if CUPY_AVAILABLE and cp_module:
                 gpu_data = cp_module.asarray(data)
                 corr = cp_module.corrcoef(gpu_data.T)
-                return cp_module.asnumpy(corr)
+                return np.asarray(cp_module.asnumpy(corr))
             elif TORCH_AVAILABLE and torch_module and TORCH_DEVICE:
                 gpu_data = torch_module.from_numpy(data).to(TORCH_DEVICE)
                 # Standardize the data
@@ -391,7 +398,9 @@ def gpu_accelerated_correlation(data: np.ndarray) -> np.ndarray:
     return np.corrcoef(data.T)
 
 
-def gpu_accelerated_rolling_window(data: np.ndarray, window_size: int, func) -> np.ndarray:
+def gpu_accelerated_rolling_window(
+    data: NDArray[np.float64], window_size: int, func: Any
+) -> NDArray[np.float64]:
     """Apply rolling window function with GPU acceleration."""
     if gpu_manager.gpu_available and CUPY_AVAILABLE and cp_module:
         try:
@@ -402,7 +411,7 @@ def gpu_accelerated_rolling_window(data: np.ndarray, window_size: int, func) -> 
                 window = gpu_data[i : i + window_size]
                 result[i] = func(window)
 
-            return cp_module.asnumpy(result)
+            return np.asarray(cp_module.asnumpy(result))
         except Exception as e:
             logger.warning(f"GPU rolling window calculation failed, using CPU: {e}")
 
@@ -415,16 +424,16 @@ def gpu_accelerated_rolling_window(data: np.ndarray, window_size: int, func) -> 
     return result
 
 
-def setup_gpu_logging():
+def setup_gpu_logging() -> Callable[[], None] | None:
     """Setup GPU usage monitoring and logging."""
     if not gpu_manager.gpu_available:
-        return
+        return None
 
     try:
         import gpustat
 
         # Log GPU stats periodically
-        def log_gpu_stats():
+        def log_gpu_stats() -> None:
             try:
                 stats = gpustat.GPUStatCollection.new_query()
                 for gpu in stats:

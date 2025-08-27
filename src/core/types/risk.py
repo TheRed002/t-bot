@@ -1,6 +1,6 @@
 """Risk management types for the T-Bot trading system."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -135,7 +135,7 @@ class RiskMetrics(BaseModel):
     net_exposure: Decimal | None = None
     leverage: float | None = None
 
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

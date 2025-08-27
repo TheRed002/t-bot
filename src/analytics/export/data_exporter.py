@@ -19,7 +19,7 @@ Key Features:
 import asyncio
 import csv
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from io import BytesIO, StringIO
 from typing import Any
@@ -725,7 +725,7 @@ class DataExporter(BaseComponent):
         """
         try:
             prometheus_lines = []
-            timestamp = int(datetime.now().timestamp() * 1000)  # Milliseconds
+            timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)  # Milliseconds
 
             # Add metadata
             prometheus_lines.append("# HELP t_bot_analytics T-Bot Analytics Metrics")
@@ -770,7 +770,7 @@ class DataExporter(BaseComponent):
         """
         try:
             lines = []
-            timestamp = int(datetime.now().timestamp() * 1000000000)  # Nanoseconds
+            timestamp = int(datetime.now(timezone.utc).timestamp() * 1000000000)  # Nanoseconds
 
             def process_metrics(data: dict, tags: dict = None) -> None:
                 tags = tags or {}

@@ -1,11 +1,11 @@
 """Centralized risk calculations with caching to eliminate duplication."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import numpy as np
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.types.market import MarketData
 from src.core.types.risk import RiskLevel, RiskMetrics
 from src.core.types.trading import Position
@@ -42,21 +42,122 @@ class RiskCalculator(BaseComponent):
 
         Returns:
             VaR value
+
+        Raises:
+            ValueError: If input parameters are invalid
         """
-        if not returns or len(returns) < 2:
+        try:
+            # Enhanced input validation
+            if not returns:
+                self.logger.warning("Empty returns list provided for VaR calculation")
+                return 0.0
+
+            if not isinstance(returns, list | tuple):
+                raise ValueError(f"Returns must be a list or tuple, got {type(returns).__name__}")
+
+            if len(returns) < 10:  # Need at least 10 returns for reliable VaR
+                self.logger.warning(
+                    f"Insufficient returns data for VaR: {len(returns)} returns (minimum 10 required)"
+                )
+                return 0.0
+
+            # Validate confidence level with detailed error message
+            if not isinstance(confidence_level, (int, float)):
+                raise ValueError(
+                    f"Confidence level must be numeric, got {type(confidence_level).__name__}"
+                )
+
+            if not (0.5 <= confidence_level <= 0.999):
+                self.logger.warning(
+                    f"Invalid confidence level {confidence_level} (must be between 0.5 and 0.999), using 0.95"
+                )
+                confidence_level = 0.95
+
+            # Validate time horizon
+            if not isinstance(time_horizon, int) or time_horizon <= 0:
+                self.logger.warning(
+                    f"Invalid time horizon {time_horizon} (must be positive integer), using 1 day"
+                )
+                time_horizon = 1
+
+            # Validate and clean returns data
+            valid_returns = []
+            for i, ret in enumerate(returns):
+                try:
+                    float_ret = float(ret)
+                    if not (np.isnan(float_ret) or np.isinf(float_ret)):
+                        # Apply reasonable bounds for returns (-100% to +1000%)
+                        if -1.0 <= float_ret <= 10.0:
+                            valid_returns.append(float_ret)
+                        else:
+                            self.logger.warning(
+                                f"Extreme return value at index {i}: {float_ret}, excluding from calculation"
+                            )
+                    else:
+                        self.logger.warning(
+                            f"Invalid return value at index {i}: {ret} (NaN or Inf), excluding from calculation"
+                        )
+                except (TypeError, ValueError) as e:
+                    self.logger.warning(
+                        f"Cannot convert return at index {i} to float: {ret}, error: {e}"
+                    )
+                    continue
+
+            if not valid_returns or len(valid_returns) < 10:
+                self.logger.warning(
+                    f"Insufficient valid returns for VaR: {len(valid_returns)} valid out of {len(returns)} total"
+                )
+                return 0.0
+
+            # Convert to numpy array for calculations
+            returns_array = np.array(valid_returns)
+
+            # Calculate VaR using percentile method
+            var_percentile = (1 - confidence_level) * 100
+
+            try:
+                var_daily = np.percentile(returns_array, var_percentile)
+            except Exception as e:
+                self.logger.error(f"Error calculating percentile: {e}")
+                return 0.0
+
+            # Validate percentile result
+            if np.isnan(var_daily) or np.isinf(var_daily):
+                self.logger.warning("Invalid VaR percentile calculated (NaN or Inf)")
+                return 0.0
+
+            # Scale to time horizon with bounds checking
+            try:
+                scaling_factor = np.sqrt(time_horizon)
+                if np.isnan(scaling_factor) or np.isinf(scaling_factor):
+                    self.logger.warning("Invalid scaling factor calculated")
+                    scaling_factor = 1.0
+                var_scaled = var_daily * scaling_factor
+            except Exception as e:
+                self.logger.error(f"Error scaling VaR to time horizon: {e}")
+                return 0.0
+
+            # Apply reasonable bounds (max 50% VaR)
+            var_result = min(abs(var_scaled), 0.5)
+
+            # Final validation
+            if np.isnan(var_result) or np.isinf(var_result) or var_result < 0:
+                self.logger.warning(f"Invalid final VaR result: {var_result}, returning 0")
+                return 0.0
+
+            return var_result
+
+        except Exception as e:
+            self.logger.error(
+                f"Unexpected error in VaR calculation: {e}",
+                extra={
+                    "returns_count": len(returns) if returns else 0,
+                    "confidence_level": confidence_level,
+                    "time_horizon": time_horizon,
+                    "error_type": type(e).__name__,
+                },
+            )
             return 0.0
-
-        # Convert to numpy array for calculations
-        returns_array = np.array(returns)
-
-        # Calculate VaR using percentile method
-        var_percentile = (1 - confidence_level) * 100
-        var_daily = np.percentile(returns_array, var_percentile)
-
-        # Scale to time horizon
-        var_scaled = var_daily * np.sqrt(time_horizon)
-
-        return abs(var_scaled)
 
     def calculate_expected_shortfall(
         self, returns: list[float], confidence_level: float = 0.95
@@ -101,12 +202,28 @@ class RiskCalculator(BaseComponent):
             return 0.0
 
         returns_array = np.array(returns)
-        excess_returns = returns_array - risk_free_rate
 
-        if np.std(returns_array) == 0:
+        # Validate returns data
+        if np.any(np.isnan(returns_array)) or np.any(np.isinf(returns_array)):
+            self.logger.warning("Invalid returns data for Sharpe ratio calculation")
             return 0.0
 
-        return np.mean(excess_returns) / np.std(returns_array)
+        excess_returns = returns_array - risk_free_rate
+        volatility = np.std(returns_array)
+
+        # Check for zero or near-zero volatility
+        if volatility == 0 or volatility < 1e-8:
+            self.logger.debug("Zero or near-zero volatility, Sharpe ratio set to 0")
+            return 0.0
+
+        sharpe = np.mean(excess_returns) / volatility
+
+        # Validate result
+        if np.isnan(sharpe) or np.isinf(sharpe):
+            self.logger.warning("Invalid Sharpe ratio calculated")
+            return 0.0
+
+        return sharpe
 
     def calculate_sortino_ratio(
         self, returns: list[float], risk_free_rate: float = 0.02, target_return: float = 0.0
@@ -185,7 +302,7 @@ class RiskCalculator(BaseComponent):
 
         return annual_return / abs(max_dd)
 
-    def calculate_portfolio_metrics(
+    async def calculate_portfolio_metrics(
         self, positions: list[Position], market_data: list[MarketData]
     ) -> RiskMetrics:
         """
@@ -235,7 +352,7 @@ class RiskCalculator(BaseComponent):
         risk_level = self._determine_risk_level(var_1d, max_dd, sharpe)
 
         return RiskMetrics(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             portfolio_value=Decimal(str(portfolio_value)),
             total_exposure=Decimal(str(total_exposure)),
             var_1d=Decimal(str(var_1d)),
@@ -329,23 +446,96 @@ class RiskCalculator(BaseComponent):
         self._cache.clear()
         self.logger.debug("Risk calculation cache cleared")
 
-    def update_history(self, symbol: str, price: float, return_value: float | None = None) -> None:
+    def update_history(
+        self, symbol: str, price: Decimal, return_value: float | None = None
+    ) -> None:
         """
         Update historical data for a symbol.
 
         Args:
             symbol: Trading symbol
-            price: Current price
+            price: Current price as Decimal for financial precision
             return_value: Return value if calculated
+
+        Raises:
+            ValueError: If input parameters are invalid
         """
-        if symbol not in self.position_data:
-            self.position_data[symbol] = []
+        try:
+            # Enhanced input validation
+            if not symbol or not isinstance(symbol, str) or symbol.strip() == "":
+                raise ValueError(f"Invalid symbol: {symbol} (must be non-empty string)")
 
-        self.position_data[symbol].append(price)
+            symbol = symbol.strip().upper()  # Normalize symbol
 
-        # Keep only recent history (e.g., last 1000 points)
-        if len(self.position_data[symbol]) > 1000:
-            self.position_data[symbol] = self.position_data[symbol][-1000:]
+            if not isinstance(price, (Decimal, int, float)):
+                raise ValueError(
+                    f"Price must be Decimal, int, or float, got {type(price).__name__}"
+                )
+
+            # Convert to Decimal for validation
+            if not isinstance(price, Decimal):
+                try:
+                    price = Decimal(str(price))
+                except (ValueError, TypeError) as e:
+                    raise ValueError(f"Cannot convert price to Decimal: {e}") from e
+
+            # Validate price range
+            if price <= Decimal("0"):
+                self.logger.warning(f"Invalid price for {symbol}: {price} (must be positive)")
+                return
+
+            # Apply reasonable price bounds (between $0.000001 and $1,000,000)
+            min_price = Decimal("0.000001")
+            max_price = Decimal("1000000")
+            if not (min_price <= price <= max_price):
+                self.logger.warning(
+                    f"Price for {symbol} outside reasonable bounds: {price} (bounds: {min_price} - {max_price})"
+                )
+                return
+
+            # Initialize symbol data if needed
+            if symbol not in self.position_data:
+                self.position_data[symbol] = []
+
+            # Convert to float only for storage (numpy compatibility)
+            try:
+                price_float = float(price)
+                if np.isnan(price_float) or np.isinf(price_float):
+                    self.logger.warning(
+                        f"Price conversion resulted in NaN or Inf for {symbol}: {price}"
+                    )
+                    return
+                self.position_data[symbol].append(price_float)
+            except (TypeError, ValueError, OverflowError) as e:
+                self.logger.error(f"Error converting price to float for {symbol}: {e}")
+                return
+
+            # Keep only recent history with memory management
+            max_history = 1000
+            if len(self.position_data[symbol]) > max_history:
+                self.position_data[symbol] = self.position_data[symbol][-max_history:]
+
+            # Log successful update for debugging
+            self.logger.debug(
+                f"Updated price history for {symbol}",
+                extra={
+                    "price": str(price),
+                    "history_length": len(self.position_data[symbol]),
+                    "return_value": return_value,
+                },
+            )
+
+        except Exception as e:
+            self.logger.error(
+                f"Unexpected error updating price history for {symbol}: {e}",
+                extra={
+                    "symbol": symbol,
+                    "price": str(price) if price else None,
+                    "error_type": type(e).__name__,
+                },
+            )
+            # Don't re-raise to prevent breaking the calling code
+            return
 
 
 # Global instance for singleton pattern

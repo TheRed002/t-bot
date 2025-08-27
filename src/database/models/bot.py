@@ -75,21 +75,21 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     @property
     def is_running(self) -> bool:
         """Check if bot is running."""
-        return self.status == "RUNNING"
+        return bool(self.status == "RUNNING")
 
     @property
     def win_rate(self) -> float:
         """Calculate win rate."""
         if self.total_trades == 0:
-            return 0
-        return (self.winning_trades / self.total_trades) * 100
+            return 0.0
+        return float((self.winning_trades / self.total_trades) * 100)
 
     @property
     def average_pnl(self) -> float:
         """Calculate average P&L per trade."""
         if self.total_trades == 0:
-            return 0
-        return self.total_pnl / self.total_trades
+            return 0.0
+        return float(self.total_pnl / self.total_trades)
 
 
 class Strategy(Base, AuditMixin, MetadataMixin):
@@ -143,14 +143,14 @@ class Strategy(Base, AuditMixin, MetadataMixin):
     @property
     def is_active(self) -> bool:
         """Check if strategy is active."""
-        return self.status == "ACTIVE"
+        return bool(self.status == "ACTIVE")
 
     @property
     def signal_success_rate(self) -> float:
         """Calculate signal success rate."""
         if self.executed_signals == 0:
-            return 0
-        return (self.successful_signals / self.executed_signals) * 100
+            return 0.0
+        return float((self.successful_signals / self.executed_signals) * 100)
 
 
 class Signal(Base, TimestampMixin, MetadataMixin):
@@ -197,12 +197,12 @@ class Signal(Base, TimestampMixin, MetadataMixin):
     @property
     def is_executed(self) -> bool:
         """Check if signal was executed."""
-        return self.executed
+        return bool(self.executed)
 
     @property
     def is_successful(self) -> bool:
         """Check if signal was successful."""
-        return self.outcome == "SUCCESS"
+        return bool(self.outcome == "SUCCESS")
 
 
 class BotLog(Base, TimestampMixin):

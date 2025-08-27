@@ -1,6 +1,6 @@
 """Data pipeline and quality types for the T-Bot trading system."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -110,7 +110,7 @@ class PredictionResult(BaseModel):
     processing_time_ms: float
     metadata: dict[str, Any] = Field(default_factory=dict)
     error: str | None = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class FeatureSet(BaseModel):
@@ -121,5 +121,5 @@ class FeatureSet(BaseModel):
     features: dict[str, Any]
     feature_names: list[str]
     computation_time_ms: float
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)

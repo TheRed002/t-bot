@@ -9,7 +9,7 @@ CRITICAL: This strategy MUST inherit from BaseStrategy and follow the exact inte
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -130,7 +130,7 @@ class MarketMakingStrategy(BaseStrategy):
             target_inventory=self.target_inventory,
             max_inventory=self.max_inventory,
             inventory_skew=0.0,
-            last_rebalance=datetime.now(),
+            last_rebalance=datetime.now(timezone.utc),
         )
 
         # Market data tracking
@@ -143,7 +143,7 @@ class MarketMakingStrategy(BaseStrategy):
         self.profitable_trades = 0
         self.total_pnl = Decimal("0")
         self.daily_pnl = Decimal("0")
-        self.last_daily_reset = datetime.now()
+        self.last_daily_reset = datetime.now(timezone.utc)
 
         self.logger.info(
             "Market Making Strategy initialized",
@@ -277,17 +277,17 @@ class MarketMakingStrategy(BaseStrategy):
         # Ensure minimum spread
         min_spread = Decimal("0.0001")  # 0.01%
         return max(level_spread, min_spread)
-    
+
     def _calculate_correlation_risk_factor(self) -> Decimal:
         """Calculate risk factor based on correlation with other assets.
-        
+
         Returns:
             Risk factor between 1.0 (no correlation) and 2.0 (high correlation)
         """
         # TODO: Implement actual correlation calculation with portfolio
         # For now, return conservative estimate
         base_factor = Decimal("1.0")
-        
+
         # Increase risk factor if we have high inventory
         inventory_ratio = abs(self.inventory_state.inventory_skew)
         if inventory_ratio > 0.7:
@@ -295,7 +295,7 @@ class MarketMakingStrategy(BaseStrategy):
             base_factor += Decimal("0.5")
         elif inventory_ratio > 0.5:
             base_factor += Decimal("0.3")
-        
+
         return base_factor
 
     def _calculate_level_size(self, level: int) -> Decimal:
@@ -583,7 +583,7 @@ class MarketMakingStrategy(BaseStrategy):
                 )
 
             # Update last rebalance time
-            self.inventory_state.last_rebalance = datetime.now()
+            self.inventory_state.last_rebalance = datetime.now(timezone.utc)
 
             self.logger.debug(
                 "Inventory state updated",
@@ -614,9 +614,9 @@ class MarketMakingStrategy(BaseStrategy):
                 self.profitable_trades += 1
 
             # Reset daily P&L if needed
-            if datetime.now() - self.last_daily_reset > timedelta(days=1):
+            if datetime.now(timezone.utc) - self.last_daily_reset > timedelta(days=1):
                 self.daily_pnl = Decimal("0")
-                self.last_daily_reset = datetime.now()
+                self.last_daily_reset = datetime.now(timezone.utc)
 
             # Update win rate
             if self.total_trades > 0:
@@ -624,7 +624,7 @@ class MarketMakingStrategy(BaseStrategy):
                 self.metrics.total_trades = self.total_trades
 
             self.metrics.total_pnl = self.total_pnl
-            self.metrics.last_updated = datetime.now()
+            self.metrics.last_updated = datetime.now(timezone.utc)
 
             self.logger.debug(
                 "Performance metrics updated",

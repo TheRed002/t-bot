@@ -201,8 +201,10 @@ class AlternativeDataSource(BaseComponent):
                 raise DataSourceError("FRED API key not configured")
 
             all_indicators = []
-            end_date = datetime.now().strftime("%Y-%m-%d")
-            start_date = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+            end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            start_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime(
+                "%Y-%m-%d"
+            )
 
             for indicator_id in indicators:
                 try:

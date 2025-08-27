@@ -8,7 +8,7 @@ memory monitoring, and cache statistics.
 import threading
 import time
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import psutil
@@ -150,7 +150,7 @@ class ModelCacheService(BaseService):
                 if model_id in self.cache:
                     # Move to end (most recent)
                     self.cache.move_to_end(model_id)
-                    self.access_times[model_id] = datetime.utcnow()
+                    self.access_times[model_id] = datetime.now(timezone.utc)
                     return True
 
                 # Estimate model memory usage
@@ -161,7 +161,7 @@ class ModelCacheService(BaseService):
 
                 # Add model to cache
                 self.cache[model_id] = model
-                self.access_times[model_id] = datetime.utcnow()
+                self.access_times[model_id] = datetime.now(timezone.utc)
                 self.memory_usage[model_id] = model_memory_mb
 
                 # Update statistics
@@ -198,7 +198,7 @@ class ModelCacheService(BaseService):
             if model_id in self.cache:
                 # Check TTL
                 access_time = self.access_times[model_id]
-                if datetime.utcnow() - access_time > timedelta(minutes=self.ttl_minutes):
+                if datetime.now(timezone.utc) - access_time > timedelta(minutes=self.ttl_minutes):
                     # Model has expired
                     self._remove_model(model_id, reason="TTL expired")
                     self.cache_stats["misses"] += 1
@@ -207,7 +207,7 @@ class ModelCacheService(BaseService):
                 # Move to end (most recent) and update access time
                 model = self.cache[model_id]
                 self.cache.move_to_end(model_id)
-                self.access_times[model_id] = datetime.utcnow()
+                self.access_times[model_id] = datetime.now(timezone.utc)
 
                 self.cache_stats["hits"] += 1
 
@@ -412,7 +412,7 @@ class ModelCacheService(BaseService):
             return 0
 
         expired_models = []
-        cutoff_time = datetime.utcnow() - timedelta(minutes=self.ttl_minutes)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=self.ttl_minutes)
 
         with self.lock:
             for model_id, access_time in self.access_times.items():
@@ -473,7 +473,7 @@ class ModelCacheService(BaseService):
         with self.lock:
             health = {
                 "status": "healthy",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "cache_size": len(self.cache),
                 "max_size": self.max_size,
                 "memory_usage_mb": sum(self.memory_usage.values()),

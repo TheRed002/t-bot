@@ -10,7 +10,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.base import BaseComponent
+from src.core.base import BaseComponent
 from src.database.connection import get_async_session
 from src.database.models import MarketDataRecord, Position, Trade
 from src.error_handling.decorators import with_circuit_breaker, with_fallback, with_retry
@@ -32,7 +32,7 @@ class DatabaseManager(BaseComponent):
         self.session: AsyncSession | None = None
         self._session_context = None
 
-    @with_retry(max_attempts=3, base_delay=1.0)
+    @with_retry(max_retries=3, base_delay=1.0)
     async def __aenter__(self):
         """Async context manager entry."""
         self._session_context = get_async_session()
@@ -48,7 +48,7 @@ class DatabaseManager(BaseComponent):
 
     @time_execution
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=30.0)
-    @with_retry(max_attempts=3, base_delay=1.0, exceptions=(Exception,))
+    @with_retry(max_retries=3, base_delay=1.0, exceptions=(Exception,))
     @with_fallback(default_value=[])
     async def get_historical_data(
         self, symbol: str, start_time: datetime, end_time: datetime, timeframe: str = "1m"
@@ -68,7 +68,9 @@ class DatabaseManager(BaseComponent):
         async with get_async_session() as session:
             # Simplified query - in production this would use proper SQLAlchemy queries
             records: list[MarketDataRecord] = []
-            self.logger.info(f"Fetching historical data for {symbol} from {start_time} to {end_time}")
+            self.logger.info(
+                f"Fetching historical data for {symbol} from {start_time} to {end_time}"
+            )
 
             # Placeholder implementation - replace with actual database query
             # In production, this would query the MarketDataRecord table
@@ -76,7 +78,7 @@ class DatabaseManager(BaseComponent):
 
     @time_execution
     @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_attempts=5, base_delay=0.5, exceptions=(Exception,))
+    @with_retry(max_retries=5, base_delay=0.5, exceptions=(Exception,))
     async def save_trade(self, trade_data: dict[str, Any]) -> Trade:
         """
         Save a trade to the database.
@@ -97,7 +99,7 @@ class DatabaseManager(BaseComponent):
 
     @time_execution
     @with_circuit_breaker(failure_threshold=3, recovery_timeout=30.0)
-    @with_retry(max_attempts=3, base_delay=1.0, exceptions=(Exception,))
+    @with_retry(max_retries=3, base_delay=1.0, exceptions=(Exception,))
     @with_fallback(default_value=[])
     async def get_positions(
         self, strategy_id: str | None = None, symbol: str | None = None

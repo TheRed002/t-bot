@@ -24,7 +24,7 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, TypeVar
 
@@ -153,11 +153,11 @@ class LRUCache:
         # Estimate value size based on type
         if value is None:
             return size + 16
-        elif isinstance(value, (int, float, bool)):
+        elif isinstance(value, int | float | bool):
             size += sys.getsizeof(value)
         elif isinstance(value, str):
             size += sys.getsizeof(value)
-        elif isinstance(value, (list, tuple)):
+        elif isinstance(value, list | tuple):
             size += sys.getsizeof(value)
             # Add size of elements (simplified)
             for item in value[:10]:  # Sample first 10 items
@@ -228,11 +228,14 @@ class FallbackConfig:
 
 
 class ErrorMetrics:
-    """Error metrics tracking."""
+    """Error metrics tracking with automatic cleanup."""
 
-    def __init__(self):
+    def __init__(self, max_entries: int = 1000, retention_hours: int = 24):
         self._metrics: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
+        self._max_entries = max_entries
+        self._retention_hours = retention_hours
+        self._last_cleanup = datetime.now(timezone.utc)
 
     async def record_error(
         self,
@@ -242,6 +245,10 @@ class ErrorMetrics:
         resolved: bool = False,
     ) -> None:
         """Record error occurrence."""
+        # Check if cleanup is needed
+        if self._should_cleanup():
+            self._cleanup_old_metrics()
+
         with self._lock:
             if function_name not in self._metrics:
                 self._metrics[function_name] = {
@@ -284,6 +291,43 @@ class ErrorMetrics:
         else:
             self._metrics.clear()
 
+    def _cleanup_old_metrics(self) -> None:
+        """Remove old metrics to prevent memory growth."""
+        with self._lock:
+            now = datetime.now(timezone.utc)
+
+            # Remove metrics older than retention period
+            retention_cutoff = now - timedelta(hours=self._retention_hours)
+            to_remove = []
+
+            for func_name, metrics in self._metrics.items():
+                last_error = metrics.get("last_error")
+                if last_error and last_error < retention_cutoff:
+                    to_remove.append(func_name)
+
+            for func_name in to_remove:
+                del self._metrics[func_name]
+
+            # If still too many entries, remove oldest
+            if len(self._metrics) > self._max_entries:
+                # Sort by last_error time and keep only the most recent
+                sorted_funcs = sorted(
+                    self._metrics.items(),
+                    key=lambda x: x[1].get("last_error", datetime.min.replace(tzinfo=timezone.utc)),
+                    reverse=True,
+                )
+                self._metrics = dict(sorted_funcs[: self._max_entries])
+
+            self._last_cleanup = now
+
+    def _should_cleanup(self) -> bool:
+        """Check if cleanup is needed."""
+        now = datetime.now(timezone.utc)
+        # Run cleanup every hour or when reaching max entries
+        return (
+            now - self._last_cleanup > timedelta(hours=1) or len(self._metrics) > self._max_entries
+        )
+
 
 # Global error metrics instance
 error_metrics = ErrorMetrics()
@@ -297,19 +341,19 @@ def categorize_error(error: Exception) -> ErrorCategory:
     if not isinstance(error_type, type):
         return ErrorCategory.UNKNOWN
 
-    if issubclass(error_type, (NetworkError, ConnectionError, TimeoutError)):
+    if issubclass(error_type, NetworkError | ConnectionError | TimeoutError):
         return ErrorCategory.NETWORK
-    elif issubclass(error_type, (DatabaseConnectionError, DataError)):
+    elif issubclass(error_type, DatabaseConnectionError | DataError):
         return ErrorCategory.DATABASE
-    elif issubclass(error_type, (ValidationError, ValueError, TypeError)):
+    elif issubclass(error_type, ValidationError | ValueError | TypeError):
         return ErrorCategory.VALIDATION
     elif issubclass(error_type, ExchangeError):
         return ErrorCategory.EXCHANGE
     elif issubclass(error_type, ConfigurationError):
         return ErrorCategory.CONFIGURATION
-    elif issubclass(error_type, (ServiceError, TradingBotError)):
+    elif issubclass(error_type, ServiceError | TradingBotError):
         return ErrorCategory.BUSINESS_LOGIC
-    elif issubclass(error_type, (OSError, MemoryError, SystemError)):
+    elif issubclass(error_type, OSError | MemoryError | SystemError):
         return ErrorCategory.SYSTEM
     else:
         return ErrorCategory.UNKNOWN
@@ -371,13 +415,24 @@ class UniversalErrorHandler:
         with self._cleanup_task_lock:
             try:
                 # Check if there's an event loop running
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
                 if self._cleanup_task is None or self._cleanup_task.done():
                     self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+                    # Add done callback to handle any exceptions
+                    self._cleanup_task.add_done_callback(self._cleanup_task_done_callback)
             except RuntimeError:
                 # No event loop running, this is expected in sync contexts
                 # Cleanup will be started when an async context is available
                 pass
+
+    def _cleanup_task_done_callback(self, task: asyncio.Task) -> None:
+        """Handle cleanup task completion."""
+        if task.exception():
+            self.logger.error(f"Cleanup task failed: {task.exception()}")
+        # Reset task reference so it can be restarted if needed
+        with self._cleanup_task_lock:
+            if self._cleanup_task is task:
+                self._cleanup_task = None
 
     async def _periodic_cleanup(self) -> None:
         """Periodic cleanup of caches and state."""
@@ -501,11 +556,7 @@ class UniversalErrorHandler:
                         )
                     else:
                         # If we're in an async context and have a sync function, run it in executor
-                        try:
-                            loop = asyncio.get_running_loop()
-                        except RuntimeError:
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
+                        loop = asyncio.get_running_loop()
                         result = await loop.run_in_executor(
                             None,
                             self.fallback_config.fallback_function,
@@ -636,11 +687,11 @@ class UniversalErrorHandler:
 
     def _get_error_severity(self, error: Exception) -> str:
         """Map exception to severity string for rate limiting."""
-        if isinstance(error, (SecurityError, StateConsistencyError)):
+        if isinstance(error, SecurityError | StateConsistencyError):
             return "critical"
-        elif isinstance(error, (RiskManagementError, ExchangeError, ExecutionError)):
+        elif isinstance(error, RiskManagementError | ExchangeError | ExecutionError):
             return "high"
-        elif isinstance(error, (DataError, ModelError)):
+        elif isinstance(error, DataError | ModelError):
             return "medium"
         else:
             return "low"

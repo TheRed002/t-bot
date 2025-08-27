@@ -18,14 +18,21 @@ logger = logging.getLogger(__name__)
 try:
     from ..utils.decorators import time_execution
 except ImportError as e:
-    logger.warning(f"Failed to import time_execution decorator: {e}")
+    logger.error(f"Failed to import time_execution decorator: {e}")
 
-    # Provide a no-op fallback decorator
+    # Provide a fallback decorator that logs a warning
     def time_execution(func: Callable) -> Callable:
-        """Fallback time_execution decorator that does nothing."""
+        """Fallback time_execution decorator that warns about missing functionality."""
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Log warning on first use only
+            if not hasattr(wrapper, "_warned"):
+                logger.warning(
+                    f"Performance monitoring disabled for {func.__name__} - "
+                    "time_execution decorator not available"
+                )
+                wrapper._warned = True
             return func(*args, **kwargs)
 
         return wrapper
@@ -47,12 +54,18 @@ except ImportError as e:
 try:
     from ..utils.file_utils import ensure_directory_exists
 except ImportError as e:
-    logger.warning(f"Failed to import file utilities: {e}")
+    logger.error(f"Failed to import file utilities: {e}")
 
-    # Provide a fallback implementation
+    # Provide a fallback implementation that uses standard library
     def ensure_directory_exists(path: str) -> None:
-        """Fallback ensure_directory_exists that does nothing."""
-        pass
+        """Fallback ensure_directory_exists using standard library."""
+        from pathlib import Path
+
+        try:
+            Path(path).mkdir(parents=True, exist_ok=True)
+        except Exception as mkdir_error:
+            logger.error(f"Failed to create directory {path}: {mkdir_error}")
+            raise
 
 
 # Export all imported utilities

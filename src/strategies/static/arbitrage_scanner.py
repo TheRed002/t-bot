@@ -9,7 +9,7 @@ CRITICAL: This scanner requires real-time data feeds and ultra-low latency
 processing to detect opportunities before they disappear.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -75,7 +75,7 @@ class ArbitrageOpportunity(BaseStrategy):
         self.active_opportunities: dict[str, dict] = {}
         self.exchange_prices: dict[str, dict[str, MarketData]] = {}
         self.opportunity_history: list[dict] = []
-        self.last_scan_time = datetime.now()
+        self.last_scan_time = datetime.now(timezone.utc)
 
         # Performance tracking
         self.scan_count = 0
@@ -156,7 +156,7 @@ class ArbitrageOpportunity(BaseStrategy):
             # Update scanner metrics
             self.scan_count += 1
             self.opportunities_found += len(prioritized_signals)
-            self.last_scan_time = datetime.now()
+            self.last_scan_time = datetime.now(timezone.utc)
 
             return prioritized_signals
 
@@ -228,7 +228,7 @@ class ArbitrageOpportunity(BaseStrategy):
                         signal = Signal(
                             direction=SignalDirection.BUY,
                             confidence=min(0.9, net_profit_percentage / 2),
-                            timestamp=datetime.now(),
+                            timestamp=datetime.now(timezone.utc),
                             symbol=symbol,
                             strategy_name=self.name,
                             metadata={
@@ -316,7 +316,7 @@ class ArbitrageOpportunity(BaseStrategy):
                     signal = Signal(
                         direction=SignalDirection.BUY,
                         confidence=min(0.9, net_profit_percentage / 2),
-                        timestamp=datetime.now(),
+                        timestamp=datetime.now(timezone.utc),
                         symbol=pair1,
                         strategy_name=self.name,
                         metadata={
@@ -784,7 +784,7 @@ class ArbitrageOpportunity(BaseStrategy):
             # Check execution timeout
             metadata = position.metadata
             execution_timeout = metadata.get("execution_timeout", self.max_execution_time)
-            position_age = (datetime.now() - position.timestamp).total_seconds() * 1000
+            position_age = (datetime.now(timezone.utc) - position.timestamp).total_seconds() * 1000
 
             if position_age > execution_timeout:
                 self.logger.info(
@@ -934,7 +934,7 @@ class ArbitrageOpportunity(BaseStrategy):
                 return Signal(
                     direction=SignalDirection.BUY,
                     confidence=min(0.9, net_profit_percentage / 2),
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(timezone.utc),
                     symbol=pair1,
                     strategy_name=self.name,
                     metadata={

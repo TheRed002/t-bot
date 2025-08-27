@@ -27,15 +27,15 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
 import redis.asyncio as redis
 from cachetools import TTLCache
 
-from src.base import BaseComponent
-from src.core.config import Config
+from src.core.base.component import BaseComponent
+from src.core.config.main import Config
 from src.core.exceptions import CacheError
 from src.core.logging import get_logger
 from src.data.cache.data_cache import DataCache
@@ -97,8 +97,8 @@ class CacheEntry:
     value: Any
     level: CacheLevel
     category: DataCategory
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    last_accessed: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_accessed: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     access_count: int = 0
     ttl_seconds: int = 3600
     size_bytes: int = 0
@@ -110,11 +110,11 @@ class CacheEntry:
         """Check if entry has expired."""
         if self.ttl_seconds <= 0:
             return False
-        return (datetime.utcnow() - self.created_at).total_seconds() > self.ttl_seconds
+        return (datetime.now(timezone.utc) - self.created_at).total_seconds() > self.ttl_seconds
 
     def touch(self) -> None:
         """Update access information."""
-        self.last_accessed = datetime.utcnow()
+        self.last_accessed = datetime.now(timezone.utc)
         self.access_count += 1
 
 
@@ -477,7 +477,7 @@ class L2MemoryCache(CacheInterface):
                 return len(pickle.dumps(value))
             else:
                 return 100  # Default estimate
-        except:
+        except Exception:
             return 100
 
     def _update_access_time(self, start_time: float) -> None:
@@ -755,7 +755,7 @@ class UnifiedCacheLayer(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Failed to initialize unified cache layer: {e}")
-            raise CacheError(f"Initialization failed: {e}")
+            raise CacheError(f"Initialization failed: {e}") from e
 
     async def _initialize_cache_levels(self) -> None:
         """Initialize all cache levels."""
@@ -1007,7 +1007,11 @@ class UnifiedCacheLayer(BaseComponent):
             if policy.warm_on_startup:
                 # Queue for warming
                 await self._warming_queue.put(
-                    {"type": "startup_warm", "category": category, "timestamp": datetime.utcnow()}
+                    {
+                        "type": "startup_warm",
+                        "category": category,
+                        "timestamp": datetime.now(timezone.utc),
+                    }
                 )
 
     async def _cache_warming_loop(self) -> None:
@@ -1130,7 +1134,7 @@ class UnifiedCacheLayer(BaseComponent):
     async def get_comprehensive_stats(self) -> dict[str, Any]:
         """Get comprehensive statistics from all cache levels."""
         stats = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "global_stats": self.global_stats.copy(),
         }
 

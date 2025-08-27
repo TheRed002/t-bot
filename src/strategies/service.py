@@ -9,7 +9,7 @@ This module provides the service layer for strategy management, including:
 - Backtesting coordination
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from src.core.base.service import BaseService
@@ -377,8 +377,10 @@ class StrategyService(BaseService):
 
         metrics = self._strategy_metrics[strategy_id]
         metrics.signals_generated += len(signals)
-        metrics.last_signal_time = datetime.now() if signals else metrics.last_signal_time
-        metrics.last_updated = datetime.now()
+        metrics.last_signal_time = (
+            datetime.now(timezone.utc) if signals else metrics.last_signal_time
+        )
+        metrics.last_updated = datetime.now(timezone.utc)
 
     @cache_strategy_signals(strategy_id_arg_name="strategy_id", ttl=300)  # Cache for 5 minutes
     async def get_strategy_performance(self, strategy_id: str) -> dict[str, Any]:
@@ -410,7 +412,7 @@ class StrategyService(BaseService):
             "config": config.model_dump() if config else {},
             "metrics": metrics.model_dump() if metrics else {},
             "signal_history_count": len(self._signal_history.get(strategy_id, [])),
-            "last_update": datetime.now(),
+            "last_update": datetime.now(timezone.utc),
         }
 
         # Add strategy-specific performance data
@@ -541,7 +543,9 @@ class StrategyService(BaseService):
         stuck_strategies = []
         for strategy_id, metrics in self._strategy_metrics.items():
             if metrics.last_updated:
-                time_since_update = (datetime.now() - metrics.last_updated).total_seconds()
+                time_since_update = (
+                    datetime.now(timezone.utc) - metrics.last_updated
+                ).total_seconds()
                 if time_since_update > 300:  # 5 minutes
                     stuck_strategies.append(strategy_id)
 

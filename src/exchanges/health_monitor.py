@@ -11,7 +11,7 @@ P-002A (error handling), and P-003+ (exchange interfaces).
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -55,7 +55,7 @@ class ConnectionInfo:
 
     def __post_init__(self):
         if self.created_at is None:
-            self.created_at = datetime.now()
+            self.created_at = datetime.now(timezone.utc)
 
 
 class ConnectionHealthMonitor(BaseComponent):
@@ -232,7 +232,7 @@ class ConnectionHealthMonitor(BaseComponent):
             conn_info = self.connections[connection_id]
             conn_info.status = ConnectionStatus.FAILED
             conn_info.failure_count += 1
-            conn_info.last_failure = datetime.now()
+            conn_info.last_failure = datetime.now(timezone.utc)
 
             # Record failure metric
             self.metrics_collector.increment_counter(
@@ -407,7 +407,7 @@ class ConnectionHealthMonitor(BaseComponent):
                 # Update last health check timestamp
                 self.metrics_collector.set_gauge(
                     "last_health_check_timestamp",
-                    datetime.now().timestamp(),
+                    datetime.now(timezone.utc).timestamp(),
                     {
                         "exchange": conn_info.exchange,
                         "stream_type": conn_info.stream_type,
@@ -422,7 +422,7 @@ class ConnectionHealthMonitor(BaseComponent):
                     await self.mark_failed(self._get_connection_by_id(connection_id))
                 else:
                     # Update last ping time
-                    conn_info.last_ping = datetime.now()
+                    conn_info.last_ping = datetime.now(timezone.utc)
 
             except Exception as e:
                 self.logger.error(
@@ -442,7 +442,7 @@ class ConnectionHealthMonitor(BaseComponent):
         try:
             # Check if connection has been inactive for too long
             if conn_info.last_ping:
-                time_since_ping = datetime.now() - conn_info.last_ping
+                time_since_ping = datetime.now(timezone.utc) - conn_info.last_ping
                 if time_since_ping.total_seconds() > self.health_check_interval * 2:
                     self.logger.warning(
                         "Connection inactive for too long",
@@ -494,7 +494,7 @@ class ConnectionHealthMonitor(BaseComponent):
 
             # For now, assume connection is healthy if it has recent activity
             if conn_info.last_ping:
-                time_since_ping = datetime.now() - conn_info.last_ping
+                time_since_ping = datetime.now(timezone.utc) - conn_info.last_ping
                 return time_since_ping.total_seconds() < self.health_check_interval
 
             return True
@@ -607,7 +607,7 @@ class ConnectionHealthMonitor(BaseComponent):
                 (healthy_connections / total_connections * 100) if total_connections > 0 else 0
             ),
             "is_monitoring": self.is_monitoring,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "metrics_integration": {
                 "metrics_collector_active": self.metrics_collector is not None,
                 "exchange_metrics_active": self.exchange_metrics is not None,

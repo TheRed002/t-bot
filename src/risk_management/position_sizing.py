@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from src.core.base.component import BaseComponent
+from src.error_handling.context import ErrorContext
 from src.core.config.main import Config
 from src.core.exceptions import RiskManagementError, ValidationError
 
@@ -135,17 +136,45 @@ class PositionSizer(BaseComponent):
         try:
             # Use default method if not specified
             if method is None:
-                method = PositionSizeMethod(self.risk_config.default_position_size_method)
+                try:
+                    method = PositionSizeMethod(self.risk_config.default_position_size_method)
+                except (ValueError, AttributeError) as e:
+                    self.logger.warning(
+                        "Invalid default position sizing method in config, using FIXED_PERCENTAGE",
+                        config_method=getattr(
+                            self.risk_config, "default_position_size_method", None
+                        ),
+                        error=str(e),
+                    )
+                    method = PositionSizeMethod.FIXED_PERCENTAGE
 
-            # Validate inputs
-            if not signal or not signal.confidence:
-                raise ValidationError("Invalid signal for position sizing")
+            # Enhanced input validation
+            if not signal:
+                raise ValidationError("Signal cannot be None")
+
+            if not hasattr(signal, "symbol") or not signal.symbol:
+                raise ValidationError("Signal must have a valid symbol")
+
+            # Check for either confidence or strength (backward compatibility)
+            confidence = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
+            if confidence is None:
+                raise ValidationError("Signal must have a confidence or strength value")
+
+            if not isinstance(confidence, int | float) or not (0 < confidence <= 1):
+                raise ValidationError(
+                    f"Signal confidence/strength must be between 0 and 1, got: {confidence}"
+                )
+
+            if not isinstance(portfolio_value, Decimal | int | float):
+                raise ValidationError(
+                    f"Portfolio value must be numeric, got {type(portfolio_value).__name__}"
+                )
 
             if portfolio_value <= 0:
-                raise ValidationError("Invalid portfolio value for position sizing")
+                raise ValidationError(f"Portfolio value must be positive, got: {portfolio_value}")
 
             # Calculate position size based on method
-            if method == PositionSizeMethod.FIXED_PCT:
+            if method == PositionSizeMethod.FIXED_PERCENTAGE:
                 position_size = await self._fixed_percentage_sizing(signal, portfolio_value)
             elif method == PositionSizeMethod.KELLY_CRITERION:
                 position_size = await self._kelly_criterion_sizing(signal, portfolio_value)
@@ -158,7 +187,7 @@ class PositionSizer(BaseComponent):
 
             # Apply maximum position size limit (25% absolute maximum)
             max_position_size = min(
-                portfolio_value * to_decimal(self.risk_config.max_position_size_pct),
+                portfolio_value * to_decimal(self.risk_config.risk_per_trade),
                 portfolio_value * to_decimal("0.25"),  # 25% hard limit
             )
             if position_size > max_position_size:
@@ -183,7 +212,7 @@ class PositionSizer(BaseComponent):
                 "Position size calculated",
                 method=method.value,
                 signal_symbol=signal.symbol,
-                signal_confidence=signal.confidence,
+                signal_confidence=confidence,
                 portfolio_value=format_decimal(portfolio_value),
                 position_size=format_decimal(position_size),
             )
@@ -196,7 +225,7 @@ class PositionSizer(BaseComponent):
                 error=str(e),
                 signal_symbol=signal.symbol if signal else None,
             )
-            raise RiskManagementError(f"Position size calculation failed: {e}")
+            raise RiskManagementError(f"Position size calculation failed: {e}") from e
 
     @time_execution
     async def _fixed_percentage_sizing(self, signal: Signal, portfolio_value: Decimal) -> Decimal:
@@ -211,10 +240,12 @@ class PositionSizer(BaseComponent):
             Decimal: Position size as fixed percentage of portfolio
         """
         # Base position size as percentage of portfolio
-        base_size = portfolio_value * to_decimal(self.risk_config.default_position_size_pct)
+        base_size = portfolio_value * to_decimal(self.risk_config.risk_per_trade)
 
         # Adjust for signal confidence
-        confidence_multiplier = to_decimal(signal.confidence)
+        # Get confidence from either confidence or strength field
+        confidence = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
+        confidence_multiplier = to_decimal(confidence)
         position_size = base_size * confidence_multiplier
 
         self.logger.debug(
@@ -293,12 +324,15 @@ class PositionSizer(BaseComponent):
                 self.logger.warning("Average loss too small for Kelly calculation")
                 return await self._fixed_percentage_sizing(signal, portfolio_value)
 
-            # Calculate win/loss ratio (b in Kelly formula)
-            win_loss_ratio = avg_win / avg_loss
+            # Calculate win/loss ratio (b in Kelly formula) with safe division
+            win_loss_ratio = safe_divide(avg_win, avg_loss, ZERO)
+            if win_loss_ratio <= ZERO:
+                self.logger.warning("Invalid win/loss ratio calculated")
+                return await self._fixed_percentage_sizing(signal, portfolio_value)
 
-            # Calculate Kelly fraction: f = (p*b - q) / b
+            # Calculate Kelly fraction: f = (p*b - q) / b with safe division
             numerator = (win_probability * win_loss_ratio) - loss_probability
-            kelly_fraction = numerator / win_loss_ratio
+            kelly_fraction = safe_divide(numerator, win_loss_ratio, ZERO)
 
             # Handle negative Kelly (negative edge)
             if kelly_fraction <= ZERO:
@@ -315,7 +349,9 @@ class PositionSizer(BaseComponent):
             half_kelly_fraction = kelly_fraction * to_decimal("0.5")
 
             # Apply confidence adjustment
-            adjusted_fraction = half_kelly_fraction * to_decimal(signal.confidence)
+            # Get confidence from either confidence or strength field
+            confidence = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
+            adjusted_fraction = half_kelly_fraction * to_decimal(confidence)
 
             # Apply bounds: min 1%, max 25% of portfolio
             # Enforce bounds using clamp_decimal
@@ -398,12 +434,12 @@ class PositionSizer(BaseComponent):
             volatility_adjustment = max(0.1, min(volatility_adjustment, 5.0))
 
             # Base position size
-            base_size = portfolio_value * to_decimal(self.risk_config.default_position_size_pct)
+            base_size = portfolio_value * to_decimal(self.risk_config.risk_per_trade)
 
             # Apply volatility adjustment and confidence
-            position_size = (
-                base_size * to_decimal(volatility_adjustment) * to_decimal(signal.confidence)
-            )
+            # Get confidence from either confidence or strength field
+            confidence = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
+            position_size = base_size * to_decimal(volatility_adjustment) * to_decimal(confidence)
 
             self.logger.debug(
                 "Volatility-adjusted sizing",
@@ -435,11 +471,13 @@ class PositionSizer(BaseComponent):
             Decimal: Position size weighted by ML confidence
         """
         # Base position size
-        base_size = portfolio_value * to_decimal(self.risk_config.default_position_size_pct)
+        base_size = portfolio_value * to_decimal(self.risk_config.risk_per_trade)
 
         # Apply confidence weighting with non-linear scaling
         # Higher confidence gets proportionally larger position
-        confidence = to_decimal(signal.confidence)
+        # Get confidence from either confidence or strength field
+        confidence_value = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
+        confidence = to_decimal(confidence_value)
         confidence_weight = confidence**2  # Square for non-linear scaling
 
         position_size = base_size * confidence_weight
@@ -454,40 +492,118 @@ class PositionSizer(BaseComponent):
         return position_size
 
     @time_execution
-    async def update_price_history(self, symbol: str, price: float) -> None:
+    async def update_price_history(self, symbol: str, price: Decimal) -> None:
         """
         Update price history for volatility calculations.
 
         Args:
             symbol: Trading symbol
-            price: Current price
+            price: Current price as Decimal for financial precision
+
+        Raises:
+            ValidationError: If input parameters are invalid
         """
-        if symbol not in self.price_history:
-            self.price_history[symbol] = []
+        try:
+            # Enhanced input validation
+            if not symbol or not isinstance(symbol, str) or symbol.strip() == "":
+                raise ValidationError(f"Invalid symbol: {symbol} (must be non-empty string)")
 
-        # Convert to Decimal for precision
-        decimal_price = to_decimal(price)
-        self.price_history[symbol].append(decimal_price)
+            symbol = symbol.strip().upper()  # Normalize symbol
 
-        # Keep only recent history to manage memory
-        max_history = max(self.risk_config.volatility_window * 2, 100)
-        if len(self.price_history[symbol]) > max_history:
-            self.price_history[symbol] = self.price_history[symbol][-max_history:]
+            if not isinstance(price, Decimal | int | float):
+                raise ValidationError(
+                    f"Price must be Decimal, int, or float, got {type(price).__name__}"
+                )
 
-        # Calculate and store returns
-        if len(self.price_history[symbol]) > 1:
-            if symbol not in self.return_history:
-                self.return_history[symbol] = []
+            # Convert to Decimal if needed
+            if not isinstance(price, Decimal):
+                try:
+                    price = to_decimal(price)
+                except (ValueError, TypeError) as e:
+                    raise ValidationError(f"Cannot convert price to Decimal: {e}") from e
 
-            prev_price = self.price_history[symbol][-2]
-            if prev_price > ZERO:
-                return_rate = safe_divide(decimal_price - prev_price, prev_price, ZERO)
-                # Convert to float for return history to match test expectations
-                self.return_history[symbol].append(float(return_rate))
+            # Validate price is positive with bounds checking
+            if price <= ZERO:
+                raise ValidationError(f"Price must be positive: {price}")
 
-                # Keep only recent returns
-                if len(self.return_history[symbol]) > max_history:
-                    self.return_history[symbol] = self.return_history[symbol][-max_history:]
+            # Apply reasonable price bounds
+            min_price = to_decimal("0.000001")
+            max_price = to_decimal("1000000")
+            if not (min_price <= price <= max_price):
+                self.logger.warning(
+                    f"Price for {symbol} outside reasonable bounds: {price} (bounds: {min_price} - {max_price})"
+                )
+                return
+
+            # Initialize symbol data if needed
+            if symbol not in self.price_history:
+                self.price_history[symbol] = []
+
+            # Use Decimal directly for financial precision
+            self.price_history[symbol].append(price)
+
+            # Keep only recent history to manage memory with error handling
+            try:
+                max_history = max(getattr(self.risk_config, "volatility_window", 20) * 2, 100)
+                if len(self.price_history[symbol]) > max_history:
+                    self.price_history[symbol] = self.price_history[symbol][-max_history:]
+            except (AttributeError, TypeError) as e:
+                self.logger.warning(f"Error accessing volatility_window config, using default: {e}")
+                max_history = 100
+                if len(self.price_history[symbol]) > max_history:
+                    self.price_history[symbol] = self.price_history[symbol][-max_history:]
+
+            # Calculate and store returns with enhanced error handling
+            if len(self.price_history[symbol]) > 1:
+                try:
+                    if symbol not in self.return_history:
+                        self.return_history[symbol] = []
+
+                    prev_price = self.price_history[symbol][-2]
+                    if prev_price > ZERO:
+                        return_rate = safe_divide(price - prev_price, prev_price, ZERO)
+
+                        # Validate return rate
+                        return_float = float(return_rate)
+                        if not (np.isnan(return_float) or np.isinf(return_float)):
+                            # Apply reasonable bounds for returns (-100% to +1000%)
+                            if -1.0 <= return_float <= 10.0:
+                                self.return_history[symbol].append(return_float)
+                            else:
+                                self.logger.warning(
+                                    f"Extreme return rate calculated for {symbol}: {return_float}, excluding from history"
+                                )
+                        else:
+                            self.logger.warning(
+                                f"Invalid return rate calculated for {symbol}: {return_float} (NaN or Inf)"
+                            )
+
+                        # Keep only recent returns
+                        if len(self.return_history[symbol]) > max_history:
+                            self.return_history[symbol] = self.return_history[symbol][-max_history:]
+                    else:
+                        self.logger.warning(
+                            f"Previous price is zero or negative for {symbol}: {prev_price}, cannot calculate return"
+                        )
+                except Exception as e:
+                    self.logger.error(
+                        f"Error calculating returns for {symbol}: {e}",
+                        extra={"current_price": str(price), "error_type": type(e).__name__},
+                    )
+
+        except ValidationError:
+            # Re-raise validation errors
+            raise
+        except Exception as e:
+            self.logger.error(
+                f"Unexpected error updating price history for {symbol}: {e}",
+                extra={
+                    "symbol": symbol,
+                    "price": str(price) if price else None,
+                    "error_type": type(e).__name__,
+                },
+            )
+            raise ValidationError(f"Failed to update price history for {symbol}: {e}") from e
 
     @time_execution
     async def get_position_size_summary(
@@ -550,7 +666,7 @@ class PositionSizer(BaseComponent):
 
             # Check maximum position size (25% absolute maximum)
             max_size = min(
-                portfolio_value * to_decimal(self.risk_config.max_position_size_pct),
+                portfolio_value * to_decimal(self.risk_config.risk_per_trade),
                 portfolio_value * to_decimal("0.25"),  # 25% hard limit
             )
             if position_size > max_size:

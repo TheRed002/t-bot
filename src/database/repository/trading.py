@@ -1,22 +1,25 @@
 """Trading-specific repository implementations."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging import get_logger
 from src.database.models.trading import Order, OrderFill, Position, Trade
-from src.database.repository.base import BaseRepository
+from src.database.repository.core_compliant_base import DatabaseRepository
 
 logger = get_logger(__name__)
 
 
-class OrderRepository(BaseRepository[Order]):
+class OrderRepository(DatabaseRepository[Order, str]):
     """Repository for Order entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(session, Order)
+        super().__init__(
+            session=session, model=Order, entity_type=Order, key_type=str, name="OrderRepository"
+        )
 
     async def get_active_orders(
         self, bot_id: str | None = None, symbol: str | None = None
@@ -51,23 +54,29 @@ class OrderRepository(BaseRepository[Order]):
     async def get_recent_orders(self, hours: int = 24, bot_id: str | None = None) -> list[Order]:
         """Get recent orders."""
         from sqlalchemy import select
-        
-        since = datetime.utcnow() - timedelta(hours=hours)
+
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         stmt = select(Order).where(Order.created_at >= since)
-        
+
         if bot_id:
             stmt = stmt.where(Order.bot_id == bot_id)
-            
+
         stmt = stmt.order_by(Order.created_at.desc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
 
-class PositionRepository(BaseRepository[Position]):
+class PositionRepository(DatabaseRepository[Position, str]):
     """Repository for Position entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(session, Position)
+        super().__init__(
+            session=session,
+            model=Position,
+            entity_type=Position,
+            key_type=str,
+            name="PositionRepository",
+        )
 
     async def get_open_positions(
         self, bot_id: str | None = None, symbol: str | None = None
@@ -86,7 +95,7 @@ class PositionRepository(BaseRepository[Position]):
         """Get position by symbol and side."""
         return await self.get_by(bot_id=bot_id, symbol=symbol, side=side, status="OPEN")
 
-    async def close_position(self, position_id: str, exit_price: float) -> bool:
+    async def close_position(self, position_id: str, exit_price: Decimal) -> bool:
         """Close a position."""
         position = await self.get(position_id)
         if position and position.is_open:
@@ -97,7 +106,7 @@ class PositionRepository(BaseRepository[Position]):
             return True
         return False
 
-    async def update_position_price(self, position_id: str, current_price: float) -> bool:
+    async def update_position_price(self, position_id: str, current_price: Decimal) -> bool:
         """Update position's current price."""
         position = await self.get(position_id)
         if position:
@@ -107,7 +116,7 @@ class PositionRepository(BaseRepository[Position]):
             return True
         return False
 
-    async def get_total_exposure(self, bot_id: str) -> dict[str, float]:
+    async def get_total_exposure(self, bot_id: str) -> dict[str, Decimal]:
         """Get total exposure by bot."""
         positions = await self.get_open_positions(bot_id=bot_id)
 
@@ -122,11 +131,13 @@ class PositionRepository(BaseRepository[Position]):
         }
 
 
-class TradeRepository(BaseRepository[Trade]):
+class TradeRepository(DatabaseRepository[Trade, str]):
     """Repository for Trade entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(session, Trade)
+        super().__init__(
+            session=session, model=Trade, entity_type=Trade, key_type=str, name="TradeRepository"
+        )
 
     async def get_profitable_trades(self, bot_id: str | None = None) -> list[Trade]:
         """Get profitable trades."""
@@ -151,12 +162,12 @@ class TradeRepository(BaseRepository[Trade]):
     ) -> dict[str, Any]:
         """Get trade statistics."""
         from sqlalchemy import select
-        
+
         stmt = select(Trade).where(Trade.bot_id == bot_id)
-        
+
         if since:
             stmt = stmt.where(Trade.created_at >= since)
-            
+
         result = await self.session.execute(stmt)
         trades = list(result.scalars().all())
 
@@ -209,11 +220,17 @@ class TradeRepository(BaseRepository[Trade]):
         return await self.create(trade)
 
 
-class OrderFillRepository(BaseRepository[OrderFill]):
+class OrderFillRepository(DatabaseRepository[OrderFill, str]):
     """Repository for OrderFill entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(session, OrderFill)
+        super().__init__(
+            session=session,
+            model=OrderFill,
+            entity_type=OrderFill,
+            key_type=str,
+            name="OrderFillRepository",
+        )
 
     async def get_fills_by_order(self, order_id: str) -> list[OrderFill]:
         """Get all fills for an order."""

@@ -9,7 +9,7 @@ P-002A (error handling), and P-007A (utils) components.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -66,7 +66,7 @@ class BaseRiskManager(BaseComponent, ABC):
 
         # Risk state tracking
         self.current_risk_level = RiskLevel.LOW
-        self.last_risk_calculation = datetime.now()
+        self.last_risk_calculation = datetime.now(timezone.utc)
         self.risk_metrics: RiskMetrics | None = None
         self.position_limits: PositionLimits | None = None
 
@@ -273,29 +273,33 @@ class BaseRiskManager(BaseComponent, ABC):
         """
         try:
             # Validate position size parameters
-            if not (0 < self.risk_config.default_position_size_pct <= 1):
-                raise ValidationError("Invalid default position size percentage")
+            if not (0 < self.risk_config.risk_per_trade <= 1):
+                raise ValidationError("Invalid risk per trade percentage")
 
-            if not (0 < self.risk_config.max_position_size_pct <= 1):
-                raise ValidationError("Invalid max position size percentage")
+            if not (self.risk_config.max_position_size > 0):
+                raise ValidationError("Invalid max position size")
 
             # Validate portfolio limits
-            if not (0 < self.risk_config.max_portfolio_exposure <= 1):
-                raise ValidationError("Invalid max portfolio exposure")
+            if not (0 < self.risk_config.max_portfolio_concentration <= 1):
+                raise ValidationError("Invalid max portfolio concentration")
 
-            if not (0 < self.risk_config.max_drawdown_pct <= 1):
+            if not (0 < self.risk_config.max_drawdown <= 1):
                 raise ValidationError("Invalid max drawdown percentage")
 
             # Validate Kelly Criterion parameters
-            if not (0 < self.risk_config.kelly_max_fraction <= 1):
-                raise ValidationError("Invalid Kelly max fraction")
+            if not (0 < self.risk_config.kelly_fraction <= 1):
+                raise ValidationError("Invalid Kelly fraction")
+
+            # Validate daily loss limit
+            if not (self.risk_config.max_daily_loss > 0):
+                raise ValidationError("Invalid max daily loss")
 
             self.logger.info("Risk parameters validated successfully")
             return True
 
         except Exception as e:
             self.logger.error("Risk parameter validation failed", error=str(e))
-            raise ValidationError(f"Risk parameter validation failed: {e}")
+            raise ValidationError(f"Risk parameter validation failed: {e}") from e
 
     def _calculate_portfolio_exposure(self, positions: list[Position]) -> Decimal:
         """
@@ -324,7 +328,7 @@ class BaseRiskManager(BaseComponent, ABC):
         Returns:
             bool: True if drawdown is within limits
         """
-        max_drawdown = Decimal(str(self.risk_config.max_drawdown_pct))
+        max_drawdown = Decimal(str(self.risk_config.max_drawdown))
         return current_drawdown <= max_drawdown
 
     def _check_daily_loss_limit(self, daily_pnl: Decimal) -> bool:
@@ -340,9 +344,8 @@ class BaseRiskManager(BaseComponent, ABC):
         if daily_pnl >= 0:
             return True  # No loss to check
 
-        max_daily_loss = self.total_portfolio_value * Decimal(
-            str(self.risk_config.max_daily_loss_pct)
-        )
+        # Use the absolute max_daily_loss from config (not a percentage)
+        max_daily_loss = self.risk_config.max_daily_loss
         return abs(daily_pnl) <= max_daily_loss
 
     async def _log_risk_violation(self, violation_type: str, details: dict[str, Any]) -> None:

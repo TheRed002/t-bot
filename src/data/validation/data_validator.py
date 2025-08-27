@@ -19,7 +19,7 @@ from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.base import BaseComponent
 from src.core.config import Config
@@ -110,8 +110,7 @@ class ValidationRule(BaseModel):
     enabled: bool = True
     parameters: dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class MarketDataValidationResult(BaseModel):
@@ -124,8 +123,7 @@ class MarketDataValidationResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     validation_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class DataValidator(BaseComponent):

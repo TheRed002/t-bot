@@ -22,7 +22,7 @@ Performance targets:
 import asyncio
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -64,8 +64,8 @@ class ConnectionMetrics:
     """Metrics for a single connection."""
 
     connection_id: str
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    last_used: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_used: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     total_requests: int = 0
     failed_requests: int = 0
     avg_response_time: float = 0.0
@@ -111,7 +111,7 @@ class ConnectionWrapper:
         self.connection_type = connection_type
         self.base_url = base_url
         self.metrics = ConnectionMetrics(connection_id=connection_id)
-        self.last_health_check = datetime.utcnow()
+        self.last_health_check = datetime.now(timezone.utc)
         self.health_check_interval = 60  # seconds
         self._lock = asyncio.Lock()
 
@@ -122,7 +122,7 @@ class ConnectionWrapper:
         async with self._lock:
             try:
                 self.metrics.total_requests += 1
-                self.metrics.last_used = datetime.utcnow()
+                self.metrics.last_used = datetime.now(timezone.utc)
                 self.metrics.status = ConnectionStatus.ACTIVE
 
                 response = await self.session.request(method, url, **kwargs)
@@ -157,7 +157,7 @@ class ConnectionWrapper:
         try:
             # Skip if recently checked
             if (
-                datetime.utcnow() - self.last_health_check
+                datetime.now(timezone.utc) - self.last_health_check
             ).total_seconds() < self.health_check_interval:
                 return self.metrics.status != ConnectionStatus.UNHEALTHY
 
@@ -170,7 +170,7 @@ class ConnectionWrapper:
 
                 if response.status == 200:
                     self.metrics.status = ConnectionStatus.IDLE
-                    self.last_health_check = datetime.utcnow()
+                    self.last_health_check = datetime.now(timezone.utc)
                     return True
                 else:
                     self.metrics.status = ConnectionStatus.UNHEALTHY
@@ -189,6 +189,10 @@ class ConnectionWrapper:
             self.metrics.status = ConnectionStatus.DISCONNECTED
         except Exception as e:
             logger.warning(f"Error closing connection {self.connection_id}: {e}")
+            # Ensure connection is marked as disconnected even if close fails
+            self.metrics.status = ConnectionStatus.DISCONNECTED
+            # Invalidate the session to prevent reuse
+            self.session = None
 
 
 class EnhancedConnectionPool(BaseComponent):
@@ -237,7 +241,7 @@ class EnhancedConnectionPool(BaseComponent):
 
         # Adaptive sizing
         self.load_history: list[tuple[datetime, int]] = []  # (timestamp, active_count)
-        self.last_resize = datetime.utcnow()
+        self.last_resize = datetime.now(timezone.utc)
         self.resize_interval = 300  # 5 minutes
 
         # Health monitoring
@@ -568,7 +572,7 @@ class EnhancedConnectionPool(BaseComponent):
         # Check if timeout has passed
         if self.circuit_breaker_last_failure:
             time_since_failure = (
-                datetime.utcnow() - self.circuit_breaker_last_failure
+                datetime.now(timezone.utc) - self.circuit_breaker_last_failure
             ).total_seconds()
             if time_since_failure > self.circuit_breaker_timeout:
                 self.circuit_breaker_open = False
@@ -581,7 +585,7 @@ class EnhancedConnectionPool(BaseComponent):
     def _record_circuit_breaker_failure(self) -> None:
         """Record a failure for circuit breaker tracking."""
         self.circuit_breaker_failures += 1
-        self.circuit_breaker_last_failure = datetime.utcnow()
+        self.circuit_breaker_last_failure = datetime.now(timezone.utc)
 
         if self.circuit_breaker_failures >= self.circuit_breaker_threshold:
             self.circuit_breaker_open = True
@@ -636,7 +640,7 @@ class EnhancedConnectionPool(BaseComponent):
                 await asyncio.sleep(self.resize_interval)
 
                 # Analyze load patterns
-                current_time = datetime.utcnow()
+                current_time = datetime.now(timezone.utc)
                 active_count = len(self.active_connections)
 
                 # Record load sample
@@ -707,8 +711,10 @@ class EnhancedConnectionPool(BaseComponent):
                     connections_to_remove.append(connection)
 
             # Remove connections in O(n) by creating a new list
-            self.connections = [conn for conn in self.connections if conn not in connections_to_remove]
-            
+            self.connections = [
+                conn for conn in self.connections if conn not in connections_to_remove
+            ]
+
             # Close removed connections
             for connection in connections_to_remove:
                 await connection.close()
@@ -926,7 +932,7 @@ class ConnectionPoolManager(BaseComponent):
         )
 
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "global_metrics": {
                 "total_pools": len(self.pools),
                 "total_connections": total_connections,

@@ -18,7 +18,7 @@ CRITICAL: All modules MUST use this service instead of direct database access.
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, TypeVar
 
@@ -37,6 +37,8 @@ from src.core.config.service import ConfigService
 
 # Import core components
 from src.core.exceptions import (
+    DatabaseConnectionError,
+    DatabaseQueryError,
     DataError,
     DataValidationError,
     ServiceError,
@@ -214,7 +216,7 @@ class DatabaseService(TransactionalService):
 
     async def _create_entity_impl(self, entity: T) -> T:
         """Internal implementation of entity creation."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate entity data
@@ -269,7 +271,7 @@ class DatabaseService(TransactionalService):
 
     async def _get_entity_by_id_impl(self, model_class: type[T], entity_id: K) -> T | None:
         """Internal implementation of get by ID."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         cache_key = f"{model_class.__name__}_{entity_id}"
 
         try:
@@ -323,7 +325,7 @@ class DatabaseService(TransactionalService):
 
     async def _update_entity_impl(self, entity: T) -> T:
         """Internal implementation of entity update."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate entity data
@@ -369,7 +371,7 @@ class DatabaseService(TransactionalService):
 
     async def _delete_entity_impl(self, model_class: type[T], entity_id: K) -> bool:
         """Internal implementation of entity deletion."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             async with get_async_session() as session:
@@ -448,7 +450,7 @@ class DatabaseService(TransactionalService):
         include_relations: list[str] | None,
     ) -> list[T]:
         """Internal implementation of entity listing."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             async with get_async_session() as session:
@@ -519,7 +521,7 @@ class DatabaseService(TransactionalService):
         self, model_class: type[T], filters: dict[str, Any] | None
     ) -> int:
         """Internal implementation of entity counting."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             async with get_async_session() as session:
@@ -568,7 +570,7 @@ class DatabaseService(TransactionalService):
 
     async def _bulk_create_impl(self, entities: list[T]) -> list[T]:
         """Internal implementation of bulk creation."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate all entities
@@ -602,11 +604,14 @@ class DatabaseService(TransactionalService):
     @asynccontextmanager
     async def transaction(self) -> AsyncGenerator[AsyncSession, None]:
         """
-        Provide database transaction context manager.
+        Provide database transaction context manager with guaranteed cleanup.
 
         Yields:
             AsyncSession: Database session within transaction
         """
+        session = None
+        committed = False
+        
         try:
             self._performance_metrics["transactions_total"] += 1
 
@@ -614,14 +619,30 @@ class DatabaseService(TransactionalService):
                 try:
                     yield session
                     await session.commit()
+                    committed = True
                     self._performance_metrics["transactions_committed"] += 1
                     logger.debug("Transaction committed successfully")
 
                 except Exception as e:
-                    await session.rollback()
-                    self._performance_metrics["transactions_rolled_back"] += 1
-                    logger.error(f"Transaction rolled back: {e}")
+                    # Try to rollback, but don't fail if rollback fails
+                    try:
+                        await session.rollback()
+                        self._performance_metrics["transactions_rolled_back"] += 1
+                        logger.error(f"Transaction rolled back: {e}")
+                    except Exception as rollback_error:
+                        logger.critical(
+                            f"CRITICAL: Transaction rollback failed: {rollback_error}, "
+                            f"original error: {e}"
+                        )
+                        self._performance_metrics["transactions_rolled_back"] += 1
                     raise
+                finally:
+                    # Ensure session is properly closed even if commit/rollback fail
+                    if session and not committed:
+                        try:
+                            await session.close()
+                        except Exception as close_error:
+                            logger.error(f"Session close failed: {close_error}")
 
         except Exception as e:
             logger.error(f"Transaction failed: {e}")
@@ -816,7 +837,7 @@ class DatabaseService(TransactionalService):
 
     def _record_query_metrics(self, operation: str, start_time: datetime, success: bool) -> None:
         """Record query execution metrics."""
-        execution_time = (datetime.utcnow() - start_time).total_seconds()
+        execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
         self._performance_metrics["total_queries"] += 1
 
@@ -882,13 +903,13 @@ class DatabaseService(TransactionalService):
 
     async def _archive_bot_record_impl(self, bot_id: str) -> bool:
         """Internal implementation of bot record archiving."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Create an archive record for the bot
             archive_data = {
                 "bot_id": bot_id,
-                "archived_at": datetime.utcnow(),
+                "archived_at": datetime.now(timezone.utc),
                 "archived_by": "BotService",
                 "archive_reason": "bot_deletion",
             }
@@ -938,7 +959,7 @@ class DatabaseService(TransactionalService):
 
     async def _get_bot_metrics_impl(self, bot_id: str, limit: int) -> list[dict[str, Any]]:
         """Internal implementation of get bot metrics."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # For now, return empty list as placeholder
@@ -982,7 +1003,7 @@ class DatabaseService(TransactionalService):
 
     async def _store_bot_metrics_impl(self, metrics_record: dict[str, Any]) -> bool:
         """Internal implementation of store bot metrics."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate required fields
@@ -1003,7 +1024,7 @@ class DatabaseService(TransactionalService):
             #         {
             #             "bot_id": metrics_record["bot_id"],
             #             "data": json.dumps(metrics_record),
-            #             "timestamp": metrics_record.get("timestamp", datetime.utcnow())
+            #             "timestamp": metrics_record.get("timestamp", datetime.now(timezone.utc))
             #         }
             #     )
             #     await session.commit()
@@ -1037,7 +1058,7 @@ class DatabaseService(TransactionalService):
 
     async def _get_bot_health_checks_impl(self, bot_id: str, limit: int) -> list[dict[str, Any]]:
         """Internal implementation of get bot health checks."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Placeholder implementation - return empty list
@@ -1072,7 +1093,7 @@ class DatabaseService(TransactionalService):
 
     async def _store_bot_health_analysis_impl(self, health_analysis: dict[str, Any]) -> bool:
         """Internal implementation of store bot health analysis."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate required fields
@@ -1111,7 +1132,7 @@ class DatabaseService(TransactionalService):
 
     async def _get_bot_health_analyses_impl(self, bot_id: str, hours: int) -> list[dict[str, Any]]:
         """Internal implementation of get bot health analyses."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Placeholder implementation
@@ -1147,7 +1168,7 @@ class DatabaseService(TransactionalService):
 
     async def _get_recent_health_analyses_impl(self, hours: int) -> list[dict[str, Any]]:
         """Internal implementation of get recent health analyses."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Placeholder implementation
@@ -1178,7 +1199,7 @@ class DatabaseService(TransactionalService):
 
     async def _get_active_bots_impl(self) -> list[dict[str, Any]]:
         """Internal implementation of get active bots."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Use BotRepository to get active bots
@@ -1229,7 +1250,7 @@ class DatabaseService(TransactionalService):
 
     async def _store_resource_allocation_impl(self, allocation_record: dict[str, Any]) -> bool:
         """Internal implementation of store resource allocation."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate required fields
@@ -1270,7 +1291,7 @@ class DatabaseService(TransactionalService):
 
     async def _update_resource_allocation_status_impl(self, bot_id: str, status: str) -> bool:
         """Internal implementation of update resource allocation status."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             logger.debug(f"Updating resource allocation status for bot {bot_id} to {status}")
@@ -1303,7 +1324,7 @@ class DatabaseService(TransactionalService):
 
     async def _store_resource_usage_impl(self, usage_record: dict[str, Any]) -> bool:
         """Internal implementation of store resource usage."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate required fields
@@ -1340,7 +1361,7 @@ class DatabaseService(TransactionalService):
 
     async def _store_resource_reservation_impl(self, reservation: dict[str, Any]) -> bool:
         """Internal implementation of store resource reservation."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate required fields
@@ -1383,7 +1404,7 @@ class DatabaseService(TransactionalService):
         self, reservation_id: str, status: str
     ) -> bool:
         """Internal implementation of update resource reservation status."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             logger.debug(f"Updating resource reservation {reservation_id} status to {status}")
@@ -1416,7 +1437,7 @@ class DatabaseService(TransactionalService):
 
     async def _store_resource_usage_history_impl(self, usage_entry: dict[str, Any]) -> bool:
         """Internal implementation of store resource usage history."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate required fields
@@ -1453,7 +1474,7 @@ class DatabaseService(TransactionalService):
 
     async def _store_optimization_suggestion_impl(self, suggestion: dict[str, Any]) -> bool:
         """Internal implementation of store optimization suggestion."""
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             # Validate required fields
@@ -1557,7 +1578,11 @@ class DatabaseRepository(BaseRepository[T, K]):
         try:
             health_status = await self.database_service._service_health_check()
             return health_status == HealthStatus.HEALTHY
-        except Exception:
+        except (DatabaseConnectionError, DatabaseQueryError) as e:
+            self.logger.debug(f"Database health check failed: {e}")
+            return False
+        except Exception as e:
+            self.logger.warning(f"Unexpected error in database connection test: {e}")
             return False
 
     async def _repository_health_check(self) -> Any:

@@ -72,7 +72,9 @@ from .risk import (
     PortfolioState,
     PositionLimits,
     PositionSizeMethod,
+    RiskAlert,
     RiskLevel,
+    RiskLimits,
     RiskMetrics,
     WithdrawalRule,
 )
@@ -171,7 +173,9 @@ __all__ = [
     "ResourceAllocation",
     "ResourceType",
     # Risk
+    "RiskAlert",
     "RiskLevel",
+    "RiskLimits",
     "RiskMetrics",
     "Signal",
     # Trading

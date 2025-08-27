@@ -50,7 +50,6 @@ __all__ = [
     "BaseFactory",
     "BaseRepository",
     "BaseService",
-    "TransactionalService",
     # Interfaces
     "Configurable",
     "HealthCheckManager",
@@ -60,4 +59,5 @@ __all__ = [
     "Lifecycle",
     "Loggable",
     "Monitorable",
+    "TransactionalService",
 ]
