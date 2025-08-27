@@ -437,43 +437,145 @@ class MicroFixer:
         print(f"  🧪 Final tests: {test_status}")
         print("-" * 50)
 
-    def fix_module_micro(self, module):
-        """Apply all micro-fixes to a module."""
+    def fix_module_micro(self, module, max_iterations=5):
+        """Apply all micro-fixes to a module with iterative test fixing."""
         print(f"\n{'='*60}")
         print(f"🔧 MICRO-FIXING MODULE: {module}")
         print('='*60)
 
-        # Apply each micro-fix
+        # Apply each micro-fix (skip slow_tests as it's handled separately)
         for fix_type, prompt_template in MICRO_PROMPTS.items():
+            if fix_type == "slow_tests":
+                continue  # Handle this after tests pass
+                
             print(f"\n[{fix_type.upper()}] Fixing {module}...")
 
             prompt = prompt_template.format(module=module)
-            success, output = self.execute_prompt(prompt)
+            success, output = self.execute_prompt(prompt, f"Applying {fix_type} fixes to {module}")
 
             if success:
                 # Quick validation
                 valid, val_output = self.quick_validate(module, fix_type)
                 status = "✓" if valid else "⚠"
-                print(f"{status} {fix_type}: {'PASS' if valid else 'PARTIAL'}")
+                print(f"  {status} {fix_type}: {'PASS' if valid else 'PARTIAL'}")
                 self.log_fix_result(module, fix_type, success, valid)
             else:
-                print(f"✗ {fix_type}: FAILED - {output[:100]}")
+                print(f"  ✗ {fix_type}: FAILED - {output[:100]}")
                 self.log_fix_result(module, fix_type, False)
 
-        # Final module test
-        print(f"\n[TESTING] Running tests for {module}...")
-        test_passed, test_output = self.run_module_tests(module)
-
-        if not test_passed:
-            print(f"⚠ Tests failed, orchestrating fixes...")
-            final_result = self.fix_test_failures(module, test_output)
-        else:
-            print(f"✓ All tests passed for {module}")
-            final_result = True
+        # Iterative test fixing loop
+        iteration = 0
+        final_result = False
+        
+        while iteration < max_iterations:
+            iteration += 1
+            print(f"\n[TESTING - Iteration {iteration}/{max_iterations}] Running tests for {module}...")
+            
+            # Run tests with timing info
+            test_passed, test_output, slow_tests = self.run_module_tests(module, self.test_timeout, check_timing=True)
+            
+            # Parse test results for detailed info
+            failures, errors, warnings = self.parse_test_results(test_output)
+            
+            if test_passed and not failures and not errors and not warnings:
+                print(f"  ✅ All tests pass with 0 failures, 0 errors, 0 warnings!")
+                
+                # Now check for slow tests
+                if slow_tests and any(duration > 5.0 for _, duration in slow_tests):
+                    print(f"  ⚡ Optimizing {len(slow_tests)} slow tests...")
+                    self.fix_slow_tests(module, slow_tests)
+                
+                final_result = True
+                break
+            elif iteration < max_iterations:
+                print(f"  ⚠ Found: {failures} failures, {errors} errors, {warnings} warnings")
+                print(f"  🔄 Applying targeted fixes (iteration {iteration})...")
+                
+                # Use more precise fixing prompt
+                fix_success = self.fix_test_issues_precise(module, test_output, failures, errors, warnings)
+                
+                if not fix_success:
+                    print(f"  ❌ Failed to apply fixes, stopping iterations")
+                    break
+            else:
+                print(f"  ❌ Max iterations reached, some issues remain")
+                print(f"     Failures: {failures}, Errors: {errors}, Warnings: {warnings}")
+                break
 
         self.stats['tests'][module] = final_result
         self.print_module_summary(module, final_result)
         return final_result
+    
+    def parse_test_results(self, test_output):
+        """Parse test output to extract failure, error, and warning counts."""
+        import re
+        
+        failures = 0
+        errors = 0
+        warnings = 0
+        
+        # Look for pytest summary line
+        summary_match = re.search(r'(\d+) failed.*?(\d+) passed', test_output)
+        if summary_match:
+            failures = int(summary_match.group(1))
+        
+        error_match = re.search(r'(\d+) error', test_output)
+        if error_match:
+            errors = int(error_match.group(1))
+        
+        warning_match = re.search(r'(\d+) warning', test_output)
+        if warning_match:
+            warnings = int(warning_match.group(1))
+        
+        # Alternative parsing for different pytest formats
+        if not failures:
+            if 'FAILED' in test_output:
+                failures = test_output.count('FAILED')
+        
+        if not errors:
+            if 'ERROR' in test_output:
+                errors = test_output.count('ERROR')
+        
+        return failures, errors, warnings
+    
+    def fix_test_issues_precise(self, module, test_output, failures, errors, warnings):
+        """Apply precise fixes for test issues without hallucination."""
+        precise_prompt = f"""Use Task: strategic-project-coordinator agent to fix test issues in {module} module.
+
+CURRENT STATUS:
+- Failures: {failures}
+- Errors: {errors}  
+- Warnings: {warnings}
+
+TEST OUTPUT (showing failures/errors):
+{test_output[:3000]}
+
+STRICT REQUIREMENTS:
+1. ONLY fix the actual failing tests shown above
+2. DO NOT create new functions or classes - work with existing code
+3. DO NOT modify test assertions unless they are clearly wrong
+4. DO NOT add unnecessary imports or dependencies
+5. MAINTAIN existing test structure and patterns
+
+SYSTEMATIC FIX APPROACH:
+1. For ImportError/ModuleNotFoundError: Fix import paths, add missing __init__.py files
+2. For AttributeError: Ensure mocked objects have required attributes
+3. For TypeError: Fix argument counts, parameter types
+4. For AssertionError: Fix test data or mock return values (NOT the assertions)
+5. For async errors: Add proper await, ensure event loop handling
+6. For database errors: Use proper test fixtures, ensure cleanup
+7. For warnings: Update deprecated calls, fix resource warnings
+
+Use specialized agents:
+- Task: integration-test-architect for test structure issues
+- Task: financial-qa-engineer for test data and assertions
+- Task: code-guardian-enforcer for import and type issues
+
+SUCCESS CRITERIA: Tests pass with ZERO failures, ZERO errors, ZERO warnings.
+Make MINIMAL changes to achieve this."""
+        
+        success, output = self.execute_prompt(precise_prompt, f"Fixing {failures}F/{errors}E/{warnings}W in {module}")
+        return success
 
     def fix_slow_tests(self, module, slow_tests):
         """Fix slow-running tests in a module."""
@@ -547,7 +649,8 @@ class MicroFixer:
         success_count = 0
         for fix_type, prompt_template in INTEGRATION_PROMPTS.items():
             prompt = prompt_template.format(module=module, dependency=dependency)
-            success, output = self.execute_prompt(prompt)
+            desc = f"Integration {fix_type}: {module}→{dependency}"
+            success, output = self.execute_prompt(prompt, desc)
 
             status = "✓" if success else "✗"
             print(f"  {status} {fix_type}")
@@ -595,6 +698,20 @@ class MicroFixer:
             for module in failed_modules:
                 print(f"  ❌ {module}")
 
+        # Slow test optimization results
+        if self.stats['slow_tests']:
+            print(f"\n⚡ SLOW TEST OPTIMIZATIONS:")
+            total_before = sum(s['before'] for s in self.stats['slow_tests'].values())
+            total_after = sum(s['after'] for s in self.stats['slow_tests'].values())
+            improvement = ((total_before - total_after) / total_before * 100) if total_before > 0 else 0
+            
+            print(f"  • Total slow tests before: {total_before}")
+            print(f"  • Total slow tests after: {total_after}")
+            print(f"  • Improvement: {improvement:.1f}%")
+            
+            for module, stats in self.stats['slow_tests'].items():
+                print(f"    {module}: {stats['before']} → {stats['after']} slow tests")
+
         # Integration results
         if self.stats['integrations']:
             int_passed = sum(1 for r in self.stats['integrations'].values() if r)
@@ -613,6 +730,7 @@ class MicroFixer:
         )
 
         print(f"\n📊 OVERALL STATISTICS:")
+        print(f"  • Total prompts executed: {self.current_prompt}/{self.total_prompts}")
         print(f"  • Total micro-fixes applied: {successful_fixes}/{total_fixes}")
         print(f"  • Modules with passing tests: {len(passed_modules)}/{len(results)}")
         if self.stats['integrations']:
@@ -626,8 +744,15 @@ class MicroFixer:
         """Run systematic micro-fixes across all modules."""
         modules_to_process = [m for m in MODULE_HIERARCHY if m not in SKIP_MODULES]
 
+        # Calculate total prompts for progress tracking
+        self.total_prompts = self.calculate_total_prompts(modules_to_process)
+        self.current_prompt = 0
+
         print(f"🚀 MICRO-FIX PIPELINE: {len(modules_to_process)} modules")
-        print(f"📊 Parallel processing: {self.parallel} (workers: {self.max_workers})")
+        print(f"📊 Total prompts to execute: {self.total_prompts}")
+        print(f"⚙️  Parallel processing: {self.parallel} (workers: {self.max_workers})")
+        print(f"⏱️  Test timeout: {self.test_timeout} seconds per module")
+        print("="*60)
 
         if self.parallel and len(modules_to_process) > 1:
             # Process independent modules in parallel
@@ -648,20 +773,28 @@ class MicroFixer:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Micro-Fix Architecture V2")
+    parser = argparse.ArgumentParser(description="Micro-Fix Architecture V2 with Test Optimization")
     parser.add_argument("--parallel", action="store_true", help="Enable parallel processing")
     parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers")
     parser.add_argument("--module", help="Process specific module only")
+    parser.add_argument("--timeout", type=int, default=300, help="Test timeout in seconds (default: 300)")
+    parser.add_argument("--iterations", type=int, default=5, help="Max iterations for test fixing (default: 5)")
 
     args = parser.parse_args()
 
-    fixer = MicroFixer(parallel=args.parallel, max_workers=args.workers)
+    fixer = MicroFixer(parallel=args.parallel, max_workers=args.workers, test_timeout=args.timeout)
 
     if args.module:
         # Process single module
         print(f"Processing single module: {args.module}")
-        result = fixer.fix_module_micro(args.module)
-        print(f"Result: {'✓ SUCCESS' if result else '✗ FAILED'}")
+        print(f"Test timeout: {args.timeout}s, Max iterations: {args.iterations}")
+        result = fixer.fix_module_micro(args.module, max_iterations=args.iterations)
+        print(f"\nResult: {'✅ SUCCESS' if result else '❌ FAILED'}")
+        
+        # Show module-specific slow test stats if available
+        if args.module in fixer.stats['slow_tests']:
+            stats = fixer.stats['slow_tests'][args.module]
+            print(f"Slow tests: {stats['before']} → {stats['after']}")
     else:
         # Process all modules
         results = fixer.run_systematic_fixes()
@@ -674,7 +807,7 @@ def main():
         print('='*60)
 
         for module, success in results.items():
-            status = "✓" if success else "✗"
+            status = "✅" if success else "❌"
             print(f"{status} {module}")
 
         fixer.print_final_summary(results)
