@@ -207,8 +207,11 @@ class PortfolioAllocator:
 
             return True
 
+        except AllocationError:
+            # Re-raise allocation errors
+            raise
         except Exception as e:
-            raise AllocationError(f"Failed to add strategy {strategy.name}: {e}")
+            raise AllocationError(f"Failed to add strategy {strategy.name}: {e}") from e
 
     async def _validate_strategy(self, strategy: BaseStrategyInterface) -> bool:
         """
@@ -251,7 +254,11 @@ class PortfolioAllocator:
 
             return True
 
-        except Exception:
+        except (AttributeError, TypeError) as e:
+            # Strategy validation errors - log and return False
+            return False
+        except Exception as e:
+            # Unexpected errors - log and return False for safety
             return False
 
     async def _calculate_strategy_correlation(self, new_strategy: BaseStrategyInterface) -> float:
@@ -291,8 +298,12 @@ class PortfolioAllocator:
 
             return max_correlation
 
-        except Exception:
+        except (KeyError, AttributeError, TypeError) as e:
+            # Strategy type comparison errors
             return 1.0  # Conservative estimate
+        except Exception as e:
+            # Unexpected errors - return conservative estimate
+            return 1.0
 
     @time_execution
     async def rebalance_portfolio(self) -> dict[str, Any]:
@@ -332,8 +343,11 @@ class PortfolioAllocator:
                 "available_capital": float(self.available_capital),
             }
 
+        except AllocationError:
+            # Re-raise allocation errors
+            raise
         except Exception as e:
-            raise AllocationError(f"Portfolio rebalancing failed: {e}")
+            raise AllocationError(f"Portfolio rebalancing failed: {e}") from e
 
     async def _update_strategy_metrics(self) -> None:
         """Update performance metrics for all strategies."""
@@ -361,8 +375,11 @@ class PortfolioAllocator:
                                 mean_return = np.mean(allocation.daily_returns)
                                 allocation.sortino_ratio = mean_return / downside_deviation
 
-            except Exception:
-                # Log error but continue with other strategies
+            except (AttributeError, KeyError, TypeError) as e:
+                # Strategy metrics access errors - continue with other strategies
+                continue
+            except Exception as e:
+                # Unexpected errors - log and continue
                 continue
 
     async def _calculate_optimal_weights(self) -> dict[str, float]:
@@ -408,8 +425,11 @@ class PortfolioAllocator:
 
             return optimal_weights
 
-        except Exception:
-            # Fallback to performance-based weights
+        except (ValueError, np.linalg.LinAlgError, ZeroDivisionError) as e:
+            # Mathematical optimization errors - fallback to performance-based weights
+            return self._calculate_performance_based_weights()
+        except Exception as e:
+            # Unexpected errors - fallback to performance-based weights
             return self._calculate_performance_based_weights()
 
     def _build_returns_matrix(self, strategies: list[str]) -> np.ndarray | None:
@@ -437,7 +457,11 @@ class PortfolioAllocator:
 
             return returns_matrix
 
-        except Exception:
+        except (IndexError, ValueError, TypeError) as e:
+            # Data processing errors
+            return None
+        except Exception as e:
+            # Unexpected errors
             return None
 
     def _optimize_sharpe_ratio(
@@ -446,7 +470,7 @@ class PortfolioAllocator:
         """Optimize portfolio for maximum Sharpe ratio."""
         try:
             # Objective function (negative Sharpe ratio to minimize)
-            def objective(weights):
+            def objective(weights: np.ndarray) -> float:
                 portfolio_return = np.dot(weights, expected_returns)
                 portfolio_volatility = np.sqrt(np.dot(weights, np.dot(cov_matrix, weights)))
 
@@ -486,8 +510,11 @@ class PortfolioAllocator:
                 # Fallback to equal weights
                 return initial_weights
 
-        except Exception:
-            # Fallback to equal weights
+        except (ValueError, np.linalg.LinAlgError, ZeroDivisionError) as e:
+            # Mathematical optimization errors - fallback to equal weights
+            return np.array([1.0 / n_strategies] * n_strategies)
+        except Exception as e:
+            # Unexpected errors - fallback to equal weights
             return np.array([1.0 / n_strategies] * n_strategies)
 
     def _apply_weight_constraints(self, weights: np.ndarray) -> np.ndarray:
@@ -534,8 +561,12 @@ class PortfolioAllocator:
 
             return {name: score / total_score for name, score in scores.items()}
 
-        except Exception:
-            # Equal weights fallback
+        except (ZeroDivisionError, KeyError, AttributeError) as e:
+            # Performance calculation errors - equal weights fallback
+            strategies = list(self.allocations.keys())
+            return {name: 1.0 / len(strategies) for name in strategies}
+        except Exception as e:
+            # Unexpected errors - equal weights fallback
             strategies = list(self.allocations.keys())
             return {name: 1.0 / len(strategies) for name in strategies}
 
@@ -569,7 +600,11 @@ class PortfolioAllocator:
 
             return adjusted_weights
 
-        except Exception:
+        except (KeyError, AttributeError, ZeroDivisionError) as e:
+            # Regime adjustment errors - return original weights
+            return weights
+        except Exception as e:
+            # Unexpected errors - return original weights
             return weights
 
     async def _execute_rebalancing(self, target_weights: dict[str, float]) -> list[dict[str, Any]]:
@@ -617,8 +652,11 @@ class PortfolioAllocator:
 
             return actions
 
+        except AllocationError:
+            # Re-raise allocation errors
+            raise
         except Exception as e:
-            raise AllocationError(f"Failed to execute rebalancing: {e}")
+            raise AllocationError(f"Failed to execute rebalancing: {e}") from e
 
     async def _calculate_portfolio_metrics(self) -> dict[str, Any]:
         """Calculate comprehensive portfolio performance metrics."""
@@ -678,7 +716,11 @@ class PortfolioAllocator:
 
             return self.portfolio_metrics
 
-        except Exception:
+        except (ValueError, IndexError, ZeroDivisionError) as e:
+            # Metrics calculation errors - return existing metrics
+            return self.portfolio_metrics
+        except Exception as e:
+            # Unexpected errors - return existing metrics
             return self.portfolio_metrics
 
     async def update_market_regime(self, new_regime: MarketRegime) -> None:
@@ -741,8 +783,11 @@ class PortfolioAllocator:
 
             return True
 
+        except AllocationError:
+            # Re-raise allocation errors
+            raise
         except Exception as e:
-            raise AllocationError(f"Failed to remove strategy {strategy_name}: {e}")
+            raise AllocationError(f"Failed to remove strategy {strategy_name}: {e}") from e
 
     def get_allocation_status(self) -> dict[str, Any]:
         """
@@ -792,8 +837,10 @@ class PortfolioAllocator:
                 },
             }
 
+        except (KeyError, AttributeError) as e:
+            raise AllocationError(f"Failed to get allocation status - data access error: {e}") from e
         except Exception as e:
-            raise AllocationError(f"Failed to get allocation status: {e}")
+            raise AllocationError(f"Failed to get allocation status: {e}") from e
 
     async def should_rebalance(self) -> bool:
         """
@@ -824,5 +871,9 @@ class PortfolioAllocator:
 
             return False
 
-        except Exception:
+        except (KeyError, AttributeError, TypeError) as e:
+            # Rebalancing check errors - conservative approach
+            return True  # Conservative approach - rebalance on error
+        except Exception as e:
+            # Unexpected errors - conservative approach
             return True  # Conservative approach - rebalance on error

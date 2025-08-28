@@ -213,24 +213,22 @@ class GlobalErrorHandler:
     ) -> dict[str, Any]:
         """
         Synchronous version of handle_error for use in non-async contexts.
-        
+
         Args:
             error: The exception to handle
             context: Additional context about the error
             severity: Error severity level
-            
+
         Returns:
             dict: Error handling result
         """
         import asyncio
-        
+
         # Get or create event loop
         try:
             loop = asyncio.get_running_loop()
             # Already in async context, create task
-            future = asyncio.ensure_future(
-                self.handle_error(error, context, severity)
-            )
+            future = asyncio.ensure_future(self.handle_error(error, context, severity))
             # Can't wait synchronously in running loop
             self._logger.warning(
                 "handle_error_sync called from async context, scheduled as task",
@@ -249,9 +247,7 @@ class GlobalErrorHandler:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                return loop.run_until_complete(
-                    self.handle_error(error, context, severity)
-                )
+                return loop.run_until_complete(self.handle_error(error, context, severity))
             finally:
                 loop.close()
                 asyncio.set_event_loop(None)
@@ -289,12 +285,17 @@ class GlobalErrorHandler:
 
     def _log_error_handler_exception(self, task: asyncio.Task) -> None:
         """Log exceptions that occur in error handling tasks."""
-        if task.exception():
-            self._logger.critical(
-                "Exception in error handler task",
-                handler_exception=str(task.exception()),
-                exc_info=task.exception(),
-            )
+        try:
+            exception = task.exception()
+            if exception and not isinstance(exception, asyncio.CancelledError):
+                self._logger.critical(
+                    "Exception in error handler task",
+                    handler_exception=str(exception),
+                    exc_info=exception,
+                )
+        except asyncio.CancelledError:
+            # Task was cancelled, this is expected during shutdown
+            pass
 
     def install_global_handler(self):
         """Install this handler as the global exception handler."""

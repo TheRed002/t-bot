@@ -577,7 +577,7 @@ class TransactionalService(BaseService):
     ensuring data consistency across service operations.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize transactional service."""
         super().__init__(*args, **kwargs)
         self._transaction_manager: Any | None = None

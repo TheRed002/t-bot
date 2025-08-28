@@ -771,6 +771,7 @@ class SmartOrderRouter(BaseAlgorithm):
         risk_manager,
     ) -> None:
         """Execute a single route asynchronously."""
+        exchange = None
         try:
             exchange = await exchange_factory.get_exchange(route["exchange"])
             if not exchange:
@@ -793,8 +794,8 @@ class SmartOrderRouter(BaseAlgorithm):
                 if not is_valid:
                     raise ExecutionError(f"Risk manager rejected order for {route['exchange']}")
 
-            # Place order
             # Place order with error handling
+            order_response = None
             try:
                 order_response = await exchange.place_order(order)
             except ExchangeError as e:
@@ -824,12 +825,19 @@ class SmartOrderRouter(BaseAlgorithm):
                 exchange=route["exchange"],
                 quantity=str(route["quantity"]),
                 allocation_pct=route["allocation_pct"],
-                order_id=order_response.id,
+                order_id=order_response.id if order_response else "unknown",
             )
 
         except Exception as e:
             self.logger.error(f"Route execution failed for {route['exchange']}: {e}")
             raise
+        finally:
+            # Ensure exchange connection is properly handled
+            if exchange and hasattr(exchange, "close"):
+                try:
+                    await exchange.close()
+                except Exception as cleanup_error:
+                    self.logger.warning(f"Failed to close exchange connection: {cleanup_error}")
 
     async def _finalize_execution(self, execution_result: ExecutionResult) -> None:
         """

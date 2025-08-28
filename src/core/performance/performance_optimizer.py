@@ -21,7 +21,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 
 # Import all performance optimization components
 from src.core.caching.unified_cache_layer import UnifiedCacheLayer
@@ -165,8 +165,9 @@ class PerformanceOptimizer(BaseComponent):
         """Initialize connection pool management."""
         # self.connection_pool_manager = ConnectionPoolManager(self.config)
         # Commented to fix circular dependency
-        await self.connection_pool_manager.initialize()
-        self.logger.info("Connection pool manager initialized")
+        if hasattr(self, "connection_pool_manager") and self.connection_pool_manager:
+            await self.connection_pool_manager.initialize()
+            self.logger.info("Connection pool manager initialized")
 
     async def _initialize_trading_profiler(self) -> None:
         """Initialize trading operation profiler."""
@@ -297,7 +298,7 @@ class PerformanceOptimizer(BaseComponent):
                 metrics["trading_profiler"] = await self.trading_profiler.get_optimization_report()
 
             # Connection pool metrics
-            if self.connection_pool_manager:
+            if hasattr(self, "connection_pool_manager") and self.connection_pool_manager:
                 metrics["connection_pools"] = await self.connection_pool_manager.get_global_status()
 
         except Exception as e:
@@ -742,8 +743,11 @@ class PerformanceOptimizer(BaseComponent):
             (self.performance_monitor, "performance_monitor"),
             (self.trading_profiler, "trading_profiler"),
             (self.cache_layer, "cache_layer"),
-            (self.connection_pool_manager, "connection_pool_manager"),
         ]
+
+        # Add connection pool manager if it exists
+        if hasattr(self, "connection_pool_manager") and self.connection_pool_manager:
+            components.append((self.connection_pool_manager, "connection_pool_manager"))
 
         for component, component_name in components:
             if component:
@@ -792,7 +796,10 @@ class PerformanceOptimizer(BaseComponent):
             ("trading_profiler", self.trading_profiler),
             ("cache_layer", self.cache_layer),
             ("database_service", self.database_service),
-            ("connection_pool_manager", self.connection_pool_manager),
         ]
+
+        # Add connection pool manager if it exists
+        if hasattr(self, "connection_pool_manager"):
+            components.append(("connection_pool_manager", self.connection_pool_manager))
 
         return {name: component is not None for name, component in components}

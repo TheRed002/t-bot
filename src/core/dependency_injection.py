@@ -19,7 +19,7 @@ T = TypeVar("T")
 class DependencyContainer:
     """Container for managing dependencies."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize dependency container."""
         self._services: dict[str, Any] = {}
         self._factories: dict[str, Callable] = {}

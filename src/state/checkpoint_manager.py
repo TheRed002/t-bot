@@ -129,7 +129,7 @@ class CheckpointManager(BaseComponent):
         self._checkpoints_list: list = []  # Internal list storage
         self.checkpoint_metadata: dict[str, CheckpointMetadata] = {}  # Keep metadata in dict
         self.checkpoint_schedules: dict[str, datetime] = {}
-        self._test_checkpoints = {}  # For test compatibility
+        self._test_checkpoints: dict[str, Any] = {}  # For test compatibility
 
         # Performance tracking
         self.performance_stats = {
@@ -151,8 +151,8 @@ class CheckpointManager(BaseComponent):
 
         self.logger.info("CheckpointManager initialized")
 
-    async def initialize(self) -> None:
-        """Initialize the checkpoint manager."""
+    async def _do_start(self) -> None:
+        """Start the checkpoint manager (BaseComponent lifecycle method)."""
         try:
             # Ensure checkpoint directory exists
             try:
@@ -170,19 +170,69 @@ class CheckpointManager(BaseComponent):
 
             self._scheduler_task = asyncio.create_task(self._scheduler_loop())
 
-            self.logger.info("CheckpointManager initialized successfully")
+            self.logger.info("CheckpointManager startup completed")
 
         except Exception as e:
             error_context = ErrorContext.from_exception(
                 e,
                 component="CheckpointManager",
-                operation="initialize",
+                operation="start",
                 severity=ErrorSeverity.HIGH,
             )
-            error_context.details = {"error": str(e), "error_code": "CHECKPOINT_INIT_FAILED"}
+            error_context.details = {"error": str(e), "error_code": "CHECKPOINT_START_FAILED"}
             handler = self.error_handler
             await handler.handle_error(e, error_context)
-            raise StateError(f"Failed to initialize CheckpointManager: {e}") from e
+            raise StateError(f"Failed to start CheckpointManager: {e}") from e
+
+    async def _do_stop(self) -> None:
+        """Stop checkpoint manager (BaseComponent lifecycle method)."""
+        try:
+            self.logger.info("Starting CheckpointManager stop")
+
+            # Cancel and await background tasks
+            tasks_to_cancel = []
+
+            if self._scheduler_task and not self._scheduler_task.done():
+                tasks_to_cancel.append(self._scheduler_task)
+
+            if self._cleanup_task and not self._cleanup_task.done():
+                tasks_to_cancel.append(self._cleanup_task)
+
+            # Add all background cleanup tasks
+            for task in self._cleanup_tasks:
+                if task and not task.done():
+                    tasks_to_cancel.append(task)
+
+            # Cancel all tasks
+            for task in tasks_to_cancel:
+                task.cancel()
+
+            # Wait for all tasks to complete with timeout
+            if tasks_to_cancel:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks_to_cancel, return_exceptions=True), timeout=5.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Background tasks stop timeout")
+                except Exception as e:
+                    self.logger.warning(f"Background tasks stop error: {e}")
+
+            # Clear task references
+            self._scheduler_task = None
+            self._cleanup_task = None
+            self._cleanup_tasks.clear()
+
+            self.logger.info("CheckpointManager stop completed")
+
+        except Exception as e:
+            self.logger.error(f"Error during CheckpointManager stop: {e}")
+            raise
+        finally:
+            # Ensure references are cleared even if stop fails
+            self._scheduler_task = None
+            self._cleanup_task = None
+            self._cleanup_tasks.clear()
 
     @with_retry(max_attempts=3, base_delay=0.1, backoff_factor=2.0, exceptions=(StateError,))
     async def create_checkpoint(
@@ -264,8 +314,13 @@ class CheckpointManager(BaseComponent):
 
             # Save to disk
             checkpoint_path = self.checkpoint_dir / f"{checkpoint_id}.checkpoint"
-            async with aiofiles.open(checkpoint_path, "wb") as f:
+            f = None
+            try:
+                f = await aiofiles.open(checkpoint_path, "wb")
                 await f.write(final_data)
+            finally:
+                if f:
+                    await f.close()
 
             # Validate if enabled
             if self.integrity_check_enabled:
@@ -324,7 +379,9 @@ class CheckpointManager(BaseComponent):
         Returns:
             Checkpoint ID
         """
-        return await self.create_checkpoint(data, checkpoint_type="compressed", compress=True)
+        return await self.create_checkpoint_from_dict(
+            data, compress=True, checkpoint_type="compressed"
+        )
 
     async def create_checkpoint_with_integrity(self, data: dict[str, Any]) -> str:
         """
@@ -336,7 +393,7 @@ class CheckpointManager(BaseComponent):
         Returns:
             Checkpoint ID
         """
-        return await self.create_checkpoint(data, checkpoint_type="integrity_checked")
+        return await self.create_checkpoint_from_dict(data, checkpoint_type="integrity_checked")
 
     async def cleanup_old_checkpoints(self) -> None:
         """
@@ -410,12 +467,19 @@ class CheckpointManager(BaseComponent):
             self.logger.error(f"Failed to verify checkpoint integrity: {e}")
             return False
 
-    async def create_checkpoint_from_dict(self, state_dict: dict[str, Any]) -> str:
+    async def create_checkpoint_from_dict(
+        self,
+        state_dict: dict[str, Any],
+        compress: bool | None = None,
+        checkpoint_type: str = "manual",
+    ) -> str:
         """
         Create checkpoint from a dictionary (compatibility method for tests).
 
         Args:
             state_dict: Dictionary containing bot state data
+            compress: Whether to compress (None = auto-decide)
+            checkpoint_type: Type of checkpoint
 
         Returns:
             Checkpoint ID
@@ -447,7 +511,9 @@ class CheckpointManager(BaseComponent):
         else:
             bot_state = BotState(**bot_state_data)
 
-        return await self.create_checkpoint(bot_id, bot_state)
+        return await self.create_checkpoint(
+            bot_id, bot_state, checkpoint_type=checkpoint_type, compress=compress
+        )
 
     @with_retry(max_attempts=3, base_delay=0.5, backoff_factor=2.0, exceptions=(StateError,))
     async def restore_checkpoint(self, checkpoint_id: str) -> tuple[str, BotState]:
@@ -476,8 +542,13 @@ class CheckpointManager(BaseComponent):
             if not checkpoint_path.exists():
                 raise StateError(f"Checkpoint file not found: {checkpoint_path}")
 
-            async with aiofiles.open(checkpoint_path, "rb") as f:
+            f = None
+            try:
+                f = await aiofiles.open(checkpoint_path, "rb")
                 file_data = await f.read()
+            finally:
+                if f:
+                    await f.close()
 
             # Verify integrity
             if self.integrity_check_enabled:
@@ -807,8 +878,13 @@ class CheckpointManager(BaseComponent):
                 errors.append(f"Size mismatch: expected {metadata.size_bytes}, got {actual_size}")
 
             # Check integrity hash
-            async with aiofiles.open(checkpoint_path, "rb") as f:
+            f = None
+            try:
+                f = await aiofiles.open(checkpoint_path, "rb")
                 file_data = await f.read()
+            finally:
+                if f:
+                    await f.close()
 
             file_hash = hashlib.sha256(file_data).hexdigest()
             if file_hash != metadata.integrity_hash:

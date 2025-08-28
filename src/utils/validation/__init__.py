@@ -40,9 +40,23 @@ from .service import (
     shutdown_validation_service,
 )
 
-# Global validator instance - single source of truth (backward compatibility)
-# Import directly from the consolidated ValidationFramework in core.py
-validator = ValidationFramework()
+
+# Get validator instance from DI container for backward compatibility
+def _get_validator() -> ValidationFramework:
+    """Get validator instance from DI container with lazy initialization."""
+    from src.core.dependency_injection import injector
+
+    # Try to resolve, register if not found
+    try:
+        return injector.resolve("ValidationFramework")
+    except Exception:
+        # Register ValidationFramework if not already registered
+        injector.register_service("ValidationFramework", ValidationFramework(), singleton=True)
+        return injector.resolve("ValidationFramework")
+
+
+# Lazy initialization to avoid circular dependencies
+validator = _get_validator()
 
 # Legacy convenience exports - use ValidationFramework as single source of truth
 validate_order = validator.validate_order

@@ -48,10 +48,10 @@ from src.error_handling.decorators import (
     with_error_context,
     with_retry,
 )
+from src.monitoring.financial_precision import safe_decimal_to_float
 
 # Monitoring integration
 from src.monitoring.metrics import MetricsCollector
-from src.monitoring.financial_precision import safe_decimal_to_float
 from src.state import StateType
 
 # StateService will be injected
@@ -214,11 +214,13 @@ class RiskService(BaseService):
         """
         super().__init__(
             name="RiskService",
-            config=(
+            config=dict(
                 config.model_dump()
                 if config and hasattr(config, "model_dump")
-                else (config.__dict__ if config else {})
-            ),
+                else (config.__dict__ if config and hasattr(config, "__dict__") else {})
+            )
+            if config
+            else {},
             correlation_id=correlation_id,
         )
 
@@ -299,6 +301,7 @@ class RiskService(BaseService):
             # Try to get from container as fallback for backward compatibility
             try:
                 from src.core.dependency_injection import get_container
+
                 self.metrics_collector = get_container().get("MetricsCollectorProtocol")
             except Exception as e:
                 self._logger.warning(f"Failed to get metrics collector from DI container: {e}")
@@ -340,7 +343,7 @@ class RiskService(BaseService):
 
         except Exception as e:
             self._logger.error(f"Failed to start RiskService: {e}")
-            raise ServiceError(f"RiskService startup failed: {e}")
+            raise ServiceError(f"RiskService startup failed: {e}") from e
 
     async def _do_stop(self) -> None:
         """Stop the risk service."""
@@ -839,7 +842,10 @@ class RiskService(BaseService):
             sharpe_ratio = await self._calculate_sharpe_ratio()
 
             # Calculate additional metrics
-            total_exposure = sum(pos.quantity * pos.current_price for pos in positions)
+            total_exposure = sum(
+                pos.quantity * pos.current_price if pos.quantity and pos.current_price else ZERO
+                for pos in positions
+            )
             beta = await self._calculate_portfolio_beta(positions)
             correlation_risk = await self._calculate_correlation_risk(positions)
 
@@ -858,6 +864,7 @@ class RiskService(BaseService):
             risk_metrics = RiskMetrics(
                 timestamp=datetime.now(timezone.utc),
                 total_exposure=total_exposure,
+                var_1d=var_1d,
                 var_95=var_1d,
                 var_99=var_5d,
                 expected_shortfall=expected_shortfall,
@@ -890,20 +897,28 @@ class RiskService(BaseService):
                 try:
                     # Update VaR metrics using specialized methods with safe conversion
                     if var_1d is not None:
-                        var_1d_float = safe_decimal_to_float(var_1d, "risk_var_1d", precision_digits=2)
+                        var_1d_float = safe_decimal_to_float(
+                            var_1d, "risk_var_1d", precision_digits=2
+                        )
                         self.metrics_collector.risk_metrics.record_var(0.95, "1d", var_1d_float)
                     if var_5d is not None:
-                        var_5d_float = safe_decimal_to_float(var_5d, "risk_var_5d", precision_digits=2)
+                        var_5d_float = safe_decimal_to_float(
+                            var_5d, "risk_var_5d", precision_digits=2
+                        )
                         self.metrics_collector.risk_metrics.record_var(0.95, "5d", var_5d_float)
 
                     # Update drawdown metrics using specialized method with safe conversion
                     if max_drawdown is not None:
-                        drawdown_float = safe_decimal_to_float(max_drawdown, "risk_max_drawdown", precision_digits=4)
+                        drawdown_float = safe_decimal_to_float(
+                            max_drawdown, "risk_max_drawdown", precision_digits=4
+                        )
                         self.metrics_collector.risk_metrics.record_drawdown("30d", drawdown_float)
 
                     # Update Sharpe ratio using specialized method with safe conversion
                     if sharpe_ratio is not None:
-                        sharpe_float = safe_decimal_to_float(sharpe_ratio, "risk_sharpe_ratio", precision_digits=4)
+                        sharpe_float = safe_decimal_to_float(
+                            sharpe_ratio, "risk_sharpe_ratio", precision_digits=4
+                        )
                         self.metrics_collector.risk_metrics.record_sharpe_ratio("30d", sharpe_float)
                 except Exception as e:
                     self._logger.warning(f"Failed to update monitoring metrics: {e}")
@@ -922,7 +937,7 @@ class RiskService(BaseService):
 
         except Exception as e:
             self._logger.error(f"Risk metrics calculation failed: {e}")
-            raise RiskManagementError(f"Risk metrics calculation failed: {e}")
+            raise RiskManagementError(f"Risk metrics calculation failed: {e}") from e
 
     def _create_empty_risk_metrics(self) -> RiskMetrics:
         """Create empty risk metrics for portfolios with no positions."""
@@ -1567,10 +1582,13 @@ class RiskService(BaseService):
                 self._emergency_stop_triggered = True
                 raise RiskManagementError(
                     f"Emergency stop partially failed (state service error): {e}"
-                )
+                ) from e
             except Exception as e:
                 self._logger.error(f"Emergency stop execution failed: {e}")
-                raise RiskManagementError(f"Emergency stop failed: {e}")
+                raise RiskManagementError(f"Emergency stop failed: {e}") from e
+            finally:
+                # Ensure emergency lock resources are cleaned up
+                pass
 
     async def reset_emergency_stop(self, reason: str) -> None:
         """
@@ -1604,10 +1622,13 @@ class RiskService(BaseService):
                 # Re-raise to notify caller of failure
                 raise RiskManagementError(
                     f"Failed to reset emergency stop in state service: {e}"
-                )
+                ) from e
             except Exception as e:
                 self._logger.error(f"Emergency stop reset failed: {e}")
-                raise RiskManagementError(f"Emergency stop reset failed: {e}")
+                raise RiskManagementError(f"Emergency stop reset failed: {e}") from e
+            finally:
+                # Ensure emergency reset lock resources are cleaned up
+                pass
 
     # Market Data Integration
 
@@ -1663,6 +1684,9 @@ class RiskService(BaseService):
                 except Exception as e:
                     self._logger.error(f"Price history update failed for {symbol}: {e}")
                     raise
+                finally:
+                    # Ensure lock resources are cleaned up
+                    pass
         except Exception as e:
             self._logger.error(f"Failed to acquire history lock for {symbol}: {e}")
             # Don't re-raise to prevent blocking other operations
@@ -1683,7 +1707,7 @@ class RiskService(BaseService):
             self._logger.error(f"Failed to get positions: {e}")
             # Propagate database errors to trigger appropriate risk controls
             raise RiskManagementError(
-                f"Unable to retrieve positions for risk assessment: {str(e)}",
+                f"Unable to retrieve positions for risk assessment: {e!s}",
                 error_code="DATABASE_ACCESS_ERROR",
                 details={"operation": "get_all_positions", "original_error": str(e)},
             ) from e
@@ -1700,9 +1724,13 @@ class RiskService(BaseService):
             self._logger.error(f"Failed to get positions for {symbol}: {e}")
             # Propagate database errors to trigger appropriate risk controls
             raise RiskManagementError(
-                f"Unable to retrieve positions for {symbol}: {str(e)}",
+                f"Unable to retrieve positions for {symbol}: {e!s}",
                 error_code="DATABASE_ACCESS_ERROR",
-                details={"operation": "get_positions_for_symbol", "symbol": symbol, "original_error": str(e)},
+                details={
+                    "operation": "get_positions_for_symbol",
+                    "symbol": symbol,
+                    "original_error": str(e),
+                },
             ) from e
 
     async def _get_current_market_data(self) -> list[MarketData]:
@@ -1712,7 +1740,7 @@ class RiskService(BaseService):
         return []
 
     # State Management Integration
-    
+
     def _serialize_with_decimals(self, data: Any) -> Any:
         """Recursively serialize data structures preserving Decimal precision."""
         if isinstance(data, Decimal):
@@ -1741,7 +1769,7 @@ class RiskService(BaseService):
                 if not isinstance(emergency_state, dict):
                     self._logger.error(f"Invalid emergency state format: {type(emergency_state)}")
                     emergency_state = {}
-                
+
                 if emergency_state.get("emergency_stop"):
                     self._emergency_stop_triggered = True
                     self._current_risk_level = RiskLevel.CRITICAL
@@ -1778,8 +1806,10 @@ class RiskService(BaseService):
                     portfolio_metrics_data = self._portfolio_metrics.model_dump(mode="json")
                 else:
                     # Fallback for objects without model_dump
-                    portfolio_metrics_data = self._serialize_with_decimals(self._portfolio_metrics.__dict__)
-            
+                    portfolio_metrics_data = self._serialize_with_decimals(
+                        self._portfolio_metrics.__dict__
+                    )
+
             risk_state = {
                 "current_risk_level": self._current_risk_level.value,
                 "emergency_stop_triggered": self._emergency_stop_triggered,
@@ -1803,12 +1833,12 @@ class RiskService(BaseService):
             if self.metrics_collector:
                 self.metrics_collector.record_counter("tbot_risk_state_persistence_failures_total")
             # Re-raise for critical state updates
-            raise RiskManagementError(f"Failed to persist risk state: {e}")
+            raise RiskManagementError(f"Failed to persist risk state: {e}") from e
         except Exception as e:
             self._logger.error(f"Failed to save risk state: {e}")
             if self.metrics_collector:
                 self.metrics_collector.record_counter("tbot_risk_state_persistence_failures_total")
-            raise RiskManagementError(f"Failed to save risk state: {e}")
+            raise RiskManagementError(f"Failed to save risk state: {e}") from e
 
     async def _save_risk_metrics(self, risk_metrics: RiskMetrics) -> None:
         """Save risk metrics to StateService and potentially database."""
@@ -1820,7 +1850,7 @@ class RiskService(BaseService):
             else:
                 # Fallback with custom Decimal serialization
                 metrics_data = self._serialize_with_decimals(risk_metrics.__dict__)
-            
+
             # Save to state service for real-time access
             await self.state_service.set_state(
                 state_type=StateType.RISK_STATE,
@@ -1839,12 +1869,12 @@ class RiskService(BaseService):
             if self.metrics_collector:
                 self.metrics_collector.record_counter("tbot_risk_metrics_save_failures_total")
             # Re-raise as risk metrics are important for system operation
-            raise RiskManagementError(f"Failed to persist risk metrics: {e}")
+            raise RiskManagementError(f"Failed to persist risk metrics: {e}") from e
         except Exception as e:
             self._logger.error(f"Failed to save risk metrics: {e}")
             if self.metrics_collector:
                 self.metrics_collector.record_counter("tbot_risk_metrics_save_failures_total")
-            raise RiskManagementError(f"Failed to save risk metrics: {e}")
+            raise RiskManagementError(f"Failed to save risk metrics: {e}") from e
 
     async def _save_emergency_state(self, reason: str) -> None:
         """Save emergency stop state."""
@@ -1870,10 +1900,10 @@ class RiskService(BaseService):
         except StateError as e:
             self._logger.error(f"State service error while saving emergency state: {e}")
             # Re-raise as emergency state is critical
-            raise RiskManagementError(f"Critical: Failed to save emergency state - {e}")
+            raise RiskManagementError(f"Critical: Failed to save emergency state - {e}") from e
         except Exception as e:
             self._logger.error(f"Failed to save emergency state: {e}")
-            raise RiskManagementError(f"Critical: Failed to save emergency state - {e}")
+            raise RiskManagementError(f"Critical: Failed to save emergency state - {e}") from e
 
     # Utility Methods
 

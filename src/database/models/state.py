@@ -22,7 +22,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import Mapped, relationship
 from sqlalchemy.sql import func
 
 from .base import AuditMixin, Base, MetadataMixin, SoftDeleteMixin, TimestampMixin
@@ -44,7 +44,7 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     # Snapshot metadata
     name = Column(String(255), nullable=True)
     description = Column(Text, nullable=True)
-    snapshot_type = Column(
+    snapshot_type: Mapped[str] = Column(
         Enum("manual", "automatic", "checkpoint", "backup", name="snapshot_type_enum"),
         nullable=False,
         default="manual",
@@ -64,7 +64,7 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     state_checksum = Column(String(128), nullable=False)  # SHA-256 hash
 
     # Status tracking
-    status = Column(
+    status: Mapped[str] = Column(
         Enum("creating", "ready", "corrupted", "archived", name="snapshot_status_enum"),
         nullable=False,
         default="creating",
@@ -125,7 +125,7 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
     # Checkpoint metadata
     name = Column(String(255), nullable=True)
     description = Column(Text, nullable=True)
-    checkpoint_type = Column(
+    checkpoint_type: Mapped[str] = Column(
         Enum("incremental", "full", "emergency", name="checkpoint_type_enum"),
         nullable=False,
         default="incremental",
@@ -162,7 +162,7 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
     changes_checksum = Column(String(128), nullable=False)
 
     # Status
-    status = Column(
+    status: Mapped[str] = Column(
         Enum("creating", "ready", "applied", "rolled_back", name="checkpoint_status_enum"),
         nullable=False,
         default="creating",
@@ -211,7 +211,7 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
     state_id = Column(String(255), nullable=False, index=True)
 
     # Operation details
-    operation = Column(
+    operation: Mapped[str] = Column(
         Enum("create", "update", "delete", "restore", "sync", name="state_operation_enum"),
         nullable=False,
     )

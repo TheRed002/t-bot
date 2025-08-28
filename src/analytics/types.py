@@ -61,10 +61,11 @@ class PerformanceMetricType(Enum):
 class AlertSeverity(Enum):
     """Severity levels for analytics alerts."""
 
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
     CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFO = "info"
 
 
 class ReportType(Enum):

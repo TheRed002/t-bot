@@ -162,8 +162,13 @@ class SecurityRateLimiter:
 
     def _cleanup_task_done_callback(self, task: asyncio.Task) -> None:
         """Handle cleanup task completion."""
-        if task.exception():
-            self.logger.error(f"Cleanup task failed: {task.exception()}")
+        try:
+            exception = task.exception()
+            if exception and not isinstance(exception, asyncio.CancelledError):
+                self.logger.error(f"Cleanup task failed: {exception}")
+        except asyncio.CancelledError:
+            # Task was cancelled, this is expected during shutdown
+            pass
         # Reset task reference so it can be restarted if needed
         if self._cleanup_task is task:
             self._cleanup_task = None

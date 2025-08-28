@@ -47,11 +47,11 @@ try:
 except ImportError:
     stats = None
 
-from src.core import BaseComponent, OrderType
+from src.core import BaseComponent
+from src.core.types import OrderType
 
 # Import utils decorators and helpers for better integration
 from src.utils.decorators import cache_result, logged, monitored, retry, time_execution
-from src.utils.helpers import format_timestamp
 
 # Import error handling with fallback
 try:
@@ -66,8 +66,9 @@ except ImportError:
 
     @dataclass
     class ErrorContext:
-        component: str
-        operation: str
+        error: Exception | None = None
+        component: str = ""
+        operation: str = ""
         details: dict = None
 
     @dataclass
@@ -79,6 +80,12 @@ except ImportError:
 
     def get_global_error_handler():
         return None
+
+
+# Helper function fallback
+def format_timestamp(dt):
+    """Fallback timestamp formatter."""
+    return dt.strftime("%Y-%m-%d %H:%M:%S UTC") if dt else ""
 
 
 from src.monitoring.alerting import Alert, AlertManager, AlertSeverity, AlertStatus
@@ -243,7 +250,7 @@ class PerformanceProfiler(BaseComponent):
         """
         super().__init__(name="PerformanceProfiler")
 
-        # Remove service locator pattern - require explicit dependencies
+        # Use dependency injection - no direct global access in service layer
         if metrics_collector is None:
             raise ValueError("metrics_collector is required - use dependency injection")
 
@@ -270,7 +277,7 @@ class PerformanceProfiler(BaseComponent):
         self._force_shutdown_timeout = 10.0  # seconds
 
         # Performance thresholds for alerting
-        self._thresholds = {
+        self._thresholds: dict[str, dict[str, float]] = {
             "order_execution_latency_ms": {"warning": 100, "critical": 500},
             "market_data_latency_ms": {"warning": 50, "critical": 200},
             "database_query_ms": {"warning": 100, "critical": 1000},
@@ -704,16 +711,72 @@ class PerformanceProfiler(BaseComponent):
         slippage_bps: float,
     ) -> None:
         """Record order execution performance metrics."""
+        from src.core.exceptions import ValidationError
+        
+        # Validate inputs using core validation patterns
+        if not isinstance(exchange, str) or not exchange:
+            raise ValidationError(
+                "Invalid exchange parameter",
+                field_name="exchange",
+                field_value=exchange,
+                expected_type="non-empty str",
+            )
+            
+        if not isinstance(order_type, OrderType):
+            raise ValidationError(
+                "Invalid order_type parameter",
+                field_name="order_type",
+                field_value=order_type,
+                expected_type="OrderType enum",
+            )
+            
+        if not isinstance(symbol, str) or not symbol:
+            raise ValidationError(
+                "Invalid symbol parameter",
+                field_name="symbol",
+                field_value=symbol,
+                expected_type="non-empty str",
+            )
+            
+        if not isinstance(latency_ms, (int, float)) or latency_ms < 0:
+            raise ValidationError(
+                "Invalid latency_ms parameter",
+                field_name="latency_ms",
+                field_value=latency_ms,
+                validation_rule="must be non-negative number",
+            )
+            
+        if not isinstance(fill_rate, (int, float)) or not (0 <= fill_rate <= 1):
+            raise ValidationError(
+                "Invalid fill_rate parameter",
+                field_name="fill_rate",
+                field_value=fill_rate,
+                validation_rule="must be between 0 and 1",
+            )
+
         with self._lock:
             metric_name = f"order_execution.{exchange}.{order_type.value}.{symbol}"
             self._latency_data[metric_name].append(latency_ms)
 
         labels = {"exchange": exchange, "order_type": order_type.value, "symbol": symbol}
 
-        # Update Prometheus metrics
-        self.metrics_collector.observe_histogram(
-            "order_execution_latency_seconds", latency_ms / 1000.0, labels
-        )
+        try:
+            # Update Prometheus metrics with consistent error handling
+            self.metrics_collector.observe_histogram(
+                "order_execution_latency_seconds", latency_ms / 1000.0, labels
+            )
+        except Exception as e:
+            from src.core.exceptions import MonitoringError
+            raise MonitoringError(
+                f"Failed to record order execution metrics: {e}",
+                component_name="PerformanceProfiler",
+                details={
+                    "exchange": exchange,
+                    "order_type": order_type.value,
+                    "symbol": symbol,
+                    "latency_ms": latency_ms,
+                },
+            ) from e
 
         self.metrics_collector.set_gauge("order_fill_rate_percent", fill_rate * 100, labels)
 
@@ -746,7 +809,7 @@ class PerformanceProfiler(BaseComponent):
             # Update throughput data
             current_time = time.time()
             self._throughput_data[metric_name].append((current_time, message_count))
-            
+
             # No need to clean old data - deque is automatically bounded
 
         labels = {"exchange": exchange, "data_type": data_type}
@@ -975,7 +1038,10 @@ class PerformanceProfiler(BaseComponent):
         """Get current memory usage in bytes."""
         try:
             return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
-        except Exception:
+        except Exception as e:
+            self.logger.debug(
+                f"Failed to get memory usage from resource: {e}, falling back to psutil"
+            )
             return psutil.Process().memory_info().rss
 
     def _calculate_throughput(self, metric_name: str) -> float:
@@ -1068,7 +1134,8 @@ class PerformanceProfiler(BaseComponent):
             def get_open_fds():
                 try:
                     return process.num_fds() if hasattr(process, "num_fds") else 0
-                except Exception:
+                except Exception as e:
+                    self.logger.debug(f"Failed to get file descriptor count: {e}")
                     return 0
 
             open_fds = await loop.run_in_executor(None, get_open_fds)
@@ -1341,7 +1408,9 @@ class PerformanceProfiler(BaseComponent):
         except Exception as e:
             self.logger.error(f"Error sending performance alert: {e}")
 
-    def _create_managed_alert_task(self, title: str, message: str, severity, labels: dict) -> None:
+    def _create_managed_alert_task(
+        self, title: str, message: str, severity, labels: dict[str, str]
+    ) -> None:
         """Create a managed alert task that cleans up after itself."""
         if not self.alert_manager:
             return

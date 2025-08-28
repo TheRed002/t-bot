@@ -42,7 +42,12 @@ class ExchangeTypes:
             validated = ValidationFramework.validate_symbol(symbol)
             # Exchange-specific stricter rule: alphanumeric only
             return bool(re.match(r"^[A-Z0-9]+$", symbol.upper())) if validated else False
-        except Exception:
+        except Exception as e:
+            # Log the validation error for debugging
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"Symbol validation failed for '{symbol}': {e}")
             return False
 
 

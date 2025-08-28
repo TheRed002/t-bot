@@ -3,7 +3,10 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
 
 from pydantic import BaseModel, Field
 
@@ -74,7 +77,9 @@ class BotConfiguration(BaseModel):
 
     # Strategy assignment
     strategy_id: str | None = None
+    strategy_name: str | None = None  # Legacy attribute for compatibility
     strategy_config: dict[str, Any] = Field(default_factory=dict)
+    strategy_parameters: dict[str, Any] = Field(default_factory=dict)  # Legacy attribute
 
     # Trading parameters
     symbols: list[str] = Field(default_factory=list)
@@ -88,8 +93,10 @@ class BotConfiguration(BaseModel):
 
     # Risk limits
     max_capital: Decimal | None = None
+    allocated_capital: Decimal = Field(default=Decimal("0"))  # Legacy attribute for compatibility
     max_position_size: Decimal | None = None
     max_daily_loss: Decimal | None = None
+    risk_percentage: float = Field(default=0.02, ge=0.0, le=1.0)  # Legacy attribute
 
     # Scheduling
     schedule: dict[str, Any] | None = None  # cron-like schedule
@@ -97,13 +104,22 @@ class BotConfiguration(BaseModel):
 
     # Monitoring
     health_check_interval: int = 60  # seconds
+    heartbeat_interval: int = 60  # Legacy attribute
     metrics_interval: int = 300  # seconds
     alert_settings: dict[str, Any] = Field(default_factory=dict)
+    
+    # Priority setting
+    priority: BotPriority = BotPriority.NORMAL
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime | None = None
 
     metadata: dict[str, Any] = Field(default_factory=dict)
+    
+    @property
+    def bot_name(self) -> str:
+        """Legacy property alias for name."""
+        return self.name
 
 
 class BotMetrics(BaseModel):
@@ -112,45 +128,60 @@ class BotMetrics(BaseModel):
     bot_id: str
 
     # Performance metrics
-    uptime_seconds: int
-    total_trades: int
-    successful_trades: int
-    failed_trades: int
-    total_pnl: Decimal
+    uptime_seconds: int = 0
+    total_trades: int = 0
+    successful_trades: int = 0
+    failed_trades: int = 0
+    total_pnl: Decimal = Decimal("0")
+    
+    # Legacy attributes for compatibility
+    profitable_trades: int = 0
+    losing_trades: int = 0
+    win_rate: float = 0.0
+    average_trade_pnl: Decimal = Decimal("0")
+    start_time: datetime | None = None
+    uptime_percentage: float = 0.0
+    last_trade_time: datetime | None = None
+    last_heartbeat: datetime | None = None
+    error_count: int = 0
+    cpu_usage: float = 0.0
+    memory_usage: float = 0.0  # MB
+    metrics_updated_at: datetime | None = None
 
     # Resource usage
-    cpu_usage_percent: float
-    memory_usage_mb: float
-    network_bytes_sent: int
-    network_bytes_received: int
-    disk_usage_mb: float
+    cpu_usage_percent: float = 0.0
+    memory_usage_mb: float = 0.0
+    network_bytes_sent: int = 0
+    network_bytes_received: int = 0
+    disk_usage_mb: float = 0.0
 
     # API usage
-    api_calls_made: int
-    api_calls_remaining: int
-    api_errors: int
+    api_calls_made: int = 0
+    api_calls_remaining: int = 0
+    api_errors: int = 0
 
     # WebSocket metrics
-    ws_connections_active: int
-    ws_messages_received: int
-    ws_messages_sent: int
-    ws_reconnections: int
+    ws_connections_active: int = 0
+    ws_messages_received: int = 0
+    ws_messages_sent: int = 0
+    ws_reconnections: int = 0
 
     # Error metrics
-    total_errors: int
-    critical_errors: int
+    total_errors: int = 0
+    critical_errors: int = 0
     last_error: str | None = None
     last_error_at: datetime | None = None
 
     # Timing metrics
-    avg_response_time_ms: float
-    max_response_time_ms: float
-    avg_processing_time_ms: float
+    avg_response_time_ms: float = 0.0
+    max_response_time_ms: float = 0.0
+    avg_processing_time_ms: float = 0.0
 
     # Health score
-    health_score: float = Field(ge=0.0, le=100.0)
+    health_score: float = Field(default=100.0, ge=0.0, le=100.0)
 
-    timestamp: datetime
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -158,8 +189,10 @@ class BotState(BaseModel):
     """Bot runtime state."""
 
     bot_id: str
-    status: BotStatus
-    priority: BotPriority
+    status: BotStatus = BotStatus.INITIALIZING
+    priority: BotPriority = BotPriority.NORMAL
+    configuration: "BotConfiguration | None" = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Runtime info
     pid: int | None = None
@@ -180,6 +213,8 @@ class BotState(BaseModel):
     # State persistence
     checkpoint: dict[str, Any] | None = None
     checkpoint_at: datetime | None = None
+    checkpoint_created: datetime | None = None  # Legacy attribute
+    state_version: int = 1  # Legacy attribute
 
     # Error state
     error_count: int = 0

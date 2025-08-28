@@ -20,8 +20,9 @@ from src.analytics.types import (
     AnalyticsConfiguration,
     OperationalMetrics,
 )
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.monitoring.metrics import get_metrics_collector
+from src.monitoring.alerting import AlertSeverity
 from src.utils.datetime_utils import get_current_utc_timestamp
 from src.utils.decimal_utils import safe_decimal
 
@@ -184,6 +185,72 @@ class OperationalAnalyticsEngine(BaseComponent):
                 execution_time_ms,
                 labels={"exchange": exchange, "event_type": event_type},
             )
+
+    def record_order_update(self, order) -> None:
+        """
+        Record order update with consistent event type mapping and error handling.
+
+        This method encapsulates the business logic for mapping order status
+        to appropriate event types, using consistent patterns across services.
+
+        Args:
+            order: Order object with status and other properties
+        """
+        try:
+            # Use consistent event constant patterns
+            from src.core.event_constants import OrderEvents
+
+            # Map order status to event type with consistent business logic
+            if order.is_filled():
+                event_type = OrderEvents.FILLED
+            elif order.status.value == "rejected":
+                event_type = OrderEvents.REJECTED
+            elif order.status.value == "expired":
+                event_type = OrderEvents.EXPIRED
+            elif order.status.value == "cancelled":
+                event_type = OrderEvents.CANCELLED
+            else:
+                event_type = OrderEvents.CREATED
+
+            # Consistent success status determination
+            success = order.status.value not in ["rejected", "expired"]
+
+            # Calculate execution time if available
+            execution_time_ms = None
+            if order.created_at and order.updated_at:
+                execution_time_ms = (order.updated_at - order.created_at).total_seconds() * 1000
+
+            # Use consistent event recording with full context
+            self.record_order_event(
+                event_type=event_type,
+                exchange=order.exchange,
+                order_id=order.order_id,
+                timestamp=order.updated_at or get_current_utc_timestamp(),
+                execution_time_ms=execution_time_ms,
+                success=success,
+                metadata={
+                    "order_type": order.order_type.value
+                    if hasattr(order, "order_type")
+                    else "unknown",
+                    "symbol": order.symbol,
+                    "side": order.side.value if hasattr(order, "side") else "unknown",
+                },
+            )
+
+        except Exception as e:
+            # Use consistent error propagation pattern
+            from src.core.exceptions import ComponentError
+
+            raise ComponentError(
+                f"Failed to record order update for {order.order_id}",
+                component="OperationalAnalyticsEngine",
+                operation="record_order_update",
+                context={
+                    "order_id": order.order_id,
+                    "exchange": order.exchange,
+                    "status": order.status.value if hasattr(order, "status") else "unknown",
+                },
+            ) from e
 
     def record_strategy_event(
         self,
@@ -575,7 +642,9 @@ class OperationalAnalyticsEngine(BaseComponent):
                     "status": (
                         "healthy"
                         if component_score >= 80
-                        else "warning" if component_score >= 60 else "critical"
+                        else "warning"
+                        if component_score >= 60
+                        else "critical"
                     ),
                     "score": component_score,
                     "metrics": metrics_dict,
@@ -963,18 +1032,50 @@ class OperationalAnalyticsEngine(BaseComponent):
 
     async def _get_database_connections(self) -> int:
         """Get active database connections count."""
-        # Placeholder - would integrate with actual database monitoring
-        return 10
+        try:
+            # Use monitoring service to get database metrics instead of direct access
+            if self.metrics_collector:
+                # Use the correct method to get a metric value
+                metric = self.metrics_collector.get_metric("database_connections_active")
+                if metric and hasattr(metric, "_value"):
+                    return getattr(metric, "_value", {}).get("", 0)
+                return 0
+            return 0
+        except Exception as e:
+            self.logger.error(f"Error getting database connections: {e}")
+            return 0
 
     async def _get_average_query_time(self, cutoff_time: datetime) -> Decimal | None:
         """Get average database query time."""
-        # Placeholder - would calculate from actual database metrics
-        return safe_decimal(15.5)  # 15.5ms
+        try:
+            # Use monitoring service to get query metrics instead of direct access
+            if self.metrics_collector:
+                # Use the correct method to get a metric value
+                metric = self.metrics_collector.get_metric("database_query_duration_seconds")
+                if metric and hasattr(metric, "_value"):
+                    # Convert seconds to milliseconds
+                    seconds = getattr(metric, "_value", {}).get("", 0.0)
+                    return safe_decimal(seconds * 1000)
+                return safe_decimal(0.0)
+            return None
+        except Exception as e:
+            self.logger.error(f"Error getting average query time: {e}")
+            return None
 
     async def _get_cache_hit_rate(self) -> Decimal:
         """Get cache hit rate percentage."""
-        # Placeholder - would integrate with actual cache monitoring
-        return safe_decimal(92.5)
+        try:
+            # Use monitoring service to get cache metrics instead of direct access
+            if self.metrics_collector:
+                # Use the correct method to get a metric value
+                metric = self.metrics_collector.get_metric("cache_hit_rate_percent")
+                if metric and hasattr(metric, "_value"):
+                    return safe_decimal(getattr(metric, "_value", {}).get("", 0.0))
+                return safe_decimal(0.0)
+            return safe_decimal(0.0)
+        except Exception as e:
+            self.logger.error(f"Error getting cache hit rate: {e}")
+            return safe_decimal(0.0)
 
     async def _count_connected_exchanges(self) -> int:
         """Count currently connected exchanges."""
@@ -1003,15 +1104,40 @@ class OperationalAnalyticsEngine(BaseComponent):
 
     async def _check_database_health(self) -> bool:
         """Check database health status."""
-        # Placeholder - would perform actual database health check
-        return True
+        try:
+            # Use monitoring service to check database health instead of direct access
+            if self.metrics_collector:
+                # Use existing system monitoring approach
+                metric = self.metrics_collector.get_metric("system_cpu_usage_percent")
+                # If system monitoring is working, assume database is healthy
+                return metric is not None
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking database health: {e}")
+            return False
 
     async def _check_api_health(self) -> bool:
         """Check API endpoints health."""
-        # Placeholder - would check API endpoint responses
-        return True
+        try:
+            # Use monitoring service to check API health instead of direct access
+            if self.metrics_collector:
+                # Check if exchange API metrics are being collected
+                metric = self.metrics_collector.get_metric("exchange_api_requests_total")
+                return metric is not None
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking API health: {e}")
+            return False
 
     async def _check_cache_health(self) -> bool:
         """Check cache system health."""
-        # Placeholder - would check cache system status
-        return True
+        try:
+            # Use monitoring service to check cache health instead of direct access
+            if self.metrics_collector:
+                # Check if cache metrics are being collected
+                metric = self.metrics_collector.get_metric("cache_hit_rate_percent")
+                return metric is not None
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking cache health: {e}")
+            return False

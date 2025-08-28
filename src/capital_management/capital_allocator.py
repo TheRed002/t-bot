@@ -25,7 +25,7 @@ from src.capital_management.service import CapitalService
 from src.core.base.component import BaseComponent
 
 # Import foundation services
-from src.core.exceptions import RiskManagementError, ServiceError, ValidationError
+from src.core.exceptions import ServiceError, ValidationError
 
 # MANDATORY: Import from P-001
 from src.core.types.risk import (
@@ -85,10 +85,10 @@ class CapitalAllocator(BaseComponent):
     def __init__(
         self,
         capital_service: CapitalService,
-        config_service=None,
+        config_service: Any = None,
         risk_manager: RiskService | RiskManager | None = None,
         trade_lifecycle_manager: TradeLifecycleManager | None = None,
-    ):
+    ) -> None:
         """
         Initialize the capital allocator with CapitalService dependency injection.
 
@@ -192,12 +192,35 @@ class CapitalAllocator(BaseComponent):
             ServiceError: If allocation operation fails
         """
         try:
-            # Validate inputs using existing validation logic
-            if not ValidationFramework.validate_quantity(float(requested_amount)):
-                raise ValidationError(f"Invalid capital allocation amount: {requested_amount}")
-
+            # Consistent boundary validation - match service layer patterns
             if not strategy_id or not strategy_id.strip():
-                raise ValidationError("Strategy ID cannot be empty")
+                raise ValidationError(
+                    "Strategy ID cannot be empty",
+                    error_code="CAP_004",
+                    details={"component": "CapitalAllocator", "field": "strategy_id"},
+                )
+
+            if not exchange or not exchange.strip():
+                raise ValidationError(
+                    "Exchange cannot be empty",
+                    error_code="CAP_005",
+                    details={"component": "CapitalAllocator", "field": "exchange"},
+                )
+
+            # Amount validation using consistent patterns
+            if not ValidationFramework.validate_quantity(float(requested_amount)):
+                raise ValidationError(
+                    f"Invalid capital allocation amount: {requested_amount}",
+                    error_code="CAP_006",
+                    details={"amount": str(requested_amount), "component": "CapitalAllocator"},
+                )
+
+            if requested_amount <= 0:
+                raise ValidationError(
+                    "Allocation amount must be positive",
+                    error_code="CAP_007",
+                    details={"amount": str(requested_amount), "component": "CapitalAllocator"},
+                )
 
             # Use CapitalService for allocation - includes all validation, audit, and transaction support
             allocation = await self.capital_service.allocate_capital(
@@ -234,26 +257,40 @@ class CapitalAllocator(BaseComponent):
             return allocation
 
         except (ValidationError, ServiceError) as e:
-            # Re-raise service layer exceptions
+            # Re-raise service layer exceptions with consistent error propagation
             self.logger.error(
-                "Capital allocation failed",
+                "Capital allocation failed - service/validation error",
                 strategy_id=strategy_id,
                 exchange=exchange,
                 requested_amount=format_currency(float(requested_amount)),
+                error_type=type(e).__name__,
+                error_code=getattr(e, "error_code", "UNKNOWN"),
                 error=str(e),
+                component="CapitalAllocator",
             )
             raise
 
         except Exception as e:
-            # Log and wrap unexpected exceptions
+            # Log and wrap unexpected exceptions with consistent error propagation
             self.logger.error(
                 "Unexpected error in capital allocation",
                 strategy_id=strategy_id,
                 exchange=exchange,
                 error=str(e),
+                error_type=type(e).__name__,
+                component="CapitalAllocator",
                 exc_info=True,
             )
-            raise ServiceError(f"Capital allocation failed: {e}") from e
+            # Propagate as ServiceError for consistent error handling
+            raise ServiceError(
+                f"Capital allocation failed: {e}",
+                error_code="CAP_999",
+                details={
+                    "strategy_id": strategy_id,
+                    "exchange": exchange,
+                    "component": "CapitalAllocator",
+                },
+            ) from e
 
     @time_execution
     async def release_capital(
@@ -296,21 +333,29 @@ class CapitalAllocator(BaseComponent):
             return success
 
         except (ValidationError, ServiceError) as e:
+            # Consistent error logging for service layer exceptions
             self.logger.error(
-                "Capital release failed",
+                "Capital release failed - service/validation error",
                 strategy_id=strategy_id,
                 exchange=exchange,
                 amount=format_currency(float(amount)),
+                error_type=type(e).__name__,
+                error_code=getattr(e, "error_code", "UNKNOWN"),
                 error=str(e),
+                component="CapitalAllocator",
             )
             return False
 
         except Exception as e:
+            # Consistent error logging for unexpected exceptions
             self.logger.error(
                 "Unexpected error in capital release",
                 strategy_id=strategy_id,
                 exchange=exchange,
                 error=str(e),
+                error_type=type(e).__name__,
+                component="CapitalAllocator",
+                exc_info=True,
             )
             return False
 
@@ -491,19 +536,18 @@ class CapitalAllocator(BaseComponent):
                     risk_assessment["risk_factors"].append(
                         f"Unknown risk manager type: {type(self.risk_manager)}"
                     )
-            except RiskManagementError as e:
-                # Log the error but don't re-raise - let allocation continue with high risk flag
-                self.logger.error(f"Risk assessment failed: {e}")
-                risk_assessment["risk_level"] = "high"
-                risk_assessment["risk_factors"].append(f"Risk assessment error: {e!s}")
-                risk_assessment["recommendations"].append(
-                    "Manual review recommended due to risk assessment failure"
-                )
             except Exception as e:
-                # Handle any other unexpected errors gracefully
-                self.logger.warning(f"Unexpected error in risk assessment: {e}")
-                risk_assessment["risk_level"] = "unknown"
-                risk_assessment["risk_factors"].append(f"Unexpected error: {e!s}")
+                # Log the error but don't re-raise - let allocation continue with high risk flag
+                if "risk" in str(e).lower() or "management" in str(e).lower():
+                    self.logger.error(f"Risk assessment failed: {e}")
+                    risk_assessment["risk_level"] = "high"
+                    risk_assessment["risk_factors"].append(f"Risk assessment error: {e!s}")
+                    risk_assessment["recommendations"].append(
+                        "Manual review recommended due to risk assessment failure"
+                    )
+                else:
+                    # Re-raise non-risk related exceptions
+                    raise
 
         return risk_assessment
 

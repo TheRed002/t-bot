@@ -33,7 +33,6 @@ from src.risk_management.base import BaseRiskManager
 from src.strategies.interfaces import BaseStrategyInterface
 from src.utils.decimal_utils import safe_decimal
 from src.utils.decorators import time_execution
-from src.utils.validators import ValidationFramework
 
 logger = get_logger(__name__)
 
@@ -231,6 +230,8 @@ class BacktestEngine:
             exchange=self.config.exchange,
             start_time=self.config.start_date,
             end_time=self.config.end_date,
+            limit=None,
+            cache_ttl=3600,
             use_cache=True,
         )
 
@@ -382,16 +383,17 @@ class BacktestEngine:
 
         for symbol, data in market_data.items():
             # Convert pandas Series to MarketData object for strategy
+            if self._current_time is None:
+                continue
             market_data_obj = CoreMarketData(
                 symbol=symbol,
                 timestamp=self._current_time,
-                price=safe_decimal(data["close"]),
+                close=safe_decimal(data["close"]),
                 volume=safe_decimal(data["volume"]),
-                bid=safe_decimal(data["close"] * 0.999),  # Approximate bid
-                ask=safe_decimal(data["close"] * 1.001),  # Approximate ask
                 high=safe_decimal(data["high"]),
                 low=safe_decimal(data["low"]),
                 open=safe_decimal(data["open"]),
+                exchange=self.config.exchange,
             )
 
             # Generate signals using the strategy's method with error handling
@@ -454,16 +456,17 @@ class BacktestEngine:
         from src.core.types import MarketData as CoreMarketData
 
         # Convert market data to MarketData object
+        if self._current_time is None:
+            return
         market_data = CoreMarketData(
             symbol=symbol,
             timestamp=self._current_time,
-            price=safe_decimal(market_data_row["close"]),
+            close=safe_decimal(market_data_row["close"]),
             volume=safe_decimal(market_data_row["volume"]),
-            bid=safe_decimal(market_data_row["close"] * 0.999),  # Approximate bid
-            ask=safe_decimal(market_data_row["close"] * 1.001),  # Approximate ask
             high=safe_decimal(market_data_row["high"]),
             low=safe_decimal(market_data_row["low"]),
             open=safe_decimal(market_data_row["open"]),
+            exchange=self.config.exchange,
         )
 
         # Determine order side based on signal and current position
@@ -471,8 +474,8 @@ class BacktestEngine:
 
         # Calculate position size
         if self.risk_manager:
-            position_size = self.risk_manager.calculate_position_size(
-                signal, self._capital, market_data.price
+            position_size = await self.risk_manager.calculate_position_size(
+                signal, self._capital, market_data.close
             )
         else:
             # Default position sizing
@@ -483,10 +486,10 @@ class BacktestEngine:
             symbol=symbol,
             side=order_side,
             order_type=OrderType.MARKET,  # Use market orders for backtesting
-            quantity=position_size / market_data.price,  # Convert value to quantity
+            quantity=position_size / market_data.close,  # Convert value to quantity
             time_in_force=TimeInForce.GTC,
             metadata={
-                "signal_confidence": signal.confidence,
+                "signal_strength": signal.strength,
                 "strategy": self.strategy.name,
                 "backtest": True,
             },
@@ -505,6 +508,8 @@ class BacktestEngine:
 
         try:
             # Execute through ExecutionEngine
+            if self.execution_engine is None:
+                raise ValueError("ExecutionEngine is None")
             result = await self.execution_engine.execute_order(
                 instruction=execution_instruction,
                 market_data=market_data,
@@ -623,14 +628,16 @@ class BacktestEngine:
             from src.core.types import Signal as CoreSignal
 
             # Create a signal for position sizing
+            if self._current_time is None:
+                return
             sizing_signal = CoreSignal(
-                direction=signal,
-                confidence=0.8,
-                timestamp=self._current_time,
                 symbol=symbol,
-                strategy_name="backtest",
+                direction=signal,
+                strength=0.8,
+                timestamp=self._current_time,
+                source="backtest",
             )
-            position_size = self.risk_manager.calculate_position_size(
+            position_size = await self.risk_manager.calculate_position_size(
                 sizing_signal, self._capital, safe_decimal(price)
             )
         else:

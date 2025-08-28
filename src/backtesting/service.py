@@ -33,13 +33,13 @@ from src.backtesting.metrics import MetricsCalculator
 from src.backtesting.simulator import TradeSimulator
 from src.backtesting.utils import convert_market_records_to_dataframe
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import HealthCheckResult, HealthStatus
 from src.core.config import Config
 from src.core.exceptions import BacktestError, ServiceError
 from src.data.types import DataRequest
 from src.error_handling.decorators import (
     with_circuit_breaker,
     with_error_context,
-    with_fallback,
     with_retry,
 )
 from src.utils.decimal_utils import safe_decimal
@@ -103,7 +103,7 @@ class BacktestRequest(BaseModel):
             try:
                 ValidationFramework.validate_symbol(symbol)
             except ValueError as e:
-                raise ValueError(f"Invalid symbol {symbol}: {e}")
+                raise ValueError(f"Invalid symbol {symbol}: {e}") from e
         return v
 
 
@@ -139,7 +139,14 @@ class BacktestService(BaseComponent):
         # Convert config to dict if needed
         config_dict = None
         if config:
-            config_dict = config.dict() if hasattr(config, "dict") else {}
+            if hasattr(config, "model_dump"):
+                config_dict = config.model_dump()
+            elif hasattr(config, "dict"):
+                config_dict = config.dict()
+            elif isinstance(config, dict):
+                config_dict = config
+            else:
+                config_dict = {}
 
         super().__init__(name="BacktestService", config=config_dict)
         self.config = config
@@ -216,7 +223,7 @@ class BacktestService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"BacktestService initialization failed: {e}")
-            raise ServiceError(f"Initialization failed: {e}")
+            raise ServiceError(f"Initialization failed: {e}") from e
 
     async def _initialize_services(self) -> None:
         """Initialize service dependencies via dependency injection."""
@@ -261,8 +268,9 @@ class BacktestService(BaseComponent):
 
     async def _initialize_caching(self) -> None:
         """Initialize Redis caching for results."""
+        redis_client = None
         try:
-            self._redis_client = redis.Redis(
+            redis_client = redis.Redis(
                 host=self._cache_config["redis_host"],
                 port=self._cache_config["redis_port"],
                 db=self._cache_config["redis_db"],
@@ -273,12 +281,18 @@ class BacktestService(BaseComponent):
             )
 
             # Test connection
-            await self._redis_client.ping()
+            await redis_client.ping()
+            self._redis_client = redis_client
             self._cache_available = True
             self.logger.info("Redis cache initialized")
 
         except Exception as e:
             self.logger.warning(f"Redis cache initialization failed, using memory only: {e}")
+            if redis_client:
+                try:
+                    await redis_client.close()
+                except Exception as e:
+                    self.logger.warning(f"Failed to close Redis connection during init: {e}")
             self._redis_client = None
             self._cache_available = False
 
@@ -300,7 +314,7 @@ class BacktestService(BaseComponent):
             await self.initialize()
 
         backtest_id = str(uuid.uuid4())
-        self.logger.info(f"Starting backtest {backtest_id}", request=request.dict())
+        self.logger.info(f"Starting backtest {backtest_id}", request=request.model_dump())
 
         # Check cache first
         if request.use_cache:
@@ -371,7 +385,7 @@ class BacktestService(BaseComponent):
         market_data = {}
 
         if not self.data_service:
-            raise BacktestError("DataService not configured", "BACKTEST_010")
+            raise BacktestError("DataService not configured")
 
         for symbol in request.symbols:
             # Use DataService to get historical data
@@ -380,6 +394,8 @@ class BacktestService(BaseComponent):
                 exchange=request.exchange,
                 start_time=request.start_date,
                 end_time=request.end_date,
+                limit=None,
+                cache_ttl=3600,
                 use_cache=True,
             )
 
@@ -406,30 +422,31 @@ class BacktestService(BaseComponent):
 
         # Validate strategy config before creation
         if not strategy_config:
-            raise BacktestError("Strategy configuration is empty", "BACKTEST_006")
+            raise BacktestError("Strategy configuration is empty")
 
         if "strategy_type" not in strategy_config:
-            raise BacktestError("Strategy type not specified in config", "BACKTEST_007")
+            raise BacktestError("Strategy type not specified in config")
 
         # Create strategy through service
+        if self.strategy_service is None:
+            raise BacktestError("Strategy service not configured")
         strategy = await self.strategy_service.create_strategy(strategy_config)
 
         # Validate created strategy
         if not strategy:
             raise BacktestError(
-                f"Failed to create strategy of type: {strategy_config.get('strategy_type')}",
-                "BACKTEST_008",
+                f"Failed to create strategy of type: {strategy_config.get('strategy_type')}"
             )
 
         if not isinstance(strategy, BaseStrategyInterface):
-            raise BacktestError(
-                f"Invalid strategy type returned: {type(strategy).__name__}", "BACKTEST_009"
-            )
+            raise BacktestError(f"Invalid strategy type returned: {type(strategy).__name__}")
 
         return strategy
 
     async def _setup_risk_management(self, risk_config: dict[str, Any]) -> Any:
         """Setup risk management using RiskManagementService."""
+        if self.risk_service is None:
+            return None  # Risk management is optional
         return await self.risk_service.create_risk_manager(risk_config)
 
     async def _run_core_simulation(
@@ -450,6 +467,8 @@ class BacktestService(BaseComponent):
             max_positions=request.max_open_positions,
         )
 
+        if self.trade_simulator is None:
+            raise BacktestError("Trade simulator not configured")
         return await self.trade_simulator.run_simulation(
             config=sim_config,
             strategy=strategy,
@@ -556,7 +575,7 @@ class BacktestService(BaseComponent):
             trades=trades,
             daily_returns=daily_returns,
             metadata={
-                "request": request.dict(),
+                "request": request.model_dump(),
                 "advanced_metrics": advanced_metrics,
                 "backtest_duration": str(request.end_date - request.start_date),
                 "symbols": request.symbols,
@@ -594,7 +613,6 @@ class BacktestService(BaseComponent):
         cache_string = json.dumps(cache_data, sort_keys=True, default=str)
         return hashlib.sha256(cache_string.encode()).hexdigest()
 
-    @with_fallback(default_return=None)
     async def _get_cached_result(self, request: BacktestRequest) -> BacktestResult | None:
         """Get cached backtest result if available."""
         request_hash = self._generate_request_hash(request)
@@ -610,24 +628,26 @@ class BacktestService(BaseComponent):
         # Check Redis cache
         if self._redis_client:
             cache_key = f"backtest_result:{request_hash}"
-            cached_data = await self._redis_client.get(cache_key)
+            try:
+                cached_data = await self._redis_client.get(cache_key)
 
-            if cached_data:
-                entry_data = json.loads(cached_data)
-                entry = BacktestCacheEntry(**entry_data)
+                if cached_data:
+                    entry_data = json.loads(cached_data)
+                    entry = BacktestCacheEntry(**entry_data)
 
-                if not entry.is_expired():
-                    # Update memory cache
-                    if len(self._memory_cache) < self._cache_config["memory_cache_size"]:
-                        self._memory_cache[request_hash] = entry
-                    return entry.result
-                else:
-                    # Remove expired entry
-                    await self._redis_client.delete(cache_key)
+                    if not entry.is_expired():
+                        # Update memory cache
+                        if len(self._memory_cache) < self._cache_config["memory_cache_size"]:
+                            self._memory_cache[request_hash] = entry
+                        return entry.result
+                    else:
+                        # Remove expired entry
+                        await self._redis_client.delete(cache_key)
+            except Exception as e:
+                self.logger.warning(f"Redis cache read error: {e}")
 
         return None
 
-    @with_fallback(default_return=None)
     async def _cache_result(self, request: BacktestRequest, result: BacktestResult) -> None:
         """Cache backtest result."""
         request_hash = self._generate_request_hash(request)
@@ -650,11 +670,14 @@ class BacktestService(BaseComponent):
         # Update Redis cache
         if self._redis_client:
             cache_key = f"backtest_result:{request_hash}"
-            cache_data = cache_entry.dict(default=str)
-            cache_json = json.dumps(cache_data, default=str)
+            try:
+                cache_data = cache_entry.model_dump()
+                cache_json = json.dumps(cache_data, default=str)
 
-            ttl_seconds = request.cache_ttl_hours * 3600
-            await self._redis_client.setex(cache_key, ttl_seconds, cache_json)
+                ttl_seconds = request.cache_ttl_hours * 3600
+                await self._redis_client.setex(cache_key, ttl_seconds, cache_json)
+            except Exception as e:
+                self.logger.warning(f"Redis cache write error: {e}")
 
     async def get_active_backtests(self) -> dict[str, dict[str, Any]]:
         """Get status of all active backtests."""
@@ -722,7 +745,7 @@ class BacktestService(BaseComponent):
 
         return stats
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> HealthCheckResult:
         """Perform comprehensive health check."""
         health = {
             "status": "healthy",
@@ -742,19 +765,36 @@ class BacktestService(BaseComponent):
             ("ml_service", self.ml_service),
         ]
 
+        services_dict: dict[str, str] = {}
         for service_name, service in services_to_check:
             if service:
                 try:
                     service_health = await service.health_check()
-                    health["services"][service_name] = service_health.get("status", "unknown")
+                    if hasattr(service_health, "status"):
+                        services_dict[service_name] = str(service_health.status)
+                    elif isinstance(service_health, dict):
+                        services_dict[service_name] = service_health.get("status", "unknown")
+                    else:
+                        services_dict[service_name] = str(service_health)
                 except Exception as e:
-                    health["services"][service_name] = f"unhealthy: {e}"
+                    services_dict[service_name] = f"unhealthy: {e}"
                     health["status"] = "degraded"
             else:
-                health["services"][service_name] = "not_initialized"
+                services_dict[service_name] = "not_initialized"
                 health["status"] = "degraded"
 
-        return health
+        health["services"] = services_dict
+
+        # Convert to HealthCheckResult
+        from datetime import timezone
+
+        status = HealthStatus.HEALTHY if health["status"] == "healthy" else HealthStatus.UNHEALTHY
+        return HealthCheckResult(
+            status=status,
+            message=f"BacktestService status: {health['status']}",
+            details=health,
+            check_time=datetime.now(timezone.utc),
+        )
 
     async def cleanup(self) -> None:
         """Cleanup service resources."""
@@ -765,10 +805,22 @@ class BacktestService(BaseComponent):
 
             # Close Redis connection
             if self._redis_client:
-                await self._redis_client.close()
+                try:
+                    await self._redis_client.close()
+                except Exception as e:
+                    self.logger.warning(f"Failed to close Redis connection during cleanup: {e}")
+                finally:
+                    self._redis_client = None
 
             # Clear caches
             self._memory_cache.clear()
+
+            # Cleanup backtesting components
+            if self.trade_simulator and hasattr(self.trade_simulator, "cleanup"):
+                self.trade_simulator.cleanup()
+
+            if self.data_replay_manager and hasattr(self.data_replay_manager, "cleanup"):
+                self.data_replay_manager.cleanup()
 
             # Cleanup service dependencies
             services_to_cleanup = [
@@ -782,7 +834,10 @@ class BacktestService(BaseComponent):
 
             for service in services_to_cleanup:
                 if service and hasattr(service, "cleanup"):
-                    await service.cleanup()
+                    try:
+                        await service.cleanup()
+                    except Exception as e:
+                        self.logger.warning(f"Service cleanup error: {e}")
 
             self._initialized = False
             self.logger.info("BacktestService cleanup completed")

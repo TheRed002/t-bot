@@ -11,6 +11,7 @@ from typing import Any
 import pandas as pd
 from pydantic import BaseModel as PydanticBaseModel, Field
 
+from src.core.base.interfaces import HealthStatus
 from src.core.base.service import BaseService
 from src.core.exceptions import ValidationError
 from src.core.types.base import ConfigDict
@@ -74,7 +75,9 @@ class ModelManagerService(BaseService):
 
         # Parse model manager configuration
         mm_config_dict = (config or {}).get("model_manager", {})
-        self.mm_config = ModelManagerConfig(**mm_config_dict)
+        self.mm_config = ModelManagerConfig(
+            **(mm_config_dict if isinstance(mm_config_dict, dict) else {})
+        )
 
         # Service dependencies - resolved during startup
         self.model_registry_service: Any = None
@@ -95,12 +98,12 @@ class ModelManagerService(BaseService):
         self.batch_predictor: Any = None
 
         # Model type registry - populated during startup
-        self.model_types = {}
+        self.model_types: dict[str, Any] = {}
 
         # Lifecycle state
-        self.active_models = {}
-        self.training_jobs = {}
-        self.monitoring_jobs = {}
+        self.active_models: dict[str, Any] = {}
+        self.training_jobs: dict[str, Any] = {}
+        self.monitoring_jobs: dict[str, Any] = {}
 
         # Add required dependencies
         self.add_dependency("ModelRegistryService")
@@ -314,7 +317,9 @@ class ModelManagerService(BaseService):
                 )
 
             # Promote model in registry
-            promotion_result = self.model_registry.promote_model(model_info["id"], deployment_stage)
+            promotion_result = await self.model_registry.promote_model(
+                model_info["id"], deployment_stage
+            )
 
             # Update inference engine if deploying to production
             if deployment_stage == "production":
@@ -484,7 +489,8 @@ class ModelManagerService(BaseService):
             self._logger.info("Starting model retirement", model_name=model_name, reason=reason)
 
             # Remove from inference engine
-            await self.inference_engine.unload_model(model_name)
+            if hasattr(self.inference_engine, "unload_model"):
+                await self.inference_engine.unload_model(model_name)
 
             # Stop monitoring
             if model_name in self.monitoring_jobs:
@@ -719,7 +725,7 @@ class ModelManagerService(BaseService):
     async def health_check(self) -> dict[str, Any]:
         """Perform health check of the ML system."""
         try:
-            health_status = {
+            health_status: dict[str, Any] = {
                 "timestamp": datetime.now(timezone.utc),
                 "status": "healthy",
                 "components": {},
@@ -772,7 +778,6 @@ class ModelManagerService(BaseService):
     # Service Health and Metrics
     async def _service_health_check(self) -> "HealthStatus":
         """Model manager service specific health check."""
-        from src.core.types import HealthStatus
 
         try:
             # Check dependencies
@@ -816,7 +821,7 @@ class ModelManagerService(BaseService):
         """Validate model manager service configuration."""
         try:
             mm_config_dict = config.get("model_manager", {})
-            ModelManagerConfig(**mm_config_dict)
+            ModelManagerConfig(**(mm_config_dict if isinstance(mm_config_dict, dict) else {}))
             return True
         except Exception as e:
             self._logger.error(

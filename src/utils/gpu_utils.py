@@ -329,15 +329,36 @@ class GPUManager:
             return func(*args, **kwargs)
 
 
-# Global GPU manager instance
-gpu_manager = GPUManager()
+# GPUManager registration is handled by service_registry.py
 
 
-def get_optimal_batch_size(data_size: int, memory_limit_gb: float = 4.0) -> int:
+def get_optimal_batch_size(
+    data_size: int, memory_limit_gb: float = 4.0, gpu_manager: GPUManager | None = None
+) -> int:
     """Calculate optimal batch size based on available GPU memory."""
+    if gpu_manager is None:
+        from src.core.dependency_injection import injector
+
+        try:
+            gpu_manager = injector.resolve("GPUManager")
+        except Exception:
+            # Register if not found
+            injector.register_service("GPUManager", GPUManager(), singleton=True)
+            gpu_manager = injector.resolve("GPUManager")
+
     if not gpu_manager.gpu_available:
         # CPU batch size
         return min(1024, data_size)
+
+    if gpu_manager is None:
+        from src.core.dependency_injection import injector
+
+        try:
+            gpu_manager = injector.resolve("GPUManager")
+        except Exception:
+            # Register if not found
+            injector.register_service("GPUManager", GPUManager(), singleton=True)
+            gpu_manager = injector.resolve("GPUManager")
 
     memory_info = gpu_manager.get_memory_info()
     available_memory_gb = memory_info.get("free", 4.0)
@@ -399,9 +420,19 @@ def gpu_accelerated_correlation(data: NDArray[np.float64]) -> NDArray[np.float64
 
 
 def gpu_accelerated_rolling_window(
-    data: NDArray[np.float64], window_size: int, func: Any
+    data: NDArray[np.float64], window_size: int, func: Any, gpu_manager: GPUManager | None = None
 ) -> NDArray[np.float64]:
     """Apply rolling window function with GPU acceleration."""
+    if gpu_manager is None:
+        from src.core.dependency_injection import injector
+
+        try:
+            gpu_manager = injector.resolve("GPUManager")
+        except Exception:
+            # Register if not found
+            injector.register_service("GPUManager", GPUManager(), singleton=True)
+            gpu_manager = injector.resolve("GPUManager")
+
     if gpu_manager.gpu_available and CUPY_AVAILABLE and cp_module:
         try:
             gpu_data = cp_module.asarray(data)
@@ -424,8 +455,18 @@ def gpu_accelerated_rolling_window(
     return result
 
 
-def setup_gpu_logging() -> Callable[[], None] | None:
+def setup_gpu_logging(gpu_manager: GPUManager | None = None) -> Callable[[], None] | None:
     """Setup GPU usage monitoring and logging."""
+    if gpu_manager is None:
+        from src.core.dependency_injection import injector
+
+        try:
+            gpu_manager = injector.resolve("GPUManager")
+        except Exception:
+            # Register if not found
+            injector.register_service("GPUManager", GPUManager(), singleton=True)
+            gpu_manager = injector.resolve("GPUManager")
+
     if not gpu_manager.gpu_available:
         return None
 
@@ -457,7 +498,7 @@ __all__ = [
     "get_optimal_batch_size",
     "gpu_accelerated_correlation",
     "gpu_accelerated_rolling_window",
-    "gpu_manager",
+    "get_optimal_batch_size",
     "parallel_apply",
     "setup_gpu_logging",
 ]

@@ -30,14 +30,14 @@ from src.core.types import (
 # Import adapter for type conversion
 from src.execution.adapters import ExecutionResultAdapter
 
+# Import result wrapper for backward compatibility
+from src.execution.execution_result_wrapper import ExecutionResultWrapper
+
 # Import execution state management
 from src.execution.execution_state import ExecutionState
 
 # Import internal execution instruction type
 from src.execution.types import ExecutionInstruction
-
-# Import result wrapper for backward compatibility
-from src.execution.execution_result_wrapper import ExecutionResultWrapper
 
 # MANDATORY: Import from P-007A
 from src.utils import log_calls, time_execution
@@ -95,7 +95,7 @@ class BaseAlgorithm(BaseComponent, ABC):
     @abstractmethod
     async def execute(
         self, instruction: ExecutionInstruction, exchange_factory=None, risk_manager=None
-    ) -> ExecutionResult:
+    ) -> ExecutionResultWrapper:
         """
         Execute an order using this algorithm.
 
@@ -329,11 +329,11 @@ class BaseAlgorithm(BaseComponent, ABC):
         """
         Create an initial execution result for tracking.
         This is a convenience method that creates a state and converts it to result.
-        
+
         Args:
             instruction: Execution instruction
             execution_id: Optional execution ID (generated if not provided)
-        
+
         Returns:
             ExecutionResult: Initial execution result with execution_id property
         """
@@ -342,7 +342,7 @@ class BaseAlgorithm(BaseComponent, ABC):
         self.current_executions[state.execution_id] = state
         # _state_to_result already returns wrapped result
         return self._state_to_result(state)
-        
+
     async def _update_execution_result(
         self,
         execution_result: ExecutionResult,
@@ -353,27 +353,29 @@ class BaseAlgorithm(BaseComponent, ABC):
         """
         Update an execution result with new information.
         This method updates the underlying state and returns the updated result.
-        
+
         Args:
             execution_result: Execution result to update
             status: New status (optional)
             child_order: New child order to add (optional)
             error_message: Error message if failed (optional)
-        
+
         Returns:
             ExecutionResult: Updated execution result
         """
         # Find the corresponding state
         # Get execution_id from either property or attribute
-        execution_id = getattr(execution_result, 'execution_id', None) or execution_result.instruction_id
+        execution_id = (
+            getattr(execution_result, "execution_id", None) or execution_result.instruction_id
+        )
         state = self.current_executions.get(execution_id)
         if not state:
             # If no state found, create one from the result
             raise ExecutionError(f"No execution state found for {execution_id}")
-            
+
         # Update the state
         await self._update_execution_state(state, status, child_order, error_message)
-        
+
         # _state_to_result already returns wrapped result
         return self._state_to_result(state)
 
@@ -512,7 +514,8 @@ class BaseAlgorithm(BaseComponent, ABC):
         """Component-specific health checks."""
         # Basic health: check if we have too many stuck executions
         stuck_count = sum(
-            1 for state in self.current_executions.values()
+            1
+            for state in self.current_executions.values()
             if state.status == ExecutionStatus.RUNNING
             and (datetime.now(timezone.utc) - state.start_time).total_seconds() > 300  # 5 minutes
         )

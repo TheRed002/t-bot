@@ -80,14 +80,15 @@ class TestPortfolioConcurrency:
         for i, symbol in enumerate(symbols):
             data = MarketData(
                 symbol=symbol,
-                price=Decimal(f"{1100 + i * 100}"),
+                open=Decimal(f"{1000 + i * 100}"),
+                high=Decimal(f"{1200 + i * 100}"),
+                low=Decimal(f"{950 + i * 100}"),
+                close=Decimal(f"{1100 + i * 100}"),
                 volume=Decimal(f"{1000 + i * 50}"),
                 timestamp=datetime.now(timezone.utc),
-                bid=Decimal(f"{1099 + i * 100}"),
-                ask=Decimal(f"{1101 + i * 100}"),
-                open_price=Decimal(f"{1000 + i * 100}"),
-                high_price=Decimal(f"{1200 + i * 100}"),
-                low_price=Decimal(f"{950 + i * 100}"),
+                exchange="binance",
+                bid_price=Decimal(f"{1099 + i * 100}"),
+                ask_price=Decimal(f"{1101 + i * 100}"),
             )
             market_data.append(data)
 
@@ -600,14 +601,15 @@ class TestPortfolioConcurrency:
         invalid_market_data = [
             MarketData(
                 symbol="INVALID",  # Mismatched symbol
-                price=Decimal("1000"),
+                open=Decimal("1000"),
+                high=Decimal("1100"),
+                low=Decimal("900"),
+                close=Decimal("1000"),
                 volume=Decimal("100"),
                 timestamp=datetime.now(timezone.utc),
-                bid=Decimal("999"),
-                ask=Decimal("1001"),
-                open_price=Decimal("1000"),
-                high_price=Decimal("1100"),
-                low_price=Decimal("900"),
+                exchange="binance",
+                bid_price=Decimal("999"),
+                ask_price=Decimal("1001"),
             )
         ]
 

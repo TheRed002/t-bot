@@ -7,23 +7,15 @@ handling save/load operations with the database service.
 
 import asyncio
 import json
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
 from src.core.exceptions import DataError, ServiceError, StateError
 
-# Removed direct database connection import - using database service instead
-from src.database.repository.state import (
-    StateBackupRepository,
-    StateMetadataRepository,
-    StateSnapshotRepository,
-)
-from src.error_handling.decorators import with_retry
+# Service layer imports instead of direct repository access
+from .services import StatePersistenceServiceProtocol
 
 if TYPE_CHECKING:
-    from src.database.service import DatabaseService
-
     from .state_service import StateMetadata, StateService, StateSnapshot, StateType
 
 
@@ -31,8 +23,8 @@ class StatePersistence(BaseComponent):
     """
     Handles state persistence operations for the StateService.
 
-    Provides methods for saving, loading, and managing state data
-    in persistent storage through the database service.
+    This is now a wrapper around the service layer to maintain backward compatibility
+    while properly separating concerns.
     """
 
     def __init__(self, state_service: "StateService"):
@@ -45,19 +37,10 @@ class StatePersistence(BaseComponent):
         super().__init__()
         self.state_service = state_service
 
-        # PER-07 Fix: Add proper null check before accessing database_service
-        if not hasattr(state_service, "database_service") or state_service.database_service is None:
-            self.logger.warning("Database service not available on state_service")
-            self.database_service: DatabaseService | None = None
-        else:
-            self.database_service = state_service.database_service
+        # Use service layer instead of direct database access
+        self._persistence_service: StatePersistenceServiceProtocol | None = None
 
-        # Initialize repositories (will be None if database service not available)
-        self._snapshot_repo: StateSnapshotRepository | None = None
-        self._backup_repo: StateBackupRepository | None = None
-        self._metadata_repo: StateMetadataRepository | None = None
-
-        # Queues for async persistence
+        # Queues for async persistence (maintained for compatibility)
         self._save_queue: asyncio.Queue = asyncio.Queue()
         self._delete_queue: asyncio.Queue = asyncio.Queue()
 
@@ -65,25 +48,23 @@ class StatePersistence(BaseComponent):
         self._persistence_task: asyncio.Task | None = None
         self._running = False
 
-        self.logger.info("StatePersistence initialized")
+        self.logger.info("StatePersistence initialized as service layer wrapper")
 
     async def initialize(self) -> None:
         """Initialize the persistence handler."""
         try:
-            # Initialize repositories if database service is available
-            if self.database_service is not None:
-                try:
-                    # Note: Repositories will be created per-session as needed
-                    self.logger.info("Database service available for persistence operations")
-                except Exception as e:
-                    self.logger.error(f"Failed to initialize database repositories: {e}")
-                    # Continue without database repositories for graceful degradation
+            # Get persistence service from state service
+            if hasattr(self.state_service, "_persistence_service"):
+                self._persistence_service = self.state_service._persistence_service
+                self.logger.info("Using service layer for persistence operations")
+            else:
+                self.logger.warning("No persistence service available - operations will be limited")
 
-            # Start background persistence task
+            # Start background persistence task for backward compatibility
             self._running = True
             self._persistence_task = asyncio.create_task(self._persistence_loop())
 
-            super().initialize()
+            await super().initialize()
             self.logger.info("StatePersistence initialization completed")
 
         except Exception as e:
@@ -106,11 +87,12 @@ class StatePersistence(BaseComponent):
                 except asyncio.CancelledError:
                     pass
 
-            super().cleanup()
+            await super().cleanup()
             self.logger.info("StatePersistence cleanup completed")
 
         except Exception as e:
             self.logger.error(f"Error during StatePersistence cleanup: {e}")
+            raise
 
     async def load_state(self, state_type: "StateType", state_id: str) -> dict[str, Any] | None:
         """
@@ -124,38 +106,15 @@ class StatePersistence(BaseComponent):
             State data or None if not found
         """
         try:
-            # PER-08 Fix: Replace direct null check with proper abstraction
-            if not self._is_database_available():
-                self.logger.warning("Database not available for load_state operation")
+            # Use service layer for persistence operations
+            if self._persistence_service:
+                return await self._persistence_service.load_state(state_type, state_id)
+            else:
+                self.logger.warning("No persistence service available for load_state operation")
                 return None
 
-            # PER-09 Fix: Use database service transaction instead of direct session
-            if self.database_service is None:
-                self.logger.warning("Database service not available, cannot load state")
-                return None
-
-            async with self.database_service.transaction() as session:
-                # Create temporary repository for this operation
-                snapshot_repo = StateSnapshotRepository(session)
-
-                # Search for the latest snapshot matching the criteria
-                snapshots = await snapshot_repo.get_all(
-                    filters={"entity_type": state_type.value, "entity_id": state_id},
-                    order_by="-state_version",
-                    limit=1,
-                )
-
-                if snapshots and snapshots[0].snapshot_data:
-                    # Parse the stored JSON data
-                    return json.loads(snapshots[0].snapshot_data)
-
-                return None
-
-        except (DataError, ServiceError) as e:
-            self.logger.error(f"Database service error loading state: {e}")
-            return None
         except Exception as e:
-            self.logger.error(f"Unexpected error loading state: {e}")
+            self.logger.error(f"Failed to load state: {e}")
             return None
 
     async def save_state(
@@ -178,57 +137,17 @@ class StatePersistence(BaseComponent):
             True if successful
         """
         try:
-            if not self._is_database_available():
-                self.logger.warning("Database not available for save_state operation")
+            # Use service layer for persistence operations
+            if self._persistence_service:
+                return await self._persistence_service.save_state(
+                    state_type, state_id, state_data, metadata
+                )
+            else:
+                self.logger.warning("No persistence service available for save_state operation")
                 return False
 
-            # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            if self.database_service is None:
-                self.logger.warning("Database service not available, cannot save state")
-                return None
-
-            async with self.database_service.transaction() as session:
-                snapshot_repo = StateSnapshotRepository(session)
-
-                # Try to find existing snapshot
-                existing = await snapshot_repo.get_by(
-                    entity_type=state_type.value, entity_id=state_id
-                )
-
-                snapshot_data = json.dumps(state_data, default=str)
-
-                if existing:
-                    # Update existing snapshot
-                    existing.snapshot_data = snapshot_data
-                    existing.state_version = metadata.version
-                    existing.checksum = metadata.checksum
-                    existing.updated_at = datetime.now(timezone.utc)
-                    await snapshot_repo.update(existing)
-                else:
-                    # Create new snapshot
-                    from src.database.models.state import StateSnapshot
-
-                    new_snapshot = StateSnapshot(
-                        snapshot_id=f"{state_id}_{state_type.value}_{metadata.version}",
-                        entity_type=state_type.value,
-                        entity_id=state_id,
-                        snapshot_data=snapshot_data,
-                        state_version=metadata.version,
-                        checksum=metadata.checksum,
-                        created_at=metadata.created_at,
-                        updated_at=datetime.now(timezone.utc),
-                    )
-                    await snapshot_repo.create(new_snapshot)
-
-                await session.commit()
-
-            return True
-
-        except (DataError, ServiceError) as e:
-            self.logger.error(f"Database service error saving state: {e}")
-            return False
         except Exception as e:
-            self.logger.error(f"Unexpected error saving state: {e}")
+            self.logger.error(f"Failed to save state: {e}")
             return False
 
     async def delete_state(self, state_type: "StateType", state_id: str) -> bool:
@@ -243,35 +162,15 @@ class StatePersistence(BaseComponent):
             True if successful
         """
         try:
-            if not self._is_database_available():
-                self.logger.warning("Database not available for delete_state operation")
+            # Use service layer for persistence operations
+            if self._persistence_service:
+                return await self._persistence_service.delete_state(state_type, state_id)
+            else:
+                self.logger.warning("No persistence service available for delete_state operation")
                 return False
 
-            # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            if self.database_service is None:
-                self.logger.warning("Database service not available, cannot save state")
-                return None
-
-            async with self.database_service.transaction() as session:
-                snapshot_repo = StateSnapshotRepository(session)
-
-                # Find snapshots to delete
-                snapshots = await snapshot_repo.get_all(
-                    filters={"entity_type": state_type.value, "entity_id": state_id}
-                )
-
-                # Delete all matching snapshots
-                for snapshot in snapshots:
-                    await snapshot_repo.delete(snapshot.id)
-
-                await session.commit()
-                return True
-
-        except (DataError, ServiceError) as e:
-            self.logger.error(f"Database service error deleting state: {e}")
-            return False
         except Exception as e:
-            self.logger.error(f"Unexpected error deleting state: {e}")
+            self.logger.error(f"Failed to delete state: {e}")
             return False
 
     async def queue_state_save(
@@ -318,50 +217,19 @@ class StatePersistence(BaseComponent):
             List of states
         """
         try:
-            if not self._is_database_available():
-                self.logger.warning("Database not available for get_states_by_type operation")
+            # Use service layer for persistence operations
+            if self._persistence_service:
+                return await self._persistence_service.list_states(
+                    state_type, limit=limit, offset=0
+                )
+            else:
+                self.logger.warning(
+                    "No persistence service available for get_states_by_type operation"
+                )
                 return []
 
-            # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            if self.database_service is None:
-                self.logger.warning("Database service not available, cannot save state")
-                return None
-
-            async with self.database_service.transaction() as session:
-                snapshot_repo = StateSnapshotRepository(session)
-
-                snapshots = await snapshot_repo.get_all(
-                    filters={"entity_type": state_type.value}, order_by="-updated_at", limit=limit
-                )
-
-            states = []
-            for snapshot in snapshots:
-                if snapshot.snapshot_data:
-                    state_data = json.loads(snapshot.snapshot_data)
-
-                    if include_metadata:
-                        metadata = {
-                            "state_id": snapshot.entity_id,
-                            "version": snapshot.state_version,
-                            "checksum": snapshot.checksum,
-                            "created_at": (
-                                snapshot.created_at.isoformat() if snapshot.created_at else None
-                            ),
-                            "updated_at": (
-                                snapshot.updated_at.isoformat() if snapshot.updated_at else None
-                            ),
-                        }
-                        states.append({"data": state_data, "metadata": metadata})
-                    else:
-                        states.append(state_data)
-
-            return states
-
-        except (DataError, ServiceError) as e:
-            self.logger.error(f"Database service error getting states by type: {e}")
-            return []
         except Exception as e:
-            self.logger.error(f"Unexpected error getting states by type: {e}")
+            self.logger.error(f"Failed to get states by type: {e}")
             return []
 
     async def search_states(
@@ -389,7 +257,7 @@ class StatePersistence(BaseComponent):
             # PER-09 Fix: Use repository pattern instead of direct SQL queries
             if self.database_service is None:
                 self.logger.warning("Database service not available, cannot save state")
-                return None
+                return []
 
             async with self.database_service.transaction() as session:
                 snapshot_repo = StateSnapshotRepository(session)
@@ -429,41 +297,15 @@ class StatePersistence(BaseComponent):
             True if successful
         """
         try:
-            if not self._is_database_available():
-                self.logger.warning("Database not available for save_snapshot operation")
+            # Use service layer for persistence operations
+            if self._persistence_service:
+                return await self._persistence_service.save_snapshot(snapshot)
+            else:
+                self.logger.warning("No persistence service available for save_snapshot operation")
                 return False
 
-            # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            if self.database_service is None:
-                self.logger.warning("Database service not available, cannot save state")
-                return None
-
-            async with self.database_service.transaction() as session:
-                snapshot_repo = StateSnapshotRepository(session)
-
-                # Convert the StateSnapshot to database model
-                from src.database.models.state import StateSnapshot as DBStateSnapshot
-
-                db_snapshot = DBStateSnapshot(
-                    snapshot_id=snapshot.snapshot_id,
-                    entity_type="system_snapshot",
-                    entity_id=snapshot.snapshot_id,
-                    snapshot_data=json.dumps(snapshot.__dict__, default=str),
-                    description=snapshot.description,
-                    created_at=snapshot.timestamp,
-                    updated_at=datetime.now(timezone.utc),
-                )
-
-                await snapshot_repo.create(db_snapshot)
-                await session.commit()
-
-            return True
-
-        except (DataError, ServiceError) as e:
-            self.logger.error(f"Database service error saving snapshot: {e}")
-            return False
         except Exception as e:
-            self.logger.error(f"Unexpected error saving snapshot: {e}")
+            self.logger.error(f"Failed to save snapshot: {e}")
             return False
 
     async def load_snapshot(self, snapshot_id: str) -> "StateSnapshot | None":
@@ -477,34 +319,15 @@ class StatePersistence(BaseComponent):
             Snapshot or None if not found
         """
         try:
-            if not self._is_database_available():
-                self.logger.warning("Database not available for load_snapshot operation")
+            # Use service layer for persistence operations
+            if self._persistence_service:
+                return await self._persistence_service.load_snapshot(snapshot_id)
+            else:
+                self.logger.warning("No persistence service available for load_snapshot operation")
                 return None
 
-            # PER-09 Fix: Use repository pattern instead of direct SQL queries
-            if self.database_service is None:
-                self.logger.warning("Database service not available, cannot save state")
-                return None
-
-            async with self.database_service.transaction() as session:
-                snapshot_repo = StateSnapshotRepository(session)
-
-                db_snapshot = await snapshot_repo.get_by(snapshot_id=snapshot_id)
-
-            if db_snapshot and db_snapshot.snapshot_data:
-                snapshot_data = json.loads(db_snapshot.snapshot_data)
-                # Reconstruct StateSnapshot object
-                from .state_service import StateSnapshot
-
-                return StateSnapshot(**snapshot_data)
-
-            return None
-
-        except (DataError, ServiceError) as e:
-            self.logger.error(f"Database service error loading snapshot: {e}")
-            return None
         except Exception as e:
-            self.logger.error(f"Unexpected error loading snapshot: {e}")
+            self.logger.error(f"Failed to load snapshot: {e}")
             return None
 
     async def load_all_states_to_cache(self) -> None:
@@ -569,6 +392,7 @@ class StatePersistence(BaseComponent):
 
             except Exception as e:
                 self.logger.error(f"Persistence loop error: {e}")
+                # Don't re-raise to keep loop running
                 await asyncio.sleep(1.0)
 
     async def _flush_queues(self) -> None:
@@ -606,36 +430,19 @@ class StatePersistence(BaseComponent):
                 return False
         return True
 
-    def _is_database_available(self) -> bool:
+    def _is_service_available(self) -> bool:
         """
-        PER-08 Fix: Proper abstraction for checking database availability.
+        Check if persistence service is available.
 
         Returns:
-            bool: True if database service is available and initialized
+            bool: True if persistence service is available
         """
         try:
             return (
-                self.database_service is not None
-                and hasattr(self.database_service, "initialized")
-                and getattr(self.database_service, "initialized", False)
+                self._persistence_service is not None
+                and hasattr(self._persistence_service, "is_available")
+                and self._persistence_service.is_available()
             )
         except Exception as e:
-            self.logger.warning(f"Error checking database availability: {e}")
-            return False
-
-    @with_retry(max_retries=3, base_delay=1.0)
-    async def _ensure_repositories_initialized(self) -> bool:
-        """
-        Ensure database repositories are properly initialized.
-
-        Returns:
-            bool: True if repositories are available
-        """
-        try:
-            if not self._is_database_available():
-                return False
-
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to initialize repositories: {e}")
+            self.logger.warning(f"Error checking persistence service availability: {e}")
             return False

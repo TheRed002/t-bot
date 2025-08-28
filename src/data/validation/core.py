@@ -2,14 +2,14 @@
 
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.data.interfaces import DataValidatorInterface
 
 
 class DataValidationPipeline(BaseComponent):
     """Centralized validation pipeline for data."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize validation pipeline."""
         super().__init__()  # Initialize BaseComponent
         self.validators: list[DataValidatorInterface] = []
@@ -25,7 +25,7 @@ class DataValidationPipeline(BaseComponent):
             Self for chaining
         """
         self.validators.append(validator)
-        self._logger.debug(f"Added validator: {validator.__class__.__name__}")
+        self.logger.debug(f"Added validator: {validator.__class__.__name__}")
         return self
 
     def remove_validator(self, validator_type: type) -> bool:
@@ -42,7 +42,7 @@ class DataValidationPipeline(BaseComponent):
         self.validators = [v for v in self.validators if not isinstance(v, validator_type)]
         removed = initial_count - len(self.validators)
         if removed:
-            self._logger.debug(f"Removed {removed} validators of type {validator_type.__name__}")
+            self.logger.debug(f"Removed {removed} validators of type {validator_type.__name__}")
         return removed > 0
 
     def validate(self, data: Any) -> tuple[bool, list[str]]:
@@ -72,13 +72,13 @@ class DataValidationPipeline(BaseComponent):
 
             except Exception as e:
                 error_msg = f"{validator.__class__.__name__} raised exception: {e!s}"
-                self._logger.error(error_msg)
+                self.logger.error(error_msg)
                 errors.append(error_msg)
 
         is_valid = len(errors) == 0
 
         if not is_valid:
-            self._logger.warning(f"Validation failed with {len(errors)} errors")
+            self.logger.warning(f"Validation failed with {len(errors)} errors")
 
         return is_valid, errors
 
@@ -100,7 +100,7 @@ class DataValidationPipeline(BaseComponent):
     def clear(self) -> None:
         """Clear all validators from the pipeline."""
         self.validators.clear()
-        self._logger.debug("Cleared all validators")
+        self.logger.debug("Cleared all validators")
 
     def get_validator_count(self) -> int:
         """Get the number of validators in the pipeline."""

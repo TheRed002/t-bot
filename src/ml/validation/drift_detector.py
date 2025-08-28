@@ -56,7 +56,7 @@ class DriftDetectionService(BaseService):
         )
 
         # Configuration parameters with defaults
-        ml_config = self._config.get("ml", {}) if self._config else {}
+        ml_config = dict(self._config.get("ml", {}) if self._config else {})
         self.drift_threshold = ml_config.get("drift_threshold", 0.1)
         self.min_samples = ml_config.get("min_drift_samples", 100)
         self.reference_window = ml_config.get("drift_reference_window", 1000)
@@ -64,9 +64,9 @@ class DriftDetectionService(BaseService):
         self.significance_level = ml_config.get("significance_level", 0.05)
 
         # Drift monitoring state
-        self.reference_data = {}
-        self.drift_history = []
-        self.feature_statistics = {}
+        self.reference_data: dict[str, Any] = {}
+        self.drift_history: list[dict[str, Any]] = []
+        self.feature_statistics: dict[str, Any] = {}
 
         # Add dependencies for data and model services
         self.add_dependency("DataService")
@@ -847,7 +847,7 @@ class DriftDetectionService(BaseService):
                 current_samples=len(current_data),
             )
 
-            monitoring_results = {
+            monitoring_results: dict[str, Any] = {
                 "timestamp": datetime.now(timezone.utc),
                 "model_name": model_name,
                 "monitoring_type": "continuous",

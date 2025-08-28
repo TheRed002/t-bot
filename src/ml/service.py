@@ -207,7 +207,8 @@ class MLService(BaseService):
         if self.ml_config.enable_feature_store:
             try:
                 self.feature_store_service = self.resolve_dependency("FeatureStoreService")
-            except Exception:
+            except Exception as e:
+                self._logger.warning(f"Feature store dependency resolution failed: {e}")
                 # Feature store is optional
                 self.feature_store_service = None
 

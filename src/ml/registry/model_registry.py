@@ -817,8 +817,13 @@ class ModelRegistryService(BaseService):
         """Save object as pickle file."""
         import pickle
 
-        with open(file_path, "wb") as f:
+        f = None
+        try:
+            f = open(file_path, "wb")
             pickle.dump(obj, f)
+        finally:
+            if f:
+                f.close()
 
     async def _load_model_from_file(self, file_path: Path) -> Any:
         """Load model from file."""
@@ -834,13 +839,23 @@ class ModelRegistryService(BaseService):
         """Load object from pickle file."""
         import pickle
 
-        with open(file_path, "rb") as f:
+        f = None
+        try:
+            f = open(file_path, "rb")
             return pickle.load(f)
+        finally:
+            if f:
+                f.close()
 
     def _load_json_file(self, file_path: Path) -> dict[str, Any]:
         """Load JSON file."""
-        with open(file_path) as f:
+        f = None
+        try:
+            f = open(file_path)
             return json.load(f)
+        finally:
+            if f:
+                f.close()
 
     async def _save_registry_entry(self, metadata: ModelMetadata) -> None:
         """Save registry entry to file."""
@@ -865,8 +880,13 @@ class ModelRegistryService(BaseService):
 
     def _save_json_file(self, data: dict[str, Any], file_path: Path) -> None:
         """Save data as JSON file."""
-        with open(file_path, "w") as f:
+        f = None
+        try:
+            f = open(file_path, "w")
             json.dump(data, f, indent=2, default=str)
+        finally:
+            if f:
+                f.close()
 
     async def _load_existing_metadata(self) -> None:
         """Load existing model metadata from files."""

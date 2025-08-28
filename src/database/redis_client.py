@@ -130,11 +130,11 @@ class RedisClient(BaseComponent):
                 else:
                     # Fall back to close() for older versions
                     await self.client.close()
+                self.logger.info("Redis connection closed")
             except Exception as e:
                 self.logger.warning(f"Error during disconnect: {e}")
             finally:
                 self.client = None
-            self.logger.info("Redis connection closed")
 
     def _get_namespaced_key(self, key: str, namespace: str = "trading_bot") -> str:
         """Get namespaced key for organization."""

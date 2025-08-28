@@ -61,7 +61,7 @@ class ValidationCache:
         """Check if cache is still valid."""
         return (time.time() - self.last_updated) < self.cache_duration
 
-    def invalidate(self):
+    def invalidate(self) -> None:
         """Invalidate the cache."""
         self.last_updated = 0
 
@@ -81,7 +81,7 @@ class OrderPool:
             return order_obj
         return {}
 
-    def return_order(self, order_obj: dict[str, Any]):
+    def return_order(self, order_obj: dict[str, Any]) -> None:
         """Return an order object to the pool."""
         if id(order_obj) in self._in_use:
             order_obj.clear()  # Clear data
@@ -108,7 +108,7 @@ class CircularBuffer:
         low: float,
         close: float,
         volume: float,
-    ):
+    ) -> None:
         """Add new data point."""
         self.buffer[self.index] = [timestamp, open_price, high, low, close, volume]
         self.index = (self.index + 1) % self.size
@@ -169,8 +169,8 @@ class HighPerformanceExecutor:
         }
 
         # Pre-compiled regex patterns and other optimizations
-        self._symbol_pattern = None
-        self._price_precision_cache = {}
+        self._symbol_pattern: str | None = None
+        self._price_precision_cache: dict[str, int] = {}
 
         self.logger.info(
             "High-performance executor initialized",
@@ -200,7 +200,7 @@ class HighPerformanceExecutor:
             batch_size = min(10, len(orders))  # Optimal batch size for parallel processing
             batches = [orders[i : i + batch_size] for i in range(0, len(orders), batch_size)]
 
-            results = []
+            results: list[ExecutionResult] = []
 
             # Process batches in parallel
             batch_tasks = [self._execute_order_batch(batch, market_data) for batch in batches]
@@ -212,7 +212,8 @@ class HighPerformanceExecutor:
                 if isinstance(batch_result, Exception):
                     self.logger.error("Batch execution failed", error=str(batch_result))
                     continue
-                results.extend(batch_result)
+                if isinstance(batch_result, list):
+                    results.extend(batch_result)
 
             # Update metrics
             execution_time_ms = (time.perf_counter() - start_time) * 1000
@@ -303,7 +304,7 @@ class HighPerformanceExecutor:
             )
 
             # All checks must pass
-            return np.all(risk_checks)
+            return bool(np.all(risk_checks))
 
         except Exception as e:
             self.logger.error("Fast validation failed", order_id=order.id, error=str(e))
@@ -441,12 +442,12 @@ class HighPerformanceExecutor:
             self.logger.error("Fast order execution failed", order_id=order.id, error=str(e))
             return None
 
-    async def _ensure_cache_warm(self):
+    async def _ensure_cache_warm(self) -> None:
         """Ensure validation cache is warmed up."""
         if not self.validation_cache.is_valid():
             await self._refresh_validation_cache()
 
-    async def _refresh_validation_cache(self):
+    async def _refresh_validation_cache(self) -> None:
         """Refresh validation cache with current data."""
         try:
             # Simulate cache refresh (replace with actual data fetching)
@@ -480,7 +481,9 @@ class HighPerformanceExecutor:
         except Exception as e:
             self.logger.error("Cache refresh failed", error=str(e))
 
-    def _update_metrics(self, total_orders: int, successful_orders: int, execution_time_ms: float):
+    def _update_metrics(
+        self, total_orders: int, successful_orders: int, execution_time_ms: float
+    ) -> None:
         """Update execution metrics."""
         self._execution_metrics["total_orders"] += total_orders
         self._execution_metrics["successful_orders"] += successful_orders
@@ -516,11 +519,13 @@ class HighPerformanceExecutor:
             ),
         }
 
-    async def cleanup(self):
+    async def cleanup(self) -> None:
         """Cleanup resources."""
         try:
             # Shutdown thread pool
-            self.thread_pool.shutdown(wait=True)
+            if hasattr(self, "thread_pool"):
+                self.thread_pool.shutdown(wait=True)
+                self.thread_pool = None
 
             # Clear caches
             self.validation_cache.invalidate()
@@ -534,8 +539,15 @@ class HighPerformanceExecutor:
 
         except Exception as e:
             self.logger.error("Cleanup failed", error=str(e))
+        finally:
+            # Ensure thread pool is closed even if error occurs
+            if hasattr(self, "thread_pool") and self.thread_pool:
+                try:
+                    self.thread_pool.shutdown(wait=False)
+                except Exception as e:
+                    self.logger.warning("Failed to shutdown thread pool cleanly", error=str(e))
 
-    async def warm_up_system(self):
+    async def warm_up_system(self) -> None:
         """Warm up the system for optimal performance."""
         try:
             # Pre-warm caches

@@ -173,8 +173,8 @@ class CrossoverOperator:
         parent2_genes: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Uniform crossover: randomly select from each parent."""
-        child1_genes = {}
-        child2_genes = {}
+        child1_genes: dict[str, Any] = {}
+        child2_genes: dict[str, Any] = {}
 
         for param in parent1_genes:
             if param in parent2_genes:
@@ -204,8 +204,8 @@ class CrossoverOperator:
         # Random crossover point
         crossover_point = random.randint(1, len(params) - 1)
 
-        child1_genes = {}
-        child2_genes = {}
+        child1_genes: dict[str, Any] = {}
+        child2_genes: dict[str, Any] = {}
 
         for i, param in enumerate(params):
             if param in parent2_genes:
@@ -236,8 +236,8 @@ class CrossoverOperator:
         point1 = random.randint(1, len(params) - 2)
         point2 = random.randint(point1 + 1, len(params) - 1)
 
-        child1_genes = {}
-        child2_genes = {}
+        child1_genes: dict[str, Any] = {}
+        child2_genes: dict[str, Any] = {}
 
         for i, param in enumerate(params):
             if param in parent2_genes:
@@ -260,15 +260,15 @@ class CrossoverOperator:
         alpha: float = 0.5,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Blend crossover: blend numeric values."""
-        child1_genes = {}
-        child2_genes = {}
+        child1_genes: dict[str, Any] = {}
+        child2_genes: dict[str, Any] = {}
 
         for param in parent1_genes:
             if param in parent2_genes:
                 val1 = parent1_genes[param]
                 val2 = parent2_genes[param]
 
-                if isinstance(val1, int | float) and isinstance(val2, int | float):
+                if isinstance(val1, (int, float)) and isinstance(val2, (int, float)):
                     # Blend numeric values
                     min_val = min(val1, val2)
                     max_val = max(val1, val2)
@@ -278,10 +278,12 @@ class CrossoverOperator:
                     lower = min_val - alpha * range_val
                     upper = max_val + alpha * range_val
 
-                    if isinstance(val1, int):
+                    if isinstance(val1, int) and isinstance(val2, int):
+                        # Both are integers, keep result as integer
                         child1_genes[param] = int(random.uniform(lower, upper))
                         child2_genes[param] = int(random.uniform(lower, upper))
                     else:
+                        # At least one is float, result should be float
                         child1_genes[param] = random.uniform(lower, upper)
                         child2_genes[param] = random.uniform(lower, upper)
                 else:

@@ -567,8 +567,12 @@ class BaseStrategy(BaseComponent, BaseStrategyInterface, ABC):
                             },
                         )
                         await alert_manager.fire_alert(alert)
-                    except Exception:
-                        pass  # Don't fail start due to alerting issues
+                    except (AttributeError, ImportError, KeyError) as e:
+                        # Alert system not available or misconfigured - continue
+                        pass
+                    except Exception as e:
+                        # Unexpected alerting error - don't fail start due to alerting issues
+                        pass
 
             raise
 

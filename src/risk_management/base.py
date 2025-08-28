@@ -36,6 +36,7 @@ from src.error_handling import ErrorHandler
 
 # Monitoring integration
 from src.monitoring.metrics import MetricsCollector
+from src.utils.decimal_utils import ZERO
 
 # MANDATORY: Import from P-003+
 # MANDATORY: Import from P-007A
@@ -78,7 +79,7 @@ class BaseRiskManager(BaseComponent, ABC):
 
         # Initialize monitoring integration
         try:
-            self.metrics_collector = MetricsCollector()
+            self.metrics_collector: MetricsCollector | None = MetricsCollector()
         except Exception as e:
             self.logger.warning(f"Failed to initialize metrics collector: {e}")
             self.metrics_collector = None
@@ -214,7 +215,7 @@ class BaseRiskManager(BaseComponent, ABC):
 
         # Calculate current drawdown
         if self.risk_metrics:
-            self.current_drawdown = self.risk_metrics.current_drawdown
+            self.current_drawdown = self.risk_metrics.current_drawdown or ZERO
             if self.current_drawdown > self.max_drawdown:
                 self.max_drawdown = self.current_drawdown
 
@@ -311,12 +312,21 @@ class BaseRiskManager(BaseComponent, ABC):
         Returns:
             Decimal: Portfolio exposure as decimal (0.0 to 1.0)
         """
-        if not self.total_portfolio_value or self.total_portfolio_value == 0:
+        try:
+            if not self.total_portfolio_value or self.total_portfolio_value == 0:
+                return Decimal("0")
+
+            total_exposure = sum(
+                abs(pos.quantity * pos.current_price)
+                if pos.quantity and pos.current_price
+                else ZERO
+                for pos in positions
+            )
+
+            return total_exposure / self.total_portfolio_value
+        except Exception as e:
+            self.logger.error(f"Portfolio exposure calculation failed: {e}")
             return Decimal("0")
-
-        total_exposure = sum(abs(pos.quantity * pos.current_price) for pos in positions)
-
-        return total_exposure / self.total_portfolio_value
 
     def _check_drawdown_limit(self, current_drawdown: Decimal) -> bool:
         """
@@ -413,4 +423,6 @@ class BaseRiskManager(BaseComponent, ABC):
         except Exception as e:
             self.logger.error(f"Error during risk manager cleanup: {e}")
         finally:
-            super().cleanup()  # Call parent cleanup
+            # Call parent cleanup if it exists
+            if hasattr(super(), "cleanup"):
+                super().cleanup()

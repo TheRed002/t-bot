@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from src.core.base.component import BaseComponent
-from src.error_handling.context import ErrorContext
 from src.core.config.main import Config
 from src.core.exceptions import RiskManagementError, ValidationError
 
@@ -116,7 +115,7 @@ class PositionSizer(BaseComponent):
 
     @time_execution
     async def calculate_position_size(
-        self, signal: Signal, portfolio_value: Decimal, method: PositionSizeMethod = None
+        self, signal: Signal, portfolio_value: Decimal, method: PositionSizeMethod | None = None
     ) -> Decimal:
         """
         Calculate position size using specified method.
@@ -245,7 +244,7 @@ class PositionSizer(BaseComponent):
         # Adjust for signal confidence
         # Get confidence from either confidence or strength field
         confidence = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
-        confidence_multiplier = to_decimal(confidence)
+        confidence_multiplier = to_decimal(confidence if confidence is not None else 0)
         position_size = base_size * confidence_multiplier
 
         self.logger.debug(
@@ -351,7 +350,9 @@ class PositionSizer(BaseComponent):
             # Apply confidence adjustment
             # Get confidence from either confidence or strength field
             confidence = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
-            adjusted_fraction = half_kelly_fraction * to_decimal(confidence)
+            adjusted_fraction = half_kelly_fraction * to_decimal(
+                confidence if confidence is not None else 0
+            )
 
             # Apply bounds: min 1%, max 25% of portfolio
             # Enforce bounds using clamp_decimal
@@ -439,7 +440,11 @@ class PositionSizer(BaseComponent):
             # Apply volatility adjustment and confidence
             # Get confidence from either confidence or strength field
             confidence = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
-            position_size = base_size * to_decimal(volatility_adjustment) * to_decimal(confidence)
+            position_size = (
+                base_size
+                * to_decimal(volatility_adjustment)
+                * to_decimal(confidence if confidence is not None else 0)
+            )
 
             self.logger.debug(
                 "Volatility-adjusted sizing",
@@ -477,7 +482,7 @@ class PositionSizer(BaseComponent):
         # Higher confidence gets proportionally larger position
         # Get confidence from either confidence or strength field
         confidence_value = getattr(signal, "confidence", None) or getattr(signal, "strength", None)
-        confidence = to_decimal(confidence_value)
+        confidence = to_decimal(confidence_value if confidence_value is not None else 0)
         confidence_weight = confidence**2  # Square for non-linear scaling
 
         position_size = base_size * confidence_weight
@@ -633,8 +638,8 @@ class PositionSizer(BaseComponent):
             except Exception as e:
                 summary[method.value] = {
                     "error": str(e),
-                    "position_size": 0,
-                    "portfolio_percentage": 0,
+                    "position_size": "0",
+                    "portfolio_percentage": "0",
                 }
 
         return summary

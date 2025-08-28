@@ -4,6 +4,7 @@ import uuid
 
 from sqlalchemy import Boolean, Column, DateTime, Index, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
 
 from .base import Base, MetadataMixin, TimestampMixin
 
@@ -29,6 +30,22 @@ class BotInstance(Base, TimestampMixin, MetadataMixin):
     # Activity tracking
     last_active = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=False)
+
+    # Relationships
+    capital_audit_logs = relationship(
+        "CapitalAuditLog", foreign_keys="CapitalAuditLog.bot_id", back_populates="bot_instance"
+    )
+    execution_audit_logs = relationship(
+        "ExecutionAuditLog", foreign_keys="ExecutionAuditLog.bot_id", back_populates="bot_instance"
+    )
+    risk_audit_logs = relationship(
+        "RiskAuditLog", foreign_keys="RiskAuditLog.bot_id", back_populates="bot_instance"
+    )
+    performance_audit_logs = relationship(
+        "PerformanceAuditLog",
+        foreign_keys="PerformanceAuditLog.bot_id",
+        back_populates="bot_instance",
+    )
 
     # Indexes
     __table_args__ = (

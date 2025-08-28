@@ -279,7 +279,7 @@ class PositionSizer:
             return position_size
 
         except Exception as e:
-            raise RiskManagementError(f"Position size calculation failed: {e}")
+            raise RiskManagementError(f"Position size calculation failed: {e}") from e
 
     def _apply_limits(self, position_size: Decimal, portfolio_value: Decimal) -> Decimal:
         """Apply position size limits."""

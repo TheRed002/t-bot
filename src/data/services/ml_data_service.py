@@ -46,7 +46,7 @@ class MLDataService(BaseService):
     async def _do_start(self) -> None:
         """Start the ML data service."""
         await super()._do_start()
-        self._logger.info("ML Data Service started successfully")
+        self.logger.info("ML Data Service started successfully")
 
     async def _do_stop(self) -> None:
         """Stop the ML data service."""
@@ -64,7 +64,7 @@ class MLDataService(BaseService):
             **metadata,
             "stored_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._logger.info(f"Stored model metadata for {model_id}")
+        self.logger.info(f"Stored model metadata for {model_id}")
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
     async def update_model_metadata(self, model_id: str, metadata: dict[str, Any]) -> None:
@@ -78,7 +78,7 @@ class MLDataService(BaseService):
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
         )
-        self._logger.info(f"Updated model metadata for {model_id}")
+        self.logger.info(f"Updated model metadata for {model_id}")
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
     async def get_model_by_id(self, model_id: str) -> dict[str, Any] | None:
@@ -147,7 +147,7 @@ class MLDataService(BaseService):
         """Delete model metadata."""
         if model_id in self._model_metadata:
             del self._model_metadata[model_id]
-            self._logger.info(f"Deleted model {model_id}")
+            self.logger.info(f"Deleted model {model_id}")
 
     # Feature Store Operations
     @UnifiedDecorator.enhance(log=True, monitor=True)
@@ -169,7 +169,7 @@ class MLDataService(BaseService):
             "version": version or "latest",
             "stored_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._logger.info(f"Stored feature set {key}")
+        self.logger.info(f"Stored feature set {key}")
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
     async def get_feature_set(
@@ -241,7 +241,7 @@ class MLDataService(BaseService):
                 del self._feature_sets[key]
                 deleted_count += 1
 
-        self._logger.info(f"Deleted {deleted_count} feature sets")
+        self.logger.info(f"Deleted {deleted_count} feature sets")
         return deleted_count
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
@@ -276,7 +276,7 @@ class MLDataService(BaseService):
             **artifact_metadata,
             "stored_at": datetime.now(timezone.utc).isoformat(),
         }
-        self._logger.info(f"Stored artifact info {artifact_key}")
+        self.logger.info(f"Stored artifact info {artifact_key}")
 
     @UnifiedDecorator.enhance(log=True, monitor=True)
     async def get_artifact_info(
@@ -325,7 +325,7 @@ class MLDataService(BaseService):
         artifact_key = f"{model_id}:{artifact_name}:{artifact_type}:{version or 'latest'}"
         if artifact_key in self._artifacts:
             del self._artifacts[artifact_key]
-            self._logger.info(f"Deleted artifact {artifact_key}")
+            self.logger.info(f"Deleted artifact {artifact_key}")
 
     # Prediction Storage Operations
     @UnifiedDecorator.enhance(log=True, monitor=True)
@@ -337,7 +337,7 @@ class MLDataService(BaseService):
                 "saved_at": datetime.now(timezone.utc).isoformat(),
             }
         )
-        self._logger.info(f"Saved predictions for model {prediction_data.get('model_id')}")
+        self.logger.info(f"Saved predictions for model {prediction_data.get('model_id')}")
 
     # Audit Operations
     @UnifiedDecorator.enhance(log=True, monitor=True)
@@ -371,7 +371,7 @@ class MLDataService(BaseService):
             return HealthStatus.HEALTHY
 
         except Exception as e:
-            self._logger.error("ML data service health check failed", error=str(e))
+            self.logger.error("ML data service health check failed", error=str(e))
             return HealthStatus.UNHEALTHY
 
     def get_ml_data_metrics(self) -> dict[str, Any]:

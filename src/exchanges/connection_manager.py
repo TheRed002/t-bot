@@ -65,8 +65,8 @@ class WebSocketConnection:
         # Connection state
         self.connected = False
         self.connecting = False
-        self.last_heartbeat = None
-        self.last_message = None
+        self.last_heartbeat: datetime | None = None
+        self.last_message: datetime | None = None
 
         # Message queue for reconnection
         self.message_queue: list[dict[str, Any]] = []
@@ -588,12 +588,22 @@ class ConnectionManager:
         Returns:
             bool: True if removed successfully, False otherwise
         """
-        if connection_id in self.websocket_connections:
-            connection = self.websocket_connections[connection_id]
-            await connection.disconnect()
-            del self.websocket_connections[connection_id]
-            self.logger.info(f"Removed WebSocket connection {connection_id}")
-            return True
+        connection = None
+        try:
+            connection = self.websocket_connections.get(connection_id)
+            if connection:
+                await connection.disconnect()
+        except Exception as e:
+            self.logger.error(f"Error disconnecting connection {connection_id}: {e!s}")
+        finally:
+            # Always remove from tracking
+            try:
+                if connection_id in self.websocket_connections:
+                    del self.websocket_connections[connection_id]
+                    self.logger.info(f"Removed WebSocket connection {connection_id}")
+                    return True
+            except Exception as e:
+                self.logger.error(f"Error removing connection {connection_id}: {e!s}")
 
         return False
 
@@ -730,16 +740,30 @@ class ConnectionManager:
 
     async def disconnect_all(self) -> None:
         """Disconnect all connections."""
+        websocket_connections_to_disconnect = {}
+        rest_connections_to_clear = {}
+
+        try:
+            # Store references to avoid modification during iteration
+            websocket_connections_to_disconnect = dict(self.websocket_connections)
+            rest_connections_to_clear = dict(self.rest_connections)
+        except Exception as e:
+            self.logger.error(f"Error preparing disconnect: {e!s}")
+
         # Disconnect WebSocket connections
-        for connection_id, connection in self.websocket_connections.items():
+        for connection_id, connection in websocket_connections_to_disconnect.items():
             try:
-                await connection.disconnect()
+                if connection:
+                    await connection.disconnect()
             except Exception as e:
                 self.logger.error(f"Error disconnecting WebSocket {connection_id}: {e!s}")
 
         # Clear connection pools
-        self.websocket_connections.clear()
-        self.rest_connections.clear()
+        try:
+            self.websocket_connections.clear()
+            self.rest_connections.clear()
+        except Exception as e:
+            self.logger.error(f"Error clearing connection pools: {e!s}")
 
         self.logger.info(f"Disconnected all connections for {self.exchange_name}")
 

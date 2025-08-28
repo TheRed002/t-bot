@@ -809,7 +809,8 @@ class ModelValidationService(BaseService):
                     )
                     bootstrap_importance = result.importances_mean
                     importance_variations.append(bootstrap_importance)
-                except Exception:
+                except Exception as e:
+                    self._logger.debug(f"Bootstrap permutation failed: {e}")
                     continue
 
             if importance_variations:
@@ -1363,7 +1364,8 @@ class ModelValidationService(BaseService):
                     warnings.simplefilter("ignore")
                     model.predict(pd.DataFrame())
                 checks["handles_empty_data"] = False  # Should raise an error
-            except Exception:
+            except Exception as e:
+                self._logger.debug(f"Empty data test - correctly raised: {type(e).__name__}")
                 checks["handles_empty_data"] = True  # Correctly raises error
 
             # Test with NaN data
@@ -1374,7 +1376,8 @@ class ModelValidationService(BaseService):
                     warnings.simplefilter("ignore")
                     model.predict(X_nan)
                 checks["handles_nan_gracefully"] = True
-            except Exception:
+            except Exception as e:
+                self._logger.debug(f"NaN data test failed: {e}")
                 checks["handles_nan_gracefully"] = False
 
             # Test with wrong feature count
@@ -1384,7 +1387,8 @@ class ModelValidationService(BaseService):
                     warnings.simplefilter("ignore")
                     model.predict(X_wrong)
                 checks["handles_wrong_features"] = False  # Should raise error
-            except Exception:
+            except Exception as e:
+                self._logger.debug(f"Wrong features test - correctly raised: {type(e).__name__}")
                 checks["handles_wrong_features"] = True  # Correctly raises error
 
             # Overall error handling assessment

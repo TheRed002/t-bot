@@ -107,9 +107,10 @@ class RiskManagementFactory:
             if metrics_collector is None:
                 try:
                     metrics_collector = get_container().get("MetricsCollectorProtocol")
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Could not get metrics collector from container: {e}")
                     pass  # Will fallback in RiskService
-            
+
             self._risk_service_instance = RiskService(
                 database_service=self.database_service,
                 state_service=self.state_service,

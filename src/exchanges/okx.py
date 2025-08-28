@@ -79,7 +79,9 @@ class OKXExchange(EnhancedBaseExchange):
             state_service: Optional state service for persistence
             trade_lifecycle_manager: Optional trade lifecycle manager
         """
-        super().__init__(config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector)
+        super().__init__(
+            config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector
+        )
 
         # OKX-specific configuration
         self.api_key = config.exchange.okx_api_key
@@ -436,7 +438,6 @@ class OKXExchange(EnhancedBaseExchange):
 
         except Exception as e:
             await self._handle_okx_error(e, "get_order_status", {"order_id": order_id})
-            return OrderStatus.UNKNOWN
 
     async def _get_market_data_from_exchange(
         self, symbol: str, timeframe: str = "1m"
@@ -617,7 +618,6 @@ class OKXExchange(EnhancedBaseExchange):
 
         except Exception as e:
             await self._handle_okx_error(e, "get_trade_history", {"symbol": symbol})
-            return []
 
     async def get_exchange_info(self) -> ExchangeInfo:
         """
@@ -726,11 +726,16 @@ class OKXExchange(EnhancedBaseExchange):
             # Map to unified exception
             unified_error = ExchangeErrorMapper.map_okx_error(error_data)
 
-            # Handle using base class error handling
-            await self._handle_exchange_error(unified_error, operation, context)
+            # Log the error with context
+            self.logger.error(f"OKX {operation} failed: {unified_error}", extra=context or {})
+
+            # Re-raise the unified exception
+            raise unified_error
 
         except Exception as e:
             self.logger.error(f"Error in OKX error handling: {e!s}")
+            # Re-raise the original error if mapping fails
+            raise error
 
     def _convert_order_to_okx(self, order: OrderRequest) -> dict[str, Any]:
         """Convert unified order request to OKX format."""

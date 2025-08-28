@@ -22,18 +22,20 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.core.base.component import BaseComponent
-from src.core.config import Config
-from src.core.exceptions import ValidationError
+from src.core.base.service import TransactionalService
+
+# Exchange-specific exceptions
+from src.core.exceptions import ExchangeConnectionError, NetworkError, ServiceError, ValidationError
 
 # MANDATORY: Import from P-001
 from src.core.types.capital import CapitalExchangeAllocation as ExchangeAllocation
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.exchanges.base import BaseExchange
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
 from src.utils.validators import ValidationFramework
+
+# Import service interfaces
+from .interfaces import AbstractExchangeDistributionService
 
 # MANDATORY: Use structured logging from src.core.logging for all capital
 # management operations
@@ -45,7 +47,7 @@ from src.utils.validators import ValidationFramework
 # From P-007A - MANDATORY: Use decorators and validators
 
 
-class ExchangeDistributor(BaseComponent):
+class ExchangeDistributor(AbstractExchangeDistributionService, TransactionalService):
     """
     Multi-exchange capital distribution manager.
 
@@ -56,22 +58,24 @@ class ExchangeDistributor(BaseComponent):
 
     def __init__(
         self,
-        config: Config,
-        exchanges: dict[str, BaseExchange],
-        error_handler: ErrorHandler | None = None,
-    ):
+        exchanges: dict[str, BaseExchange] | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
         """
-        Initialize the exchange distributor.
+        Initialize the exchange distributor service.
 
         Args:
-            config: Application configuration
-            exchanges: Dictionary of exchange instances
-            error_handler: Optional error handler instance (uses DI if not provided)
+            exchanges: Dictionary of exchange instances (injected)
+            correlation_id: Request correlation ID for tracing
         """
-        super().__init__()  # Initialize BaseComponent
-        self.config = config
-        self.exchanges = exchanges
-        self.capital_config = config.capital_management
+        super().__init__(
+            name="ExchangeDistributorService",
+            correlation_id=correlation_id,
+        )
+        self.exchanges = exchanges or {}
+
+        # Configuration will be loaded in _do_start
+        self.capital_config: dict[str, Any] = {}
 
         # Exchange allocation tracking
         self.exchange_allocations: dict[str, ExchangeAllocation] = {}
@@ -83,50 +87,47 @@ class ExchangeDistributor(BaseComponent):
         self.reliability_scores: dict[str, float] = {}
         self.historical_slippage: dict[str, list[float]] = {}
 
-        # Error handler - use dependency injection or provided instance
-        if error_handler:
-            self.error_handler = error_handler
-        else:
-            try:
-                from src.core.dependency_injection import get_container
+    async def _do_start(self) -> None:
+        """Start the exchange distributor service."""
+        try:
+            # Resolve exchange info service if not injected
+            if not self._exchange_info_service:
+                try:
+                    self._exchange_info_service = self.resolve_dependency("ExchangeInfoService")
+                except Exception as e:
+                    self._logger.warning(
+                        f"ExchangeInfoService not available via DI: {e}, will use fallback data"
+                    )
 
-                self.error_handler = get_container().get("ErrorHandler")
-            except (ImportError, KeyError):
-                # Fallback to creating instance if DI not available
-                self.error_handler = ErrorHandler(config)
+            # Load configuration from ConfigService
+            await self._load_configuration()
 
-        # Recovery scenarios
-        self.partial_fill_recovery = PartialFillRecovery(config)
+            # Initialize exchange allocations
+            await self._initialize_exchange_allocations()
 
-        # Initialize exchange allocations
-        # Capital will be updated by external service that:
-        # 1. Queries Exchange Balances via exchange integrations
-        # 2. Currency Conversion via CurrencyManager
-        # 3. Updates capital components with real balances
-
-        # Initialize exchange allocations
-        self._initialize_exchange_allocations_sync()
-
-        self.logger.info(
-            "Exchange distributor initialized",
-            exchanges=list(exchanges.keys()),
-            total_exchanges=len(exchanges),
-        )
-
-    def _initialize_exchange_allocations_sync(self) -> None:
-        """Synchronous initialization of exchange allocations during __init__."""
-        for exchange_name in self.exchanges.keys():
-            allocation = ExchangeAllocation(
-                exchange=exchange_name,
-                allocated_amount=Decimal("0"),
-                available_amount=Decimal("0"),
-                utilization_rate=0.0,
-                liquidity_score=0.5,  # Default score
-                fee_efficiency=0.5,  # Default score
-                reliability_score=0.5,  # Default score
-                last_rebalance=datetime.now(timezone.utc),
+            self._logger.info(
+                "Exchange distributor service started",
+                exchanges=self.supported_exchanges,
+                total_exchanges=len(self.supported_exchanges),
             )
-            self.exchange_allocations[exchange_name] = allocation
+        except Exception as e:
+            self._logger.error(f"Failed to start ExchangeDistributor service: {e}")
+            raise ServiceError(f"ExchangeDistributor startup failed: {e}") from e
+
+    async def _load_configuration(self) -> None:
+        """Load configuration from ConfigService."""
+        try:
+            config_service = self.resolve_dependency("ConfigService")
+            self.capital_config = config_service.get_config_value("capital_management", {})
+        except Exception as e:
+            self._logger.warning(f"Failed to load configuration: {e}, using defaults")
+            # Use defaults
+            self.capital_config = {
+                "exchange_allocation_weights": "dynamic",
+                "max_allocation_pct": 0.3,
+                "min_deposit_amount": 1000,
+                "max_daily_reallocation_pct": 0.1,
+            }
 
     @time_execution
     async def distribute_capital(self, total_amount: Decimal) -> dict[str, ExchangeAllocation]:
@@ -149,13 +150,14 @@ class ExchangeDistributor(BaseComponent):
             # Calculate exchange scores
             await self._update_exchange_metrics()
 
-            # Determine distribution strategy
-            distribution_mode = self.capital_config.exchange_allocation_weights
+            # Determine distribution strategy - use dynamic mode by default
+            # Can be overridden with hardcoded weights if needed
+            exchange_weights = self.capital_config.get("exchange_allocation_weights", "dynamic")
 
-            if distribution_mode == "dynamic":
+            if exchange_weights == "dynamic":
                 allocations = await self._dynamic_distribution(total_amount)
             else:
-                allocations = await self._weighted_distribution(total_amount, distribution_mode)
+                allocations = await self._weighted_distribution(total_amount, exchange_weights)
 
             # Apply minimum balance requirements
             allocations = await self._apply_minimum_balances(allocations)
@@ -164,7 +166,7 @@ class ExchangeDistributor(BaseComponent):
             self.exchange_allocations.update(allocations)
             self.last_rebalance = datetime.now(timezone.utc)
 
-            self.logger.info(
+            self._logger.info(
                 "Capital distributed across exchanges",
                 total_amount=format_currency(float(total_amount)),
                 allocations_count=len(allocations),
@@ -173,12 +175,12 @@ class ExchangeDistributor(BaseComponent):
             return allocations
 
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Capital distribution failed",
                 total_amount=format_currency(float(total_amount)),
                 error=str(e),
             )
-            raise
+            raise ServiceError(f"Capital distribution failed: {e}") from e
 
     @time_execution
     async def rebalance_exchanges(self) -> dict[str, ExchangeAllocation]:
@@ -189,7 +191,7 @@ class ExchangeDistributor(BaseComponent):
             Dict[str, ExchangeAllocation]: Updated allocations
         """
         try:
-            self.logger.info("Starting exchange rebalancing")
+            self._logger.info("Starting exchange rebalancing")
 
             # Update exchange metrics
             await self._update_exchange_metrics()
@@ -209,15 +211,15 @@ class ExchangeDistributor(BaseComponent):
             self.exchange_allocations.update(final_allocations)
             self.last_rebalance = datetime.now(timezone.utc)
 
-            self.logger.info(
+            self._logger.info(
                 "Exchange rebalancing completed", allocations_count=len(final_allocations)
             )
 
             return final_allocations
 
         except Exception as e:
-            self.logger.error("Exchange rebalancing failed", error=str(e))
-            raise
+            self._logger.error("Exchange rebalancing failed", error=str(e))
+            raise ServiceError(f"Exchange rebalancing failed: {e}") from e
 
     @time_execution
     async def get_exchange_allocation(self, exchange: str) -> ExchangeAllocation | None:
@@ -253,7 +255,7 @@ class ExchangeDistributor(BaseComponent):
                         utilized_amount / allocation.allocated_amount
                     )
 
-                self.logger.debug(
+                self._logger.debug(
                     "Exchange utilization updated",
                     exchange=exchange,
                     utilized=format_currency(float(utilized_amount)),
@@ -262,7 +264,9 @@ class ExchangeDistributor(BaseComponent):
                 )
 
         except Exception as e:
-            self.logger.error("Exchange utilization update failed", exchange=exchange, error=str(e))
+            self._logger.error(
+                "Exchange utilization update failed", exchange=exchange, error=str(e)
+            )
 
     @time_execution
     async def calculate_optimal_distribution(self, total_capital: Decimal) -> dict[str, Decimal]:
@@ -283,7 +287,7 @@ class ExchangeDistributor(BaseComponent):
             composite_scores = {}
             total_score = 0
 
-            for exchange in self.exchanges.keys():
+            for exchange in self.supported_exchanges:
                 liquidity = self.liquidity_scores.get(exchange, 0.5)
                 fee_efficiency = self.fee_efficiencies.get(exchange, 0.5)
                 reliability = self.reliability_scores.get(exchange, 0.5)
@@ -303,7 +307,7 @@ class ExchangeDistributor(BaseComponent):
                     allocation_pct = 1.0 / len(composite_scores)
 
                 # Apply maximum allocation limit
-                max_allocation_pct = self.capital_config.max_exchange_allocation_pct
+                max_allocation_pct = self.capital_config.get("max_allocation_pct", 0.3)
                 allocation_pct = min(allocation_pct, max_allocation_pct)
 
                 distribution[exchange] = total_capital * Decimal(str(allocation_pct))
@@ -311,8 +315,8 @@ class ExchangeDistributor(BaseComponent):
             return distribution
 
         except Exception as e:
-            self.logger.error("Optimal distribution calculation failed", error=str(e))
-            raise
+            self._logger.error("Optimal distribution calculation failed", error=str(e))
+            raise ServiceError(f"Optimal distribution calculation failed: {e}") from e
 
     async def _initialize_exchange_allocations(self) -> None:
         """Initialize exchange allocations with default values."""
@@ -352,31 +356,35 @@ class ExchangeDistributor(BaseComponent):
                 await self._update_slippage_data(exchange_name)
 
         except Exception as e:
-            self.logger.error("Failed to update exchange metrics", error=str(e))
+            self._logger.error("Failed to update exchange metrics", error=str(e))
 
-    async def _calculate_liquidity_score(self, exchange: BaseExchange) -> float:
+    async def _calculate_liquidity_score(self, exchange_name: str) -> float:
         """
         Calculate liquidity score for an exchange.
 
         Args:
-            exchange: Exchange instance
+            exchange_name: Exchange name
 
         Returns:
             float: Liquidity score (0-1)
         """
         try:
-            exchange_name = exchange.__class__.__name__.lower()
-
-            # Try to calculate based on real market data if available
-            if hasattr(exchange, "fetch_order_book"):
+            # Try to calculate based on real market data if available via service
+            if self._exchange_info_service:
                 try:
                     # Sample a few major pairs to assess liquidity
                     major_pairs = ["BTC/USDT", "ETH/USDT"]
                     depth_scores = []
 
                     for pair in major_pairs:
-                        if hasattr(exchange, "markets") and pair in exchange.markets:
-                            orderbook = await exchange.fetch_order_book(pair, limit=50)
+                        try:
+                            if hasattr(self._exchange_info_service, "get_order_book"):
+                                orderbook = await self._exchange_info_service.get_order_book(
+                                    exchange_name, pair, limit=50
+                                )
+                            else:
+                                # Skip if service doesn't support order book data
+                                continue
 
                             # Calculate liquidity based on order book depth
                             bid_volume = sum(
@@ -394,12 +402,16 @@ class ExchangeDistributor(BaseComponent):
                                 float((bid_volume + ask_volume) / Decimal("2000000")), 1.0
                             )
                             depth_scores.append(depth_score)
+                        except Exception as pair_error:
+                            self._logger.debug(
+                                f"Could not fetch {pair} data for {exchange_name}: {pair_error}"
+                            )
 
                     if depth_scores:
                         return sum(depth_scores) / len(depth_scores)
 
                 except Exception as e:
-                    self.logger.debug(
+                    self._logger.debug(
                         f"Could not fetch real liquidity data for {exchange_name}: {e}"
                     )
 
@@ -413,26 +425,25 @@ class ExchangeDistributor(BaseComponent):
             return fallback_scores.get(exchange_name, 0.5)
 
         except Exception as e:
-            self.logger.error(f"Failed to calculate liquidity score for {exchange}", error=str(e))
+            self._logger.error(f"Failed to calculate liquidity score for {exchange}", error=str(e))
             return 0.5  # Default score
 
-    async def _calculate_fee_efficiency(self, exchange: BaseExchange) -> float:
+    async def _calculate_fee_efficiency(self, exchange_name: str) -> float:
         """
         Calculate fee efficiency score for an exchange.
 
         Args:
-            exchange: Exchange instance
+            exchange_name: Exchange name
 
         Returns:
             float: Fee efficiency score (0-1)
         """
         try:
-            exchange_name = exchange.__class__.__name__.lower()
-
-            # Try to get real fee structure if available
-            if hasattr(exchange, "fees"):
+            # Try to get real fee structure if available via service
+            if self._exchange_info_service and hasattr(self._exchange_info_service, "get_fees"):
                 try:
-                    trading_fees = exchange.fees.get("trading", {})
+                    fees_data = await self._exchange_info_service.get_fees(exchange_name)
+                    trading_fees = fees_data.get("trading", {})
 
                     # Get taker fee (usually higher than maker)
                     taker_fee = trading_fees.get("taker", 0.001)  # Default 0.1%
@@ -444,7 +455,7 @@ class ExchangeDistributor(BaseComponent):
                     return fee_efficiency
 
                 except Exception as e:
-                    self.logger.debug(f"Could not fetch real fee data for {exchange_name}: {e}")
+                    self._logger.debug(f"Could not fetch real fee data for {exchange_name}: {e}")
 
             # Fallback to known exchange fee structures
             fallback_efficiencies = {
@@ -456,44 +467,50 @@ class ExchangeDistributor(BaseComponent):
             return fallback_efficiencies.get(exchange_name, 0.5)
 
         except Exception as e:
-            self.logger.error(f"Failed to calculate fee efficiency for {exchange}", error=str(e))
+            self._logger.error(f"Failed to calculate fee efficiency for {exchange}", error=str(e))
             return 0.5  # Default score
 
-    async def _calculate_reliability_score(self, exchange: BaseExchange) -> float:
+    async def _calculate_reliability_score(self, exchange_name: str) -> float:
         """
         Calculate reliability score for an exchange.
 
         Args:
-            exchange: Exchange instance
+            exchange_name: Exchange name
 
         Returns:
             float: Reliability score (0-1)
         """
         try:
-            exchange_name = exchange.__class__.__name__.lower()
-
             # Start with base score
             reliability_score = 0.5
 
-            # Check exchange health/status if available
-            if hasattr(exchange, "fetch_status"):
+            # Check exchange health/status if available via service
+            if self._exchange_info_service and hasattr(self._exchange_info_service, "get_status"):
                 try:
-                    status = await exchange.fetch_status()
+                    status = await self._exchange_info_service.get_status(exchange_name)
                     if status.get("status") == "ok":
                         reliability_score += 0.2
                 except (ExchangeConnectionError, NetworkError) as e:
-                    self.logger.debug(f"Exchange {exchange_name} status check failed: {e}")
+                    self._logger.debug(f"Exchange {exchange_name} status check failed: {e}")
                     reliability_score -= 0.1  # Penalize for connectivity issues
                 except Exception as e:
-                    self.logger.debug(
+                    self._logger.debug(
                         f"Unexpected error checking exchange {exchange_name} status: {e}"
                     )
                     # Don't penalize for unexpected errors, just skip status bonus
 
-            # Check if exchange has required methods
-            required_methods = ["fetch_ticker", "fetch_order_book", "create_order", "cancel_order"]
-            available_methods = sum(1 for method in required_methods if hasattr(exchange, method))
-            reliability_score += (available_methods / len(required_methods)) * 0.3
+            # Service availability scoring (if service supports various operations)
+            if self._exchange_info_service:
+                service_score = 0.0
+                if hasattr(self._exchange_info_service, "get_ticker"):
+                    service_score += 0.075
+                if hasattr(self._exchange_info_service, "get_order_book"):
+                    service_score += 0.075
+                if hasattr(self._exchange_info_service, "create_order"):
+                    service_score += 0.075
+                if hasattr(self._exchange_info_service, "cancel_order"):
+                    service_score += 0.075
+                reliability_score += service_score
 
             # Fallback adjustments for known exchanges
             known_adjustments = {
@@ -508,7 +525,9 @@ class ExchangeDistributor(BaseComponent):
             return min(reliability_score, 1.0)
 
         except Exception as e:
-            self.logger.error(f"Failed to calculate reliability score for {exchange}", error=str(e))
+            self._logger.error(
+                f"Failed to calculate reliability score for {exchange}", error=str(e)
+            )
             return 0.5  # Default score
 
     async def _update_slippage_data(self, exchange_name: str) -> None:
@@ -545,7 +564,7 @@ class ExchangeDistributor(BaseComponent):
                 ]
 
         except Exception as e:
-            self.logger.error(f"Failed to update slippage data for {exchange_name}", error=str(e))
+            self._logger.error(f"Failed to update slippage data for {exchange_name}", error=str(e))
 
     async def _dynamic_distribution(self, total_amount: Decimal) -> dict[str, ExchangeAllocation]:
         """Dynamic distribution based on real-time metrics."""
@@ -576,7 +595,7 @@ class ExchangeDistributor(BaseComponent):
         allocations = {}
 
         for exchange, weight in weights.items():
-            if exchange in self.exchanges:
+            if exchange in self.supported_exchanges:
                 amount = total_amount * Decimal(str(weight))
                 allocation = ExchangeAllocation(
                     exchange=exchange,
@@ -596,14 +615,14 @@ class ExchangeDistributor(BaseComponent):
         self, allocations: dict[str, ExchangeAllocation]
     ) -> dict[str, ExchangeAllocation]:
         """Apply minimum balance requirements."""
-        min_balance = Decimal(str(self.capital_config.min_exchange_balance))
+        min_balance = Decimal(str(self.capital_config.get("min_deposit_amount", 1000)))
 
         for exchange, allocation in allocations.items():
             if allocation.allocated_amount < min_balance:
                 allocation.allocated_amount = min_balance
                 allocation.available_amount = min_balance
 
-                self.logger.warning(
+                self._logger.warning(
                     "Applied minimum balance requirement",
                     exchange=exchange,
                     min_balance=format_currency(float(min_balance)),
@@ -639,8 +658,10 @@ class ExchangeDistributor(BaseComponent):
         self, new_allocations: dict[str, ExchangeAllocation]
     ) -> dict[str, ExchangeAllocation]:
         """Apply rebalancing limits to prevent excessive changes."""
-        max_daily_change = self.total_capital * Decimal(
-            str(self.capital_config.max_daily_reallocation_pct)
+        # Calculate total from new allocations being rebalanced
+        total_being_rebalanced = sum(alloc.allocated_amount for alloc in new_allocations.values())
+        max_daily_change = total_being_rebalanced * Decimal(
+            str(self.capital_config.get("max_daily_reallocation_pct", 0.1))
         )
 
         for exchange, allocation in new_allocations.items():
@@ -663,7 +684,7 @@ class ExchangeDistributor(BaseComponent):
 
                     allocation.available_amount = allocation.allocated_amount
 
-                    self.logger.warning(
+                    self._logger.warning(
                         "Exchange allocation change limited",
                         exchange=exchange,
                         original_change=format_currency(float(change_amount)),
@@ -681,7 +702,7 @@ class ExchangeDistributor(BaseComponent):
         """Get current metrics for all exchanges."""
         metrics = {}
 
-        for exchange_name in self.exchanges.keys():
+        for exchange_name in self.supported_exchanges:
             metrics[exchange_name] = {
                 "liquidity_score": self.liquidity_scores.get(exchange_name, 0.5),
                 "fee_efficiency": self.fee_efficiencies.get(exchange_name, 0.5),

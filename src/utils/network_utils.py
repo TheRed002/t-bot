@@ -23,7 +23,6 @@ async def test_connection(host: str, port: int, timeout: float = 5.0) -> bool:
     Returns:
         True if connection successful, False otherwise
     """
-    reader = None
     writer = None
     try:
         # Create connection task
@@ -45,11 +44,12 @@ async def test_connection(host: str, port: int, timeout: float = 5.0) -> bool:
         return False
     finally:
         if writer:
-            writer.close()
             try:
+                writer.close()
                 await writer.wait_closed()
-            except Exception:
-                # Ignore errors during cleanup
+            except (OSError, asyncio.TimeoutError, ConnectionResetError) as e:
+                # Ignore expected errors during cleanup
+                logger.debug(f"Error during writer cleanup in test_connection: {e}")
                 pass
 
 
@@ -68,7 +68,6 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
     Raises:
         ValidationError: If connection fails
     """
-    reader = None
     writer = None
     try:
         loop = asyncio.get_running_loop()
@@ -99,11 +98,12 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
         raise ValidationError(f"Cannot measure latency to {host}:{port}: {e!s}") from e
     finally:
         if writer:
-            writer.close()
             try:
+                writer.close()
                 await writer.wait_closed()
-            except Exception:
-                # Ignore errors during cleanup
+            except (OSError, asyncio.TimeoutError, ConnectionResetError) as e:
+                # Ignore expected errors during cleanup
+                logger.debug(f"Error during writer cleanup in measure_latency: {e}")
                 pass
 
 
@@ -161,18 +161,36 @@ async def check_multiple_hosts(
     Returns:
         Dictionary mapping host:port to connectivity status
     """
-    tasks = []
-    for host, port in hosts:
-        task = test_connection(host, port, timeout)
-        tasks.append((f"{host}:{port}", task))
+    if not hosts:
+        return {}
 
+    # Create tasks for parallel execution
+    tasks = []
+    host_port_mapping = []
+    
+    for host, port in hosts:
+        host_port = f"{host}:{port}"
+        task = test_connection(host, port, timeout)
+        tasks.append(task)
+        host_port_mapping.append(host_port)
+
+    # Execute all tasks concurrently using asyncio.gather
+    try:
+        results_list = await asyncio.gather(*tasks, return_exceptions=True)
+    except Exception as e:
+        logger.error(f"Unexpected error in check_multiple_hosts: {e}")
+        # Return all False if gather fails unexpectedly
+        return {host_port: False for host_port in host_port_mapping}
+
+    # Process results
     results = {}
-    for host_port, task in tasks:
-        try:
-            results[host_port] = await task
-        except Exception as e:
-            logger.warning(f"Failed to check {host_port}: {e}")
+    for i, result in enumerate(results_list):
+        host_port = host_port_mapping[i]
+        if isinstance(result, Exception):
+            logger.warning(f"Failed to check {host_port}: {result}")
             results[host_port] = False
+        else:
+            results[host_port] = result
 
     return results
 

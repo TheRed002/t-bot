@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
 
@@ -629,7 +629,7 @@ class DataIngestionPipeline(BaseComponent):
             self.logger.error(f"Historical market data ingestion failed: {e!s}")
             raise
 
-    def _handle_market_data(self, ticker: Ticker, symbol: str) -> None:
+    async def _handle_market_data(self, ticker: Ticker, symbol: str) -> None:
         """Handle incoming market data from real-time streams."""
         try:
             # Convert ticker to MarketData format mapping to core Ticker fields
@@ -646,13 +646,16 @@ class DataIngestionPipeline(BaseComponent):
             )
 
             # Add to buffer
-            self._add_to_buffer("market_data", market_data)
+            await self._add_to_buffer_async("market_data", market_data)
             self.metrics.successful_ingestions += 1
 
-            # Call registered callbacks
+            # Call registered callbacks asynchronously
             for callback in self.data_callbacks["market_data"]:
                 try:
-                    callback(market_data)
+                    if asyncio.iscoroutinefunction(callback):
+                        await callback(market_data)
+                    else:
+                        callback(market_data)
                 except Exception as e:
                     # Use ErrorHandler for callback errors
                     error_context = self.error_handler.create_error_context(
@@ -663,9 +666,7 @@ class DataIngestionPipeline(BaseComponent):
                         details={"data_type": "market_data", "callback_type": "market_data"},
                     )
 
-                    # Note: handle_error is async but this function is sync
-                    # TODO: Consider making this function async or using asyncio.create_task()
-                    # self.error_handler.handle_error(e, error_context)
+                    await self.error_handler.handle_error(e, error_context)
                     self.pattern_analytics.add_error_event(error_context.__dict__)
 
                     self.logger.warning(f"Market data callback failed: {e!s}")
@@ -680,9 +681,7 @@ class DataIngestionPipeline(BaseComponent):
                 details={"data_type": "market_data", "stage": "data_handling"},
             )
 
-            # Note: handle_error is async but this function is sync
-            # TODO: Consider making this function async or using asyncio.create_task()
-            # self.error_handler.handle_error(e, error_context)
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Failed to handle market data for {symbol}: {e!s}")
@@ -723,6 +722,43 @@ class DataIngestionPipeline(BaseComponent):
             # Note: handle_error is async but this function is sync
             # TODO: Consider making this function async or using asyncio.create_task()
             # self.error_handler.handle_error(e, error_context)
+            self.pattern_analytics.add_error_event(error_context.__dict__)
+
+            self.logger.error(f"Failed to add data to buffer {source}: {e!s}")
+
+    async def _add_to_buffer_async(self, source: str, data: Any) -> None:
+        """Add data to the appropriate buffer asynchronously."""
+        try:
+            if source not in self.data_buffers:
+                self.data_buffers[source] = []
+
+            self.data_buffers[source].append(
+                {
+                    "data": data,
+                    "timestamp": datetime.now(timezone.utc),
+                    "source": source,
+                    "type": source,
+                }
+            )
+
+            # Maintain buffer size
+            if len(self.data_buffers[source]) > self.ingestion_config.buffer_size:
+                self.data_buffers[source].pop(0)
+
+        except Exception as e:
+            # Use ErrorHandler for buffer operation errors
+            error_context = self.error_handler.create_error_context(
+                error=e,
+                component="DataIngestionPipeline",
+                operation="add_to_buffer_async",
+                details={
+                    "source": source,
+                    "buffer_size": len(self.data_buffers.get(source, [])),
+                    "max_buffer_size": self.ingestion_config.buffer_size,
+                },
+            )
+
+            await self.error_handler.handle_error(e, error_context)
             self.pattern_analytics.add_error_event(error_context.__dict__)
 
             self.logger.error(f"Failed to add data to buffer {source}: {e!s}")

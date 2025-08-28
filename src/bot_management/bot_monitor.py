@@ -159,8 +159,7 @@ class BotMonitor(BaseService):
         self.bot_health_status: dict[str, dict[str, Any]] = {}
         self.performance_baselines: dict[str, dict[str, float]] = {}
 
-        # Monitor state
-        self.is_running = False
+        # Monitor state (is_running is handled by BaseComponent)
         self.monitoring_task = None
         self.health_check_task = None
         self.metrics_collection_task = None
@@ -246,7 +245,7 @@ class BotMonitor(BaseService):
         self.health_check_task = asyncio.create_task(self._health_check_loop())
         self.metrics_collection_task = asyncio.create_task(self._metrics_collection_loop())
 
-        self.is_running = True
+        # is_running is managed by BaseComponent
 
         self._logger.info(
             "Bot monitor started successfully with service dependencies",
@@ -266,7 +265,7 @@ class BotMonitor(BaseService):
             return
 
         self._logger.info("Stopping bot monitor")
-        self.is_running = False
+        # is_running is managed by BaseComponent
 
         # Stop monitoring tasks
         tasks = [self.monitoring_task, self.health_check_task, self.metrics_collection_task]
@@ -433,7 +432,7 @@ class BotMonitor(BaseService):
         # Record health check in monitoring system with error handling
         if self._metrics_collector:
             try:
-                self._metrics_collector.increment(
+                await self._metrics_collector.increment(
                     "bot_health_checks_total", labels={"bot_id": bot_id}
                 )
             except Exception as e:
@@ -860,6 +859,7 @@ class BotMonitor(BaseService):
     @with_error_context(component="BotMonitor", operation="store_metrics")
     async def _store_metrics(self, bot_id: str, metrics: BotMetrics) -> None:
         """Store metrics using database service - NO MORE DIRECT INFLUXDB ACCESS."""
+        db_connection = None
         try:
             if not self._database_service:
                 self._logger.warning("DatabaseService not available for metrics storage")
@@ -899,6 +899,14 @@ class BotMonitor(BaseService):
                 context={"operation": "store_metrics", "bot_id": bot_id},
                 severity=ErrorSeverity.MEDIUM.value,
             )
+        finally:
+            if db_connection:
+                try:
+                    await db_connection.close()
+                except Exception as e:
+                    self.logger.debug(
+                        f"Failed to close database connection during store_metrics: {e}"
+                    )
 
     async def _check_performance_anomalies(self, bot_id: str, metrics: BotMetrics) -> None:
         """Check for performance anomalies against baseline."""
@@ -1277,6 +1285,7 @@ class BotMonitor(BaseService):
     @with_error_context(component="BotMonitor", operation="collect_system_metrics")
     async def _collect_system_metrics(self) -> None:
         """Collect system-wide metrics using database service - NO MORE DIRECT INFLUXDB ACCESS."""
+        db_connection = None
         try:
             if not self._database_service:
                 self._logger.warning("DatabaseService not available for system metrics collection")
@@ -1348,6 +1357,14 @@ class BotMonitor(BaseService):
                 context={"operation": "collect_system_metrics"},
                 severity=ErrorSeverity.MEDIUM.value,
             )
+        finally:
+            if db_connection:
+                try:
+                    await db_connection.close()
+                except Exception as e:
+                    self.logger.debug(
+                        f"Failed to close database connection during collect_system_metrics: {e}"
+                    )
 
     async def _update_all_baselines(self) -> None:
         """Update performance baselines for all bots."""

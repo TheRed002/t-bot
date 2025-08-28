@@ -20,6 +20,9 @@ from binance.exceptions import BinanceAPIException, BinanceOrderException
 from src.core.config import Config
 from src.core.exceptions import ExchangeError, ExecutionError, OrderRejectionError, ValidationError
 
+# Logger setup
+from src.core.logging import get_logger
+
 # Logger is provided by BaseExchange (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
@@ -37,9 +40,6 @@ from src.utils import (
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.validators import ValidationFramework
-
-# Logger setup
-from src.core.logging import get_logger
 
 
 class BinanceOrderManager:
@@ -69,7 +69,7 @@ class BinanceOrderManager:
         self.config = config
         self.client = client
         self.exchange_name = exchange_name
-        
+
         # Initialize logger
         self.logger = get_logger(self.__class__.__module__)
 

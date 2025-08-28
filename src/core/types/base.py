@@ -502,7 +502,9 @@ class FinancialBaseModel(BaseValidatedModel):
         for _field_name, field_value in self.model_dump().items():
             if isinstance(field_value, Decimal):
                 # Check precision requirements
-                if field_value.as_tuple().exponent < -12:  # More than 12 decimal places
+                tuple_data = field_value.as_tuple()
+                exponent = tuple_data.exponent
+                if isinstance(exponent, int) and exponent < -12:  # More than 12 decimal places
                     return False
         return True
 

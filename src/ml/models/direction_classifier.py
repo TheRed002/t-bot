@@ -11,20 +11,26 @@ import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
 
-from src.core.config import Config
 from src.core.exceptions import ValidationError
-from src.ml.models.base_model import BaseModel
+from src.ml.models.base_model import BaseMLModel
 from src.utils.decorators import UnifiedDecorator
 
 # Initialize decorator instance
 dec = UnifiedDecorator()
 
 
-class DirectionClassifier(BaseModel):
+class DirectionClassifier(BaseMLModel):
     """
     Direction classification model for predicting price movement direction.
 
@@ -45,10 +51,13 @@ class DirectionClassifier(BaseModel):
 
     def __init__(
         self,
-        config: Config,
+        config: dict[str, Any] | None = None,
+        model_name: str = "direction_classifier",
+        version: str = "1.0.0",
         algorithm: str = "random_forest",
         direction_threshold: float = 0.01,
         prediction_horizon: int = 1,
+        correlation_id: str | None = None,
     ):
         """
         Initialize the direction classifier.
@@ -59,12 +68,7 @@ class DirectionClassifier(BaseModel):
             direction_threshold: Threshold for direction classification (e.g., 0.01 = 1%)
             prediction_horizon: Number of periods ahead to predict
         """
-        super().__init__(
-            config=config,
-            model_name="direction_classifier",
-            model_type="classification",
-            version="1.0.0",
-        )
+        super().__init__(model_name, version, config, correlation_id)
 
         self.algorithm = algorithm
         self.direction_threshold = direction_threshold
@@ -75,8 +79,9 @@ class DirectionClassifier(BaseModel):
         self.num_classes = len(self.class_names)
 
         # Model-specific parameters
-        self.class_weights = config.ml.class_weights or "balanced"
-        self.random_state = config.ml.random_state
+        ml_config = config.get("ml", {}) if config else {}
+        self.class_weights = ml_config.get("class_weights", "balanced")
+        self.random_state = ml_config.get("random_state", 42)
 
         # Initialize the underlying model
         self.model = self._create_model()
@@ -85,13 +90,40 @@ class DirectionClassifier(BaseModel):
         self.feature_importance_ = None
         self.class_distribution_ = None
 
-        self.logger.info(
+        self._logger.info(
             "Direction classifier initialized",
             algorithm=self.algorithm,
             direction_threshold=self.direction_threshold,
             prediction_horizon=self.prediction_horizon,
             model_name=self.model_name,
         )
+
+    def _get_model_type(self) -> str:
+        """Return the model type identifier."""
+        return "direction_classifier"
+
+    def _validate_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Validate and preprocess features for the model."""
+        # Basic validation - ensure numeric data
+        X_clean = X.copy()
+        X_clean = X_clean.replace([np.inf, -np.inf], 0)
+        X_clean = X_clean.fillna(0)
+        return X_clean
+
+    def _validate_targets(self, y: pd.Series) -> pd.Series:
+        """Validate and preprocess targets for the model."""
+        return y.fillna(0)
+
+    def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+        """Calculate model-specific performance metrics."""
+        return {
+            "accuracy": float(accuracy_score(y_true, y_pred)),
+            "precision": float(
+                precision_score(y_true, y_pred, average="weighted", zero_division=0)
+            ),
+            "recall": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
+            "f1_score": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
+        }
 
     def _create_model(self) -> Any:
         """Create the underlying classification model."""
@@ -142,7 +174,7 @@ class DirectionClassifier(BaseModel):
                 raise ValidationError(f"Unknown algorithm: {self.algorithm}")
 
         except Exception as e:
-            self.logger.error(f"Failed to create model: {e}")
+            self._logger.error(f"Failed to create model: {e}")
             raise ValidationError(f"Model creation failed: {e}")
 
     @dec.enhance(log=True, monitor=True, log_level="info")
@@ -174,7 +206,7 @@ class DirectionClassifier(BaseModel):
             class_counts = pd.Series(y_direction).value_counts()
             self.class_distribution_ = class_counts.to_dict()
 
-            self.logger.info(
+            self._logger.info(
                 "Class distribution",
                 class_counts=self.class_distribution_,
                 model_name=self.model_name,
@@ -216,7 +248,7 @@ class DirectionClassifier(BaseModel):
 
             self.is_trained = True
 
-            self.logger.info(
+            self._logger.info(
                 "Direction classifier training completed",
                 training_accuracy=training_accuracy,
                 algorithm=self.algorithm,
@@ -226,7 +258,7 @@ class DirectionClassifier(BaseModel):
             return metrics
 
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Direction classifier training failed", algorithm=self.algorithm, error=str(e)
             )
             raise ValidationError(f"Training failed: {e}")
@@ -254,7 +286,7 @@ class DirectionClassifier(BaseModel):
 
             predictions = self.model.predict(X)
 
-            self.logger.debug(
+            self._logger.debug(
                 "Direction predictions made",
                 prediction_count=len(predictions),
                 model_name=self.model_name,
@@ -263,7 +295,7 @@ class DirectionClassifier(BaseModel):
             return predictions
 
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Direction prediction failed", error=str(e), model_name=self.model_name
             )
             raise ValidationError(f"Prediction failed: {e}")
@@ -291,7 +323,7 @@ class DirectionClassifier(BaseModel):
 
             probabilities = self.model.predict_proba(X)
 
-            self.logger.debug(
+            self._logger.debug(
                 "Direction probabilities predicted",
                 prediction_count=len(probabilities),
                 model_name=self.model_name,
@@ -300,7 +332,7 @@ class DirectionClassifier(BaseModel):
             return probabilities
 
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Direction probability prediction failed", error=str(e), model_name=self.model_name
             )
             raise ValidationError(f"Probability prediction failed: {e}")
@@ -332,7 +364,7 @@ class DirectionClassifier(BaseModel):
 
             # Make predictions
             y_pred = self.predict(X)
-            self.predict_proba(X)
+            y_proba = self.predict_proba(X)
 
             # Calculate metrics
             accuracy = accuracy_score(y_true, y_pred)
@@ -367,7 +399,7 @@ class DirectionClassifier(BaseModel):
                 "test_samples": len(X),
             }
 
-            self.logger.info(
+            self._logger.info(
                 "Direction classifier evaluation completed",
                 test_accuracy=accuracy,
                 directional_accuracy=directional_accuracy,
@@ -377,7 +409,7 @@ class DirectionClassifier(BaseModel):
             return metrics
 
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Direction classifier evaluation failed", error=str(e), model_name=self.model_name
             )
             raise ValidationError(f"Evaluation failed: {e}")
@@ -414,7 +446,7 @@ class DirectionClassifier(BaseModel):
             return direction_classes[valid_mask].astype(int)
 
         except Exception as e:
-            self.logger.error(f"Failed to convert to direction classes: {e}")
+            self._logger.error(f"Failed to convert to direction classes: {e}")
             raise ValidationError(f"Direction class conversion failed: {e}")
 
     def _calculate_directional_accuracy(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -432,7 +464,7 @@ class DirectionClassifier(BaseModel):
             return directional_correct / directional_total
 
         except Exception as e:
-            self.logger.error(f"Failed to calculate directional accuracy: {e}")
+            self._logger.error(f"Failed to calculate directional accuracy: {e}")
             return 0.0
 
     def get_feature_importance(self) -> pd.Series | None:
@@ -443,7 +475,7 @@ class DirectionClassifier(BaseModel):
             Series with feature importance scores or None if not available
         """
         if not self.is_trained:
-            self.logger.warning("Model not trained, no feature importance available")
+            self._logger.warning("Model not trained, no feature importance available")
             return None
 
         return self.feature_importance_
@@ -456,7 +488,7 @@ class DirectionClassifier(BaseModel):
             Dictionary with class distribution or None if not trained
         """
         if not self.is_trained:
-            self.logger.warning("Model not trained, no class distribution available")
+            self._logger.warning("Model not trained, no class distribution available")
             return None
 
         return self.class_distribution_
@@ -476,7 +508,7 @@ class DirectionClassifier(BaseModel):
             return [self.class_names[pred] for pred in predictions]
 
         except Exception as e:
-            self.logger.error(f"Direction label prediction failed: {e}")
+            self._logger.error(f"Direction label prediction failed: {e}")
             raise ValidationError(f"Direction label prediction failed: {e}")
 
     def get_prediction_confidence(self, X: pd.DataFrame) -> np.ndarray:
@@ -494,5 +526,5 @@ class DirectionClassifier(BaseModel):
             return np.max(probabilities, axis=1)
 
         except Exception as e:
-            self.logger.error(f"Confidence calculation failed: {e}")
+            self._logger.error(f"Confidence calculation failed: {e}")
             raise ValidationError(f"Confidence calculation failed: {e}")

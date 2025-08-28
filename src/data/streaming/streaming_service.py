@@ -28,8 +28,9 @@ import websockets
 from pydantic import BaseModel, ConfigDict, Field
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
+from src.core.exceptions import NetworkError, ValidationError, ConfigurationError
 from src.core.types import MarketData
 from src.data.services.data_service import DataService
 from src.data.validation.data_validator import DataValidator
@@ -195,6 +196,7 @@ class WebSocketConnection:
         SECURITY NOTE: API keys should be provided via environment variables
         or secure vault, not hardcoded in configuration.
         """
+        websocket = None
         try:
             self.state = StreamState.CONNECTING
 
@@ -211,7 +213,7 @@ class WebSocketConnection:
                     headers["Authorization"] = f"Bearer {api_key}"
 
             # Connect to WebSocket
-            self.websocket = await websockets.connect(
+            websocket = await websockets.connect(
                 self.config.websocket_url,
                 extra_headers=headers,
                 timeout=self.config.connection_timeout,
@@ -219,6 +221,7 @@ class WebSocketConnection:
                 ping_timeout=self.config.heartbeat_interval * 2,
             )
 
+            self.websocket = websocket
             self.state = StreamState.CONNECTED
             self.connection_start_time = datetime.now(timezone.utc)
 
@@ -229,7 +232,12 @@ class WebSocketConnection:
 
         except Exception as e:
             self.state = StreamState.ERROR
-            raise ConnectionError(f"WebSocket connection failed: {e}")
+            if websocket:
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+            raise NetworkError(f"WebSocket connection failed: {e}")
 
     async def _send_subscription(self) -> None:
         """Send subscription message for symbols and data types."""
@@ -251,7 +259,7 @@ class WebSocketConnection:
     async def listen(self) -> AsyncGenerator[dict[str, Any], None]:
         """Listen for messages from WebSocket."""
         if not self.websocket:
-            raise RuntimeError("WebSocket not connected")
+            raise NetworkError("WebSocket not connected")
 
         try:
             async for message in self.websocket:
@@ -278,10 +286,21 @@ class WebSocketConnection:
 
     async def disconnect(self) -> None:
         """Disconnect from WebSocket."""
-        if self.websocket:
-            await self.websocket.close()
-            self.websocket = None
-        self.state = StreamState.DISCONNECTED
+        websocket = None
+        try:
+            if self.websocket:
+                websocket = self.websocket
+                self.websocket = None
+                await websocket.close()
+        except Exception as e:
+            self.logger.warning(f"Failed to close WebSocket during cleanup: {e}")
+        finally:
+            if websocket and not websocket.closed:
+                try:
+                    await websocket.close()
+                except Exception as e:
+                    self.logger.warning(f"Failed to close WebSocket in finally block: {e}")
+            self.state = StreamState.DISCONNECTED
 
     def is_connected(self) -> bool:
         """Check if WebSocket is connected."""
@@ -405,7 +424,7 @@ class StreamingDataService(BaseComponent):
         """Start streaming for an exchange."""
         try:
             if exchange not in self._stream_configs:
-                raise ValueError(f"No configuration for exchange: {exchange}")
+                raise ConfigurationError(f"No configuration for exchange: {exchange}")
 
             config = self._stream_configs[exchange]
 
@@ -520,57 +539,102 @@ class StreamingDataService(BaseComponent):
                 await asyncio.sleep(1)
 
     async def _process_message_batch(self, exchange: str, messages: list[dict[str, Any]]) -> None:
-        """Process batch of messages."""
+        """Process batch of messages using consistent data flow patterns."""
         config = self._stream_configs[exchange]
         handler = self._message_handlers.get(exchange, self._message_handlers["default"])
 
-        # Convert messages to MarketData objects
+        # Use consistent transformation patterns from pipeline
+        from src.data.pipeline.data_pipeline import DataTransformation
+
+        # Convert messages to MarketData objects with consistent error handling
         market_data_list = []
+        processing_errors = []
 
         for message in messages:
             try:
                 market_data = await handler(message, exchange)
                 if market_data:
-                    # Deduplication check
+                    # Apply consistent normalization using pipeline patterns
+                    normalized_data = await DataTransformation.normalize_prices(market_data)
+
+                    # Deduplication check with consistent pattern
                     if config.enable_deduplication:
-                        if await self._is_duplicate(exchange, market_data):
+                        if await self._is_duplicate(exchange, normalized_data):
                             continue
 
-                    market_data_list.append(market_data)
+                    market_data_list.append(normalized_data)
 
             except Exception as e:
+                # Use consistent error propagation pattern from pipeline
+                from src.core.exceptions import DataProcessingError
+
+                processing_errors.append(
+                    DataProcessingError(
+                        f"Message processing failed for {exchange}",
+                        processing_step="streaming_message_conversion",
+                        input_data_sample={"exchange": exchange},
+                        data_source=exchange,
+                        data_type="streaming_message",
+                        pipeline_stage="ingestion",
+                    )
+                )
                 self.logger.error(f"Message processing error: {e}")
-                continue
 
         if not market_data_list:
             return
 
-        # Validate data if enabled
+        # Use consistent validation patterns from pipeline
         if config.enable_validation and self.validator:
             try:
+                # Use batch validation with consistent interface
                 validation_results = await self.validator.validate_market_data(
                     market_data_list, include_statistical=True
                 )
 
-                # Filter valid data
+                # Filter valid data using consistent quality thresholds
                 valid_data = []
                 for i, result in enumerate(validation_results):
+                    # Use same quality score threshold as pipeline (70%)
                     if result.is_valid or result.quality_score.overall > 0.7:
                         valid_data.append(market_data_list[i])
 
                 market_data_list = valid_data
 
             except Exception as e:
-                self.logger.error(f"Validation error: {e}")
+                from src.core.exceptions import DataValidationError
 
-        # Store data if data service available
+                raise DataValidationError(
+                    f"Streaming data validation failed for {exchange}",
+                    validation_type="market_data_batch",
+                    failed_rules=["streaming_quality_check"],
+                    data_source=exchange,
+                ) from e
+
+        # Store data using consistent patterns with pipeline
         if self.data_service and market_data_list:
             try:
-                await self.data_service.store_market_data(
-                    market_data_list, exchange, validate=False
+                # Use consistent storage interface with pipeline
+                success = await self.data_service.store_market_data(
+                    market_data_list,
+                    exchange=exchange,
+                    validate=False,  # Already validated
+                    source="streaming",
                 )
+
+                if not success:
+                    from src.core.exceptions import DataError
+
+                    raise DataError(
+                        "Streaming data storage failed",
+                        error_code="STREAM_STORAGE_001",
+                        data_type="market_data_batch",
+                        context={"exchange": exchange, "count": len(market_data_list)},
+                    )
+
             except Exception as e:
+                # Consistent error propagation
                 self.logger.error(f"Data storage error: {e}")
+                raise
 
     async def _is_duplicate(self, exchange: str, data: MarketData) -> bool:
         """Check if data is duplicate."""

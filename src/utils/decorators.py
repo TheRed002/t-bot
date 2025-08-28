@@ -15,10 +15,14 @@ from src.core.exceptions import ValidationError
 
 # Note: Validation should be done via dependency injection, not global import
 
+# Logger for module-level functions
+logger = logging.getLogger(__name__)
+
+
 # Exception classification for retry logic
 class ExceptionCategory:
     """Classification of exceptions for intelligent retry behavior."""
-    
+
     # Permanent failures - should not be retried
     PERMANENT = {
         ValidationError,
@@ -29,21 +33,21 @@ class ExceptionCategory:
         PermissionError,
         FileNotFoundError,
     }
-    
+
     # Authentication/Authorization errors - usually permanent
     AUTH_ERRORS = {
         "Unauthorized",
-        "Forbidden", 
+        "Forbidden",
         "Invalid API key",
         "Authentication failed",
         "Access denied",
         "Token expired",
     }
-    
+
     # Network errors - usually transient, good for retry
     NETWORK_ERRORS = {
         "ConnectionError",
-        "TimeoutError", 
+        "TimeoutError",
         "ConnectTimeout",
         "ReadTimeout",
         "HTTPError",
@@ -51,16 +55,16 @@ class ExceptionCategory:
         "SocketError",
         "DNSError",
     }
-    
+
     # Resource errors - may be transient or permanent
     RESOURCE_ERRORS = {
         "MemoryError",
-        "DiskSpaceError", 
+        "DiskSpaceError",
         "ResourceExhausted",
         "RateLimitExceeded",
         "ServiceUnavailable",
     }
-    
+
     # Trading-specific errors
     TRADING_TRANSIENT = {
         "MarketClosed",
@@ -69,41 +73,41 @@ class ExceptionCategory:
         "ExchangeUnavailable",
         "OrderBookEmpty",
     }
-    
+
     TRADING_PERMANENT = {
         "InvalidSymbol",
         "UnsupportedOrderType",
-        "InsufficientBalance", 
+        "InsufficientBalance",
         "MarketNotFound",
         "InvalidOrderSize",
     }
-    
+
     @classmethod
     def should_retry(cls, exception: Exception) -> bool:
         """Determine if an exception should be retried."""
         exc_type = type(exception)
         exc_message = str(exception)
-        
+
         # Check for permanent exception types
         if exc_type in cls.PERMANENT:
             return False
-            
+
         # Check for trading permanent errors
         if any(pattern in exc_message for pattern in cls.TRADING_PERMANENT):
             return False
-            
+
         # Check for authentication errors
         if any(pattern in exc_message for pattern in cls.AUTH_ERRORS):
             return False
-            
+
         # Network errors are generally retryable
         if any(pattern in exc_type.__name__ for pattern in cls.NETWORK_ERRORS):
             return True
-            
+
         # Trading transient errors are retryable
         if any(pattern in exc_message for pattern in cls.TRADING_TRANSIENT):
             return True
-            
+
         # Resource errors - depends on the specific error
         if any(pattern in exc_type.__name__ for pattern in cls.RESOURCE_ERRORS):
             # Rate limits and service unavailable are retryable
@@ -114,16 +118,16 @@ class ExceptionCategory:
                 return False
             # Default to retryable for other resource errors
             return True
-            
+
         # Default: retry for unknown exceptions (conservative approach)
         return True
-        
+
     @classmethod
     def get_retry_delay(cls, exception: Exception, attempt: int, base_delay: float) -> float:
         """Get appropriate retry delay based on exception type and attempt."""
         exc_type = type(exception)
         exc_message = str(exception)
-        
+
         # Rate limiting errors - use longer delays
         if "RateLimit" in exc_message or "TooManyRequests" in exc_message:
             # Extract rate limit reset time if available
@@ -131,26 +135,30 @@ class ExceptionCategory:
                 try:
                     # Try to extract seconds from message
                     import re
+
                     match = re.search(r"retry after (\d+)", exc_message.lower())
                     if match:
                         return float(match.group(1))
-                except Exception:
+                except (ImportError, AttributeError) as e:
+                    logger.debug(f"Failed to extract retry delay from rate limit message: {e}")
                     pass
             # Default rate limit backoff
-            return base_delay * (3 ** attempt)  # More aggressive backoff
-            
+            return base_delay * (3**attempt)  # More aggressive backoff
+
         # Network errors - standard exponential backoff with jitter
         if any(pattern in exc_type.__name__ for pattern in cls.NETWORK_ERRORS):
             import random
+
             jitter = random.uniform(0.1, 0.3) * base_delay
-            return (base_delay * (2 ** attempt)) + jitter
-            
+            return (base_delay * (2**attempt)) + jitter
+
         # Service unavailable - moderate backoff
         if "ServiceUnavailable" in exc_message:
-            return base_delay * (2.5 ** attempt)
-            
+            return base_delay * (2.5**attempt)
+
         # Default exponential backoff
-        return base_delay * (2 ** attempt)
+        return base_delay * (2**attempt)
+
 
 # Define proper type variables
 P = ParamSpec("P")
@@ -316,7 +324,7 @@ class UnifiedDecorator:
         """Execute function with intelligent retry logic and exception classification."""
         last_exception = None
         correlation_id = str(uuid.uuid4())[:8]
-        
+
         for attempt in range(retry_times):
             try:
                 if asyncio.iscoroutinefunction(func):
@@ -325,10 +333,10 @@ class UnifiedDecorator:
                     return func(*args, **kwargs)
             except Exception as e:
                 last_exception = e
-                
+
                 # Enhanced exception classification
                 should_retry = ExceptionCategory.should_retry(e)
-                
+
                 if not should_retry:
                     if logger:
                         logger.error(
@@ -336,27 +344,27 @@ class UnifiedDecorator:
                             f"{type(e).__name__}: {e}. Correlation: {correlation_id}"
                         )
                     # Add correlation ID to exception for tracking
-                    if not hasattr(e, 'correlation_id'):
-                        e.correlation_id = correlation_id
+                    if not hasattr(e, "correlation_id"):
+                        e.correlation_id = correlation_id  # type: ignore
                     raise
-                
+
                 if logger:
                     logger.warning(
                         f"Attempt {attempt + 1}/{retry_times} failed for {func.__name__}: "
                         f"{type(e).__name__}: {e}. Correlation: {correlation_id}"
                     )
-                
+
                 # Check if we should continue retrying
                 if attempt < retry_times - 1:
                     # Calculate intelligent retry delay
                     delay = ExceptionCategory.get_retry_delay(e, attempt, retry_delay)
-                    
+
                     if logger:
                         logger.debug(
                             f"Retrying {func.__name__} in {delay:.2f}s (attempt {attempt + 1}/{retry_times}). "
                             f"Correlation: {correlation_id}"
                         )
-                    
+
                     await asyncio.sleep(delay)
                 else:
                     # Final attempt failed
@@ -365,18 +373,18 @@ class UnifiedDecorator:
                             f"All {retry_times} retry attempts failed for {func.__name__}. "
                             f"Final error: {type(e).__name__}: {e}. Correlation: {correlation_id}"
                         )
-        
+
         if last_exception:
             # Add correlation ID for final tracking
-            if not hasattr(last_exception, 'correlation_id'):
-                last_exception.correlation_id = correlation_id
+            if not hasattr(last_exception, "correlation_id"):
+                last_exception.correlation_id = correlation_id  # type: ignore
             raise last_exception
         else:
             final_error = RuntimeError(
                 f"Failed to execute {func.__name__} after {retry_times} attempts. "
                 f"Correlation: {correlation_id}"
             )
-            final_error.correlation_id = correlation_id
+            final_error.correlation_id = correlation_id  # type: ignore
             raise final_error
 
     @classmethod
@@ -722,19 +730,19 @@ class UnifiedDecorator:
         """Execute sync function with intelligent retry logic."""
         if not config["retry"]:
             return func(*args, **kwargs)
-        
+
         last_exception = None
         correlation_id = str(uuid.uuid4())[:8]
-        
+
         for attempt in range(config["retry_times"]):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
                 last_exception = e
-                
+
                 # Enhanced exception classification
                 should_retry = ExceptionCategory.should_retry(e)
-                
+
                 if not should_retry:
                     if context["logger"]:
                         context["logger"].error(
@@ -742,26 +750,26 @@ class UnifiedDecorator:
                             f"{type(e).__name__}: {e}. Correlation: {correlation_id}"
                         )
                     # Add correlation ID to exception
-                    if not hasattr(e, 'correlation_id'):
-                        e.correlation_id = correlation_id
+                    if not hasattr(e, "correlation_id"):
+                        e.correlation_id = correlation_id  # type: ignore
                     raise
-                
+
                 if context["logger"]:
                     context["logger"].warning(
                         f"Attempt {attempt + 1}/{config['retry_times']} failed for "
                         f"{func.__name__}: {type(e).__name__}: {e}. Correlation: {correlation_id}"
                     )
-                
+
                 if attempt < config["retry_times"] - 1:
                     # Calculate intelligent retry delay
                     delay = ExceptionCategory.get_retry_delay(e, attempt, config["retry_delay"])
-                    
+
                     if context["logger"]:
                         context["logger"].debug(
                             f"Retrying {func.__name__} in {delay:.2f}s (attempt {attempt + 1}/{config['retry_times']}). "
                             f"Correlation: {correlation_id}"
                         )
-                    
+
                     time.sleep(delay)
                 else:
                     # Final attempt failed
@@ -770,18 +778,18 @@ class UnifiedDecorator:
                             f"All {config['retry_times']} retry attempts failed for {func.__name__}. "
                             f"Final error: {type(e).__name__}: {e}. Correlation: {correlation_id}"
                         )
-        
+
         if last_exception:
             # Add correlation ID for final tracking
-            if not hasattr(last_exception, 'correlation_id'):
-                last_exception.correlation_id = correlation_id
+            if not hasattr(last_exception, "correlation_id"):
+                last_exception.correlation_id = correlation_id  # type: ignore
             raise last_exception
         else:
             final_error = RuntimeError(
                 f"Failed to execute {func.__name__} after {config['retry_times']} attempts. "
                 f"Correlation: {correlation_id}"
             )
-            final_error.correlation_id = correlation_id
+            final_error.correlation_id = correlation_id  # type: ignore
             raise final_error
 
     @classmethod
@@ -795,8 +803,8 @@ class UnifiedDecorator:
         context: dict[str, Any],
     ) -> Any:
         """Handle execution errors and fallbacks for async functions with correlation tracking."""
-        correlation_id = getattr(error, 'correlation_id', str(uuid.uuid4())[:8])
-        
+        correlation_id = getattr(error, "correlation_id", str(uuid.uuid4())[:8])
+
         if context["logger"]:
             context["logger"].error(
                 f"{func.__name__} failed: {type(error).__name__}: {error}. "
@@ -824,13 +832,13 @@ class UnifiedDecorator:
                     )
                 # Chain the original error with fallback error
                 fallback_error.__cause__ = error
-                if not hasattr(fallback_error, 'correlation_id'):
-                    fallback_error.correlation_id = correlation_id
+                if not hasattr(fallback_error, "correlation_id"):
+                    fallback_error.correlation_id = correlation_id  # type: ignore
                 raise fallback_error
 
         # Ensure error has correlation ID before raising
-        if not hasattr(error, 'correlation_id'):
-            error.correlation_id = correlation_id
+        if not hasattr(error, "correlation_id"):
+            error.correlation_id = correlation_id  # type: ignore
         raise error
 
     @classmethod
@@ -844,8 +852,8 @@ class UnifiedDecorator:
         context: dict[str, Any],
     ) -> Any:
         """Handle execution errors and fallbacks for sync functions with correlation tracking."""
-        correlation_id = getattr(error, 'correlation_id', str(uuid.uuid4())[:8])
-        
+        correlation_id = getattr(error, "correlation_id", str(uuid.uuid4())[:8])
+
         if context["logger"]:
             context["logger"].error(
                 f"{func.__name__} failed: {type(error).__name__}: {error}. "
@@ -868,13 +876,13 @@ class UnifiedDecorator:
                     )
                 # Chain the original error with fallback error
                 fallback_error.__cause__ = error
-                if not hasattr(fallback_error, 'correlation_id'):
-                    fallback_error.correlation_id = correlation_id
+                if not hasattr(fallback_error, "correlation_id"):
+                    fallback_error.correlation_id = correlation_id  # type: ignore
                 raise fallback_error
 
         # Ensure error has correlation ID before raising
-        if not hasattr(error, 'correlation_id'):
-            error.correlation_id = correlation_id
+        if not hasattr(error, "correlation_id"):
+            error.correlation_id = correlation_id  # type: ignore
         raise error
 
     @classmethod

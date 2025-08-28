@@ -1,44 +1,50 @@
 """Mathematical and statistical utilities for the T-Bot trading system."""
 
+from decimal import Decimal
+
 import numpy as np
 
 from src.core.exceptions import ValidationError
+from src.utils.decimal_utils import ZERO, to_decimal
 
 
-def calculate_percentage_change(old_value: float, new_value: float) -> float:
+def calculate_percentage_change(old_value: Decimal, new_value: Decimal) -> Decimal:
     """
     Calculate percentage change between two values.
 
     Args:
-        old_value: Original value
-        new_value: New value
+        old_value: Original value as Decimal
+        new_value: New value as Decimal
 
     Returns:
-        Percentage change as a float (e.g., 0.05 for 5% increase)
+        Percentage change as Decimal (e.g., 0.05 for 5% increase)
 
     Raises:
         ValidationError: If old_value is zero
     """
-    if old_value == 0:
+    old_decimal = to_decimal(old_value) if not isinstance(old_value, Decimal) else old_value
+    new_decimal = to_decimal(new_value) if not isinstance(new_value, Decimal) else new_value
+
+    if old_decimal == ZERO:
         raise ValidationError("Cannot calculate percentage change with zero old value")
 
-    percentage_change = (new_value - old_value) / old_value
-    return float(percentage_change)
+    percentage_change = (new_decimal - old_decimal) / old_decimal
+    return percentage_change
 
 
 def calculate_sharpe_ratio(
-    returns: list[float], risk_free_rate: float = 0.02, frequency: str = "daily"
-) -> float:
+    returns: list[Decimal], risk_free_rate: Decimal = Decimal("0.02"), frequency: str = "daily"
+) -> Decimal:
     """
     Calculate the Sharpe ratio for a series of returns.
 
     Args:
-        returns: List of return values (as decimals, e.g., 0.05 for 5%)
-        risk_free_rate: Annual risk-free rate (default 2%)
+        returns: List of return values as Decimal (e.g., 0.05 for 5%)
+        risk_free_rate: Annual risk-free rate as Decimal (default 2%)
         frequency: Data frequency ("daily", "weekly", "monthly", "yearly")
 
     Returns:
-        Sharpe ratio as a float
+        Sharpe ratio as Decimal
 
     Raises:
         ValidationError: If returns list is empty or contains invalid values
@@ -56,34 +62,40 @@ def calculate_sharpe_ratio(
             f"Invalid frequency: {frequency}. Must be one of {list(valid_frequencies.keys())}"
         )
 
-    # Convert to numpy array for calculations
-    returns_array = np.array(returns)
+    # Convert to Decimal for precise calculations
+    decimal_returns = [to_decimal(r) if not isinstance(r, Decimal) else r for r in returns]
 
     # Calculate annualization factor
-    periods_per_year = valid_frequencies[frequency]
+    periods_per_year = Decimal(str(valid_frequencies[frequency]))
 
     # Calculate mean return (annualized)
-    mean_return = np.mean(returns_array) * periods_per_year
+    mean_return = (sum(decimal_returns) / Decimal(len(decimal_returns))) * periods_per_year
 
-    # Calculate standard deviation (annualized)
-    std_return = np.std(returns_array, ddof=1) * np.sqrt(periods_per_year)
+    # Calculate variance manually for precision
+    variance = sum((r - mean_return / periods_per_year) ** 2 for r in decimal_returns) / Decimal(
+        len(decimal_returns) - 1
+    )
+    std_return = variance.sqrt() * periods_per_year.sqrt()
 
     # Avoid division by zero
-    if std_return == 0:
-        return 0.0
+    if std_return == ZERO:
+        return ZERO
 
     # Calculate Sharpe ratio
-    sharpe_ratio = (mean_return - risk_free_rate) / std_return
+    rf_rate = (
+        to_decimal(risk_free_rate) if not isinstance(risk_free_rate, Decimal) else risk_free_rate
+    )
+    sharpe_ratio = (mean_return - rf_rate) / std_return
 
-    return float(sharpe_ratio)
+    return sharpe_ratio
 
 
-def calculate_max_drawdown(equity_curve: list[float]) -> tuple[float, int, int]:
+def calculate_max_drawdown(equity_curve: list[Decimal]) -> tuple[Decimal, int, int]:
     """
     Calculate the maximum drawdown from an equity curve.
 
     Args:
-        equity_curve: List of equity values over time
+        equity_curve: List of equity values over time as Decimal
 
     Returns:
         Tuple of (max_drawdown, start_index, end_index)
@@ -97,35 +109,47 @@ def calculate_max_drawdown(equity_curve: list[float]) -> tuple[float, int, int]:
     if len(equity_curve) < 2:
         raise ValidationError("Need at least 2 points to calculate drawdown")
 
-    # Convert to numpy array
-    equity = np.array(equity_curve)
+    # Convert to Decimal for precise calculations
+    decimal_equity = [to_decimal(e) if not isinstance(e, Decimal) else e for e in equity_curve]
 
-    # Calculate running maximum
-    running_max = np.maximum.accumulate(equity)
+    # Calculate running maximum using Decimal precision
+    running_max = []
+    current_max = decimal_equity[0]
+    for value in decimal_equity:
+        if value > current_max:
+            current_max = value
+        running_max.append(current_max)
 
     # Calculate drawdown
-    drawdown = (equity - running_max) / running_max
+    drawdown = []
+    for i, (equity_val, max_val) in enumerate(zip(decimal_equity, running_max, strict=False)):
+        if max_val == ZERO:
+            drawdown.append(ZERO)
+        else:
+            dd = (equity_val - max_val) / max_val
+            drawdown.append(dd)
 
     # Find maximum drawdown
-    max_drawdown_idx = np.argmin(drawdown)
-    max_drawdown = drawdown[max_drawdown_idx]
+    max_drawdown = min(drawdown)
+    max_drawdown_idx = drawdown.index(max_drawdown)
 
     # Find the peak before the maximum drawdown
-    peak_idx = np.argmax(equity[: max_drawdown_idx + 1])
+    peak_value = max(decimal_equity[: max_drawdown_idx + 1])
+    peak_idx = decimal_equity.index(peak_value)
 
-    return float(max_drawdown), int(peak_idx), int(max_drawdown_idx)
+    return max_drawdown, int(peak_idx), int(max_drawdown_idx)
 
 
-def calculate_var(returns: list[float], confidence_level: float = 0.95) -> float:
+def calculate_var(returns: list[Decimal], confidence_level: Decimal = Decimal("0.95")) -> Decimal:
     """
     Calculate Value at Risk (VaR) for a series of returns.
 
     Args:
-        returns: List of return values
-        confidence_level: Confidence level for VaR calculation (default 95%)
+        returns: List of return values as Decimal
+        confidence_level: Confidence level for VaR calculation as Decimal (default 95%)
 
     Returns:
-        VaR as a float (negative value represents loss)
+        VaR as Decimal (negative value represents loss)
 
     Raises:
         ValidationError: If returns list is empty or confidence level is invalid
@@ -133,18 +157,27 @@ def calculate_var(returns: list[float], confidence_level: float = 0.95) -> float
     if not returns:
         raise ValidationError("Returns list cannot be empty")
 
-    if not 0 < confidence_level < 1:
+    conf_level = (
+        to_decimal(confidence_level)
+        if not isinstance(confidence_level, Decimal)
+        else confidence_level
+    )
+    if not (ZERO < conf_level < Decimal("1")):
         raise ValidationError("Confidence level must be between 0 and 1")
 
-    # Convert to numpy array
-    returns_array = np.array(returns)
+    # Convert to Decimal for precise calculations
+    decimal_returns = [to_decimal(r) if not isinstance(r, Decimal) else r for r in returns]
+    decimal_returns.sort()
 
-    # Calculate VaR using historical simulation
-    # For 95% confidence, we want the 5th percentile (worst 5% of returns)
-    var_percentile = (1 - confidence_level) * 100
-    var = np.percentile(returns_array, var_percentile)
+    # Calculate VaR using historical simulation with Decimal precision
+    var_percentile = (Decimal("1") - conf_level) * Decimal("100")
+    percentile_index = int((var_percentile / Decimal("100")) * Decimal(len(decimal_returns)))
 
-    return float(var)
+    # Ensure index is within bounds
+    percentile_index = max(0, min(percentile_index, len(decimal_returns) - 1))
+
+    var = decimal_returns[percentile_index]
+    return var
 
 
 def calculate_volatility(returns: list[float], window: int | None = None) -> float:
@@ -301,17 +334,17 @@ def calculate_sortino_ratio(
     return float((mean_excess / downside_std) * np.sqrt(periods_per_year))
 
 
-def safe_min(*args: float, default: float | None = None) -> float:
+def safe_min(*args: Decimal, default: Decimal | None = None) -> Decimal:
     """
-    Safely calculate minimum value, handling None and invalid inputs.
-    
+    Safely calculate minimum value using Decimal precision, handling None and invalid inputs.
+
     Args:
-        *args: Numeric values to compare
-        default: Default value if all inputs are None/invalid
-        
+        *args: Decimal values to compare
+        default: Default Decimal value if all inputs are None/invalid
+
     Returns:
-        Minimum value or default
-        
+        Minimum Decimal value or default
+
     Raises:
         ValidationError: If no valid values and no default provided
     """
@@ -319,31 +352,31 @@ def safe_min(*args: float, default: float | None = None) -> float:
     for arg in args:
         if arg is not None:
             try:
-                val = float(arg)
-                if not np.isnan(val) and not np.isinf(val):
+                val = to_decimal(arg) if not isinstance(arg, Decimal) else arg
+                if val.is_finite():  # Check for NaN and infinity
                     valid_values.append(val)
             except (TypeError, ValueError):
                 continue
-    
+
     if not valid_values:
         if default is not None:
             return default
         raise ValidationError("No valid values provided and no default specified")
-    
-    return float(min(valid_values))
+
+    return min(valid_values)
 
 
-def safe_max(*args: float, default: float | None = None) -> float:
+def safe_max(*args: Decimal, default: Decimal | None = None) -> Decimal:
     """
-    Safely calculate maximum value, handling None and invalid inputs.
-    
+    Safely calculate maximum value using Decimal precision, handling None and invalid inputs.
+
     Args:
-        *args: Numeric values to compare
-        default: Default value if all inputs are None/invalid
-        
+        *args: Decimal values to compare
+        default: Default Decimal value if all inputs are None/invalid
+
     Returns:
-        Maximum value or default
-        
+        Maximum Decimal value or default
+
     Raises:
         ValidationError: If no valid values and no default provided
     """
@@ -351,49 +384,47 @@ def safe_max(*args: float, default: float | None = None) -> float:
     for arg in args:
         if arg is not None:
             try:
-                val = float(arg)
-                if not np.isnan(val) and not np.isinf(val):
+                val = to_decimal(arg) if not isinstance(arg, Decimal) else arg
+                if val.is_finite():  # Check for NaN and infinity
                     valid_values.append(val)
             except (TypeError, ValueError):
                 continue
-    
+
     if not valid_values:
         if default is not None:
             return default
         raise ValidationError("No valid values provided and no default specified")
-    
-    return float(max(valid_values))
+
+    return max(valid_values)
 
 
-def safe_percentage(value: float, total: float, default: float = 0.0) -> float:
+def safe_percentage(value: Decimal, total: Decimal, default: Decimal = ZERO) -> Decimal:
     """
-    Safely calculate percentage, handling zero division and invalid inputs.
-    
+    Safely calculate percentage using Decimal precision, handling zero division and invalid inputs.
+
     Args:
-        value: Numerator value
-        total: Denominator value
-        default: Default value if calculation fails
-        
+        value: Numerator value as Decimal
+        total: Denominator value as Decimal
+        default: Default Decimal value if calculation fails
+
     Returns:
-        Percentage as decimal (e.g., 0.15 for 15%)
+        Percentage as Decimal (e.g., 0.15 for 15%)
     """
+    from src.utils.decimal_utils import safe_divide
+
     try:
         # Handle None values
         if value is None or total is None:
             return default
-            
-        # Convert to float
-        value_f = float(value)
-        total_f = float(total)
-        
-        # Handle invalid values
-        if np.isnan(value_f) or np.isnan(total_f) or np.isinf(value_f) or np.isinf(total_f):
-            return default
-            
-        # Handle zero division
-        if total_f == 0:
-            return default
-            
-        return float(value_f / total_f)
-    except (TypeError, ValueError, ZeroDivisionError):
-        return default
+
+        # Convert to Decimal for precision
+        value_decimal = to_decimal(value) if not isinstance(value, Decimal) else value
+        total_decimal = to_decimal(total) if not isinstance(total, Decimal) else total
+        default_decimal = to_decimal(default) if not isinstance(default, Decimal) else default
+
+        # Use safe_divide from decimal_utils for proper handling
+        return safe_divide(value_decimal, total_decimal, default_decimal)
+
+    except (TypeError, ValueError):
+        # Return default on any conversion error
+        return to_decimal(default) if not isinstance(default, Decimal) else default

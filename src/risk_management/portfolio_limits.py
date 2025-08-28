@@ -18,7 +18,6 @@ from typing import Any
 import numpy as np
 
 from src.core.base.component import BaseComponent
-from src.error_handling.context import ErrorContext
 from src.core.config.main import Config
 from src.core.exceptions import PositionLimitError, ValidationError
 
@@ -146,7 +145,7 @@ class PortfolioLimits(BaseComponent):
                 error=str(e),
                 symbol=new_position.symbol if new_position else None,
             )
-            raise PositionLimitError(f"Portfolio limits check failed: {e}")
+            raise PositionLimitError(f"Portfolio limits check failed: {e}") from e
 
     @time_execution
     def _check_total_positions_limit(self, new_position: Position) -> bool:
@@ -219,23 +218,37 @@ class PortfolioLimits(BaseComponent):
             return True  # No portfolio value to check against
 
         # Validate new position values
-        if new_position.quantity <= ZERO or new_position.current_price <= ZERO:
+        if (new_position.quantity and new_position.quantity <= ZERO) or (
+            new_position.current_price and new_position.current_price <= ZERO
+        ):
             self.logger.warning(
                 "Invalid new position values",
-                quantity=format_decimal(new_position.quantity),
-                price=format_decimal(new_position.current_price),
+                quantity=format_decimal(new_position.quantity) if new_position.quantity else "0",
+                price=format_decimal(new_position.current_price)
+                if new_position.current_price
+                else "0",
             )
             return False
 
         # Calculate current portfolio exposure with validation
         current_exposure = ZERO
         for pos in self.positions:
-            if pos.quantity > ZERO and pos.current_price > ZERO:
-                position_exposure = abs(pos.quantity * pos.current_price)
+            if (pos.quantity and pos.quantity > ZERO) and (
+                pos.current_price and pos.current_price > ZERO
+            ):
+                position_exposure = (
+                    abs(pos.quantity * pos.current_price)
+                    if pos.quantity and pos.current_price
+                    else ZERO
+                )
                 current_exposure += position_exposure
 
         # Add new position exposure
-        new_exposure = abs(new_position.quantity * new_position.current_price)
+        new_exposure = (
+            abs(new_position.quantity * new_position.current_price)
+            if new_position.quantity and new_position.current_price
+            else ZERO
+        )
         total_exposure = current_exposure + new_exposure
 
         # Calculate exposure percentage with safe division
@@ -283,10 +296,18 @@ class PortfolioLimits(BaseComponent):
             pos_sector = self.sector_mapping.get(pos_symbol_base, "other")
 
             if pos_sector == sector:
-                sector_exposure += abs(pos.quantity * pos.current_price)
+                sector_exposure += (
+                    abs(pos.quantity * pos.current_price)
+                    if pos.quantity and pos.current_price
+                    else ZERO
+                )
 
         # Add new position to sector exposure
-        new_exposure = abs(new_position.quantity * new_position.current_price)
+        new_exposure = (
+            abs(new_position.quantity * new_position.current_price)
+            if new_position.quantity and new_position.current_price
+            else ZERO
+        )
         total_sector_exposure = sector_exposure + new_exposure
 
         # Calculate sector exposure percentage
@@ -332,11 +353,19 @@ class PortfolioLimits(BaseComponent):
 
             # If correlation is high (>0.7), add to correlated exposure
             if correlation > 0.7:
-                position_exposure = abs(pos.quantity * pos.current_price)
+                position_exposure = (
+                    abs(pos.quantity * pos.current_price)
+                    if pos.quantity and pos.current_price
+                    else ZERO
+                )
                 high_correlation_exposure += position_exposure
 
         # Add new position exposure if it has high correlations
-        new_exposure = abs(new_position.quantity * new_position.current_price)
+        new_exposure = (
+            abs(new_position.quantity * new_position.current_price)
+            if new_position.quantity and new_position.current_price
+            else ZERO
+        )
         total_correlated_exposure = high_correlation_exposure + new_exposure
 
         # Calculate correlated exposure percentage
@@ -411,7 +440,8 @@ class PortfolioLimits(BaseComponent):
         try:
             correlation = np.corrcoef(returns1_aligned, returns2_aligned)[0, 1]
             return float(correlation) if not np.isnan(correlation) else 0.0
-        except Exception:
+        except Exception as e:
+            self.logger.warning(f"Correlation calculation failed: {e}")
             return 0.0
 
     @time_execution
@@ -445,7 +475,7 @@ class PortfolioLimits(BaseComponent):
         """
         # Convert price to Decimal if needed
         price_decimal = to_decimal(price) if not isinstance(price, Decimal) else price
-        
+
         # Validate price
         if price_decimal <= ZERO:
             self.logger.warning(f"Invalid price for {symbol}: {price_decimal}")
@@ -483,7 +513,10 @@ class PortfolioLimits(BaseComponent):
             Dict containing current portfolio state and limits
         """
         # Calculate current exposures
-        total_exposure = sum(abs(pos.quantity * pos.current_price) for pos in self.positions)
+        total_exposure = sum(
+            abs(pos.quantity * pos.current_price) if pos.quantity and pos.current_price else ZERO
+            for pos in self.positions
+        )
 
         exposure_percentage = (
             total_exposure / self.total_portfolio_value if self.total_portfolio_value > 0 else 0
@@ -498,7 +531,11 @@ class PortfolioLimits(BaseComponent):
             if sector not in sector_exposures:
                 sector_exposures[sector] = Decimal("0")
 
-            sector_exposures[sector] += abs(pos.quantity * pos.current_price)
+            sector_exposures[sector] += (
+                abs(pos.quantity * pos.current_price)
+                if pos.quantity and pos.current_price
+                else ZERO
+            )
 
         # Convert to percentages
         sector_exposure_percentages = {}

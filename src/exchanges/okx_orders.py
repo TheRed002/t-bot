@@ -27,6 +27,9 @@ from okx.api import Trade as OKXTrade
 from src.core.config import Config
 from src.core.exceptions import ExchangeError, ExchangeInsufficientFundsError, ValidationError
 
+# Logger setup
+from src.core.logging import get_logger
+
 # Logger is provided by BaseExchange (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
@@ -34,9 +37,6 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 from src.utils import ValidationFramework, normalize_price, round_to_precision
-
-# Logger setup
-from src.core.logging import get_logger
 
 
 class OKXOrderManager:
@@ -61,7 +61,7 @@ class OKXOrderManager:
         """
         self.config = config
         self.trade_client = trade_client
-        
+
         # Initialize logger
         self.logger = get_logger(self.__class__.__module__)
 

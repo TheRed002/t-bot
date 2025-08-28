@@ -14,7 +14,7 @@ Key Features:
 - Performance monitoring configurations
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from src.core.types import StrategyType
 
@@ -34,8 +34,8 @@ class StrategyConfigTemplates:
     @staticmethod
     def get_arbitrage_scanner_config(
         risk_level: str = "medium",
-        exchanges: list[str] = None,
-        symbols: list[str] = None,
+        exchanges: Optional[list[str]] = None,
+        symbols: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """
         Get arbitrage scanner configuration.
@@ -600,7 +600,7 @@ class StrategyConfigTemplates:
 
     @staticmethod
     def get_ensemble_config(
-        strategy_types: list[str] = None,
+        strategy_types: Optional[list[str]] = None,
         voting_method: str = "weighted",
         correlation_limit: float = 0.7,
     ) -> dict[str, Any]:

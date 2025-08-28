@@ -16,6 +16,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -33,17 +34,17 @@ from src.database.service import DatabaseService
 try:
     from src.database.manager import DatabaseManager
 except ImportError:
-    DatabaseManager = None
+    DatabaseManager = None  # type: ignore
 
 try:
     from src.database.redis_client import RedisClient
 except ImportError:
-    RedisClient = None
+    RedisClient = None  # type: ignore
 
 try:
     from src.database.influxdb_client import InfluxDBClient
 except ImportError:
-    InfluxDBClient = None
+    InfluxDBClient = None  # type: ignore
 
 from .utils_imports import time_execution
 
@@ -1718,7 +1719,7 @@ class QualityController(BaseComponent):
 
                 # Total value should be sum of cash and positions
                 expected_total = available_cash + total_positions_value
-                tolerance = abs(expected_total * 0.01)  # 1% tolerance
+                tolerance = abs(expected_total * Decimal("0.01"))  # 1% tolerance
 
                 if abs(total_value - expected_total) > tolerance:
                     return False
@@ -1865,7 +1866,7 @@ class QualityController(BaseComponent):
                 and hasattr(state, "total_positions_value")
             ):
                 expected_total = state.available_cash + state.total_positions_value
-                if abs(state.total_value - expected_total) > expected_total * 0.01:
+                if abs(state.total_value - expected_total) > expected_total * Decimal("0.01"):
                     corrections.append(
                         {
                             "field": "total_value",

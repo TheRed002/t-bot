@@ -1670,8 +1670,13 @@ class NeuroEvolutionStrategy(BaseStrategy):
                 "config": self.neuro_config,
             }
 
-            with open(filepath, "wb") as f:
+            f = None
+            try:
+                f = open(filepath, "wb")
                 pickle.dump(save_data, f)
+            finally:
+                if f:
+                    f.close()
 
             self.logger.info(f"Population saved to {filepath}")
 
@@ -1688,8 +1693,13 @@ class NeuroEvolutionStrategy(BaseStrategy):
         try:
             import pickle
 
-            with open(filepath, "rb") as f:
+            f = None
+            try:
+                f = open(filepath, "rb")
                 save_data = pickle.load(f)
+            finally:
+                if f:
+                    f.close()
 
             self.population = save_data["population"]
             self.best_genome = save_data["best_genome"]

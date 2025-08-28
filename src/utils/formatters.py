@@ -40,7 +40,9 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-def format_currency(amount: float | int | Decimal, currency: str = "USD", precision: int = 2) -> str:
+def format_currency(
+    amount: float | int | Decimal, currency: str = "USD", precision: int = 2
+) -> str:
     """
     Format amount as currency string.
 
@@ -100,14 +102,21 @@ def format_percentage(value: float | int | Decimal, precision: int = 2) -> str:
     if not isinstance(value, int | float | Decimal):
         raise ValidationError(f"Value must be a number, got {type(value).__name__}")
 
-    # Convert to percentage
-    percentage = float(value) * 100
+    # Convert to Decimal for precise percentage calculation
+    from src.utils.decimal_utils import HUNDRED, to_decimal
 
-    # Format with sign and precision
-    if percentage >= 0:
-        return f"+{percentage:.{precision}f}%"
+    decimal_value = to_decimal(value)
+    percentage_decimal = decimal_value * HUNDRED
+
+    # Format with sign and precision using Decimal quantization
+    quantizer = Decimal(10) ** -precision
+    rounded_percentage = percentage_decimal.quantize(quantizer, rounding=ROUND_HALF_UP)
+
+    # Format with sign
+    if rounded_percentage >= 0:
+        return f"+{rounded_percentage}%"
     else:
-        return f"{percentage:.{precision}f}%"
+        return f"{rounded_percentage}%"
 
 
 def format_pnl(pnl: float | int | Decimal, currency: str = "USD") -> tuple[str, str]:
@@ -465,13 +474,16 @@ def format_ohlcv_data(ohlcv_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             timestamp = candle["timestamp"]
 
+        # Use Decimal for precision then convert to string for JSON serialization
+        from src.utils.decimal_utils import to_decimal
+
         formatted_candle = {
             "timestamp": timestamp.isoformat(),
-            "open": float(candle["open"]),
-            "high": float(candle["high"]),
-            "low": float(candle["low"]),
-            "close": float(candle["close"]),
-            "volume": float(candle["volume"]),
+            "open": str(to_decimal(candle["open"])),
+            "high": str(to_decimal(candle["high"])),
+            "low": str(to_decimal(candle["low"])),
+            "close": str(to_decimal(candle["close"])),
+            "volume": str(to_decimal(candle["volume"])),
         }
 
         formatted_data.append(formatted_candle)

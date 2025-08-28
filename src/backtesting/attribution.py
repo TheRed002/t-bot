@@ -25,12 +25,19 @@ class PerformanceAttributor(BaseComponent):
     - Cost analysis
     """
 
-    def __init__(self, config: Any = None):
+    def __init__(self, config: Any = None) -> None:
         """Initialize performance attributor."""
         # Convert config to dict if needed
         config_dict = None
         if config:
-            config_dict = config.dict() if hasattr(config, "dict") else {}
+            if hasattr(config, "model_dump"):
+                config_dict = config.model_dump()
+            elif hasattr(config, "dict"):
+                config_dict = config.dict()
+            elif isinstance(config, dict):
+                config_dict = config
+            else:
+                config_dict = {}
 
         super().__init__(name="PerformanceAttributor", config=config_dict)
         self.config = config
@@ -60,7 +67,7 @@ class PerformanceAttributor(BaseComponent):
         self.logger.info("Starting return attribution", num_trades=len(trades))
 
         # Group trades by symbol
-        symbol_trades = self._group_trades_by_symbol(trades)
+        symbol_trades: dict[str, list[dict[str, Any]]] = self._group_trades_by_symbol(trades)
 
         # Calculate attributions
         symbol_attribution = self._attribute_by_symbol(symbol_trades)
@@ -100,7 +107,7 @@ class PerformanceAttributor(BaseComponent):
         self, trades: list[dict[str, Any]]
     ) -> dict[str, list[dict[str, Any]]]:
         """Group trades by symbol."""
-        symbol_trades = {}
+        symbol_trades: dict[str, list[dict[str, Any]]] = {}
 
         for trade in trades:
             symbol = trade["symbol"]

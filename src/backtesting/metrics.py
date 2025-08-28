@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.utils.decimal_utils import safe_decimal
 from src.utils.decorators import time_execution
 
@@ -19,7 +19,7 @@ from src.utils.decorators import time_execution
 class BacktestMetrics(BaseComponent):
     """Container for all backtest metrics."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize metrics container."""
         super().__init__()  # Initialize BaseComponent
         self.metrics: dict[str, Any] = {}
@@ -55,7 +55,7 @@ class MetricsCalculator:
     CONFIDENCE_LEVEL = 0.95
     VAR_PERCENTILE = 5  # For 95% VaR
 
-    def __init__(self, risk_free_rate: float = None):
+    def __init__(self, risk_free_rate: float | None = None) -> None:
         """
         Initialize metrics calculator.
 

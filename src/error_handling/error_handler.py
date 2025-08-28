@@ -9,7 +9,6 @@ for error logging and will be used by all subsequent prompts.
 """
 
 import asyncio
-from decimal import Decimal
 import threading
 import time
 import traceback
@@ -99,7 +98,7 @@ class CircuitBreaker:
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.failure_count = 0
-        self.last_failure_time = None
+        self.last_failure_time: float | None = None
         self.state = "CLOSED"  # CLOSED, OPEN, HALF_OPEN
         self._lock = threading.RLock()
 
@@ -125,7 +124,7 @@ class CircuitBreaker:
         except Exception as e:
             with self._lock:
                 self.failure_count += 1
-                self.last_failure_time = time.time()
+                self.last_failure_time: float = time.time()
 
                 if self.failure_count >= self.failure_threshold:
                     self.state = "OPEN"
@@ -363,7 +362,7 @@ class ErrorHandler:
 
         # Check rate limits before processing
         rate_limit_result = await self.rate_limiter.check_rate_limit(
-            component=context.component,
+            component=context.component or "unknown",
             operation="error_recovery",
             context={"error_id": context.error_id},
         )
@@ -425,7 +424,9 @@ class ErrorHandler:
                 # Accept both class instances with execute_recovery and callables
                 try:
                     if hasattr(recovery_strategy, "execute_recovery"):
-                        recovery_data = context.__dict__ if hasattr(context, "__dict__") else context
+                        recovery_data = (
+                            context.__dict__ if hasattr(context, "__dict__") else context
+                        )
                         await recovery_strategy.execute_recovery(recovery_data)
                     else:
                         await recovery_strategy(context)
@@ -493,19 +494,19 @@ class ErrorHandler:
     ) -> bool:
         """
         Synchronous version of handle_error for use in non-async contexts.
-        
+
         Args:
             error: The exception to handle
             component: Component where error occurred
             operation: Operation being performed
             recovery_strategy: Optional recovery strategy
             **kwargs: Additional context data
-            
+
         Returns:
             bool: True if error was recovered, False otherwise
         """
         import asyncio
-        
+
         # Get or create event loop
         try:
             loop = asyncio.get_running_loop()
@@ -697,6 +698,14 @@ class ErrorHandler:
         }
 
         return severity_mapping.get(severity, SensitivityLevel.MEDIUM)
+
+    async def shutdown(self) -> None:
+        """Shutdown error handler and cleanup resources."""
+
+        # Force cleanup of expired patterns first
+        self.error_patterns.cleanup_expired()
+
+        self.logger.info("Error handler shutdown completed")
 
 
 # Module-level error handler instance

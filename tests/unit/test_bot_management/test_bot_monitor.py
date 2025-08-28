@@ -61,7 +61,21 @@ def bot_metrics():
 @pytest.fixture
 def monitor(config):
     """Create BotMonitor for testing."""
-    return BotMonitor(config)
+    # BotMonitor now takes no arguments and uses dependency injection
+    monitor = BotMonitor()
+    
+    # Mock the service dependencies to prevent actual service resolution
+    monitor._bot_service = MagicMock()
+    monitor._state_service = MagicMock()
+    monitor._database_service = AsyncMock()
+    monitor._database_service.store_bot_metrics = AsyncMock()  # Mock the expected method
+    monitor._risk_service = MagicMock()
+    monitor._metrics_collector = MagicMock()
+    monitor._metrics_collector.increment = AsyncMock()
+    monitor._metrics_collector.gauge = MagicMock()
+    monitor._config_service = MagicMock()
+    
+    return monitor
 
 
 def create_test_bot_metrics(bot_id: str = "test_bot_001", **overrides) -> BotMetrics:
@@ -97,7 +111,7 @@ class TestBotMonitor:
     @pytest.mark.asyncio
     async def test_monitor_initialization(self, monitor, config):
         """Test monitor initialization."""
-        assert monitor.config == config
+        # BotMonitor no longer has a direct config attribute
         assert monitor.monitored_bots == {}
         assert monitor.alert_history == []
         assert monitor.performance_baselines == {}
@@ -106,23 +120,41 @@ class TestBotMonitor:
     @pytest.mark.asyncio
     async def test_start_monitor(self, monitor):
         """Test monitor startup."""
-        await monitor.start()
-        
-        assert monitor.is_running
-        assert monitor.monitoring_task is not None
+        # Mock the service dependencies to prevent actual service resolution
+        with patch.object(monitor, 'resolve_dependency') as mock_resolve:
+            # Mock all required dependencies
+            mock_resolve.side_effect = lambda dep: MagicMock() if dep in [
+                'BotService', 'StateService', 'DatabaseService', 'MetricsCollector', 'ConfigService'
+            ] else None
+            
+            await monitor.start()
+            
+            assert monitor.is_running
+            assert monitor.monitoring_task is not None
 
     @pytest.mark.asyncio
     async def test_stop_monitor(self, monitor):
         """Test monitor shutdown."""
-        await monitor.start()
-        await monitor.stop()
-        
-        assert not monitor.is_running
+        # Mock the service dependencies to prevent actual service resolution
+        with patch.object(monitor, 'resolve_dependency') as mock_resolve:
+            # Mock all required dependencies
+            mock_resolve.side_effect = lambda dep: MagicMock() if dep in [
+                'BotService', 'StateService', 'DatabaseService', 'MetricsCollector', 'ConfigService'
+            ] else None
+            
+            await monitor.start()
+            await monitor.stop()
+            
+            assert not monitor.is_running
 
     @pytest.mark.asyncio
     async def test_update_bot_metrics(self, monitor, bot_metrics):
         """Test bot metrics update."""
         bot_id = "test_bot_001"
+        
+        # Mock database service to prevent actual database operations
+        mock_db_service = AsyncMock()
+        monitor._database_service = mock_db_service
         
         await monitor.update_bot_metrics(bot_id, bot_metrics)
         
@@ -219,9 +251,16 @@ class TestBotMonitor:
             total_pnl=Decimal("150.50"),
             unrealized_pnl=Decimal("25.30"),
             win_rate=0.92,
+            average_trade_pnl=Decimal("6.02"),
+            max_drawdown=Decimal("15.30"),
+            sharpe_ratio=1.85,
             error_count=2,
             uptime_percentage=0.98,
-            last_heartbeat=datetime.now(timezone.utc)
+            last_heartbeat=datetime.now(timezone.utc),
+            api_calls_count=350,
+            start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+            metrics_updated_at=datetime.now(timezone.utc)
         )
         
         await monitor.update_bot_metrics(bot_id, high_cpu_metrics)
@@ -251,9 +290,16 @@ class TestBotMonitor:
                 total_pnl=Decimal("150.50"),
                 unrealized_pnl=Decimal("25.30"),
                 win_rate=0.92,
+                average_trade_pnl=Decimal("6.02"),
+                max_drawdown=Decimal("15.30"),
+                sharpe_ratio=1.85,
                 error_count=1,
                 uptime_percentage=0.98,
-                last_heartbeat=datetime.now(timezone.utc)
+                last_heartbeat=datetime.now(timezone.utc),
+                api_calls_count=350,
+                start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+                last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+                metrics_updated_at=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, metrics)
         
@@ -283,9 +329,16 @@ class TestBotMonitor:
                 total_pnl=Decimal("150.50"),
                 unrealized_pnl=Decimal("25.30"),
                 win_rate=0.92,
+                average_trade_pnl=Decimal("6.02"),
+                max_drawdown=Decimal("15.30"),
+                sharpe_ratio=1.85,
                 error_count=1,
                 uptime_percentage=0.98,
-                last_heartbeat=datetime.now(timezone.utc)
+                last_heartbeat=datetime.now(timezone.utc),
+                api_calls_count=350,
+                start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+                last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+                metrics_updated_at=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, normal_metrics)
         
@@ -302,9 +355,16 @@ class TestBotMonitor:
             total_pnl=Decimal("150.50"),
             unrealized_pnl=Decimal("25.30"),
             win_rate=0.92,
+            average_trade_pnl=Decimal("6.02"),
+            max_drawdown=Decimal("15.30"),
+            sharpe_ratio=1.85,
             error_count=1,
             uptime_percentage=0.98,
-            last_heartbeat=datetime.now(timezone.utc)
+            last_heartbeat=datetime.now(timezone.utc),
+            api_calls_count=350,
+            start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+            metrics_updated_at=datetime.now(timezone.utc)
         )
         
         anomalies = await monitor._detect_anomalies(bot_id, anomalous_metrics)
@@ -328,9 +388,16 @@ class TestBotMonitor:
                 total_pnl=Decimal("150.50"),
                 unrealized_pnl=Decimal("25.30"),
                 win_rate=0.92,
+                average_trade_pnl=Decimal("6.02"),
+                max_drawdown=Decimal("15.30"),
+                sharpe_ratio=1.85,
                 error_count=1,
                 uptime_percentage=0.98,
-                last_heartbeat=datetime.now(timezone.utc)
+                last_heartbeat=datetime.now(timezone.utc),
+                api_calls_count=350,
+                start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+                last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+                metrics_updated_at=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, metrics)
         
@@ -412,7 +479,13 @@ class TestBotMonitor:
     @pytest.mark.asyncio
     async def test_monitoring_loop(self, monitor):
         """Test monitoring loop functionality."""
-        await monitor.start()
+        # Mock the service dependencies
+        with patch.object(monitor, 'resolve_dependency') as mock_resolve:
+            mock_resolve.side_effect = lambda dep: MagicMock() if dep in [
+                'BotService', 'StateService', 'DatabaseService', 'MetricsCollector', 'ConfigService'
+            ] else None
+            
+            await monitor.start()
         
         # Add a bot with metrics
         bot_id = "test_bot_001"
@@ -426,9 +499,16 @@ class TestBotMonitor:
             total_pnl=Decimal("150.50"),
             unrealized_pnl=Decimal("0.00"),
             win_rate=0.92,
+            average_trade_pnl=Decimal("6.02"),
+            max_drawdown=Decimal("15.30"),
+            sharpe_ratio=1.85,
             uptime_percentage=0.9,
             error_count=2,
-            last_heartbeat=datetime.now(timezone.utc)
+            last_heartbeat=datetime.now(timezone.utc),
+            api_calls_count=350,
+            start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+            metrics_updated_at=datetime.now(timezone.utc)
         )
         await monitor.update_bot_metrics(bot_id, metrics)
         
@@ -454,9 +534,16 @@ class TestBotMonitor:
             total_pnl=Decimal("150.50"),
             unrealized_pnl=Decimal("0.00"),
             win_rate=0.92,
+            average_trade_pnl=Decimal("6.02"),
+            max_drawdown=Decimal("15.30"),
+            sharpe_ratio=1.85,
             uptime_percentage=0.9,
             error_count=2,
-            last_heartbeat=datetime.now(timezone.utc)
+            last_heartbeat=datetime.now(timezone.utc),
+            api_calls_count=350,
+            start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+            metrics_updated_at=datetime.now(timezone.utc)
         )
         
         # Simulate old metrics in history
@@ -527,9 +614,16 @@ class TestBotMonitor:
                 total_pnl=Decimal("200.00"),
                 unrealized_pnl=Decimal("0.00"),
                 win_rate=0.98,
+                average_trade_pnl=Decimal("6.02"),
+                max_drawdown=Decimal("15.30"),
+                sharpe_ratio=1.85,
                 uptime_percentage=0.95,
                 error_count=1,
-                last_heartbeat=datetime.now(timezone.utc)
+                last_heartbeat=datetime.now(timezone.utc),
+                api_calls_count=350,
+                start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+                last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+                metrics_updated_at=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, good_metrics)
         
@@ -546,9 +640,16 @@ class TestBotMonitor:
             total_pnl=Decimal("150.00"),  # Lower performance
             unrealized_pnl=Decimal("0.00"),
             win_rate=0.91,
+            average_trade_pnl=Decimal("6.02"),
+            max_drawdown=Decimal("15.30"),
+            sharpe_ratio=1.85,
             uptime_percentage=0.85,
             error_count=8,
-            last_heartbeat=datetime.now(timezone.utc)
+            last_heartbeat=datetime.now(timezone.utc),
+            api_calls_count=350,
+            start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+            metrics_updated_at=datetime.now(timezone.utc)
         )
         
         degradation = await monitor._detect_performance_degradation(bot_id, degraded_metrics)
@@ -589,9 +690,16 @@ class TestBotMonitor:
                 total_pnl=Decimal("150.50"),
                 unrealized_pnl=Decimal("0.00"),
                 win_rate=0.92,
+                average_trade_pnl=Decimal("6.02"),
+                max_drawdown=Decimal("15.30"),
+                sharpe_ratio=1.85,
                 uptime_percentage=0.95,
                 error_count=2 + i,  # Trending upward
-                last_heartbeat=base_time + timedelta(minutes=i * 5)
+                last_heartbeat=base_time + timedelta(minutes=i * 5),
+                api_calls_count=350,
+                start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+                last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+                metrics_updated_at=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, trending_metrics)
         
@@ -622,9 +730,16 @@ class TestBotMonitor:
                 total_pnl=Decimal("150.50"),
                 unrealized_pnl=Decimal("0.00"),
                 win_rate=0.92,
+                average_trade_pnl=Decimal("6.02"),
+                max_drawdown=Decimal("15.30"),
+                sharpe_ratio=1.85,
                 uptime_percentage=0.95,
                 error_count=int(error_rate * 100),  # Convert error_rate to count
-                last_heartbeat=datetime.now(timezone.utc)
+                last_heartbeat=datetime.now(timezone.utc),
+                api_calls_count=350,
+                start_time=datetime.now(timezone.utc) - timedelta(hours=1),
+                last_trade_time=datetime.now(timezone.utc) - timedelta(minutes=5),
+                metrics_updated_at=datetime.now(timezone.utc)
             )
             await monitor.update_bot_metrics(bot_id, metrics)
         

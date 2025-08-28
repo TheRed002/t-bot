@@ -123,7 +123,8 @@ class TestBotLifecycle:
         # Create bot configuration
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
-            bot_name="Test Bot",
+            name="Test Bot",
+            version="1.0.0",
             bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
@@ -151,7 +152,8 @@ class TestBotLifecycle:
         """Test bot deployment with staged strategy."""
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
-            bot_name="Test Bot",
+            name="Test Bot",
+            version="1.0.0",
             bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
@@ -177,7 +179,8 @@ class TestBotLifecycle:
         """Test bot deployment failure."""
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
-            bot_name="Test Bot",
+            name="Test Bot",
+            version="1.0.0",
             bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
@@ -190,7 +193,8 @@ class TestBotLifecycle:
         )
         
         # Mock orchestrator failure
-        mock_orchestrator.create_bot.side_effect = Exception("Deployment failed")
+        from src.core.exceptions import ExecutionError
+        mock_orchestrator.create_bot.side_effect = ExecutionError("Deployment failed")
         
         await lifecycle._initialize_bot_lifecycle("test_bot_001", "simple_strategy_bot", "immediate")
         
@@ -419,7 +423,8 @@ class TestBotLifecycle:
         """Test different deployment strategy execution."""
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
-            bot_name="Test Bot",
+            name="Test Bot",
+            version="1.0.0",
             bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
@@ -469,7 +474,8 @@ class TestBotLifecycle:
         """Test error handling during deployment."""
         bot_config = BotConfiguration(
             bot_id="test_bot_001",
-            bot_name="Test Bot",
+            name="Test Bot",
+            version="1.0.0",
             bot_type=BotType.TRADING,
             priority=BotPriority.NORMAL,
             strategy_name="test_strategy",
@@ -482,7 +488,8 @@ class TestBotLifecycle:
         )
         
         # Mock orchestrator to fail
-        mock_orchestrator.create_bot.side_effect = Exception("Create failed")
+        from src.core.exceptions import ExecutionError
+        mock_orchestrator.create_bot.side_effect = ExecutionError("Create failed")
         
         # Should handle deployment failure gracefully
         success = await lifecycle._deploy_immediate(bot_config, mock_orchestrator, {})

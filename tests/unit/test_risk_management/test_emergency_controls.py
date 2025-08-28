@@ -107,7 +107,7 @@ class TestEmergencyControls:
     async def test_activate_emergency_stop(self, emergency_controls):
         """Test emergency stop activation."""
         reason = "Daily loss limit exceeded"
-        trigger_type = CircuitBreakerType.DAILY_LOSS_LIMIT_LIMIT_LIMIT
+        trigger_type = CircuitBreakerType.DAILY_LOSS_LIMIT
 
         await emergency_controls.activate_emergency_stop(reason, trigger_type)
 
@@ -131,7 +131,7 @@ class TestEmergencyControls:
 
         with pytest.raises(EmergencyStopError):
             await emergency_controls.activate_emergency_stop(
-                "Test reason", CircuitBreakerType.DAILY_LOSS_LIMIT_LIMIT_LIMIT
+                "Test reason", CircuitBreakerType.DAILY_LOSS_LIMIT
             )
 
     @pytest.mark.asyncio
@@ -464,7 +464,7 @@ class TestEmergencyControlsIntegration:
 
             # Activate emergency stop
             await emergency_controls.activate_emergency_stop(
-                "Test emergency", CircuitBreakerType.DAILY_LOSS_LIMIT_LIMIT_LIMIT
+                "Test emergency", CircuitBreakerType.DAILY_LOSS_LIMIT
             )
 
             assert emergency_controls.state == EmergencyState.EMERGENCY
@@ -512,7 +512,7 @@ class TestEmergencyControlsIntegration:
 
             # Activate emergency stop
             await emergency_controls.activate_emergency_stop(
-                "Test emergency", CircuitBreakerType.DAILY_LOSS_LIMIT_LIMIT_LIMIT
+                "Test emergency", CircuitBreakerType.DAILY_LOSS_LIMIT
             )
 
             # Verify orders were cancelled

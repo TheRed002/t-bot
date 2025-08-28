@@ -400,7 +400,7 @@ class HealthCheckManager(BaseComponent):
             Dictionary mapping component names to health results
         """
         start_time = datetime.now(timezone.utc)
-        results = {}
+        results: dict[str, HealthCheckResult] = {}
 
         enabled_components = [name for name, info in self._components.items() if info.enabled]
 

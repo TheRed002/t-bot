@@ -40,11 +40,9 @@ class TestKellyCriterionPrecision:
     def config(self):
         """Create test configuration with known Kelly parameters."""
         config = Config()
-        # Set known Kelly parameters for testing
-        config.risk.kelly_lookback_days = 30
-        config.risk.kelly_max_fraction = 0.25  # 25% max Kelly
-        config.risk.default_position_size_pct = 0.02  # 2% default
-        config.risk.max_position_size_pct = 0.10  # 10% max position
+        # Note: RiskConfig uses different attribute names than expected
+        # kelly_fraction instead of kelly_max_fraction
+        # risk_per_trade instead of default_position_size_pct
         return config
 
     @pytest.fixture
@@ -135,7 +133,7 @@ class TestKellyCriterionPrecision:
         position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
         # Should be capped at max Kelly fraction
-        max_allowed = portfolio_value * Decimal(str(position_sizer.risk_config.kelly_max_fraction))
+        max_allowed = portfolio_value * Decimal(str(position_sizer.risk_config.kelly_fraction))
         max_with_confidence = max_allowed * Decimal(str(sample_signal.strength))
 
         assert position_size <= max_with_confidence
@@ -153,8 +151,8 @@ class TestKellyCriterionPrecision:
         # Kelly with all negative returns should fallback to fixed percentage
         position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
-        # Should fallback to fixed percentage sizing
-        expected_fallback = portfolio_value * Decimal("0.02") * Decimal(str(sample_signal.strength))
+        # Should fallback to fixed percentage sizing (using risk_per_trade from config)
+        expected_fallback = portfolio_value * Decimal(str(position_sizer.risk_config.risk_per_trade)) * Decimal(str(sample_signal.strength))
         assert position_size == expected_fallback
 
     @pytest.mark.asyncio
@@ -168,8 +166,8 @@ class TestKellyCriterionPrecision:
 
         position_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
-        # Should fallback to fixed percentage sizing
-        expected_fallback = portfolio_value * Decimal("0.02") * Decimal(str(sample_signal.strength))
+        # Should fallback to fixed percentage sizing (using risk_per_trade from config)
+        expected_fallback = portfolio_value * Decimal(str(position_sizer.risk_config.risk_per_trade)) * Decimal(str(sample_signal.strength))
         assert position_size == expected_fallback
 
     @pytest.mark.asyncio
@@ -356,23 +354,23 @@ class TestKellyCriterionPrecision:
         returns = [0.02, 0.01, 0.03, -0.01, 0.015] * 6  # 30 returns
         position_sizer.return_history["BTCUSDT"] = returns
 
-        # Calculate using main method
+        # Calculate using main method (fix enum value)
         size = await position_sizer.calculate_position_size(
-            sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION_CRITERION_CRITERION
+            sample_signal, portfolio_value, PositionSizeMethod.KELLY_CRITERION
         )
 
         # Calculate using internal method
         internal_size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
-        # Should apply additional limits in main method
+        # Should apply additional limits in main method (fix attribute name)
         assert size <= portfolio_value * Decimal(
-            str(position_sizer.risk_config.max_position_size_pct)
+            str(position_sizer.risk_config.risk_per_trade)
         )
         assert size >= Decimal("0")
 
-        # If within limits, should match internal calculation
+        # If within limits, should match internal calculation (fix attribute name)
         max_allowed = portfolio_value * Decimal(
-            str(position_sizer.risk_config.max_position_size_pct)
+            str(position_sizer.risk_config.risk_per_trade)
         )
         if internal_size <= max_allowed:
             assert size == internal_size
@@ -430,9 +428,9 @@ class TestKellyCriterionPrecision:
 
             size = await position_sizer._kelly_criterion_sizing(sample_signal, portfolio_value)
 
-            # Should fallback to fixed percentage
+            # Should fallback to fixed percentage (using risk_per_trade from config)
             expected_fallback = (
-                portfolio_value * Decimal("0.02") * Decimal(str(sample_signal.strength))
+                portfolio_value * Decimal(str(position_sizer.risk_config.risk_per_trade)) * Decimal(str(sample_signal.strength))
             )
             assert size == expected_fallback
 

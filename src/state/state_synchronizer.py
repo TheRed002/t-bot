@@ -10,7 +10,10 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from src.core.base.component import BaseComponent
-from src.core.exceptions import StateError
+from src.core.exceptions import StateConsistencyError, SynchronizationError
+
+# Service layer imports
+from .services import StateSynchronizationServiceProtocol
 
 if TYPE_CHECKING:
     from .state_service import StateChange, StateService
@@ -20,8 +23,8 @@ class StateSynchronizer(BaseComponent):
     """
     Handles state synchronization across components and services.
 
-    Provides methods for syncing state changes, conflict resolution,
-    and ensuring eventual consistency across the system.
+    This is now a wrapper around the service layer to maintain backward compatibility
+    while properly separating concerns.
     """
 
     def __init__(self, state_service: "StateService"):
@@ -34,7 +37,10 @@ class StateSynchronizer(BaseComponent):
         super().__init__()
         self.state_service = state_service
 
-        # Synchronization queues
+        # Use service layer instead of direct synchronization logic
+        self._synchronization_service: StateSynchronizationServiceProtocol | None = None
+
+        # Synchronization queues (maintained for compatibility)
         self._sync_queue: asyncio.Queue = asyncio.Queue()
         self._pending_changes: list[StateChange] = []
 
@@ -52,24 +58,32 @@ class StateSynchronizer(BaseComponent):
         self._successful_syncs = 0
         self._failed_syncs = 0
 
-        self.logger.info("StateSynchronizer initialized")
+        self.logger.info("StateSynchronizer initialized as service layer wrapper")
 
-    async def initialize(self) -> None:
-        """Initialize the synchronizer."""
+    async def _do_start(self) -> None:
+        """Start the synchronizer (BaseComponent lifecycle method)."""
         try:
-            # Start background sync task
+            # Get synchronization service from state service
+            if hasattr(self.state_service, "_synchronization_service"):
+                self._synchronization_service = self.state_service._synchronization_service
+                self.logger.info("Using service layer for synchronization operations")
+            else:
+                self.logger.warning(
+                    "No synchronization service available - operations will be limited"
+                )
+
+            # Start background sync task for backward compatibility
             self._running = True
             self._sync_task = asyncio.create_task(self._sync_loop())
 
-            super().initialize()
-            self.logger.info("StateSynchronizer initialization completed")
+            self.logger.info("StateSynchronizer startup completed")
 
         except Exception as e:
-            self.logger.error(f"StateSynchronizer initialization failed: {e}")
-            raise StateError(f"Failed to initialize StateSynchronizer: {e}") from e
+            self.logger.error(f"StateSynchronizer startup failed: {e}")
+            raise StateConsistencyError(f"Failed to start StateSynchronizer: {e}") from e
 
-    async def cleanup(self) -> None:
-        """Cleanup synchronizer resources."""
+    async def _do_stop(self) -> None:
+        """Stop the synchronizer (BaseComponent lifecycle method)."""
         try:
             self._running = False
 
@@ -84,11 +98,17 @@ class StateSynchronizer(BaseComponent):
                 except asyncio.CancelledError:
                     pass
 
-            super().cleanup()
-            self.logger.info("StateSynchronizer cleanup completed")
+            # Ensure task is cleaned up
+            self._sync_task = None
+
+            self.logger.info("StateSynchronizer stop completed")
 
         except Exception as e:
-            self.logger.error(f"Error during StateSynchronizer cleanup: {e}")
+            self.logger.error(f"Error during StateSynchronizer stop: {e}")
+            raise
+        finally:
+            # Ensure task reference is cleared even if stop fails
+            self._sync_task = None
 
     async def queue_state_sync(self, state_change: "StateChange") -> None:
         """
@@ -97,10 +117,13 @@ class StateSynchronizer(BaseComponent):
         Args:
             state_change: State change to synchronize
         """
-        await self._sync_queue.put(state_change)
-
-        # Mark change as queued
-        state_change.synchronized = False
+        # Use service layer if available, otherwise fall back to queue
+        if self._synchronization_service:
+            await self._synchronization_service.synchronize_state_change(state_change)
+        else:
+            await self._sync_queue.put(state_change)
+            # Mark change as queued
+            state_change.synchronized = False
 
     async def sync_pending_changes(self) -> bool:
         """
@@ -118,7 +141,18 @@ class StateSynchronizer(BaseComponent):
         try:
             self._total_syncs += 1
 
-            # Collect pending changes
+            # Use service layer if available
+            if self._synchronization_service:
+                # Service layer handles its own synchronization logic
+                metrics = self._synchronization_service.get_synchronization_metrics()
+                self._successful_syncs = metrics.get("total_syncs", 0) - metrics.get(
+                    "sync_failures", 0
+                )
+                self._failed_syncs = metrics.get("sync_failures", 0)
+                self._last_sync_time = datetime.now(timezone.utc)
+                return True
+
+            # Fall back to legacy synchronization logic
             changes_to_sync = []
 
             # Get changes from queue
@@ -166,12 +200,6 @@ class StateSynchronizer(BaseComponent):
 
             self._last_sync_time = datetime.now(timezone.utc)
 
-            # Update state service metrics
-            if hasattr(self.state_service, "_metrics"):
-                sync_rate = self._successful_syncs / max(self._total_syncs, 1)
-                self.state_service._metrics.sync_success_rate = sync_rate
-                self.state_service._metrics.last_successful_sync = self._last_sync_time
-
             return all_successful
 
         except Exception as e:
@@ -191,7 +219,13 @@ class StateSynchronizer(BaseComponent):
         """
         try:
             self.logger.info("Forcing state synchronization...")
-            return await self.sync_pending_changes()
+
+            # Use service layer if available
+            if self._synchronization_service:
+                # Service layer handles force sync internally
+                return True
+            else:
+                return await self.sync_pending_changes()
 
         except Exception as e:
             self.logger.error(f"Force sync failed: {e}")

@@ -675,9 +675,22 @@ class ArtifactStore(BaseService):
         elif isinstance(artifact_data, np.ndarray):
             file_extension = ".npy"
             artifact_path = artifact_dir / f"{base_filename}{file_extension}"
-            await loop.run_in_executor(
-                self._executor, lambda: np.save(artifact_path, artifact_data)
-            )
+
+            def save_numpy():
+                from src.core.exceptions import DataError
+
+                try:
+                    np.save(artifact_path, artifact_data)
+                except Exception as e:
+                    raise DataError(
+                        f"Failed to save numpy array to {artifact_path}",
+                        error_code="DATA_003",
+                        data_type="numpy",
+                        file_path=str(artifact_path),
+                        original_error=str(e),
+                    ) from e
+
+            await loop.run_in_executor(self._executor, save_numpy)
         elif isinstance(artifact_data, dict):
             file_extension = ".json"
             artifact_path = artifact_dir / f"{base_filename}{file_extension}"
@@ -702,19 +715,40 @@ class ArtifactStore(BaseService):
 
     def _save_json_data(self, data: dict, path: Path) -> None:
         """Save JSON data to file."""
-        with open(path, "w") as f:
+        f = None
+        try:
+            f = open(path, "w")
             json.dump(data, f, indent=2, default=str)
+        finally:
+            if f:
+                f.close()
 
     def _save_text_data(self, data: str, path: Path) -> None:
         """Save text data to file."""
-        with open(path, "w") as f:
+        f = None
+        try:
+            f = open(path, "w")
             f.write(data)
+        finally:
+            if f:
+                f.close()
 
     def _save_joblib_data(self, data: Any, path: Path) -> None:
         """Save object using joblib."""
         import joblib
 
-        joblib.dump(data, path)
+        from src.core.exceptions import DataError
+
+        try:
+            joblib.dump(data, path)
+        except Exception as e:
+            raise DataError(
+                f"Failed to save joblib data to {path}",
+                error_code="DATA_003",
+                data_type="joblib",
+                file_path=str(path),
+                original_error=str(e),
+            ) from e
 
     async def _compress_artifact(self, artifact_path: Path) -> Path:
         """Compress artifact file."""
@@ -731,9 +765,17 @@ class ArtifactStore(BaseService):
 
     def _compress_file(self, input_path: Path, output_path: Path) -> None:
         """Compress file using gzip."""
-        with open(input_path, "rb") as f_in:
-            with gzip.open(output_path, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
+        f_in = None
+        f_out = None
+        try:
+            f_in = open(input_path, "rb")
+            f_out = gzip.open(output_path, "wb")
+            shutil.copyfileobj(f_in, f_out)
+        finally:
+            if f_in:
+                f_in.close()
+            if f_out:
+                f_out.close()
 
     async def _calculate_file_hash(self, file_path: Path) -> str:
         """Calculate SHA-256 hash of a file."""
@@ -743,10 +785,15 @@ class ArtifactStore(BaseService):
     def _calculate_hash_sync(self, file_path: Path) -> str:
         """Calculate SHA-256 hash synchronously."""
         sha256_hash = hashlib.sha256()
-        with open(file_path, "rb") as f:
+        f = None
+        try:
+            f = open(file_path, "rb")
             for chunk in iter(lambda: f.read(4096), b""):
                 sha256_hash.update(chunk)
-        return sha256_hash.hexdigest()
+            return sha256_hash.hexdigest()
+        finally:
+            if f:
+                f.close()
 
     async def _save_artifact_metadata(
         self, artifact_dir: Path, base_filename: str, metadata: dict[str, Any]
@@ -763,8 +810,13 @@ class ArtifactStore(BaseService):
 
     def _load_json_sync(self, file_path: Path) -> dict[str, Any]:
         """Load JSON file synchronously."""
-        with open(file_path) as f:
+        f = None
+        try:
+            f = open(file_path)
             return json.load(f)
+        finally:
+            if f:
+                f.close()
 
     async def _find_metadata_file(self, metadata_files: list[Path], data_file: Path) -> Path | None:
         """Find metadata file corresponding to data file."""
@@ -791,14 +843,24 @@ class ArtifactStore(BaseService):
                 original_suffix = file_path.suffix
 
             if compressed:
-                with gzip.open(file_path, "rb") as f:
+                f = None
+                try:
+                    f = gzip.open(file_path, "rb")
                     content = f.read()
+                finally:
+                    if f:
+                        f.close()
                 # Save to temporary file for processing
                 import tempfile
 
-                with tempfile.NamedTemporaryFile(suffix=f".{original_suffix}", delete=False) as tmp:
+                tmp = None
+                try:
+                    tmp = tempfile.NamedTemporaryFile(suffix=f".{original_suffix}", delete=False)
                     tmp.write(content)
                     temp_path = Path(tmp.name)
+                finally:
+                    if tmp:
+                        tmp.close()
 
                 try:
                     result = self._load_by_extension(temp_path)
@@ -817,21 +879,58 @@ class ArtifactStore(BaseService):
         if suffix == ".parquet":
             return pd.read_parquet(file_path)
         elif suffix == ".npy":
-            return np.load(file_path)
+            from src.core.exceptions import DataError
+
+            try:
+                return np.load(file_path)
+            except Exception as e:
+                raise DataError(
+                    f"Failed to load numpy array from {file_path}",
+                    error_code="DATA_002",
+                    data_type="numpy",
+                    file_path=str(file_path),
+                    original_error=str(e),
+                ) from e
         elif suffix == ".json":
-            with open(file_path) as f:
+            f = None
+            try:
+                f = open(file_path)
                 return json.load(f)
+            finally:
+                if f:
+                    f.close()
         elif suffix == ".txt":
-            with open(file_path) as f:
+            f = None
+            try:
+                f = open(file_path)
                 return f.read()
+            finally:
+                if f:
+                    f.close()
         elif suffix == ".joblib":
             import joblib
 
-            return joblib.load(file_path)
+            from src.core.exceptions import DataError
+
+            try:
+                return joblib.load(file_path)
+            except Exception as e:
+                raise DataError(
+                    f"Failed to load joblib data from {file_path}",
+                    error_code="DATA_002",
+                    data_type="joblib",
+                    file_path=str(file_path),
+                    original_error=str(e),
+                ) from e
         else:
             # Default to binary read
-            with open(file_path, "rb") as f:
+            f = None
+            try:
+                f = open(file_path, "rb")
                 return f.read()
+            finally:
+                if f:
+                    f.close()
 
     async def _scan_artifact_directory(
         self, type_dir: Path, model_id: str | None, version: str | None

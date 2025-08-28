@@ -31,14 +31,34 @@ class JoblibStorageBackend(ModelStorageBackend):
 
     def save(self, model_data: dict[str, Any], filepath: Path) -> None:
         """Save model data using joblib."""
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(model_data, filepath)
+        from src.core.exceptions import ModelError
+
+        try:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            joblib.dump(model_data, filepath)
+        except Exception as e:
+            raise ModelError(
+                f"Failed to save model to {filepath}",
+                error_code="MODEL_001",
+                model_path=str(filepath),
+                original_error=str(e),
+            ) from e
 
     def load(self, filepath: Path) -> dict[str, Any]:
         """Load model data using joblib."""
+        from src.core.exceptions import ModelLoadError
+
         if not filepath.exists():
-            raise FileNotFoundError(f"Model file not found: {filepath}")
-        return joblib.load(filepath)
+            raise ModelLoadError(f"Model file not found: {filepath}", model_path=str(filepath))
+
+        try:
+            return joblib.load(filepath)
+        except Exception as e:
+            raise ModelLoadError(
+                f"Failed to load model from {filepath}",
+                model_path=str(filepath),
+                original_error=str(e),
+            ) from e
 
 
 class PickleStorageBackend(ModelStorageBackend):
@@ -48,19 +68,48 @@ class PickleStorageBackend(ModelStorageBackend):
         """Save model data using pickle."""
         import pickle
 
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        with open(filepath, "wb") as f:
-            pickle.dump(model_data, f)
+        from src.core.exceptions import ModelError
+
+        try:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            f = None
+            try:
+                f = open(filepath, "wb")
+                pickle.dump(model_data, f)
+            finally:
+                if f:
+                    f.close()
+        except Exception as e:
+            raise ModelError(
+                f"Failed to save model to {filepath}",
+                error_code="MODEL_001",
+                model_path=str(filepath),
+                original_error=str(e),
+            ) from e
 
     def load(self, filepath: Path) -> dict[str, Any]:
         """Load model data using pickle."""
         import pickle
 
-        if not filepath.exists():
-            raise FileNotFoundError(f"Model file not found: {filepath}")
+        from src.core.exceptions import ModelLoadError
 
-        with open(filepath, "rb") as f:
-            return pickle.load(f)
+        if not filepath.exists():
+            raise ModelLoadError(f"Model file not found: {filepath}", model_path=str(filepath))
+
+        try:
+            f = None
+            try:
+                f = open(filepath, "rb")
+                return pickle.load(f)
+            finally:
+                if f:
+                    f.close()
+        except Exception as e:
+            raise ModelLoadError(
+                f"Failed to load model from {filepath}",
+                model_path=str(filepath),
+                original_error=str(e),
+            ) from e
 
 
 class ModelStorageManager:

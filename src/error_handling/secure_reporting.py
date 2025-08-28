@@ -42,13 +42,8 @@ class ReportingChannel(Enum):
     AUDIT = "audit"  # Audit trail
 
 
-class AlertSeverity(Enum):
-    """Alert severity levels."""
-
-    INFO = "info"
-    WARNING = "warning"
-    ERROR = "error"
-    CRITICAL = "critical"
+# Use common AlertSeverity from monitoring module to maintain consistency
+from src.monitoring.alerting import AlertSeverity
 
 
 @dataclass
@@ -152,7 +147,7 @@ class SecureErrorReporter:
                     ReportingChannel.METRICS,
                 ],
                 min_user_role=UserRole.ADMIN,
-                alert_severity=AlertSeverity.ERROR,
+                alert_severity=AlertSeverity.HIGH,
                 rate_limit=20,
             ),
             # Database errors - alerts for developers and admins
@@ -161,7 +156,7 @@ class SecureErrorReporter:
                 condition="error_category == 'database' and alert_severity in ['error', 'critical']",
                 channels=[ReportingChannel.LOG, ReportingChannel.DATABASE, ReportingChannel.ALERT],
                 min_user_role=UserRole.DEVELOPER,
-                alert_severity=AlertSeverity.WARNING,
+                alert_severity=AlertSeverity.MEDIUM,
                 rate_limit=30,
             ),
             # Network errors - standard logging
@@ -192,8 +187,13 @@ class SecureErrorReporter:
 
     def _background_task_done_callback(self, task: asyncio.Task) -> None:
         """Handle background task completion."""
-        if task.exception():
-            self.logger.error(f"Background maintenance task failed: {task.exception()}")
+        try:
+            exception = task.exception()
+            if exception and not isinstance(exception, asyncio.CancelledError):
+                self.logger.error(f"Background maintenance task failed: {exception}")
+        except asyncio.CancelledError:
+            # Task was cancelled, this is expected during shutdown
+            pass
         # Reset task reference so it can be restarted if needed
         if self._cleanup_task is task:
             self._cleanup_task = None
@@ -623,7 +623,7 @@ class SecureErrorReporter:
 
         # Users can only see their own reports (if user_id matches)
         if security_context.user_role == UserRole.USER:
-            return (
+            return bool(
                 security_context.user_id
                 and report.context.get("user_id") == security_context.user_id
             )
@@ -738,9 +738,9 @@ class SecureErrorReporter:
         if any(keyword in message_lower for keyword in ["critical", "fatal", "security"]):
             return AlertSeverity.CRITICAL
         elif any(keyword in message_lower for keyword in ["error", "failed", "exception"]):
-            return AlertSeverity.ERROR
+            return AlertSeverity.HIGH
         elif any(keyword in message_lower for keyword in ["warning", "warn"]):
-            return AlertSeverity.WARNING
+            return AlertSeverity.MEDIUM
         else:
             return AlertSeverity.INFO
 
@@ -807,7 +807,7 @@ class SecureErrorReporter:
 
     def _get_component_stats(self, reports: list[SecureErrorReport]) -> dict[str, int]:
         """Get error statistics by component."""
-        stats = {}
+        stats: dict[str, int] = {}
         for report in reports:
             component = report.component or "unknown"
             stats[component] = stats.get(component, 0) + 1
@@ -815,7 +815,7 @@ class SecureErrorReporter:
 
     def _get_severity_stats(self, reports: list[SecureErrorReport]) -> dict[str, int]:
         """Get error statistics by severity."""
-        stats = {}
+        stats: dict[str, int] = {}
         for report in reports:
             severity = self._determine_alert_severity(report).value
             stats[severity] = stats.get(severity, 0) + 1
@@ -826,7 +826,7 @@ class SecureErrorReporter:
     ) -> list[dict[str, Any]]:
         """Get time series error statistics."""
         # Group reports by hour
-        hourly_stats = {}
+        hourly_stats: dict[str, int] = {}
         for report in reports:
             hour = report.timestamp.replace(minute=0, second=0, microsecond=0)
             hour_key = hour.isoformat()
@@ -837,7 +837,7 @@ class SecureErrorReporter:
 
     def _get_error_type_stats(self, reports: list[SecureErrorReport]) -> dict[str, int]:
         """Get statistics by error type."""
-        stats = {}
+        stats: dict[str, int] = {}
         for report in reports:
             # Extract error type from technical message
             error_type = (
@@ -874,7 +874,7 @@ class SecureErrorReporter:
 
     def _group_access_by_role(self) -> dict[str, int]:
         """Group access logs by user role."""
-        stats = {}
+        stats: dict[str, int] = {}
         for log in self._access_logs:
             role = log.get("user_role", "unknown")
             stats[role] = stats.get(role, 0) + 1
@@ -895,6 +895,27 @@ class SecureErrorReporter:
             "metrics": asdict(self._metrics),
             "background_tasks_running": not (self._cleanup_task and self._cleanup_task.done()),
         }
+
+    async def shutdown(self) -> None:
+        """Shutdown secure error reporter and cleanup resources."""
+
+        # Cancel background tasks
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup secure reporting task: {e}")
+
+        # Clear all data
+        self._error_reports.clear()
+        self._error_alerts.clear()
+        self._access_logs.clear()
+        self._user_sessions.clear()
+
+        self.logger.info("Secure error reporter shutdown completed")
 
 
 # Global secure error reporter instance

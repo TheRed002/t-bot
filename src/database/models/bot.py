@@ -3,15 +3,19 @@
 import uuid
 
 from sqlalchemy import (
+    DECIMAL,
     JSON,
     Boolean,
     CheckConstraint,
     Column,
+    DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
     String,
+    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -42,14 +46,14 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     paper_trading = Column(Boolean, default=False)
 
     # Capital allocation
-    allocated_capital = Column(Float, default=0)
-    current_balance = Column(Float, default=0)
+    allocated_capital = Column(DECIMAL(20, 8), default=0)
+    current_balance = Column(DECIMAL(20, 8), default=0)
 
     # Performance metrics
     total_trades = Column(Integer, default=0)
     winning_trades = Column(Integer, default=0)
     losing_trades = Column(Integer, default=0)
-    total_pnl = Column(Float, default=0)
+    total_pnl = Column(DECIMAL(20, 8), default=0)
 
     # Configuration
     config = Column(JSON, default={})
@@ -61,12 +65,23 @@ class Bot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     trades = relationship("Trade", back_populates="bot")
     logs = relationship("BotLog", back_populates="bot", cascade="all, delete-orphan")
 
-    # Indexes
+    # Indexes and constraints
     __table_args__ = (
         Index("idx_bots_status", "status"),
         Index("idx_bots_exchange", "exchange"),
         Index("idx_bots_created_at", "created_at"),
         CheckConstraint("allocated_capital >= 0", name="check_allocated_capital_non_negative"),
+        CheckConstraint("current_balance >= 0", name="check_current_balance_non_negative"),
+        CheckConstraint("total_trades >= 0", name="check_total_trades_non_negative"),
+        CheckConstraint("winning_trades >= 0", name="check_winning_trades_non_negative"),
+        CheckConstraint("losing_trades >= 0", name="check_losing_trades_non_negative"),
+        CheckConstraint(
+            "winning_trades + losing_trades <= total_trades", name="check_trades_consistency"
+        ),
+        CheckConstraint(
+            "status IN ('INITIALIZING', 'RUNNING', 'PAUSED', 'STOPPING', 'STOPPED', 'ERROR')",
+            name="check_bot_status",
+        ),
     )
 
     def __repr__(self):
@@ -110,10 +125,10 @@ class Strategy(Base, AuditMixin, MetadataMixin):
     params = Column(JSON, default={})
 
     # Risk parameters
-    max_position_size = Column(Float)
-    risk_per_trade = Column(Float)
-    stop_loss_percentage = Column(Float)
-    take_profit_percentage = Column(Float)
+    max_position_size = Column(DECIMAL(20, 8))
+    risk_per_trade = Column(DECIMAL(6, 4))
+    stop_loss_percentage = Column(DECIMAL(6, 4))
+    take_profit_percentage = Column(DECIMAL(6, 4))
 
     # Performance tracking
     total_signals = Column(Integer, default=0)
@@ -127,13 +142,30 @@ class Strategy(Base, AuditMixin, MetadataMixin):
     trades = relationship("Trade", back_populates="strategy")
     signals = relationship("Signal", back_populates="strategy", cascade="all, delete-orphan")
 
-    # Indexes
+    # Indexes and constraints
     __table_args__ = (
         Index("idx_strategies_bot_id", "bot_id"),
         Index("idx_strategies_status", "status"),
         Index("idx_strategies_type", "type"),
         CheckConstraint(
             "risk_per_trade >= 0 AND risk_per_trade <= 1", name="check_risk_per_trade_range"
+        ),
+        CheckConstraint("max_position_size > 0", name="check_max_position_size_positive"),
+        CheckConstraint(
+            "stop_loss_percentage >= 0 AND stop_loss_percentage <= 1", name="check_stop_loss_range"
+        ),
+        CheckConstraint("take_profit_percentage >= 0", name="check_take_profit_non_negative"),
+        CheckConstraint("total_signals >= 0", name="check_total_signals_non_negative"),
+        CheckConstraint("executed_signals >= 0", name="check_executed_signals_non_negative"),
+        CheckConstraint("successful_signals >= 0", name="check_successful_signals_non_negative"),
+        CheckConstraint(
+            "executed_signals <= total_signals", name="check_signals_execution_consistency"
+        ),
+        CheckConstraint(
+            "successful_signals <= executed_signals", name="check_signals_success_consistency"
+        ),
+        CheckConstraint(
+            "status IN ('ACTIVE', 'INACTIVE', 'PAUSED', 'ERROR')", name="check_strategy_status"
         ),
     )
 
@@ -166,9 +198,9 @@ class Signal(Base, TimestampMixin, MetadataMixin):
     strength = Column(Float)  # Signal strength 0-1
 
     # Signal details
-    price = Column(Float)
-    quantity = Column(Float)
-    reason = Column(String(500))
+    price = Column(DECIMAL(20, 8))
+    quantity = Column(DECIMAL(20, 8))
+    reason = Column(Text)
 
     # Execution status
     executed = Column(Boolean, default=False)
@@ -177,18 +209,28 @@ class Signal(Base, TimestampMixin, MetadataMixin):
 
     # Outcome
     outcome = Column(String(20))  # SUCCESS, FAILURE, PARTIAL, EXPIRED
-    pnl = Column(Float)
+    pnl = Column(DECIMAL(20, 8))
 
     # Relationships
     strategy = relationship("Strategy", back_populates="signals")
     order = relationship("Order")
 
-    # Indexes
+    # Indexes and constraints
     __table_args__ = (
         Index("idx_signals_strategy_id", "strategy_id"),
         Index("idx_signals_symbol", "symbol"),
         Index("idx_signals_created_at", "created_at"),
         Index("idx_signals_executed", "executed"),
+        Index("idx_signals_outcome", "outcome"),
+        Index("idx_signals_strength", "strength"),
+        CheckConstraint("strength >= 0 AND strength <= 1", name="check_signal_strength_range"),
+        CheckConstraint("price > 0", name="check_signal_price_positive"),
+        CheckConstraint("quantity > 0", name="check_signal_quantity_positive"),
+        CheckConstraint("execution_time >= 0", name="check_execution_time_non_negative"),
+        CheckConstraint("action IN ('BUY', 'SELL', 'HOLD', 'CLOSE')", name="check_signal_action"),
+        CheckConstraint(
+            "outcome IN ('SUCCESS', 'FAILURE', 'PARTIAL', 'EXPIRED')", name="check_signal_outcome"
+        ),
     )
 
     def __repr__(self):
@@ -206,28 +248,69 @@ class Signal(Base, TimestampMixin, MetadataMixin):
 
 
 class BotLog(Base, TimestampMixin):
-    """Bot activity log model."""
+    """Bot activity log model for error handling and audit trail."""
 
     __tablename__ = "bot_logs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id"), nullable=False)
+    bot_id = Column(UUID(as_uuid=True), ForeignKey("bots.id", ondelete="CASCADE"), nullable=False)
 
     level = Column(String(20), nullable=False)  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     category = Column(String(50))  # strategy, execution, risk, system, etc.
-    message = Column(String(2000), nullable=False)
+    message = Column(Text, nullable=False)
+
+    # Error handling specific fields
+    error_code = Column(String(50))
+    error_type = Column(String(100))
+    stack_trace = Column(Text)
 
     # Additional context
-    context = Column(JSON)
+    context = Column(JSON, default={})
+
+    # Correlation for tracking related events
+    correlation_id = Column(String(100), index=True)
+    request_id = Column(String(100), index=True)
+
+    # Source information
+    component = Column(String(100))
+    function_name = Column(String(100))
+
+    # Severity and priority
+    severity_score = Column(Integer, default=0)  # 0-100 scale
+    requires_attention = Column(Boolean, default=False)
+
+    # Resolution tracking
+    resolved = Column(Boolean, default=False)
+    resolved_at = Column(DateTime(timezone=True))
+    resolution_notes = Column(Text)
 
     # Relationships
     bot = relationship("Bot", back_populates="logs")
 
-    # Indexes
+    # Indexes and constraints
     __table_args__ = (
         Index("idx_bot_logs_bot_id", "bot_id"),
         Index("idx_bot_logs_level", "level"),
         Index("idx_bot_logs_created_at", "created_at"),
+        Index("idx_bot_logs_category", "category"),
+        Index("idx_bot_logs_error_code", "error_code"),
+        Index("idx_bot_logs_correlation", "correlation_id"),
+        Index("idx_bot_logs_resolved", "resolved"),
+        Index("idx_bot_logs_attention", "requires_attention"),
+        Index("idx_bot_logs_severity", "severity_score"),
+        Index("idx_bot_logs_composite", "bot_id", "level", "created_at"),
+        CheckConstraint(
+            "level IN ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL')", name="check_log_level"
+        ),
+        CheckConstraint(
+            "severity_score >= 0 AND severity_score <= 100", name="check_severity_score_range"
+        ),
+        CheckConstraint(
+            "resolved_at IS NULL OR resolved = true", name="check_resolved_consistency"
+        ),
+        UniqueConstraint(
+            "bot_id", "correlation_id", "created_at", name="unique_bot_log_correlation"
+        ),
     )
 
     def __repr__(self):

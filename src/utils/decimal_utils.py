@@ -11,7 +11,7 @@ to financial losses.
 
 import logging
 import warnings
-from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, setcontext
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, setcontext
 from typing import Any
 
 from src.core.exceptions import ValidationError
@@ -37,10 +37,11 @@ def safe_decimal(value: Any, default: Decimal | None = None) -> Decimal:
         return value
     try:
         return Decimal(str(value))
-    except Exception:
+    except (InvalidOperation, ValueError, TypeError, OverflowError) as e:
         default_val = default if default is not None else Decimal("0")
         logger.warning(
-            f"safe_decimal: Failed to convert {type(value).__name__} '{value}' to Decimal, returning {default_val}"
+            f"safe_decimal: Failed to convert {type(value).__name__} '{value}' "
+            f"to Decimal: {e}, returning {default_val}"
         )
         return default_val
 

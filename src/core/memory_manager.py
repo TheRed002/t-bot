@@ -88,15 +88,18 @@ class ObjectPool(Generic[T]):
         self.name = name
 
         # Thread-safe pool using deque
-        self._pool = deque(maxlen=max_size)
+        self._pool: deque[T] = deque(maxlen=max_size)
         self._lock = threading.RLock()
-        self._in_use = set()  # Track objects in use
+        self._in_use: set[int] = set()  # Track object IDs in use
 
         # Statistics
         self.created_count = 0
         self.borrowed_count = 0
         self.returned_count = 0
         self.discarded_count = 0
+
+        # Logger
+        self.logger = get_logger(f"{__name__}.ObjectPool.{name}")
 
         # Pre-populate pool
         self._populate_pool()
@@ -142,7 +145,8 @@ class ObjectPool(Generic[T]):
             # Reset object
             try:
                 self.reset_func(obj)
-            except Exception:
+            except Exception as e:
+                self.logger.warning(f"Failed to reset object in pool {self.name}: {e}")
                 # If reset fails, discard object
                 self.discarded_count += 1
                 return
@@ -181,7 +185,7 @@ class MemoryLeakDetector:
 
     def __init__(self, check_interval: int = 300):  # 5 minutes
         self.check_interval = check_interval
-        self.snapshots = deque(maxlen=100)  # Keep last 100 snapshots
+        self.snapshots: deque[dict[str, Any]] = deque(maxlen=100)  # Keep last 100 snapshots
         self.is_running = False
         self.logger = get_logger(f"{__name__}.LeakDetector")
 
@@ -356,6 +360,7 @@ class MemoryMappedCache:
         self.mmap_file = None
         self.file_handle = None
         self.current_size = 0
+        self.logger = get_logger(f"{__name__}.MemoryMappedCache")
 
         # Create file if it doesn't exist
         if not os.path.exists(file_path):
@@ -383,7 +388,8 @@ class MemoryMappedCache:
             self.mmap_file[offset : offset + len(data)] = data
             self.current_size = max(self.current_size, offset + len(data))
             return True
-        except Exception:
+        except (ValueError, OSError) as e:
+            self.logger.error(f"Failed to write data to memory-mapped file: {e}")
             return False
 
     def read_data(self, offset: int, length: int) -> bytes | None:
@@ -393,7 +399,8 @@ class MemoryMappedCache:
 
         try:
             return self.mmap_file[offset : offset + length]
-        except Exception:
+        except (ValueError, OSError) as e:
+            self.logger.error(f"Failed to read data from memory-mapped file: {e}")
             return None
 
     def close(self):
@@ -412,7 +419,7 @@ class HighPerformanceMemoryManager:
         self.logger = get_logger(__name__)
 
         # Object pools for common objects
-        self.pools = {}
+        self.pools: dict[str, ObjectPool[Any]] = {}
         self._initialize_pools()
 
         # Memory monitoring
@@ -420,10 +427,10 @@ class HighPerformanceMemoryManager:
         self.leak_detector = MemoryLeakDetector()
 
         # Weak reference tracking
-        self.weak_refs = weakref.WeakSet()
+        self.weak_refs: weakref.WeakSet[Any] = weakref.WeakSet()
 
         # Memory statistics
-        self.stats_history = deque(maxlen=1000)  # Keep last 1000 readings
+        self.stats_history: deque[MemoryStats] = deque(maxlen=1000)  # Keep last 1000 readings
 
         # Background monitoring
         self.monitoring_task = None

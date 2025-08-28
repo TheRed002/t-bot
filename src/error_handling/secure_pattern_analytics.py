@@ -126,7 +126,7 @@ class SecurePatternAnalytics:
     - Integration with monitoring and alerting systems
     """
 
-    def __init__(self, config: AnalyticsConfig = None):
+    def __init__(self, config: AnalyticsConfig | None = None):
         self.config = config or AnalyticsConfig()
         self.logger = get_logger(self.__class__.__module__)
         self.sanitizer = get_security_sanitizer()
@@ -346,7 +346,7 @@ class SecurePatternAnalytics:
     def _anonymize_security_context(self, security_context: SecurityContext) -> dict[str, Any]:
         """Anonymize security context for pattern analysis."""
 
-        anonymized = {}
+        anonymized: dict[str, Any] = {}
 
         # Anonymize user ID
         if security_context.user_id and not self.config.anonymize_user_data:
@@ -519,7 +519,7 @@ class SecurePatternAnalytics:
     def _analyze_geographic_distribution(self, events: list[dict[str, Any]]) -> dict[str, int]:
         """Analyze geographic distribution of events."""
 
-        geo_dist = defaultdict(int)
+        geo_dist: dict[str, int] = defaultdict(int)
 
         for event in events:
             region = event.get("ip_region", "unknown")
@@ -530,7 +530,7 @@ class SecurePatternAnalytics:
     def _analyze_time_distribution(self, events: list[dict[str, Any]]) -> dict[str, int]:
         """Analyze temporal distribution of events."""
 
-        time_dist = defaultdict(int)
+        time_dist: dict[str, int] = defaultdict(int)
 
         for event in events:
             timestamp = event["timestamp"]
@@ -806,12 +806,17 @@ class SecurePatternAnalytics:
 
     def _log_threat_analysis_exception(self, task: asyncio.Task) -> None:
         """Log exceptions that occur in threat analysis tasks."""
-        if task.exception():
-            self.logger.error(
-                "Exception in threat analysis task",
-                threat_analysis_exception=str(task.exception()),
-                exc_info=task.exception(),
-            )
+        try:
+            exception = task.exception()
+            if exception and not isinstance(exception, asyncio.CancelledError):
+                self.logger.error(
+                    "Exception in threat analysis task",
+                    threat_analysis_exception=str(exception),
+                    exc_info=exception,
+                )
+        except asyncio.CancelledError:
+            # Task was cancelled, this is expected during shutdown
+            pass
 
     def _start_background_analysis(self) -> None:
         """Start background pattern analysis task."""
@@ -875,7 +880,7 @@ class SecurePatternAnalytics:
         }
 
         # Count patterns by threat type
-        threat_counts = defaultdict(int)
+        threat_counts: dict[str, int] = defaultdict(int)
         for pattern in patterns:
             for threat_type in pattern.threat_types:
                 threat_counts[threat_type.value] += 1
@@ -904,8 +909,8 @@ class SecurePatternAnalytics:
         now = datetime.now(timezone.utc)
 
         # Count patterns by time period
-        hour_counts = defaultdict(int)
-        day_counts = defaultdict(int)
+        hour_counts: dict[int, int] = defaultdict(int)
+        day_counts: dict[int, int] = defaultdict(int)
 
         for events in self._temporal_patterns.values():
             for timestamp in events:
@@ -938,7 +943,7 @@ class SecurePatternAnalytics:
 _global_analytics = None
 
 
-def get_pattern_analytics(config: AnalyticsConfig = None) -> SecurePatternAnalytics:
+def get_pattern_analytics(config: AnalyticsConfig | None = None) -> SecurePatternAnalytics:
     """Get global pattern analytics instance."""
     global _global_analytics
     if _global_analytics is None:

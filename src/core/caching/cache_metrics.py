@@ -6,7 +6,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 
 
 @dataclass
@@ -45,13 +45,13 @@ class CacheStats:
 class CacheMetrics(BaseComponent):
     """Cache metrics collector and reporter with memory accounting."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._stats: dict[str, CacheStats] = defaultdict(CacheStats)
-        self._recent_operations: dict[str, deque] = defaultdict(
+        self._recent_operations: dict[str, deque[dict[str, Any]]] = defaultdict(
             lambda: deque(maxlen=100)
         )  # Reduced from 1000
-        self._start_time = time.time()
+        self._metrics_start_time: float = time.time()
 
         # Memory tracking
         self._memory_lock = threading.Lock()
@@ -225,7 +225,7 @@ class CacheMetrics(BaseComponent):
             "hit_rate": total_stats.hit_rate,
             "miss_rate": total_stats.miss_rate,
             "avg_response_time": total_stats.avg_response_time,
-            "uptime_seconds": time.time() - self._start_time,
+            "uptime_seconds": time.time() - self._metrics_start_time,
         }
 
         return result
@@ -295,7 +295,7 @@ class CacheMetrics(BaseComponent):
         else:
             self._stats.clear()
             self._recent_operations.clear()
-            self._start_time = time.time()
+            self._metrics_start_time = time.time()
 
     def export_metrics_for_monitoring(self) -> dict[str, Any]:
         """Export metrics in format suitable for monitoring systems."""

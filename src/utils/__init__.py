@@ -153,6 +153,10 @@ from .helpers import (
     # Network utilities
     test_connection,
 )
+from .interfaces import (
+    BaseUtilityService,
+    ValidationServiceInterface,
+)
 from .validation import (
     # Framework and service exports
     ValidationFramework,
@@ -177,6 +181,7 @@ from .validators import (
 
 __all__ = [
     "API_ENDPOINTS",
+    "BaseUtilityService",
     "DEFAULT_VALUES",
     "ERROR_CODES",
     "ERROR_MESSAGES",
@@ -199,6 +204,8 @@ __all__ = [
     "TRADING_PAIRS",
     "ZERO",
     "UnifiedDecorator",
+    # Interfaces
+    "ValidationServiceInterface",
     # Validation framework
     "ValidationFramework",
     "ValidationService",
@@ -291,4 +298,7 @@ __all__ = [
 
 __version__ = "1.0.0"
 __author__ = "Trading Bot Team"
+# Service registry available for explicit registration
+# from .service_registry import register_util_services
+
 __description__ = "Comprehensive utility framework for trading bot system"

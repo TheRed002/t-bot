@@ -24,15 +24,34 @@ from typing import Any
 
 import psutil
 
-from src.core import BaseComponent
-
-# Import core types and exceptions directly
+from src.core.base.component import BaseComponent
 from src.core.exceptions import MonitoringError
-from src.core.types.trading import OrderStatus, OrderType
+from src.core.types import OrderStatus, OrderType
 
-# Import utils decorators and helpers for better integration
-# Import error handling
-from src.error_handling.context import ErrorContext, ErrorSeverity
+# Import error handling with fallback
+try:
+    from src.error_handling.context import ErrorContext, ErrorSeverity
+except ImportError:
+    # Fallback if error handling module not available
+    from dataclasses import dataclass
+    from enum import Enum
+
+    class ErrorSeverity(Enum):
+        LOW = "low"
+        MEDIUM = "medium"
+        HIGH = "high"
+        CRITICAL = "critical"
+
+    @dataclass
+    class ErrorContext:
+        error: Exception | None = None
+        component: str = ""
+        operation: str = ""
+        details: dict = None
+        severity: ErrorSeverity = ErrorSeverity.MEDIUM
+        correlation_id: str = ""
+
+
 from src.monitoring.financial_precision import safe_decimal_to_float, validate_financial_range
 from src.utils.decorators import cache_result, logged, monitored, retry
 from src.utils.validators import (
@@ -64,22 +83,22 @@ except ImportError:
             self._description = args[1] if len(args) > 1 else "Mock metric"
             self._fallback_storage = []  # Store metrics when Prometheus unavailable
             self._logger = logging.getLogger(__name__)
-            
+
         def inc(self, value: float = 1) -> None:
             self._store_fallback_metric("counter", "inc", {"value": value})
-            
+
         def set(self, value: float) -> None:
             self._store_fallback_metric("gauge", "set", {"value": value})
-            
+
         def observe(self, value: float) -> None:
             self._store_fallback_metric("histogram", "observe", {"value": value})
-            
+
         def labels(self, **kwargs: Any) -> "MockMetric":
             mock = MockMetric(self._name, self._description)
             mock._fallback_storage = self._fallback_storage
             mock._logger = self._logger
             return mock
-            
+
         def _store_fallback_metric(self, metric_type: str, operation: str, data: dict) -> None:
             """Store metric data when Prometheus is unavailable."""
             metric_data = {
@@ -88,17 +107,17 @@ except ImportError:
                 "metric_type": metric_type,
                 "operation": operation,
                 "data": data,
-                "correlation_id": str(uuid.uuid4())[:8]
+                "correlation_id": str(uuid.uuid4())[:8],
             }
             self._fallback_storage.append(metric_data)
-            
+
             # Log critical metrics that should trigger alerts
             if self._is_critical_metric():
                 self._logger.warning(
                     f"PROMETHEUS_UNAVAILABLE: Critical metric {self._name} stored in fallback. "
                     f"Operation: {operation}, Data: {data}, Correlation: {metric_data['correlation_id']}"
                 )
-            
+
             # Limit fallback storage to prevent memory issues
             if len(self._fallback_storage) > 10000:
                 self._fallback_storage = self._fallback_storage[-5000:]  # Keep last 5000
@@ -106,12 +125,20 @@ except ImportError:
                     f"Fallback metric storage limit reached for {self._name}. "
                     "Truncated to last 5000 entries. Correlation: {metric_data['correlation_id']}"
                 )
-                
+
         def _is_critical_metric(self) -> bool:
             """Determine if this metric is critical and should trigger alerts."""
             critical_patterns = [
-                "error", "failure", "exception", "circuit_breaker", "limit_violation",
-                "portfolio_value", "risk_", "order_", "trade_", "pnl"
+                "error",
+                "failure",
+                "exception",
+                "circuit_breaker",
+                "limit_violation",
+                "portfolio_value",
+                "risk_",
+                "order_",
+                "trade_",
+                "pnl",
             ]
             return any(pattern in self._name.lower() for pattern in critical_patterns)
 
@@ -194,9 +221,12 @@ class MetricsCollector(BaseComponent):
 
         # Register error handling metrics
         self._register_error_handling_metrics()
-        
+
         # Register system monitoring metrics
         self._register_system_monitoring_metrics()
+
+        # Register analytics metrics
+        self._register_analytics_metrics()
 
     def register_metric(self, definition: MetricDefinition) -> None:
         """
@@ -263,7 +293,7 @@ class MetricsCollector(BaseComponent):
                 else:
                     raise MonitoringError(
                         f"Unknown metric type: {definition.metric_type}",
-                        error_code="MONITORING_002",
+                        error_code="MON_1002",
                     )
 
                 self._metrics[full_name] = new_metric
@@ -303,11 +333,51 @@ class MetricsCollector(BaseComponent):
             labels: Label values
             value: Increment value
             namespace: Metric namespace
+            
+        Raises:
+            ValidationError: If parameters are invalid
+            MonitoringError: If metric operation fails
         """
+        # Validate inputs using core validation patterns
+        from src.core.exceptions import ValidationError
+
+        if not isinstance(name, str) or not name:
+            raise ValidationError(
+                "Invalid metric name",
+                field_name="name",
+                field_value=name,
+                expected_type="non-empty str",
+            )
+
+        if not isinstance(value, (int, float)) or value < 0:
+            raise ValidationError(
+                "Invalid counter value",
+                field_name="value",
+                field_value=value,
+                validation_rule="must be non-negative number",
+            )
+
+        if labels is not None and not isinstance(labels, dict):
+            raise ValidationError(
+                "Invalid labels parameter",
+                field_name="labels",
+                field_value=type(labels).__name__,
+                expected_type="dict or None",
+            )
+
         try:
             metric = self.get_metric(name, namespace)
             if metric and hasattr(metric, "inc"):
                 if labels:
+                    # Validate label values
+                    for key, val in labels.items():
+                        if not isinstance(val, str):
+                            raise ValidationError(
+                                f"Invalid label value for key '{key}'",
+                                field_name=f"labels.{key}",
+                                field_value=val,
+                                expected_type="str",
+                            )
                     metric.labels(**labels).inc(value)
                 else:
                     metric.inc(value)
@@ -316,17 +386,24 @@ class MetricsCollector(BaseComponent):
                 pass
             else:
                 correlation_id = str(uuid.uuid4())[:8]
-                self.logger.warning(
-                    f"Counter metric '{namespace}_{name}' not found or invalid. "
-                    f"Correlation: {correlation_id}"
+                from src.core.exceptions import MonitoringError
+                raise MonitoringError(
+                    f"Counter metric '{namespace}_{name}' not found or invalid",
+                    component_name="MetricsCollector",
+                    details={
+                        "metric_name": name,
+                        "namespace": namespace,
+                        "correlation_id": correlation_id,
+                    },
                 )
+        except ValidationError:
+            # Re-raise validation errors without modification
+            raise
         except Exception as e:
             correlation_id = str(uuid.uuid4())[:8]
-            self.logger.error(
-                f"Failed to increment counter '{namespace}_{name}': {type(e).__name__}: {e}. "
-                f"Correlation: {correlation_id}"
-            )
-            # Track metric operation failures
+            from src.core.exceptions import ComponentError
+
+            # Track metric operation failures using consistent error patterns
             if name != "metrics_collection_errors_total":  # Avoid infinite recursion
                 try:
                     error_metric = self.get_metric("metrics_collection_errors_total")
@@ -338,12 +415,30 @@ class MetricsCollector(BaseComponent):
                             "correlation_id": correlation_id,
                         }
                         error_metric.labels(**error_labels).inc(1)
-                except Exception:
+                except Exception as fallback_error:
                     # Last resort - just log
-                    pass
+                    self.logger.debug(f"Failed to record metrics error: {fallback_error}")
+
+            raise ComponentError(
+                f"Failed to increment counter '{namespace}_{name}': {e}",
+                component="MetricsCollector", 
+                operation="increment_counter",
+                context={
+                    "metric_name": name,
+                    "namespace": namespace,
+                    "value": value,
+                    "labels": labels,
+                    "correlation_id": correlation_id,
+                    "original_error": str(e),
+                },
+            ) from e
 
     def set_gauge(
-        self, name: str, value: float, labels: dict[str, str] | None = None, namespace: str = "tbot"
+        self,
+        name: str,
+        value: float,
+        labels: dict[str, str] | None = None,
+        namespace: str = "tbot",
     ) -> None:
         """
         Set a gauge metric value with enhanced error handling.
@@ -388,11 +483,16 @@ class MetricsCollector(BaseComponent):
                             "correlation_id": correlation_id,
                         }
                         error_metric.labels(**error_labels).inc(1)
-                except Exception:
+                except Exception as fallback_error:
+                    self.logger.debug(f"Failed to record metrics error: {fallback_error}")
                     pass
 
     def observe_histogram(
-        self, name: str, value: float, labels: dict[str, str] | None = None, namespace: str = "tbot"
+        self,
+        name: str,
+        value: float,
+        labels: dict[str, str] | None = None,
+        namespace: str = "tbot",
     ) -> None:
         """
         Observe a histogram metric with enhanced error handling.
@@ -437,7 +537,8 @@ class MetricsCollector(BaseComponent):
                             "correlation_id": correlation_id,
                         }
                         error_metric.labels(**error_labels).inc(1)
-                except Exception:
+                except Exception as fallback_error:
+                    self.logger.debug(f"Failed to record metrics error: {fallback_error}")
                     pass
 
     def time_operation(
@@ -514,7 +615,7 @@ class MetricsCollector(BaseComponent):
     async def cleanup(self) -> None:
         """Cleanup resources on shutdown."""
         await self.stop_collection()
-        
+
         # Cleanup Prometheus registry
         if self.registry:
             try:
@@ -529,7 +630,7 @@ class MetricsCollector(BaseComponent):
             self._metrics.clear()
             self._metric_definitions.clear()
             self._metric_cache.clear()
-        
+
         # Clear error handler reference to prevent circular references
         self._error_handler = None
 
@@ -567,31 +668,43 @@ class MetricsCollector(BaseComponent):
         await self.stop_collection()
 
     async def _collect_system_metrics(self) -> None:
-        """Collect system-level metrics using async-safe operations."""
-        correlation_id = str(uuid.uuid4())[:8]
+        """
+        Collect system-level metrics using async-safe operations.
         
+        Uses streaming pattern consistent with analytics module for real-time processing.
+        """
+        correlation_id = str(uuid.uuid4())[:8]
+
         try:
             # Run psutil operations in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
 
-            # CPU metrics - run in thread pool
-            cpu_percent = await loop.run_in_executor(None, psutil.cpu_percent, None)
+            # Use consistent async task creation pattern from analytics
+            tasks = []
+            
+            # CPU metrics - run in thread pool (stream processing approach)
+            tasks.append(loop.run_in_executor(None, psutil.cpu_percent, None))
+            
+            # Memory metrics - run in thread pool  
+            tasks.append(loop.run_in_executor(None, psutil.virtual_memory))
+            
+            # Disk metrics - run in thread pool
+            tasks.append(loop.run_in_executor(None, psutil.disk_usage, "/"))
+            
+            # Network metrics - run in thread pool
+            tasks.append(loop.run_in_executor(None, psutil.net_io_counters))
+            
+            # Process all metrics concurrently (stream processing pattern)
+            cpu_percent, memory, disk, network = await asyncio.gather(*tasks)
+            
+            # Update metrics with stream-like processing
             self.set_gauge("system_cpu_usage_percent", cpu_percent)
-
-            # Memory metrics - run in thread pool
-            memory = await loop.run_in_executor(None, psutil.virtual_memory)
             self.set_gauge("system_memory_usage_bytes", memory.used)
             self.set_gauge("system_memory_total_bytes", memory.total)
             self.set_gauge("system_memory_usage_percent", memory.percent)
-
-            # Disk metrics - run in thread pool
-            disk = await loop.run_in_executor(None, psutil.disk_usage, "/")
             self.set_gauge("system_disk_usage_bytes", disk.used)
             self.set_gauge("system_disk_total_bytes", disk.total)
             self.set_gauge("system_disk_usage_percent", disk.percent)
-
-            # Network metrics - run in thread pool
-            network = await loop.run_in_executor(None, psutil.net_io_counters)
             self.increment_counter("system_network_bytes_sent_total", value=network.bytes_sent)
             self.increment_counter("system_network_bytes_recv_total", value=network.bytes_recv)
 
@@ -606,20 +719,20 @@ class MetricsCollector(BaseComponent):
                 details={
                     "prometheus_available": PROMETHEUS_AVAILABLE,
                     "metrics_count": len(self._metrics),
-                    "error_handler_available": self._error_handler is not None
-                }
+                    "error_handler_available": self._error_handler is not None,
+                },
             )
-            
+
             # Record metrics collection failure
             self.increment_counter(
                 "system_metrics_collection_errors_total",
-                labels={"error_type": type(e).__name__, "correlation_id": correlation_id}
+                labels={"error_type": type(e).__name__, "correlation_id": correlation_id},
             )
-            
+
             # Enhanced error handling with proper propagation
             handler_success = False
             handler_error = None
-            
+
             if self._error_handler:
                 try:
                     if hasattr(self._error_handler, "handle_error"):
@@ -629,35 +742,37 @@ class MetricsCollector(BaseComponent):
                         self._error_handler.handle_error_sync(e, context)
                         handler_success = True
                     else:
-                        error_msg = f"Error handler has no valid methods. Correlation: {correlation_id}"
+                        error_msg = (
+                            f"Error handler has no valid methods. Correlation: {correlation_id}"
+                        )
                         self.logger.error(error_msg)
-                        raise MonitoringError(error_msg, error_code="MONITORING_003")
-                        
+                        raise MonitoringError(error_msg, error_code="MON_1003")
+
                 except Exception as he:
                     handler_error = he
                     self.logger.error(
                         f"Error handler failed with {type(he).__name__}: {he}. "
                         f"Original error: {type(e).__name__}: {e}. Correlation: {correlation_id}"
                     )
-                    
+
             else:
                 error_msg = f"No error handler available for metrics collection error. Correlation: {correlation_id}"
                 self.logger.error(error_msg)
-                
+
             # Critical: Don't silently continue if system metrics collection fails repeatedly
             if not handler_success:
                 # For critical system monitoring failures, we need to escalate
                 if isinstance(e, (MemoryError, OSError)) or "disk" in str(e).lower():
                     critical_error = MonitoringError(
                         f"Critical system metrics collection failure: {e}. Correlation: {correlation_id}",
-                        error_code="MONITORING_004"
+                        error_code="MON_1004",
                     )
                     # Chain original exception and handler error
                     critical_error.__cause__ = e
                     if handler_error:
                         critical_error.__context__ = handler_error
                     raise critical_error
-                    
+
             # Log warning for non-critical failures but don't stop execution
             self.logger.warning(
                 f"System metrics collection failed but continuing. "
@@ -731,7 +846,7 @@ class MetricsCollector(BaseComponent):
                         "correlation_id": correlation_id,
                     },
                 )
-                
+
     def _register_system_monitoring_metrics(self) -> None:
         """Register metrics for monitoring the monitoring system itself."""
         monitoring_metrics = [
@@ -765,7 +880,7 @@ class MetricsCollector(BaseComponent):
                 ["handler_type", "correlation_id"],
             ),
         ]
-        
+
         for metric_def in monitoring_metrics:
             try:
                 self.register_metric(metric_def)
@@ -776,9 +891,169 @@ class MetricsCollector(BaseComponent):
                     f"Failed to register monitoring metric '{metric_def.name}': "
                     f"{type(e).__name__}: {e}. Correlation: {correlation_id}"
                 )
-                
+
         # Set Prometheus availability status
         self.set_gauge("prometheus_availability", 1.0 if PROMETHEUS_AVAILABLE else 0.0)
+
+    def _register_analytics_metrics(self) -> None:
+        """Register metrics for analytics components."""
+        analytics_metrics = [
+            # Operational analytics metrics
+            MetricDefinition(
+                "operational_order_events",
+                "Order events tracked by operational analytics",
+                "counter",
+                ["exchange", "event_type", "success"],
+            ),
+            MetricDefinition(
+                "operational_order_execution_time",
+                "Order execution time in milliseconds",
+                "histogram",
+                ["exchange", "event_type"],
+                [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+            ),
+            MetricDefinition(
+                "operational_strategy_events",
+                "Strategy events tracked by operational analytics",
+                "counter",
+                ["strategy", "event_type", "success"],
+            ),
+            MetricDefinition(
+                "operational_market_data_events",
+                "Market data events tracked by operational analytics",
+                "counter",
+                ["exchange", "event_type", "success"],
+            ),
+            MetricDefinition(
+                "operational_market_data_latency",
+                "Market data latency in milliseconds",
+                "histogram",
+                ["exchange", "symbol"],
+                [1, 5, 10, 25, 50, 100, 250, 500, 1000],
+            ),
+            MetricDefinition(
+                "operational_errors",
+                "Operational errors by component and type",
+                "counter",
+                ["component", "error_type", "severity"],
+            ),
+            MetricDefinition(
+                "operational_api_calls",
+                "API calls tracked by operational analytics",
+                "counter",
+                ["service", "endpoint", "success"],
+            ),
+            MetricDefinition(
+                "operational_api_response_time",
+                "API response time in milliseconds",
+                "histogram",
+                ["service", "endpoint"],
+                [10, 25, 50, 100, 250, 500, 1000, 2500, 5000],
+            ),
+            MetricDefinition(
+                "operational_cpu_usage",
+                "CPU usage percentage tracked by operational analytics",
+                "gauge",
+            ),
+            MetricDefinition(
+                "operational_memory_usage",
+                "Memory usage percentage tracked by operational analytics",
+                "gauge",
+            ),
+            MetricDefinition(
+                "operational_disk_usage",
+                "Disk usage percentage tracked by operational analytics",
+                "gauge",
+            ),
+            MetricDefinition(
+                "operational_database_health",
+                "Database health status (1=healthy, 0=unhealthy)",
+                "gauge",
+            ),
+            MetricDefinition(
+                "operational_api_health",
+                "API health status (1=healthy, 0=unhealthy)",
+                "gauge",
+            ),
+            MetricDefinition(
+                "operational_cache_health",
+                "Cache health status (1=healthy, 0=unhealthy)",
+                "gauge",
+            ),
+            # Analytics reporting metrics
+            MetricDefinition(
+                "reports_generated",
+                "Total reports generated",
+                "counter",
+                ["report_type"],
+            ),
+            # Analytics export metrics
+            MetricDefinition(
+                "analytics_exports_total",
+                "Total analytics data exports",
+                "counter",
+                ["data_type", "format"],
+            ),
+            MetricDefinition(
+                "analytics_export_size_bytes",
+                "Size of analytics exports in bytes",
+                "histogram",
+                ["data_type", "format"],
+                [1024, 10240, 102400, 1048576, 10485760, 104857600],
+            ),
+            # Analytics alert metrics
+            MetricDefinition(
+                "analytics_alerts_generated",
+                "Alerts generated by analytics",
+                "counter",
+                ["severity", "metric"],
+            ),
+            MetricDefinition(
+                "analytics_active_alerts_total",
+                "Total active analytics alerts",
+                "gauge",
+            ),
+            MetricDefinition(
+                "analytics_active_alerts_by_severity",
+                "Active alerts by severity level",
+                "gauge",
+                ["severity"],
+            ),
+            # Portfolio analytics metrics
+            MetricDefinition(
+                "portfolio_positions_count",
+                "Number of positions in portfolio",
+                "gauge",
+            ),
+            MetricDefinition(
+                "portfolio_max_position_weight",
+                "Maximum position weight in portfolio",
+                "gauge",
+            ),
+            MetricDefinition(
+                "portfolio_concentration_hhi",
+                "Portfolio concentration using HHI",
+                "gauge",
+            ),
+        ]
+
+        for metric_def in analytics_metrics:
+            try:
+                self.register_metric(metric_def)
+            except Exception as e:
+                correlation_id = str(uuid.uuid4())[:8]
+                self.logger.warning(
+                    (
+                        f"Failed to register analytics metric '{metric_def.name}': "
+                        f"{type(e).__name__}: {e}. Correlation: {correlation_id}"
+                    ),
+                    extra={
+                        "metric_name": metric_def.name,
+                        "metric_type": metric_def.metric_type,
+                        "error_type": type(e).__name__,
+                        "correlation_id": correlation_id,
+                    },
+                )
 
 
 class TradingMetrics(BaseComponent):
@@ -840,6 +1115,12 @@ class TradingMetrics(BaseComponent):
             ),
             MetricDefinition(
                 "portfolio_pnl_usd", "Portfolio P&L in USD", "gauge", ["exchange", "timeframe"]
+            ),
+            MetricDefinition(
+                "portfolio_pnl_percent",
+                "Portfolio P&L percentage",
+                "gauge",
+                ["exchange", "timeframe"],
             ),
             MetricDefinition(
                 "portfolio_exposure_percent",
@@ -1356,11 +1637,11 @@ class ExchangeMetrics(BaseComponent):
         symbol = kwargs.get("symbol", "unknown")
 
         # Map success boolean to OrderStatus
-        from src.core.types.trading import OrderStatus
+        from src.core.types import OrderStatus
 
         status = OrderStatus.FILLED if success else OrderStatus.REJECTED
 
-        # Get TradingMetrics instance from the collector
+        # Delegate to TradingMetrics service
         if hasattr(self.collector, "trading_metrics"):
             try:
                 self.collector.trading_metrics.record_order(
@@ -1376,27 +1657,22 @@ class ExchangeMetrics(BaseComponent):
                     f"Failed to record order metrics via TradingMetrics: {e}"
                 )
                 # Fallback to basic counter increment
-                labels = {
-                    "exchange": exchange,
-                    "status": status.value,
-                    "order_type": order_type.value
-                    if hasattr(order_type, "value")
-                    else str(order_type),
-                    "symbol": symbol,
-                }
-                self.collector.increment_counter("orders_total", labels)
+                self._record_basic_order_metrics(exchange, status, order_type, symbol)
         else:
             self.collector.logger.warning(
-                "TradingMetrics not available, using basic order counting"
+                "TradingMetrics service not available, using basic order counting"
             )
-            # Fallback implementation
-            labels = {
-                "exchange": exchange,
-                "status": status.value,
-                "order_type": order_type.value if hasattr(order_type, "value") else str(order_type),
-                "symbol": symbol,
-            }
-            self.collector.increment_counter("orders_total", labels)
+            self._record_basic_order_metrics(exchange, status, order_type, symbol)
+
+    def _record_basic_order_metrics(self, exchange: str, status, order_type, symbol: str) -> None:
+        """Record basic order metrics as fallback."""
+        labels = {
+            "exchange": exchange,
+            "status": status.value,
+            "order_type": order_type.value if hasattr(order_type, "value") else str(order_type),
+            "symbol": symbol,
+        }
+        self.collector.increment_counter("orders_total", labels)
 
     def record_order_latency(
         self, exchange: str, latency: float, order_type: str | None = None

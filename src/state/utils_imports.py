@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import time_execution decorator with fallback
 try:
-    from ..utils.decorators import time_execution
+    from src.utils.decorators import time_execution
 except ImportError as e:
     logger.error(f"Failed to import time_execution decorator: {e}")
 
@@ -40,7 +40,7 @@ except ImportError as e:
 
 # Try to import ValidationService with error handling
 try:
-    from ..utils.validation.service import ValidationService
+    from src.utils.validation.service import ValidationService
 except ImportError as e:
     logger.error(f"Failed to import ValidationService: {e}")
     # Re-raise as this is critical for factory.py
@@ -52,19 +52,19 @@ except ImportError as e:
 
 # Import file utilities
 try:
-    from ..utils.file_utils import ensure_directory_exists
+    from src.utils.file_utils import ensure_directory_exists
 except ImportError as e:
     logger.error(f"Failed to import file utilities: {e}")
 
     # Provide a fallback implementation that uses standard library
-    def ensure_directory_exists(path: str) -> None:
+    def ensure_directory_exists(directory_path: str) -> None:
         """Fallback ensure_directory_exists using standard library."""
         from pathlib import Path
 
         try:
-            Path(path).mkdir(parents=True, exist_ok=True)
+            Path(directory_path).mkdir(parents=True, exist_ok=True)
         except Exception as mkdir_error:
-            logger.error(f"Failed to create directory {path}: {mkdir_error}")
+            logger.error(f"Failed to create directory {directory_path}: {mkdir_error}")
             raise
 
 

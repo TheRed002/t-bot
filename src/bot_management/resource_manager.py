@@ -822,6 +822,8 @@ class ResourceManager(BaseComponent):
 
     async def _release_resource_allocation(self, allocation: ResourceAllocation) -> None:
         """Release a specific resource allocation."""
+        db_connection = None
+        websocket_conn = None
         try:
             # Special handling for capital release
             if allocation.resource_type == ResourceType.CAPITAL:
@@ -852,9 +854,26 @@ class ResourceManager(BaseComponent):
                 },
                 severity="medium",
             )
+        finally:
+            if db_connection:
+                try:
+                    await db_connection.close()
+                except Exception as e:
+                    self._logger.debug(
+                        f"Failed to close database connection in _release_resource_allocation: {e}"
+                    )
+            if websocket_conn:
+                try:
+                    await websocket_conn.close()
+                except Exception as e:
+                    self._logger.debug(
+                        f"Failed to close websocket connection in _release_resource_allocation: {e}"
+                    )
 
     async def _verify_resource_allocation(self, allocation: ResourceAllocation) -> bool:
         """Verify that a resource allocation is still valid."""
+        db_connection = None
+        websocket_conn = None
         try:
             # Check if allocation has expired
             if allocation.expires_at and datetime.now(timezone.utc) > allocation.expires_at:
@@ -892,6 +911,21 @@ class ResourceManager(BaseComponent):
                 severity="low",
             )
             return False
+        finally:
+            if db_connection:
+                try:
+                    await db_connection.close()
+                except Exception as e:
+                    self._logger.debug(
+                        f"Failed to close database connection in _verify_resource_allocation: {e}"
+                    )
+            if websocket_conn:
+                try:
+                    await websocket_conn.close()
+                except Exception as e:
+                    self._logger.debug(
+                        f"Failed to close websocket connection in _verify_resource_allocation: {e}"
+                    )
 
     async def _monitoring_loop(self) -> None:
         """Resource monitoring and optimization loop."""
@@ -937,8 +971,8 @@ class ResourceManager(BaseComponent):
         # Collect system metrics using monitoring
         if self.system_metrics:
             try:
-                cpu_usage = self.system_metrics.get_cpu_usage()
-                memory_usage = self.system_metrics.get_memory_usage()
+                cpu_usage = await self.system_metrics.get_cpu_usage()
+                memory_usage = await self.system_metrics.get_memory_usage()
 
                 # Push to metrics collector if available with error handling
                 if self.metrics_collector:
@@ -1099,26 +1133,35 @@ class ResourceManager(BaseComponent):
     async def _release_all_resources(self) -> None:
         """Release all allocated resources during shutdown."""
         bot_ids = list(self.resource_allocations.keys())
+        open_connections = []
 
-        for bot_id in bot_ids:
-            try:
-                await self.release_resources(bot_id)
-            except (ExecutionError, ValidationError) as e:
-                self._logger.warning(
-                    f"Failed to release resources during shutdown: {e}", bot_id=bot_id
-                )
-                # During shutdown, we still need to log errors but can't wait too long
+        try:
+            for bot_id in bot_ids:
                 try:
-                    await asyncio.wait_for(
-                        self.error_handler.handle_error(
-                            e,
-                            {"operation": "shutdown_resource_release", "bot_id": bot_id},
-                            severity="medium",
-                        ),
-                        timeout=2.0,  # Give 2 seconds for error logging during shutdown
+                    await self.release_resources(bot_id)
+                except (ExecutionError, ValidationError) as e:
+                    self._logger.warning(
+                        f"Failed to release resources during shutdown: {e}", bot_id=bot_id
                     )
-                except asyncio.TimeoutError:
-                    self._logger.warning("Error handler timed out during shutdown")
+                    # During shutdown, we still need to log errors but can't wait too long
+                    try:
+                        await asyncio.wait_for(
+                            self.error_handler.handle_error(
+                                e,
+                                {"operation": "shutdown_resource_release", "bot_id": bot_id},
+                                severity="medium",
+                            ),
+                            timeout=2.0,  # Give 2 seconds for error logging during shutdown
+                        )
+                    except asyncio.TimeoutError:
+                        self._logger.warning("Error handler timed out during shutdown")
+        finally:
+            # Close any remaining connections
+            for conn in open_connections:
+                try:
+                    await conn.close()
+                except Exception as e:
+                    self._logger.debug(f"Failed to close remaining connection during shutdown: {e}")
 
     async def _cleanup_failed_allocation(self, bot_id: str) -> None:
         """Cleanup after failed resource allocation."""

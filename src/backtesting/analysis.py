@@ -47,7 +47,14 @@ class MonteCarloAnalyzer(BaseComponent):
         # Convert config to dict if needed
         config_dict = None
         if config:
-            config_dict = config.dict() if hasattr(config, "dict") else {}
+            if hasattr(config, "model_dump"):
+                config_dict = config.model_dump()
+            elif hasattr(config, "dict"):
+                config_dict = config.dict()
+            elif isinstance(config, dict):
+                config_dict = config
+            else:
+                config_dict = {}
 
         super().__init__(name="MonteCarloAnalyzer", config=config_dict)
         self.config = config
@@ -249,7 +256,7 @@ class MonteCarloAnalyzer(BaseComponent):
 
         # Calculate drawdown
         peak = initial_capital
-        max_dd = 0
+        max_dd: float = 0.0
 
         for value in equity_curve:
             if value > peak:
@@ -355,7 +362,14 @@ class WalkForwardAnalyzer(BaseComponent):
         # Convert config to dict if needed
         config_dict = None
         if config:
-            config_dict = config.dict() if hasattr(config, "dict") else {}
+            if hasattr(config, "model_dump"):
+                config_dict = config.model_dump()
+            elif hasattr(config, "dict"):
+                config_dict = config.dict()
+            elif isinstance(config, dict):
+                config_dict = config
+            else:
+                config_dict = {}
 
         super().__init__(name="WalkForwardAnalyzer", config=config_dict)
         self.config = config
@@ -409,13 +423,15 @@ class WalkForwardAnalyzer(BaseComponent):
             self.logger.info(f"Processing window {i + 1}/{len(windows)}")
 
             # Optimize on in-sample data
-            opt_data = market_data[opt_start:opt_end]
+            # mypy: ignore because pandas .loc supports datetime slicing
+            opt_data = market_data.loc[opt_start:opt_end]  # type: ignore[misc]
             best_params = await self._optimize_parameters(
                 strategy_class, parameter_ranges, opt_data, optimization_metric
             )
 
             # Test on out-of-sample data
-            test_data = market_data[test_start:test_end]
+            # mypy: ignore because pandas .loc supports datetime slicing
+            test_data = market_data.loc[test_start:test_end]  # type: ignore[misc]
             test_result = await self._test_parameters(strategy_class, best_params, test_data)
 
             window_results.append(
@@ -477,7 +493,7 @@ class WalkForwardAnalyzer(BaseComponent):
         self, data: pd.DataFrame
     ) -> list[tuple[datetime, datetime, datetime, datetime]]:
         """Generate optimization and test windows."""
-        windows = []
+        windows: list[tuple[datetime, datetime, datetime, datetime]] = []
 
         total_days = len(data)
         min_required = self.optimization_window + self.test_window
@@ -541,7 +557,7 @@ class WalkForwardAnalyzer(BaseComponent):
                     "max_drawdown": float(result.max_drawdown),
                 }
 
-        return best_params
+        return best_params if best_params is not None else {}
 
     async def _test_parameters(
         self, strategy_class: type, parameters: dict[str, Any], data: pd.DataFrame

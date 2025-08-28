@@ -62,7 +62,7 @@ class ResourceInfo:
     access_count: int = 0
     memory_usage_bytes: int = 0
 
-    def touch(self):
+    def touch(self) -> None:
         """Update last accessed time."""
         self.last_accessed = datetime.now(timezone.utc)
         self.access_count += 1
@@ -71,7 +71,7 @@ class ResourceInfo:
 class ResourceMonitor:
     """Monitors resource usage and detects leaks."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
         self._start_time = time.time()
         self._last_gc_check = time.time()
@@ -151,7 +151,7 @@ class ResourceManager:
     - Resource usage reporting
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
 
         # Resource tracking
@@ -419,7 +419,7 @@ class ResourceManager:
             )
             self._stats["leaks_detected"] += len(potential_leaks)
 
-    def _log_resource_stats(self):
+    def _log_resource_stats(self) -> None:
         """Log resource statistics."""
         memory_stats = self._monitor.get_memory_usage()
         connection_stats = self._monitor.get_connection_stats()

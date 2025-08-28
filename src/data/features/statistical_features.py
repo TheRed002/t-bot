@@ -30,7 +30,7 @@ import pandas as pd
 from scipy import stats
 from scipy.signal import periodogram
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataError
 
@@ -665,7 +665,8 @@ class StatisticalFeatures(BaseComponent):
                     dominant_freq_idx = np.argmax(power[1:]) + 1  # Skip DC component
                     dominant_frequency = frequencies[dominant_freq_idx]
                     dominant_period = 1 / dominant_frequency if dominant_frequency > 0 else None
-            except Exception:
+            except Exception as e:
+                self.logger.warning(f"FFT frequency analysis failed: {e}")
                 dominant_frequency = None
                 dominant_period = None
 

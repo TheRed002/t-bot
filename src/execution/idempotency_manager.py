@@ -479,6 +479,7 @@ class OrderIdempotencyManager(BaseComponent):
 
     async def _get_idempotency_key(self, key: str) -> IdempotencyKey | None:
         """Get idempotency key from cache or Redis."""
+        redis_connection = None
         try:
             # Check in-memory cache first
             with self._cache_lock:
@@ -488,7 +489,8 @@ class OrderIdempotencyManager(BaseComponent):
             # Check Redis if available
             if self.use_redis and self.redis_client:
                 try:
-                    data = await self.redis_client.get(key)
+                    redis_connection = self.redis_client
+                    data = await redis_connection.get(key)
                     if data:
                         self.stats["redis_operations"] += 1
                         key_data = json.loads(data)
@@ -512,15 +514,22 @@ class OrderIdempotencyManager(BaseComponent):
                         return idempotency_key
                 except Exception as e:
                     self.logger.warning(f"Redis get operation failed: {e}")
+                finally:
+                    # Redis connections are typically pooled, no explicit close needed
+                    pass
 
             return None
 
         except Exception as e:
             self.logger.error(f"Failed to get idempotency key: {e}")
             return None
+        finally:
+            # Redis connections are typically managed by connection pools
+            pass
 
     async def _store_idempotency_key(self, idempotency_key: IdempotencyKey) -> bool:
         """Store idempotency key in cache and Redis."""
+        redis_connection = None
         try:
             key = idempotency_key.key
 
@@ -533,25 +542,33 @@ class OrderIdempotencyManager(BaseComponent):
             # Store in Redis if available
             if self.use_redis and self.redis_client:
                 try:
+                    redis_connection = self.redis_client
                     data = json.dumps(idempotency_key.to_dict())
                     ttl_seconds = int(
                         (idempotency_key.expires_at - datetime.now(timezone.utc)).total_seconds()
                     )
 
                     if ttl_seconds > 0:
-                        await self.redis_client.set(key, data, ttl=ttl_seconds)
+                        await redis_connection.set(key, data, ttl=ttl_seconds)
                         self.stats["redis_operations"] += 1
                 except Exception as e:
                     self.logger.warning(f"Redis store operation failed: {e}")
+                finally:
+                    # Redis connections are typically pooled, no explicit close needed
+                    pass
 
             return True
 
         except Exception as e:
             self.logger.error(f"Failed to store idempotency key: {e}")
             return False
+        finally:
+            # Redis connections are typically managed by connection pools
+            pass
 
     async def _delete_idempotency_key(self, key: str) -> bool:
         """Delete idempotency key from cache and Redis."""
+        redis_connection = None
         try:
             # Remove from memory cache
             with self._cache_lock:
@@ -563,16 +580,23 @@ class OrderIdempotencyManager(BaseComponent):
             # Remove from Redis if available
             if self.use_redis and self.redis_client:
                 try:
-                    await self.redis_client.delete(key)
+                    redis_connection = self.redis_client
+                    await redis_connection.delete(key)
                     self.stats["redis_operations"] += 1
                 except Exception as e:
                     self.logger.warning(f"Redis delete operation failed: {e}")
+                finally:
+                    # Redis connections are typically pooled, no explicit close needed
+                    pass
 
             return True
 
         except Exception as e:
             self.logger.error(f"Failed to delete idempotency key: {e}")
             return False
+        finally:
+            # Redis connections are typically managed by connection pools
+            pass
 
     async def _find_key_by_client_order_id(self, client_order_id: str) -> IdempotencyKey | None:
         """Find idempotency key by client_order_id."""
@@ -761,5 +785,5 @@ class OrderIdempotencyManager(BaseComponent):
             for task in self._background_tasks:
                 if not task.done():
                     task.cancel()
-        except Exception:
-            pass  # Ignore errors during emergency cleanup
+        except Exception as e:
+            self.logger.warning("Error during idempotency manager emergency cleanup", error=str(e))

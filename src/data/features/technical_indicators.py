@@ -31,7 +31,7 @@ import numpy as np
 import pandas as pd
 import talib
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 
 # Import from P-001 core components
@@ -62,7 +62,7 @@ class IndicatorConfig:
     indicator_type: IndicatorType
     period: int
     enabled: bool = True
-    parameters: dict[str, Any] = None
+    parameters: dict[str, Any] | None = None
 
 
 @dataclass
@@ -231,14 +231,16 @@ class TechnicalIndicators(BaseComponent):
 
                     elif indicator == "macd":
                         macd_params = params.get("macd", [12, 26, 9])
-                        value = await self._calculate_macd(prices, *macd_params)
+                        macd_result = await self._calculate_macd(prices, *macd_params)
+                        value = macd_result  # Dictionary of MACD values
                         if value is not None:
                             results[indicator] = value
 
                     elif indicator == "bollinger_bands":
                         period = params.get("bb_period", 20)
                         std_dev = params.get("bb_std", 2)
-                        value = await self._calculate_bollinger_bands(prices, period, std_dev)
+                        bb_result = await self._calculate_bollinger_bands(prices, period, std_dev)
+                        value = bb_result  # Dictionary of Bollinger Band values
                         if value is not None:
                             results[indicator] = value
 
@@ -538,7 +540,7 @@ class TechnicalIndicators(BaseComponent):
                 return None
 
             # Extract volumes
-            volumes = []
+            volumes: list[float] = []
             for d in price_data:
                 if hasattr(d, "volume") and d.volume:
                     volumes.append(float(d.volume))
@@ -549,11 +551,11 @@ class TechnicalIndicators(BaseComponent):
             if len(volumes) < period + 1:
                 return None
 
-            volumes = np.array(volumes)
+            volumes_array = np.array(volumes)
 
             # Calculate volume ratio as current volume vs average volume
-            current_volume = volumes[-1]
-            avg_volume = np.mean(volumes[-period:]) if len(volumes) >= period else np.mean(volumes)
+            current_volume = volumes_array[-1]
+            avg_volume = np.mean(volumes_array[-period:]) if len(volumes_array) >= period else np.mean(volumes_array)
 
             volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
             return float(volume_ratio)

@@ -506,8 +506,13 @@ class ConnectionManager:
 
     def _cleanup_task_done_callback(self, task: asyncio.Task) -> None:
         """Handle cleanup task completion."""
-        if task.exception():
-            self.logger.error(f"Cleanup task failed: {task.exception()}")
+        try:
+            exception = task.exception()
+            if exception and not isinstance(exception, asyncio.CancelledError):
+                self.logger.error(f"Cleanup task failed: {exception}")
+        except asyncio.CancelledError:
+            # Task was cancelled, this is expected during shutdown
+            pass
         # Reset task reference so it can be restarted if needed
         if self._cleanup_task is task:
             self._cleanup_task = None
@@ -581,7 +586,9 @@ class ConnectionManager:
 
         if success:
             async with self._stats_lock:
-                self._connection_stats["total_messages_queued"] += 1
+                self._connection_stats["total_messages_queued"] = (
+                    int(self._connection_stats["total_messages_queued"]) + 1
+                )
 
             # Get queue size safely
             async with self._message_queues_lock:
@@ -692,3 +699,49 @@ class ConnectionManager:
         time_since_heartbeat = (datetime.now(timezone.utc) - health.last_heartbeat).total_seconds()
 
         return time_since_heartbeat < max_age and health.connection_quality > 0.5
+
+    async def cleanup_resources(self) -> None:
+        """Cleanup all resources and close connections."""
+
+        # Cancel cleanup task if running
+        if self._cleanup_task and not self._cleanup_task.done():
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup task: {e}")
+
+        # Cancel all health monitoring tasks
+        async with self._tasks_lock:
+            for task in list(self._health_monitor_tasks.values()):
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        self.logger.error(f"Failed to await cancelled task: {e}")
+            self._health_monitor_tasks.clear()
+
+        # Close all connections
+        connection_ids = list(self.connections.keys())
+        for connection_id in connection_ids:
+            try:
+                await self.close_connection(connection_id)
+            except Exception as e:
+                self.logger.error(f"Failed to close connection {connection_id}: {e}")
+
+        # Clear all data structures
+        async with self._connections_lock:
+            self.connections.clear()
+        async with self._health_monitors_lock:
+            self.health_monitors.clear()
+        async with self._message_queues_lock:
+            for queue in self.message_queues.values():
+                queue.clear()
+            self.message_queues.clear()
+
+        self.logger.info("Connection manager cleanup completed")

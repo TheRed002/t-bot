@@ -261,8 +261,11 @@ class StrategyFactory(StrategyFactoryInterface):
             try:
                 data_service = self._strategy_service.resolve_dependency("DataService")
                 strategy.set_data_service(data_service)
-            except Exception:
+            except (KeyError, AttributeError, ImportError) as e:
                 # Data service is optional for some strategies
+                pass
+            except Exception as e:
+                # Unexpected error resolving data service - log but continue
                 pass
 
         except Exception as e:
@@ -311,7 +314,11 @@ class StrategyFactory(StrategyFactoryInterface):
             # Validate strategy-specific requirements
             return self._validate_strategy_specific_requirements(strategy_type, config)
 
-        except Exception:
+        except (ValueError, TypeError, AttributeError) as e:
+            # Configuration validation errors
+            return False
+        except Exception as e:
+            # Unexpected validation errors
             return False
 
     def _validate_strategy_specific_requirements(
@@ -501,7 +508,11 @@ class StrategyFactory(StrategyFactoryInterface):
 
             return True
 
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as e:
+            # Strategy-specific requirement validation errors
+            return False
+        except Exception as e:
+            # Unexpected requirement validation errors
             return False
 
     async def _validate_created_strategy(self, strategy: BaseStrategyInterface) -> bool:
@@ -544,7 +555,11 @@ class StrategyFactory(StrategyFactoryInterface):
 
             return True
 
-        except Exception:
+        except (AttributeError, TypeError) as e:
+            # Strategy instance validation errors
+            return False
+        except Exception as e:
+            # Unexpected strategy validation errors
             return False
 
     def get_strategy_info(self, strategy_type: StrategyType) -> dict[str, Any]:

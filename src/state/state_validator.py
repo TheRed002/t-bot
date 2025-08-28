@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.core.base.component import BaseComponent
 from src.core.exceptions import ValidationError
 from src.core.types import BotStatus, OrderSide, OrderType
+from src.utils.validators import validate_decimal_precision
 
 from .utils_imports import time_execution
 
@@ -166,14 +167,15 @@ class StateValidator(BaseComponent):
 
         self.logger.info("StateValidator initialized")
 
-    def initialize(self) -> None:
-        """Initialize the validator."""
+    async def _do_start(self) -> None:
+        """Start the validator (BaseComponent lifecycle method)."""
         try:
             # Initialize state transition rules
             self._initialize_transition_rules()
 
-            # Load custom validation rules from configuration (sync version)
+            # Load custom validation rules from configuration
             try:
+                await self._load_custom_rules()
                 self.logger.info("Custom validation rules loading completed")
             except Exception as e:
                 self.logger.warning(f"Failed to load custom validation rules: {e}")
@@ -181,30 +183,31 @@ class StateValidator(BaseComponent):
             # Start background cache cleanup
             self._cleanup_task = asyncio.create_task(self._cache_cleanup_loop())
 
-            # Parent class uses async start() instead of initialize()
-            # self._initialized = True  # Set by BaseComponent
-            self.logger.info("StateValidator initialization completed")
+            self.logger.info("StateValidator startup completed")
 
         except Exception as e:
-            self.logger.error(f"StateValidator initialization failed: {e}")
-            raise ValidationError(f"Failed to initialize StateValidator: {e}") from e
+            self.logger.error(f"StateValidator startup failed: {e}")
+            raise ValidationError(f"Failed to start StateValidator: {e}") from e
 
-    def cleanup(self) -> None:
-        """Cleanup validator resources."""
+    async def _do_stop(self) -> None:
+        """Stop the validator (BaseComponent lifecycle method)."""
         try:
             # Cancel background task
             if self._cleanup_task and not self._cleanup_task.done():
                 self._cleanup_task.cancel()
+                try:
+                    await self._cleanup_task
+                except asyncio.CancelledError:
+                    pass
 
             self._validation_cache.clear()
             self._rule_cache.clear()
 
-            # Parent class uses async stop() instead of cleanup()
-            # self._initialized = False  # Set by BaseComponent
-            self.logger.info("StateValidator cleanup completed")
+            self.logger.info("StateValidator stop completed")
 
         except Exception as e:
-            self.logger.error(f"Error during StateValidator cleanup: {e}")
+            self.logger.error(f"Error during StateValidator stop: {e}")
+            raise
 
     # Core Validation Methods
 
@@ -955,30 +958,27 @@ class StateValidator(BaseComponent):
         }
 
     def _validate_decimal_field(self, data: dict[str, Any], field_name: str) -> dict[str, Any]:
-        """Validate that a field is a valid decimal/numeric value."""
+        """Validate that a field is a valid decimal/numeric value using core utilities."""
         value = data.get(field_name)
 
         try:
             if value is None:
                 return {"passed": False, "message": f"{field_name} is required"}
 
-            # Try to convert to Decimal
-            if isinstance(value, int | float):
-                Decimal(str(value))
-            elif isinstance(value, str):
-                Decimal(value)
-            elif isinstance(value, Decimal):
-                pass
-            else:
+            # Use core validation utility
+            decimal_value = Decimal(str(value))
+
+            # Check precision using core validator
+            if not validate_decimal_precision(decimal_value, places=8):
                 return {
                     "passed": False,
-                    "message": f"{field_name} must be a valid number",
+                    "message": f"{field_name} has too many decimal places",
                     "current_value": value,
                 }
 
             return {"passed": True, "message": "Valid decimal value", "current_value": value}
 
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError, ValidationError) as e:
             return {
                 "passed": False,
                 "message": f"{field_name} must be a valid decimal: {e}",

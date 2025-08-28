@@ -181,17 +181,27 @@ class DatabaseService(TransactionalService):
 
     async def _do_stop(self) -> None:
         """Stop the database service."""
-        try:
-            if self.connection_manager:
-                await self.connection_manager.close()
+        connection_manager = None
+        redis_client = None
 
-            if self._redis_client:
-                await self._redis_client.aclose()
+        try:
+            connection_manager = self.connection_manager
+            redis_client = self._redis_client
+
+            if connection_manager:
+                await connection_manager.close()
+
+            if redis_client:
+                await redis_client.aclose()
 
             logger.info("DatabaseService stopped successfully")
 
         except Exception as e:
             logger.error(f"Error stopping DatabaseService: {e}")
+        finally:
+            # Ensure references are cleared even if close operations fail
+            self.connection_manager = None
+            self._redis_client = None
 
     # CRUD Operations with Comprehensive Error Handling
 
@@ -611,7 +621,7 @@ class DatabaseService(TransactionalService):
         """
         session = None
         committed = False
-        
+
         try:
             self._performance_metrics["transactions_total"] += 1
 
@@ -643,6 +653,11 @@ class DatabaseService(TransactionalService):
                             await session.close()
                         except Exception as close_error:
                             logger.error(f"Session close failed: {close_error}")
+                            # Try to invalidate the session to prevent connection reuse
+                            try:
+                                await session.invalidate()
+                            except Exception as invalidate_error:
+                                logger.critical(f"Session invalidate failed: {invalidate_error}")
 
         except Exception as e:
             logger.error(f"Transaction failed: {e}")

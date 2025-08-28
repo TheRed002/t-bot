@@ -288,8 +288,13 @@ class ErrorPatternAnalytics:
 
     def _cleanup_task_done_callback(self, task: asyncio.Task) -> None:
         """Handle cleanup task completion."""
-        if task.exception():
-            self.logger.error(f"Cleanup task failed: {task.exception()}")
+        try:
+            exception = task.exception()
+            if exception and not isinstance(exception, asyncio.CancelledError):
+                self.logger.error(f"Cleanup task failed: {exception}")
+        except asyncio.CancelledError:
+            # Task was cancelled, this is expected during shutdown
+            pass
         # Reset task reference so it can be restarted if needed
         if self._cleanup_task is task:
             self._cleanup_task = None
@@ -379,8 +384,13 @@ class ErrorPatternAnalytics:
 
     def _pattern_analysis_done_callback(self, task: asyncio.Task) -> None:
         """Handle pattern analysis task completion."""
-        if task.exception():
-            self.logger.error(f"Pattern analysis task failed: {task.exception()}")
+        try:
+            exception = task.exception()
+            if exception and not isinstance(exception, asyncio.CancelledError):
+                self.logger.error(f"Pattern analysis task failed: {exception}")
+        except asyncio.CancelledError:
+            # Task was cancelled, this is expected during shutdown
+            pass
         # Reset task reference so it can be restarted if needed
         if self._pattern_analysis_task is task:
             self._pattern_analysis_task = None
@@ -831,9 +841,29 @@ class ErrorPatternAnalytics:
 
         return severity_mapping.get(severity.lower(), SensitivityLevel.MEDIUM)
 
-    def cleanup(self) -> None:
+    async def cleanup(self) -> None:
         """Cleanup resources including async tasks."""
+
+        # Cancel and wait for cleanup task
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                self.logger.error(f"Failed to await cleanup task: {e}")
+
+        # Cancel and wait for pattern analysis task
         if self._pattern_analysis_task and not self._pattern_analysis_task.done():
             self._pattern_analysis_task.cancel()
+            try:
+                await self._pattern_analysis_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                self.logger.error(f"Failed to await pattern analysis task: {e}")
+
+        # Clear references
+        self._cleanup_task = None
+        self._pattern_analysis_task = None

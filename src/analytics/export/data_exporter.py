@@ -36,7 +36,8 @@ from src.analytics.types import (
     RiskMetrics,
     StrategyMetrics,
 )
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
+from src.core.exceptions import DataError, ValidationError, ComponentError
 from src.monitoring.metrics import get_metrics_collector
 from src.utils.datetime_utils import get_current_utc_timestamp
 
@@ -87,7 +88,13 @@ class DataExporter(BaseComponent):
             elif format.lower() == "excel":
                 result = await self._to_excel({"portfolio_metrics": data})
             else:
-                raise ValueError(f"Unsupported export format: {format}")
+                raise ValidationError(
+                    f"Unsupported export format: {format}",
+                    error_code="EXPORT_001",
+                    field_name="format",
+                    field_value=format,
+                    validation_rule="supported_export_format",
+                )
 
             # Record export
             self._record_export("portfolio_metrics", format, len(str(result)))
@@ -122,7 +129,13 @@ class DataExporter(BaseComponent):
             elif format.lower() == "excel":
                 result = await self._to_excel({"risk_metrics": data})
             else:
-                raise ValueError(f"Unsupported export format: {format}")
+                raise ValidationError(
+                    f"Unsupported export format: {format}",
+                    error_code="EXPORT_001",
+                    field_name="format",
+                    field_value=format,
+                    validation_rule="supported_export_format",
+                )
 
             self._record_export("risk_metrics", format, len(str(result)))
 
@@ -156,7 +169,13 @@ class DataExporter(BaseComponent):
             elif format.lower() == "excel":
                 result = await self._to_excel({"position_metrics": data})
             else:
-                raise ValueError(f"Unsupported export format: {format}")
+                raise ValidationError(
+                    f"Unsupported export format: {format}",
+                    error_code="EXPORT_001",
+                    field_name="format",
+                    field_value=format,
+                    validation_rule="supported_export_format",
+                )
 
             self._record_export("position_metrics", format, len(str(result)))
 
@@ -190,7 +209,13 @@ class DataExporter(BaseComponent):
             elif format.lower() == "excel":
                 result = await self._to_excel({"strategy_metrics": data})
             else:
-                raise ValueError(f"Unsupported export format: {format}")
+                raise ValidationError(
+                    f"Unsupported export format: {format}",
+                    error_code="EXPORT_001",
+                    field_name="format",
+                    field_value=format,
+                    validation_rule="supported_export_format",
+                )
 
             self._record_export("strategy_metrics", format, len(str(result)))
 
@@ -224,7 +249,13 @@ class DataExporter(BaseComponent):
             elif format.lower() == "excel":
                 result = await self._to_excel({"operational_metrics": data})
             else:
-                raise ValueError(f"Unsupported export format: {format}")
+                raise ValidationError(
+                    f"Unsupported export format: {format}",
+                    error_code="EXPORT_001",
+                    field_name="format",
+                    field_value=format,
+                    validation_rule="supported_export_format",
+                )
 
             self._record_export("operational_metrics", format, len(str(result)))
 
@@ -256,7 +287,13 @@ class DataExporter(BaseComponent):
             elif format.lower() == "excel":
                 result = await self._report_to_excel(data)
             else:
-                raise ValueError(f"Unsupported report export format: {format}")
+                raise ValidationError(
+                    f"Unsupported report export format: {format}",
+                    error_code="EXPORT_002",
+                    field_name="format",
+                    field_value=format,
+                    validation_rule="supported_report_format",
+                )
 
             self._record_export("complete_report", format, len(str(result)))
 
@@ -356,7 +393,13 @@ class DataExporter(BaseComponent):
             elif format.lower() == "parquet":
                 result = await self._time_series_to_parquet(filtered_data)
             else:
-                raise ValueError(f"Unsupported time series export format: {format}")
+                raise ValidationError(
+                    f"Unsupported time series export format: {format}",
+                    error_code="EXPORT_003",
+                    field_name="format",
+                    field_value=format,
+                    validation_rule="supported_timeseries_format",
+                )
 
             self._record_export("time_series_data", format, len(str(result)))
 
@@ -855,6 +898,7 @@ class DataExporter(BaseComponent):
         Returns:
             Success boolean
         """
+        session = None
         try:
             headers = headers or {"Content-Type": "application/json"}
 
@@ -876,7 +920,8 @@ class DataExporter(BaseComponent):
                 "data": data,
             }
 
-            async with aiohttp.ClientSession() as session:
+            session = aiohttp.ClientSession()
+            try:
                 async with session.post(
                     endpoint, json=payload, headers=headers, timeout=30
                 ) as response:
@@ -888,8 +933,16 @@ class DataExporter(BaseComponent):
                             f"API export failed: {response.status} - {await response.text()}"
                         )
                         return False
+            finally:
+                if session:
+                    await session.close()
 
         except Exception as e:
+            if session:
+                try:
+                    await session.close()
+                except Exception:
+                    pass
             self.logger.error(f"Error exporting to REST API: {e}")
             return False
 
@@ -917,7 +970,13 @@ class DataExporter(BaseComponent):
             elif template:
                 return await self._generate_custom_template_report(data, template)
             else:
-                raise ValueError(f"Unsupported regulatory report type: {report_type}")
+                raise ValidationError(
+                    f"Unsupported regulatory report type: {report_type}",
+                    error_code="EXPORT_004",
+                    field_name="report_type",
+                    field_value=report_type,
+                    validation_rule="supported_regulatory_report",
+                )
 
         except Exception as e:
             self.logger.error(f"Error generating regulatory report: {e}")
@@ -1068,6 +1127,7 @@ SA-CCR Exposure: {{ sa_ccr_exposure }}
 
         except Exception as e:
             self.logger.error(f"Error streaming real-time data: {e}")
+            raise
 
     async def create_scheduled_export(
         self, export_config: dict[str, Any], schedule_interval_minutes: int = 60
@@ -1108,6 +1168,7 @@ SA-CCR Exposure: {{ sa_ccr_exposure }}
 
         except Exception as e:
             self.logger.error(f"Error creating scheduled export: {e}")
+            raise
 
     async def _execute_scheduled_export(self, config: dict[str, Any]) -> None:
         """Execute a scheduled export based on configuration."""
@@ -1141,6 +1202,7 @@ SA-CCR Exposure: {{ sa_ccr_exposure }}
 
         except Exception as e:
             self.logger.error(f"Error executing scheduled export: {e}")
+            raise
 
     # Helper methods for data retrieval
 
@@ -1185,13 +1247,20 @@ SA-CCR Exposure: {{ sa_ccr_exposure }}
         """Export data to file."""
         try:
             if format.lower() == "json":
-                with open(filepath, "w") as f:
-                    json.dump(data, f, indent=2, default=str)
+                import aiofiles
+
+                async with aiofiles.open(filepath, "w") as f:
+                    await f.write(json.dumps(data, indent=2, default=str))
             elif format.lower() == "csv":
-                df = pd.json_normalize(data)
-                df.to_csv(filepath, index=False)
+                import asyncio
+
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None, lambda: pd.json_normalize(data).to_csv(filepath, index=False)
+                )
             else:
                 self.logger.warning(f"Unsupported file format: {format}")
 
         except Exception as e:
             self.logger.error(f"Error exporting to file: {e}")
+            raise

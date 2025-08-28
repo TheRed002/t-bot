@@ -61,25 +61,26 @@ class CacheManager(BaseComponent):
             raise CacheError("Cache manager is shutting down")
 
         async with self._connection_lock:
-            if not self.redis_client:
+            if not self.redis_client or self.redis_client is None:
                 if self.config:
                     self.redis_client = RedisClient(self.config)
                 else:
                     raise CacheError("Redis client not available and no config provided")
 
             # Check if client is connected and healthy
-            if self.redis_client.client is None or not await self._is_client_healthy():
+            if self.redis_client is None or self.redis_client.client is None or not await self._is_client_healthy():
                 await self._reconnect_with_retries()
 
     async def _is_client_healthy(self) -> bool:
         """Check if Redis client is healthy."""
         try:
-            if self.redis_client.client is None:
+            if self.redis_client is None or self.redis_client.client is None:
                 return False
             # Simple ping to check connectivity
-            await asyncio.wait_for(await self.redis_client.ping(), timeout=2.0)
+            await asyncio.wait_for(self.redis_client.ping(), timeout=2.0)
             return True
-        except Exception:
+        except (ConnectionError, TimeoutError, OSError, asyncio.TimeoutError) as e:
+            self.logger.debug(f"Redis health check failed: {e}")
             return False
 
     async def _reconnect_with_retries(self):
@@ -89,8 +90,12 @@ class CacheManager(BaseComponent):
                 if self.redis_client.client is not None:
                     try:
                         await self.redis_client.disconnect()
-                    except Exception:
-                        pass  # Ignore disconnection errors
+                    except (ConnectionError, OSError) as e:
+                        # Log disconnection errors for debugging
+                        # but don't let them block reconnection
+                        self.logger.debug(
+                            f"Failed to disconnect Redis client during reconnect: {e}"
+                        )
 
                 await self.redis_client.connect()
 
@@ -149,6 +154,8 @@ class CacheManager(BaseComponent):
 
         try:
             await self._ensure_client()
+            if self.redis_client is None:
+                raise CacheError("Redis client not available")
             value = await self.redis_client.get(key, namespace)
 
             if value is not None:

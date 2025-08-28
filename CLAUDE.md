@@ -1,143 +1,162 @@
-# Claude Code Project Configuration - T-Bot Trading System
+# T-Bot Trading System - Claude Configuration v2
 
-## Project Overview
-T-Bot is a cryptocurrency trading bot with multiple exchange integrations, risk management, and automated trading strategies.
+## Project Goal
+Build a production-ready cryptocurrency trading bot with institutional-grade reliability, comprehensive risk management, and ML-powered strategies.
 
-## Environment Setup
-- **Python Version**: 3.10.12
-- **Virtual Environment**: WSL Ubuntu at `~/.venv/bin/activate`
-- **Working Directory**: `/mnt/e/Work/P-41 Trading/code/t-bot`
-- **Setup tool**: `make`, `export PATH="$HOME/.nvm/versions/node/v18.19.0/bin:$PATH`
+## Environment
+- **Python**: 3.10.12 with venv at `~/.venv/bin/activate`
+- **Directory**: `/mnt/e/Work/P-41 Trading/code/t-bot`
+- **Node**: 18.19.0 at `$HOME/.nvm/versions/node/v18.19.0/bin`
 
-## Critical Commands
-These commands should be run automatically when making code changes:
+## Critical Standards
+- **FOLLOW**: `CODING_STANDARDS.md` and `COMMON_PATTERNS.md` exactly
+- **Financial Precision**: ALWAYS use `Decimal`, NEVER `float` for money
+- **Database**: Use `DECIMAL(20,8)` for crypto, relationships need `back_populates`
+- **Services**: Controllers→Services→Repositories (never skip layers)
 
-### Linting & Formatting
-```bash
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && ruff check src/ --fix"
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && ruff format src/"
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && black src/ --line-length 100"
+## Module Hierarchy (Process in Order)
+1. **core** - Base classes, exceptions, types, config, DI container
+2. **utils** - Validators, formatters, decorators 
+3. **error_handling** - Decorators, handlers, circuit breakers
+4. **database** - Models, repositories, UoW, migrations
+5. **monitoring, state, data** - Infrastructure services
+6. **exchanges, risk_management** - Trading components
+7. **execution, ml, strategies** - Business logic
+8. **analytics, backtesting, capital/bot_management, web_interface** - Applications
+
+## Core Module Usage
+```python
+# MANDATORY imports for ALL modules
+from src.core.base import BaseComponent, BaseService
+from src.core.exceptions import ValidationError, ServiceError  # Use specific
+from src.core.logging import get_logger
+from src.core.types import *  # Trading types
+from src.utils.decorators import retry, with_circuit_breaker
 ```
 
-### Type Checking
+## Required Agents (Use Task tool for ALL)
+### Code Quality & Testing
+- `code-guardian-enforcer` - Prevent violations & service bypasses
+- `integration-test-architect` - Create comprehensive integration tests
+- `module-integration-validator` - Verify module dependencies work
+- `financial-qa-engineer` - Test edge cases & chaos scenarios
+- `quality-control-enforcer` - Orchestrate deployment readiness
+
+### Trading & Financial
+- `algo-trading-specialist` - Trading algorithms & backtesting
+- `trading-system-architect` - HFT systems & order routing
+- `trading-engine-developer` - Execution systems & smart routing
+- `risk-management-expert` - VaR, position sizing, risk controls
+- `quantitative-strategy-researcher` - Strategy validation & alpha
+- `quant-ml-strategist` - ML models for trading
+- `technical-indicator-specialist` - Implement & optimize indicators
+- `portfolio-optimization-expert` - MPT & allocation strategies
+- `backtest-simulation-expert` - Historical testing frameworks
+
+### Data & Infrastructure
+- `market-data-expert` - Real-time feeds & exchange APIs
+- `data-pipeline-maestro` - Stream processing & data integrity
+- `realtime-pipeline-architect` - High-throughput data pipelines
+- `postgres-timescale-architect` - Time-series DB optimization
+- `timeseries-db-optimizer` - Query performance & retention
+- `redis-cache-optimizer` - Cache warming & TTL strategies
+- `message-queue-architect` - RabbitMQ/Redis Streams setup
+- `celery-task-orchestrator` - Distributed task queues
+
+### APIs & Integration
+- `financial-api-architect` - High-performance trading APIs
+- `exchange-integration-specialist` - Exchange connections & FIX
+- `rate-limit-architect` - Token bucket & throttling
+- `auth-security-architect` - JWT, OAuth2, API keys
+
+### Security & Operations
+- `financial-security-expert` - Threat assessment & security
+- `cybersecurity-guardian` - Vulnerability analysis
+- `infrastructure-wizard` - Deployment & monitoring
+- `trading-ops-monitor` - Alerting & compliance
+- `config-management-expert` - Feature flags & hot-reload
+
+### UI & Documentation
+- `realtime-dashboard-architect` - WebSocket/React dashboards
+- `trading-ui-specialist` - Trading interfaces & order books
+- `financial-docs-writer` - Technical documentation
+- `mcp__playwright__*` - Browser automation testing
+
+### Project Coordination
+- `strategic-project-coordinator` - High-level orchestration
+- `tactical-task-coordinator` - Daily task management
+- `pipeline-execution-orchestrator` - Multi-agent workflows
+- `knowledge-synthesis-orchestrator` - Capture patterns & learnings
+- `automation-orchestrator` - Self-healing systems
+
+### Architecture & Design
+- `system-design-architect` - API contracts, data models
+- `integration-architect` - Find existing services first
+- `portfolio-simulation-architect` - Virtual portfolios & matching
+
+## Quality Commands (Run After Changes)
 ```bash
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && mypy src/ --ignore-missing-imports"
+# Format & Lint
+ruff check src/ --fix && ruff format src/
+black src/ --line-length 120
+
+# Type Check
+mypy src/ --ignore-missing-imports
+
+# Test
+pytest tests/ -v --tb=short
 ```
 
-### Testing
-```bash
-# Run all tests
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && pytest tests/ -v"
+## Critical Files
+- **Config**: `src/core/config.py` - All settings
+- **Types**: `src/core/types/*.py` - Domain models  
+- **Models**: `src/database/models/*.py` - DB schema
+- **Services**: `src/*/service.py` - Business logic
+- **Main**: `src/main.py` - Entry point
 
-# Run with coverage
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && pytest tests/ --cov=src --cov-report=html --cov-report=term"
+## Trading Validations
+- Position size ≤ 2% of capital per trade
+- Stop-loss required for all positions
+- Order prices within market bounds (±10%)
+- Total exposure ≤ 100% of portfolio
 
-# Run specific test categories
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && pytest tests/unit/ -v"
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && pytest tests/integration/ -v"
-```
+## Security Rules
+- NEVER log API keys or passwords
+- Validate ALL external inputs
+- Use parameterized queries
+- Rate limit exchange APIs
 
-## Code Agents
+## Testing Requirements
+- Unit tests: `tests/unit/test_MODULE/`
+- Coverage: >70% (90% for trading/risk)
+- Financial calculations: 100% coverage
 
-### 1. Formatting Agent
-**Purpose**: Automatically format code according to project standards
-**Batch Processing**: Process multiple files in parallel
-```bash
-# Format all Python files in batches
-find src/ -name "*.py" | xargs -P 4 -n 10 bash -c 'for file; do ruff format "$file"; done' _
-```
+## Agent Usage Patterns
+**New Feature**: `integration-architect` → `system-design-architect` → `code-guardian-enforcer`
+**Bug Fix**: `financial-qa-engineer` → fix → `integration-test-architect`
+**Performance**: `performance-optimization-specialist` → `redis-cache-optimizer`
+**Trading Strategy**: `algo-trading-specialist` → `backtest-simulation-expert` → `risk-management-expert`
+**Database**: `postgres-timescale-architect` → `timeseries-db-optimizer`
+**API**: `financial-api-architect` → `rate-limit-architect` → `auth-security-architect`
 
-### 2. Logical Error Detection Agent
-**Purpose**: Detect logical inconsistencies, race conditions, and architectural issues
-**Focus Areas**:
-- Async/await consistency
-- Resource management (connections, locks)
-- Error handling completeness
-- State management in trading logic
+## Key Patterns
+- **Service Pattern**: Inherit from `BaseService`
+- **Repository Pattern**: Standard CRUD interface
+- **Dependency Injection**: Use `DependencyContainer`
+- **Error Handling**: Use decorators, not try-catch
+- **Async Operations**: Always `await`, use `asyncio.gather()`
 
-### 3. Test Coverage Agent
-**Purpose**: Ensure comprehensive test coverage
-**Metrics**:
-- Line coverage > 80%
-- Branch coverage > 70%
-- Critical paths 100% covered (trading operations, risk management)
+## Save Non-Production Files
+Use `.claude_experiments/` for drafts, logs, experiments
 
-### 4. Calculation Accuracy Agent
-**Purpose**: Verify numerical calculations in trading logic
-**Critical Areas**:
-- Price calculations
-- Position sizing
-- Risk metrics
-- Portfolio value calculations
-- Fee calculations
+---
 
-### 5. Code Duplication Agent
-**Purpose**: Identify and refactor duplicate code
-**Tools**:
-```bash
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && pylint src/ --disable=all --enable=duplicate-code"
-```
-**MENDATORY**: Always use specialized agents when available for a specific task. 
+## MANDATORY Agent Checks (Run Frequently)
+After EVERY code change, run these agents:
+1. `code-guardian-enforcer` - Catch violations immediately
+2. `module-integration-validator` - Verify dependencies
+3. `financial-qa-engineer` - Test financial accuracy
+4. `integration-test-architect` - Ensure integration tests exist
+5. `performance-optimization-specialist` - Check for bottlenecks
 
-### 5. Frontend inspector Agent via Playwright
-**Purpose**: Identify and fix UI related issues by inspecting UI and console logs
-
-
-## Batch Processing Strategy
-
-### Cost-Effective Analysis Pipeline
-1. **File Grouping**: Process files by module to maintain context
-2. **Parallel Execution**: Run independent checks simultaneously
-3. **Incremental Processing**: Only analyze changed files
-4. **Cache Results**: Store analysis results to avoid re-processing
-
-### Priority Levels
-- **P0 (Critical)**: Trading logic, order execution, risk management
-- **P1 (High)**: Exchange connections, data processing, error handling
-- **P2 (Medium)**: Strategies, indicators, utilities
-- **P3 (Low)**: Documentation, tests, configuration
-
-## Automated Workflow
-
-### Pre-Commit Checks
-```bash
-# Run all quality checks before committing
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && ./scripts/pre-commit-checks.sh"
-```
-
-### Continuous Monitoring
-```bash
-# Watch for file changes and run appropriate checks
-wsl -e bash -c "cd '/mnt/e/Work/P-41 Trading/code/t-bot' && source ~/.venv/bin/activate && ./scripts/watch-and-check.sh"
-```
-
-## Module Dependencies
-- **P-001**: Core types, exceptions, config
-- **P-002A**: Error handling components
-- **P-007**: Advanced rate limiting
-- **P-007A**: Utility functions
-
-## Security Considerations
-- Never log sensitive data (API keys, secrets)
-- Validate all external inputs
-- Use parameterized queries for database operations
-- Implement rate limiting for all exchange APIs
-- Secure WebSocket connections with proper authentication
-
-## Performance Guidelines
-- Use async/await for I/O operations
-- Implement connection pooling
-- Cache frequently accessed data
-- Use batch operations for database writes
-- Monitor memory usage in long-running processes
-
-## Trading-Specific Validations
-- Order price must be within market bounds
-- Position size must respect account limits
-- Stop-loss must be set for all positions
-- Risk per trade must not exceed configured percentage
-- Total exposure must stay within portfolio limits
-
-## Directories
-- If you want to generate any image, code, logs, summary or anything which is not related to production project, please save them in .claude_experiments directory at project root so that we don't clutter the actual code. 
-
+**Remember**: This is a FINANCIAL system - accuracy, testing, and risk controls are MANDATORY. Use agents liberally for precision!

@@ -90,8 +90,10 @@ def _safe_unicode_decoder(
         if isinstance(result, dict):
             return result
         return event_dict  # Return original if decoder failed
-    except Exception:
-        # If decoding fails, return original dict
+    except (UnicodeError, ValueError) as e:
+        # If decoding fails, log the issue and return original dict
+        if event_dict:
+            event_dict["decode_error"] = str(e)
         return event_dict
 
 
@@ -118,7 +120,7 @@ def setup_logging(
         retention_days: Days to retain log files
     """
     # Configure structlog processors
-    processors = [
+    processors: list[Any] = [
         structlog.stdlib.filter_by_level,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
@@ -173,8 +175,9 @@ def setup_logging(
         for handler in logging.getLogger().handlers:
             try:
                 handler.flush()
-            except Exception:
-                pass
+            except (OSError, ValueError) as e:
+                # Log handler flush failures but continue
+                print(f"Warning: Failed to flush log handler: {e}", file=sys.stderr)
 
         # Clean up old log files based on retention policy
         _cleanup_old_logs(log_path.parent, log_path.stem, retention_days)
@@ -347,7 +350,7 @@ class SecureLogger:
 
     def _sanitize_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Remove sensitive data from logging."""
-        sanitized = {}
+        sanitized: dict[str, Any] = {}
         for key, value in data.items():
             if isinstance(value, dict):
                 sanitized[key] = self._sanitize_data(value)

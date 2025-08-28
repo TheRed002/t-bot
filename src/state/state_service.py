@@ -24,10 +24,10 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 from uuid import uuid4
 
 from src.core.base.component import BaseComponent
+from src.core.base.events import BaseEventEmitter
 from src.core.base.interfaces import HealthCheckResult
 from src.core.config.main import Config
 from src.core.exceptions import StateError, ValidationError
-from src.core.types.base import ConfigDict
 from src.error_handling import (
     ErrorContext,
     ErrorHandler,
@@ -37,6 +37,26 @@ from src.error_handling import (
 )
 from src.monitoring.telemetry import get_tracer
 
+# Import consistency patterns for aligned data flow
+from .consistency import (
+    ConsistentEventPattern,
+    ConsistentProcessingPattern,
+    ConsistentValidationPattern,
+    emit_state_event,
+    validate_state_data,
+)
+
+# Service layer imports
+from .services import (
+    StateBusinessService,
+    StateBusinessServiceProtocol,
+    StatePersistenceService,
+    StatePersistenceServiceProtocol,
+    StateSynchronizationService,
+    StateSynchronizationServiceProtocol,
+    StateValidationService,
+    StateValidationServiceProtocol,
+)
 from .utils_imports import time_execution
 
 
@@ -257,10 +277,16 @@ class StateService(BaseComponent):
             config: Application configuration
             database_service: Database service instance (injected dependency)
         """
-        # Convert Config object to ConfigDict for BaseComponent
-        from typing import cast
-
-        config_dict = cast(ConfigDict, config.__dict__ if hasattr(config, "__dict__") else {})
+        # Convert Config object to dict for BaseComponent
+        config_dict = (
+            {
+                key: getattr(config, key)
+                for key in dir(config)
+                if not key.startswith("_") and not callable(getattr(config, key))
+            }
+            if config
+            else {}
+        )
         super().__init__(name="StateService", config=config_dict)
         self.config = config
 
@@ -278,14 +304,27 @@ class StateService(BaseComponent):
         self._metadata_cache: dict[str, StateMetadata] = {}
         self._change_log: list[StateChange] = []
 
-        # State management components (will be injected)
+        # Service layer components (dependency injection)
+        self._business_service: StateBusinessServiceProtocol | None = None
+        self._persistence_service: StatePersistenceServiceProtocol | None = None
+        self._validation_service: StateValidationServiceProtocol | None = None
+        self._synchronization_service: StateSynchronizationServiceProtocol | None = None
+
+        # Legacy components (backward compatibility)
         self._synchronizer: StateSynchronizer | None = None
         self._validator: StateValidator | None = None
         self._persistence: StatePersistence | None = None
 
-        # Event system
+        # Event system - use consistent event-driven pattern only
         self._subscribers: dict[StateType, set[Callable]] = {}
-        self._event_queue: asyncio.Queue = asyncio.Queue()
+        self._event_emitter = BaseEventEmitter(name="StateService", config=config)
+        # Remove mixed queue pattern - use only consistent event pattern
+        # self._event_queue: asyncio.Queue = asyncio.Queue()
+
+        # Initialize consistency patterns for aligned data flow
+        self._consistent_event_pattern = ConsistentEventPattern("StateService")
+        self._consistent_validation_pattern = ConsistentValidationPattern()
+        self._consistent_processing_pattern = ConsistentProcessingPattern("StateService")
 
         # Synchronization primitives
         self._locks: dict[str, asyncio.Lock] = {}
@@ -326,7 +365,7 @@ class StateService(BaseComponent):
         self._cleanup_task: asyncio.Task | None = None
         self._metrics_task: asyncio.Task | None = None
         self._backup_task: asyncio.Task | None = None
-        self._event_task: asyncio.Task | None = None
+        # self._event_task: asyncio.Task | None = None  # Removed - using consistent patterns
         self._running = False
 
         # Backup configuration
@@ -378,6 +417,9 @@ class StateService(BaseComponent):
             # Initialize InfluxDB client through database service factory if available
             await self._initialize_influxdb_client()
 
+            # Initialize service layer components
+            await self._initialize_service_components()
+
             # Initialize state management components with lazy imports to avoid circular deps
             await self._initialize_state_components()
 
@@ -411,8 +453,8 @@ class StateService(BaseComponent):
             if self.auto_backup_enabled:
                 self._backup_task = asyncio.create_task(self._backup_loop())
 
-            # Initialize event processing
-            self._event_task = asyncio.create_task(self._event_processing_loop())
+            # Event processing now handled synchronously via consistent patterns
+            # No separate event processing task needed
 
             # Note: super().initialize() is not called as it's legacy compatibility
             self.logger.info("StateService initialization completed")
@@ -437,7 +479,6 @@ class StateService(BaseComponent):
                 self._cleanup_task,
                 self._metrics_task,
                 self._backup_task,
-                self._event_task,
             ]:
                 if task and not task.done():
                     task.cancel()
@@ -449,8 +490,21 @@ class StateService(BaseComponent):
             # Final synchronization
             if self._synchronizer:
                 await self._synchronizer.force_sync()
+            if self._synchronization_service:
+                # Service layer handles its own cleanup
+                pass
 
-            # Cleanup components
+            # Cleanup service layer components
+            if self._persistence_service and hasattr(self._persistence_service, "stop"):
+                await self._persistence_service.stop()
+            if self._validation_service and hasattr(self._validation_service, "stop"):
+                await self._validation_service.stop()
+            if self._synchronization_service and hasattr(self._synchronization_service, "stop"):
+                await self._synchronization_service.stop()
+            if self._business_service and hasattr(self._business_service, "stop"):
+                await self._business_service.stop()
+
+            # Cleanup legacy components
             if self._persistence:
                 await self._persistence.cleanup()
             if self._synchronizer:
@@ -482,6 +536,7 @@ class StateService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error during StateService cleanup: {e}")
+            raise
 
     # Core State Operations
 
@@ -570,7 +625,7 @@ class StateService(BaseComponent):
                         severity=ErrorSeverity.MEDIUM,
                     )
                     error_context.details = {
-                        "error_code": "STATE_GET_FAILED",
+                        "error_code": "STATE_001",
                         "cache_key": cache_key,
                         "state_type": state_type.value,
                         "state_id": state_id,
@@ -627,82 +682,100 @@ class StateService(BaseComponent):
                     # Get current state for change detection
                     current_state = await self.get_state(state_type, state_id)
 
-                    # Validate state if requested
-                    if validate and self._validator:
-                        validation_result = await self._validator.validate_state(
-                            state_type, state_data
+                    # Use consistent validation pattern
+                    if validate:
+                        validation_result = await validate_state_data(
+                            f"{state_type.value}_data", state_data
                         )
-                        if not validation_result.is_valid:
+                        if not validation_result["is_valid"]:
                             raise ValidationError(
-                                f"State validation failed: {validation_result.errors}"
+                                f"State validation failed: {validation_result['errors']}"
                             )
 
                     # Validate state transition if updating existing state
-                    if current_state and self._validator:
-                        transition_valid = await self._validator.validate_state_transition(
+                    if current_state:
+                        transition_valid = await self._validate_state_transition_through_service(
                             state_type, current_state, state_data
                         )
                         if not transition_valid:
                             raise ValidationError("Invalid state transition")
 
-                    # Create state change record
-                    state_change = StateChange(
-                        state_id=state_id,
-                        state_type=state_type,
-                        operation=StateOperation.UPDATE if current_state else StateOperation.CREATE,
-                        priority=priority,
-                        old_value=current_state,
-                        new_value=state_data,
-                        changed_fields=self._detect_changed_fields(current_state, state_data),
-                        source_component=source_component,
-                        reason=reason,
+                    # Use business service to process state update
+                    state_change = await self._process_state_update_through_service(
+                        state_type, state_id, state_data, source_component, reason
                     )
 
-                    # Calculate metadata
-                    metadata = StateMetadata(
-                        state_id=state_id,
-                        state_type=state_type,
-                        version=self._get_next_version(cache_key),
-                        checksum=self._calculate_checksum(state_data),
-                        size_bytes=len(json.dumps(state_data, default=str).encode()),
-                        source_component=source_component,
+                    # Calculate metadata through business service
+                    metadata = await self._calculate_metadata_through_service(
+                        state_type, state_id, state_data, source_component
                     )
+
+                    # Update version from existing metadata if available
+                    metadata.version = self._get_next_version(cache_key)
 
                     # Store in memory cache
                     self._memory_cache[cache_key] = state_data.copy()
                     self._metadata_cache[cache_key] = metadata
 
-                    # Store in Redis cache
+                    # Store in Redis cache using consistent data transformation
                     if self.redis_client:
                         redis_key = f"state:{cache_key}"
+                        # Use consistent JSON serialization pattern
+                        serialized_data = (
+                            await (
+                                self._consistent_processing_pattern.process_item_consistent(
+                                    state_data,
+                                    lambda data: json.dumps(data, default=str, sort_keys=True),
+                                )
+                            )
+                        )
                         await self.redis_client.setex(
-                            redis_key, self.cache_ttl_seconds, json.dumps(state_data, default=str)
+                            redis_key, self.cache_ttl_seconds, serialized_data
                         )
 
-                        # Store metadata in Redis
+                        # Store metadata in Redis using consistent pattern
                         metadata_key = f"metadata:{cache_key}"
+                        serialized_metadata = (
+                            await (
+                                self._consistent_processing_pattern.process_item_consistent(
+                                    metadata.__dict__,
+                                    lambda data: json.dumps(data, default=str, sort_keys=True),
+                                )
+                            )
+                        )
                         await self.redis_client.setex(
                             metadata_key,
                             self.cache_ttl_seconds,
-                            json.dumps(metadata.__dict__, default=str),
+                            serialized_metadata,
                         )
 
-                    # Queue for database persistence
-                    if self._persistence:
-                        await self._persistence.queue_state_save(
-                            state_type, state_id, state_data, metadata
-                        )
+                    # Use service layer for persistence
+                    await self._persist_state_through_service(
+                        state_type, state_id, state_data, metadata
+                    )
 
                     # Add to change log
                     self._change_log.append(state_change)
                     if len(self._change_log) > self.max_change_log_size:
                         self._change_log = self._change_log[-self.max_change_log_size // 2 :]
 
-                    # Queue for synchronization
-                    if self._synchronizer:
-                        await self._synchronizer.queue_state_sync(state_change)
+                    # Use service layer for synchronization
+                    await self._synchronize_state_change_through_service(state_change)
 
-                    # Broadcast state change event
+                    # Broadcast state change using consistent event pattern
+                    await emit_state_event(
+                        "changed",
+                        {
+                            "state_type": state_type.value,
+                            "state_id": state_id,
+                            "state_data": state_data,
+                            "operation": state_change.operation.value,
+                            "source_component": source_component,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+
+                    # Also broadcast to legacy subscribers
                     await self._broadcast_state_change(
                         state_type, state_id, state_data, state_change
                     )
@@ -734,7 +807,7 @@ class StateService(BaseComponent):
                         severity=ErrorSeverity.HIGH,
                     )
                     error_context.details = {
-                        "error_code": "STATE_SET_FAILED",
+                        "error_code": "STATE_002",
                         "cache_key": cache_key,
                         "state_type": state_type.value,
                         "state_id": state_id,
@@ -1258,7 +1331,7 @@ class StateService(BaseComponent):
         state_data: dict[str, Any] | None,
         state_change: StateChange,
     ) -> None:
-        """Broadcast state change to subscribers."""
+        """Broadcast state change to subscribers using consistent event-driven pattern."""
         try:
             event_data = {
                 "state_type": state_type,
@@ -1267,10 +1340,36 @@ class StateService(BaseComponent):
                 "state_change": state_change,
             }
 
-            await self._event_queue.put(event_data)
+            # Use unified event system for consistent message patterns only
+            await self._event_emitter.emit_async(
+                f"state.{state_type.value}.changed", event_data, source="StateService"
+            )
+
+            # Process legacy subscribers synchronously to avoid queue pattern
+            await self._notify_legacy_subscribers(state_type, state_id, state_data, state_change)
 
         except Exception as e:
             self.logger.warning(f"Failed to broadcast state change: {e}")
+
+    async def _notify_legacy_subscribers(
+        self,
+        state_type: StateType,
+        state_id: str,
+        state_data: dict[str, Any] | None,
+        state_change: StateChange,
+    ) -> None:
+        """Notify legacy subscribers without using queue pattern."""
+        subscribers = self._subscribers.get(state_type, set())
+        for callback in subscribers.copy():
+            try:
+                if asyncio.iscoroutinefunction(callback):
+                    await callback(state_type, state_id, state_data, state_change)
+                else:
+                    callback(state_type, state_id, state_data, state_change)
+            except Exception as e:
+                self.logger.error(f"Legacy subscriber callback error: {e}")
+                # Remove failing callback
+                self._subscribers[state_type].discard(callback)
 
     # Background Loops
 
@@ -1350,36 +1449,7 @@ class StateService(BaseComponent):
                 self.logger.error(f"Metrics loop error: {e}")
                 await asyncio.sleep(self.validation_interval_seconds)
 
-    async def _event_processing_loop(self) -> None:
-        """Background event processing loop."""
-        while self._running:
-            try:
-                event_data = await self._event_queue.get()
-
-                state_type = event_data["state_type"]
-                state_id = event_data["state_id"]
-                state_data = event_data["state_data"]
-                state_change = event_data["state_change"]
-
-                # Notify subscribers
-                subscribers = self._subscribers.get(state_type, set())
-                for callback in subscribers.copy():  # Copy to avoid modification during iteration
-                    try:
-                        if asyncio.iscoroutinefunction(callback):
-                            await callback(state_type, state_id, state_data, state_change)
-                        else:
-                            callback(state_type, state_id, state_data, state_change)
-
-                    except Exception as e:
-                        self.logger.error(f"Event callback error: {e}")
-                        # Remove failing callback
-                        self._subscribers[state_type].discard(callback)
-
-                self._event_queue.task_done()
-
-            except Exception as e:
-                self.logger.error(f"Event processing error: {e}")
-                await asyncio.sleep(0.1)
+    # Event processing loop removed - using synchronous consistent patterns instead
 
     async def _backup_loop(self) -> None:
         """Background automatic backup loop."""
@@ -1468,7 +1538,9 @@ class StateService(BaseComponent):
                             elif hasattr(self.redis_client, "disconnect"):
                                 await self.redis_client.disconnect()
                         except Exception as cleanup_error:
-                            self.logger.error(f"Error cleaning up Redis connection: {cleanup_error}")
+                            self.logger.error(
+                                f"Error cleaning up Redis connection: {cleanup_error}"
+                            )
                     self.redis_client = None
 
         except Exception as e:
@@ -1556,6 +1628,47 @@ class StateService(BaseComponent):
             self.logger.warning(f"InfluxDB client initialization failed: {e}")
             self.influxdb_client = None
 
+    async def _initialize_service_components(self) -> None:
+        """Initialize service layer components with proper dependency injection."""
+        try:
+            # Initialize business service
+            self._business_service = StateBusinessService()
+            if hasattr(self._business_service, "start"):
+                await self._business_service.start()
+
+            # Initialize persistence service
+            self._persistence_service = StatePersistenceService(self.database_service)
+            if hasattr(self._persistence_service, "start"):
+                await self._persistence_service.start()
+
+            # Initialize validation service
+            self._validation_service = StateValidationService()
+            if hasattr(self._validation_service, "start"):
+                await self._validation_service.start()
+
+            # Initialize synchronization service
+            self._synchronization_service = StateSynchronizationService()
+            if hasattr(self._synchronization_service, "start"):
+                await self._synchronization_service.start()
+
+            self.logger.info("Service layer components initialized successfully")
+
+        except Exception as e:
+            error_context = ErrorContext.from_exception(
+                e,
+                component="StateService",
+                operation="initialize_service_components",
+                severity=ErrorSeverity.MEDIUM,
+            )
+            handler = self.error_handler
+            await handler.handle_error(e, error_context)
+            self.logger.error(f"Failed to initialize service components: {e}")
+            # Set services to None for graceful degradation
+            self._business_service = None
+            self._persistence_service = None
+            self._validation_service = None
+            self._synchronization_service = None
+
     async def _initialize_state_components(self) -> None:
         """Initialize state management components with lazy imports to avoid circular deps."""
         try:
@@ -1605,3 +1718,115 @@ class StateService(BaseComponent):
         if self._error_handler is None:
             self._error_handler = ErrorHandler(self.config)
         return self._error_handler
+
+    # Service layer integration methods
+
+    async def _validate_state_through_service(
+        self, state_type: StateType, state_data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Validate state through service layer or fall back to legacy."""
+        if self._validation_service:
+            return await self._validation_service.validate_state_data(state_type, state_data)
+        elif self._validator:
+            # Fall back to legacy validator
+            result = await self._validator.validate_state(state_type, state_data)
+            return {
+                "is_valid": result.is_valid,
+                "errors": [e.error_message for e in result.errors],
+                "warnings": [w.warning_message for w in result.warnings],
+            }
+        else:
+            # No validation available
+            return {"is_valid": True, "errors": [], "warnings": []}
+
+    async def _validate_state_transition_through_service(
+        self,
+        state_type: StateType,
+        current_state: dict[str, Any],
+        new_state: dict[str, Any],
+    ) -> bool:
+        """Validate state transition through service layer or fall back to legacy."""
+        if self._validation_service:
+            return await self._validation_service.validate_state_transition(
+                state_type, current_state, new_state
+            )
+        elif self._validator:
+            # Fall back to legacy validator
+            return await self._validator.validate_state_transition(
+                state_type, current_state, new_state
+            )
+        else:
+            # No validation available - allow transition
+            return True
+
+    async def _process_state_update_through_service(
+        self,
+        state_type: StateType,
+        state_id: str,
+        state_data: dict[str, Any],
+        source_component: str,
+        reason: str,
+    ) -> StateChange:
+        """Process state update through business service or fall back to legacy."""
+        if self._business_service:
+            return await self._business_service.process_state_update(
+                state_type, state_id, state_data, source_component, reason
+            )
+        else:
+            # Fall back to creating state change directly
+            return StateChange(
+                state_id=state_id,
+                state_type=state_type,
+                operation=StateOperation.UPDATE,
+                priority=StatePriority.MEDIUM,
+                new_value=state_data,
+                source_component=source_component,
+                reason=reason,
+            )
+
+    async def _calculate_metadata_through_service(
+        self,
+        state_type: StateType,
+        state_id: str,
+        state_data: dict[str, Any],
+        source_component: str,
+    ) -> StateMetadata:
+        """Calculate metadata through business service or fall back to legacy."""
+        if self._business_service:
+            return await self._business_service.calculate_state_metadata(
+                state_type, state_id, state_data, source_component
+            )
+        else:
+            # Fall back to direct metadata calculation
+            return StateMetadata(
+                state_id=state_id,
+                state_type=state_type,
+                version=1,
+                checksum=self._calculate_checksum(state_data),
+                size_bytes=len(json.dumps(state_data, default=str).encode()),
+                source_component=source_component,
+            )
+
+    async def _persist_state_through_service(
+        self,
+        state_type: StateType,
+        state_id: str,
+        state_data: dict[str, Any],
+        metadata: StateMetadata,
+    ) -> None:
+        """Persist state through service layer or fall back to legacy."""
+        if self._persistence_service:
+            await self._persistence_service.save_state(state_type, state_id, state_data, metadata)
+        elif self._persistence:
+            # Fall back to legacy persistence
+            await self._persistence.queue_state_save(state_type, state_id, state_data, metadata)
+        # If no persistence is available, data is only stored in memory
+
+    async def _synchronize_state_change_through_service(self, state_change: StateChange) -> None:
+        """Synchronize state change through service layer or fall back to legacy."""
+        if self._synchronization_service:
+            await self._synchronization_service.synchronize_state_change(state_change)
+        elif self._synchronizer:
+            # Fall back to legacy synchronizer
+            await self._synchronizer.queue_state_sync(state_change)
+        # If no synchronization is available, change is not synchronized

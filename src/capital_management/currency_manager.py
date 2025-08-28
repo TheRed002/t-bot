@@ -19,23 +19,34 @@ Version: 1.0.0
 import statistics
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
 
-from src.core.base.component import BaseComponent
-from src.core.config import Config
-from src.core.exceptions import ValidationError
+# Remove direct exchange dependency - use protocols
+from typing import Any, Protocol
+
+from src.core.base.service import TransactionalService
+from src.core.exceptions import ServiceError, ValidationError
 
 # MANDATORY: Import from P-001
 from src.core.types.capital import (
     CapitalCurrencyExposure as CurrencyExposure,
     CapitalFundFlow as FundFlow,
 )
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import PartialFillRecovery
-from src.exchanges.base import BaseExchange
+
+
+class ExchangeDataProtocol(Protocol):
+    """Protocol for exchange data operations."""
+
+    async def fetch_tickers(self) -> dict[str, Any]: ...
+    async def fetch_order_book(self, symbol: str, limit: int = 50) -> dict[str, Any]: ...
+    async def fetch_status(self) -> dict[str, Any]: ...
+
+
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
 from src.utils.validators import ValidationFramework
+
+# Import service interfaces
+from .interfaces import AbstractCurrencyManagementService
 
 # MANDATORY: Use structured logging from src.core.logging for all capital
 # management operations
@@ -47,7 +58,7 @@ from src.utils.validators import ValidationFramework
 # From P-007A - MANDATORY: Use decorators and validators
 
 
-class CurrencyManager(BaseComponent):
+class CurrencyManager(AbstractCurrencyManagementService, TransactionalService):
     """
     Multi-currency capital management system.
 
@@ -57,60 +68,91 @@ class CurrencyManager(BaseComponent):
 
     def __init__(
         self,
-        config: Config,
-        exchanges: dict[str, BaseExchange],
-        error_handler: ErrorHandler | None = None,
-    ):
+        exchange_data_service: Any = None,
+        correlation_id: str | None = None,
+    ) -> None:
         """
-        Initialize the currency manager.
+        Initialize the currency manager service.
 
         Args:
-            config: Application configuration
-            exchanges: Dictionary of exchange instances
-            error_handler: Optional error handler instance (uses DI if not provided)
+            exchange_data_service: Exchange data service for market data (injected)
+            correlation_id: Request correlation ID for tracing
         """
-        super().__init__()  # Initialize BaseComponent
-        self.config = config
-        self.exchanges = exchanges
-        self.capital_config = config.capital_management
+        super().__init__(
+            name="CurrencyManagerService",
+            correlation_id=correlation_id,
+        )
+        self._exchange_data_service = exchange_data_service
 
         # Currency tracking
         self.currency_exposures: dict[str, CurrencyExposure] = {}
         self.exchange_rates: dict[str, Decimal] = {}
-        self.base_currency = self.capital_config.base_currency
+        self.base_currency = "USDT"  # Default, will be loaded from config
 
         # Hedging tracking
         self.hedge_positions: dict[str, Decimal] = {}
-        self.hedging_threshold = self.capital_config.hedging_threshold
-        self.hedge_ratio = self.capital_config.hedge_ratio
+        self.hedging_threshold = 0.1  # Default, will be loaded from config
+        self.hedge_ratio = 0.5  # Default, will be loaded from config
 
         # Historical exchange rates for volatility calculation
         self.rate_history: dict[str, list[tuple[datetime, Decimal]]] = {}
 
-        # Error handler - use dependency injection or provided instance
-        if error_handler:
-            self.error_handler = error_handler
-        else:
-            try:
-                from src.core.dependency_injection import get_container
+        # Configuration will be loaded in _do_start
+        self.capital_config: dict[str, Any] = {}
 
-                self.error_handler = get_container().get("ErrorHandler")
-            except (ImportError, KeyError):
-                # Fallback to creating instance if DI not available
-                self.error_handler = ErrorHandler(config)
+    async def _do_start(self) -> None:
+        """Start the currency manager service."""
+        try:
+            # Resolve exchange data service if not injected
+            if not self._exchange_data_service:
+                try:
+                    self._exchange_data_service = self.resolve_dependency("ExchangeDataService")
+                except Exception as e:
+                    self._logger.warning(
+                        f"ExchangeDataService not available via DI: {e}, will use fallback rates"
+                    )
 
-        # Recovery scenarios
-        self.partial_fill_recovery = PartialFillRecovery(config)
+            # Load configuration from ConfigService
+            await self._load_configuration()
 
-        # Initialize supported currencies
-        self._initialize_currencies()
+            # Initialize supported currencies
+            self._initialize_currencies()
 
-        self.logger.info(
-            "Currency manager initialized",
-            base_currency=self.base_currency,
-            supported_currencies=self.capital_config.supported_currencies,
-            hedging_enabled=self.capital_config.hedging_enabled,
-        )
+            self._logger.info(
+                "Currency manager service started",
+                base_currency=self.base_currency,
+                supported_currencies=self.capital_config.get(
+                    "supported_currencies", ["USDT", "BTC", "ETH"]
+                ),
+                hedging_enabled=self.capital_config.get("hedging_enabled", False),
+            )
+        except Exception as e:
+            self._logger.error(f"Failed to start CurrencyManager service: {e}")
+            raise ServiceError(f"CurrencyManager startup failed: {e}") from e
+
+    async def _load_configuration(self) -> None:
+        """Load configuration from ConfigService."""
+        try:
+            config_service = self.resolve_dependency("ConfigService")
+            self.capital_config = config_service.get_config_value("capital_management", {})
+
+            # Update settings from config
+            self.base_currency = self.capital_config.get("base_currency", "USDT")
+            self.hedging_threshold = self.capital_config.get("hedging_threshold", 0.1)
+            self.hedge_ratio = self.capital_config.get("hedge_ratio", 0.5)
+        except Exception as e:
+            self._logger.warning(f"Failed to load configuration: {e}, using defaults")
+            # Use defaults
+            self.capital_config = {
+                "base_currency": "USDT",
+                "hedging_threshold": 0.1,
+                "hedge_ratio": 0.5,
+                "supported_currencies": ["USDT", "BTC", "ETH"],
+                "hedging_enabled": False,
+            }
+            self.base_currency = "USDT"
+            self.hedging_threshold = 0.1
+            self.hedge_ratio = 0.5
 
     @time_execution
     async def update_currency_exposures(
@@ -130,9 +172,12 @@ class CurrencyManager(BaseComponent):
             await self._update_exchange_rates()
 
             # Validate currencies are supported
+            supported_currencies = self.capital_config.get(
+                "supported_currencies", ["USDT", "BTC", "ETH"]
+            )
             for _exchange, exchange_balances in balances.items():
                 for currency, amount in exchange_balances.items():
-                    if currency not in self.capital_config.supported_currencies:
+                    if currency not in supported_currencies:
                         raise ValidationError(f"Unsupported currency: {currency}")
 
             # Calculate total exposures by currency
@@ -166,8 +211,9 @@ class CurrencyManager(BaseComponent):
                 )
 
                 # Determine if hedging is required
+                hedging_enabled = getattr(self.capital_config, "hedging_enabled", False)
                 hedging_required = (
-                    self.capital_config.hedging_enabled
+                    hedging_enabled
                     and currency != self.base_currency
                     and exposure_percentage > self.hedging_threshold
                 )
@@ -259,10 +305,13 @@ class CurrencyManager(BaseComponent):
             if not ValidationFramework.validate_quantity(float(amount)):
                 raise ValidationError(f"Invalid currency conversion amount: {amount}")
 
-            if from_currency not in self.capital_config.supported_currencies:
+            supported_currencies = self.capital_config.get(
+                "supported_currencies", ["USDT", "BTC", "ETH"]
+            )
+            if from_currency not in supported_currencies:
                 raise ValidationError(f"Unsupported source currency: {from_currency}")
 
-            if to_currency not in self.capital_config.supported_currencies:
+            if to_currency not in supported_currencies:
                 raise ValidationError(f"Unsupported target currency: {to_currency}")
 
             # Get exchange rate
@@ -364,7 +413,7 @@ class CurrencyManager(BaseComponent):
             raise
 
     @time_execution
-    async def get_currency_risk_metrics(self) -> dict[str, float]:
+    async def get_currency_risk_metrics(self) -> dict[str, dict[str, float]]:
         """
         Calculate currency risk metrics.
 
@@ -412,7 +461,10 @@ class CurrencyManager(BaseComponent):
 
     def _initialize_currencies(self) -> None:
         """Initialize supported currencies with default exposures."""
-        for currency in self.capital_config.supported_currencies:
+        supported_currencies = getattr(
+            self.capital_config, "supported_currencies", ["USDT", "BTC", "ETH"]
+        )
+        for currency in supported_currencies:
             exposure = CurrencyExposure(
                 currency=currency,
                 total_exposure=Decimal("0"),
@@ -425,40 +477,45 @@ class CurrencyManager(BaseComponent):
             self.currency_exposures[currency] = exposure
 
     async def _update_exchange_rates(self) -> None:
-        """Update exchange rates from exchanges."""
+        """Update exchange rates from exchange data service."""
         try:
             rates_updated = 0
 
-            # Fetch real rates from exchanges if available
-            if hasattr(self, "exchanges") and self.exchanges:
-                for exchange_name, exchange in self.exchanges.items():
-                    try:
-                        # Get ticker information from exchange
-                        tickers = await exchange.fetch_tickers()
+            # Fetch real rates from exchange data service if available
+            if self._exchange_data_service:
+                try:
+                    # Use service method to get ticker data
+                    if hasattr(self._exchange_data_service, "get_tickers"):
+                        tickers = await self._exchange_data_service.get_tickers()
+                    elif hasattr(self._exchange_data_service, "fetch_tickers"):
+                        tickers = await self._exchange_data_service.fetch_tickers()
+                    else:
+                        # Service doesn't have expected methods
+                        tickers = {}
 
-                        for symbol, ticker in tickers.items():
-                            if ticker.get("last"):
-                                rate = Decimal(str(ticker["last"]))
-                                self.exchange_rates[symbol] = rate
+                    for symbol, ticker in tickers.items():
+                        if isinstance(ticker, dict) and ticker.get("last"):
+                            rate = Decimal(str(ticker["last"]))
+                            self.exchange_rates[symbol] = rate
 
-                                # Store in history for volatility calculation
-                                if symbol not in self.rate_history:
-                                    self.rate_history[symbol] = []
+                            # Store in history for volatility calculation
+                            if symbol not in self.rate_history:
+                                self.rate_history[symbol] = []
 
-                                self.rate_history[symbol].append((datetime.now(timezone.utc), rate))
+                            self.rate_history[symbol].append((datetime.now(timezone.utc), rate))
 
-                                # Keep only last 100 data points
-                                if len(self.rate_history[symbol]) > 100:
-                                    self.rate_history[symbol] = self.rate_history[symbol][-100:]
+                            # Keep only last 100 data points
+                            if len(self.rate_history[symbol]) > 100:
+                                self.rate_history[symbol] = self.rate_history[symbol][-100:]
 
-                                rates_updated += 1
+                            rates_updated += 1
 
-                    except Exception as e:
-                        self.logger.warning(f"Failed to fetch rates from {exchange_name}: {e}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to fetch rates from exchange data service: {e}")
 
-            # Fallback to hardcoded rates if no exchanges available (for testing)
+            # Fallback to hardcoded rates if no service available (for testing)
             if rates_updated == 0:
-                self.logger.warning("No exchange rates fetched, using fallback rates for testing")
+                self.logger.warning("No exchange rates fetched, using fallback rates")
                 fallback_rates = {
                     "BTC/USDT": Decimal("45000"),
                     "ETH/USDT": Decimal("3000"),

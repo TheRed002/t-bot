@@ -139,7 +139,7 @@ class SecureLogger:
     - Compliance with security standards
     """
 
-    def __init__(self, name: str, config: LoggingConfig = None):
+    def __init__(self, name: str, config: LoggingConfig | None = None):
         self.name = name
         self.config = config or LoggingConfig()
         self.sanitizer = get_security_sanitizer()
@@ -511,7 +511,7 @@ class SecureLogger:
         """Format log message for output."""
 
         # Create structured log data
-        log_data = {
+        log_data: dict[str, Any] = {
             "timestamp": log_entry.timestamp.isoformat(),
             "level": log_entry.level.value,
             "category": log_entry.category.value,
@@ -724,6 +724,38 @@ class SecureLogger:
             self._flush_log_buffer()
             self._flush_audit_buffer()
 
+    def close(self) -> None:
+        """Close all file handles and cleanup resources."""
+
+        with self._lock:
+            # Flush any remaining data
+            self._flush_log_buffer()
+            self._flush_audit_buffer()
+
+            # Close all handlers
+            for handler in self.logger.handlers[:]:
+                try:
+                    handler.close()
+                    self.logger.removeHandler(handler)
+                except Exception as e:
+                    # Use print as logger might be compromised during shutdown
+                    print(f"Failed to close logger handler: {e}")
+
+            if hasattr(self, "audit_logger"):
+                for handler in self.audit_logger.handlers[:]:
+                    try:
+                        handler.close()
+                        self.audit_logger.removeHandler(handler)
+                    except Exception as e:
+                        print(f"Failed to close audit logger handler: {e}")
+
+            for handler in self.security_logger.handlers[:]:
+                try:
+                    handler.close()
+                    self.security_logger.removeHandler(handler)
+                except Exception as e:
+                    print(f"Failed to close security logger handler: {e}")
+
     def get_logger_stats(self) -> dict[str, Any]:
         """Get logging system statistics."""
 
@@ -762,6 +794,18 @@ def get_secure_logger(name: str, config: LoggingConfig | None = None) -> SecureL
         if name not in _loggers:
             _loggers[name] = SecureLogger(name, config)
         return _loggers[name]
+
+
+def close_all_loggers() -> None:
+    """Close all logger instances and cleanup resources."""
+
+    with _logger_lock:
+        for logger in _loggers.values():
+            try:
+                logger.close()
+            except Exception as e:
+                print(f"Failed to close logger during shutdown: {e}")
+        _loggers.clear()
 
 
 def log_security_error(

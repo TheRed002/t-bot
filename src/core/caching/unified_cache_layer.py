@@ -29,6 +29,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pickle import PicklingError
 from typing import Any
 
 import redis.asyncio as redis
@@ -477,7 +478,11 @@ class L2MemoryCache(CacheInterface):
                 return len(pickle.dumps(value))
             else:
                 return 100  # Default estimate
-        except Exception:
+        except (UnicodeDecodeError, PicklingError, MemoryError, ValueError) as e:
+            # Log the specific error for debugging but don't let it propagate
+            import logging
+
+            logging.getLogger(__name__).debug(f"Failed to estimate cache value size: {e}")
             return 100
 
     def _update_access_time(self, start_time: float) -> None:

@@ -545,13 +545,12 @@ class TradeSimulator:
             mock_market_data = CoreMarketData(
                 symbol="",  # Not needed for impact calculation
                 timestamp=datetime.now(timezone.utc),
-                price=safe_decimal("1"),  # Normalized
+                close=safe_decimal("1"),  # Normalized
                 volume=safe_decimal(volume),
-                bid=safe_decimal("0.999"),
-                ask=safe_decimal("1.001"),
                 high=safe_decimal("1.01"),
                 low=safe_decimal("0.99"),
                 open=safe_decimal("1"),
+                exchange="mock",
             )
 
             # Calculate slippage using the model
@@ -676,6 +675,19 @@ class TradeSimulator:
             "fill_rate": (filled + partial) / total if total > 0 else 0.0,
             "rejection_rate": rejected / total if total > 0 else 0.0,
         }
+
+    def cleanup(self) -> None:
+        """Cleanup simulator resources."""
+        try:
+            # Clear all internal state
+            self._order_book.clear()
+            self._executed_trades.clear()
+            self._pending_orders.clear()
+
+            logger.info("TradeSimulator cleanup completed")
+        except Exception as e:
+            logger.error(f"TradeSimulator cleanup error: {e}")
+            # Don't re-raise cleanup errors to avoid masking original issues
 
     @with_error_context(component="backtesting", operation="run_simulation")
     async def run_simulation(

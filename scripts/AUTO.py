@@ -38,6 +38,137 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 # ============================================================================
+# DETAILED LOGGING SETUP
+# ============================================================================
+
+
+class DetailedLogger:
+    """Enhanced logger for AUTO.py with structured logging to files"""
+
+    def __init__(self, log_file: Path = Path("scripts/AUTO.logs")):
+        self.log_file = log_file
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Setup file logger
+        self.logger = logging.getLogger("AUTO_DETAILED")
+        self.logger.setLevel(logging.DEBUG)
+
+        # Clear existing handlers
+        self.logger.handlers.clear()
+
+        # File handler with detailed format
+        file_handler = logging.FileHandler(self.log_file, mode='a', encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+
+        # Detailed formatter
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)8s | %(name)s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(formatter)
+        self.logger.addHandler(file_handler)
+
+        # Initialize log session
+        self.log_session_start()
+
+    def log_session_start(self):
+        """Log session start with system info"""
+        self.logger.info("="*80)
+        self.logger.info("AUTO.PY SESSION STARTED")
+        self.logger.info(f"Session ID: {datetime.now().isoformat()}")
+        self.logger.info(f"Working Directory: {Path.cwd()}")
+        self.logger.info(f"Python Version: {sys.version}")
+        self.logger.info("="*80)
+
+    def log_module_start(self, module: str, total_steps: int):
+        """Log module processing start"""
+        self.logger.info(f"MODULE_START | {module} | steps={total_steps}")
+
+    def log_step(self, module: str, step: int, total: int, action: str):
+        """Log individual step"""
+        progress = (step / total * 100) if total > 0 else 0
+        self.logger.info(f"STEP | {module} | {step:03d}/{total:03d} | {progress:5.1f}% | {action}")
+
+    def log_test_run(self, module: str, test_dir: str, timeout: int, result: Dict[str, Any]):
+        """Log test execution details"""
+        success = result.get("success", False)
+        returncode = result.get("returncode", -1)
+        failures_count = len(result.get("failures", []))
+        slow_tests_count = len(result.get("slow_tests", []))
+
+        self.logger.info(f"TEST_RUN | {module} | dir={test_dir} | timeout={timeout}s")
+        self.logger.info(
+            f"TEST_RESULT | {module} | success={success} | returncode={returncode} | failures={failures_count} | slow_tests={slow_tests_count}")
+
+        # Log failures in detail
+        for failure in result.get("failures", [])[:10]:  # Limit to 10
+            self.logger.warning(f"TEST_FAILURE | {module} | {failure}")
+
+    def log_claude_request(self, prompt_num: int, total_prompts: int, description: str,
+                           prompt_length: int):
+        """Log Claude API request details"""
+        self.logger.info(f"CLAUDE_CALL | {prompt_num:03d}/{total_prompts} | {description}")
+        self.logger.info(f"CLAUDE_REQUEST | len={prompt_length} | timeout=900s")
+    
+    def log_claude_response(self, response_time: float, response_length: int,
+                            success: bool, error: str = ""):
+        """Log Claude API response details"""
+        if success:
+            self.logger.info(
+                f"CLAUDE_RESPONSE | time={response_time:.1f}s | len={response_length} | SUCCESS")
+        else:
+            self.logger.error(f"CLAUDE_RESPONSE | time={response_time:.1f}s | ERROR | {error}")
+    
+    def log_claude_call(self, prompt_num: int, total_prompts: int, description: str,
+                        prompt_length: int, response_time: float, response_length: int,
+                        success: bool, error: str = ""):
+        """Legacy method for backward compatibility - logs both request and response"""
+        self.log_claude_request(prompt_num, total_prompts, description, prompt_length)
+        if response_time > 0 or error:  # Only log response if there's actual data
+            self.log_claude_response(response_time, response_length, success, error)
+
+    def log_progress_update(self, module: str, **kwargs):
+        """Log progress updates"""
+        updates = " | ".join([f"{k}={v}" for k, v in kwargs.items()])
+        self.logger.info(f"PROGRESS_UPDATE | {module} | {updates}")
+
+    def log_cascade_check(self, module: str, dependent: str, success: bool):
+        """Log cascade check results"""
+        result = "SUCCESS" if success else "FAILED"
+        self.logger.warning(f"CASCADE_CHECK | {module} -> {dependent} | {result}")
+
+    def log_integration_check(self, module: str, dependency: str, prompt_type: str):
+        """Log integration checks"""
+        self.logger.info(f"INTEGRATION_CHECK | {module} -> {dependency} | {prompt_type}")
+
+    def log_error(self, module: str, error: str, traceback_str: str = None):
+        """Log errors with traceback"""
+        self.logger.error(f"MODULE_ERROR | {module} | {error}")
+        if traceback_str:
+            self.logger.error(f"TRACEBACK | {module} | {traceback_str}")
+
+    def log_completion(self, module: str, status: str, iterations: int, prompts_completed: List[str]):
+        """Log module completion"""
+        prompts_str = ",".join(prompts_completed)
+        self.logger.info(
+            f"MODULE_COMPLETE | {module} | status={status} | iterations={iterations} | prompts=[{prompts_str}]")
+
+    def log_final_summary(self, completed: Set[str], failed: Set[str], success_rate: float):
+        """Log final execution summary"""
+        self.logger.info("="*80)
+        self.logger.info("FINAL SUMMARY")
+        self.logger.info(
+            f"COMPLETED_MODULES | count={len(completed)} | modules={','.join(sorted(completed))}")
+        self.logger.info(
+            f"FAILED_MODULES | count={len(failed)} | modules={','.join(sorted(failed))}")
+        self.logger.info(f"SUCCESS_RATE | {success_rate:.1f}%")
+        self.logger.info("="*80)
+
+
+# Global logger instance
+detailed_logger = None
+
+# ============================================================================
 # CONFIGURATION
 # ============================================================================
 
@@ -120,7 +251,7 @@ TEST_DIRECTORIES = {
     "database": "tests/unit/test_database",
     "state": "tests/unit/test_state",
     "monitoring": "tests/unit/test_monitoring",
-    "exchanges": "tests/unit/test_exchange",  # Note: test_exchange not test_exchanges
+    "exchanges": "tests/unit/test_exchanges",  # Now consistent with module name
     "risk_management": "tests/unit/test_risk_management",
     "execution": "tests/unit/test_execution",
     "data": "tests/unit/test_data",
@@ -135,7 +266,10 @@ TEST_DIRECTORIES = {
 }
 
 # Configuration
-MAX_ITERATIONS_PER_MODULE = 10
+# MAX_ITERATIONS_PER_MODULE:
+#   > 0: Maximum number of iterations before giving up on a module
+#   = 0: Infinite iterations until all tests pass (recommended for comprehensive fixes)
+MAX_ITERATIONS_PER_MODULE = 0
 MAX_PARALLEL_MODULES = 2  # Reduced for safety
 API_RATE_LIMIT_PER_MINUTE = 5
 API_RATE_LIMIT_PER_HOUR = 100
@@ -265,7 +399,16 @@ class PromptType(Enum):
     ERRORS_ONLY = "errors_only"
     TEST_FIXES = "test_fixes"
     SLOW_TESTS = "slow_tests"
+    TEST_VERIFICATION = "test_verification"  # New comprehensive test check
+    TEST_COVERAGE = "test_coverage"  # New coverage enforcement
     INTEGRATION = "integration"
+    # Trading-specific prompts
+    SERVICE_LAYER = "service_layer"
+    DATABASE_MODELS = "database_models"
+    FINANCIAL_PRECISION = "financial_precision"
+    DEPENDENCY_INJECTION = "dependency_injection"
+    WEBSOCKET_ASYNC = "websocket_async"
+    FACTORY_PATTERNS = "factory_patterns"
 
 
 # More granular, specific prompts with anti-hallucination and no-report instruction
@@ -437,6 +580,237 @@ CRITICAL RULES:
 - DO NOT skip important edge cases
 - Maintain test reliability and determinism
 - DO NOT write any reports or lengthy explanations - just apply the fixes
+
+{anti_hallucination}
+""",
+
+    PromptType.TEST_VERIFICATION: """Use Task tool: financial-qa-engineer
+Comprehensive test verification for {module} module - ensure tests are ACTUALLY testing logic correctly:
+
+VERIFICATION CHECKLIST:
+1. **Test Logic Correctness**:
+   - Are assertions actually checking the RIGHT values?
+   - Do mocks return realistic data (not just None or empty)?
+   - Are edge cases properly tested (empty data, nulls, extreme values)?
+   - Are financial calculations verified with exact expected values?
+   - Do tests cover BOTH success AND failure scenarios?
+
+2. **Data Validity**:
+   - Are test fixtures using realistic data shapes and values?
+   - For trading tests: prices > 0, quantities > 0, proper decimal precision
+   - For timestamps: realistic dates, proper timezone handling
+   - For IDs: consistent types (int vs string) across tests
+   - Mock data matches actual API response structures
+
+3. **Critical Path Coverage**:
+   - Main business logic paths have tests
+   - Error handling paths are tested
+   - Resource cleanup (finally blocks) are tested
+   - Async operations properly awaited in tests
+   - Database transactions are tested for both commit and rollback
+
+4. **Financial Accuracy** (for trading modules):
+   - Price calculations use Decimal, not float
+   - Commission/fee calculations are verified
+   - Position sizing respects limits
+   - Risk calculations match expected formulas
+   - P&L calculations are precise to 8 decimal places
+
+5. **Test Independence**:
+   - Tests don't depend on execution order
+   - Each test has proper setup/teardown
+   - No shared mutable state between tests
+   - Database tests use transactions or test databases
+
+FIX THESE COMMON ISSUES:
+- Tests that always pass (assertions like assert True or assert result is not None)
+- Mocks that return None when code expects real objects
+- Missing assertions on critical return values
+- Tests that don't actually call the function being tested
+- Incomplete error scenario testing
+
+VALIDATION:
+After fixes, run: python -m pytest {test_dir} -v --tb=short
+All tests must pass AND actually validate the module's behavior
+
+{anti_hallucination}
+""",
+
+    PromptType.TEST_COVERAGE: """Use Task tool: financial-qa-engineer
+Ensure {module} module has MINIMUM 70% test coverage (90% for critical modules):
+
+COVERAGE REQUIREMENTS:
+- MINIMUM: 70% overall coverage
+- CRITICAL MODULES ({critical_modules}): 90% coverage required
+- Financial calculations: 100% coverage required
+
+CHECK AND ADD MISSING TESTS FOR:
+1. **Uncovered Functions**: Add tests for any function with 0% coverage
+2. **Uncovered Branches**: Add tests for if/else branches not covered
+3. **Exception Paths**: Add tests that trigger exception handling
+4. **Edge Cases**: Empty inputs, None values, boundary conditions
+5. **Integration Points**: Where module interacts with others
+
+GENERATE MISSING TESTS:
+```python
+# For each uncovered function, create tests like:
+def test_function_name_success_case():
+    # Arrange
+    # Act  
+    # Assert
+
+def test_function_name_edge_case():
+    # Test with edge inputs
+
+def test_function_name_error_case():
+    # Test error handling
+```
+
+CRITICAL TEST SCENARIOS FOR FINANCIAL MODULES:
+- Decimal precision preservation
+- Overflow/underflow handling
+- Negative value handling
+- Zero value edge cases
+- Maximum position size limits
+- Minimum order size validation
+- Rate limiting behavior
+- Connection failure recovery
+
+RUN COVERAGE CHECK:
+```bash
+python -m pytest {test_dir} --cov=src/{module} --cov-report=term-missing --cov-fail-under=70
+```
+
+For critical modules, use --cov-fail-under=90
+
+ADD TESTS UNTIL COVERAGE MEETS REQUIREMENTS!
+
+{anti_hallucination}
+""",
+
+    PromptType.SERVICE_LAYER: """Use Task tool: system-design-architect
+Fix ONLY service layer violations in src/{module}/:
+
+ISSUES TO FIX:
+1. Controllers calling repositories directly (should call services)
+2. Business logic in controllers (should be in services)
+3. Services with tight coupling to infrastructure
+4. Missing service interfaces/protocols
+5. Circular dependencies between services
+
+RULES:
+- Move business logic from controllers to services
+- Controllers should ONLY call services, never repositories
+- Services should use dependency injection for infrastructure
+- Create service interfaces where missing
+- Break circular dependencies with events or interfaces
+- Use existing service patterns from other modules
+
+{anti_hallucination}
+""",
+
+    PromptType.DATABASE_MODELS: """Use Task tool: postgres-timescale-architect
+Fix ONLY database model issues in src/{module}/:
+
+ISSUES TO FIX:
+1. Missing foreign key relationships
+2. Incorrect relationship configurations (back_populates, cascade)
+3. Missing database constraints (CheckConstraint, UniqueConstraint)
+4. Incorrect column types for financial data (should use DECIMAL)
+5. Missing indexes for performance
+6. Circular import issues in model relationships
+
+RULES:
+- Use DECIMAL(20, 8) for all financial amounts (prices, quantities)
+- Add proper foreign keys with CASCADE options
+- Configure back_populates correctly on both sides
+- Add check constraints for business rules (quantity > 0, etc.)
+- Add indexes for frequently queried columns
+- Import models properly to avoid circular imports
+
+{anti_hallucination}
+""",
+
+    PromptType.FINANCIAL_PRECISION: """Use Task tool: risk-management-expert
+Fix ONLY financial precision issues in src/{module}/:
+
+ISSUES TO FIX:
+1. Using float instead of Decimal for financial calculations
+2. Missing precision in price/quantity calculations
+3. Rounding errors in profit/loss calculations
+4. Incorrect decimal places for different asset types
+5. Currency conversion precision issues
+
+RULES:
+- Use Decimal for ALL financial calculations (never float)
+- Use DECIMAL(20, 8) precision for crypto (8 decimal places)
+- Use DECIMAL(20, 4) precision for forex (4 decimal places)
+- Use DECIMAL(20, 2) precision for stocks (2 decimal places)
+- Always specify decimal context for rounding
+- Validate precision in calculations and comparisons
+
+{anti_hallucination}
+""",
+
+    PromptType.DEPENDENCY_INJECTION: """Use Task tool: system-design-architect
+Fix ONLY dependency injection issues in src/{module}/:
+
+ISSUES TO FIX:
+1. Services creating dependencies directly (should inject)
+2. Missing service registration in containers
+3. Circular dependencies in DI container
+4. Incorrect service lifetimes (singleton vs transient)
+5. Missing factory patterns for complex dependencies
+
+RULES:
+- Use constructor injection for dependencies
+- Register services in DI container with correct lifetime
+- Use factory patterns for complex service creation
+- Break circular dependencies with interfaces
+- Follow existing DI patterns from other modules
+- Use ServiceContainer.register_singleton for stateful services
+
+{anti_hallucination}
+""",
+
+    PromptType.WEBSOCKET_ASYNC: """Use Task tool: realtime-dashboard-architect
+Fix ONLY WebSocket and async issues in src/{module}/:
+
+ISSUES TO FIX:
+1. Missing await on async WebSocket operations
+2. Blocking operations in async WebSocket handlers
+3. Memory leaks from unclosed WebSocket connections
+4. Race conditions in concurrent WebSocket handling
+5. Improper error handling in WebSocket streams
+
+RULES:
+- Add await to all async WebSocket operations
+- Use async context managers for WebSocket connections
+- Add proper error handling and connection cleanup
+- Use asyncio.gather() for concurrent operations
+- Implement proper backpressure handling
+- Add connection timeout and heartbeat mechanisms
+
+{anti_hallucination}
+""",
+
+    PromptType.FACTORY_PATTERNS: """Use Task tool: system-design-architect
+Fix ONLY factory pattern issues in src/{module}/:
+
+ISSUES TO FIX:
+1. Factory methods not using dependency injection
+2. Hard-coded service creation in factories
+3. Missing factory registration in service containers
+4. Factories not following interface patterns
+5. Complex factory logic that should be simplified
+
+RULES:
+- Use dependency injection in factory methods
+- Register factories in service container
+- Return interfaces, not concrete classes
+- Keep factory logic simple and focused
+- Use existing factory patterns from other modules
+- Follow service locator pattern for complex creation
 
 {anti_hallucination}
 """
@@ -611,7 +985,7 @@ class ProgressTracker:
             }
             with open(self.progress_file, 'w') as f:
                 json.dump(data, f, indent=2, default=str)
-            print(f"💾 Progress saved to {self.progress_file}")
+            # Progress saves silently - details in log file only
         except Exception as e:
             print(f"⚠️ Could not save progress: {e}")
 
@@ -634,7 +1008,6 @@ class ProgressTracker:
     def update_module(self, module: str, **kwargs):
         """Update module progress"""
         with self._lock:
-            print(f"🔄 Updating progress for {module}: {kwargs}")
             # Use internal method that doesn't acquire lock again
             progress = self._get_module_progress_internal(module)
             for key, value in kwargs.items():
@@ -648,7 +1021,10 @@ class ProgressTracker:
                 self.failed_modules.add(module)
                 self.completed_modules.discard(module)
 
-            print(f"✅ Updated progress for {module}: {progress.status}")
+            # Log progress update (detailed logging only)
+            if detailed_logger:
+                detailed_logger.log_progress_update(module, **kwargs)
+
             # Call internal save that doesn't acquire lock again
             self._save_progress_internal()
 
@@ -718,16 +1094,14 @@ class ClaudeExecutor:
         self.total_prompts = 0
         self.current_prompt = 0
 
-    def execute_prompt(self, prompt: str, description: str = "", use_feedback_agent: bool = False) -> Tuple[bool, str]:
+    def execute_prompt(self, prompt: str, description: str = "") -> Tuple[bool, str]:
         """Execute a Claude prompt with anti-hallucination and retry logic"""
 
         self.current_prompt += 1
 
-        print(f"\n{'='*60}")
+        # Minimal Claude call indicator - use newline for parallel safety
         print(
-            f"🤖 CLAUDE PROMPT [{self.current_prompt}/{self.total_prompts if self.total_prompts > 0 else '?'}]: {description}")
-        print(f"⏰ Time: {datetime.now().strftime('%H:%M:%S')}")
-        print(f"{'='*60}")
+            f"🤖 API Call {self.current_prompt}/{self.total_prompts if self.total_prompts > 0 else '?'}")
 
         # Check for dry-run mode
         if DRY_RUN_MODE:
@@ -756,7 +1130,7 @@ class ClaudeExecutor:
             cmd = [
                 "claude",
                 "--dangerously-skip-permissions",
-                "--model", "claude-opus-4-20250514",
+                "--model", "claude-sonnet-4-20250514",
                 "-p", prompt
             ]
 
@@ -765,35 +1139,64 @@ class ClaudeExecutor:
                     print(f"🔄 Retry {retries}/{self.max_retries} for {description}...")
                 else:
                     print(f"🚀 Sending to Claude API...")
+                    # Log Claude request start (only on first attempt)
+                    if detailed_logger:
+                        detailed_logger.log_claude_request(
+                            self.current_prompt, self.total_prompts, description,
+                            len(prompt)
+                        )
 
                 start_time = time.time()
-                print(f"⏳ Executing command (timeout: 300s)...")
+                print(f"⏳ Executing command...")
 
+                # No timeout for Claude API - it can legitimately take a long time
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=300,
-                    check=True
+                    check=True,
+                    timeout=None  # No timeout - Claude can run as long as needed
                 )
 
                 elapsed = time.time() - start_time
-                print(f"✅ Claude responded in {elapsed:.1f}s")
-                print(f"📤 Response length: {len(result.stdout)} characters")
 
-                # Show response preview
-                if result.stdout:
-                    response_lines = result.stdout.split('\n')
-                    preview = response_lines[0] if response_lines else "Empty"
-                    print(f"📄 Response preview: {preview[:150]}...")
+                # Log successful Claude response (details go to log file only)
+                if detailed_logger:
+                    detailed_logger.log_claude_response(
+                        elapsed, len(result.stdout), True
+                    )
 
-                # Success - return result
+                # Success - return result (no console spam)
                 return True, result.stdout
 
-            except subprocess.TimeoutExpired:
-                return False, "Timeout"
+            except subprocess.TimeoutExpired as e:
+                elapsed = time.time() - start_time
+                error_msg = f"Timeout after {elapsed:.1f}s"
+                print(f"⚠️ Claude API timeout: {error_msg}")
+                if detailed_logger:
+                    detailed_logger.log_claude_response(
+                        elapsed, 0, False, error_msg
+                    )
+                return False, error_msg
             except subprocess.CalledProcessError as e:
-                error_msg = e.stderr[:500] if e.stderr else str(e)
+                elapsed = time.time() - start_time
+                # Capture full error details
+                error_msg = f"Exit code: {e.returncode}\n"
+                if e.stderr:
+                    error_msg += f"Stderr: {e.stderr[:1000]}\n"
+                if e.stdout:
+                    error_msg += f"Stdout: {e.stdout[:500]}"
+                if not e.stderr and not e.stdout:
+                    error_msg = f"Command failed with exit code {e.returncode}: {str(e)}"
+
+                # Log failed Claude response with full error
+                if detailed_logger:
+                    detailed_logger.log_claude_response(
+                        elapsed, 0, False, error_msg[:500]
+                    )
+
+                # Print error to console for visibility
+                print(f"❌ Claude API error: {error_msg[:200]}")
 
                 # Check for 500 error or rate limit
                 if "500" in error_msg or "rate" in error_msg.lower() or "limit" in error_msg.lower():
@@ -806,6 +1209,18 @@ class ClaudeExecutor:
 
                 return False, f"Error: {error_msg[:200]}"
             except Exception as e:
+                elapsed = time.time() - start_time
+                error_msg = f"{type(e).__name__}: {str(e)}"
+
+                # Log exception with full details
+                if detailed_logger:
+                    detailed_logger.log_claude_response(
+                        elapsed, 0, False, error_msg
+                    )
+
+                # Print to console
+                print(f"⚠️ Unexpected error: {error_msg}")
+
                 retries += 1
                 if retries < self.max_retries:
                     print(f"⚠️ Exception occurred: {e}, retrying in {self.retry_delay}s...")
@@ -813,6 +1228,11 @@ class ClaudeExecutor:
                     continue
                 return False, str(e)
 
+        # Log max retries exceeded
+        if detailed_logger:
+            detailed_logger.log_claude_response(
+                0, 0, False, f"Max retries ({self.max_retries}) exceeded"
+            )
         return False, f"Max retries ({self.max_retries}) exceeded"
 
     def request_feedback(self, module: str, issue: str, agent: str = "code-guardian-enforcer") -> Tuple[bool, str]:
@@ -833,7 +1253,7 @@ Provide ONLY:
 DO NOT write reports or lengthy explanations.
 """
 
-        return self.execute_prompt(feedback_prompt, f"Getting feedback from {agent}", use_feedback_agent=True)
+        return self.execute_prompt(feedback_prompt, f"Getting feedback from {agent}")
 
 # ============================================================================
 # TEST RUNNER
@@ -917,7 +1337,7 @@ class TestRunner:
             if slow_tests:
                 print(f"🐌 {len(slow_tests)} slow tests found")
 
-            return {
+            test_result = {
                 "success": result.returncode == 0,
                 "passed": passed,
                 "failures": failures,
@@ -926,6 +1346,12 @@ class TestRunner:
                 "output": output[:5000],
                 "returncode": result.returncode
             }
+
+            # Log detailed test results
+            if detailed_logger:
+                detailed_logger.log_test_run(module, test_dir, timeout, test_result)
+
+            return test_result
 
         except subprocess.TimeoutExpired:
             return {
@@ -1088,46 +1514,61 @@ class ModuleProcessor:
         steps = 0
         steps += 1  # Update status to in_progress
         steps += 1  # Baseline test
-        steps += 5 * MAX_ITERATIONS_PER_MODULE  # Fix prompts
-        steps += MAX_ITERATIONS_PER_MODULE  # Test runs per iteration
+
+        # Calculate actual number of fix prompts
+        fix_prompts_count = len([p for p in PromptType if p in MODULE_PROMPTS and p !=
+                                PromptType.TEST_FIXES and p != PromptType.SLOW_TESTS])
+
+        if MAX_ITERATIONS_PER_MODULE > 0:
+            steps += fix_prompts_count * MAX_ITERATIONS_PER_MODULE  # Fix prompts
+            steps += MAX_ITERATIONS_PER_MODULE  # Test runs per iteration
+        else:
+            # For infinite iterations, estimate reasonable default for progress bar
+            estimated_iterations = 3
+            steps += fix_prompts_count * estimated_iterations  # Fix prompts
+            steps += estimated_iterations  # Test runs per iteration
+
         steps += len(MODULE_DEPENDENCIES.get(module, []))  # Integration checks
         steps += len(DEPENDENT_MODULES.get(module, []))  # Cascade checks
         return steps
 
-    def _log_step(self, action: str):
-        """Log current step with progress indicator"""
+    def _log_step(self, action: str, module: str = "unknown", phase: str = "PROCESSING"):
+        """Log current step with clean progress indicator"""
         self.current_step += 1
-        timestamp = datetime.now().strftime('%H:%M:%S')
         progress_pct = (self.current_step / self.total_steps * 100) if self.total_steps > 0 else 0
-        progress_bar = '█' * int(progress_pct / 5) + '░' * (20 - int(progress_pct / 5))
-        print(f"\n[🔹 STEP {self.current_step:03d}/{self.total_steps:03d}] {action}")
-        print(f"[📊 PROGRESS] [{progress_bar}] {progress_pct:.1f}% @ {timestamp}")
+
+        # Clean, concise output - use newline instead of carriage return for parallel safety
+        print(f"🔧 {module.upper()} | {phase} | {action} | {progress_pct:.0f}%")
+
+        # Log to detailed logger only
+        if detailed_logger:
+            detailed_logger.log_step(module, self.current_step, self.total_steps, action)
 
     def process_module(self, module: str) -> bool:
         """Process a module with granular fixes and cascade checks"""
 
-        print(f"\n{'='*80}")
-        print(f"📦 PROCESSING MODULE: {module}")
-        print(f"⏰ Started at: {datetime.now().strftime('%H:%M:%S')}")
-        print(f"{'='*80}")
-
         # Skip if already complete
         if self.progress.is_module_complete(module):
-            print(f"✅ {module}: Already completed (skipping)")
+            print(f"\n✅ {module.upper()} | SKIPPED | Already completed")
             return True
 
         # Initialize step tracking for this module
         self.current_step = 0
         self.total_steps = self._calculate_module_steps(module)
-        print(f"📢 Total steps for {module}: {self.total_steps}")
+
+        # Clean module start indicator
+        print(f"\n📦 {module.upper()} | STARTING | {self.total_steps} steps")
+
+        # Log module start
+        if detailed_logger:
+            detailed_logger.log_module_start(module, self.total_steps)
 
         # Update progress
-        self._log_step("Updating module status to in_progress")
+        self._log_step("Initializing", module, "SETUP")
         self.progress.update_module(module, status="in_progress")
 
         # Get baseline test results
-        self._log_step("Running baseline tests")
-        print(f"📊 Getting baseline for {module}...")
+        self._log_step("Baseline tests", module, "TESTING")
         baseline = self.test_runner.run_tests(module)
         self.cascade_protector.update_baseline(module, baseline)
 
@@ -1135,122 +1576,100 @@ class ModuleProcessor:
             module_progress = self.progress.get_module_progress(module)
 
             # Process with granular prompts and verification after each
-            for iteration in range(module_progress.iteration, MAX_ITERATIONS_PER_MODULE):
-                print(f"\n🔄 Iteration {iteration + 1}/{MAX_ITERATIONS_PER_MODULE}")
+            # If MAX_ITERATIONS_PER_MODULE = 0, iterate indefinitely until tests pass
+            iteration = module_progress.iteration
+            consecutive_api_failures = 0
+            max_consecutive_failures = 5  # Safety: exit after 5 consecutive API failures
+
+            while True:
+                # Check iteration limit (if not infinite)
+                if MAX_ITERATIONS_PER_MODULE > 0 and iteration >= MAX_ITERATIONS_PER_MODULE:
+                    break
+
+                # Safety check: prevent infinite loops due to persistent API failures
+                if MAX_ITERATIONS_PER_MODULE == 0 and consecutive_api_failures >= max_consecutive_failures:
+                    print(f"\n❌ {module.upper()} | FAILED | Too many consecutive API failures")
+                    self.progress.update_module(module, status="failed")
+                    return False
+                # Display iteration info
+                if MAX_ITERATIONS_PER_MODULE > 0:
+                    self._log_step(
+                        f"Iteration {iteration + 1}/{MAX_ITERATIONS_PER_MODULE}", module, "FIXING")
+                else:
+                    self._log_step(f"Iteration {iteration + 1} (infinite)", module, "FIXING")
                 self.progress.update_module(module, iteration=iteration + 1)
 
-                # Granular fix sequence with testing after each critical fix
+                # Granular fix sequence - run all prompts then test
                 fix_sequence = [
-                    (PromptType.IMPORTS_ONLY, "Fixing imports", True),
-                    (PromptType.TYPES_ONLY, "Fixing types", False),
-                    (PromptType.ASYNC_ONLY, "Fixing async/await", True),
-                    (PromptType.RESOURCES_ONLY, "Fixing resources", True),
-                    (PromptType.ERRORS_ONLY, "Fixing error handling", False),
+                    (PromptType.IMPORTS_ONLY, "Fixing imports"),
+                    (PromptType.TYPES_ONLY, "Fixing types"),
+                    (PromptType.ASYNC_ONLY, "Fixing async/await"),
+                    (PromptType.RESOURCES_ONLY, "Fixing resources"),
+                    (PromptType.ERRORS_ONLY, "Fixing error handling"),
+                    # Trading-specific fixes
+                    (PromptType.SERVICE_LAYER, "Fixing service layer"),
+                    (PromptType.DATABASE_MODELS, "Fixing database models"),
+                    (PromptType.FINANCIAL_PRECISION, "Fixing financial precision"),
+                    (PromptType.DEPENDENCY_INJECTION, "Fixing dependency injection"),
+                    (PromptType.WEBSOCKET_ASYNC, "Fixing WebSocket/async"),
+                    (PromptType.FACTORY_PATTERNS, "Fixing factory patterns"),
+                    # Test quality verification - run after code fixes
+                    (PromptType.TEST_VERIFICATION, "Verifying test logic correctness"),
+                    (PromptType.TEST_COVERAGE, "Ensuring 70%+ test coverage"),
                 ]
 
-                # Calculate prompts for this iteration
-                remaining_prompts = len(
-                    [p for p, _, _ in fix_sequence if p.value not in module_progress.prompts_completed])
-                print(f"📋 Prompts to execute this iteration: {remaining_prompts}")
-
-                tests_passing = False
-
-                prompt_num = 0
-                for prompt_type, description, test_after in fix_sequence:
+                # Execute all fix prompts for this iteration
+                for prompt_type, description in fix_sequence:
                     if prompt_type.value in module_progress.prompts_completed:
-                        print(f"⏭️  Skipping {prompt_type.value} (already completed)")
                         continue
 
-                    prompt_num += 1
-                    self._log_step(f"{description} (iteration {iteration + 1})")
-                    print(
-                        f"🔧 FIX [{prompt_num}/{remaining_prompts}] in iteration {iteration + 1}: {prompt_type.value}")
-                    print(f"📋 Description: {description}")
+                    self._log_step(description, module, "FIXING")
 
                     # Prepare prompt with module-specific info
                     if prompt_type not in MODULE_PROMPTS:
-                        print(f"⚠️ Skipping {prompt_type.value} - not a module-level prompt")
                         continue
 
-                    prompt = MODULE_PROMPTS[prompt_type].format(
-                        module=module,
-                        anti_hallucination="{anti_hallucination}"
-                    )
-
-                    # Log prompt details
-                    print(f"📝 Prompt length: {len(prompt)} characters")
-                    prompt_preview = prompt.split('\n')[0][:150]
-                    print(f"📝 Prompt preview: {prompt_preview}...")
+                    # Format prompt with appropriate parameters
+                    format_args = {
+                        "module": module,
+                        "anti_hallucination": "{anti_hallucination}",
+                        "test_dir": TEST_DIRECTORIES.get(module, f"tests/unit/test_{module}")
+                    }
+                    
+                    # Add specific parameters for certain prompt types
+                    if prompt_type == PromptType.TEST_COVERAGE:
+                        format_args["critical_modules"] = ", ".join(FINANCIAL_CRITICAL_MODULES)
+                    
+                    prompt = MODULE_PROMPTS[prompt_type].format(**format_args)
 
                     success, output = self.claude.execute_prompt(prompt, description)
 
                     if success:
-                        print(f"✅ {description} completed successfully")
+                        consecutive_api_failures = 0  # Reset failure counter on success
                         module_progress.prompts_completed.append(prompt_type.value)
                         self.progress.update_module(
                             module,
                             prompts_completed=module_progress.prompts_completed
                         )
-                        print(
-                            f"💾 Progress saved (completed: {len(module_progress.prompts_completed)}/{len(fix_sequence)})")
-                        
-                        # Test after critical fixes
-                        if test_after:
-                            print(f"🧪 Quick test after {description}...")
-                            quick_test = self.test_runner.run_tests(module, timeout=60)
-
-                            # Check for cascading failures and propagate changes
-                            if CASCADE_CHECK_ENABLED:
-                                cascade_results = self.cascade_protector.check_dependents(module)
-                                if self.cascade_protector.cascade_detected:
-                                    print(f"🔄 CASCADE DETECTED! Propagating changes...")
-                                    # Instead of failing, propagate the changes
-                                    for dependent, needs_fix in cascade_results:
-                                        if not needs_fix:
-                                            print(f"  → Cascading changes to {dependent}")
-                                            prompt = INTEGRATION_PROMPTS["prevent_breaking"].format(
-                                                module=module,
-                                                dependent=dependent,
-                                                anti_hallucination="{anti_hallucination}"
-                                            )
-                                            self.claude.execute_prompt(
-                                                prompt,
-                                                f"Cascading changes from {module} to {dependent}"
-                                            )
-                                    # Reset cascade detection for next iteration
-                                    self.cascade_protector.cascade_detected = False
                     else:
-                        print(f"❌ {description} failed: {output[:100]}")
+                        consecutive_api_failures += 1
 
                 # Full test run
-                self._log_step(f"Full test run (iteration {iteration + 1})")
-                print(f"🧪 Full test run for {module}...")
+                self._log_step("Running tests", module, "TESTING")
                 test_results = self.test_runner.run_tests(module)
                 self.progress.update_module(module, test_results=test_results)
 
-                # Request feedback if tests are still failing
-                if not test_results["success"] and test_results.get("failures"):
-                    print(f"🔍 Getting expert feedback on failures...")
-                    failures_str = "\n".join(test_results["failures"][:3])
-                    success, feedback = self.claude.request_feedback(
-                        module,
-                        failures_str,
-                        "quality-control-enforcer"
-                    )
-                    if success and "YES" in feedback:
-                        print(f"📝 Expert feedback: {feedback}")
-
                 if test_results.get("skipped"):
-                    print(f"⏭️ No tests for {module}")
+                    print(f"\n✅ {module.upper()} | COMPLETED | No tests found")
                     self.progress.update_module(module, status="completed")
                     return True
-                
-                elif test_results["success"]:
-                    print(f"✅ {module}: All tests passing!")
 
-                    # Fix slow tests if any
+                elif test_results["success"]:
+                    print(f"\n✅ {module.upper()} | COMPLETED | All tests passing")
+
+                    # Handle slow tests and cascade checks silently
                     if test_results.get("slow_tests"):
-                        print(f"🐌 Optimizing {len(test_results['slow_tests'])} slow tests...")
+                        self._log_step("Optimizing slow tests", module, "OPTIMIZING")
                         slow_tests_str = "\n".join(test_results["slow_tests"])
                         prompt = MODULE_PROMPTS[PromptType.SLOW_TESTS].format(
                             test_dir=TEST_DIRECTORIES.get(module),
@@ -1263,39 +1682,140 @@ class ModuleProcessor:
 
                     # Final cascade check
                     if CASCADE_CHECK_ENABLED:
-                        print(f"🔍 Final cascade check for {module}...")
+                        self._log_step("Cascade check", module, "VALIDATING")
                         cascade_results = self.cascade_protector.check_dependents(module)
                         for dependent, ok in cascade_results:
                             if not ok:
-                                print(f"⚠️ {module} broke {dependent} - needs fixing")
-                                # Could trigger dependent fix here
+                                if detailed_logger:
+                                    detailed_logger.log_cascade_check(module, dependent, False)
+
+                                # Request feedback on cascade failure
+                                self._log_step(
+                                    f"Analyzing cascade: {dependent}", module, "FEEDBACK")
+                                feedback_success, feedback = self.claude.request_feedback(
+                                    module,
+                                    f"Cascade failure detected: {module} changes broke {dependent}. Should we proceed with fixes or rollback?",
+                                    "system-design-architect"
+                                )
+
+                                if feedback_success:
+                                    if "ROLLBACK" in feedback.upper():
+                                        print(
+                                            f"\n🤖 {module.upper()} | FEEDBACK | Rollback recommended for cascade failure")
+                                        # Could implement rollback logic here if needed
+                                    else:
+                                        print(
+                                            f"\n🤖 {module.upper()} | FEEDBACK | Proceeding with cascade fixes for {dependent}")
 
                     self.progress.update_module(module, status="completed")
                     return True
 
-                # Fix test failures
-                if test_results.get("failures"):
-                    print(f"❌ Fixing {len(test_results['failures'])} test failures...")
+                # Comprehensive test failure fixing
+                elif test_results.get("failures"):
+                    failure_count = len(test_results["failures"])
+
+                    # Request feedback before attempting to fix failures
+                    self._log_step("Getting feedback on failures", module, "ANALYZING")
+                    # Limit to first 3 for feedback
+                    first_few_failures = test_results["failures"][:3]
+                    failure_summary = "\n".join(first_few_failures)
+
+                    feedback_success, feedback = self.claude.request_feedback(
+                        module,
+                        f"Test failures detected:\n{failure_summary}\n\nShould these failures be fixed or are they false positives?",
+                        "integration-test-architect"
+                    )
+
+                    # Skip fixing if feedback indicates issues aren't real
+                    if feedback_success and "NO" in feedback.upper():
+                        self._log_step("Skipping fixes (feedback: not real issues)",
+                                       module, "SKIPPING")
+                        print(
+                            f"\n🤖 {module.upper()} | FEEDBACK | Skipping test fixes - identified as false positives")
+                        iteration += 1
+                        continue
+
+                    # Fix ALL failures at once
+                    self._log_step(f"Fixing {failure_count} failures", module, "FIXING")
 
                     prompt = MODULE_PROMPTS[PromptType.TEST_FIXES].format(
                         test_dir=TEST_DIRECTORIES.get(module),
-                        failures="\n".join(test_results["failures"][:5]),
+                        failures="\n".join(test_results["failures"]),
                         anti_hallucination="{anti_hallucination}"
                     )
-                    self.claude.execute_prompt(prompt, "Fixing test failures")
 
-            # Max iterations reached
-            print(f"⚠️ {module}: Max iterations reached")
+                    success, output = self.claude.execute_prompt(prompt, "Fixing test failures")
+
+                    if success:
+                        consecutive_api_failures = 0  # Reset failure counter on success
+                        # Re-test to check if issues are resolved
+                        self._log_step("Verifying fixes", module, "TESTING")
+                        test_results = self.test_runner.run_tests(module)
+                        self.progress.update_module(module, test_results=test_results)
+
+                        if test_results["success"]:
+                            print(f"\n✅ {module.upper()} | COMPLETED | All failures fixed")
+
+                            # Handle optimizations silently
+                            if test_results.get("slow_tests"):
+                                self._log_step("Optimizing slow tests", module, "OPTIMIZING")
+                                slow_tests_str = "\n".join(test_results["slow_tests"])
+                                prompt = MODULE_PROMPTS[PromptType.SLOW_TESTS].format(
+                                    test_dir=TEST_DIRECTORIES.get(module),
+                                    module=module,
+                                    slow_tests=slow_tests_str,
+                                    timeout=TEST_TIMEOUT_PER_TEST,
+                                    anti_hallucination="{anti_hallucination}"
+                                )
+                                self.claude.execute_prompt(prompt, "Optimizing slow tests")
+
+                            self.progress.update_module(module, status="completed")
+                            return True
+                    else:
+                        consecutive_api_failures += 1
+
+                # Increment iteration counter and continue loop
+                iteration += 1
+
+            # Max iterations reached (only applies when MAX_ITERATIONS_PER_MODULE > 0)
+            if MAX_ITERATIONS_PER_MODULE > 0:
+                # Request feedback before marking as failed
+                module_progress = self.progress.get_module_progress(module)
+                last_failures = module_progress.test_results.get("failures", [])[:3]
+                failure_summary = "\n".join(
+                    last_failures) if last_failures else "Unknown test failures"
+
+                feedback_success, feedback = self.claude.request_feedback(
+                    module,
+                    f"Module {module} reached max iterations ({MAX_ITERATIONS_PER_MODULE}) with persistent issues:\n{failure_summary}\n\nShould we continue or mark as failed?",
+                    "quality-control-enforcer"
+                )
+
+                if feedback_success and "CONTINUE" in feedback.upper():
+                    print(f"\n🤖 {module.upper()} | FEEDBACK | Extending iterations based on feedback")
+                    # Could extend MAX_ITERATIONS_PER_MODULE here or switch to infinite mode
+                    # For now, just log the recommendation
+                    if detailed_logger:
+                        detailed_logger.log_error(
+                            module, f"Feedback recommended continuing beyond max iterations: {feedback[:200]}", "")
+
+                print(
+                    f"\n❌ {module.upper()} | FAILED | Max iterations ({MAX_ITERATIONS_PER_MODULE}) reached")
+            else:
+                # This should never happen with infinite iterations, but just in case
+                print(f"\n❌ {module.upper()} | FAILED | Unexpected exit from infinite loop")
             self.progress.update_module(module, status="failed")
             return False
 
         except Exception as e:
-            print(f"❌ {module}: Error - {e}")
+            print(f"\n❌ {module.upper()} | FAILED | {str(e)}")
             self.progress.update_module(
                 module,
                 status="failed",
                 errors=[str(e)]
             )
+            if detailed_logger:
+                detailed_logger.log_error(module, str(e), traceback.format_exc())
             return False
 
 # ============================================================================
@@ -1319,7 +1839,22 @@ class IntegrationChecker:
         if not self.progress.is_module_complete(dependency):
             return False
 
-        print(f"\n🔗 Checking: {module} → {dependency}")
+        print(f"🔗 {module.upper()} → {dependency.upper()} | INTEGRATING")
+
+        # Request feedback before integration checks
+        feedback_success, feedback = self.claude.request_feedback(
+            module,
+            f"About to run integration checks between {module} and {dependency}. Are there known integration issues or conflicts?",
+            "integration-architect"
+        )
+
+        # Skip integration if feedback indicates major conflicts
+        if feedback_success and "SKIP" in feedback.upper():
+            print(
+                f"\n🤖 {module.upper()} → {dependency.upper()} | FEEDBACK | Skipping integration (conflicts detected)")
+            return False
+        elif feedback_success and "CAUTION" in feedback.upper():
+            print(f"\n🤖 {module.upper()} → {dependency.upper()} | FEEDBACK | Proceeding with caution")
 
         # 1. Verify correct usage
         prompt = INTEGRATION_PROMPTS["verify_usage"].format(
@@ -1439,7 +1974,6 @@ class AutoFixer:
 
             # Check integrations immediately after module completes successfully
             if success:
-                print(f"\n🔗 Checking integrations for {module}")
                 deps = MODULE_DEPENDENCIES.get(module, [])
                 for dep in deps:
                     if dep not in SKIP_MODULES and self.progress.is_module_complete(dep):
@@ -1464,6 +1998,7 @@ class AutoFixer:
     def run_smart_parallel(self) -> bool:
         """Run in smart parallel mode preventing conflicts"""
         all_success = True
+        # groups of modules that can be safely processed in parallel
         groups = self.parallel_executor.get_safe_groups()
 
         print(f"\n📊 Smart execution plan: {len(groups)} groups")
@@ -1527,7 +2062,6 @@ class AutoFixer:
             # Check integrations after each group
             for module in group:
                 if self.progress.is_module_complete(module):
-                    print(f"\n🔗 Checking integrations for {module}")
                     deps = MODULE_DEPENDENCIES.get(module, [])
                     for dep in deps:
                         if self.progress.is_module_complete(dep):
@@ -1582,6 +2116,8 @@ class AutoFixer:
 
 
 def main():
+    global detailed_logger
+
     print(f"\n{'='*80}")
     print(f"🚀 AUTO_FINAL.py - Financial Application Module Fixer")
     print(f"📅 Started at: {datetime.now().isoformat()}")
@@ -1621,6 +2157,19 @@ def main():
         if progress_file.exists():
             progress_file.unlink()
             print("🔄 Progress reset")
+        
+        # Also handle log file - rename old one if exists
+        log_file = Path("scripts/AUTO.logs")
+        if log_file.exists():
+            # Create timestamp for backup filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_name = f"scripts/AUTO.logs.{timestamp}.bak"
+            log_file.rename(backup_name)
+            print(f"📁 Log file backed up to: {backup_name}")
+
+    # Initialize detailed logger (after reset handling)
+    detailed_logger = DetailedLogger()
+    print(f"📝 Detailed logging enabled: scripts/AUTO.logs")
 
     # Initialize fixer first so we can access it in signal handler
     fixer = AutoFixer(skip_modules=args.skip)
@@ -1652,6 +2201,14 @@ def main():
 
         fixer.print_summary()
 
+        # Log final summary
+        if detailed_logger:
+            completed = fixer.progress.completed_modules
+            failed = fixer.progress.failed_modules
+            processed = len(completed) + len(failed)
+            success_rate = len(completed) / processed * 100 if processed > 0 else 0
+            detailed_logger.log_final_summary(completed, failed, success_rate)
+
         print(f"\n{'='*80}")
         print(f"📅 Finished at: {datetime.now().isoformat()}")
         print(f"🎯 Overall result: {'SUCCESS ✅' if success else 'FAILURE ❌'}")
@@ -1662,6 +2219,11 @@ def main():
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
         traceback.print_exc()
+
+        # Log fatal error
+        if detailed_logger:
+            detailed_logger.log_error("MAIN", str(e), traceback.format_exc())
+
         sys.exit(1)
 
 

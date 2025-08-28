@@ -79,8 +79,9 @@ def safe_write_file(file_path: str, content: str, encoding: str = "utf-8") -> No
         if temp_path.exists():
             try:
                 temp_path.unlink()
-            except Exception:
-                # Ignore cleanup errors
+            except (OSError, PermissionError) as cleanup_e:
+                # Log cleanup errors but don't fail the operation
+                logger.debug(f"Failed to cleanup temp file {temp_path}: {cleanup_e}")
                 pass
 
         logger.error(f"Failed to write file {file_path}: {e!s}")

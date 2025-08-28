@@ -23,7 +23,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 
 
@@ -137,7 +137,7 @@ class ThresholdRule(BaseModel):
 
     name: str = Field(..., min_length=1)
     metric_name: str = Field(..., min_length=1)
-    operator: str = Field(..., regex="^(gt|gte|lt|lte|eq|ne)$")  # greater than, less than, etc.
+    operator: str = Field(..., pattern="^(gt|gte|lt|lte|eq|ne)$")  # greater than, less than, etc.
     threshold: float
     severity: AlertSeverity = AlertSeverity.WARNING
     category: AlertCategory = AlertCategory.PERFORMANCE
@@ -226,6 +226,7 @@ class DataMonitor(BaseComponent):
                 threshold=self.monitoring_config.response_time_threshold_ms,
                 severity=AlertSeverity.WARNING,
                 category=AlertCategory.PERFORMANCE,
+                cooldown_minutes=15,
                 description="Response time exceeded threshold",
             ),
             ThresholdRule(
@@ -235,6 +236,7 @@ class DataMonitor(BaseComponent):
                 threshold=self.monitoring_config.error_rate_threshold,
                 severity=AlertSeverity.ERROR,
                 category=AlertCategory.AVAILABILITY,
+                cooldown_minutes=15,
                 description="Error rate exceeded threshold",
             ),
             ThresholdRule(
@@ -244,6 +246,7 @@ class DataMonitor(BaseComponent):
                 threshold=self.monitoring_config.min_data_quality_score,
                 severity=AlertSeverity.WARNING,
                 category=AlertCategory.DATA_QUALITY,
+                cooldown_minutes=15,
                 description="Data quality score below threshold",
             ),
             ThresholdRule(
@@ -253,6 +256,7 @@ class DataMonitor(BaseComponent):
                 threshold=self.monitoring_config.cpu_usage_threshold * 100,
                 severity=AlertSeverity.WARNING,
                 category=AlertCategory.CAPACITY,
+                cooldown_minutes=15,
                 description="CPU usage exceeded threshold",
             ),
             ThresholdRule(
@@ -262,6 +266,7 @@ class DataMonitor(BaseComponent):
                 threshold=self.monitoring_config.memory_usage_threshold * 100,
                 severity=AlertSeverity.WARNING,
                 category=AlertCategory.CAPACITY,
+                cooldown_minutes=15,
                 description="Memory usage exceeded threshold",
             ),
         ]

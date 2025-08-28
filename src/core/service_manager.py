@@ -5,7 +5,9 @@ This module provides a centralized service registry that eliminates circular
 dependencies by managing service lifecycle and dependency injection.
 """
 
+import asyncio
 import logging
+from datetime import datetime
 from typing import Any
 
 from src.core.dependency_injection import injector
@@ -25,7 +27,7 @@ class ServiceManager:
     4. Handling service shutdown gracefully
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the service manager."""
         self._injector = injector
         self._services: dict[str, Any] = {}
@@ -268,7 +270,14 @@ class ServiceManager:
             if service_name in self._running_services:
                 await self._stop_service(service_name)
 
-        self._running_services.clear()
+        # Clear all service references to prevent resource leaks
+        try:
+            self._running_services.clear()
+            self._services.clear()
+            self._service_configs.clear()
+        except Exception as e:
+            self._logger.error(f"Error clearing service references: {e}")
+
         self._initialized = False
         self._logger.info("All services stopped")
 
@@ -339,32 +348,58 @@ class ServiceManager:
         await self._start_service(service_name)
 
     async def health_check_all(self) -> dict[str, Any]:
-        """Perform health check on all running services."""
+        """Perform health check on all running services using consistent patterns."""
         health_status = {}
 
+        # Use consistent batch processing for health checks
+        health_tasks = []
         for service_name in self._running_services:
+            task = asyncio.create_task(self._check_service_health(service_name))
+            health_tasks.append((service_name, task))
+
+        # Wait for all health checks with timeout
+        for service_name, task in health_tasks:
             try:
-                service = self._services.get(service_name)
-                if service and hasattr(service, "health_check"):
-                    health_status[service_name] = await service.health_check()
-                else:
-                    health_status[service_name] = {"status": "running"}
+                health_status[service_name] = await asyncio.wait_for(task, timeout=30.0)
+            except asyncio.TimeoutError:
+                health_status[service_name] = {
+                    "status": "timeout",
+                    "error": "Health check timed out",
+                }
             except Exception as e:
                 health_status[service_name] = {"status": "error", "error": str(e)}
 
+        # Consistent status aggregation
+        healthy_statuses = ["healthy", "running"]
+        overall_status = (
+            "healthy"
+            if all(status.get("status") in healthy_statuses for status in health_status.values())
+            else "degraded"
+        )
+
         return {
-            "overall_status": (
-                "healthy"
-                if all(
-                    status.get("status") in ["healthy", "running"]
-                    for status in health_status.values()
-                )
-                else "degraded"
-            ),
+            "overall_status": overall_status,
             "services": health_status,
             "running_count": len(self._running_services),
             "total_registered": len(self._service_configs),
+            "timestamp": datetime.now().isoformat(),
         }
+
+    async def _check_service_health(self, service_name: str) -> dict[str, Any]:
+        """Check health of a single service with consistent error handling."""
+        try:
+            service = self._services.get(service_name)
+            if service and hasattr(service, "health_check"):
+                result = await service.health_check()
+                # Ensure consistent health check result format
+                if isinstance(result, dict):
+                    return result
+                else:
+                    return {"status": "healthy", "details": result}
+            else:
+                return {"status": "running", "details": "No health check method available"}
+        except Exception as e:
+            return {"status": "error", "error": str(e), "error_type": type(e).__name__}
 
 
 # Global service manager instance

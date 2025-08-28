@@ -78,7 +78,9 @@ class BinanceExchange(EnhancedBaseExchange):
             state_service: Optional state service for persistence
             trade_lifecycle_manager: Optional trade lifecycle manager
         """
-        super().__init__(config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector)
+        super().__init__(
+            config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector
+        )
 
         # Binance-specific configuration
         self.api_key = config.exchange.binance_api_key

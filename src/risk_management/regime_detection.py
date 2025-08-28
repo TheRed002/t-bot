@@ -114,7 +114,7 @@ class MarketRegimeDetector(BaseComponent):
 
         except Exception as e:
             self.logger.error("Error detecting volatility regime", symbol=symbol, error=str(e))
-            raise RiskManagementError(f"Volatility regime detection failed: {e!s}")
+            raise RiskManagementError(f"Volatility regime detection failed: {e!s}") from e
 
     @time_execution
     async def detect_trend_regime(self, symbol: str, price_data: list[float]) -> MarketRegime:
@@ -167,7 +167,7 @@ class MarketRegimeDetector(BaseComponent):
 
         except Exception as e:
             self.logger.error("Error detecting trend regime", symbol=symbol, error=str(e))
-            raise RiskManagementError(f"Trend regime detection failed: {e!s}")
+            raise RiskManagementError(f"Trend regime detection failed: {e!s}") from e
 
     @time_execution
     async def detect_correlation_regime(
@@ -235,7 +235,7 @@ class MarketRegimeDetector(BaseComponent):
 
         except Exception as e:
             self.logger.error("Error detecting correlation regime", error=str(e))
-            raise RiskManagementError(f"Correlation regime detection failed: {e!s}")
+            raise RiskManagementError(f"Correlation regime detection failed: {e!s}") from e
 
     @time_execution
     async def detect_comprehensive_regime(self, market_data: list[MarketData]) -> MarketRegime:
@@ -288,7 +288,7 @@ class MarketRegimeDetector(BaseComponent):
 
         except Exception as e:
             self.logger.error("Error in comprehensive regime detection", error=str(e))
-            raise RiskManagementError(f"Comprehensive regime detection failed: {e!s}")
+            raise RiskManagementError(f"Comprehensive regime detection failed: {e!s}") from e
 
     def _combine_regimes(
         self,
@@ -355,18 +355,19 @@ class MarketRegimeDetector(BaseComponent):
 
             if confidence > self.regime_change_threshold:
                 event = RegimeChangeEvent(
-                    from_regime=self.current_regime,
-                    to_regime=new_regime,
-                    confidence=confidence,
                     timestamp=datetime.now(timezone.utc),
-                    trigger_metrics={
+                    symbol="PORTFOLIO",  # For portfolio-wide regime detection
+                    previous_regime=self.current_regime,
+                    new_regime=new_regime,
+                    confidence=confidence,
+                    indicators={
                         "volatility_window": self.volatility_window,
                         "trend_window": self.trend_window,
                         "correlation_window": self.correlation_window,
                     },
-                    description=(
-                        f"Regime change from {self.current_regime.value} to {new_regime.value}"
-                    ),
+                    metadata={
+                        "description": f"Regime change from {self.current_regime.value} to {new_regime.value}"
+                    },
                 )
 
                 self.regime_history.append(event)
@@ -374,7 +375,7 @@ class MarketRegimeDetector(BaseComponent):
 
                 self.logger.warning(
                     "Market regime change detected",
-                    from_regime=event.from_regime.value,
+                    from_regime=event.previous_regime.value,
                     to_regime=new_regime.value,
                     confidence=confidence,
                 )
@@ -402,7 +403,7 @@ class MarketRegimeDetector(BaseComponent):
         )
 
         # Higher confidence if this is a new regime type
-        if new_regime not in [event.to_regime for event in recent_changes]:
+        if new_regime not in [event.new_regime for event in recent_changes]:
             return 0.9
 
         # Lower confidence if frequent changes

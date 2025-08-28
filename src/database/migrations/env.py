@@ -114,6 +114,8 @@ try:
         run_migrations_offline()
     else:
         run_migrations_online()
-except Exception:
+except Exception as e:
     # Not in Alembic context, probably being imported for testing
-    pass
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Migration not in Alembic context: {e}")

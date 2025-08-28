@@ -44,7 +44,7 @@ class TestBaseCircuitBreaker:
         config = Mock(spec=Config)
         config.risk = Mock()
         config.risk.max_daily_loss_pct = 0.05
-        config.risk.max_drawdown_pct = 0.15
+        config.risk.max_drawdown = 0.15
         return config
 
     @pytest.fixture
@@ -214,7 +214,7 @@ class TestDrawdownLimitBreaker:
         """Create mock configuration."""
         config = Mock(spec=Config)
         config.risk = Mock()
-        config.risk.max_drawdown_pct = 0.15  # 15%
+        config.risk.max_drawdown = 0.15  # 15%
         return config
 
     @pytest.fixture
@@ -490,7 +490,7 @@ class TestCircuitBreakerManager:
         config = Mock(spec=Config)
         config.risk = Mock()
         config.risk.max_daily_loss_pct = 0.05
-        config.risk.max_drawdown_pct = 0.15
+        config.risk.max_drawdown = 0.15
         return config
 
     @pytest.fixture
@@ -604,7 +604,7 @@ class TestCircuitBreakerIntegration:
         config = Mock(spec=Config)
         config.risk = Mock()
         config.risk.max_daily_loss_pct = 0.05
-        config.risk.max_drawdown_pct = 0.15
+        config.risk.max_drawdown = 0.15
         return config
 
     @pytest.fixture

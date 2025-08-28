@@ -278,6 +278,7 @@ class StateMonitoringService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error during StateMonitoringService cleanup: {e}")
+            raise
 
     # Health Check Operations
 

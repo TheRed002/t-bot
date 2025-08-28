@@ -265,9 +265,8 @@ class ExchangeFactory(BaseComponent):
 
         # Register metrics collector
         from src.monitoring import get_metrics_collector
-        self.container.register_singleton(
-            "metrics_collector", lambda: get_metrics_collector(), []
-        )
+
+        self.container.register_singleton("metrics_collector", lambda: get_metrics_collector(), [])
 
         # Register state service and trade lifecycle manager as None initially
         # They will be set later via register_state_services method
@@ -307,7 +306,13 @@ class ExchangeFactory(BaseComponent):
             lambda config, error_handler, state_service, trade_lifecycle_manager, metrics_collector: exchange_class(
                 config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector
             ),
-            ["config", "error_handler", "state_service", "trade_lifecycle_manager", "metrics_collector"],
+            [
+                "config",
+                "error_handler",
+                "state_service",
+                "trade_lifecycle_manager",
+                "metrics_collector",
+            ],
         )
 
         self.logger.info(f"Registered exchange with DI container: {exchange_name}")
@@ -424,7 +429,11 @@ class ExchangeFactory(BaseComponent):
                 trade_lifecycle_manager = self.container._services.get("trade_lifecycle_manager")
                 metrics_collector = self.container.resolve("metrics_collector")
                 exchange = exchange_class(
-                    self.config, exchange_name, state_service, trade_lifecycle_manager, metrics_collector
+                    self.config,
+                    exchange_name,
+                    state_service,
+                    trade_lifecycle_manager,
+                    metrics_collector,
                 )
                 self.logger.debug(f"Created exchange using direct instantiation: {exchange_name}")
 

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, TypeVar
 
-from src.core.types.base import ConfigDict
+from pydantic import ConfigDict
 
 # Type variables for generic protocols
 T = TypeVar("T")

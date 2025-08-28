@@ -145,7 +145,7 @@ class TestBacktestingIntegration:
         )
     
     @pytest.fixture
-    async def mock_db_manager(self):
+    def mock_db_manager(self):
         """Create mock database manager with realistic data."""
         db_manager = AsyncMock(spec=DatabaseManager)
         

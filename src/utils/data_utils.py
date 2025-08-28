@@ -72,30 +72,35 @@ def normalize_array(arr: list[float] | NDArray[np.float64]) -> NDArray[np.float6
 
 
 def convert_currency(
-    amount: float, from_currency: str, to_currency: str, exchange_rate: float
-) -> float:
+    amount: Decimal, from_currency: str, to_currency: str, exchange_rate: Decimal
+) -> Decimal:
     """
     Convert amount from one currency to another.
 
     Args:
-        amount: Amount to convert
+        amount: Amount to convert as Decimal
         from_currency: Source currency
         to_currency: Target currency
-        exchange_rate: Exchange rate (from_currency/to_currency)
+        exchange_rate: Exchange rate as Decimal (from_currency/to_currency)
 
     Returns:
-        Converted amount
+        Converted amount as Decimal
 
     Raises:
         ValidationError: If amount is negative or exchange rate is invalid
     """
-    if amount < 0:
+    amount_decimal = to_decimal(amount) if not isinstance(amount, Decimal) else amount
+    rate_decimal = (
+        to_decimal(exchange_rate) if not isinstance(exchange_rate, Decimal) else exchange_rate
+    )
+
+    if amount_decimal < ZERO:
         raise ValidationError("Amount cannot be negative")
 
-    if exchange_rate <= 0:
+    if rate_decimal <= ZERO:
         raise ValidationError("Exchange rate must be positive")
 
-    converted_amount = amount * exchange_rate
+    converted_amount = amount_decimal * rate_decimal
 
     # Round to appropriate precision based on currency
     if to_currency.upper() in ["BTC", "ETH"]:
@@ -105,7 +110,9 @@ def convert_currency(
     else:
         precision = 4
 
-    return round(converted_amount, precision)
+    # Use Decimal quantize for precise rounding
+    quantizer = Decimal(10) ** -precision
+    return converted_amount.quantize(quantizer, rounding=ROUND_HALF_UP)
 
 
 def normalize_price(price: float | Decimal, symbol: str) -> Decimal:
@@ -146,16 +153,16 @@ def normalize_price(price: float | Decimal, symbol: str) -> Decimal:
     return normalized_price
 
 
-def round_to_precision(value: float, precision: int) -> float:
+def round_to_precision(value: Decimal, precision: int) -> Decimal:
     """
-    Round value to specified precision.
+    Round value to specified precision using Decimal for financial accuracy.
 
     Args:
-        value: Value to round
+        value: Value to round as Decimal
         precision: Number of decimal places
 
     Returns:
-        Rounded value
+        Rounded Decimal value
 
     Raises:
         ValidationError: If precision is negative
@@ -163,8 +170,11 @@ def round_to_precision(value: float, precision: int) -> float:
     if precision < 0:
         raise ValidationError("Precision must be non-negative")
 
-    factor = 10**precision
-    return float(round(value * factor) / factor)
+    decimal_value = to_decimal(value) if not isinstance(value, Decimal) else value
+
+    # Use Decimal's quantize method for precise rounding
+    quantizer = Decimal(f"0.{'0' * (precision - 1)}1") if precision > 0 else Decimal("1")
+    return decimal_value.quantize(quantizer, rounding=ROUND_HALF_UP)
 
 
 def round_to_precision_decimal(value: Decimal, precision: int) -> Decimal:

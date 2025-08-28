@@ -29,11 +29,11 @@ from src.core.types import (
 # Import exchange interfaces
 from src.execution.exchange_interface import ExchangeFactoryInterface
 
-# Import internal execution instruction type
-from src.execution.types import ExecutionInstruction
-
 # Import execution state for proper type hints
 from src.execution.execution_state import ExecutionState
+
+# Import internal execution instruction type
+from src.execution.types import ExecutionInstruction
 
 # MANDATORY: Import from P-002A
 # MANDATORY: Import from P-007A
@@ -199,7 +199,7 @@ class TWAPAlgorithm(BaseAlgorithm):
             # Calculate TWAP execution plan
             execution_plan = await self._create_execution_plan(instruction)
 
-            # Execute TWAP strategy  
+            # Execute TWAP strategy
             await self._execute_twap_plan(execution_plan, execution_result, exchange, risk_manager)
 
             # Finalize execution state (not result)
@@ -228,7 +228,7 @@ class TWAPAlgorithm(BaseAlgorithm):
 
         except Exception as e:
             # Handle execution failure
-            if 'execution_id' in locals() and execution_id in self.current_executions:
+            if "execution_id" in locals() and execution_id in self.current_executions:
                 await self._update_execution_result(
                     self.current_executions[execution_id],
                     status=ExecutionStatus.FAILED,
@@ -469,7 +469,8 @@ class TWAPAlgorithm(BaseAlgorithm):
                         continue
                     except NetworkError as e:
                         self.logger.error(
-                            f"Network error placing slice {slice_info['slice_number']}: {e}", slice_num=slice_info["slice_number"]
+                            f"Network error placing slice {slice_info['slice_number']}: {e}",
+                            slice_num=slice_info["slice_number"],
                         )
                         # For network errors, might want to retry or abort
                         raise ExecutionError(f"Network error during TWAP execution: {e}")
@@ -565,8 +566,7 @@ class TWAPAlgorithm(BaseAlgorithm):
                 execution_id=execution_state.execution_id,
                 final_status=execution_state.status.value,
                 fill_rate=float(
-                    execution_state.total_filled_quantity
-                    / execution_state.original_order.quantity
+                    execution_state.total_filled_quantity / execution_state.original_order.quantity
                 ),
             )
 

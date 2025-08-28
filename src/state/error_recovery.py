@@ -61,7 +61,7 @@ class StateErrorContext:
     # Error details
     error_type: ErrorType = ErrorType.UNKNOWN
     error_message: str = ""
-    exception: Exception = None
+    exception: Exception | None = None
 
     # Operation context
     session_id: str = ""
@@ -189,7 +189,7 @@ class StateErrorRecovery:
         state_type: str,
         state_id: str,
         current_state: dict[str, Any] | None = None,
-        session: AsyncSession = None,
+        session: AsyncSession | None = None,
         **context,
     ) -> str:
         """
@@ -223,6 +223,9 @@ class StateErrorRecovery:
                 }
             except Exception as e:
                 self.logger.warning(f"Failed to capture database state: {e}")
+            finally:
+                # Ensure session is properly managed - session should be closed by caller
+                pass
 
         # Store checkpoint
         self._recovery_checkpoints[checkpoint.checkpoint_id] = checkpoint
@@ -325,7 +328,7 @@ class StateErrorRecovery:
         return error_context
 
     async def _attempt_recovery(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """
         Attempt to recover from error using appropriate strategy.
@@ -364,7 +367,7 @@ class StateErrorRecovery:
             return False
 
     async def rollback_to_checkpoint(
-        self, checkpoint_id: str, session: AsyncSession = None
+        self, checkpoint_id: str, session: AsyncSession | None = None
     ) -> bool:
         """
         Rollback to a specific checkpoint.
@@ -396,6 +399,15 @@ class StateErrorRecovery:
                 except Exception as e:
                     self.logger.error(f"Database rollback failed: {e}")
                     return False
+                finally:
+                    # Session should be closed by caller, but ensure it's not left hanging
+                    if hasattr(session, "is_active") and session.is_active:
+                        try:
+                            await session.close()
+                        except Exception as close_error:
+                            self.logger.warning(
+                                f"Session close error during rollback: {close_error}"
+                            )
 
             # Execute rollback instructions
             for instruction in checkpoint.rollback_instructions:
@@ -415,7 +427,7 @@ class StateErrorRecovery:
     # Error type handlers
 
     async def _handle_database_connection_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle database connection errors."""
         if error_context.retry_count < error_context.max_retries:
@@ -430,7 +442,7 @@ class StateErrorRecovery:
         return False
 
     async def _handle_database_integrity_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle database integrity errors."""
         # For integrity errors, we usually need to rollback
@@ -439,7 +451,7 @@ class StateErrorRecovery:
         return False
 
     async def _handle_database_timeout_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle database timeout errors."""
         if error_context.retry_count < error_context.max_retries:
@@ -450,7 +462,7 @@ class StateErrorRecovery:
         return False
 
     async def _handle_redis_connection_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle Redis connection errors."""
         # Redis errors are often transient
@@ -461,13 +473,13 @@ class StateErrorRecovery:
         return False
 
     async def _handle_redis_timeout_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle Redis timeout errors."""
         return await self._handle_redis_connection_error(error_context, checkpoint)
 
     async def _handle_data_corruption_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle data corruption errors."""
         # Data corruption usually requires rollback and manual intervention
@@ -479,7 +491,7 @@ class StateErrorRecovery:
         return False
 
     async def _handle_disk_space_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle disk space errors."""
         # Disk space errors require manual intervention
@@ -487,7 +499,7 @@ class StateErrorRecovery:
         return False
 
     async def _handle_permission_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle permission errors."""
         # Permission errors usually require manual fixing
@@ -495,7 +507,7 @@ class StateErrorRecovery:
         return False
 
     async def _handle_validation_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle validation errors."""
         # Validation errors usually indicate data issues
@@ -504,7 +516,7 @@ class StateErrorRecovery:
         return False
 
     async def _handle_concurrency_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle concurrency errors."""
         if error_context.retry_count < error_context.max_retries:
@@ -518,7 +530,7 @@ class StateErrorRecovery:
         return False
 
     async def _handle_unknown_error(
-        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint = None
+        self, error_context: StateErrorContext, checkpoint: RecoveryCheckpoint | None = None
     ) -> bool:
         """Handle unknown errors."""
         # For unknown errors, try a limited number of retries

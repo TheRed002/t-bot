@@ -256,54 +256,56 @@ class UnitOfWork:
     def close(self):
         """Close session."""
         if self.session:
-            self.session.close()
-            self.session = None
+            try:
+                self.session.close()
+            finally:
+                self.session = None
 
-            # Clear repository references
-            # Core repositories
-            self.users = None
-            self.bots = None
-            self.bot_instances = None
-            self.bot_logs = None
-            self.strategies = None
-            self.signals = None
+                # Clear repository references
+                # Core repositories
+                self.users = None
+                self.bots = None
+                self.bot_instances = None
+                self.bot_logs = None
+                self.strategies = None
+                self.signals = None
 
-            # Trading repositories
-            self.orders = None
-            self.positions = None
-            self.trades = None
-            self.fills = None
+                # Trading repositories
+                self.orders = None
+                self.positions = None
+                self.trades = None
+                self.fills = None
 
-            # Audit repositories
-            self.capital_audit_logs = None
-            self.execution_audit_logs = None
-            self.performance_audit_logs = None
-            self.risk_audit_logs = None
+                # Audit repositories
+                self.capital_audit_logs = None
+                self.execution_audit_logs = None
+                self.performance_audit_logs = None
+                self.risk_audit_logs = None
 
-            # Capital management repositories
-            self.capital_allocations = None
-            self.fund_flows = None
-            self.currency_exposures = None
-            self.exchange_allocations = None
+                # Capital management repositories
+                self.capital_allocations = None
+                self.fund_flows = None
+                self.currency_exposures = None
+                self.exchange_allocations = None
 
-            # Data repositories
-            self.features = None
-            self.data_quality = None
-            self.data_pipelines = None
-            self.market_data = None
+                # Data repositories
+                self.features = None
+                self.data_quality = None
+                self.data_pipelines = None
+                self.market_data = None
 
-            # State management repositories
-            self.state_snapshots = None
-            self.state_checkpoints = None
-            self.state_history = None
-            self.state_metadata = None
-            self.state_backups = None
+                # State management repositories
+                self.state_snapshots = None
+                self.state_checkpoints = None
+                self.state_history = None
+                self.state_metadata = None
+                self.state_backups = None
 
-            # System repositories
-            self.alerts = None
-            self.audit_logs = None
-            self.performance_metrics = None
-            self.balance_snapshots = None
+                # System repositories
+                self.alerts = None
+                self.audit_logs = None
+                self.performance_metrics = None
+                self.balance_snapshots = None
 
     def refresh(self, entity):
         """Refresh entity from database."""
@@ -340,7 +342,7 @@ class UnitOfWork:
                 suggested_action="Check database state and retry",
             ) from e
         except Exception as e:
-            self.logger.error(f"Unexpected error in savepoint: {e}")
+            self._logger.error(f"Unexpected error in savepoint: {e}")
             savepoint.rollback()
             raise DatabaseError(
                 "Critical database error",
@@ -479,7 +481,7 @@ class AsyncUnitOfWork:
         commit_error = None
         rollback_error = None
         close_error = None
-        
+
         if exc_type:
             # Exception occurred, try to rollback
             try:
@@ -499,10 +501,8 @@ class AsyncUnitOfWork:
                     await self.rollback()
                 except Exception as rollback_e:
                     rollback_error = rollback_e
-                    self._logger.critical(
-                        f"Failed to rollback after commit error: {rollback_e}"
-                    )
-        
+                    self._logger.critical(f"Failed to rollback after commit error: {rollback_e}")
+
         # Always try to close the session, regardless of previous errors
         try:
             await self.close()
@@ -515,7 +515,7 @@ class AsyncUnitOfWork:
                     await self.session.invalidate()
                 except Exception as invalidate_error:
                     self._logger.critical(f"Failed to invalidate session: {invalidate_error}")
-        
+
         # Raise the most critical error
         if rollback_error and exc_type:
             # Original exception + rollback failure

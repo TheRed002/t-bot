@@ -33,7 +33,7 @@ from typing import Any
 
 import psutil
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import PerformanceError
 from src.core.logging import get_logger
@@ -810,26 +810,54 @@ class MemoryOptimizer(BaseComponent):
     async def cleanup(self) -> None:
         """Cleanup memory optimizer resources."""
         try:
-            # Cancel monitoring task
-            if self._monitoring_task:
-                self._monitoring_task.cancel()
+            # Cancel monitoring task with timeout
+            monitoring_task = self._monitoring_task
+            if monitoring_task and not monitoring_task.done():
+                monitoring_task.cancel()
                 try:
-                    await self._monitoring_task
-                except asyncio.CancelledError:
+                    await asyncio.wait_for(monitoring_task, timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
+                finally:
+                    self._monitoring_task = None
 
             # Stop profiling
-            self.profiler.stop_profiling()
+            try:
+                self.profiler.stop_profiling()
+            except Exception as e:
+                self.logger.error(f"Error stopping profiler: {e}")
 
             # Clear object pools
-            for pool in self.object_pools.values():
-                pool.clear()
+            try:
+                for pool in self.object_pools.values():
+                    pool.clear()
+                self.object_pools.clear()
+            except Exception as e:
+                self.logger.error(f"Error clearing object pools: {e}")
 
             # Clear statistics history
-            self.stats_history.clear()
+            try:
+                self.stats_history.clear()
+            except Exception as e:
+                self.logger.error(f"Error clearing stats history: {e}")
+
+            # Clear category usage
+            try:
+                self.category_usage.clear()
+            except Exception as e:
+                self.logger.error(f"Error clearing category usage: {e}")
+
+            # Clear alert callbacks
+            try:
+                self._alert_callbacks.clear()
+            except Exception as e:
+                self.logger.error(f"Error clearing alert callbacks: {e}")
 
             # Re-enable GC if disabled
-            self.gc_optimizer.enable_gc_after_trading()
+            try:
+                self.gc_optimizer.enable_gc_after_trading()
+            except Exception as e:
+                self.logger.error(f"Error enabling GC: {e}")
 
             self.logger.info("Memory optimizer cleaned up")
 

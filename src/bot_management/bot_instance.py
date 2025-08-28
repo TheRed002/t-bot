@@ -272,8 +272,12 @@ class BotInstance:
         }
 
         # Initialize monitoring components
-        self.trading_metrics = TradingMetrics()
-        self.exchange_metrics = ExchangeMetrics()
+        # Create a dummy metrics collector if none is available
+        from src.monitoring.metrics import MetricsCollector
+        dummy_collector = MetricsCollector()
+        
+        self.trading_metrics = TradingMetrics(dummy_collector)
+        self.exchange_metrics = ExchangeMetrics(dummy_collector)
         self.metrics_collector = None  # Will be injected if available
         self.tracer = get_tracer(__name__)
 
@@ -287,6 +291,7 @@ class BotInstance:
     @with_error_context(component="bot_instance", operation="create_database_service")
     def _create_database_service(self, config: Config) -> DatabaseService | None:
         """Create DatabaseService instance if not provided."""
+        db_service = None
         try:
             # Create ConfigService from the legacy Config object
             config_service = ConfigService()
@@ -296,16 +301,28 @@ class BotInstance:
             from src.core.dependency_injection import get_container
 
             container = get_container()
-            validation_service = container.get("validation_service", ValidationService())
+            # Get validation service from container or create new instance
+            if container.has("validation_service"):
+                validation_service = container.get("validation_service")
+            else:
+                validation_service = ValidationService()
 
             # Now create DatabaseService with proper parameters
-            return DatabaseService(config_service, validation_service)
+            db_service = DatabaseService(config_service, validation_service)
+            return db_service
         except ImportError as e:
             self._logger.warning(f"DatabaseService not available, using fallback: {e}")
             # Return None for fallback behavior
             return None
         except Exception as e:
             self._logger.error(f"Failed to create DatabaseService: {e}")
+            if db_service and hasattr(db_service, "close"):
+                try:
+                    db_service.close()
+                except Exception as e:
+                    self._logger.debug(
+                        f"Failed to close database service during initialization cleanup: {e}"
+                    )
             raise ExecutionError(f"DatabaseService creation failed: {e}") from e
 
     @with_error_context(component="bot_instance", operation="create_state_service")
@@ -538,7 +555,7 @@ class BotInstance:
     async def _validate_configuration(self) -> None:
         """Validate bot configuration before startup."""
         # Validate strategy exists
-        supported_strategies = self.strategy_factory.get_supported_strategies()
+        supported_strategies = await self.strategy_factory.get_supported_strategies()
         # Convert bot_config.strategy_id to StrategyType enum
         strategy_type = self._convert_to_strategy_type(self.bot_config.strategy_id)
 
@@ -552,8 +569,9 @@ class BotInstance:
                 raise ValidationError(f"Exchange not available: {exchange_name}")
 
         # Validate capital allocation
-        if self.bot_config.allocated_capital <= 0:
-            raise ValidationError("Allocated capital must be positive")
+        capital_amount = self.bot_config.max_capital or self.bot_config.allocated_capital
+        if capital_amount <= 0:
+            raise ValidationError("Capital allocation must be positive")
 
         # Validate symbols format
         for symbol in self.bot_config.symbols:
@@ -615,9 +633,10 @@ class BotInstance:
             # Continue with allocation attempt - adapter may still work
 
         # Allocate capital through capital allocator
+        capital_amount = self.bot_config.max_capital or self.bot_config.allocated_capital
         allocated = await self.capital_allocator.allocate_capital(
             bot_id=self.bot_config.bot_id,
-            amount=self.bot_config.allocated_capital,
+            amount=capital_amount,
             source="bot_instance",
         )
 
@@ -625,11 +644,12 @@ class BotInstance:
             raise ExecutionError("Failed to allocate required capital")
 
         # Update resource tracking
-        self.bot_state.allocated_capital = self.bot_config.allocated_capital
+        capital_amount = self.bot_config.max_capital or self.bot_config.allocated_capital
+        self.bot_state.allocated_capital = capital_amount
 
         self._logger.debug(
             "Resources allocated",
-            allocated_capital=float(self.bot_config.allocated_capital),
+            allocated_capital=float(capital_amount),
             bot_id=self.bot_config.bot_id,
         )
 
@@ -640,10 +660,11 @@ class BotInstance:
         strategy_type = self._convert_to_strategy_type(self.bot_config.strategy_id)
 
         # Create StrategyConfig from bot configuration
+        strategy_name = self.bot_config.strategy_name or self.bot_config.name
         strategy_config = StrategyConfig(
             strategy_id=self.bot_config.strategy_id,
             strategy_type=strategy_type,
-            name=self.bot_config.strategy_name,
+            name=strategy_name,
             symbol=self.bot_config.symbols[0] if self.bot_config.symbols else "",
             timeframe=self.bot_config.strategy_config.get("timeframe", "1h"),
             parameters=self.bot_config.strategy_config,
@@ -664,7 +685,7 @@ class BotInstance:
 
         self._logger.info(
             "Strategy initialized",
-            strategy=self.bot_config.strategy_name,
+            strategy=strategy_name,
             bot_id=self.bot_config.bot_id,
         )
 
@@ -1218,20 +1239,33 @@ class BotInstance:
 
         # Close WebSocket connections if any
         if hasattr(self, "exchange_connections"):
-            for exchange_name, connection in self.exchange_connections.items():
-                try:
-                    if hasattr(connection, "close_websocket"):
-                        await connection.close_websocket()
-                except Exception as e:
-                    await self.error_handler.handle_error(
-                        e,
-                        {
-                            "operation": "close_websocket",
-                            "bot_id": self.bot_config.bot_id,
-                            "exchange": exchange_name,
-                        },
-                        severity="low",
-                    )
+            websocket_connections = []
+            try:
+                for exchange_name, connection in self.exchange_connections.items():
+                    try:
+                        if hasattr(connection, "close_websocket"):
+                            websocket_connections.append(connection)
+                            await connection.close_websocket()
+                    except Exception as e:
+                        await self.error_handler.handle_error(
+                            e,
+                            {
+                                "operation": "close_websocket",
+                                "bot_id": self.bot_config.bot_id,
+                                "exchange": exchange_name,
+                            },
+                            severity="low",
+                        )
+            finally:
+                # Ensure all websocket connections are closed
+                for conn in websocket_connections:
+                    try:
+                        if hasattr(conn, "close"):
+                            await conn.close()
+                    except Exception as e:
+                        self._logger.debug(
+                            f"Failed to close websocket connection during resource release: {e}"
+                        )
 
         self._logger.debug("Resources released", bot_id=self.bot_config.bot_id)
 

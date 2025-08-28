@@ -78,12 +78,12 @@ class VolatilityBreakoutStrategy(BaseStrategy):
         self._version = value
 
     @property
-    def status(self):
+    def status(self) -> str:
         """Get the current strategy status."""
         return getattr(self, "_status", "inactive")
 
     @status.setter
-    def status(self, value) -> None:
+    def status(self, value: str) -> None:
         """Set the strategy status."""
         self._status = value
 
@@ -516,7 +516,11 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             # Consider it a squeeze if band width is less than 4% of middle price
             return band_width / middle_price < 0.04 if middle_price > 0 else False
 
-        except Exception:
+        except (KeyError, ValueError, TypeError, IndexError) as e:
+            # Bollinger band calculation errors
+            return False
+        except Exception as e:
+            # Unexpected errors in squeeze detection
             return False
 
     def _get_bb_position(self, bb_data: dict, current_price: Decimal) -> str:
@@ -536,7 +540,11 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             else:
                 return "inside_bands"
 
-        except Exception:
+        except (KeyError, ValueError, TypeError) as e:
+            # Bollinger band position calculation errors
+            return "unknown"
+        except Exception as e:
+            # Unexpected errors in position calculation
             return "unknown"
 
     async def _calculate_breakout_levels_enhanced(
@@ -1172,7 +1180,11 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                 if self._risk_manager:
                     try:
                         portfolio_value = self._risk_manager.get_available_capital()
-                    except Exception:
+                    except (AttributeError, TypeError, KeyError) as e:
+                        # Risk manager capital access error - use default portfolio value
+                        pass
+                    except Exception as e:
+                        # Unexpected error accessing risk manager - use default portfolio value
                         pass
 
                 # Calculate position size with breakout-specific factors

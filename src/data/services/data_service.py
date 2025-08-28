@@ -1,6 +1,16 @@
 """
 DataService - Comprehensive Data Management Service
 
+⚠️ NOTICE: This service has infrastructure coupling issues.
+For new implementations, prefer RefactoredDataService from the factory:
+
+```python
+from src.data import DataServiceFactory
+
+# Create service with dependency injection
+service = DataServiceFactory.create_data_service(config)
+```
+
 This module provides enterprise-grade data infrastructure for the trading bot,
 implementing sophisticated data pipelines, caching, validation, and streaming
 capabilities for mission-critical financial data processing.
@@ -16,11 +26,12 @@ import json
 import uuid
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 import redis.asyncio as redis
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 
 # Caching imports
 from src.core.caching import (
@@ -43,15 +54,15 @@ from src.database.queries import DatabaseQueries
 from src.error_handling.decorators import retry_with_backoff
 
 # Monitoring imports
-from src.monitoring import MetricsCollector, Status, StatusCode, get_tracer
+# Import core exceptions
+from src.core.exceptions import DataError
+
+# Monitoring imports
+from src.monitoring import MetricsCollector, Status, StatusCode
 from src.utils.decorators import cache_result, time_execution
 from src.utils.validators import validate_decimal_precision, validate_market_data
 
 
-class DataServiceError(Exception):
-    """Base exception for DataService operations."""
-
-    pass
 
 
 class DataService(BaseComponent):
@@ -83,16 +94,17 @@ class DataService(BaseComponent):
         self.cache_manager = get_cache_manager(config=config)
 
         # Metrics tracking - use standard MetricsCollector
-        self.metrics_collector = metrics_collector or MetricsCollector(config)
+        self.metrics_collector = metrics_collector or MetricsCollector(registry=None)
         self._metrics = DataMetrics()  # Keep for backward compatibility
         self._last_metrics_reset = datetime.now(timezone.utc)
 
         # Initialize tracer for distributed tracing
         try:
-            self.tracer = get_tracer(__name__)
+            from opentelemetry import trace
+            self.tracer = trace.get_tracer(__name__)
         except Exception as e:
             self.logger.warning(f"Failed to initialize tracer: {e}")
-            self.tracer = None
+            self.tracer = None  # type: ignore
 
         # Pipeline state
         self._active_pipelines: dict[str, dict[str, Any]] = {}
@@ -162,7 +174,7 @@ class DataService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"DataService initialization failed: {e}")
-            raise DataServiceError(f"Initialization failed: {e}") from e
+            raise DataError(f"Initialization failed: {e}") from e
 
     async def _initialize_redis(self) -> None:
         """Initialize Redis connection for L2 caching."""
@@ -235,9 +247,9 @@ class DataService(BaseComponent):
                 )
             except Exception as e:
                 self.logger.warning(f"Failed to start span: {e}")
-                span_ctx = nullcontext()
+                span_ctx = nullcontext()  # type: ignore
         else:
-            span_ctx = nullcontext()
+            span_ctx = nullcontext()  # type: ignore
 
         with span_ctx as span:
             try:
@@ -333,27 +345,16 @@ class DataService(BaseComponent):
 
         for data in data_list:
             try:
-                # Basic validation
-                if not validate_market_data(data.model_dump()):
-                    self.logger.warning(f"Invalid market data for {data.symbol}")
+                # Use consistent validation patterns from data validator
+                from src.data.validation.data_validator import DataValidator
+                
+                # Create temporary validator for boundary validation
+                temp_validator = DataValidator(self.config)
+                validation_result = await temp_validator._validate_single(data, include_statistical=False)
+                
+                if not validation_result.is_valid:
+                    self.logger.warning(f"Invalid market data for {data.symbol}: {validation_result.issues}")
                     continue
-
-                # Decimal precision validation for financial data
-                if data.price and not validate_decimal_precision(float(data.price), places=8):
-                    self.logger.warning(f"Invalid price precision for {data.symbol}")
-                    continue
-
-                # Volume validation
-                if data.volume and data.volume < 0:
-                    self.logger.warning(f"Invalid volume for {data.symbol}")
-                    continue
-
-                # Timestamp validation
-                if data.timestamp:
-                    now = datetime.now(timezone.utc)
-                    if data.timestamp > now + timedelta(minutes=5):
-                        self.logger.warning(f"Future timestamp for {data.symbol}")
-                        continue
 
                 valid_data.append(data)
 
@@ -443,9 +444,11 @@ class DataService(BaseComponent):
 
     async def _store_to_database(self, records: list[MarketDataRecord]) -> None:
         """Store records to database with proper error handling."""
+        session = None
         try:
-            async with get_async_session() as session:
-                db_queries = DatabaseQueries(session, self.config)
+            session = get_async_session()
+            async with session:
+                db_queries = DatabaseQueries(session, config=None)
 
                 # Use the standard bulk_create method
                 await db_queries.bulk_create(records)
@@ -456,6 +459,9 @@ class DataService(BaseComponent):
         except Exception as e:
             self.logger.error(f"Database storage failed: {e}")
             raise
+        finally:
+            if session:
+                await session.close()
 
     async def _update_indexes(self, records: list[MarketDataRecord]) -> None:
         """Update database indexes for faster querying."""
@@ -588,16 +594,22 @@ class DataService(BaseComponent):
 
     async def _get_from_database(self, request: DataRequest) -> list[MarketDataRecord]:
         """Retrieve data from database."""
-        async with get_async_session() as session:
-            db_queries = DatabaseQueries(session, self.config)
+        session = None
+        try:
+            session = get_async_session()
+            async with session:
+                db_queries = DatabaseQueries(session, config=None)
 
-            return await db_queries.get_market_data_records(
-                symbol=request.symbol,
-                exchange=request.exchange,
-                start_time=request.start_time,
-                end_time=request.end_time,
-                limit=request.limit,
-            )
+                return await db_queries.get_market_data_records(
+                    symbol=request.symbol,
+                    exchange=request.exchange,
+                    start_time=request.start_time,
+                    end_time=request.end_time,
+                    limit=request.limit,
+                )
+        finally:
+            if session:
+                await session.close()
 
     async def _cache_data(self, request: DataRequest, data: list[MarketDataRecord]) -> None:
         """Cache data in appropriate cache levels."""
@@ -700,8 +712,10 @@ class DataService(BaseComponent):
             health["components"]["redis"] = "disabled"
 
         # Check database connection
+        session = None
         try:
-            async with get_async_session() as session:
+            session = get_async_session()
+            async with session:
                 from sqlalchemy import text
 
                 await session.execute(text("SELECT 1"))
@@ -709,6 +723,9 @@ class DataService(BaseComponent):
         except Exception as e:
             health["components"]["database"] = f"unhealthy: {e}"
             health["status"] = "unhealthy"
+        finally:
+            if session:
+                await session.close()
 
         return health
 
@@ -719,14 +736,20 @@ class DataService(BaseComponent):
             if not self._initialized:
                 await self.initialize()
 
-            async with get_async_session() as session:
-                db_queries = DatabaseQueries(session, self.config)
+            session = None
+            try:
+                session = get_async_session()
+                async with session:
+                    db_queries = DatabaseQueries(session, config=None)
 
-                # Use get_market_data_records to count records
-                records = await db_queries.get_market_data_records(
-                    symbol=symbol, exchange=exchange, limit=None
-                )
-                return len(records)
+                    # Use get_market_data_records to count records
+                    records = await db_queries.get_market_data_records(
+                        symbol=symbol, exchange=exchange, limit=None
+                    )
+                    return len(records)
+            finally:
+                if session:
+                    await session.close()
 
         except Exception as e:
             self.logger.error(f"Data count retrieval failed for {symbol}: {e}")
@@ -741,7 +764,7 @@ class DataService(BaseComponent):
                 await self.initialize()
 
             # Create a data request
-            request = DataRequest(symbol=symbol, exchange=exchange, limit=limit, use_cache=True)
+            request = DataRequest(symbol=symbol, exchange=exchange, limit=limit, use_cache=True, cache_ttl=3600)
 
             # Get records from the service
             records = await self.get_market_data(request)
@@ -751,14 +774,12 @@ class DataService(BaseComponent):
             for record in records:
                 data = MarketData(
                     symbol=record.symbol,
-                    price=record.price or record.close_price,
-                    volume=record.volume,
                     timestamp=record.timestamp or record.data_timestamp,
-                    bid=getattr(record, "bid", None),
-                    ask=getattr(record, "ask", None),
-                    open_price=record.open_price,
-                    high_price=record.high_price,
-                    low_price=record.low_price,
+                    open=record.open_price or record.close_price or Decimal("0"),
+                    high=record.high_price or record.close_price or Decimal("0"),
+                    low=record.low_price or record.close_price or Decimal("0"),
+                    close=record.close_price or Decimal("0"),
+                    volume=record.volume or Decimal("0"),
                 )
                 market_data.append(data)
 
@@ -773,10 +794,13 @@ class DataService(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup service resources."""
+        redis_client = None
         try:
             # Close Redis connection
             if self._redis_client:
-                await self._redis_client.close()
+                redis_client = self._redis_client
+                self._redis_client = None
+                await redis_client.close()
 
             # Clear caches
             self._memory_cache.clear()
@@ -789,3 +813,9 @@ class DataService(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"DataService cleanup error: {e}")
+        finally:
+            if redis_client and not redis_client.closed:
+                try:
+                    await redis_client.close()
+                except Exception as e:
+                    self.logger.warning(f"Failed to close Redis client: {e}")

@@ -16,7 +16,7 @@ from src.database.service import DatabaseService
 try:
     from src.database.redis_client import RedisClient
 except ImportError:
-    RedisClient = None
+    RedisClient = None  # type: ignore
 
 
 class SyncEventType(Enum):
@@ -49,9 +49,9 @@ class StateSyncManager:
         self.synchronizer = None
 
         # Sync state storage
-        self._sync_states = {}
-        self._event_subscriptions = {}
-        self._conflict_resolvers = {}
+        self._sync_states: dict[str, Any] = {}
+        self._event_subscriptions: dict[str, Any] = {}
+        self._conflict_resolvers: dict[str, Any] = {}
 
         # Mock sync metrics for testing
         self.sync_metrics = type(

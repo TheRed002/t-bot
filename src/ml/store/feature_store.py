@@ -123,7 +123,7 @@ class FeatureStoreService(BaseService):
 
         # Parse feature store configuration
         fs_config_dict = (config or {}).get("feature_store", {})
-        self.fs_config = FeatureStoreConfig(**fs_config_dict)
+        self.fs_config = FeatureStoreConfig(**dict(fs_config_dict))
 
         # Service dependencies - resolved during startup
         self.data_service: Any = None
@@ -741,7 +741,8 @@ class FeatureStoreService(BaseService):
             else:
                 return "1.0.0"
 
-        except Exception:
+        except Exception as e:
+            self._logger.warning(f"Version generation failed: {e}")
             # Fallback to timestamp-based version
             return f"1.0.{int(datetime.now(timezone.utc).timestamp())}"
 
@@ -753,7 +754,8 @@ class FeatureStoreService(BaseService):
             # Create a string representation of the data
             data_str = json.dumps(feature_set.features, sort_keys=True, default=str)
             return hashlib.md5(data_str.encode()).hexdigest()
-        except Exception:
+        except Exception as e:
+            self._logger.warning(f"Hash generation failed: {e}")
             return ""
 
     async def _prepare_feature_data(

@@ -13,6 +13,7 @@ This module provides a completely refactored BaseExchange with:
 
 import asyncio
 import time
+import types
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -22,7 +23,7 @@ from typing import TYPE_CHECKING, Any
 try:
     import aiohttp
 except ImportError:
-    aiohttp = None
+    aiohttp: types.ModuleType | None = None
 
 from src.core.base import BaseComponent
 from src.core.config import Config
@@ -65,7 +66,7 @@ from src.exchanges.advanced_rate_limiter import get_global_rate_limiter
 from src.exchanges.connection_manager import ConnectionManager
 
 # MANDATORY: Import from P-030 (monitoring)
-from src.monitoring import ExchangeMetrics, MetricsCollector, SystemMetrics, get_tracer
+from src.monitoring import ExchangeMetrics, SystemMetrics, get_tracer
 
 # MANDATORY: Import from P-007A (utils)
 from src.utils.decorators import UnifiedDecorator, time_execution
@@ -211,6 +212,7 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         # Initialize monitoring components
         if metrics_collector is None:
             from src.monitoring import get_metrics_collector
+
             self.metrics_collector = get_metrics_collector()
         else:
             self.metrics_collector = metrics_collector
@@ -441,31 +443,49 @@ class EnhancedBaseExchange(BaseComponent, ABC):
         """
         Clean up connection pool and session resources.
         """
+        tasks_to_cancel = []
+        session_to_close = None
+
         try:
-            # Cancel all monitoring tasks
-            for task in self._monitoring_tasks:
-                if not task.done():
+            tasks_to_cancel = list(self._monitoring_tasks) if self._monitoring_tasks else []
+            session_to_close = self.request_session
+        except Exception:
+            pass
+
+        # Cancel monitoring tasks
+        try:
+            for task in tasks_to_cancel:
+                if task and not task.done():
                     task.cancel()
 
             # Wait for all tasks to complete with timeout
-            if self._monitoring_tasks:
-                await asyncio.wait(self._monitoring_tasks, timeout=5.0)
-
+            if tasks_to_cancel:
+                try:
+                    await asyncio.wait(tasks_to_cancel, timeout=5.0)
+                except Exception as e:
+                    self.logger.error(f"Error waiting for tasks to complete: {e!s}")
+        except Exception as e:
+            self.logger.error(f"Error canceling monitoring tasks: {e!s}")
+        finally:
             # Clear task list
-            self._monitoring_tasks.clear()
+            try:
+                self._monitoring_tasks.clear()
+            except Exception:
+                pass
 
-            # Close request session
-            if self.request_session:
-                await self.request_session.close()
-                self.request_session = None
-
+        # Close request session
+        try:
+            if session_to_close:
+                await session_to_close.close()
+        except Exception as e:
+            self.logger.error(f"Error closing request session: {e!s}")
+        finally:
+            # Always clear references
+            self.request_session = None
             self.connection_pool = None
             self.session_manager = None
             self.unified_rate_limiter = None
             self.unified_ws_manager = None
-
-        except Exception as e:
-            self.logger.error(f"Error cleaning up connection infrastructure: {e!s}")
 
     # === CONNECTION MANAGEMENT ===
 
@@ -1848,26 +1868,41 @@ class EnhancedBaseExchange(BaseComponent, ABC):
             if self.connected:
                 import asyncio
 
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # Store task reference to avoid garbage collection
-                    disconnect_task = loop.create_task(self.disconnect())
-                    # Best effort - don't wait for completion in cleanup
-                    _ = disconnect_task
-                else:
-                    loop.run_until_complete(self.disconnect())
+                loop = None
+                try:
+                    loop = asyncio.get_event_loop()
+                except Exception:
+                    pass
 
-            # Clear caches and tracking
-            self.market_data_cache.clear()
-            self.pending_orders.clear()
-            self.order_callbacks.clear()
-            self.rate_limit_windows.clear()
-
-            self.logger.info(f"Enhanced exchange cleanup completed for {self.exchange_name}")
+                if loop:
+                    if loop.is_running():
+                        # Store task reference to avoid garbage collection
+                        disconnect_task = loop.create_task(self.disconnect())
+                        # Best effort - don't wait for completion in cleanup
+                        _ = disconnect_task
+                    else:
+                        try:
+                            loop.run_until_complete(self.disconnect())
+                        except Exception as e:
+                            self.logger.error(f"Error running disconnect: {e}")
         except Exception as e:
             self.logger.error(f"Error during exchange cleanup: {e}")
         finally:
-            super().cleanup()  # Call parent cleanup
+            # Clear caches and tracking regardless of disconnect success
+            try:
+                self.market_data_cache.clear()
+                self.pending_orders.clear()
+                self.order_callbacks.clear()
+                self.rate_limit_windows.clear()
+            except Exception as e:
+                self.logger.error(f"Error clearing caches: {e}")
+
+            self.logger.info(f"Enhanced exchange cleanup completed for {self.exchange_name}")
+
+            try:
+                super().cleanup()  # Call parent cleanup
+            except Exception as e:
+                self.logger.error(f"Error in parent cleanup: {e}")
 
     # === STATUS METHODS ===
 

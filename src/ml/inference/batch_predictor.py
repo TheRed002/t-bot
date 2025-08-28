@@ -451,7 +451,8 @@ class BatchPredictorService(BaseService):
                     probabilities = model.predict_proba(features)
                     if probabilities.shape[1] >= 2:
                         result["confidence"] = np.max(probabilities, axis=1)
-                except Exception:
+                except Exception as e:
+                    self._logger.warning(f"Probability prediction failed: {e}")
                     result["confidence"] = 0.5  # Default confidence
             else:
                 result["confidence"] = 0.5  # Default confidence

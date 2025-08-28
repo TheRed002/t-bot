@@ -21,7 +21,7 @@ from src.core.exceptions import (
     ExchangeConnectionError,
     ValidationError,
 )
-from src.monitoring import get_metrics_collector
+from src.monitoring import MetricsCollector
 
 # MANDATORY: Import from P-001
 # MANDATORY: Import from P-002A
@@ -91,8 +91,8 @@ class ConnectionHealthMonitor(BaseComponent):
         self.is_monitoring = False
 
         # Metrics integration
-        self.metrics_collector = get_metrics_collector()
-        self.exchange_metrics = self.metrics_collector.exchange_metrics
+        self.metrics_collector = MetricsCollector()
+        self.exchange_metrics = getattr(self.metrics_collector, 'exchange_metrics', None)
 
         # Initialize health monitoring metrics
         self._initialize_health_metrics()

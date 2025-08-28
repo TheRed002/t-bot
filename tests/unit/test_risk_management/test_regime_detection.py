@@ -318,8 +318,8 @@ class TestMarketRegimeDetector:
 
         # Check event details
         event = regime_detector.regime_history[0]
-        assert event.from_regime == old_regime
-        assert event.to_regime == new_regime
+        assert event.previous_regime == old_regime
+        assert event.new_regime == new_regime
         assert event.confidence > 0.7  # Should be above threshold
         assert isinstance(event.timestamp, datetime)
 
@@ -332,12 +332,13 @@ class TestMarketRegimeDetector:
         """Test confidence calculation for new regime type."""
         # Add some history
         event = RegimeChangeEvent(
-            from_regime=MarketRegime.MEDIUM_VOLATILITY,
-            to_regime=MarketRegime.LOW_VOLATILITY,
-            confidence=0.8,
             timestamp=datetime.now(timezone.utc),
-            trigger_metrics={},
-            description="Test event",
+            symbol="BTCUSDT",
+            previous_regime=MarketRegime.MEDIUM_VOLATILITY,
+            new_regime=MarketRegime.LOW_VOLATILITY,
+            confidence=0.8,
+            indicators={},
+            metadata={"description": "Test event"},
         )
         regime_detector.regime_history.append(event)
 
@@ -350,19 +351,20 @@ class TestMarketRegimeDetector:
         # Add some test events
         for i in range(5):
             event = RegimeChangeEvent(
-                from_regime=MarketRegime.MEDIUM_VOLATILITY,
-                to_regime=MarketRegime.LOW_VOLATILITY,
-                confidence=0.8,
                 timestamp=datetime.now(timezone.utc),
-                trigger_metrics={},
-                description=f"Test event {i}",
+                symbol="BTCUSDT",
+                previous_regime=MarketRegime.MEDIUM_VOLATILITY,
+                new_regime=MarketRegime.LOW_VOLATILITY,
+                confidence=0.8,
+                indicators={},
+                metadata={"description": f"Test event {i}"},
             )
             regime_detector.regime_history.append(event)
 
         # Test with limit
         history = regime_detector.get_regime_history(limit=3)
         assert len(history) == 3
-        assert history[-1].description == "Test event 4"
+        assert history[-1].metadata["description"] == "Test event 4"
 
     def test_get_current_regime(self, regime_detector):
         """Test getting current regime."""
@@ -382,12 +384,13 @@ class TestMarketRegimeDetector:
         """Test getting regime statistics with history."""
         # Add a test event
         event = RegimeChangeEvent(
-            from_regime=MarketRegime.MEDIUM_VOLATILITY,
-            to_regime=MarketRegime.HIGH_VOLATILITY,
-            confidence=0.8,
             timestamp=datetime.now(timezone.utc) - timedelta(hours=2),
-            trigger_metrics={},
-            description="Test event",
+            symbol="BTCUSDT",
+            previous_regime=MarketRegime.MEDIUM_VOLATILITY,
+            new_regime=MarketRegime.HIGH_VOLATILITY,
+            confidence=0.8,
+            indicators={},
+            metadata={"description": "Test event"},
         )
         regime_detector.regime_history.append(event)
         regime_detector.current_regime = MarketRegime.HIGH_VOLATILITY

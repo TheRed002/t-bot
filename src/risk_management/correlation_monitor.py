@@ -22,15 +22,14 @@ from src.core.config.main import Config
 from src.core.exceptions import RiskManagementError
 from src.core.types import MarketData, Position
 
+
 class CorrelationLevel(Enum):
     """Correlation level classification."""
+
     HIGH = "high_correlation"
     MEDIUM = "medium_correlation"
     LOW = "low_correlation"
     UNKNOWN = "unknown"
-
-
-
 
 
 @dataclass
@@ -354,7 +353,7 @@ class CorrelationMonitor(BaseComponent):
             raise RiskManagementError(
                 f"Portfolio correlation calculation failed: {e}",
                 error_code="CORRELATION_CALCULATION_FAILED",
-            )
+            ) from e
 
     async def get_position_limits_for_correlation(
         self, correlation_metrics: CorrelationMetrics

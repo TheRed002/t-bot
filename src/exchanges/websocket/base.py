@@ -528,7 +528,7 @@ class EnhancedBaseWebSocketManager(ABC):
             self._logger.error(f"Health check failed: {e!s}")
             return False
 
-    def get_connection_metrics(self) -> dict[str, Any]:
+    async def get_connection_metrics(self) -> dict[str, Any]:
         """
         Get comprehensive connection metrics.
 
@@ -549,7 +549,7 @@ class EnhancedBaseWebSocketManager(ABC):
             return {
                 "exchange": self.exchange_name,
                 "connected": self.connected,
-                "healthy": self.health_check(),
+                "healthy": await self.health_check(),
                 "uptime_seconds": uptime,
                 "total_messages_received": self._total_messages_received,
                 "total_messages_sent": self._total_messages_sent,

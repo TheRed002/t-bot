@@ -66,7 +66,7 @@ class PartialFillRecovery(RecoveryScenario):
             self._logger.error("Invalid context for partial fill recovery", context=context)
             return False
 
-        fill_percentage = float(filled_quantity / order.quantity)
+        fill_percentage = filled_quantity / order.quantity
 
         self._logger.info(
             "Processing partial fill recovery",
@@ -117,7 +117,7 @@ class PartialFillRecovery(RecoveryScenario):
                 "Partial fill logged",
                 order_id=order.get("id"),
                 filled_quantity=filled_quantity,
-                fill_percentage=float(filled_quantity / order["quantity"]),
+                fill_percentage=filled_quantity / order["quantity"],
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
 
@@ -206,7 +206,7 @@ class PartialFillRecovery(RecoveryScenario):
                         """UPDATE positions
                            SET quantity = :quantity, updated_at = NOW()
                            WHERE position_id = :position_id""",
-                        {"quantity": float(new_quantity), "position_id": position.position_id},
+                        {"quantity": new_quantity, "position_id": position.position_id},
                     )
                 else:
                     # Create new position
@@ -217,7 +217,7 @@ class PartialFillRecovery(RecoveryScenario):
                         {
                             "symbol": order.get("symbol"),
                             "side": order.get("side"),
-                            "quantity": float(filled_quantity),
+                            "quantity": filled_quantity,
                             "price": order.get("price"),
                             "exchange": order.get("exchange"),
                         },
@@ -305,7 +305,7 @@ class PartialFillRecovery(RecoveryScenario):
                         """UPDATE positions
                            SET stop_loss_price = :stop_loss
                            WHERE position_id = :position_id""",
-                        {"stop_loss": float(new_stop), "position_id": position.position_id},
+                        {"stop_loss": new_stop, "position_id": position.position_id},
                     )
                     await session.commit()
 
@@ -320,7 +320,7 @@ class PartialFillRecovery(RecoveryScenario):
                         "Stop loss adjusted for partial fill",
                         order_id=order.get("id"),
                         filled_quantity=filled_quantity,
-                        new_stop_loss=float(new_stop),
+                        new_stop_loss=new_stop,
                     )
                 else:
                     self._logger.warning(

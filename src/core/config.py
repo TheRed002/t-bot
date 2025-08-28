@@ -1083,7 +1083,7 @@ class Config(BaseConfig):
         try:
             self.from_yaml(yaml_path)
             return True
-        except Exception:
+        except (FileNotFoundError, ValueError, yaml.YAMLError):
             return False
 
 

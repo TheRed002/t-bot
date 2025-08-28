@@ -177,7 +177,7 @@ class BotLifecycle:
                 "name": "Market Making Bot",
                 "description": "Automated market making with spread management",
                 "default_config": {
-                    "bot_type": BotType.MARKET_MAKER,
+                    "bot_type": BotType.MARKET_MAKING,
                     "priority": BotPriority.HIGH,
                     "max_concurrent_positions": 20,
                     "risk_percentage": 0.005,
@@ -194,7 +194,7 @@ class BotLifecycle:
                 "name": "Hybrid Multi-Strategy Bot",
                 "description": "Advanced bot running multiple coordinated strategies",
                 "default_config": {
-                    "bot_type": BotType.HYBRID,
+                    "bot_type": BotType.TRADING,
                     "priority": BotPriority.NORMAL,
                     "max_concurrent_positions": 15,
                     "risk_percentage": 0.03,
@@ -211,7 +211,7 @@ class BotLifecycle:
                 "name": "Opportunity Scanner Bot",
                 "description": "Market opportunity scanner with signal generation",
                 "default_config": {
-                    "bot_type": BotType.SCANNER,
+                    "bot_type": BotType.MONITORING,
                     "priority": BotPriority.LOW,
                     "max_concurrent_positions": 1,  # Minimal trading
                     "risk_percentage": 0.001,
@@ -332,7 +332,8 @@ class BotLifecycle:
             **template["default_config"],
             **custom_config,
             "bot_id": bot_id,
-            "bot_name": bot_name,
+            "name": bot_name,
+            "version": "1.0.0",  # Default version
         }
 
         # Create bot configuration

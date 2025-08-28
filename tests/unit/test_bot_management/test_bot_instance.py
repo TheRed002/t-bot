@@ -11,6 +11,7 @@ from src.core.types import (
     BotConfiguration, BotStatus, BotType, BotPriority,
     OrderRequest, OrderSide, OrderType, MarketData
 )
+from src.core.types.strategy import StrategyType
 from src.bot_management.bot_instance import BotInstance
 
 
@@ -35,7 +36,7 @@ def bot_config():
         name="Test Strategy Bot",  # Changed from bot_name
         bot_type=BotType.TRADING,
         version="1.0.0",  # Added required field
-        strategy_id="test_strategy",  # Changed from strategy_name
+        strategy_id="momentum",  # Valid StrategyType
         exchanges=["binance"],
         symbols=["BTCUSDT"],
         max_capital=Decimal("10000"),  # Changed from allocated_capital
@@ -92,7 +93,7 @@ def bot_instance(config, bot_config):
                     with patch('src.bot_management.bot_instance.CapitalAllocatorAdapter') as mock_ca:
                         # Mock the factories to return mock instances
                         mock_sf_instance = AsyncMock()
-                        mock_sf_instance.get_available_strategies = AsyncMock(return_value=["test_strategy"])
+                        mock_sf_instance.get_supported_strategies = AsyncMock(return_value=[StrategyType.MOMENTUM])
                         mock_sf_instance.create_strategy = AsyncMock()
                         mock_sf.return_value = mock_sf_instance
                         
@@ -153,8 +154,17 @@ class TestBotInstance:
         # Setup running bot
         bot_instance.bot_state.status = BotStatus.RUNNING
         bot_instance.is_running = True
-        bot_instance.trading_task = AsyncMock()
-        bot_instance.heartbeat_task = AsyncMock()
+        # Create actual asyncio tasks for proper cancellation behavior
+        import asyncio
+        
+        async def dummy_coro():
+            try:
+                await asyncio.sleep(10)  # Long sleep to allow cancellation
+            except asyncio.CancelledError:
+                pass  # Expected when cancelled
+                
+        bot_instance.strategy_task = asyncio.create_task(dummy_coro())
+        bot_instance.heartbeat_task = asyncio.create_task(dummy_coro())
         bot_instance.strategy = mock_strategy
         bot_instance.execution_engine = mock_execution_engine
         
@@ -197,11 +207,28 @@ class TestBotInstance:
         # Mock successful execution
         from src.core.types import ExecutionResult, ExecutionStatus, ExecutionAlgorithm
         execution_result = ExecutionResult(
-            execution_id="exec_123",
-            original_order=order_request,
-            algorithm=ExecutionAlgorithm.TWAP,
+            instruction_id="exec_123",
+            symbol=order_request.symbol,
             status=ExecutionStatus.COMPLETED,
-            start_time=datetime.now(timezone.utc)
+            target_quantity=order_request.quantity,
+            filled_quantity=order_request.quantity,
+            remaining_quantity=Decimal("0"),
+            average_price=Decimal("50000"),
+            worst_price=Decimal("50100"),
+            best_price=Decimal("49900"),
+            expected_cost=Decimal("50000"),
+            actual_cost=Decimal("50000"),
+            slippage_bps=0.0,
+            slippage_amount=Decimal("0"),
+            fill_rate=1.0,
+            execution_time=30,
+            num_fills=1,
+            num_orders=1,
+            total_fees=Decimal("10"),
+            maker_fees=Decimal("5"),
+            taker_fees=Decimal("5"),
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc)
         )
         mock_execution_engine.execute_order.return_value = execution_result
         
@@ -269,11 +296,28 @@ class TestBotInstance:
         )
         
         execution_result = ExecutionResult(
-            execution_id="exec_close_123",
-            original_order=close_order,
-            algorithm=ExecutionAlgorithm.MARKET,
+            instruction_id="exec_close_123",
+            symbol=close_order.symbol,
             status=ExecutionStatus.COMPLETED,
-            start_time=datetime.now(timezone.utc)
+            target_quantity=close_order.quantity,
+            filled_quantity=close_order.quantity,
+            remaining_quantity=Decimal("0"),
+            average_price=Decimal("50000"),
+            worst_price=Decimal("50100"),
+            best_price=Decimal("49900"),
+            expected_cost=Decimal("50000"),
+            actual_cost=Decimal("50000"),
+            slippage_bps=0.0,
+            slippage_amount=Decimal("0"),
+            fill_rate=1.0,
+            execution_time=30,
+            num_fills=1,
+            num_orders=1,
+            total_fees=Decimal("10"),
+            maker_fees=Decimal("5"),
+            taker_fees=Decimal("5"),
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc)
         )
         mock_execution_engine.execute_order.return_value = execution_result
         

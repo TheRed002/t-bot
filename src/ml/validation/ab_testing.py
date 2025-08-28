@@ -53,8 +53,8 @@ class ABTestVariant:
 
         # Performance tracking
         self.predictions_count = 0
-        self.performance_metrics = {}
-        self.trading_metrics = {}
+        self.performance_metrics: dict[str, Any] = {}
+        self.trading_metrics: dict[str, Any] = {}
 
 
 class ABTest:
@@ -89,11 +89,11 @@ class ABTest:
         # Test lifecycle
         self.status = ABTestStatus.DRAFT
         self.created_at = datetime.now(timezone.utc)
-        self.started_at = None
-        self.ended_at = None
+        self.started_at: datetime | None = None
+        self.ended_at: datetime | None = None
 
         # Results tracking
-        self.results_history = []
+        self.results_history: list[dict[str, Any]] = []
         self.statistical_power = 0.8  # 80% power
         self.early_stopping_enabled = True
         self.risk_controls = {
@@ -358,7 +358,7 @@ class ABTestFramework(BaseComponent):
             raise ValidationError(f"Variant assignment failed: {e}")
 
     @dec.enhance(log=True, monitor=True, log_level="info")
-    def record_result(
+    async def record_result(
         self,
         test_id: str,
         variant_id: str,
@@ -414,7 +414,7 @@ class ABTestFramework(BaseComponent):
 
             # Check for early stopping conditions
             if test.early_stopping_enabled:
-                self._check_early_stopping(test)
+                await self._check_early_stopping(test)
 
             # Check risk controls
             self._check_risk_controls(test, variant_id)
@@ -635,11 +635,11 @@ class ABTestFramework(BaseComponent):
 
         return float(gross_profit / gross_loss) if gross_loss != 0 else float("inf")
 
-    def _check_early_stopping(self, test: ABTest) -> None:
+    async def _check_early_stopping(self, test: ABTest) -> None:
         """Check if test should be stopped early."""
         try:
             # Run analysis to check for significance
-            analysis = self.analyze_ab_test(test.test_id)
+            analysis = await self.analyze_ab_test(test.test_id)
 
             if "significance_tests" in analysis:
                 primary_test = analysis["significance_tests"].get(test.primary_metric)
@@ -934,7 +934,7 @@ class ABTestFramework(BaseComponent):
     ) -> dict[str, Any]:
         """Generate recommendation based on test analysis."""
         try:
-            recommendation = {
+            recommendation: dict[str, Any] = {
                 "action": "continue",  # continue, stop_launch_treatment, stop_keep_control
                 "confidence": "low",  # low, medium, high
                 "reasons": [],
@@ -1095,7 +1095,7 @@ class ABTestFramework(BaseComponent):
             }
 
     @dec.enhance(log=True, monitor=True, log_level="info")
-    def stop_ab_test(self, test_id: str, reason: str = "manual_stop") -> bool:
+    async def stop_ab_test(self, test_id: str, reason: str = "manual_stop") -> bool:
         """
         Stop an A/B test.
 
@@ -1128,7 +1128,7 @@ class ABTestFramework(BaseComponent):
             del self.active_tests[test_id]
 
             # Final analysis
-            final_analysis = self.analyze_ab_test(test_id)
+            final_analysis = await self.analyze_ab_test(test_id)
 
             self.logger.info(
                 "A/B test stopped",
@@ -1172,7 +1172,7 @@ class ABTestFramework(BaseComponent):
 
         return summaries
 
-    def get_test_results(self, test_id: str) -> dict[str, Any]:
+    async def get_test_results(self, test_id: str) -> dict[str, Any]:
         """Get detailed results for a specific test."""
         test = self.active_tests.get(test_id) or self.completed_tests.get(test_id)
 
@@ -1183,4 +1183,4 @@ class ABTestFramework(BaseComponent):
         if test.results_history:
             return test.results_history[-1]
         else:
-            return self.analyze_ab_test(test_id)
+            return await self.analyze_ab_test(test_id)

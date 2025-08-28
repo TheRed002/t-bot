@@ -73,15 +73,20 @@ class ConnectionManager:
             self._logger.warning("Not connected")
             return
 
-        if self.session:
-            await self.session.close()
-            # Wait a bit for the session to fully close
-            await asyncio.sleep(0.25)
+        session = None
+        try:
+            session = self.session
+            if session:
+                await session.close()
+                # Wait a bit for the session to fully close
+                await asyncio.sleep(0.25)
+        except Exception as e:
+            self._logger.error(f"Error closing session: {e}")
+        finally:
             self.session = None
-
-        self._connected = False
-        self._connection_time = None
-        self._logger.info(f"Disconnected from {self.base_url}")
+            self._connected = False
+            self._connection_time = None
+            self._logger.info(f"Disconnected from {self.base_url}")
 
     async def request(
         self,

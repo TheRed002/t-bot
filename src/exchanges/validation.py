@@ -1,9 +1,19 @@
 """Order validation mixin for exchanges."""
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 
 from src.core.exceptions import ValidationError
+
+
+class LoggerProtocol(Protocol):
+    """Protocol defining the logger interface."""
+
+    def warning(self, msg: str) -> None: ...
+    def info(self, msg: str) -> None: ...
+    def error(self, msg: str) -> None: ...
+    def debug(self, msg: str) -> None: ...
+
 
 # Logger is provided by BaseExchange (via BaseComponent)
 
@@ -15,6 +25,8 @@ class OrderValidationMixin:
     This eliminates duplication of validation logic across different
     exchange implementations.
     """
+
+    logger: LoggerProtocol
 
     def validate_order(
         self,

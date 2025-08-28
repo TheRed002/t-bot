@@ -240,7 +240,7 @@ class BotService(BaseService):
                 # Record success metric with error handling
                 if self._metrics_collector:
                     try:
-                        self._metrics_collector.increment(
+                        await self._metrics_collector.increment(
                             "bot_operations_total",
                             labels={"operation": operation_name, "status": "success"},
                         )
@@ -253,11 +253,11 @@ class BotService(BaseService):
                 # Record error metric with error handling
                 if self._metrics_collector:
                     try:
-                        self._metrics_collector.increment(
+                        await self._metrics_collector.increment(
                             "bot_operations_total",
                             labels={"operation": operation_name, "status": "error"},
                         )
-                        self._metrics_collector.increment(
+                        await self._metrics_collector.increment(
                             "bot_operations_errors_total",
                             labels={"operation": operation_name, "error_type": type(e).__name__},
                         )
@@ -343,6 +343,7 @@ class BotService(BaseService):
 
         # Store state through StateService with proper state type
         state_persisted = False
+        state_connection = None
         try:
             await self._state_service.set_state(
                 StateType.BOT_STATE,
@@ -359,7 +360,7 @@ class BotService(BaseService):
             # Record metric for state persistence failure with error handling
             if self._metrics_collector:
                 try:
-                    self._metrics_collector.increment(
+                    await self._metrics_collector.increment(
                         "bot_state_persistence_errors_total",
                         labels={"operation": "create_bot", "bot_id": bot_config.bot_id},
                     )
@@ -375,6 +376,12 @@ class BotService(BaseService):
                     "state_data": bot_state_data,
                     "retry_count": 0,
                 }
+        finally:
+            if state_connection:
+                try:
+                    await state_connection.close()
+                except Exception as e:
+                    logger.debug(f"Failed to close state connection during create_bot: {e}")
 
         # Initialize metrics through DatabaseService via StateService
         bot_metrics_data = {
@@ -397,6 +404,7 @@ class BotService(BaseService):
 
         # Store metrics state separately with proper state type
         # Using BOT_STATE with metrics prefix for consistency
+        metrics_connection = None
         try:
             await self._state_service.set_state(
                 StateType.BOT_STATE,  # Keep metrics with bot state
@@ -409,6 +417,12 @@ class BotService(BaseService):
         except Exception as e:
             self._logger.warning(f"Failed to persist bot metrics: {e}", bot_id=bot_config.bot_id)
             # Non-critical - metrics can be recreated
+        finally:
+            if metrics_connection:
+                try:
+                    await metrics_connection.close()
+                except Exception as e:
+                    logger.debug(f"Failed to close metrics connection during create_bot: {e}")
 
         # Create local tracking objects for performance
         bot_state = BotState(
@@ -1254,7 +1268,8 @@ class BotService(BaseService):
                         if health_result.get("status") != "healthy":
                             return HealthStatus.DEGRADED
 
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Service health check failed: {e}")
                     return HealthStatus.DEGRADED
 
             # Check active bot count

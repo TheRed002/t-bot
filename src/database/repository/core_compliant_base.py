@@ -196,7 +196,8 @@ class DatabaseRepository(CoreBaseRepository[T, K]):
             stmt = select(1)
             await self.session.execute(stmt)
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"Connection test failed: {e}")
             return False
 
     async def _repository_health_check(self) -> HealthStatus:
@@ -206,7 +207,8 @@ class DatabaseRepository(CoreBaseRepository[T, K]):
             if await self._test_connection(None):
                 return HealthStatus.HEALTHY
             return HealthStatus.UNHEALTHY
-        except Exception:
+        except Exception as e:
+            logger.error(f"Repository health check failed: {e}")
             return HealthStatus.UNHEALTHY
 
     # Health check interface methods
@@ -319,7 +321,7 @@ class DatabaseRepository(CoreBaseRepository[T, K]):
 
     async def begin(self):
         """Begin transaction."""
-        return self.session.begin()
+        return await self.session.begin()
 
     async def commit(self):
         """Commit transaction."""

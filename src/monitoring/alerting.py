@@ -28,14 +28,23 @@ from enum import Enum
 from typing import Any
 
 from src.core import BaseComponent
+from src.core.event_constants import AlertEvents
 
-# Import utils decorators instead of error_handling directly
+# Import utils decorators and error handling
 from src.utils.decorators import logged, monitored, retry
 
-# Still need error handler for pattern analytics
+# Import error handling with fallback
 try:
-    from src.error_handling import get_global_error_handler
+    from src.error_handling import ErrorContext, get_global_error_handler
 except ImportError:
+    from dataclasses import dataclass
+
+    @dataclass
+    class ErrorContext:
+        component: str
+        operation: str
+        details: dict = None
+        error: Exception | None = None
 
     def get_global_error_handler():
         return None
@@ -98,16 +107,7 @@ except ImportError:
 
 import aiohttp
 
-try:
-    from src.core import MonitoringError
-except ImportError:
-
-    class MonitoringError(Exception):
-        """Monitoring error fallback."""
-
-        def __init__(self, message: str, error_code: str = "MONITORING_000"):
-            super().__init__(message)
-            self.error_code = error_code
+from src.core import MonitoringError
 
 
 class AlertSeverity(Enum):
@@ -168,7 +168,7 @@ class AlertRule:
 
 @dataclass
 class Alert:
-    """Alert instance."""
+    """Alert instance with compatibility for database model."""
 
     rule_name: str
     severity: AlertSeverity
@@ -196,6 +196,53 @@ class Alert:
     def is_active(self) -> bool:
         """Check if alert is currently active."""
         return self.status == AlertStatus.FIRING
+
+    def to_db_model_dict(self) -> dict[str, Any]:
+        """Convert to database model format."""
+        return {
+            "alert_type": self.rule_name,
+            "severity": self.severity.value.upper(),
+            "title": self.rule_name,
+            "message": self.message,
+            "status": self.status.value.upper() if self.status != AlertStatus.FIRING else "ACTIVE",
+            "acknowledged_by": self.acknowledgment_by,
+            "acknowledged_at": self.acknowledgment_at,
+            "resolved_at": self.ends_at,
+            "context": {
+                "labels": self.labels,
+                "annotations": self.annotations,
+                "fingerprint": self.fingerprint,
+                "escalated": self.escalated,
+                "escalation_count": self.escalation_count,
+            },
+        }
+
+    @classmethod
+    def from_db_model(cls, db_alert: dict[str, Any]) -> "Alert":
+        """Create Alert from database model."""
+        context = db_alert.get("context", {})
+        status_map = {
+            "ACTIVE": AlertStatus.FIRING,
+            "ACKNOWLEDGED": AlertStatus.ACKNOWLEDGED,
+            "RESOLVED": AlertStatus.RESOLVED,
+            "SUPPRESSED": AlertStatus.SUPPRESSED,
+        }
+
+        return cls(
+            rule_name=db_alert["alert_type"],
+            severity=AlertSeverity(db_alert["severity"].lower()),
+            status=status_map.get(db_alert["status"], AlertStatus.FIRING),
+            message=db_alert["message"],
+            labels=context.get("labels", {}),
+            annotations=context.get("annotations", {}),
+            starts_at=db_alert["created_at"],
+            ends_at=db_alert.get("resolved_at"),
+            fingerprint=context.get("fingerprint", ""),
+            acknowledgment_by=db_alert.get("acknowledged_by"),
+            acknowledgment_at=db_alert.get("acknowledged_at"),
+            escalated=context.get("escalated", False),
+            escalation_count=context.get("escalation_count", 0),
+        )
 
     @property
     def duration(self) -> timedelta:
@@ -269,12 +316,12 @@ class AlertManager(BaseComponent):
         self._error_handler = error_handler or get_global_error_handler()
         self._rules: dict[str, AlertRule] = {}
         self._active_alerts: dict[str, Alert] = {}
-        self._alert_history: deque[Alert] = deque(maxlen=10000)  # Keep last 10k alerts
+        self._alert_history: deque = deque(maxlen=10000)  # Keep last 10k alerts
         self._suppression_rules: list[dict[str, Any]] = []
         self._escalation_policies: dict[str, EscalationPolicy] = {}
         self._running = False
         self._background_task: asyncio.Task | None = None
-        self._notification_queue: asyncio.Queue[tuple[str, Alert]] = asyncio.Queue()
+        self._notification_queue: asyncio.Queue = asyncio.Queue()
         # Initialize HTTP session manager for connection pooling
         self._http_session_manager = HTTPSessionManager()
 
@@ -373,9 +420,6 @@ class AlertManager(BaseComponent):
         except Exception as e:
             # Record error pattern for analysis
             if hasattr(self, "_error_handler") and self._error_handler:
-                # Use proper ErrorContext object
-                from src.error_handling import ErrorContext
-
                 error_context = ErrorContext(
                     component="AlertManager",
                     operation="fire_alert",
@@ -383,10 +427,23 @@ class AlertManager(BaseComponent):
                         "alert_name": alert.rule_name,
                         "severity": alert.severity.value,
                     },
+                    error=e,
                 )
                 await self._error_handler.handle_error(e, error_context)
-            self.logger.error(f"Error firing alert: {e}")
-            raise
+            
+            # Use consistent error propagation with analytics
+            from src.core.exceptions import ComponentError
+            
+            raise ComponentError(
+                f"Failed to fire alert: {e}",
+                component="AlertManager",
+                operation="fire_alert",
+                context={
+                    "alert_name": alert.rule_name,
+                    "severity": alert.severity.value,
+                    "fingerprint": alert.fingerprint,
+                },
+            ) from e
 
     async def resolve_alert(self, fingerprint: str) -> None:
         """
@@ -414,14 +471,13 @@ class AlertManager(BaseComponent):
 
         except Exception as e:
             if self._error_handler:
-                from src.error_handling import ErrorContext
-
                 error_context = ErrorContext(
                     component="AlertManager",
                     operation="resolve_alert",
                     details={
                         "fingerprint": fingerprint,
                     },
+                    error=e,
                 )
                 # Use proper async error handling
                 try:
@@ -437,10 +493,20 @@ class AlertManager(BaseComponent):
                     if isinstance(e, (ConnectionError, OSError, MemoryError)):
                         self.logger.critical(f"Critical alert system error in resolve_alert: {e}")
                         raise  # Re-raise critical errors
-            self.logger.error(f"Error resolving alert: {e}")
-            # Re-raise critical system errors
+            # Use consistent error propagation with analytics
+            from src.core.exceptions import ComponentError
+            
+            # Re-raise critical system errors with proper context
             if isinstance(e, (MemoryError, OSError)):
-                raise
+                raise ComponentError(
+                    f"Critical system error resolving alert: {e}",
+                    component="AlertManager",
+                    operation="resolve_alert",
+                    context={"fingerprint": fingerprint, "critical": True},
+                ) from e
+            else:
+                # Log non-critical errors but don't re-raise to maintain alert system stability
+                self.logger.error(f"Error resolving alert: {e}")
 
     async def acknowledge_alert(self, fingerprint: str, acknowledged_by: str) -> bool:
         """
@@ -561,7 +627,7 @@ class AlertManager(BaseComponent):
         await self.stop()
 
         # Close HTTP sessions
-        if hasattr(self, '_http_session_manager'):
+        if hasattr(self, "_http_session_manager"):
             await self._http_session_manager.close_all()
 
         # Clear all data structures to prevent memory leaks
@@ -681,9 +747,6 @@ class AlertManager(BaseComponent):
                 except Exception as e:
                     # Track notification failures in error handling system
                     if self._error_handler:
-                        # Use proper ErrorContext object
-                        from src.error_handling import ErrorContext
-
                         error_context = ErrorContext(
                             component="AlertManager",
                             operation="send_notification",
@@ -691,6 +754,7 @@ class AlertManager(BaseComponent):
                                 "channel": channel.value,
                                 "alert_name": alert.rule_name,
                             },
+                            error=e,
                         )
                         # Properly await error handling with proper error checking
                         try:
@@ -767,7 +831,7 @@ Fingerprint: {alert.fingerprint}
         loop = asyncio.get_event_loop()
         max_retries = 3
         retry_delay = 1.0
-        
+
         for attempt in range(max_retries):
             try:
                 await loop.run_in_executor(None, self._send_email_sync, subject, body)
@@ -775,10 +839,14 @@ Fingerprint: {alert.fingerprint}
                 break
             except Exception as e:
                 if attempt < max_retries - 1:
-                    self.logger.warning(f"Failed to send email notification (attempt {attempt + 1}/{max_retries}): {e}")
-                    await asyncio.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+                    self.logger.warning(
+                        f"Failed to send email notification (attempt {attempt + 1}/{max_retries}): {e}"
+                    )
+                    await asyncio.sleep(retry_delay * (2**attempt))  # Exponential backoff
                 else:
-                    self.logger.error(f"Failed to send email notification after {max_retries} attempts: {e}")
+                    self.logger.error(
+                        f"Failed to send email notification after {max_retries} attempts: {e}"
+                    )
                     raise
 
     def _send_email_sync(self, subject: str, body: str) -> None:
@@ -800,17 +868,18 @@ Fingerprint: {alert.fingerprint}
                 if self.config.email_username and self.config.email_password:
                     try:
                         server.login(self.config.email_username, self.config.email_password)
-                    except Exception:
+                    except Exception as e:
                         # Sanitize error message to avoid logging credentials
                         self.logger.error(
                             "SMTP authentication failed for user "
-                            f"'{self.config.email_username[:3]}***'"
+                            f"'{self.config.email_username[:3]}***': {e}"
                         )
                         raise
 
                 server.send_message(msg)
-            except Exception:
+            except Exception as e:
                 # Ensure server is closed on any error during operations
+                self.logger.error(f"Failed to send email: {e}")
                 if server:
                     try:
                         server.quit()
@@ -979,8 +1048,10 @@ Fingerprint: {alert.fingerprint}
         if not self.config.webhook_urls:
             return
 
+        from src.core.event_constants import AlertEvents
+        
         payload = {
-            "event": "alert.fired",
+            "event": AlertEvents.FIRED,
             "alert": {
                 "rule_name": alert.rule_name,
                 "severity": alert.severity.value,
@@ -996,20 +1067,21 @@ Fingerprint: {alert.fingerprint}
         for webhook_url in self.config.webhook_urls:
             max_retries = 3
             retry_delay = 1.0
-            
+
             for attempt in range(max_retries):
                 try:
                     # Use session manager for connection pooling
                     session = await self._http_session_manager.get_session(
-                        "webhooks",
-                        timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout)
+                        "webhooks", timeout=aiohttp.ClientTimeout(total=self.config.webhook_timeout)
                     )
                     async with session.post(
                         webhook_url,
                         json=payload,
                     ) as response:
                         if response.status == 200:
-                            self.logger.debug(f"Webhook notification sent for alert: {alert.rule_name}")
+                            self.logger.debug(
+                                f"Webhook notification sent for alert: {alert.rule_name}"
+                            )
                             break
                         else:
                             self.logger.error(
@@ -1017,16 +1089,20 @@ Fingerprint: {alert.fingerprint}
                             )
                             if response.status >= 500 and attempt < max_retries - 1:
                                 # Retry on server errors
-                                await asyncio.sleep(retry_delay * (2 ** attempt))
+                                await asyncio.sleep(retry_delay * (2**attempt))
                                 continue
                             break
 
                 except Exception as e:
                     if attempt < max_retries - 1:
-                        self.logger.warning(f"Failed to send webhook notification to {webhook_url} (attempt {attempt + 1}/{max_retries}): {e}")
-                        await asyncio.sleep(retry_delay * (2 ** attempt))
+                        self.logger.warning(
+                            f"Failed to send webhook notification to {webhook_url} (attempt {attempt + 1}/{max_retries}): {e}"
+                        )
+                        await asyncio.sleep(retry_delay * (2**attempt))
                     else:
-                        self.logger.error(f"Failed to send webhook notification to {webhook_url} after {max_retries} attempts: {e}")
+                        self.logger.error(
+                            f"Failed to send webhook notification to {webhook_url} after {max_retries} attempts: {e}"
+                        )
                 finally:
                     # Session is managed by the pool, don't close it
                     pass
@@ -1036,8 +1112,10 @@ Fingerprint: {alert.fingerprint}
         if not self.config.webhook_urls:
             return
 
+        from src.core.event_constants import AlertEvents
+        
         payload = {
-            "event": "alert.resolved",
+            "event": AlertEvents.RESOLVED,
             "alert": {
                 "rule_name": alert.rule_name,
                 "severity": alert.severity.value,
@@ -1325,9 +1403,10 @@ def load_alert_rules_from_file(file_path: str) -> list[AlertRule]:
     if not YAML_AVAILABLE:
         raise MonitoringError("YAML library is not available. Please install PyYAML.")
 
+    f = None
     try:
-        with open(file_path) as f:
-            data = yaml.safe_load(f)
+        f = open(file_path)
+        data = yaml.safe_load(f)
 
         rules = []
         for rule_data in data.get("rules", []):
@@ -1361,6 +1440,9 @@ def load_alert_rules_from_file(file_path: str) -> list[AlertRule]:
 
     except Exception as e:
         raise MonitoringError(f"Failed to load alert rules from {file_path}: {e}") from e
+    finally:
+        if f:
+            f.close()
 
 
 class HTTPSessionManager:

@@ -86,7 +86,7 @@ class RiskManager(BaseRiskManager):
 
     def __init__(
         self,
-        config: Config = None,
+        config: Config | None = None,
         database_service: "DatabaseService | None" = None,
         state_service: "StateService | None" = None,
     ):
@@ -227,7 +227,7 @@ class RiskManager(BaseRiskManager):
                 symbol=signal.symbol,
                 error=str(e),
             )
-            raise RiskManagementError(f"Position sizing failed: {e}")
+            raise RiskManagementError(f"Position sizing failed: {e}") from e
 
     @time_execution
     async def validate_signal(self, signal: Signal) -> bool:
@@ -251,12 +251,12 @@ class RiskManager(BaseRiskManager):
             # DEPRECATED: Fallback to legacy implementation
             logger.warning("Using DEPRECATED signal validation - migrate to RiskService")
             # Check confidence threshold
-            if signal.confidence < self.config.risk.min_signal_confidence:
+            if signal.strength < 0.3:  # Use strength instead of confidence
                 logger.warning(
-                    "Signal confidence too low",
+                    "Signal strength too low",
                     symbol=signal.symbol,
-                    confidence=signal.confidence,
-                    min_required=self.config.risk.min_signal_confidence,
+                    strength=signal.strength,
+                    min_required=0.3,
                 )
                 return False
 

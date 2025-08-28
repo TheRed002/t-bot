@@ -26,7 +26,7 @@ from typing import Any
 import redis.asyncio as redis
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.utils.decorators import time_execution
 
@@ -273,7 +273,8 @@ class L1MemoryCache(BaseComponent):
                 return len(json.dumps(value, default=str).encode("utf-8"))
             else:
                 return sys.getsizeof(value)
-        except Exception:
+        except Exception as e:
+            self.logger.warning(f"Size calculation failed: {e}, using default estimate")
             return 1024  # Default estimate
 
     async def get_stats(self) -> CacheStats:
@@ -504,8 +505,20 @@ class L2RedisCache(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup Redis connection."""
-        if self._redis_client:
-            await self._redis_client.close()
+        redis_client = None
+        try:
+            if self._redis_client:
+                redis_client = self._redis_client
+                self._redis_client = None
+                await redis_client.close()
+        except Exception as e:
+            self.logger.warning(f"Redis cleanup error during primary close: {e}")
+        finally:
+            if redis_client and not redis_client.closed:
+                try:
+                    await redis_client.close()
+                except Exception as e:
+                    self.logger.warning(f"Redis cleanup error during final close: {e}")
 
 
 class DataCache(BaseComponent):

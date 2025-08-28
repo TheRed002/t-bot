@@ -295,12 +295,12 @@ class CapitalAllocatorAdapter(BaseComponent):
                 # Record failure for monitoring
                 if hasattr(self, "_metrics_collector") and self._metrics_collector:
                     try:
-                        self._metrics_collector.increment(
+                        await self._metrics_collector.increment(
                             "capital_allocator_state_service_failures",
                             labels={"error_type": type(e).__name__},
                         )
-                    except Exception:
-                        pass  # Ignore metrics errors
+                    except Exception as e:
+                        self.logger.debug(f"Failed to record metrics during startup: {e}")
 
         await self._database_service.startup()
 
@@ -321,5 +321,15 @@ class CapitalAllocatorAdapter(BaseComponent):
 
     async def shutdown(self) -> None:
         """Cleanup services on shutdown."""
-        await self._capital_service.shutdown()
-        await self._database_service.shutdown()
+        db_connection = None
+        try:
+            if self._capital_service:
+                await self._capital_service.shutdown()
+            if self._database_service:
+                await self._database_service.shutdown()
+        finally:
+            if db_connection:
+                try:
+                    await db_connection.close()
+                except Exception as e:
+                    self.logger.debug(f"Failed to close connection during shutdown: {e}")

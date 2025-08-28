@@ -810,7 +810,7 @@ class CoinbaseRateLimiter:
         return True
 
 
-def get_global_rate_limiter(config: Config = None) -> AdvancedRateLimiter:
+def get_global_rate_limiter(config: Config | None = None) -> AdvancedRateLimiter:
     """
     Get or create the global rate limiter instance.
 

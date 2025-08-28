@@ -145,7 +145,9 @@ class RiskManagerAdapter:
         signal_direction = (
             SignalDirection.BUY
             if side == OrderSide.BUY
-            else SignalDirection.SELL if side == OrderSide.SELL else SignalDirection.HOLD
+            else SignalDirection.SELL
+            if side == OrderSide.SELL
+            else SignalDirection.HOLD
         )
 
         # Create Signal for position sizing

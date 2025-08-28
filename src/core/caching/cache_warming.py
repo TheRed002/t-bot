@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.exceptions import CacheError
 
 from .cache_keys import CacheKeys
@@ -114,7 +114,7 @@ class CacheWarmer(BaseComponent):
         self.market_close_utc = 21  # 4:00 PM EST in UTC (approx)
 
         # Performance tracking
-        self._warming_stats = {
+        self._warming_stats: dict[str, int | float | None] = {
             "total_tasks": 0,
             "successful_tasks": 0,
             "failed_tasks": 0,
@@ -154,45 +154,50 @@ class CacheWarmer(BaseComponent):
         self._shutdown_event.set()
 
         # Cancel scheduler task
-        if self._scheduler_task and not self._scheduler_task.done():
-            self._scheduler_task.cancel()
+        scheduler_task = self._scheduler_task
+        if scheduler_task and not scheduler_task.done():
+            scheduler_task.cancel()
             try:
-                await asyncio.wait_for(self._scheduler_task, timeout=10.0)
+                await asyncio.wait_for(scheduler_task, timeout=10.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
+            finally:
+                self._scheduler_task = None
 
         # Stop worker tasks gracefully
-        if self._worker_tasks:
+        worker_tasks = self._worker_tasks.copy()
+        if worker_tasks:
             # Cancel all workers
-            for worker in self._worker_tasks:
+            for worker in worker_tasks:
                 if not worker.done():
                     worker.cancel()
 
             try:
                 # Wait for workers to finish
                 await asyncio.wait_for(
-                    asyncio.gather(*self._worker_tasks, return_exceptions=True), timeout=15.0
+                    asyncio.gather(*worker_tasks, return_exceptions=True), timeout=15.0
                 )
             except asyncio.TimeoutError:
                 self.logger.warning("Some worker tasks did not complete within timeout")
-
-            self._worker_tasks.clear()
+            finally:
+                self._worker_tasks.clear()
 
         # Cancel active warming tasks
-        if self._active_warmers:
-            for _task_id, task in self._active_warmers.items():
+        active_warmers = dict(self._active_warmers)
+        if active_warmers:
+            for _task_id, task in active_warmers.items():
                 if not task.done():
                     task.cancel()
 
             try:
                 await asyncio.wait_for(
-                    asyncio.gather(*self._active_warmers.values(), return_exceptions=True),
+                    asyncio.gather(*active_warmers.values(), return_exceptions=True),
                     timeout=10.0,
                 )
             except asyncio.TimeoutError:
                 self.logger.warning("Some warming tasks did not complete within timeout")
-
-        self._active_warmers.clear()
+            finally:
+                self._active_warmers.clear()
 
         # Clear any remaining queue items
         while not self._task_queue.empty():
@@ -224,15 +229,18 @@ class CacheWarmer(BaseComponent):
 
                         # Update stats
                         if success:
-                            self._warming_stats["successful_tasks"] += 1
+                            current = self._warming_stats.get("successful_tasks", 0)
+                            self._warming_stats["successful_tasks"] = (current or 0) + 1
                         else:
-                            self._warming_stats["failed_tasks"] += 1
+                            current = self._warming_stats.get("failed_tasks", 0)
+                            self._warming_stats["failed_tasks"] = (current or 0) + 1
 
                     except Exception as e:
                         self.logger.error(
                             f"Worker {worker_name} failed to execute task {task.name}: {e}"
                         )
-                        self._warming_stats["failed_tasks"] += 1
+                        current = self._warming_stats.get("failed_tasks", 0)
+                        self._warming_stats["failed_tasks"] = (current or 0) + 1
                     finally:
                         # CRITICAL: Always mark task as done
                         self._task_queue.task_done()
@@ -580,11 +588,15 @@ class CacheWarmer(BaseComponent):
             task.failure_count = 0
 
             # Update stats
-            self._warming_stats["successful_tasks"] += 1
-            self._warming_stats["cache_hits_generated"] += 1
+            current_success = self._warming_stats.get("successful_tasks", 0)
+            self._warming_stats["successful_tasks"] = (current_success or 0) + 1
+            
+            current_hits = self._warming_stats.get("cache_hits_generated", 0)
+            self._warming_stats["cache_hits_generated"] = (current_hits or 0) + 1
 
             execution_time = asyncio.get_event_loop().time() - start_time
-            self._warming_stats["total_warming_time"] += execution_time
+            current_time = self._warming_stats.get("total_warming_time", 0.0)
+            self._warming_stats["total_warming_time"] = (current_time or 0.0) + execution_time
 
             self.logger.debug(f"Warming task completed: {task.name}", execution_time=execution_time)
             return True
@@ -592,13 +604,15 @@ class CacheWarmer(BaseComponent):
         except asyncio.TimeoutError:
             self.logger.warning(f"Warming task timeout: {task.name}")
             task.failure_count += 1
-            self._warming_stats["failed_tasks"] += 1
+            current = self._warming_stats.get("failed_tasks", 0)
+            self._warming_stats["failed_tasks"] = (current or 0) + 1
             return False
 
         except Exception as e:
             self.logger.error(f"Warming task failed: {task.name}", error=str(e))
             task.failure_count += 1
-            self._warming_stats["failed_tasks"] += 1
+            current = self._warming_stats.get("failed_tasks", 0)
+            self._warming_stats["failed_tasks"] = (current or 0) + 1
 
             # Retry logic
             if task.failure_count <= task.max_retries:

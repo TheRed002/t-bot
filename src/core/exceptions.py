@@ -1806,6 +1806,7 @@ class ErrorCodeRegistry:
     STATE_CODES = range(700, 800)  # STATE_700 - STATE_799
     SECURITY_CODES = range(800, 900)  # SEC_800 - SEC_899
     STRATEGY_CODES = range(900, 1000)  # STRAT_900 - STRAT_999
+    MONITORING_CODES = range(1000, 1100)  # MON_1000 - MON_1099
 
     @classmethod
     def validate_code(cls, error_code: str) -> bool:
@@ -2203,7 +2204,7 @@ class MonitoringError(ComponentError):
     """Monitoring and metrics collection errors."""
 
     def __init__(self, message: str, **kwargs: Any) -> None:
-        kwargs.setdefault("error_code", "MONITORING_001")
+        kwargs.setdefault("error_code", "MON_1001")
         kwargs.setdefault("severity", "medium")
         super().__init__(message, **kwargs)
 

@@ -187,7 +187,7 @@ class HighPerformanceWebSocket:
         self.logger = get_logger(f"{__name__}.{connection_id}")
 
         # Connection state
-        self.websocket: websockets.WebSocketServerProtocol | None = None
+        self.websocket: websockets.WebSocketClientProtocol | None = None
         self.is_connected = False
         self.is_authenticated = False
         self.reconnect_attempts = 0
@@ -195,13 +195,17 @@ class HighPerformanceWebSocket:
 
         # Performance components
         self.message_batcher = MessageBatcher(
-            max_batch_size=self.config.websocket.batch_size or 50,
-            max_batch_time_ms=self.config.websocket.batch_time_ms or 5.0,
+            max_batch_size=getattr(getattr(self.config, "websocket", None), "batch_size", None)
+            or 50,
+            max_batch_time_ms=getattr(
+                getattr(self.config, "websocket", None), "batch_time_ms", None
+            )
+            or 5.0,
         )
 
         # Message queues with priority
-        self.inbound_queue = asyncio.Queue(maxsize=10000)
-        self.outbound_queue = asyncio.Queue(maxsize=1000)
+        self.inbound_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=10000)
+        self.outbound_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1000)
 
         # Performance metrics
         self.metrics = {
@@ -239,7 +243,12 @@ class HighPerformanceWebSocket:
             }
 
             # Enable compression if supported
-            compression = "deflate" if self.config.websocket.enable_compression else None
+            websocket_config = getattr(self.config, "websocket", None)
+            compression = (
+                "deflate"
+                if (websocket_config and getattr(websocket_config, "enable_compression", False))
+                else None
+            )
 
             self.websocket = await websockets.connect(
                 self.url,
@@ -492,7 +501,8 @@ class HighPerformanceWebSocket:
             relevant_messages = [
                 msg
                 for msg in messages
-                if msg.message_type == message_type or msg.data.get("type") == message_type
+                if msg.message_type == message_type
+                or (isinstance(msg.data, dict) and msg.data.get("type") == message_type)
             ]
 
             if not relevant_messages:
@@ -515,33 +525,64 @@ class HighPerformanceWebSocket:
 
     async def disconnect(self):
         """Gracefully disconnect WebSocket."""
+        tasks_to_cancel = []
+        websocket_to_close = None
+        thread_pool_to_shutdown = None
+
         try:
             self.is_connected = False
 
-            # Cancel all tasks
-            for task in self.tasks:
-                task.cancel()
+            # Store references to avoid race conditions
+            tasks_to_cancel = list(self.tasks)
+            websocket_to_close = self.websocket
+            thread_pool_to_shutdown = self.thread_pool
+        except Exception as e:
+            self.logger.error("Error preparing disconnect", error=str(e))
+
+        # Cancel all tasks
+        try:
+            for task in tasks_to_cancel:
+                if task and not task.done():
+                    task.cancel()
 
             # Wait for tasks to complete
-            if self.tasks:
-                await asyncio.gather(*self.tasks, return_exceptions=True)
+            if tasks_to_cancel:
+                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+        except Exception as e:
+            self.logger.error("Error canceling tasks", error=str(e))
+        finally:
+            try:
+                self.tasks.clear()
+            except Exception as e:
+                self.logger.error(f"Error clearing tasks during close: {e}")
 
-            # Close WebSocket
-            if self.websocket:
-                await self.websocket.close()
+        # Close WebSocket
+        try:
+            if websocket_to_close:
+                await websocket_to_close.close()
+        except Exception as e:
+            self.logger.error("Error closing websocket", error=str(e))
+        finally:
+            self.websocket = None
 
-            # Shutdown thread pool
-            self.thread_pool.shutdown(wait=True)
+        # Shutdown thread pool
+        try:
+            if thread_pool_to_shutdown:
+                thread_pool_to_shutdown.shutdown(wait=True)
+        except Exception as e:
+            self.logger.error("Error shutting down thread pool", error=str(e))
+        finally:
+            self.thread_pool = None
 
-            # Update connection pool
+        # Update connection pool
+        try:
             if self.connection_pool:
                 self.connection_pool.active_connections.discard(self.connection_id)
                 self.connection_pool.connections.pop(self.connection_id, None)
-
-            self.logger.info("WebSocket disconnected cleanly")
-
         except Exception as e:
-            self.logger.error("Disconnect error", error=str(e))
+            self.logger.error("Error updating connection pool", error=str(e))
+
+        self.logger.info("WebSocket disconnected cleanly")
 
     def get_performance_metrics(self) -> dict[str, Any]:
         """Get comprehensive performance metrics."""
@@ -679,19 +720,44 @@ class HighPerformanceWebSocketManager:
     async def disconnect_all(self):
         """Disconnect all WebSocket connections."""
         tasks = []
-        for connection in self.connections.values():
-            tasks.append(connection.disconnect())
+        connections_to_disconnect = []
 
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            connections_to_disconnect = list(self.connections.values())
+        except Exception as e:
+            self.logger.error(f"Error getting connections list for disconnect: {e}")
 
-        self.connections.clear()
-        self.connection_pool.connections.clear()
-        self.connection_pool.active_connections.clear()
+        # Create disconnect tasks
+        for connection in connections_to_disconnect:
+            if connection:
+                try:
+                    tasks.append(connection.disconnect())
+                except Exception as e:
+                    self.logger.error(f"Error creating disconnect task: {e}")
 
-        self.total_metrics["active_connections"] = 0
+        # Execute disconnects
+        try:
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception as e:
+            self.logger.error(f"Error disconnecting connections: {e}")
+        finally:
+            # Clean up state regardless of disconnect success
+            try:
+                self.connections.clear()
+            except Exception as e:
+                self.logger.error(f"Error clearing connections dict: {e}")
+            try:
+                self.connection_pool.connections.clear()
+                self.connection_pool.active_connections.clear()
+            except Exception as e:
+                self.logger.error(f"Error clearing connection pool state: {e}")
+            try:
+                self.total_metrics["active_connections"] = 0
+            except Exception as e:
+                self.logger.error(f"Error resetting metrics: {e}")
 
-        self.logger.info("All WebSocket connections disconnected")
+            self.logger.info("All WebSocket connections disconnected")
 
     def get_performance_summary(self) -> dict[str, Any]:
         """Get performance summary for all connections."""
@@ -721,31 +787,33 @@ class HighPerformanceWebSocketManager:
                 "connection_weights": dict(self.connection_pool.connection_weights),
             },
         }
-    
+
     def get_connection_health(self) -> dict[str, Any]:
         """
         Get connection health status.
-        
+
         This method provides compatibility with monitoring systems expecting
         connection health information. It returns the same data as get_performance_summary
         but also includes additional computed metrics for health monitoring.
         """
         # Get base performance summary
         summary = self.get_performance_summary()
-        
+
         # Calculate message rate
         total_latency_sum = 0.0
         message_count = 0
-        
+
         for metrics in summary["connection_details"].values():
             if "average_latency_ms" in metrics and metrics["messages_received"] > 0:
                 total_latency_sum += metrics["average_latency_ms"] * metrics["messages_received"]
                 message_count += metrics["messages_received"]
-        
+
         # Add health-specific metrics
         summary["total_latency_sum"] = total_latency_sum
-        summary["message_rate"] = message_count / max(1, time.time() - getattr(self, "start_time", time.time()))
-        
+        summary["message_rate"] = message_count / max(
+            1, time.time() - getattr(self, "start_time", time.time())
+        )
+
         return summary
 
 
@@ -823,8 +891,8 @@ class WebSocketConnectionPool:
 
             # Create new connection if pool not full
             if len(self.active_connections) < self.max_connections:
-                connection = await self._create_connection(connection_type)
-                if connection:
+                connection: PooledConnection | None = await self._create_connection(connection_type)
+                if connection is not None:
                     self.connection_pools[connection_type].append(connection)
                     self.active_connections[connection.connection_id] = connection
                     return connection
@@ -956,7 +1024,8 @@ class WebSocketConnectionPool:
 
             return True
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Error checking connection validity: {e}")
             return False
 
     def _can_use_connection(self, connection: PooledConnection) -> bool:
@@ -980,7 +1049,8 @@ class WebSocketConnectionPool:
 
             return True
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Error checking if connection can be used: {e}")
             return False
 
     def _check_message_rate_limit(self, connection: PooledConnection) -> bool:
@@ -1006,7 +1076,8 @@ class WebSocketConnectionPool:
             current_messages = len(self.message_counters[connection.connection_id])
             return current_messages < self.max_messages_per_second
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Error checking message rate limit: {e}")
             return False
 
     def _check_subscription_limit(self, connection: PooledConnection) -> bool:
@@ -1023,7 +1094,8 @@ class WebSocketConnectionPool:
             current_subscriptions = self.subscription_counters.get(connection.connection_id, 0)
             return current_subscriptions < self.max_subscriptions
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Error checking subscription limit: {e}")
             return False
 
     async def _remove_connection(self, connection: PooledConnection) -> None:
@@ -1053,8 +1125,8 @@ class WebSocketConnectionPool:
             if hasattr(connection.connection, "close"):
                 try:
                     await connection.connection.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.logger.error(f"Error closing connection {connection.connection_id}: {e}")
 
         except Exception as e:
             self.logger.error(f"Failed to remove connection: {e}")
@@ -1096,15 +1168,33 @@ class WebSocketConnectionPool:
             self.subscription_counters[connection_id] = current_count + 1
             return True
 
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Error recording subscription for connection {connection_id}: {e}")
             return False
 
     async def close_all_connections(self) -> None:
         """Close all connections in the pool."""
-        try:
-            for _connection_type, connections in self.connection_pools.items():
-                for connection in connections[:]:
-                    await self._remove_connection(connection)
+        connections_to_remove = []
 
+        try:
+            # Collect all connections to avoid modification during iteration
+            for _connection_type, connections in self.connection_pools.items():
+                connections_to_remove.extend(connections[:])
         except Exception as e:
-            self.logger.error(f"Failed to close all connections: {e}")
+            self.logger.error(f"Error collecting connections for cleanup: {e}")
+
+        # Remove connections one by one
+        for connection in connections_to_remove:
+            try:
+                await self._remove_connection(connection)
+            except Exception as e:
+                self.logger.error(f"Failed to remove connection {connection.connection_id}: {e}")
+
+        # Final cleanup
+        try:
+            self.connection_pools.clear()
+            self.active_connections.clear()
+            self.message_counters.clear()
+            self.subscription_counters.clear()
+        except Exception as e:
+            self.logger.error(f"Error in final cleanup: {e}")

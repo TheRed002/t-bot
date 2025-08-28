@@ -20,10 +20,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.types import MarketData
-from src.data.pipeline.data_pipeline import DataPipeline, PipelineConfig
+from src.data.pipeline.data_pipeline import EnhancedDataPipeline as DataPipeline
 from src.data.validation.data_validator import (
     DataValidator,
     MarketDataValidationResult,
@@ -182,17 +182,9 @@ class DataValidationPipeline(BaseComponent):
             # Initialize validator
             # DataValidator doesn't have initialize method, so skip
 
-            # Create data pipeline for processing
-            pipeline_config = PipelineConfig(
-                name="validation_pipeline",
-                batch_size=self.pipeline_config.batch_size,
-                max_workers=self.pipeline_config.max_workers,
-                timeout_seconds=self.pipeline_config.timeout_seconds,
-                retry_attempts=self.pipeline_config.retry_attempts,
-                enable_metrics=True,
-            )
+            # Create data pipeline for processing (uses config object)
 
-            self.data_pipeline = DataPipeline(pipeline_config)
+            self.data_pipeline = DataPipeline(self.config)
 
             self._initialized = True
             self.logger.info("DataValidationPipeline initialized successfully")

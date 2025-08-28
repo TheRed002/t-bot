@@ -31,7 +31,8 @@ from src.analytics.types import (
     PerformanceAttribution,
     ReportType,
 )
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
+from src.core.exceptions import DataError, ValidationError, ComponentError, RiskCalculationError
 from src.monitoring.metrics import get_metrics_collector
 from src.utils.datetime_utils import get_current_utc_timestamp
 from src.utils.decimal_utils import safe_decimal
@@ -355,7 +356,7 @@ class PerformanceReporter(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating performance metrics: {e}")
-            return {}
+            raise
 
     async def _calculate_attribution_analysis(
         self, start_date: datetime, end_date: datetime
@@ -439,7 +440,7 @@ class PerformanceReporter(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating attribution analysis: {e}")
-            return None
+            raise
 
     async def _calculate_benchmark_comparison(
         self, start_date: datetime, end_date: datetime
@@ -523,7 +524,7 @@ class PerformanceReporter(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating benchmark comparison: {e}")
-            return {}
+            raise
 
     async def _calculate_transaction_analysis(
         self, start_date: datetime, end_date: datetime
@@ -583,7 +584,7 @@ class PerformanceReporter(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating transaction analysis: {e}")
-            return {}
+            raise
 
     async def _calculate_risk_adjusted_metrics(
         self, start_date: datetime, end_date: datetime
@@ -655,7 +656,7 @@ class PerformanceReporter(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating risk-adjusted metrics: {e}")
-            return {}
+            raise
 
     async def _generate_executive_summary(
         self,
@@ -716,7 +717,7 @@ class PerformanceReporter(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error generating executive summary: {e}")
-            return "Error generating performance summary."
+            raise
 
     async def _generate_performance_charts(
         self, start_date: datetime, end_date: datetime
@@ -790,7 +791,7 @@ class PerformanceReporter(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error generating performance charts: {e}")
-            return []
+            raise
 
     async def _generate_performance_tables(
         self, performance_metrics: dict[str, Any], attribution: PerformanceAttribution | None
@@ -859,7 +860,7 @@ class PerformanceReporter(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error generating performance tables: {e}")
-            return []
+            raise
 
     async def _generate_recommendations(
         self,
@@ -932,7 +933,7 @@ class PerformanceReporter(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error generating recommendations: {e}")
-            return ["Error generating recommendations. Please review performance metrics manually."]
+            raise
 
     # Advanced Institutional Analytics Methods
 
@@ -1119,7 +1120,9 @@ class PerformanceReporter(BaseComponent):
                 "persistence_strength": (
                     "High"
                     if abs(persistence_correlation) > 0.5
-                    else "Medium" if abs(persistence_correlation) > 0.2 else "Low"
+                    else "Medium"
+                    if abs(persistence_correlation) > 0.2
+                    else "Low"
                 ),
                 "is_statistically_significant": p_value < 0.05,
             }
@@ -1512,9 +1515,9 @@ class PerformanceReporter(BaseComponent):
 
             # Add regulatory reporting if requested
             if include_regulatory:
-                institutional_report["regulatory_reporting"] = (
-                    await self._generate_regulatory_metrics()
-                )
+                institutional_report[
+                    "regulatory_reporting"
+                ] = await self._generate_regulatory_metrics()
 
             # Add ESG analysis if requested
             if include_esg:
@@ -1820,7 +1823,9 @@ class PerformanceReporter(BaseComponent):
                     "overall_skill": (
                         "Positive"
                         if ir > 0.5 and hit_ratio > 0.5
-                        else "Mixed" if ir > 0 else "Limited"
+                        else "Mixed"
+                        if ir > 0
+                        else "Limited"
                     ),
                     "market_timing_ability": (
                         "Good" if up_capture > 1.05 and down_capture < 0.95 else "Limited"

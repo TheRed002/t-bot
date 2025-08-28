@@ -84,27 +84,39 @@ class StrategyService(BaseService):
             # Resolve dependencies if available
             try:
                 self._risk_manager = self.resolve_dependency("RiskService")
-            except Exception:
-                self._logger.warning("RiskService not available")
+            except (KeyError, AttributeError, ImportError) as e:
+                self._logger.warning("RiskService not available", error=str(e))
+                self._risk_manager = None
+            except Exception as e:
+                self._logger.warning("Unexpected error resolving RiskService", error=str(e))
                 self._risk_manager = None
 
             try:
                 self._exchange_factory = self.resolve_dependency("ExchangeFactory")
-            except Exception:
-                self._logger.warning("ExchangeFactory not available")
+            except (KeyError, AttributeError, ImportError) as e:
+                self._logger.warning("ExchangeFactory not available", error=str(e))
+                self._exchange_factory = None
+            except Exception as e:
+                self._logger.warning("Unexpected error resolving ExchangeFactory", error=str(e))
                 self._exchange_factory = None
 
             try:
                 self._data_service = self.resolve_dependency("DataService")
-            except Exception:
-                self._logger.warning("DataService not available")
+            except (KeyError, AttributeError, ImportError) as e:
+                self._logger.warning("DataService not available", error=str(e))
+                self._data_service = None
+            except Exception as e:
+                self._logger.warning("Unexpected error resolving DataService", error=str(e))
                 self._data_service = None
 
             # Optional dependencies
             try:
                 self._backtesting_engine = self.resolve_dependency("BacktestService")
-            except Exception:
-                self._logger.warning("BacktestService not available")
+            except (KeyError, AttributeError, ImportError) as e:
+                self._logger.warning("BacktestService not available", error=str(e))
+                self._backtesting_engine = None
+            except Exception as e:
+                self._logger.warning("Unexpected error resolving BacktestService", error=str(e))
                 self._backtesting_engine = None
 
             self._logger.info("Strategy service dependencies resolved")

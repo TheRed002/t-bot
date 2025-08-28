@@ -67,12 +67,12 @@ class TestKellyCriterionImproved:
         # Full Kelly = (0.6 * 2 - 0.4) / 2 = 0.8 / 2 = 0.4 (40%)
         # Half Kelly = 0.4 * 0.5 = 0.2 (20%)
         # With 0.8 strength = 0.2 * 0.8 = 0.16 (16%)
-        # But will be capped at 10% by config max_position_size_pct
+        # But will be capped at 2% by config risk_per_trade
 
         assert position_size >= Decimal("100")  # At least 1%
-        assert position_size <= Decimal("1000")  # Max 10% (config limit)
-        # Should be capped at 10% = 1000
-        assert position_size == Decimal("1000")
+        assert position_size <= Decimal("200")  # Max 2% (risk_per_trade limit)
+        # Should be capped at 2% = 200
+        assert position_size == Decimal("200")
 
     @pytest.mark.asyncio
     async def test_kelly_with_negative_edge(self, position_sizer, sample_signal):
@@ -302,14 +302,14 @@ class TestKellyCriterionImproved:
         # Full Kelly = (0.5 * 3 - 0.5) / 3 = 1.0 / 3 = 0.333 (33.3%)
         # Half Kelly = 0.333 * 0.5 = 0.1665 (16.65%)
         # With 0.8 strength = 0.1665 * 0.8 = 0.1332 (13.32%)
-        # But will be capped at 10% by config max_position_size_pct
+        # But will be capped at 2% by config risk_per_trade
 
-        # Should be capped at 10% = 1000
-        expected = portfolio_value * Decimal("0.10")  # Capped at 10%
+        # Should be capped at 2% = 200
+        expected = portfolio_value * Decimal("0.02")  # Capped at 2%
         assert position_size == expected
 
     @pytest.mark.asyncio
-    async def test_kelly_logging_detail(self, position_sizer, sample_signal, caplog):
+    async def test_kelly_logging_detail(self, position_sizer, sample_signal, caplog, capsys):
         """Test that Kelly Criterion logs detailed calculation info."""
         portfolio_value = Decimal("10000")
 
@@ -328,14 +328,15 @@ class TestKellyCriterionImproved:
                 PositionSizeMethod.KELLY_CRITERION,
             )
 
-        # Check that detailed Kelly information is logged
-        log_text = caplog.text
-        assert "Kelly Criterion sizing (Half-Kelly)" in log_text
-        assert "win_probability" in log_text
-        assert "loss_probability" in log_text
-        assert "win_loss_ratio" in log_text
-        assert "half_kelly" in log_text
-        assert "final_fraction" in log_text
+        # Check that detailed Kelly information is logged in structured output (stdout)
+        captured = capsys.readouterr()
+        stdout_text = captured.out
+        assert "Kelly Criterion sizing (Half-Kelly)" in stdout_text
+        assert "win_probability" in stdout_text
+        assert "loss_probability" in stdout_text
+        assert "win_loss_ratio" in stdout_text
+        assert "half_kelly" in stdout_text
+        assert "final_fraction" in stdout_text
 
     @pytest.mark.asyncio
     async def test_validate_position_with_new_bounds(self, position_sizer):

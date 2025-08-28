@@ -77,12 +77,12 @@ class AdaptiveMomentumStrategy(BaseStrategy):
         self._version = value
 
     @property
-    def status(self):
+    def status(self) -> str:
         """Get the current strategy status."""
         return getattr(self, "_status", "inactive")
 
     @status.setter
-    def status(self, value) -> None:
+    def status(self, value: str) -> None:
         """Set the strategy status."""
         self._status = value
 
@@ -225,7 +225,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 symbol=symbol,
                 signals_count=len(signals),
                 regime=current_regime.value if current_regime else "unknown",
-                avg_confidence=np.mean([s.confidence for s in signals]) if signals else 0.0,
+                avg_confidence=np.mean([s.strength for s in signals]) if signals else 0.0,
             )
 
             return signals
@@ -427,13 +427,15 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                     combined_score, volume_score, volatility, current_regime, "BUY"
                 )
 
-                if confidence >= self.config.min_confidence:
+                min_confidence = getattr(self.config, 'min_confidence', 
+                                        self.config.parameters.get('min_confidence', 0.6))
+                if confidence >= min_confidence:
                     signal = Signal(
                         direction=SignalDirection.BUY,
-                        confidence=confidence,
+                        strength=confidence,
                         timestamp=data.timestamp,
                         symbol=data.symbol,
-                        strategy_name=self.name,
+                        source=self.name,
                         metadata={
                             **indicators,
                             "regime": current_regime.value if current_regime else "unknown",
@@ -449,13 +451,15 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                     combined_score, volume_score, volatility, current_regime, "SELL"
                 )
 
-                if confidence >= self.config.min_confidence:
+                min_confidence = getattr(self.config, 'min_confidence', 
+                                        self.config.parameters.get('min_confidence', 0.6))
+                if confidence >= min_confidence:
                     signal = Signal(
                         direction=SignalDirection.SELL,
-                        confidence=confidence,
+                        strength=confidence,
                         timestamp=data.timestamp,
                         symbol=data.symbol,
-                        strategy_name=self.name,
+                        source=self.name,
                         metadata={
                             **indicators,
                             "regime": current_regime.value if current_regime else "unknown",
@@ -528,19 +532,28 @@ class AdaptiveMomentumStrategy(BaseStrategy):
 
                 # Apply regime-specific adjustments
                 regime_multiplier = self._get_regime_confidence_multiplier(current_regime)
-                adjusted_confidence = signal.confidence * regime_multiplier
+                adjusted_strength = signal.strength * regime_multiplier
 
-                # Update signal with enhanced metadata
-                signal.confidence = min(adjusted_confidence, 0.95)
-                signal.metadata.update(
+                # Create new signal with enhanced metadata (Signal is immutable)
+                updated_metadata = {**signal.metadata}
+                updated_metadata.update(
                     {
                         "regime_confidence_multiplier": regime_multiplier,
                         "adaptive_params": adaptive_params,
                         "enhancement_version": "2.0.0",
                     }
                 )
+                
+                adjusted_signal = Signal(
+                    symbol=signal.symbol,
+                    direction=signal.direction,
+                    strength=min(adjusted_strength, 0.95),
+                    timestamp=signal.timestamp,
+                    source=signal.source,
+                    metadata=updated_metadata,
+                )
 
-                adjusted_signals.append(signal)
+                adjusted_signals.append(adjusted_signal)
 
             self.logger.debug(
                 "Applied enhanced confidence adjustments",
@@ -593,7 +606,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
 
             if signals:
                 current_avg = self._strategy_state["performance_metrics"]["avg_confidence"]
-                signal_avg = np.mean([s.confidence for s in signals])
+                signal_avg = np.mean([s.strength for s in signals])
                 total_signals = self._strategy_state["performance_metrics"][
                     "total_momentum_signals"
                 ]
@@ -643,12 +656,12 @@ class AdaptiveMomentumStrategy(BaseStrategy):
             MarketRegime.LOW_VOLATILITY: 1.15,  # Higher confidence in low vol
             MarketRegime.MEDIUM_VOLATILITY: 1.0,  # Standard confidence
             MarketRegime.HIGH_VOLATILITY: 0.75,  # Lower confidence in high vol
-            MarketRegime.CRISIS: 0.5,  # Much lower confidence in crisis
             MarketRegime.TRENDING_UP: 1.1,  # Higher in uptrend (momentum favors trends)
             MarketRegime.TRENDING_DOWN: 0.85,  # Slightly lower in downtrend
             MarketRegime.RANGING: 0.9,  # Lower in ranging (momentum less effective)
             MarketRegime.HIGH_CORRELATION: 0.85,  # Lower in high correlation
             MarketRegime.LOW_CORRELATION: 1.1,  # Higher in low correlation
+            MarketRegime.UNKNOWN: 0.8,  # Lower confidence in unknown regime
         }
 
         return confidence_multipliers.get(regime, 1.0)
@@ -701,14 +714,16 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 )
                 return False
 
-            # Validate confidence is above minimum threshold
-            if signal.confidence < self.config.min_confidence:
+            # Validate strength is above minimum threshold
+            min_confidence = getattr(self.config, 'min_confidence', 
+                                   self.config.parameters.get('min_confidence', 0.6))
+            if signal.strength < min_confidence:
                 self.logger.warning(
                     "Signal confidence below threshold",
                     strategy=self.name,
                     symbol=symbol,
-                    confidence=signal.confidence,
-                    min_threshold=self.config.min_confidence,
+                    confidence=signal.strength,
+                    min_threshold=min_confidence,
                 )
                 return False
 
@@ -717,7 +732,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 strategy=self.name,
                 symbol=symbol,
                 direction=signal.direction.value,
-                confidence=signal.confidence,
+                confidence=signal.strength,
                 validation_version="2.0.0",
             )
 
@@ -749,7 +764,11 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 if self._risk_manager:
                     try:
                         portfolio_value = self._risk_manager.get_available_capital()
-                    except Exception:
+                    except (AttributeError, TypeError, KeyError) as e:
+                        # Risk manager capital access error - use default portfolio value
+                        pass
+                    except Exception as e:
+                        # Unexpected error accessing risk manager - use default portfolio value
                         pass
 
                 # Calculate position size with enhanced factors
@@ -757,7 +776,8 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 volume_score = signal.metadata.get("volume_score", 1.0)
 
                 # Adjust position size based on volatility and volume
-                base_position_pct = self.config.position_size_pct
+                base_position_pct = getattr(self.config, 'position_size_pct', 
+                                          self.config.parameters.get('position_size_pct', 0.02))
                 volatility_adjustment = max(
                     0.5, 1.0 - (volatility * 10)
                 )  # Reduce size in high volatility
@@ -783,8 +803,10 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 return position_size
             else:
                 # Enhanced fallback calculation
-                base_size = Decimal(str(self.config.position_size_pct))
-                confidence_adjustment = Decimal(str(signal.confidence))
+                base_position_pct = getattr(self.config, 'position_size_pct', 
+                                          self.config.parameters.get('position_size_pct', 0.02))
+                base_size = Decimal(str(base_position_pct))
+                confidence_adjustment = Decimal(str(signal.strength))
                 adjusted_size = base_size * confidence_adjustment
 
                 self.logger.info(
@@ -803,7 +825,9 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                 symbol=signal.symbol,
                 error=str(e),
             )
-            return Decimal(str(self.config.position_size_pct))
+            fallback_position_pct = getattr(self.config, 'position_size_pct', 
+                                           self.config.parameters.get('position_size_pct', 0.02))
+            return Decimal(str(fallback_position_pct))
 
     def should_exit(self, position: Position, data: MarketData) -> bool:
         """Enhanced exit logic with service layer integration."""
@@ -857,7 +881,7 @@ class AdaptiveMomentumStrategy(BaseStrategy):
                         if (
                             entry_regime
                             and recent_regime != entry_regime
-                            and recent_regime in [MarketRegime.CRISIS, MarketRegime.HIGH_VOLATILITY]
+                            and recent_regime in [MarketRegime.HIGH_VOLATILITY, MarketRegime.UNKNOWN]
                         ):
                             self.logger.info(
                                 "Regime change exit triggered",

@@ -102,7 +102,7 @@ class BaseMLModel(BaseService, abc.ABC):
         }
 
         # Add optional dependencies
-        self.add_dependency("ModelStorageService", required=False)
+        self.add_dependency("ModelStorageService")
 
     async def _do_start(self) -> None:
         """Start the ML model service."""
@@ -111,7 +111,8 @@ class BaseMLModel(BaseService, abc.ABC):
         # Resolve optional dependencies
         try:
             self.model_storage_service = self.resolve_dependency("ModelStorageService")
-        except Exception:
+        except Exception as e:
+            self._logger.warning(f"Model storage service dependency resolution failed: {e}")
             self.model_storage_service = None
 
         self._logger.info(
@@ -627,3 +628,7 @@ class BaseMLModel(BaseService, abc.ABC):
         except Exception as e:
             self._logger.error("ML model service configuration validation failed", error=str(e))
             return False
+
+
+# Alias for backwards compatibility
+BaseModel = BaseMLModel

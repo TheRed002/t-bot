@@ -17,6 +17,7 @@ Author: Trading Bot Framework
 Version: 2.0.0 - Refactored for service layer
 """
 
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -34,7 +35,6 @@ from src.core.exceptions import (
 # MANDATORY: Import from P-001
 from src.core.types import (
     ExecutionAlgorithm,
-    ExecutionResult,
     ExecutionStatus,
     MarketData,
     OrderSide,
@@ -42,11 +42,11 @@ from src.core.types import (
 
 # Import error handling decorators
 from src.error_handling.decorators import with_circuit_breaker, with_error_context, with_retry
+from src.execution.execution_result_wrapper import ExecutionResultWrapper
 from src.execution.service import ExecutionService
 
 # Import internal execution instruction type
 from src.execution.types import ExecutionInstruction
-from src.execution.execution_result_wrapper import ExecutionResultWrapper
 
 # Import monitoring components
 from src.monitoring import MetricsCollector, get_tracer
@@ -408,6 +408,17 @@ class ExecutionEngine(BaseComponent):
             )
             self.local_statistics["algorithm_selections"] += 1
 
+            # Validate slippage if max_slippage_bps is specified
+            if hasattr(instruction, 'max_slippage_bps') and instruction.max_slippage_bps is not None:
+                expected_slippage_bps = self.slippage_model.calculate_expected_slippage(
+                    instruction.order, market_data
+                )
+                if expected_slippage_bps > instruction.max_slippage_bps:
+                    raise ExecutionError(
+                        f"Expected slippage {expected_slippage_bps} bps exceeds maximum allowed "
+                        f"{instruction.max_slippage_bps} bps"
+                    )
+
             # Update trade state to order created if using lifecycle manager
             if self.trade_lifecycle_manager and trade_context:
                 await self.trade_lifecycle_manager.update_trade_state(
@@ -421,11 +432,19 @@ class ExecutionEngine(BaseComponent):
                 )
 
             # Execute using selected algorithm with exchange factory and risk manager adapter
-            execution_result = await selected_algorithm.execute(
-                instruction,
-                exchange_factory=self.exchange_factory,
-                risk_manager=self.risk_manager_adapter,  # Use adapter for algorithm compatibility
-            )
+            # Add timeout handling
+            timeout = self.config.execution.get("timeout", 30)  # Default 30 seconds
+            try:
+                execution_result = await asyncio.wait_for(
+                    selected_algorithm.execute(
+                        instruction,
+                        exchange_factory=self.exchange_factory,
+                        risk_manager=self.risk_manager_adapter,  # Use adapter for algorithm compatibility
+                    ),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                raise ExecutionError(f"Execution timeout after {timeout} seconds")
 
             # Update trade state based on execution result if using lifecycle manager
             if self.trade_lifecycle_manager and trade_context:
@@ -496,10 +515,10 @@ class ExecutionEngine(BaseComponent):
                     and execution_result.status == ExecutionStatus.COMPLETED
                 ):
                     await self.trade_lifecycle_manager.complete_trade_attribution(
-                    trade_id=trade_context.trade_id,
-                    execution_result=execution_result,
-                    post_trade_analysis=post_trade_analysis,
-                )
+                        trade_id=trade_context.trade_id,
+                        execution_result=execution_result,
+                        post_trade_analysis=post_trade_analysis,
+                    )
             except Exception as state_error:
                 # If trade execution was recorded but attribution failed, log it
                 # but don't fail the entire execution as the trade was successful
@@ -881,5 +900,5 @@ class ExecutionEngine(BaseComponent):
             "status": "healthy" if healthy_count == len(self.algorithms) else "degraded",
             "algorithms_healthy": healthy_count,
             "algorithms_total": len(self.algorithms),
-            "active_executions": len(self.active_executions)
+            "active_executions": len(self.active_executions),
         }

@@ -19,7 +19,7 @@ from typing import Any
 
 import aiohttp
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataSourceError
 

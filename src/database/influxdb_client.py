@@ -93,8 +93,13 @@ class InfluxDBClientWrapper(BaseComponent):
     def disconnect(self) -> None:
         """Disconnect from InfluxDB."""
         if self.client:
-            self.client.close()
-            self.logger.info("InfluxDB connection closed")
+            try:
+                self.client.close()
+                self.logger.info("InfluxDB connection closed")
+            finally:
+                self.client = None
+                self.write_api = None
+                self.query_api = None
 
     def _decimal_to_float(self, value: Any) -> float:
         """

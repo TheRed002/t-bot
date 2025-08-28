@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, TypeVar
 
-from src.core.logging import get_logger
+from src.core import get_logger
 from src.monitoring.alerting import AlertManager
 from src.monitoring.metrics import MetricsCollector
 from src.monitoring.performance import PerformanceProfiler

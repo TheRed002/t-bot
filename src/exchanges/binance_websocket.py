@@ -132,40 +132,70 @@ class BinanceWebSocketHandler:
     async def disconnect(self) -> None:
         """Disconnect all WebSocket streams with proper cleanup."""
         async with self._connection_lock:
+            health_task = None
+            stream_tasks = []
+            stream_names = []
+
             try:
                 self._shutdown = True
                 self.logger.info("Disconnecting Binance WebSocket streams...")
 
-                # Cancel health monitoring
-                if self._health_check_task and not self._health_check_task.done():
-                    self._health_check_task.cancel()
+                # Store references before modifying
+                health_task = self._health_check_task
+                stream_tasks = list(self.stream_handlers.values())
+                stream_names = list(self.active_streams.keys())
+            except Exception as e:
+                self.logger.error(f"Error preparing disconnect: {e!s}")
+
+            # Cancel health monitoring
+            try:
+                if health_task and not health_task.done():
+                    health_task.cancel()
                     try:
-                        await self._health_check_task
+                        await health_task
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        self.logger.error(f"Error canceling health task: {e!s}")
+            except Exception as e:
+                self.logger.error(f"Error with health monitoring cleanup: {e!s}")
+            finally:
+                self._health_check_task = None
 
-                # Cancel all stream handlers
-                for task in list(self.stream_handlers.values()):
-                    if not task.done():
+            # Cancel all stream handlers
+            try:
+                for task in stream_tasks:
+                    if task and not task.done():
                         task.cancel()
                         try:
                             await task
                         except asyncio.CancelledError:
                             pass
+                        except Exception as e:
+                            self.logger.error(f"Error canceling stream task: {e!s}")
+            except Exception as e:
+                self.logger.error(f"Error canceling stream handlers: {e!s}")
 
-                # Close all active streams
-                for stream_name in list(self.active_streams.keys()):
-                    await self._close_stream(stream_name)
-
-                # Clear state
-                self.stream_handlers.clear()
-                self.callbacks.clear()
+            # Close all active streams
+            try:
+                for stream_name in stream_names:
+                    try:
+                        await self._close_stream(stream_name)
+                    except Exception as e:
+                        self.logger.error(f"Error closing stream {stream_name}: {e!s}")
+            except Exception as e:
+                self.logger.error(f"Error closing streams: {e!s}")
+            finally:
+                # Clear state regardless of errors
+                try:
+                    self.stream_handlers.clear()
+                    self.callbacks.clear()
+                    self.active_streams.clear()
+                except Exception:
+                    pass
 
                 self.connected = False
                 self.logger.info("Successfully disconnected Binance WebSocket streams")
-
-            except Exception as e:
-                self.logger.error(f"Error disconnecting Binance WebSocket streams: {e!s}")
 
     async def subscribe_to_ticker_stream(self, symbol: str, callback: Callable) -> None:
         """
@@ -565,18 +595,23 @@ class BinanceWebSocketHandler:
 
     async def _close_stream(self, stream_name: str) -> None:
         """Close a WebSocket stream."""
+        stream = None
         try:
-            if stream_name in self.active_streams:
-                stream = self.active_streams[stream_name]
+            stream = self.active_streams.get(stream_name)
+            if stream:
                 await stream.close()
-                del self.active_streams[stream_name]
-
-                if stream_name in self.callbacks:
-                    del self.callbacks[stream_name]
-
-                self.logger.info(f"Closed stream: {stream_name}")
         except Exception as e:
             self.logger.error(f"Error closing stream {stream_name}: {e!s}")
+        finally:
+            # Clean up references regardless of close success
+            try:
+                if stream_name in self.active_streams:
+                    del self.active_streams[stream_name]
+                if stream_name in self.callbacks:
+                    del self.callbacks[stream_name]
+                self.logger.info(f"Closed stream: {stream_name}")
+            except Exception:
+                pass
 
     async def _handle_stream_error(self, stream_name: str) -> None:
         """Handle stream error with enhanced reconnection logic."""
@@ -750,7 +785,7 @@ class BinanceWebSocketHandler:
             self.logger.error(f"WebSocket health check failed: {e!s}")
             return False
 
-    def get_connection_metrics(self) -> dict[str, Any]:
+    async def get_connection_metrics(self) -> dict[str, Any]:
         """
         Get comprehensive connection metrics.
 
@@ -780,7 +815,7 @@ class BinanceWebSocketHandler:
                 "stream_handlers": len(self.stream_handlers),
                 "time_since_last_message": time_since_last_message,
                 "message_timeout": self.message_timeout,
-                "health_status": "healthy" if self.health_check() else "unhealthy",
+                "health_status": "healthy" if await self.health_check() else "unhealthy",
                 "stream_names": list(self.active_streams.keys()),
                 "shutdown": self._shutdown,
                 "timestamp": datetime.now(timezone.utc).isoformat(),

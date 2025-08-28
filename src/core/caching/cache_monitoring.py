@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 
 from .cache_manager import get_cache_manager
 from .cache_metrics import get_cache_metrics
@@ -111,7 +111,7 @@ class CacheMonitor(BaseComponent):
         # Monitoring state
         self._monitoring_active = False
         self._monitoring_task: asyncio.Task | None = None
-        self._last_health_check = None
+        self._last_health_check: datetime | None = None
         self._health_check_interval = 30  # seconds
 
         # Historical data for trend analysis

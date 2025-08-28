@@ -4,7 +4,8 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
+from src.core.exceptions import ConfigurationError
 from src.data.interfaces import DataSourceInterface
 
 
@@ -16,7 +17,7 @@ class DataSourceAdapter(BaseComponent):
     handling the conversion of parameters and responses to a standard format.
     """
 
-    def __init__(self, source_type: str, **config):
+    def __init__(self, source_type: str, **config: Any) -> None:
         """
         Initialize data source adapter.
 
@@ -53,10 +54,10 @@ class DataSourceAdapter(BaseComponent):
 
             return OKXDataSource(**self.config)
         else:
-            raise ValueError(f"Unsupported data source type: {self.source_type}")
+            raise ConfigurationError(f"Unsupported data source type: {self.source_type}")
 
     async def fetch_market_data(
-        self, symbol: str, timeframe: str = "1h", limit: int = 100, **kwargs
+        self, symbol: str, timeframe: str = "1h", limit: int = 100, **kwargs: Any
     ) -> list[dict[str, Any]]:
         """
         Unified interface for fetching market data.
@@ -81,7 +82,7 @@ class DataSourceAdapter(BaseComponent):
 
         return standardized_data
 
-    async def stream_market_data(self, symbol: str, **kwargs) -> AsyncIterator[dict[str, Any]]:
+    async def stream_market_data(self, symbol: str, **kwargs: Any) -> AsyncIterator[dict[str, Any]]:
         """
         Unified interface for streaming market data.
 
@@ -96,13 +97,14 @@ class DataSourceAdapter(BaseComponent):
         adapted_params = self._adapt_stream_params(symbol, **kwargs)
 
         # Stream from source
-        async for raw_record in self.source.stream(**adapted_params):
+        stream_iter = await self.source.stream(**adapted_params)
+        async for raw_record in stream_iter:
             # Standardize each record
             standardized = self._standardize_record(raw_record)
             yield standardized
 
     def _adapt_fetch_params(
-        self, symbol: str, timeframe: str, limit: int, **kwargs
+        self, symbol: str, timeframe: str, limit: int, **kwargs: Any
     ) -> dict[str, Any]:
         """
         Adapt parameters for specific data source.
@@ -146,7 +148,7 @@ class DataSourceAdapter(BaseComponent):
         # Default: pass through as-is
         return {"symbol": symbol, "timeframe": timeframe, "limit": limit, **kwargs}
 
-    def _adapt_stream_params(self, symbol: str, **kwargs) -> dict[str, Any]:
+    def _adapt_stream_params(self, symbol: str, **kwargs: Any) -> dict[str, Any]:
         """Adapt streaming parameters for specific source."""
         if self.source_type == "binance":
             return {"symbol": self._symbol_to_binance(symbol), **kwargs}
@@ -157,7 +159,7 @@ class DataSourceAdapter(BaseComponent):
 
         return {"symbol": symbol, **kwargs}
 
-    def _standardize_response(self, raw_data: list[dict]) -> list[dict[str, Any]]:
+    def _standardize_response(self, raw_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Standardize response from different sources.
 
@@ -172,7 +174,7 @@ class DataSourceAdapter(BaseComponent):
             standardized.append(self._standardize_record(record))
         return standardized
 
-    def _standardize_record(self, record: dict) -> dict[str, Any]:
+    def _standardize_record(self, record: dict[str, Any]) -> dict[str, Any]:
         """
         Standardize a single data record.
 
@@ -307,12 +309,12 @@ class DataSourceAdapter(BaseComponent):
     async def connect(self) -> None:
         """Connect to data source."""
         await self.source.connect()
-        self._logger.info(f"Connected to {self.source_type} data source")
+        self.logger.info(f"Connected to {self.source_type} data source")
 
     async def disconnect(self) -> None:
         """Disconnect from data source."""
         await self.source.disconnect()
-        self._logger.info(f"Disconnected from {self.source_type} data source")
+        self.logger.info(f"Disconnected from {self.source_type} data source")
 
     def is_connected(self) -> bool:
         """Check if connected to data source."""

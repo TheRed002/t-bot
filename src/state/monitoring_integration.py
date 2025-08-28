@@ -12,11 +12,12 @@ from src.core.base.component import BaseComponent
 from src.core.exceptions import StateError
 from src.error_handling.context import ErrorContext
 from src.error_handling.decorators import with_retry
-from src.monitoring import MetricsCollector, get_alert_manager
+from src.monitoring import MetricsCollector
 from src.monitoring.alerting import (
     Alert as MonitoringAlert,
     AlertSeverity as MonitoringAlertSeverity,
     AlertStatus,
+    get_alert_manager,
 )
 from src.monitoring.telemetry import get_tracer
 

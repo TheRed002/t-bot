@@ -42,7 +42,7 @@ class StateManager:
 
     async def shutdown(self) -> None:
         """Shutdown the state manager."""
-        await self.state_service.shutdown()
+        await self.state_service.cleanup()
 
     async def save_bot_state(
         self, bot_id: str, state: dict[str, Any], create_snapshot: bool = False
@@ -115,18 +115,8 @@ class StateManager:
 
     async def restore_from_checkpoint(self, bot_id: str, checkpoint_id: str) -> bool:
         """Restore from checkpoint."""
-        # Check if the mocked restore_snapshot expects only checkpoint_id (for tests)
-        if hasattr(self.state_service.restore_snapshot, "_mock_call_args_list"):
-            # This is a mock, check how many arguments it expects
-            try:
-                # Try calling with just checkpoint_id first (test compatibility)
-                return await self.state_service.restore_snapshot(checkpoint_id)
-            except TypeError:
-                # If that fails, call with both arguments
-                return await self.state_service.restore_snapshot(bot_id, checkpoint_id)
-        else:
-            # Real implementation expects both arguments
-            return await self.state_service.restore_snapshot(bot_id, checkpoint_id)
+        # StateService.restore_snapshot only expects snapshot_id parameter
+        return await self.state_service.restore_snapshot(checkpoint_id)
 
     async def get_state_metrics(self, bot_id: str | None = None, hours: int = 24) -> dict[str, Any]:
         """Get state metrics."""

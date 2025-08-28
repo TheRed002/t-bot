@@ -9,7 +9,7 @@ logging any potential precision loss.
 import warnings
 from decimal import ROUND_HALF_UP, Context, Decimal, localcontext
 
-from src.core.logging import get_logger
+from src.core import get_logger
 
 logger = get_logger(__name__)
 
@@ -57,7 +57,7 @@ def safe_decimal_to_float(
         raise ValueError(f"Cannot convert None to float for metric {metric_name}")
 
     # If already float or int, just validate and return
-    if isinstance(value, float | int):
+    if isinstance(value, (float, int)):
         if isinstance(value, float) and not float("-inf") < value < float("inf"):
             raise ValueError(f"Invalid float value for metric {metric_name}: {value}")
         return round(float(value), precision_digits)

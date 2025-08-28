@@ -67,7 +67,7 @@ class DatabaseQueries(BaseComponent):
     def __init__(self, session: AsyncSession, config: dict[str, Any] | None = None):
         # Initialize BaseComponent
         super().__init__()
-        
+
         self.session = session
         self.config = config or {}
         # Always initialize error handler, use empty config if none provided
@@ -81,8 +81,9 @@ class DatabaseQueries(BaseComponent):
                 self.error_handler = ErrorHandler(default_config)
             else:
                 self.error_handler = ErrorHandler(config)
-        except Exception:
+        except Exception as e:
             # If Config class is not available, error handler features will be limited
+            logger.warning(f"Failed to initialize error handler: {e}")
             self.error_handler = None
 
     @asynccontextmanager

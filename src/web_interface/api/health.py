@@ -73,17 +73,16 @@ def get_config_dependency() -> Config:
     try:
         from src.core.dependency_injection import get_container
 
-        config_service = get_container().get("ConfigService")
-        # Create legacy Config object from ConfigService
-        config = Config()
-        config.database = config_service.get_database_config()
-        config.exchange = config_service.get_exchange_config()
-        config.risk = config_service.get_risk_config()
-        return config
+        container = get_container()
+        if container and "ConfigService" in container:
+            return container.get("ConfigService").get_config()
+        else:
+            # Use the default configuration loading
+            from src.core.config import get_config
+            return get_config()
     except (KeyError, AttributeError, ImportError):
         # Final fallback to legacy method
         from src.core.config import get_config
-
         return get_config()
 
 

@@ -17,12 +17,17 @@ CRITICAL: This service MUST be used instead of direct database access.
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any
+
+# Service layer should not import database models directly
+# Use dependency injection for all database operations
+from typing import Any, Protocol
 
 from src.core.base.interfaces import HealthStatus
 from src.core.base.service import TransactionalService
 from src.core.exceptions import (
+    DependencyError,
     ServiceError,
+    StateError,
     ValidationError,
 )
 from src.core.types.risk import (
@@ -30,42 +35,38 @@ from src.core.types.risk import (
     CapitalMetrics,
 )
 
-try:
-    from src.database.models import CapitalAllocationDB
-    from src.database.models.audit import CapitalAuditLog
-    from src.database.repository.capital import (
-        CapitalAllocationRepository,
-        CapitalAuditLogRepository,
-    )
-    from src.database.uow import UnitOfWork, UnitOfWorkFactory
 
-    DATABASE_AVAILABLE = True
-except ImportError:
-    # Database dependencies may not be available in all environments
-    CapitalAllocationDB = None  # type: ignore
-    CapitalAuditLog = None  # type: ignore
-    CapitalAllocationRepository = None  # type: ignore
-    CapitalAuditLogRepository = None  # type: ignore
-    UnitOfWork = None  # type: ignore
-    UnitOfWorkFactory = None  # type: ignore
-    DATABASE_AVAILABLE = False
+# Define repository interfaces for dependency injection
+class CapitalRepositoryProtocol(Protocol):
+    """Protocol for capital allocation repository."""
 
-# Database exceptions
-try:
-    from sqlalchemy.exc import IntegrityError, OperationalError
-except ImportError:
-    # Fallback if SQLAlchemy not available
-    IntegrityError = Exception
-    OperationalError = Exception
+    async def create(self, allocation: dict[str, Any]) -> Any: ...
+    async def update(self, allocation: Any) -> Any: ...
+    async def delete(self, allocation_id: str) -> bool: ...
+    async def get_by_strategy_exchange(self, strategy_id: str, exchange: str) -> Any | None: ...
+    async def get_by_strategy(self, strategy_id: str) -> list[Any]: ...
+    async def get_all(self, limit: int | None = None) -> list[Any]: ...
 
-# DatabaseService will be injected
+
+class AuditRepositoryProtocol(Protocol):
+    """Protocol for audit log repository."""
+
+    async def create(self, audit_log: dict[str, Any]) -> Any: ...
+
+
 from src.error_handling.decorators import with_circuit_breaker, with_retry
 
 # State management imports
-from src.state import StateService, StateType
+from src.state import StatePriority, StateService, StateType
+from src.state.consistency import (
+    ConsistentEventPattern,
+    ConsistentProcessingPattern,
+    ConsistentValidationPattern,
+    emit_state_event,
+    validate_state_data,
+)
 from src.utils.decorators import cache_result, time_execution
 from src.utils.formatters import format_currency
-from src.utils.validators import ValidationFramework
 
 
 class CapitalService(TransactionalService):
@@ -87,17 +88,17 @@ class CapitalService(TransactionalService):
 
     def __init__(
         self,
-        database_service=None,
-        uow_factory: UnitOfWorkFactory | None = None,
+        capital_repository: CapitalRepositoryProtocol | None = None,
+        audit_repository: AuditRepositoryProtocol | None = None,
         state_service: StateService | None = None,
         correlation_id: str | None = None,
-    ):
+    ) -> None:
         """
-        Initialize capital service.
+        Initialize capital service with dependency injection.
 
         Args:
-            database_service: Database service instance (injected) - DEPRECATED, use uow_factory
-            uow_factory: Unit of Work factory for transaction management
+            capital_repository: Capital repository implementation (injected)
+            audit_repository: Audit repository implementation (injected)
             state_service: State service for state management integration
             correlation_id: Request correlation ID for tracing
         """
@@ -106,14 +107,10 @@ class CapitalService(TransactionalService):
             correlation_id=correlation_id,
         )
 
-        # Database layer - prefer UoW factory over direct database service
-        self.uow_factory = uow_factory
-        self.database_service = database_service  # Keep for backward compatibility
+        # Repository dependencies - injected, not created
+        self._capital_repository = capital_repository
+        self._audit_repository = audit_repository
         self.state_service = state_service
-
-        # These will be deprecated once we fully migrate to UoW pattern
-        self.capital_repository: CapitalAllocationRepository | None = None
-        self.audit_repository: CapitalAuditLogRepository | None = None
 
         # Capital configuration - load from config if available
         self._load_configuration()
@@ -147,6 +144,11 @@ class CapitalService(TransactionalService):
         self.configure_circuit_breaker(enabled=True, threshold=5, timeout=60)
         self.configure_retry(enabled=True, max_retries=3, delay=1.0, backoff=2.0)
 
+        # Initialize consistent patterns for aligned data flow
+        self._event_pattern = ConsistentEventPattern("CapitalService")
+        self._validation_pattern = ConsistentValidationPattern()
+        self._processing_pattern = ConsistentProcessingPattern("CapitalService")
+
         self._logger.info(
             "CapitalService initialized with enterprise features",
             total_capital=float(self.total_capital),
@@ -157,47 +159,22 @@ class CapitalService(TransactionalService):
     async def _do_start(self) -> None:
         """Start the capital service."""
         try:
-            # Resolve UoW factory if not injected
-            if not self.uow_factory and DATABASE_AVAILABLE:
-                # Try to get from dependency injection
+            # Resolve repositories if not injected
+            if not self._capital_repository:
                 try:
-                    self.uow_factory = self.resolve_dependency("UnitOfWorkFactory")
+                    self._capital_repository = self.resolve_dependency("CapitalRepository")
                 except DependencyError as e:
-                    self._logger.debug(f"UnitOfWorkFactory not available via DI: {e}")
-                    # Try to resolve DatabaseService for backward compatibility
-                    if not self.database_service:
-                        try:
-                            self.database_service = self.resolve_dependency("DatabaseService")
-                        except DependencyError as e:
-                            self._logger.warning(
-                                f"Neither UnitOfWorkFactory nor DatabaseService available via DI: {e}"
-                            )
-                        except Exception as e:
-                            self._logger.error(f"Unexpected error resolving DatabaseService: {e}")
-                            raise ServiceError(
-                                "Failed to initialize database dependencies",
-                                component_name="CapitalManagementService",
-                            ) from e
-                except Exception as e:
-                    self._logger.error(f"Unexpected error resolving UnitOfWorkFactory: {e}")
-                    raise ServiceError(
-                        "Failed to resolve critical database dependencies",
-                        component_name="CapitalManagementService",
-                    ) from e
+                    self._logger.warning(
+                        f"CapitalRepository not available via DI: {e}, service will operate in degraded mode"
+                    )
 
-            # Initialize repositories if we have UoW factory (preferred) or database service
-            # NOTE: Direct repository instantiation is deprecated - this is kept for backward compatibility
-            if self.uow_factory:
-                # We'll use UoW pattern in transactions, no need for persistent repositories
-                self._logger.debug("Using UnitOfWork pattern for database operations")
-            elif self.database_service and hasattr(self.database_service, "get_session"):
-                # Fallback: create repositories from database service session
-                session = self.database_service.get_session()
-                self.capital_repository = CapitalAllocationRepository(session)
-                self.audit_repository = CapitalAuditLogRepository(session)
-                self._logger.warning(
-                    "Using legacy database service pattern - consider migrating to UnitOfWork"
-                )
+            if not self._audit_repository:
+                try:
+                    self._audit_repository = self.resolve_dependency("AuditRepository")
+                except DependencyError as e:
+                    self._logger.warning(
+                        f"AuditRepository not available via DI: {e}, audit logging will be disabled"
+                    )
 
             # Resolve state service if not injected
             if not self.state_service:
@@ -212,8 +189,9 @@ class CapitalService(TransactionalService):
                         f"Unexpected error resolving StateService: {e}, operating without state management"
                     )
 
-            # Initialize capital metrics from database
-            await self._initialize_capital_state()
+            # Initialize capital metrics if repository available
+            if self._capital_repository:
+                await self._initialize_capital_state()
 
             self._logger.info("CapitalService started successfully")
 
@@ -222,14 +200,21 @@ class CapitalService(TransactionalService):
             raise ServiceError(f"CapitalService startup failed: {e}") from e
 
     async def _initialize_capital_state(self) -> None:
-        """Initialize capital state from database."""
+        """Initialize capital state from repository."""
         try:
-            # Load existing allocations
-            allocations = await self._get_all_allocations()
+            if not self._capital_repository:
+                self._logger.warning(
+                    "No capital repository available, skipping state initialization"
+                )
+                return
+
+            # Load existing allocations via repository
+            allocations = await self._capital_repository.get_all()
 
             # Calculate total allocated
             total_allocated = sum(
-                self._safe_decimal_conversion(alloc.allocated_amount) for alloc in allocations
+                self._safe_decimal_conversion(getattr(alloc, "allocated_amount", "0"))
+                for alloc in allocations
             )
 
             # Update metrics
@@ -244,7 +229,8 @@ class CapitalService(TransactionalService):
 
         except Exception as e:
             self._logger.error(f"Failed to initialize capital state: {e}")
-            raise
+            # Don't raise - allow service to start without state initialization
+            self._logger.warning("Service will continue without capital state initialization")
 
     # Core Capital Management Operations
 
@@ -303,19 +289,28 @@ class CapitalService(TransactionalService):
         start_time = datetime.now(timezone.utc)
 
         try:
-            # Validate inputs
-            self._validate_allocation_request(strategy_id, exchange, requested_amount)
+            # Validate inputs using consistent validation pattern
+            await self._validate_allocation_request_consistent(
+                strategy_id, exchange, requested_amount
+            )
 
             # Check available capital
             available_capital = await self._get_available_capital()
             if requested_amount > available_capital:
                 raise ValidationError(
-                    f"Insufficient capital: requested {requested_amount}, "
-                    f"available {available_capital}"
+                    f"Insufficient capital: requested {requested_amount}, available {available_capital}",
+                    error_code="CAP_002",
+                    details={
+                        "requested_amount": str(requested_amount),
+                        "available_capital": str(available_capital),
+                        "component": "CapitalService",
+                    },
                 )
 
             # Check allocation limits
-            await self._validate_allocation_limits(strategy_id, exchange, requested_amount)
+            await self._validate_allocation_limits_consistent(
+                strategy_id, exchange, requested_amount
+            )
 
             # Get existing allocation if any
             existing_allocation = await self._get_existing_allocation(strategy_id, exchange)
@@ -325,47 +320,43 @@ class CapitalService(TransactionalService):
 
             # Create or update allocation record
             if existing_allocation:
-                # Update existing allocation
-                existing_allocation.allocated_amount = str(
-                    self._safe_decimal_conversion(existing_allocation.allocated_amount)
-                    + requested_amount
+                # Update existing allocation - work with allocation data
+                current_allocated = self._safe_decimal_conversion(
+                    getattr(existing_allocation, "allocated_amount", "0")
                 )
-                existing_allocation.available_amount = str(
-                    self._safe_decimal_conversion(existing_allocation.available_amount)
-                    + requested_amount
-                )
-                existing_allocation.allocation_percentage = float(
-                    self._safe_decimal_conversion(existing_allocation.allocated_amount)
-                    / self.total_capital
-                )
-                existing_allocation.last_rebalance = start_time
-                existing_allocation.updated_at = start_time
+                new_allocated = current_allocated + requested_amount
 
-                db_allocation = await self._update_allocation(existing_allocation)
-                previous_amount = (
-                    self._safe_decimal_conversion(existing_allocation.allocated_amount)
-                    - requested_amount
-                )
+                allocation_data = {
+                    "id": getattr(existing_allocation, "id", str(uuid.uuid4())),
+                    "strategy_id": strategy_id,
+                    "exchange": exchange,
+                    "allocated_amount": str(new_allocated),
+                    "utilized_amount": getattr(existing_allocation, "utilized_amount", "0"),
+                    "available_amount": str(new_allocated),
+                    "allocation_percentage": float(new_allocated / self.total_capital),
+                    "last_rebalance": start_time.isoformat(),
+                    "updated_at": start_time.isoformat(),
+                }
+
+                db_allocation = await self._update_allocation(allocation_data)
+                previous_amount = current_allocated
 
             else:
-                # Create new allocation
-                if not DATABASE_AVAILABLE or not CapitalAllocationDB:
-                    raise ServiceError("Database models not available for allocation")
+                # Create new allocation - use data dict instead of DB model
+                allocation_data = {
+                    "id": str(uuid.uuid4()),
+                    "strategy_id": strategy_id,
+                    "exchange": exchange,
+                    "allocated_amount": str(requested_amount),
+                    "utilized_amount": "0",
+                    "available_amount": str(requested_amount),
+                    "allocation_percentage": allocation_percentage,
+                    "last_rebalance": start_time.isoformat(),
+                    "created_at": start_time.isoformat(),
+                    "updated_at": start_time.isoformat(),
+                }
 
-                allocation_record = CapitalAllocationDB(
-                    id=str(uuid.uuid4()),
-                    strategy_id=strategy_id,
-                    exchange=exchange,
-                    allocated_amount=str(requested_amount),
-                    utilized_amount="0",
-                    available_amount=str(requested_amount),
-                    allocation_percentage=allocation_percentage,
-                    last_rebalance=start_time,
-                    created_at=start_time,
-                    updated_at=start_time,
-                )
-
-                db_allocation = await self._create_allocation(allocation_record)
+                db_allocation = await self._create_allocation(allocation_data)
                 previous_amount = Decimal("0")
 
             # Create audit log
@@ -377,7 +368,7 @@ class CapitalService(TransactionalService):
                 bot_id=bot_id,
                 amount=requested_amount,
                 previous_amount=previous_amount,
-                new_amount=Decimal(db_allocation.allocated_amount),
+                new_amount=Decimal(str(db_allocation.get("allocated_amount", "0"))),
                 operation_context={
                     "requested_amount": str(requested_amount),
                     "available_capital_before": str(available_capital),
@@ -395,13 +386,29 @@ class CapitalService(TransactionalService):
 
             # Convert to domain object with safe type conversion
             allocation = CapitalAllocation(
-                strategy_id=db_allocation.strategy_id,
-                exchange=db_allocation.exchange,
-                allocated_amount=self._safe_decimal_conversion(db_allocation.allocated_amount),
-                utilized_amount=self._safe_decimal_conversion(db_allocation.utilized_amount),
-                available_amount=self._safe_decimal_conversion(db_allocation.available_amount),
-                allocation_percentage=db_allocation.allocation_percentage,
-                last_rebalance=db_allocation.last_rebalance,
+                allocation_id=str(db_allocation.get("id", str(uuid.uuid4()))),
+                strategy_id=db_allocation.get("strategy_id", strategy_id),
+                allocated_capital=self._safe_decimal_conversion(
+                    db_allocation.get("allocated_amount", "0")
+                ),
+                used_capital=self._safe_decimal_conversion(
+                    db_allocation.get("utilized_amount", "0")
+                ),
+                available_capital=self._safe_decimal_conversion(
+                    db_allocation.get("available_amount", "0")
+                ),
+                allocation_pct=db_allocation.get("allocation_percentage", 0.0),
+                target_allocation_pct=db_allocation.get("allocation_percentage", 0.0),
+                min_allocation=Decimal("0"),
+                max_allocation=self._safe_decimal_conversion(
+                    db_allocation.get("allocated_amount", "0")
+                )
+                * Decimal("2"),
+                last_rebalance=(
+                    datetime.fromisoformat(db_allocation.get("last_rebalance"))
+                    if db_allocation.get("last_rebalance")
+                    else start_time
+                ),
             )
 
             self._logger.info(
@@ -413,21 +420,36 @@ class CapitalService(TransactionalService):
                 allocation_percentage=f"{allocation_percentage:.2%}",
             )
 
+            # Emit capital allocation event using consistent event pattern
+            allocation_event_data = {
+                "allocation_id": str(db_allocation.get("id", str(uuid.uuid4()))),
+                "strategy_id": strategy_id,
+                "exchange": exchange,
+                "amount": str(requested_amount),
+                "operation_id": operation_id,
+                "timestamp": start_time.isoformat(),
+            }
+            await self._event_pattern.emit_consistent("capital.allocated", allocation_event_data)
+
             # Save state snapshot after successful allocation
             await self._save_capital_state_snapshot(reason="allocation_change")
 
             return allocation
 
-        except (IntegrityError, OperationalError) as e:
-            # Database-specific errors
-            self._performance_metrics["failed_allocations"] += 1
-            self._logger.error(
-                "Database error during capital allocation",
-                operation_id=operation_id,
-                error_type=type(e).__name__,
-                error=str(e),
-            )
-            raise ServiceError(f"Database error during allocation: {e}") from e
+        except Exception as db_error:
+            # Repository errors
+            if "repository" in str(db_error).lower() or "database" in str(db_error).lower():
+                self._performance_metrics["failed_allocations"] += 1
+                self._logger.error(
+                    "Repository error during capital allocation",
+                    operation_id=operation_id,
+                    error_type=type(db_error).__name__,
+                    error=str(db_error),
+                )
+                raise ServiceError(f"Repository error during allocation: {db_error}") from db_error
+            else:
+                # Re-raise non-repository errors
+                raise
 
         except ValidationError:
             # Re-raise validation errors
@@ -530,7 +552,13 @@ class CapitalService(TransactionalService):
             allocated_amount = Decimal(allocation.allocated_amount)
             if release_amount > allocated_amount:
                 raise ValidationError(
-                    f"Cannot release {release_amount} from allocation of {allocated_amount}"
+                    f"Cannot release {release_amount} from allocation of {allocated_amount}",
+                    error_code="CAP_003",
+                    details={
+                        "release_amount": str(release_amount),
+                        "allocated_amount": str(allocated_amount),
+                        "component": "CapitalService",
+                    },
                 )
 
             # Update allocation
@@ -581,20 +609,34 @@ class CapitalService(TransactionalService):
                 remaining_allocation=format_currency(float(new_allocated_amount)),
             )
 
+            # Emit capital release event using consistent event pattern
+            release_event_data = {
+                "strategy_id": strategy_id,
+                "exchange": exchange,
+                "amount": str(release_amount),
+                "operation_id": operation_id,
+                "timestamp": start_time.isoformat(),
+            }
+            await self._event_pattern.emit_consistent("capital.released", release_event_data)
+
             # Save state snapshot after successful release
             await self._save_capital_state_snapshot(reason="release_capital")
 
             return True
 
-        except (IntegrityError, OperationalError) as e:
-            # Database-specific errors
-            self._logger.error(
-                "Database error during capital release",
-                operation_id=operation_id,
-                error_type=type(e).__name__,
-                error=str(e),
-            )
-            return False
+        except Exception as repo_error:
+            # Repository errors
+            if "repository" in str(repo_error).lower() or "database" in str(repo_error).lower():
+                self._logger.error(
+                    "Repository error during capital release",
+                    operation_id=operation_id,
+                    error_type=type(repo_error).__name__,
+                    error=str(repo_error),
+                )
+                return False
+            else:
+                # Re-raise non-repository errors
+                raise
 
         except ValidationError:
             # Re-raise validation errors
@@ -703,15 +745,22 @@ class CapitalService(TransactionalService):
 
             return True
 
-        except (IntegrityError, OperationalError) as e:
-            self._logger.error(
-                "Database error during utilization update",
-                strategy_id=strategy_id,
-                exchange=exchange,
-                error_type=type(e).__name__,
-                error=str(e),
-            )
-            raise ServiceError(f"Database error during utilization update: {e}") from e
+        except Exception as repo_error:
+            # Repository errors
+            if "repository" in str(repo_error).lower() or "database" in str(repo_error).lower():
+                self._logger.error(
+                    "Repository error during utilization update",
+                    strategy_id=strategy_id,
+                    exchange=exchange,
+                    error_type=type(repo_error).__name__,
+                    error=str(repo_error),
+                )
+                raise ServiceError(
+                    f"Repository error during utilization update: {repo_error}"
+                ) from repo_error
+            else:
+                # Re-raise non-repository errors
+                raise
 
         except ValidationError:
             # Re-raise validation errors
@@ -807,36 +856,35 @@ class CapitalService(TransactionalService):
     async def _get_allocations_by_strategy_impl(self, strategy_id: str) -> list[CapitalAllocation]:
         """Internal implementation to get allocations by strategy."""
         try:
-            # Get allocations by strategy using proper UoW pattern
-            if not DATABASE_AVAILABLE:
+            if not self._capital_repository:
                 return []
 
-            # Use UoW pattern if available
-            if self.uow_factory:
-                with self.uow_factory.create() as uow:
-                    db_allocations = await uow.capital_allocations.get_by_strategy(strategy_id)
-            # Fallback to legacy patterns
-            elif self.capital_repository:
-                db_allocations = await self.capital_repository.get_by_strategy(strategy_id)
-            elif self.database_service:
-                db_allocations = await self.database_service.list_entities(
-                    model_class=CapitalAllocationDB,
-                    filters={"strategy_id": strategy_id},
-                )
-            else:
-                return []
+            # Get allocations by strategy via repository
+            db_allocations = await self._capital_repository.get_by_strategy(strategy_id)
 
             # Convert to domain objects
             allocations = []
             for db_alloc in db_allocations:
                 allocation = CapitalAllocation(
-                    strategy_id=db_alloc.strategy_id,
-                    exchange=db_alloc.exchange,
-                    allocated_amount=self._safe_decimal_conversion(db_alloc.allocated_amount),
-                    utilized_amount=self._safe_decimal_conversion(db_alloc.utilized_amount),
-                    available_amount=self._safe_decimal_conversion(db_alloc.available_amount),
-                    allocation_percentage=db_alloc.allocation_percentage,
-                    last_rebalance=db_alloc.last_rebalance,
+                    allocation_id=str(getattr(db_alloc, "id", str(uuid.uuid4()))),
+                    strategy_id=getattr(db_alloc, "strategy_id", strategy_id),
+                    allocated_capital=self._safe_decimal_conversion(
+                        getattr(db_alloc, "allocated_amount", "0")
+                    ),
+                    used_capital=self._safe_decimal_conversion(
+                        getattr(db_alloc, "utilized_amount", "0")
+                    ),
+                    available_capital=self._safe_decimal_conversion(
+                        getattr(db_alloc, "available_amount", "0")
+                    ),
+                    allocation_pct=getattr(db_alloc, "allocation_percentage", 0.0),
+                    target_allocation_pct=getattr(db_alloc, "allocation_percentage", 0.0),
+                    min_allocation=Decimal("0"),
+                    max_allocation=self._safe_decimal_conversion(
+                        getattr(db_alloc, "allocated_amount", "0")
+                    )
+                    * Decimal("2"),
+                    last_rebalance=getattr(db_alloc, "last_rebalance", datetime.now(timezone.utc)),
                 )
                 allocations.append(allocation)
 
@@ -848,269 +896,253 @@ class CapitalService(TransactionalService):
 
     # Helper Methods
 
-    def _validate_allocation_request(
+    async def _validate_allocation_request_consistent(
         self, strategy_id: str, exchange: str, amount: Decimal
     ) -> None:
-        """Validate allocation request parameters."""
+        """Validate allocation request using consistent validation pattern."""
+        # Use consistent validation pattern
+        validation_data = {"strategy_id": strategy_id, "exchange": exchange, "amount": str(amount)}
+
+        result = await validate_state_data("capital_allocation_request", validation_data)
+
+        if not result["is_valid"]:
+            raise ValidationError(
+                f"Capital allocation validation failed: {result['errors']}",
+                error_code="CAP_004",
+                details={"component": "CapitalService", "validation_errors": result["errors"]},
+            )
+
+        # Additional boundary checks using consistent patterns
         if not strategy_id or not strategy_id.strip():
-            raise ValidationError("Strategy ID cannot be empty")
+            raise ValidationError(
+                "Strategy ID cannot be empty",
+                error_code="CAP_004",
+                details={"component": "CapitalService", "field": "strategy_id"},
+            )
 
         if not exchange or not exchange.strip():
-            raise ValidationError("Exchange cannot be empty")
-
-        if not ValidationFramework.validate_quantity(float(amount)):
-            raise ValidationError(f"Invalid capital allocation amount: {amount}")
+            raise ValidationError(
+                "Exchange cannot be empty",
+                error_code="CAP_005",
+                details={"component": "CapitalService", "field": "exchange"},
+            )
 
         if amount <= 0:
-            raise ValidationError("Allocation amount must be positive")
+            raise ValidationError(
+                "Allocation amount must be positive",
+                error_code="CAP_007",
+                details={"amount": str(amount), "component": "CapitalService"},
+            )
 
-    async def _validate_allocation_limits(
+    async def _validate_allocation_limits_consistent(
         self, strategy_id: str, exchange: str, amount: Decimal
     ) -> None:
-        """Validate allocation limits."""
-        # Check maximum single allocation
-        max_allocation = self.total_capital * self.max_allocation_pct
+        """Validate allocation limits using consistent boundary validation pattern."""
+        # Use consistent validation pattern for input boundary validation
+        boundary_validation = {
+            "strategy_id": strategy_id,
+            "exchange": exchange,
+            "amount": str(amount),
+            "max_allocation_pct": str(self.max_allocation_pct),
+        }
+
+        result = await validate_state_data("capital_allocation_limits", boundary_validation)
+
+        if not result["is_valid"]:
+            raise ValidationError(
+                f"Allocation limits validation failed: {result['errors']}",
+                error_code="CAP_008",
+                details={"component": "CapitalService", "validation_errors": result["errors"]},
+            )
+
+        # Consistent boundary checks using same pattern as state service
+        if not strategy_id or not strategy_id.strip():
+            raise ValidationError(
+                "Strategy ID cannot be empty",
+                error_code="CAP_004",
+                details={"component": "CapitalService", "field": "strategy_id"},
+            )
+
+        if not exchange or not exchange.strip():
+            raise ValidationError(
+                "Exchange cannot be empty",
+                error_code="CAP_005",
+                details={"component": "CapitalService", "field": "exchange"},
+            )
+
+        if amount <= 0:
+            raise ValidationError(
+                "Allocation amount must be positive",
+                error_code="CAP_007",
+                details={"amount": str(amount), "component": "CapitalService"},
+            )
+
+        # Business rule validation using consistent processing pattern
+        max_allocation = await self._processing_pattern.process_item_consistent(
+            {"total_capital": self.total_capital, "max_pct": self.max_allocation_pct},
+            lambda data: data["total_capital"] * data["max_pct"],
+        )
+
         if amount > max_allocation:
             raise ValidationError(
-                f"Requested amount {amount} exceeds maximum allocation {max_allocation}"
+                f"Requested amount {amount} exceeds maximum allocation {max_allocation}",
+                error_code="CAP_008",
+                details={
+                    "requested_amount": str(amount),
+                    "max_allocation": str(max_allocation),
+                    "component": "CapitalService",
+                },
             )
 
     async def _get_available_capital(self) -> Decimal:
         """Calculate available capital for allocation."""
-        # Get all allocations
-        allocations = await self._get_all_allocations()
-
-        # Return maximum available if no allocations available
-        if not allocations:
-            return self.total_capital * Decimal("0.8")  # 80% as fallback
-
-        total_allocated = sum(
-            self._safe_decimal_conversion(alloc.allocated_amount) for alloc in allocations
-        )
-        emergency_reserve = self.total_capital * self.emergency_reserve_pct
-
-        return self.total_capital - total_allocated - emergency_reserve
-
-    async def _get_existing_allocation(
-        self, strategy_id: str, exchange: str
-    ) -> CapitalAllocationDB | None:
-        """Get existing allocation for strategy and exchange using proper UoW pattern."""
-        if not DATABASE_AVAILABLE:
-            return None
-
-        # Use UoW pattern if available
-        if self.uow_factory:
-            with self.uow_factory.create() as uow:
-                return await uow.capital_allocations.find_by_strategy_exchange(
-                    strategy_id, exchange
-                )
-
-        # Fallback to legacy patterns
-        elif self.capital_repository:
-            return await self.capital_repository.find_by_strategy_exchange(strategy_id, exchange)
-        elif self.database_service:
-            allocations = await self.database_service.list_entities(
-                model_class=CapitalAllocationDB,
-                filters={
-                    "strategy_id": strategy_id,
-                    "exchange": exchange,
-                },
-                limit=1,
-            )
-            return allocations[0] if allocations else None
-        else:
-            return None
-
-    async def _create_allocation(self, allocation_record) -> Any:
-        """Create allocation using proper UoW pattern."""
-        if not DATABASE_AVAILABLE:
-            raise ServiceError("Database not available - allocation operations disabled")
-
-        # Use UoW pattern if available
-        if self.uow_factory:
-            with self.uow_factory.create() as uow:
-                return await uow.capital_allocations.create(allocation_record)
-
-        # Fallback to legacy patterns
-        elif self.capital_repository:
-            return await self.capital_repository.create(allocation_record)
-        elif self.database_service:
-            return await self.database_service.create_entity(allocation_record)
-        else:
-            raise ServiceError("No database service available")
-
-    async def _update_allocation(self, allocation) -> Any:
-        """Update allocation using proper UoW pattern."""
-        if not DATABASE_AVAILABLE:
-            raise ServiceError("Database not available - allocation operations disabled")
-
-        # Use UoW pattern if available
-        if self.uow_factory:
-            with self.uow_factory.create() as uow:
-                return await uow.capital_allocations.update(allocation)
-
-        # Fallback to legacy patterns
-        elif self.capital_repository:
-            return await self.capital_repository.update(allocation)
-        elif self.database_service:
-            return await self.database_service.update_entity(allocation)
-        else:
-            raise ServiceError("No database service available")
-
-    async def _delete_allocation(self, allocation_id: str) -> bool:
-        """Delete allocation using proper UoW pattern."""
-        if not DATABASE_AVAILABLE:
-            raise ServiceError("Database not available - allocation operations disabled")
-
-        # Use UoW pattern if available
-        if self.uow_factory:
-            with self.uow_factory.create() as uow:
-                await uow.capital_allocations.delete(allocation_id)
-                return True
-
-        # Fallback to legacy patterns
-        elif self.capital_repository:
-            await self.capital_repository.delete(allocation_id)
-            return True
-        elif self.database_service and DATABASE_AVAILABLE and CapitalAllocationDB:
-            # This was the problematic direct delete_entity call - now with safety checks
-            await self.database_service.delete_entity(CapitalAllocationDB, allocation_id)
-            return True
-        else:
-            raise ServiceError("No database service available")
-
-    async def _get_all_allocations(self, limit: int | None = None) -> list:
-        """Get all allocations using proper UoW pattern."""
-        if not DATABASE_AVAILABLE:
-            return []
-
-        # Use UoW pattern if available
-        if self.uow_factory:
-            with self.uow_factory.create() as uow:
-                return await uow.capital_allocations.get_all(limit=limit)
-
-        # Fallback to legacy patterns
-        elif self.capital_repository:
-            return await self.capital_repository.get_all(limit=limit)
-        elif self.database_service and CapitalAllocationDB:
-            return await self.database_service.list_entities(
-                model_class=CapitalAllocationDB,
-                limit=limit,
-            )
-        else:
-            return []
-
-    async def _create_audit_log_record(self, audit_log) -> None:
-        """Create audit log record using proper UoW pattern."""
-        if not DATABASE_AVAILABLE:
-            return  # Skip if database not available
+        if not self._capital_repository:
+            # Degraded mode - use conservative estimate
+            return self.total_capital * Decimal("0.5")
 
         try:
-            # Use UoW pattern if available
-            if self.uow_factory:
-                with self.uow_factory.create() as uow:
-                    await uow.capital_audit_logs.create(audit_log)
-            # Fallback to legacy patterns
-            elif self.audit_repository:
-                await self.audit_repository.create(audit_log)
-            elif self.database_service:
-                await self.database_service.create_entity(audit_log)
-            else:
-                self._logger.warning("No database service available for audit log creation")
+            # Get all allocations via repository
+            allocations = await self._capital_repository.get_all()
+
+            # Return maximum available if no allocations available
+            if not allocations:
+                return self.total_capital * Decimal("0.8")  # 80% as fallback
+
+            total_allocated = sum(
+                self._safe_decimal_conversion(getattr(alloc, "allocated_amount", "0"))
+                for alloc in allocations
+            )
+            emergency_reserve = self.total_capital * self.emergency_reserve_pct
+
+            return self.total_capital - total_allocated - emergency_reserve
+        except Exception as e:
+            self._logger.error(f"Failed to get available capital: {e}")
+            # Return conservative estimate on error
+            return self.total_capital * Decimal("0.3")
+
+    async def _get_existing_allocation(self, strategy_id: str, exchange: str) -> Any | None:
+        """Get existing allocation for strategy and exchange via repository."""
+        if not self._capital_repository:
+            return None
+
+        try:
+            return await self._capital_repository.get_by_strategy_exchange(strategy_id, exchange)
+        except Exception as e:
+            self._logger.error(
+                f"Failed to get existing allocation for {strategy_id}/{exchange}: {e}"
+            )
+            return None
+
+    async def _create_allocation(self, allocation_data: dict[str, Any]) -> Any:
+        """Create allocation via repository."""
+        if not self._capital_repository:
+            raise ServiceError("Capital repository not available - allocation operations disabled")
+
+        try:
+            return await self._capital_repository.create(allocation_data)
+        except Exception as e:
+            self._logger.error(f"Failed to create allocation: {e}")
+            raise ServiceError(f"Failed to create allocation: {e}") from e
+
+    async def _update_allocation(self, allocation_data: dict[str, Any]) -> Any:
+        """Update allocation via repository."""
+        if not self._capital_repository:
+            raise ServiceError("Capital repository not available - allocation operations disabled")
+
+        try:
+            return await self._capital_repository.update(allocation_data)
+        except Exception as e:
+            self._logger.error(f"Failed to update allocation: {e}")
+            raise ServiceError(f"Failed to update allocation: {e}") from e
+
+    async def _delete_allocation(self, allocation_id: str) -> bool:
+        """Delete allocation via repository."""
+        if not self._capital_repository:
+            raise ServiceError("Capital repository not available - allocation operations disabled")
+
+        try:
+            await self._capital_repository.delete(allocation_id)
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to delete allocation: {e}")
+            raise ServiceError(f"Failed to delete allocation: {e}") from e
+
+    async def _get_all_allocations(self, limit: int | None = None) -> list[Any]:
+        """Get all allocations via repository."""
+        if not self._capital_repository:
+            return []
+
+        try:
+            return await self._capital_repository.get_all(limit=limit)
+        except Exception as e:
+            self._logger.error(f"Failed to get all allocations: {e}")
+            return []
+
+    async def _create_audit_log_record(self, audit_log_data: dict[str, Any]) -> None:
+        """Create audit log record via repository."""
+        if not self._audit_repository:
+            self._logger.warning("Audit repository not available, skipping audit log")
+            return
+
+        try:
+            await self._audit_repository.create(audit_log_data)
         except Exception as e:
             self._logger.error(f"Failed to create audit log record: {e}")
             # Don't raise - audit failure shouldn't break the operation
 
-    async def _restore_allocations_in_transaction(self, allocations_data: list[dict]) -> None:
+    async def _restore_allocations_in_transaction(
+        self, allocations_data: list[dict[str, Any]]
+    ) -> None:
         """
-        Restore allocations within a proper transaction boundary.
-
-        This ensures that either all allocations are restored successfully,
-        or none are restored in case of any failure.
+        Restore allocations via repository.
 
         Args:
             allocations_data: List of allocation data dictionaries
         """
-        if not DATABASE_AVAILABLE or not allocations_data:
+        if not self._capital_repository or not allocations_data:
+            self._logger.warning("No capital repository or data available for restoration")
             return
 
         try:
-            # Use UoW pattern for transaction management
-            if self.uow_factory:
-                with self.uow_factory.create() as uow:
-                    # Clear existing allocations first
-                    await uow.capital_allocations.delete_all()
+            # Note: Transaction management should be handled at repository level
+            # This service layer focuses on business logic, not transaction boundaries
 
-                    # Restore allocations
-                    for alloc_data in allocations_data:
-                        if not CapitalAllocationDB:
-                            raise ServiceError("CapitalAllocationDB model not available")
+            # Clear existing allocations first (if repository supports it)
+            existing_allocations = await self._capital_repository.get_all()
+            for allocation in existing_allocations:
+                allocation_id = getattr(allocation, "id", None)
+                if allocation_id:
+                    await self._capital_repository.delete(allocation_id)
 
-                        allocation = CapitalAllocationDB(
-                            strategy_id=alloc_data["strategy_id"],
-                            exchange=alloc_data["exchange"],
-                            allocated_amount=alloc_data["allocated_amount"],
-                            utilized_amount=alloc_data["utilized_amount"],
-                            available_amount=alloc_data["available_amount"],
-                            allocation_percentage=alloc_data["allocation_percentage"],
-                            last_rebalance=(
-                                datetime.fromisoformat(alloc_data["last_rebalance"])
-                                if alloc_data["last_rebalance"]
-                                else None
-                            ),
-                        )
-                        await uow.capital_allocations.create(allocation)
-                    # Transaction commits automatically when UoW context exits
-            else:
-                # Fallback to legacy patterns without proper transaction boundary
-                self._logger.warning(
-                    "State restoration without proper transaction management - data consistency not guaranteed"
-                )
+            # Restore allocations
+            for alloc_data in allocations_data:
+                # Ensure data structure is consistent
+                normalized_data = {
+                    "id": alloc_data.get("id", str(uuid.uuid4())),
+                    "strategy_id": alloc_data["strategy_id"],
+                    "exchange": alloc_data["exchange"],
+                    "allocated_amount": alloc_data["allocated_amount"],
+                    "utilized_amount": alloc_data["utilized_amount"],
+                    "available_amount": alloc_data["available_amount"],
+                    "allocation_percentage": alloc_data["allocation_percentage"],
+                    "last_rebalance": alloc_data["last_rebalance"],
+                    "created_at": alloc_data.get(
+                        "created_at", datetime.now(timezone.utc).isoformat()
+                    ),
+                    "updated_at": alloc_data.get(
+                        "updated_at", datetime.now(timezone.utc).isoformat()
+                    ),
+                }
 
-                # Clear existing allocations
-                if self.capital_repository:
-                    await self.capital_repository.delete_all()
-                elif self.database_service:
-                    # Get all existing allocations to delete them
-                    existing = await self.database_service.list_entities(
-                        model_class=CapitalAllocationDB, limit=None
-                    )
-                    for allocation in existing:
-                        await self.database_service.delete_entity(
-                            CapitalAllocationDB, allocation.id
-                        )
+                await self._capital_repository.create(normalized_data)
 
-                # Restore allocations
-                for alloc_data in allocations_data:
-                    if not CapitalAllocationDB:
-                        raise ServiceError("CapitalAllocationDB model not available")
-
-                    allocation = CapitalAllocationDB(
-                        strategy_id=alloc_data["strategy_id"],
-                        exchange=alloc_data["exchange"],
-                        allocated_amount=alloc_data["allocated_amount"],
-                        utilized_amount=alloc_data["utilized_amount"],
-                        available_amount=alloc_data["available_amount"],
-                        allocation_percentage=alloc_data["allocation_percentage"],
-                        last_rebalance=(
-                            datetime.fromisoformat(alloc_data["last_rebalance"])
-                            if alloc_data["last_rebalance"]
-                            else None
-                        ),
-                    )
-
-                    if self.capital_repository:
-                        await self.capital_repository.create(allocation)
-                    elif self.database_service:
-                        await self.database_service.create_entity(allocation)
+            self._logger.info(f"Successfully restored {len(allocations_data)} allocations")
 
         except Exception as e:
-            self._logger.error(f"Failed to restore allocations in transaction: {e}")
+            self._logger.error(f"Failed to restore allocations: {e}")
             raise ServiceError(f"State restoration failed: {e}") from e
 
-    async def _calculate_allocation_efficiency(
-        self, allocations: list[CapitalAllocationDB]
-    ) -> float:
+    async def _calculate_allocation_efficiency(self, allocations: list[Any]) -> float:
         """Calculate allocation efficiency score."""
         if not allocations:
             return 0.5  # Neutral efficiency
@@ -1153,33 +1185,33 @@ class CapitalService(TransactionalService):
     ) -> None:
         """Create comprehensive audit log entry."""
         try:
-            if not DATABASE_AVAILABLE or not CapitalAuditLog:
-                return  # Skip if audit log model not available
+            if not self._audit_repository:
+                return  # Skip if audit repository not available
 
-            audit_log = CapitalAuditLog(
-                id=str(uuid.uuid4()),
-                operation_id=operation_id,
-                operation_type=operation_type,
-                strategy_id=strategy_id,
-                exchange=exchange,
-                bot_id=bot_id,
-                operation_description=f"Capital {operation_type} operation",
-                amount=amount,
-                previous_amount=previous_amount,
-                new_amount=new_amount,
-                operation_context=operation_context or {},
-                operation_status=operation_status,
-                success=success,
-                error_message=error_message,
-                authorized_by=authorized_by,
-                requested_at=requested_at or datetime.now(timezone.utc),
-                executed_at=executed_at,
-                source_component="CapitalService",
-                correlation_id=self._correlation_id,
-                created_at=datetime.now(timezone.utc),
-            )
+            audit_log_data = {
+                "id": str(uuid.uuid4()),
+                "operation_id": operation_id,
+                "operation_type": operation_type,
+                "strategy_id": strategy_id,
+                "exchange": exchange,
+                "bot_id": bot_id,
+                "operation_description": f"Capital {operation_type} operation",
+                "amount": str(amount) if amount is not None else None,
+                "previous_amount": str(previous_amount) if previous_amount is not None else None,
+                "new_amount": str(new_amount) if new_amount is not None else None,
+                "operation_context": operation_context or {},
+                "operation_status": operation_status,
+                "success": success,
+                "error_message": error_message,
+                "authorized_by": authorized_by,
+                "requested_at": (requested_at or datetime.now(timezone.utc)).isoformat(),
+                "executed_at": executed_at.isoformat() if executed_at else None,
+                "source_component": "CapitalService",
+                "correlation_id": self._correlation_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
 
-            await self._create_audit_log_record(audit_log)
+            await self._create_audit_log_record(audit_log_data)
 
         except Exception as e:
             self._logger.error(f"Failed to create audit log: {e}")
@@ -1206,36 +1238,17 @@ class CapitalService(TransactionalService):
     async def _service_health_check(self) -> HealthStatus:
         """Service-specific health check."""
         try:
-            # Check database availability first
-            if not DATABASE_AVAILABLE:
-                return HealthStatus.DEGRADED  # Can operate without database in some scenarios
+            # Check repository availability
+            if not self._capital_repository:
+                self._logger.warning("Capital repository not available")
+                return HealthStatus.DEGRADED  # Can operate in limited mode
 
-            # Check database connectivity
-            if self.database_service:
-                health_status = await self.database_service._service_health_check()
-                if health_status != HealthStatus.HEALTHY:
-                    return health_status
-            elif self.capital_repository:
-                # Basic connectivity check via repository
-                try:
-                    await self.capital_repository.get_all(limit=1)
-                except (DatabaseConnectionError, DatabaseQueryError) as e:
-                    self._logger.warning(f"Database connectivity check failed: {e}")
-                    return HealthStatus.UNHEALTHY
-                except Exception as e:
-                    self._logger.error(f"Unexpected error in repository health check: {e}")
-                    return HealthStatus.UNHEALTHY
-            elif self.uow_factory:
-                # Test UoW factory connectivity
-                try:
-                    with self.uow_factory.create() as uow:
-                        await uow.capital_allocations.get_all(limit=1)
-                except (DatabaseConnectionError, DatabaseQueryError) as e:
-                    self._logger.warning(f"UoW factory health check failed: {e}")
-                    return HealthStatus.UNHEALTHY
-                except Exception as e:
-                    self._logger.error(f"Unexpected error in UoW health check: {e}")
-                    return HealthStatus.UNHEALTHY
+            # Basic connectivity check via repository
+            try:
+                await self._capital_repository.get_all(limit=1)
+            except Exception as e:
+                self._logger.warning(f"Repository connectivity check failed: {e}")
+                return HealthStatus.UNHEALTHY
 
             # Check emergency reserve maintenance
             if not self._performance_metrics.get("emergency_reserve_maintained", True):
@@ -1318,7 +1331,7 @@ class CapitalService(TransactionalService):
         """Safely convert any value to Decimal."""
         if isinstance(value, Decimal):
             return value
-        elif isinstance(value, (int, float)):
+        elif isinstance(value, int | float):
             return Decimal(str(value))
         elif isinstance(value, str):
             try:
@@ -1334,7 +1347,7 @@ class CapitalService(TransactionalService):
 
     async def _save_capital_state_snapshot(self, reason: str = "allocation_change") -> None:
         """
-        Save current capital allocation state to StateService.
+        Save current capital allocation state using consistent processing pattern.
 
         Args:
             reason: Reason for saving snapshot (e.g., "allocation_change", "rebalance", "recovery")
@@ -1343,44 +1356,34 @@ class CapitalService(TransactionalService):
             return  # Skip if StateService not available
 
         try:
-            # Get current allocations
-            allocations = await self._get_all_allocations()
+            # Get current allocations using consistent processing
+            allocations = await self._processing_pattern.process_item_consistent(
+                None,  # No input item needed
+                lambda _: self._get_all_allocations(),
+            )
 
-            # Build state data
-            state_data = {
-                "total_capital": str(self.total_capital),
-                "emergency_reserve_pct": str(self.emergency_reserve_pct),
-                "allocations": [
-                    {
-                        "strategy_id": alloc.strategy_id,
-                        "exchange": alloc.exchange,
-                        "allocated_amount": alloc.allocated_amount,
-                        "utilized_amount": alloc.utilized_amount,
-                        "available_amount": alloc.available_amount,
-                        "allocation_percentage": alloc.allocation_percentage,
-                        "last_rebalance": (
-                            alloc.last_rebalance.isoformat() if alloc.last_rebalance else None
-                        ),
-                    }
-                    for alloc in allocations
-                ],
-                "performance_metrics": self._performance_metrics.copy(),
-                "snapshot_reason": reason,
-                "snapshot_timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+            # Build state data using consistent transformation
+            state_data = await self._build_consistent_state_data(allocations, reason)
 
-            # Save to StateService - use PORTFOLIO_STATE as capital is part of portfolio
-            # Note: StateType.CAPITAL doesn't exist, using PORTFOLIO_STATE for capital management
-            await self.state_service.save_state(
-                state_type=StateType.PORTFOLIO_STATE,
+            # Save to StateService using consistent pattern
+            await self.state_service.set_state(
+                state_type=StateType.SYSTEM_STATE,
+                state_id="capital_allocations",
                 state_data=state_data,
-                metadata={
-                    "reason": reason,
+                source_component="capital_management",
+                validate=True,  # Enable validation for consistency
+                priority=StatePriority.HIGH,  # Capital data is high priority
+                reason=reason,
+            )
+
+            # Emit state save event using consistent pattern
+            await emit_state_event(
+                "snapshot_saved",
+                {
                     "component": "capital_management",
-                    "total_allocated": str(
-                        sum(self._safe_decimal_conversion(a.allocated_amount) for a in allocations)
-                    ),
+                    "reason": reason,
                     "allocation_count": len(allocations),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
             )
 
@@ -1390,16 +1393,44 @@ class CapitalService(TransactionalService):
                 allocation_count=len(allocations),
             )
 
+        except StateError as e:
+            # Log state service specific errors
+            self._logger.warning(f"State service error saving capital snapshot: {e}")
         except Exception as e:
             # Log but don't fail the operation
             self._logger.warning(f"Failed to save capital state snapshot: {e}")
 
-    async def restore_capital_state(self, recovery_point_id: str) -> bool:
-        """
-        Restore capital state from a recovery point.
+    async def _build_consistent_state_data(
+        self, allocations: list[Any], reason: str
+    ) -> dict[str, Any]:
+        """Build state data using consistent transformation pattern."""
+        return {
+            "total_capital": str(self.total_capital),
+            "emergency_reserve_pct": str(self.emergency_reserve_pct),
+            "allocations": [
+                {
+                    "strategy_id": getattr(alloc, "strategy_id", ""),
+                    "exchange": getattr(alloc, "exchange", ""),
+                    "allocated_amount": str(getattr(alloc, "allocated_amount", "0")),
+                    "utilized_amount": str(getattr(alloc, "utilized_amount", "0")),
+                    "available_amount": str(getattr(alloc, "available_amount", "0")),
+                    "allocation_percentage": getattr(alloc, "allocation_percentage", 0.0),
+                    "last_rebalance": (
+                        alloc.last_rebalance.isoformat()
+                        if getattr(alloc, "last_rebalance", None)
+                        else None
+                    ),
+                }
+                for alloc in allocations
+            ],
+            "performance_metrics": self._performance_metrics.copy(),
+            "snapshot_reason": reason,
+            "snapshot_timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
-        Args:
-            recovery_point_id: ID of the recovery point to restore from
+    async def restore_capital_state(self) -> bool:
+        """
+        Restore capital state from the latest saved state.
 
         Returns:
             bool: True if restoration successful
@@ -1409,19 +1440,21 @@ class CapitalService(TransactionalService):
             return False
 
         try:
-            # Get state from recovery point - use PORTFOLIO_STATE as capital is part of portfolio
-            # Note: StateService.get_state expects state_id, not recovery_point_id
-            state_data = await self.state_service.get_state(
-                state_type=StateType.PORTFOLIO_STATE,
-                state_id=recovery_point_id,  # Using recovery_point_id as state_id
+            # Get state from StateService - use SYSTEM_STATE for capital management data
+            state_response = await self.state_service.get_state(
+                state_type=StateType.SYSTEM_STATE,
+                state_id="capital_allocations",
                 include_metadata=True,
             )
 
-            if not state_data:
-                self._logger.error(
-                    f"No capital state found for recovery point: {recovery_point_id}"
-                )
+            if not state_response:
+                self._logger.error("No capital state found for restoration")
                 return False
+
+            # Extract state data from response
+            state_data = (
+                state_response.get("data") if isinstance(state_response, dict) else state_response
+            )
 
             # Restore configuration
             self.total_capital = Decimal(state_data["total_capital"])
@@ -1435,12 +1468,14 @@ class CapitalService(TransactionalService):
 
             self._logger.info(
                 "Capital state restored successfully",
-                recovery_point_id=recovery_point_id,
                 allocations_restored=len(state_data.get("allocations", [])),
             )
 
             return True
 
+        except StateError as e:
+            self._logger.error(f"State service error restoring capital state: {e}")
+            return False
         except Exception as e:
             self._logger.error(f"Failed to restore capital state: {e}")
             return False

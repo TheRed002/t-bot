@@ -19,9 +19,7 @@ try:
     from packaging.version import LegacyVersion
 except (ImportError, AttributeError):
     # Fallback for older packaging versions or when LegacyVersion doesn't exist
-    class LegacyVersion:
-        """Fallback LegacyVersion class for compatibility"""
-        pass
+    LegacyVersion = None
 
 from src.core.exceptions import StateError
 
@@ -64,7 +62,7 @@ class StateVersion:
                 self.major = parsed.major
                 self.minor = parsed.minor
                 self.patch = parsed.micro
-            elif isinstance(parsed, LegacyVersion):
+            elif LegacyVersion and isinstance(parsed, LegacyVersion):
                 # Handle legacy version strings
                 parts = str(parsed).split(".")
                 self.major = int(parts[0]) if len(parts) > 0 else 0

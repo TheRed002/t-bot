@@ -256,7 +256,7 @@ class EmergencyControls(BaseComponent):
         if not self.emergency_events:
             event = EmergencyEvent(
                 action=EmergencyAction.CANCEL_PENDING_ORDERS,
-                trigger_type=CircuitBreakerType.MANUAL_TRIGGER,
+                trigger_type=CircuitBreakerType.MANUAL,
                 timestamp=datetime.now(timezone.utc),
                 description="Emergency order cancellation",
             )
@@ -330,7 +330,7 @@ class EmergencyControls(BaseComponent):
         if not self.emergency_events:
             event = EmergencyEvent(
                 action=EmergencyAction.CLOSE_ALL_POSITIONS,
-                trigger_type=CircuitBreakerType.MANUAL_TRIGGER,
+                trigger_type=CircuitBreakerType.MANUAL,
                 timestamp=datetime.now(timezone.utc),
                 description="Emergency position closure",
             )

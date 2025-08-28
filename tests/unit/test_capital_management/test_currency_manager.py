@@ -18,7 +18,7 @@ import pytest
 from src.capital_management.currency_manager import CurrencyManager
 from src.core.config import Config
 from src.core.exceptions import ValidationError
-from src.core.types import CurrencyExposure, FundFlow
+from src.core.types.capital import CapitalCurrencyExposure as CurrencyExposure, CapitalFundFlow as FundFlow
 from src.exchanges.base import BaseExchange
 
 
@@ -37,7 +37,13 @@ class TestCurrencyManager:
         return config
 
     @pytest.fixture
-    def currency_manager(self, config):
+    def mock_error_handler(self):
+        """Create mock error handler."""
+        from src.error_handling.error_handler import ErrorHandler
+        return Mock(spec=ErrorHandler)
+
+    @pytest.fixture
+    def currency_manager(self, config, mock_error_handler):
         """Create currency manager instance."""
         # Create mock exchanges
         mock_exchanges = {
@@ -45,7 +51,7 @@ class TestCurrencyManager:
             "okx": Mock(spec=BaseExchange),
             "coinbase": Mock(spec=BaseExchange),
         }
-        return CurrencyManager(config, mock_exchanges)
+        return CurrencyManager(config, mock_exchanges, error_handler=mock_error_handler)
 
     @pytest.fixture
     def sample_currency_exposures(self):

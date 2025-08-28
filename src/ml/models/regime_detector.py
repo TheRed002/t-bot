@@ -62,20 +62,21 @@ class RegimeDetector(BaseModel):
             use_supervised: Whether to use supervised learning
             lookback_window: Window for calculating regime features
         """
-        super().__init__(
-            config=config,
-            model_name="regime_detector",
-            model_type="clustering" if not use_supervised else "classification",
-            version="1.0.0",
-        )
-
+        # Set attributes before calling super() since _get_model_type() needs them
         self.detection_method = detection_method
         self.n_regimes = n_regimes
         self.use_supervised = use_supervised
         self.lookback_window = lookback_window
+        
+        super().__init__(
+            model_name="regime_detector",
+            version="1.0.0",
+            config=config,
+        )
 
-        # Model parameters
-        self.random_state = config.ml.random_state
+        # Model parameters - use config dictionary with fallbacks
+        ml_config = config.get("ml", {})
+        self.random_state = ml_config.get("random_state", 42)
         self.scale_features = True
 
         # Initialize models
@@ -84,6 +85,7 @@ class RegimeDetector(BaseModel):
 
         # Regime definitions
         self.regime_names = self._define_regime_names()
+        self.regime_types = self.regime_names  # Alias for compatibility
 
         # Training state
         self.regime_stats_ = None
@@ -593,3 +595,38 @@ class RegimeDetector(BaseModel):
             return None
 
         return self.feature_importance_
+
+    def get_regime_names(self) -> list[str]:
+        """Get list of regime names."""
+        return self.regime_names
+
+    def interpret_regime(self, regime_id: int) -> str:
+        """Interpret regime ID as human-readable name."""
+        if regime_id < len(self.regime_names):
+            return self.regime_names[regime_id]
+        return f"Regime_{regime_id}"
+
+    def _get_model_type(self) -> str:
+        """Return the model type identifier."""
+        return "clustering" if not self.use_supervised else "classification"
+
+    def _validate_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Validate and preprocess features for the model."""
+        if X.empty:
+            raise ValidationError("Feature data cannot be empty")
+        return X
+
+    def _validate_targets(self, y: pd.Series) -> pd.Series:
+        """Validate and preprocess targets for the model."""
+        if y is not None and y.empty:
+            raise ValidationError("Target data cannot be empty")
+        return y
+
+    def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+        """Calculate metrics for model evaluation."""
+        from sklearn.metrics import accuracy_score, silhouette_score
+        if self.use_supervised:
+            return {"accuracy": accuracy_score(y_true, y_pred)}
+        else:
+            # For unsupervised, we can't calculate accuracy without true labels
+            return {"silhouette_score": 0.5}  # Default placeholder

@@ -72,7 +72,7 @@ class TaskManager:
     - Task metrics and monitoring
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(__name__)
 
         # Task tracking
@@ -499,7 +499,7 @@ class TaskManager:
         if to_remove:
             self.logger.debug(f"Cleaned up {len(to_remove)} old task records")
 
-    def _log_task_stats(self):
+    def _log_task_stats(self) -> None:
         """Log task statistics."""
         state_counts: dict[str, int] = defaultdict(int)
         priority_counts: dict[str, int] = defaultdict(int)

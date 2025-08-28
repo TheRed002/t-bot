@@ -272,8 +272,14 @@ class PerformanceMonitor:
                 # Wait for next update interval
                 await asyncio.sleep(self.update_interval.total_seconds())
 
-            except Exception:
-                # Log error but continue monitoring
+            except asyncio.CancelledError:
+                # Monitoring was cancelled - exit loop
+                break
+            except (AttributeError, KeyError, TypeError) as e:
+                # Strategy data access errors - log and continue monitoring
+                continue
+            except Exception as e:
+                # Unexpected errors - log and continue monitoring
                 continue
 
     async def _update_all_metrics(self) -> None:
@@ -325,8 +331,11 @@ class PerformanceMonitor:
             # Mark as updated
             metrics.last_updated = datetime.now(timezone.utc)
 
-        except Exception:
-            # Log error but don't fail the entire update
+        except (AttributeError, KeyError, TypeError) as e:
+            # Strategy metrics access errors - log but don't fail the entire update
+            pass
+        except Exception as e:
+            # Unexpected errors - log but don't fail the entire update
             pass
 
     def _update_trade_statistics(self, metrics: PerformanceMetrics, trades: list[Trade]) -> None:
@@ -688,7 +697,11 @@ class PerformanceMonitor:
 
             return composite_score
 
-        except Exception:
+        except (ZeroDivisionError, ValueError, TypeError) as e:
+            # Mathematical calculation errors in composite score
+            return 0.0
+        except Exception as e:
+            # Unexpected errors in composite score calculation
             return 0.0
 
     async def get_strategy_performance(self, strategy_name: str) -> dict[str, Any]:
@@ -881,7 +894,11 @@ class PerformanceMonitor:
                 "correlation_matrix": correlation_matrix,
             }
 
-        except Exception:
+        except (KeyError, AttributeError, TypeError) as e:
+            # Strategy comparison data access errors
+            return {}
+        except Exception as e:
+            # Unexpected errors in strategy comparison
             return {}
 
     # Helper methods (implementations would depend on your data access patterns)

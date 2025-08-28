@@ -15,9 +15,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 
-from src.core.config import Config
-from src.core.exceptions import ValidationError
-from src.ml.models.base_model import BaseModel
+from src.core.exceptions import DataValidationError, ModelError, ValidationError
+from src.ml.models.base_model import BaseMLModel
 from src.utils.gpu_utils import gpu_manager
 
 # Try to import GPU-accelerated libraries
@@ -44,7 +43,7 @@ except ImportError:
     CUML_AVAILABLE = False
 
 
-class PricePredictor(BaseModel):
+class PricePredictor(BaseMLModel):
     """
     Price prediction model for financial instruments.
 
@@ -59,12 +58,13 @@ class PricePredictor(BaseModel):
 
     def __init__(
         self,
-        config: Config,
+        config: dict[str, Any] | None = None,
         model_name: str = "price_predictor",
         version: str = "1.0.0",
         algorithm: str = "random_forest",
         prediction_horizon: int = 1,
-        **model_params,
+        correlation_id: str | None = None,
+        **model_params: Any,
     ):
         """
         Initialize the price predictor.
@@ -77,7 +77,7 @@ class PricePredictor(BaseModel):
             prediction_horizon: Steps ahead to predict
             **model_params: Additional model parameters
         """
-        super().__init__(config, model_name, version)
+        super().__init__(model_name, version, config, correlation_id)
 
         self.algorithm = algorithm
         self.prediction_horizon = prediction_horizon
@@ -93,7 +93,7 @@ class PricePredictor(BaseModel):
             }
         )
 
-        self.logger.info(
+        self._logger.info(
             "Price predictor initialized",
             model_name=model_name,
             algorithm=algorithm,
@@ -104,19 +104,19 @@ class PricePredictor(BaseModel):
         """Return the model type identifier."""
         return "price_predictor"
 
-    def _create_model(self, **kwargs):
+    def _create_model(self, **kwargs: Any) -> Any:
         """Create and return the underlying ML model with GPU acceleration if available."""
         # Merge kwargs with stored model_params
         params = {**self.model_params, **kwargs}
 
         # Log GPU availability
         if gpu_manager.gpu_available:
-            self.logger.info(f"GPU acceleration available for {self.algorithm} model")
+            self._logger.info(f"GPU acceleration available for {self.algorithm} model")
 
         if self.algorithm == "linear":
             # Use GPU-accelerated version if available
             if CUML_AVAILABLE and gpu_manager.gpu_available:
-                self.logger.info("Using cuML LinearRegression with GPU acceleration")
+                self._logger.info("Using cuML LinearRegression with GPU acceleration")
                 return cuLinearRegression(**params)
             return LinearRegression(**params)
 
@@ -133,7 +133,7 @@ class PricePredictor(BaseModel):
 
             # Use GPU-accelerated version if available
             if CUML_AVAILABLE and gpu_manager.gpu_available:
-                self.logger.info("Using cuML RandomForestRegressor with GPU acceleration")
+                self._logger.info("Using cuML RandomForestRegressor with GPU acceleration")
                 # Adjust parameters for cuML
                 cuml_params = default_params.copy()
                 cuml_params.pop("min_samples_split", None)
@@ -159,10 +159,10 @@ class PricePredictor(BaseModel):
                 default_params.update(
                     {"tree_method": "gpu_hist", "predictor": "gpu_predictor", "gpu_id": 0}
                 )
-                self.logger.info("Using XGBoost with GPU acceleration")
+                self._logger.info("Using XGBoost with GPU acceleration")
 
             default_params.update(params)
-            return xgb.XGBRegressor(**default_params)
+            return xgb.XGBRegressor(**dict(default_params))
 
         elif self.algorithm == "lightgbm":
             if not LGB_AVAILABLE:
@@ -183,10 +183,10 @@ class PricePredictor(BaseModel):
             # Add GPU parameters if available
             if gpu_manager.gpu_available:
                 default_params.update({"device": "gpu", "gpu_platform_id": 0, "gpu_device_id": 0})
-                self.logger.info("Using LightGBM with GPU acceleration")
+                self._logger.info("Using LightGBM with GPU acceleration")
 
             default_params.update(params)
-            return lgb.LGBMRegressor(**default_params)
+            return lgb.LGBMRegressor(**dict(default_params))
 
         else:
             raise ValidationError(f"Unknown algorithm: {self.algorithm}")
@@ -202,7 +202,7 @@ class PricePredictor(BaseModel):
 
         # Handle missing values
         if X.isnull().any().any():
-            self.logger.warning("Missing values found in features, filling with forward fill")
+            self._logger.warning("Missing values found in features, filling with forward fill")
             X = X.fillna(method="ffill").fillna(method="bfill").fillna(0)
 
         # Handle infinite values
@@ -214,12 +214,12 @@ class PricePredictor(BaseModel):
                 try:
                     X[col] = pd.to_numeric(X[col], errors="coerce")
                 except (ValueError, TypeError) as e:
-                    self.logger.warning(
+                    self._logger.warning(
                         f"Could not convert column {col} to numeric: {e}, dropping column"
                     )
                     X = X.drop(columns=[col])
                 except Exception as e:
-                    self.logger.error(f"Unexpected error converting column {col}: {e}")
+                    self._logger.error(f"Unexpected error converting column {col}: {e}")
                     raise DataValidationError(
                         f"Failed to process column {col}",
                         validation_rule="numeric_conversion",
@@ -238,7 +238,7 @@ class PricePredictor(BaseModel):
 
         # Handle missing values
         if y.isnull().any():
-            self.logger.warning("Missing values found in targets, filling with forward fill")
+            self._logger.warning("Missing values found in targets, filling with forward fill")
             y = y.fillna(method="ffill").fillna(method="bfill").fillna(0)
 
         # Handle infinite values
@@ -256,7 +256,7 @@ class PricePredictor(BaseModel):
                     invalid_fields=["targets"],
                 ) from e
             except Exception as e:
-                self.logger.error(f"Unexpected error in target validation: {e}")
+                self._logger.error(f"Unexpected error in target validation: {e}")
                 raise ModelError(
                     "Critical error in target preprocessing",
                     model_name=self.__class__.__name__,
@@ -298,7 +298,7 @@ class PricePredictor(BaseModel):
             return metrics
 
         except Exception as e:
-            self.logger.error(f"Failed to calculate metrics: {e}")
+            self._logger.error(f"Failed to calculate metrics: {e}")
             return {
                 "mae": float("inf"),
                 "mse": float("inf"),
@@ -307,6 +307,7 @@ class PricePredictor(BaseModel):
                 "directional_accuracy": 0.0,
                 "mape": float("inf"),
             }
+
 
     def create_target_from_prices(
         self, prices: pd.Series, target_type: str = "return", horizon: int | None = None

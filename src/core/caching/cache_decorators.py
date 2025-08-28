@@ -138,7 +138,9 @@ async def _execute_and_cache_async(
 
         return result
 
-    except Exception:
+    except Exception as e:
+        # Log the cache error but don't mask the original exception
+        cache_manager.logger.warning(f"Cache error for key {cache_key}: {e}")
         if config["invalidate_on_error"]:
             await _safe_invalidate_cache(cache_manager, cache_key, config["namespace"])
         raise
@@ -172,8 +174,11 @@ async def _safe_invalidate_cache(cache_manager, cache_key: str, namespace: str):
     """Safely invalidate cache entry."""
     try:
         await cache_manager.delete(cache_key, namespace)
-    except Exception:
-        pass  # Ignore invalidation errors
+    except Exception as e:
+        # Log but ignore invalidation errors to prevent cascading failures
+        import logging
+
+        logging.getLogger(__name__).debug(f"Cache invalidation failed for key {cache_key}: {e}")
 
 
 def _make_func_async(func: Callable) -> Callable:

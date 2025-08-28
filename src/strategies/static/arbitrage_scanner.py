@@ -55,8 +55,7 @@ class ArbitrageOpportunity(BaseStrategy):
             config: Strategy configuration dictionary
         """
         super().__init__(config)
-        self.name = "arbitrage_scanner"
-        self.strategy_type = StrategyType.ARBITRAGE
+        # name and strategy_type are provided by the base class and config
 
         # Scanner-specific configuration
         self.scan_interval = config.get("scan_interval", 100)  # milliseconds
@@ -70,10 +69,12 @@ class ArbitrageOpportunity(BaseStrategy):
         self.triangular_paths = config.get(
             "triangular_paths", [["BTCUSDT", "ETHBTC", "ETHUSDT"], ["BTCUSDT", "BNBBTC", "BNBUSDT"]]
         )
+        self.min_confidence = config.get("min_confidence", 0.5)
 
         # State tracking
         self.active_opportunities: dict[str, dict] = {}
         self.exchange_prices: dict[str, dict[str, MarketData]] = {}
+        self.pair_prices: dict[str, MarketData] = {}  # Add missing attribute for tests
         self.opportunity_history: list[dict] = []
         self.last_scan_time = datetime.now(timezone.utc)
 
@@ -89,6 +90,11 @@ class ArbitrageOpportunity(BaseStrategy):
             symbols=self.symbols,
             scan_interval=self.scan_interval,
         )
+
+    @property
+    def strategy_type(self) -> StrategyType:
+        """Get the strategy type."""
+        return StrategyType.ARBITRAGE
 
     @time_execution
     async def _generate_signals_impl(self, data: MarketData) -> list[Signal]:
@@ -226,11 +232,11 @@ class ArbitrageOpportunity(BaseStrategy):
                     if net_profit_percentage >= float(self.min_profit_threshold * 100):
                         # Create cross-exchange arbitrage signal
                         signal = Signal(
-                            direction=SignalDirection.BUY,
-                            confidence=min(0.9, net_profit_percentage / 2),
-                            timestamp=datetime.now(timezone.utc),
                             symbol=symbol,
-                            strategy_name=self.name,
+                            direction=SignalDirection.BUY,
+                            strength=min(0.9, net_profit_percentage / 2),
+                            timestamp=datetime.now(timezone.utc),
+                            source=self.name,
                             metadata={
                                 "arbitrage_type": "cross_exchange",
                                 "buy_exchange": best_ask_exchange,
@@ -287,9 +293,9 @@ class ArbitrageOpportunity(BaseStrategy):
                 price3 = available_prices[pair3]
 
                 # Calculate triangular arbitrage
-                btc_usdt_rate = price1.price if price1.price else (price1.ask or price1.bid)
-                eth_btc_rate = price2.price if price2.price else (price2.ask or price2.bid)
-                eth_usdt_rate = price3.price if price3.price else (price3.ask or price3.bid)
+                btc_usdt_rate = price1.close if price1.close else (price1.ask or price1.bid)
+                eth_btc_rate = price2.close if price2.close else (price2.ask or price2.bid)
+                eth_usdt_rate = price3.close if price3.close else (price3.ask or price3.bid)
 
                 if not all([btc_usdt_rate, eth_btc_rate, eth_usdt_rate]):
                     continue
@@ -314,11 +320,11 @@ class ArbitrageOpportunity(BaseStrategy):
                 if net_profit_percentage >= float(self.min_profit_threshold * 100):
                     # Create triangular arbitrage signal
                     signal = Signal(
-                        direction=SignalDirection.BUY,
-                        confidence=min(0.9, net_profit_percentage / 2),
-                        timestamp=datetime.now(timezone.utc),
                         symbol=pair1,
-                        strategy_name=self.name,
+                        direction=SignalDirection.BUY,
+                        strength=min(0.9, net_profit_percentage / 2),
+                        timestamp=datetime.now(timezone.utc),
+                        source=self.name,
                         metadata={
                             "arbitrage_type": "triangular",
                             "path": path,
@@ -363,8 +369,8 @@ class ArbitrageOpportunity(BaseStrategy):
             # Validate input prices using utils
             validate_decimal(buy_price)
             validate_decimal(sell_price)
-            validate_price(buy_price, "buy_price")
-            validate_price(sell_price, "sell_price")
+            validate_price(buy_price)
+            validate_price(sell_price)
 
             # Get fee structure from constants and convert to Decimal
             taker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
@@ -432,7 +438,7 @@ class ArbitrageOpportunity(BaseStrategy):
             # Validate input rates using utils
             for rate, name in [(rate1, "rate1"), (rate2, "rate2"), (rate3, "rate3")]:
                 validate_decimal(rate)
-                validate_price(rate, name)
+                validate_price(rate)
 
             # Get fee structure from constants and convert to Decimal
             taker_fee_rate = Decimal(str(GLOBAL_FEE_STRUCTURE.get("taker_fee", 0.001)))  # 0.1%
@@ -516,8 +522,8 @@ class ArbitrageOpportunity(BaseStrategy):
             if hasattr(profit_percentage, "__float__"):
                 profit_percentage = float(profit_percentage)
 
-            # Validate inputs using utils
-            validate_percentage(profit_percentage, "profit_percentage")
+            # Validate inputs using utils - convert to percentage scale (0-100)
+            validate_percentage(profit_percentage * 100, min_val=0.0, max_val=1000.0)
 
             if arbitrage_type not in ["cross_exchange", "triangular"]:
                 raise ValidationError(f"Invalid arbitrage type: {arbitrage_type}")
@@ -617,7 +623,7 @@ class ArbitrageOpportunity(BaseStrategy):
         """
         try:
             # Basic signal validation
-            if not signal or signal.confidence < self.config.min_confidence:
+            if not signal or signal.strength < self.min_confidence:
                 return False
 
             # Validate arbitrage-specific metadata
@@ -692,7 +698,8 @@ class ArbitrageOpportunity(BaseStrategy):
             if not signal:
                 raise ArbitrageError("Invalid signal for arbitrage position sizing")
 
-            validate_percentage(signal.confidence, "signal_confidence")
+            # Convert to percentage scale and validate
+            validate_percentage(signal.strength * 100, min_val=0.0, max_val=100.0)
 
             # Get configuration parameters
             total_capital = Decimal(str(self.config.parameters.get("total_capital", 10000)))
@@ -712,7 +719,9 @@ class ArbitrageOpportunity(BaseStrategy):
             profit_potential = Decimal(str(metadata.get("net_profit_percentage", 0))) / Decimal(
                 "100"
             )
-            validate_percentage(profit_potential * 100, "profit_potential")
+            # Convert to percentage and validate
+            profit_potential_pct = float(profit_potential * 100)
+            validate_percentage(profit_potential_pct, min_val=0.0, max_val=1000.0)
 
             # Adjust for arbitrage type
             arbitrage_type = metadata.get("arbitrage_type", "cross_exchange")
@@ -726,11 +735,11 @@ class ArbitrageOpportunity(BaseStrategy):
             arbitrage_multiplier = min(
                 Decimal("2.0"), profit_potential * Decimal("10")
             )  # Scale with profit
-            confidence_multiplier = Decimal(str(signal.confidence))
+            strength_multiplier = Decimal(str(signal.strength))
 
             # Calculate final position size with proper validation
             position_size = round_to_precision_decimal(
-                base_size * confidence_multiplier * arbitrage_multiplier * type_multiplier,
+                base_size * strength_multiplier * arbitrage_multiplier * type_multiplier,
                 PRECISION_LEVELS["position"],
             )
 
@@ -741,14 +750,14 @@ class ArbitrageOpportunity(BaseStrategy):
 
             # Validate final result
             validate_decimal(position_size)
-            validate_quantity(position_size, "position_size")
+            validate_quantity(position_size)
 
             self.logger.debug(
                 "Arbitrage scanner position size calculated",
                 strategy=self.name,
                 base_size=format_currency(base_size),
                 profit_potential=format_percentage(profit_potential * 100),
-                confidence=format_percentage(signal.confidence * 100),
+                strength=format_percentage(signal.strength * 100),
                 arbitrage_type=arbitrage_type,
                 type_multiplier=type_multiplier,
                 final_size=format_currency(position_size),
@@ -760,7 +769,7 @@ class ArbitrageOpportunity(BaseStrategy):
             self.logger.error(
                 "Arbitrage scanner position size calculation failed",
                 strategy=self.name,
-                signal_confidence=signal.confidence if signal else None,
+                signal_strength=signal.strength if signal else None,
                 error=str(e),
             )
             raise ArbitrageError(f"Arbitrage scanner position size calculation failed: {e!s}")
@@ -784,7 +793,7 @@ class ArbitrageOpportunity(BaseStrategy):
             # Check execution timeout
             metadata = position.metadata
             execution_timeout = metadata.get("execution_timeout", self.max_execution_time)
-            position_age = (datetime.now(timezone.utc) - position.timestamp).total_seconds() * 1000
+            position_age = (datetime.now(timezone.utc) - position.opened_at).total_seconds() * 1000
 
             if position_age > execution_timeout:
                 self.logger.info(
@@ -908,9 +917,9 @@ class ArbitrageOpportunity(BaseStrategy):
             price3 = available_prices[pair3]
 
             # Calculate triangular arbitrage
-            btc_usdt_rate = price1.price if price1.price else (price1.ask or price1.bid)
-            eth_btc_rate = price2.price if price2.price else (price2.ask or price2.bid)
-            eth_usdt_rate = price3.price if price3.price else (price3.ask or price3.bid)
+            btc_usdt_rate = price1.close if price1.close else (price1.ask or price1.bid)
+            eth_btc_rate = price2.close if price2.close else (price2.ask or price2.bid)
+            eth_usdt_rate = price3.close if price3.close else (price3.ask or price3.bid)
 
             if not all([btc_usdt_rate, eth_btc_rate, eth_usdt_rate]):
                 return None
@@ -932,11 +941,11 @@ class ArbitrageOpportunity(BaseStrategy):
             # Check if profit meets threshold
             if net_profit_percentage >= float(self.min_profit_threshold * 100):
                 return Signal(
-                    direction=SignalDirection.BUY,
-                    confidence=min(0.9, net_profit_percentage / 2),
-                    timestamp=datetime.now(timezone.utc),
                     symbol=pair1,
-                    strategy_name=self.name,
+                    direction=SignalDirection.BUY,
+                    strength=min(0.9, net_profit_percentage / 2),
+                    timestamp=datetime.now(timezone.utc),
+                    source=self.name,
                     metadata={
                         "arbitrage_type": "triangular",
                         "path": path,

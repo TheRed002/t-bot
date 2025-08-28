@@ -29,7 +29,7 @@ from src.core.types import (
 from src.database.connection import get_db_session
 from src.database.models import (
     BotInstance,
-    StrategyConfig,
+    Strategy,
     Trade,
     User,
 )
@@ -284,7 +284,7 @@ class DatabaseSeeder:
 
     async def seed_strategies(
         self, session: AsyncSession, bots: list[BotInstance]
-    ) -> list[StrategyConfig]:
+    ) -> list[Strategy]:
         """
         Seed strategy data.
 
@@ -303,8 +303,8 @@ class DatabaseSeeder:
             bot = bots[i % len(bots)]
 
             # Check if strategy already exists
-            stmt = select(StrategyConfig).where(
-                StrategyConfig.name == strategy_data["name"],
+            stmt = select(Strategy).where(
+                Strategy.name == strategy_data["name"],
             )
             result = await session.execute(stmt)
             existing_strategy = result.scalar_one_or_none()
@@ -314,8 +314,8 @@ class DatabaseSeeder:
                 strategies.append(existing_strategy)
                 continue
 
-            # Create new strategy config
-            strategy = StrategyConfig(
+            # Create new strategy
+            strategy = Strategy(
                 id=str(uuid.uuid4()),
                 name=strategy_data["name"],
                 strategy_type=strategy_data["strategy_type"].value,
@@ -399,7 +399,6 @@ class DatabaseSeeder:
 
             for i in range(10):
                 trade_time = base_time + timedelta(hours=i * 12)
-                i % 3 != 0  # 70% profitable trades
 
                 trade = Trade(
                     id=str(uuid.uuid4()),

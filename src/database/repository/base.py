@@ -248,7 +248,7 @@ class BaseRepository(RepositoryInterface[T]):
 
     async def begin(self):
         """Begin transaction."""
-        return self.session.begin()
+        return await self.session.begin()
 
     async def commit(self):
         """Commit transaction."""
@@ -257,7 +257,7 @@ class BaseRepository(RepositoryInterface[T]):
     async def rollback(self):
         """Rollback transaction."""
         await self.session.rollback()
-    
+
     # Methods to comply with core Repository protocol
     async def list(
         self,
@@ -267,20 +267,15 @@ class BaseRepository(RepositoryInterface[T]):
     ) -> list[T]:
         """
         List entities with optional pagination and filtering.
-        
+
         This is an alias for get_all() to match core protocol interface.
         """
-        return await self.get_all(
-            filters=filters,
-            order_by=None,
-            limit=limit,
-            offset=offset
-        )
-    
+        return await self.get_all(filters=filters, order_by=None, limit=limit, offset=offset)
+
     async def get_by_id(self, entity_id: Any) -> T | None:
         """
         Get entity by ID.
-        
+
         This is an alias for get() to match core protocol interface.
         """
         return await self.get(entity_id)

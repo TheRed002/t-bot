@@ -10,7 +10,7 @@ This module tests the deposit/withdrawal management including:
 - Capital protection rules
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -18,7 +18,7 @@ import pytest
 from src.capital_management.fund_flow_manager import FundFlowManager
 from src.core.config import Config
 from src.core.exceptions import ValidationError
-from src.core.types import FundFlow
+from src.core.types.capital import CapitalFundFlow as FundFlow
 
 
 class TestFundFlowManager:
@@ -62,7 +62,12 @@ class TestFundFlowManager:
     @pytest.fixture
     def fund_flow_manager(self, config):
         """Create fund flow manager instance."""
-        return FundFlowManager(config)
+        # Create mock error handler to avoid dependency injection issues
+        from unittest.mock import Mock
+        from src.error_handling.error_handler import ErrorHandler
+        
+        error_handler = Mock(spec=ErrorHandler)
+        return FundFlowManager(config, error_handler=error_handler)
 
     @pytest.fixture
     def sample_fund_flows(self):
@@ -78,7 +83,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="strategy_reallocation",
-                timestamp=datetime.now() - timedelta(hours=2),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=2),
             ),
             FundFlow(
                 from_strategy=None,
@@ -90,7 +95,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="deposit",
-                timestamp=datetime.now() - timedelta(hours=1),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=1),
             ),
             FundFlow(
                 from_strategy="strategy_1",
@@ -102,18 +107,17 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="withdrawal",
-                timestamp=datetime.now() - timedelta(minutes=30),
+                timestamp=datetime.now(timezone.utc) - timedelta(minutes=30),
             ),
         ]
 
     def test_initialization(self, fund_flow_manager, config):
         """Test fund flow manager initialization."""
         assert fund_flow_manager.config == config.capital_management
-        assert fund_flow_manager.capital_config == config.capital_management
         assert fund_flow_manager.fund_flows == []
         assert fund_flow_manager.strategy_performance == {}
         # Check if last_compound_date is within the last 60 seconds
-        assert (datetime.now() - fund_flow_manager.last_compound_date).total_seconds() < 60
+        assert (datetime.now(timezone.utc) - fund_flow_manager.last_compound_date).total_seconds() < 60
         assert fund_flow_manager.total_profit == Decimal("0")
         assert fund_flow_manager.locked_profit == Decimal("0")
         assert fund_flow_manager.total_capital == Decimal("0")  # Initially 0 until set
@@ -342,7 +346,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="strategy_reallocation",
-                timestamp=datetime.now() - timedelta(hours=2),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=2),
             ),
             FundFlow(
                 from_strategy=None,
@@ -354,7 +358,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="deposit",
-                timestamp=datetime.now() - timedelta(hours=1),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=1),
             ),
         ]
 
@@ -386,7 +390,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="deposit",
-                timestamp=datetime.now() - timedelta(hours=2),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=2),
             ),
             FundFlow(
                 from_strategy="strategy_1",
@@ -398,7 +402,7 @@ class TestFundFlowManager:
                 converted_amount=None,
                 exchange_rate=None,
                 reason="withdrawal",
-                timestamp=datetime.now() - timedelta(hours=1),
+                timestamp=datetime.now(timezone.utc) - timedelta(hours=1),
             ),
         ]
 

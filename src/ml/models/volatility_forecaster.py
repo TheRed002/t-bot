@@ -64,21 +64,22 @@ class VolatilityForecaster(BaseModel):
             volatility_window: Window size for volatility calculation
         """
         super().__init__(
-            config=config,
             model_name="volatility_forecaster",
-            model_type="regression",
             version="1.0.0",
+            config=config,
         )
 
         self.algorithm = algorithm
         self.volatility_method = volatility_method
         self.forecast_horizon = forecast_horizon
         self.volatility_window = volatility_window
+        self.lookback_period = volatility_window  # Alias for compatibility
 
-        # Model parameters
-        self.use_log_returns = config.ml.use_log_returns
-        self.scaling_method = config.ml.scaling_method
-        self.random_state = config.ml.random_state
+        # Model parameters - use config dictionary with fallbacks
+        ml_config = config.get("ml", {})
+        self.use_log_returns = ml_config.get("use_log_returns", True)
+        self.scaling_method = ml_config.get("scaling_method", "standard")
+        self.random_state = ml_config.get("random_state", 42)
 
         # Initialize the underlying model and scaler
         self.model = self._create_model()
@@ -641,3 +642,28 @@ class VolatilityForecaster(BaseModel):
         except Exception as e:
             self.logger.error(f"Volatility regime prediction failed: {e}")
             raise ValidationError(f"Volatility regime prediction failed: {e}")
+
+    def _get_model_type(self) -> str:
+        """Return the model type identifier."""
+        return "regression"
+
+    def _validate_features(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Validate and preprocess features for the model."""
+        if X.empty:
+            raise ValidationError("Feature data cannot be empty")
+        return X
+
+    def _validate_targets(self, y: pd.Series) -> pd.Series:
+        """Validate and preprocess targets for the model."""
+        if y.empty:
+            raise ValidationError("Target data cannot be empty")
+        return y
+
+    def _calculate_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+        """Calculate metrics for model evaluation."""
+        from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+        return {
+            "mse": mean_squared_error(y_true, y_pred),
+            "mae": mean_absolute_error(y_true, y_pred),
+            "r2": r2_score(y_true, y_pred),
+        }

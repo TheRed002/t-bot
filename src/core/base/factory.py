@@ -389,8 +389,9 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                 if hasattr(instance, "cleanup"):
                     try:
                         instance.cleanup()
-                    except Exception:
-                        pass  # Ignore cleanup errors
+                    except Exception as e:
+                        # Log cleanup errors for debugging but don't fail the overall cleanup
+                        self.logger.debug(f"Failed to cleanup factory instance: {e}")
 
             raise CreationError(f"Batch creation failed in factory {self._name}: {e}") from e
 
@@ -468,8 +469,9 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                             dependency_type=param_type.__name__,
                         )
 
-                    except Exception:
-                        # Dependency injection is optional
+                    except Exception as e:
+                        # Dependency injection is optional, log for debugging
+                        self.logger.debug(f"Failed to inject dependency {param_name}: {e}")
                         continue
 
             return kwargs
@@ -684,7 +686,8 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                     if not info:
                         return HealthStatus.DEGRADED
 
-                except Exception:
+                except Exception as e:
+                    self.logger.debug(f"Failed to check creator info for {name}: {e}")
                     return HealthStatus.DEGRADED
 
             # Check creation error rate

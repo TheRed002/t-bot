@@ -19,6 +19,9 @@ from coinbase.rest import RESTClient
 from src.core.config import Config
 from src.core.exceptions import ExchangeConnectionError, ExecutionError, ValidationError
 
+# Logger setup
+from src.core.logging import get_logger
+
 # Logger is provided by BaseExchange (via BaseComponent)
 # MANDATORY: Import from P-001
 from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, OrderType
@@ -26,9 +29,6 @@ from src.core.types import OrderRequest, OrderResponse, OrderSide, OrderStatus, 
 # MANDATORY: Import from P-002A
 from src.error_handling.error_handler import ErrorHandler
 from src.utils import ValidationFramework, normalize_price, round_to_precision
-
-# Logger setup
-from src.core.logging import get_logger
 
 # Note: Using generic Exception handling for REST API as no specific
 # exceptions are documented
@@ -57,7 +57,7 @@ class CoinbaseOrderManager:
         self.config = config
         self.exchange_name = exchange_name
         self.error_handler = ErrorHandler(config)
-        
+
         # Initialize logger
         self.logger = get_logger(self.__class__.__module__)
 
@@ -461,9 +461,7 @@ class CoinbaseOrderManager:
         # Configure order based on type
         if order.order_type == OrderType.MARKET:
             coinbase_order["order_configuration"] = {
-                "market_market_ioc": {
-                    "quote_size": str(round_to_precision(order.quantity, 8))
-                }
+                "market_market_ioc": {"quote_size": str(round_to_precision(order.quantity, 8))}
             }
         elif order.order_type == OrderType.LIMIT:
             coinbase_order["order_configuration"] = {

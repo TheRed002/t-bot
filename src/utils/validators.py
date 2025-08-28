@@ -87,8 +87,10 @@ def validate_ttl(ttl: int | float | None, max_ttl: int = 86400) -> int:
 
     try:
         ttl_int = int(ttl)
-    except (ValueError, TypeError, OverflowError):
-        raise ValidationError(f"TTL must be convertible to integer, got: {type(ttl).__name__}")
+    except (ValueError, TypeError, OverflowError) as e:
+        raise ValidationError(
+            f"TTL must be convertible to integer, got: {type(ttl).__name__}"
+        ) from e
 
     if ttl_int < 0:
         raise ValidationError(f"TTL must be non-negative, got: {ttl_int}")
@@ -160,8 +162,8 @@ def validate_financial_range(
             decimal_value = value
         else:
             decimal_value = Decimal(str(value))
-    except (ValueError, InvalidOperation, OverflowError):
-        raise ValidationError(f"Invalid {field_name}: cannot convert to Decimal")
+    except (ValueError, InvalidOperation, OverflowError) as e:
+        raise ValidationError(f"Invalid {field_name}: cannot convert to Decimal") from e
 
     if not decimal_value.is_finite():
         raise ValidationError(f"{field_name} must be finite, got: {decimal_value}")
@@ -255,7 +257,7 @@ def validate_type_conversion(
             else:
                 raise ValidationError(f"Cannot convert {type(value).__name__} to Decimal")
 
-        elif target_type == float:
+        elif target_type is float:
             if isinstance(value, float):
                 if not math.isfinite(value):
                     raise ValidationError(f"Invalid float {field_name}: {value}")
@@ -270,7 +272,7 @@ def validate_type_conversion(
             else:
                 return float(value)  # Let Python handle the conversion
 
-        elif target_type == int:
+        elif target_type is int:
             if isinstance(value, int):
                 return value
             elif isinstance(value, (float, Decimal)):
@@ -292,13 +294,15 @@ def validate_type_conversion(
             return target_type(value)
 
     except (ValueError, TypeError, OverflowError, InvalidOperation) as e:
-        raise ValidationError(f"Failed to convert {field_name} to {target_type.__name__}: {e}")
+        raise ValidationError(
+            f"Failed to convert {field_name} to {target_type.__name__}: {e}"
+        ) from e
 
 
 def validate_market_conditions(
     price: Decimal | float,
-    volume: Decimal | float = None,
-    spread: Decimal | float = None,
+    volume: Decimal | float | None = None,
+    spread: Decimal | float | None = None,
     symbol: str = "unknown",
 ) -> dict[str, Decimal]:
     """
@@ -649,10 +653,27 @@ def validate_decimal(value: Any) -> Decimal:
     Raises:
         ValidationError: If value cannot be converted to Decimal
     """
-    # Use ValidationService internally to avoid duplication
-    from src.utils.validation.service import get_validation_service
+    # Direct implementation to avoid async dependency
+    if value is None:
+        raise ValidationError("Cannot convert None to Decimal")
 
-    return get_validation_service().validate_decimal(value)
+    try:
+        if isinstance(value, str):
+            # Handle empty strings
+            if not value.strip():
+                raise ValidationError("Cannot convert empty string to Decimal")
+            return Decimal(value.strip())
+        elif isinstance(value, (int, float)):
+            return Decimal(str(value))
+        elif isinstance(value, Decimal):
+            return value
+        else:
+            # Try to convert to string first
+            return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError) as e:
+        raise ValidationError(
+            f"Cannot convert {type(value).__name__} value '{value}' to Decimal: {e}"
+        ) from e
 
 
 def validate_positive_number(value: Any) -> float:

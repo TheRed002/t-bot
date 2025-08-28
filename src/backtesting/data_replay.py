@@ -42,9 +42,9 @@ class DataReplayManager(BaseComponent):
 
     def __init__(
         self,
-        config: Config = None,
+        config: Config | None = None,
         cache_size: int = 10000,
-    ):
+    ) -> None:
         """
         Initialize data replay manager.
 
@@ -55,7 +55,14 @@ class DataReplayManager(BaseComponent):
         # Convert Config to dict if needed
         config_dict = None
         if config:
-            config_dict = config.dict() if hasattr(config, "dict") else {}
+            if hasattr(config, "model_dump"):
+                config_dict = config.model_dump()
+            elif hasattr(config, "dict"):
+                config_dict = config.dict()
+            elif isinstance(config, dict):
+                config_dict = config
+            else:
+                config_dict = {}
 
         super().__init__(name="DataReplayManager", config=config_dict)
         self.config = config
@@ -64,9 +71,13 @@ class DataReplayManager(BaseComponent):
         # Data storage
         self._data_cache: dict[str, pd.DataFrame] = {}
         # Use self._config from BaseComponent, with proper fallback
-        self._max_cache_size: int = self._config.get(
-            "max_cache_size", 1000
-        )  # Max dataframes in cache
+        if self._config and isinstance(self._config, dict):
+            max_cache_size_value = self._config.get("max_cache_size", 1000)
+            self._max_cache_size = (
+                int(max_cache_size_value) if isinstance(max_cache_size_value, int | str) else 1000
+            )
+        else:
+            self._max_cache_size = 1000  # Max dataframes in cache
         self._current_index: dict[str, int] = {}
         self._subscribers: list[Callable] = []
 
@@ -133,9 +144,12 @@ class DataReplayManager(BaseComponent):
 
                 self.logger.info(f"Loaded data for {symbol}", records=len(data))
 
+            except DataError:
+                # Re-raise DataError as-is
+                raise
             except Exception as e:
                 self.logger.error(f"Failed to load data for {symbol}", error=str(e))
-                raise DataError(f"Failed to load data for {symbol}: {e!s}")
+                raise DataError(f"Failed to load data for {symbol}: {e!s}") from e
 
     async def _load_from_csv(
         self, symbol: str, start_date: datetime, end_date: datetime
@@ -148,12 +162,22 @@ class DataReplayManager(BaseComponent):
         if not os.path.exists(file_path):
             raise DataError(f"CSV file not found: {file_path}")
 
-        df = pd.read_csv(file_path, parse_dates=["timestamp"], index_col="timestamp")
+        df = None
+        try:
+            df = pd.read_csv(file_path, parse_dates=["timestamp"], index_col="timestamp")
 
-        # Filter by date range
-        df = df[(df.index >= start_date) & (df.index <= end_date)]
+            # Filter by date range
+            df = df[(df.index >= start_date) & (df.index <= end_date)]
 
-        return df
+            return df
+        except (FileNotFoundError, pd.errors.EmptyDataError, pd.errors.ParserError) as e:
+            raise DataError(f"Failed to load CSV file {file_path}: {e}") from e
+        except Exception as e:
+            raise DataError(f"Failed to load CSV file {file_path}: {e}") from e
+        finally:
+            # pandas handles file closing automatically, but ensure proper cleanup
+            if df is not None:
+                pass  # DataFrame cleanup is handled by pandas/garbage collector
 
     async def _generate_synthetic_data(
         self,
@@ -370,7 +394,7 @@ class DataReplayManager(BaseComponent):
         import random
 
         # Group data by periods (e.g., daily)
-        period_data = {}
+        period_data: dict[Any, dict[str, Any]] = {}
 
         for symbol, data in self._data_cache.items():
             # Group by date
@@ -416,6 +440,7 @@ class DataReplayManager(BaseComponent):
                     callback(timestamp, data)
             except Exception as e:
                 self.logger.error("Subscriber callback failed", error=str(e))
+                # Don't re-raise to avoid breaking other subscribers
 
     def get_current_data(self, symbol: str) -> pd.Series | None:
         """Get current data point for a symbol."""
@@ -470,3 +495,19 @@ class DataReplayManager(BaseComponent):
             }
 
         return stats
+
+    def cleanup(self) -> None:
+        """Cleanup data replay manager resources."""
+        try:
+            # Clear all cached data
+            self._data_cache.clear()
+            self._current_index.clear()
+            self._subscribers.clear()
+
+            # Reset state
+            self._current_timestamp = None
+
+            self.logger.info("DataReplayManager cleanup completed")
+        except Exception as e:
+            self.logger.error(f"DataReplayManager cleanup error: {e}")
+            # Don't re-raise cleanup errors to avoid masking original issues

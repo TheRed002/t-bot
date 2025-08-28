@@ -513,7 +513,8 @@ class ErrorMetrics:
                 for key, value in func_metrics.items():
                     total_size += sys.getsizeof(key) + sys.getsizeof(value)
             return total_size / (1024 * 1024)  # Convert to MB
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to calculate metrics memory size: {e}")
             return 0.0
 
     def reset_metrics(self, function_name: str | None = None) -> None:
@@ -825,8 +826,13 @@ class UniversalErrorHandler:
 
     def _cleanup_task_done_callback(self, task: asyncio.Task) -> None:
         """Handle cleanup task completion."""
-        if task.exception():
-            self.logger.error(f"Cleanup task failed: {task.exception()}")
+        try:
+            exception = task.exception()
+            if exception and not isinstance(exception, asyncio.CancelledError):
+                self.logger.error(f"Cleanup task failed: {exception}")
+        except asyncio.CancelledError:
+            # Task was cancelled, this is expected during shutdown
+            pass
         # Reset task reference so it can be restarted if needed
         with self._cleanup_task_lock:
             if self._cleanup_task is task:

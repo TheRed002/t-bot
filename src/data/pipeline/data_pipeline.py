@@ -29,8 +29,9 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
+from src.core.exceptions import DataError, DataValidationError
 from src.core.types import MarketData
 
 # Import from P-002A error handling
@@ -125,33 +126,46 @@ class DataTransformation:
     async def normalize_prices(data: MarketData) -> MarketData:
         """Normalize price data for consistency."""
         try:
+            # Use standardized decimal precision from utils
+            from src.utils.decimal_utils import normalize_decimal_precision
+
             # Ensure price precision for financial calculations
             if data.price:
-                data.price = Decimal(str(data.price)).quantize(Decimal("0.00000001"))
+                data.price = normalize_decimal_precision(data.price)
 
             if data.high_price:
-                data.high_price = Decimal(str(data.high_price)).quantize(Decimal("0.00000001"))
+                data.high_price = normalize_decimal_precision(data.high_price)
 
             if data.low_price:
-                data.low_price = Decimal(str(data.low_price)).quantize(Decimal("0.00000001"))
+                data.low_price = normalize_decimal_precision(data.low_price)
 
             if data.open_price:
-                data.open_price = Decimal(str(data.open_price)).quantize(Decimal("0.00000001"))
+                data.open_price = normalize_decimal_precision(data.open_price)
 
             if data.bid:
-                data.bid = Decimal(str(data.bid)).quantize(Decimal("0.00000001"))
+                data.bid = normalize_decimal_precision(data.bid)
 
             if data.ask:
-                data.ask = Decimal(str(data.ask)).quantize(Decimal("0.00000001"))
+                data.ask = normalize_decimal_precision(data.ask)
 
             # Normalize volume
             if data.volume:
-                data.volume = Decimal(str(data.volume)).quantize(Decimal("0.00000001"))
+                data.volume = normalize_decimal_precision(data.volume)
 
             return data
 
         except Exception as e:
-            raise ValueError(f"Price normalization failed: {e}") from e
+            from src.core.exceptions import DataProcessingError
+
+            # Use consistent error propagation
+            raise DataProcessingError(
+                f"Price normalization failed for {data.symbol}",
+                processing_step="normalize_prices",
+                input_data_sample=data.model_dump(),
+                data_source="market_data",
+                data_type="MarketData",
+                pipeline_stage="transformation",
+            ) from e
 
     @staticmethod
     async def validate_ohlc_consistency(data: MarketData) -> bool:
@@ -700,13 +714,13 @@ class EnhancedDataPipeline(BaseComponent):
 
         if not validation_result.is_valid:
             self.metrics.records_rejected += 1
-            raise ValueError(f"Data validation failed: {validation_result.errors}")
+            raise DataValidationError(f"Data validation failed: {validation_result.errors}")
 
     async def _process_cleansing(self, record: PipelineRecord) -> None:
         """Process data cleansing stage."""
         # Remove or fix data anomalies
         if record.data.price and float(record.data.price) <= 0:
-            raise ValueError("Invalid price data cannot be cleansed")
+            raise DataValidationError("Invalid price data cannot be cleansed")
 
         # Handle missing data
         if not record.data.timestamp:
@@ -729,21 +743,52 @@ class EnhancedDataPipeline(BaseComponent):
             record.validation_result
             and record.validation_result.quality_score < self.quality_config["min_quality_score"]
         ):
-            raise ValueError(f"Quality score too low: {record.validation_result.quality_score}")
-
-    async def _process_storage(self, record: PipelineRecord) -> None:
-        """Process data storage stage."""
-        if self.data_service:
-            success = await self.data_service.store_market_data(
-                record.data,
-                exchange=getattr(record.data, "exchange", "unknown"),
-                validate=False,  # Already validated
+            raise DataValidationError(
+                f"Quality score too low: {record.validation_result.quality_score}"
             )
 
-            if not success:
-                raise ValueError("Data storage failed")
+    async def _process_storage(self, record: PipelineRecord) -> None:
+        """Process data storage stage with consistent interface patterns."""
+        if self.data_service:
+            try:
+                # Use consistent storage interface with streaming service
+                success = await self.data_service.store_market_data(
+                    record.data,
+                    exchange=getattr(record.data, "exchange", "unknown"),
+                    validate=False,  # Already validated
+                    source="pipeline",  # Consistent source labeling
+                )
+
+                if not success:
+                    # Use consistent error propagation pattern
+                    raise DataError(
+                        "Pipeline data storage failed",
+                        error_code="PIPELINE_STORAGE_001",
+                        data_type="market_data",
+                        context={
+                            "record_id": record.record_id,
+                            "symbol": getattr(record.data, "symbol", "unknown"),
+                            "stage": record.stage.value,
+                        },
+                    )
+            except Exception as e:
+                # Re-raise with consistent error context
+                if not isinstance(e, DataError):
+                    raise DataError(
+                        f"Storage operation failed for record {record.record_id}",
+                        error_code="PIPELINE_STORAGE_002",
+                        data_type="market_data",
+                        context={"record_id": record.record_id},
+                    ) from e
+                raise
         else:
-            self.logger.warning("DataService not available for storage")
+            # Use consistent error for missing dependencies
+            raise DataError(
+                "DataService not available for storage",
+                error_code="PIPELINE_DEPENDENCY_001",
+                data_type="service_dependency",
+                context={"required_service": "DataService", "record_id": record.record_id},
+            )
 
     async def _process_indexing(self, record: PipelineRecord) -> None:
         """Process data indexing stage."""

@@ -118,7 +118,9 @@ class FeatureEngineeringService(BaseService):
 
         # Parse feature engineering configuration
         fe_config_dict = (config or {}).get("feature_engineering", {})
-        self.fe_config = FeatureEngineeringConfig(**fe_config_dict)
+        self.fe_config = FeatureEngineeringConfig(
+            **(fe_config_dict if isinstance(fe_config_dict, dict) else {})
+        )
 
         # Service dependencies - resolved during startup
         self.data_service: Any = None
@@ -254,7 +256,7 @@ class FeatureEngineeringService(BaseService):
                 self._logger.debug("Feature selection skipped - no target data provided")
 
             # Preprocessing if requested
-            preprocessing_info = {}
+            preprocessing_info: dict[str, Any] = {}
             if request.enable_preprocessing and self.fe_config.enable_preprocessing:
                 features_df, preprocessing_info = await self._preprocess_features(
                     features_df, request.scaling_method
@@ -310,7 +312,7 @@ class FeatureEngineeringService(BaseService):
                 feature_set=FeatureSet(
                     feature_set_id="error",
                     symbol=request.symbol,
-                    features=[],
+                    features={},
                     feature_names=[],
                     computation_time_ms=computation_time,
                 ),
@@ -915,7 +917,7 @@ class FeatureEngineeringService(BaseService):
         """Validate feature engineering service configuration."""
         try:
             fe_config_dict = config.get("feature_engineering", {})
-            FeatureEngineeringConfig(**fe_config_dict)
+            FeatureEngineeringConfig(**(fe_config_dict if isinstance(fe_config_dict, dict) else {}))
             return True
         except Exception as e:
             self._logger.error(

@@ -174,7 +174,7 @@ class CapitalManagementConfig(BaseModel):
         available = self.get_available_capital()
         return available * Decimal(str(self.min_allocation_pct))
 
-    def model_dump(self) -> dict[str, Any]:
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
         """Export configuration as dictionary."""
         return {
             "total_capital": self.total_capital,

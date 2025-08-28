@@ -164,7 +164,8 @@ class DatabaseConnectionManager:
                 from sqlalchemy.pool import NullPool
 
                 use_null_pool = bool(os.getenv("PYTEST_CURRENT_TEST"))
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to determine test environment: {e}")
                 use_null_pool = False
 
             async_pool_class = NullPool if use_null_pool else AsyncAdaptedQueuePool
@@ -336,7 +337,8 @@ class DatabaseConnectionManager:
             try:
                 yield session
                 await session.commit()
-            except Exception:
+            except Exception as e:
+                logger.error(f"Session error occurred: {e}")
                 try:
                     await session.rollback()
                 except Exception as rollback_error:
@@ -377,39 +379,59 @@ class DatabaseConnectionManager:
 
     async def close(self) -> None:
         """Close all database connections."""
+        health_task = None
+        async_engine = None
+        sync_engine = None
+        redis_client = None
+        influxdb_client = None
+
         try:
-            if self._health_check_task:
-                self._health_check_task.cancel()
+            # Store references before clearing
+            health_task = self._health_check_task
+            async_engine = self.async_engine
+            sync_engine = self.sync_engine
+            redis_client = self.redis_client
+            influxdb_client = self.influxdb_client
+
+            if health_task:
+                health_task.cancel()
                 try:
-                    await self._health_check_task
+                    await health_task
                 except asyncio.CancelledError:
                     pass
 
-            if self.async_engine:
+            if async_engine:
                 # Close all connections in the pool gracefully
-                await self.async_engine.dispose()
+                await async_engine.dispose()
 
-            if self.sync_engine:
-                self.sync_engine.dispose()
+            if sync_engine:
+                sync_engine.dispose()
 
-            if self.redis_client:
+            if redis_client:
                 # Use proper shutdown for redis.asyncio client (Redis>=5)
                 try:
-                    await self.redis_client.aclose()
+                    await redis_client.aclose()
                 except AttributeError:
                     # Fallback for older versions
                     try:
-                        await self.redis_client.close()
-                    except Exception:
-                        pass
+                        await redis_client.close()
+                    except Exception as close_error:
+                        logger.warning(f"Failed to close Redis connection: {close_error}")
 
-            if self.influxdb_client:
-                self.influxdb_client.close()
+            if influxdb_client:
+                influxdb_client.close()
 
             logger.info("Database connections closed")
 
         except Exception as e:
             logger.error("Error closing database connections", error=str(e))
+        finally:
+            # Ensure all references are cleared even if close operations fail
+            self._health_check_task = None
+            self.async_engine = None
+            self.sync_engine = None
+            self.redis_client = None
+            self.influxdb_client = None
 
     def is_healthy(self) -> bool:
         """Check if all database connections are healthy."""
@@ -486,7 +508,10 @@ async def close_database() -> None:
     """Close global database connections."""
     global _connection_manager
     if _connection_manager:
-        await _connection_manager.close()
+        try:
+            await _connection_manager.close()
+        finally:
+            _connection_manager = None
 
 
 @asynccontextmanager

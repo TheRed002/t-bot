@@ -717,7 +717,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             # Check connection pool health
             if self._connection_pool:
                 # Test connection
-                async with self.get_connection() as conn:
+                async with await self.get_connection() as conn:
                     # Simple connectivity test
                     await asyncio.wait_for(self._test_connection(conn), timeout=5.0)
 

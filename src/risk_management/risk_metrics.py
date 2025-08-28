@@ -33,7 +33,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from src.core.base.component import BaseComponent
-from src.error_handling.context import ErrorContext
 from src.core.config.main import Config
 from src.core.exceptions import RiskManagementError, ValidationError
 
@@ -180,7 +179,7 @@ class RiskCalculator(BaseComponent):
 
         except Exception as e:
             self.logger.error("Risk metrics calculation failed", error=str(e))
-            raise RiskManagementError(f"Risk metrics calculation failed: {e}")
+            raise RiskManagementError(f"Risk metrics calculation failed: {e}") from e
 
     @time_execution
     async def _create_empty_risk_metrics(self) -> RiskMetrics:

@@ -24,6 +24,13 @@ Dependencies:
 # Keep __init__ lightweight to avoid importing heavy dependencies at import time.
 # Import only quality submodules and core services here; other submodules should be imported directly
 # by consumers as needed to avoid circular or heavy dependency trees (e.g., exchanges).
+from .factory import DataServiceFactory
+from .interfaces import (
+    DataCacheInterface,
+    DataServiceInterface, 
+    DataStorageInterface,
+    DataValidatorInterface,
+)
 from .quality.cleaning import DataCleaner
 from .quality.monitoring import QualityMonitor
 from .quality.validation import DataValidator
@@ -32,8 +39,14 @@ from .services import DataIntegrationService, DataService
 __all__ = [
     "DataCleaner",
     # Data Services
-    "DataIntegrationService",
+    "DataIntegrationService", 
     "DataService",
+    "DataServiceFactory",
+    # Data Interfaces
+    "DataServiceInterface",
+    "DataStorageInterface",
+    "DataCacheInterface", 
+    "DataValidatorInterface",
     # Data Quality Management
     "DataValidator",
     "QualityMonitor",

@@ -178,136 +178,137 @@ class StateMonitor:
         """Check if portfolio balances are synchronized across systems."""
         # Using centralized decimal utilities from utils module
 
-        from src.database.manager import DatabaseManager
-        from src.database.redis_client import RedisClient
-        from src.exchanges.factory import ExchangeFactory
-
         try:
             discrepancies = []
             is_consistent = True
             severity = "low"
 
-            # Initialize data sources
-            db_manager = DatabaseManager(self.config)
-            redis_client = RedisClient(self.config)
+            # Use service layer for data access
+            try:
+                from src.database.service import DatabaseService
+                from src.exchanges.factory import ExchangeFactory
 
-            # Get balances from database
-            db_balances = {}
-            async with db_manager.get_session() as session:
-                result = await session.execute(
-                    "SELECT currency, available, locked, exchange FROM balances WHERE is_active = true"
-                )
-                for row in result:
-                    key = f"{row.exchange}:{row.currency}"
+                db_service = DatabaseService(self.config)
+                await db_service.initialize()
+
+                # Get balances from database via service
+                db_balances = {}
+                balance_records = await db_service.get_active_balances()
+                for balance in balance_records:
+                    key = f"{balance['exchange']}:{balance['currency']}"
                     db_balances[key] = {
-                        "available": self._safe_to_decimal(row.available, "balance.available"),
-                        "locked": self._safe_to_decimal(row.locked, "balance.locked"),
-                        "total": self._safe_to_decimal(row.available, "balance.available")
-                        + self._safe_to_decimal(row.locked, "balance.locked"),
+                        "available": self._safe_to_decimal(
+                            balance["available"], "balance.available"
+                        ),
+                        "locked": self._safe_to_decimal(balance["locked"], "balance.locked"),
+                        "total": self._safe_to_decimal(balance["available"], "balance.available")
+                        + self._safe_to_decimal(balance["locked"], "balance.locked"),
                     }
 
-            # Get balances from Redis cache
-            cache_balances = {}
-            cache_keys = await redis_client.keys("balance:*")
-            for key in cache_keys:
-                balance_data = await redis_client.get(key)
-                if balance_data:
-                    parts = key.split(":")
-                    if len(parts) >= 3:
-                        cache_key = f"{parts[1]}:{parts[2]}"
-                        cache_balances[cache_key] = {
-                            "available": self._safe_to_decimal(
-                                balance_data.get("available", 0), "cache.available"
-                            ),
-                            "locked": self._safe_to_decimal(
-                                balance_data.get("locked", 0), "cache.locked"
-                            ),
-                            "total": self._safe_to_decimal(
-                                balance_data.get("total", 0), "cache.total"
-                            ),
-                        }
+                # Get balances from Redis cache via service
+                cache_balances = {}
+                cached_balance_records = await db_service.get_cached_balances()
+                for balance in cached_balance_records:
+                    key = f"{balance['exchange']}:{balance['currency']}"
+                    cache_balances[key] = {
+                        "available": self._safe_to_decimal(
+                            balance.get("available", 0), "cache.available"
+                        ),
+                        "locked": self._safe_to_decimal(balance.get("locked", 0), "cache.locked"),
+                        "total": self._safe_to_decimal(balance.get("total", 0), "cache.total"),
+                    }
 
-            # Get balances from exchanges (if connected)
-            exchange_balances = {}
-            try:
-                for exchange_name in getattr(self.config, "exchange", {}).get(
-                    "enabled_exchanges", []
-                ):
-                    exchange = ExchangeFactory.create(exchange_name, self.config)
-                    if hasattr(exchange, "get_account_balance"):
-                        balance = await exchange.get_account_balance()
-                        for currency, amounts in balance.items():
-                            key = f"{exchange_name}:{currency}"
-                            exchange_balances[key] = {
-                                "available": self._safe_to_decimal(
-                                    amounts.get("free", 0), "exchange.available"
-                                ),
-                                "locked": self._safe_to_decimal(
-                                    amounts.get("used", 0), "exchange.locked"
-                                ),
-                                "total": self._safe_to_decimal(
-                                    amounts.get("total", 0), "exchange.total"
-                                ),
-                            }
-            except Exception as e:
-                self.logger.warning(f"Could not fetch exchange balances: {e}")
+                # Get balances from exchanges (if connected)
+                exchange_balances = {}
+                try:
+                    for exchange_name in getattr(self.config, "exchange", {}).get(
+                        "enabled_exchanges", []
+                    ):
+                        exchange = ExchangeFactory.create(exchange_name, self.config)
+                        if hasattr(exchange, "get_account_balance"):
+                            balance = await exchange.get_account_balance()
+                            for currency, amounts in balance.items():
+                                key = f"{exchange_name}:{currency}"
+                                exchange_balances[key] = {
+                                    "available": self._safe_to_decimal(
+                                        amounts.get("free", 0), "exchange.available"
+                                    ),
+                                    "locked": self._safe_to_decimal(
+                                        amounts.get("used", 0), "exchange.locked"
+                                    ),
+                                    "total": self._safe_to_decimal(
+                                        amounts.get("total", 0), "exchange.total"
+                                    ),
+                                }
+                except Exception as e:
+                    self.logger.warning(f"Could not fetch exchange balances: {e}")
 
-            # Compare balances across sources
-            all_keys = (
-                set(db_balances.keys()) | set(cache_balances.keys()) | set(exchange_balances.keys())
-            )
-
-            for key in all_keys:
-                db_val = db_balances.get(key, {"total": self._safe_to_decimal("0", "default")})
-                cache_val = cache_balances.get(
-                    key, {"total": self._safe_to_decimal("0", "default")}
-                )
-                exchange_val = exchange_balances.get(
-                    key, {"total": self._safe_to_decimal("0", "default")}
+                # Compare balances across sources
+                all_keys = (
+                    set(db_balances.keys())
+                    | set(cache_balances.keys())
+                    | set(exchange_balances.keys())
                 )
 
-                # Check for discrepancies (with tolerance for rounding)
-                tolerance = self._safe_to_decimal("0.00000001", "tolerance")
-
-                if db_val["total"] > 0 or cache_val["total"] > 0 or exchange_val["total"] > 0:
-                    max_diff = max(
-                        abs(db_val["total"] - cache_val["total"]),
-                        (
-                            abs(db_val["total"] - exchange_val["total"])
-                            if exchange_val["total"] > 0
-                            else self._safe_to_decimal("0", "default")
-                        ),
-                        (
-                            abs(cache_val["total"] - exchange_val["total"])
-                            if exchange_val["total"] > 0
-                            else self._safe_to_decimal("0", "default")
-                        ),
+                for key in all_keys:
+                    db_val = db_balances.get(key, {"total": self._safe_to_decimal("0", "default")})
+                    cache_val = cache_balances.get(
+                        key, {"total": self._safe_to_decimal("0", "default")}
+                    )
+                    exchange_val = exchange_balances.get(
+                        key, {"total": self._safe_to_decimal("0", "default")}
                     )
 
-                    if max_diff > tolerance:
-                        discrepancy = {
-                            "type": "balance_mismatch",
-                            "key": key,
-                            "db_balance": str(db_val["total"]),
-                            "cache_balance": str(cache_val["total"]),
-                            "exchange_balance": (
-                                str(exchange_val["total"]) if exchange_val["total"] > 0 else "N/A"
-                            ),
-                            "max_difference": str(max_diff),
-                        }
-                        discrepancies.append(discrepancy)
+                    # Check for discrepancies (with tolerance for rounding)
+                    tolerance = self._safe_to_decimal("0.00000001", "tolerance")
 
-                        # Determine severity based on difference
-                        if max_diff > self._safe_to_decimal("1.0", "severity_threshold"):
-                            severity = "critical"
-                            is_consistent = False
-                        elif max_diff > self._safe_to_decimal("0.1", "severity_threshold"):
-                            severity = "high" if severity != "critical" else severity
-                            is_consistent = False
-                        elif max_diff > self._safe_to_decimal("0.01", "severity_threshold"):
-                            severity = (
-                                "medium" if severity not in ["critical", "high"] else severity
-                            )
+                    if db_val["total"] > 0 or cache_val["total"] > 0 or exchange_val["total"] > 0:
+                        max_diff = max(
+                            abs(db_val["total"] - cache_val["total"]),
+                            (
+                                abs(db_val["total"] - exchange_val["total"])
+                                if exchange_val["total"] > 0
+                                else self._safe_to_decimal("0", "default")
+                            ),
+                            (
+                                abs(cache_val["total"] - exchange_val["total"])
+                                if exchange_val["total"] > 0
+                                else self._safe_to_decimal("0", "default")
+                            ),
+                        )
+
+                        if max_diff > tolerance:
+                            discrepancy = {
+                                "type": "balance_mismatch",
+                                "key": key,
+                                "db_balance": str(db_val["total"]),
+                                "cache_balance": str(cache_val["total"]),
+                                "exchange_balance": (
+                                    str(exchange_val["total"])
+                                    if exchange_val["total"] > 0
+                                    else "N/A"
+                                ),
+                                "max_difference": str(max_diff),
+                            }
+                            discrepancies.append(discrepancy)
+
+                            # Determine severity based on difference
+                            if max_diff > self._safe_to_decimal("1.0", "severity_threshold"):
+                                severity = "critical"
+                                is_consistent = False
+                            elif max_diff > self._safe_to_decimal("0.1", "severity_threshold"):
+                                severity = "high" if severity != "critical" else severity
+                                is_consistent = False
+                            elif max_diff > self._safe_to_decimal("0.01", "severity_threshold"):
+                                severity = (
+                                    "medium" if severity not in ["critical", "high"] else severity
+                                )
+
+            except Exception as e:
+                self.logger.warning(f"Error during balance comparison: {e}")
+                discrepancies.append({"type": "comparison_error", "error": str(e)})
+                severity = "high"
+                is_consistent = False
 
             self.logger.info(
                 f"Portfolio balance sync check completed. Found {len(discrepancies)} discrepancies"
@@ -326,58 +327,66 @@ class StateMonitor:
                 "discrepancies": [{"error": str(e), "type": "balance_sync_error"}],
                 "severity": "high",
             }
+        finally:
+            # Clean up service connections
+            try:
+                if "db_service" in locals():
+                    await db_service.cleanup()
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup database service: {e}")
 
     async def _check_position_quantity_sync(self) -> dict[str, Any]:
         """Check if position quantities are synchronized across systems."""
         # Using centralized decimal utilities from utils module
-
-        from src.database.manager import DatabaseManager
-        from src.database.redis_client import RedisClient
-        from src.exchanges.factory import ExchangeFactory
-        from src.risk_management.base import RiskManager
 
         try:
             discrepancies = []
             is_consistent = True
             severity = "low"
 
-            # Initialize data sources
-            db_manager = DatabaseManager(self.config)
-            redis_client = RedisClient(self.config)
-            risk_manager = RiskManager(self.config)
+            # Use service layer for data access
+            try:
+                from src.database.service import DatabaseService
+                from src.exchanges.factory import ExchangeFactory
+                from src.risk_management.service import RiskManagementService
 
-            # Get positions from database
-            db_positions = {}
-            async with db_manager.get_session() as session:
-                result = await session.execute(
-                    "SELECT symbol, quantity, side, exchange, entry_price FROM positions WHERE status = 'open'"
-                )
-                for row in result:
-                    key = f"{row.exchange}:{row.symbol}:{row.side}"
+                db_service = DatabaseService(self.config)
+                risk_service = RiskManagementService(self.config)
+                await db_service.initialize()
+                await risk_service.initialize()
+
+                # Get positions from database via service
+                db_positions = {}
+                position_records = await db_service.get_open_positions()
+                for position in position_records:
+                    key = f"{position['exchange']}:{position['symbol']}:{position['side']}"
                     db_positions[key] = {
-                        "quantity": self._safe_to_decimal(row.quantity, "position.quantity"),
+                        "quantity": self._safe_to_decimal(
+                            position["quantity"], "position.quantity"
+                        ),
                         "entry_price": self._safe_to_decimal(
-                            row.entry_price, "position.entry_price"
+                            position["entry_price"], "position.entry_price"
                         ),
                     }
 
-            # Get positions from Redis cache
-            cache_positions = {}
-            position_keys = await redis_client.keys("position:*")
-            for key in position_keys:
-                position_data = await redis_client.get(key)
-                if position_data and position_data.get("status") == "open":
-                    parts = key.split(":")
-                    if len(parts) >= 4:
-                        cache_key = f"{parts[1]}:{parts[2]}:{parts[3]}"
-                        cache_positions[cache_key] = {
+                # Get positions from cache via service
+                cache_positions = {}
+                cached_position_records = await db_service.get_cached_positions()
+                for position in cached_position_records:
+                    if position.get("status") == "open":
+                        key = f"{position['exchange']}:{position['symbol']}:{position['side']}"
+                        cache_positions[key] = {
                             "quantity": self._safe_to_decimal(
-                                position_data.get("quantity", 0), "cache.position.quantity"
+                                position.get("quantity", 0), "cache.position.quantity"
                             ),
                             "entry_price": self._safe_to_decimal(
-                                position_data.get("entry_price", 0), "cache.position.entry_price"
+                                position.get("entry_price", 0), "cache.position.entry_price"
                             ),
                         }
+            except Exception as e:
+                self.logger.error(f"Error initializing data sources for position sync: {e}")
+                db_positions = {}
+                cache_positions = {}
 
             # Get positions from exchanges (if connected)
             exchange_positions = {}
@@ -401,11 +410,11 @@ class StateMonitor:
             except Exception as e:
                 self.logger.warning(f"Could not fetch exchange positions: {e}")
 
-            # Get positions from risk management system
+            # Get positions from risk management system via service
             risk_positions = {}
             try:
-                risk_state = await risk_manager.get_current_state()
-                for pos_key, pos_data in risk_state.get("positions", {}).items():
+                risk_position_records = await risk_service.get_current_positions()
+                for pos_key, pos_data in risk_position_records.items():
                     risk_positions[pos_key] = {
                         "quantity": self._safe_to_decimal(
                             pos_data.get("quantity", 0), "risk.position.quantity"
@@ -498,6 +507,15 @@ class StateMonitor:
                 "discrepancies": [{"error": str(e), "type": "position_sync_error"}],
                 "severity": "high",
             }
+        finally:
+            # Clean up service connections
+            try:
+                if "db_service" in locals():
+                    await db_service.cleanup()
+                if "risk_service" in locals():
+                    await risk_service.cleanup()
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup services during position sync: {e}")
 
     async def _check_order_status_sync(self) -> dict[str, Any]:
         """Check if order statuses are synchronized across systems."""
@@ -508,7 +526,7 @@ class StateMonitor:
             # Engine)
 
             # Simulate order status check
-            discrepancies = []
+            discrepancies: list[dict[str, Any]] = []
             is_consistent = True
             severity = "low"
 
@@ -538,43 +556,39 @@ class StateMonitor:
         """Check if risk limits are being complied with."""
         # Using centralized decimal utilities from utils module
 
-        from src.database.manager import DatabaseManager
-        from src.risk_management.base import RiskManager
-        from src.risk_management.portfolio_limits import PortfolioLimits
-
         try:
             discrepancies = []
             is_consistent = True
             severity = "low"
 
-            # Initialize risk management components
-            risk_manager = RiskManager(self.config)
-            PortfolioLimits(self.config)
-            db_manager = DatabaseManager(self.config)
+            # Use service layer for data access
+            try:
+                from src.database.service import DatabaseService
+                from src.risk_management.service import RiskManagementService
 
-            # Get current risk metrics
-            risk_state = await risk_manager.get_current_state()
-            risk_metrics = risk_state.get("metrics", {})
+                db_service = DatabaseService(self.config)
+                risk_service = RiskManagementService(self.config)
+                await db_service.initialize()
+                await risk_service.initialize()
 
-            # Check position size limits
-            async with db_manager.get_session() as session:
-                result = await session.execute(
-                    """SELECT symbol, quantity, side, exchange, entry_price, current_price
-                       FROM positions WHERE status = 'open'"""
+                # Get current risk metrics via service
+                risk_metrics = await risk_service.get_current_risk_metrics()
+
+                # Check position size limits via service
+                open_positions = await db_service.get_open_positions_with_prices()
+                max_position_size = Decimal(
+                    str(getattr(self.config, "risk", {}).get("max_position_size", 1000000))
                 )
 
-                for row in result:
-                    position_value = Decimal(str(row.quantity)) * Decimal(
-                        str(row.current_price or row.entry_price)
-                    )
-                    max_position_size = Decimal(
-                        str(getattr(self.config, "risk", {}).get("max_position_size", 1000000))
+                for position in open_positions:
+                    position_value = Decimal(str(position["quantity"])) * Decimal(
+                        str(position["current_price"] or position["entry_price"])
                     )
 
                     if position_value > max_position_size:
                         discrepancy = {
                             "type": "position_size_limit_exceeded",
-                            "symbol": row.symbol,
+                            "symbol": position["symbol"],
                             "position_value": str(position_value),
                             "max_allowed": str(max_position_size),
                             "excess": str(position_value - max_position_size),
@@ -583,56 +597,57 @@ class StateMonitor:
                         severity = "critical"
                         is_consistent = False
 
-            # Check portfolio exposure limits
-            total_exposure = Decimal(str(risk_metrics.get("total_exposure", 0)))
-            max_exposure = Decimal(
-                str(getattr(self.config, "risk", {}).get("max_portfolio_exposure", 100000))
-            )
-
-            if total_exposure > max_exposure:
-                discrepancy = {
-                    "type": "portfolio_exposure_limit_exceeded",
-                    "total_exposure": str(total_exposure),
-                    "max_allowed": str(max_exposure),
-                    "excess": str(total_exposure - max_exposure),
-                }
-                discrepancies.append(discrepancy)
-                severity = "critical"
-                is_consistent = False
-
-            # Check leverage limits
-            current_leverage = Decimal(str(risk_metrics.get("current_leverage", 1)))
-            max_leverage = Decimal(str(getattr(self.config, "risk", {}).get("max_leverage", 10)))
-
-            if current_leverage > max_leverage:
-                discrepancy = {
-                    "type": "leverage_limit_exceeded",
-                    "current_leverage": str(current_leverage),
-                    "max_allowed": str(max_leverage),
-                    "excess": str(current_leverage - max_leverage),
-                }
-                discrepancies.append(discrepancy)
-                severity = "critical"
-                is_consistent = False
-
-            # Check stop loss compliance
-            async with db_manager.get_session() as session:
-                result = await session.execute(
-                    """SELECT COUNT(*) as count FROM positions
-                       WHERE status = 'open' AND stop_loss_price IS NULL"""
+                # Check portfolio exposure limits
+                total_exposure = Decimal(str(risk_metrics.get("total_exposure", 0)))
+                max_exposure = Decimal(
+                    str(getattr(self.config, "risk", {}).get("max_portfolio_exposure", 100000))
                 )
-                positions_without_stop = result.scalar()
 
-                if positions_without_stop > 0:
+                if total_exposure > max_exposure:
                     discrepancy = {
-                        "type": "stop_loss_missing",
-                        "positions_without_stop_loss": positions_without_stop,
-                        "severity": "high",
+                        "type": "portfolio_exposure_limit_exceeded",
+                        "total_exposure": str(total_exposure),
+                        "max_allowed": str(max_exposure),
+                        "excess": str(total_exposure - max_exposure),
                     }
                     discrepancies.append(discrepancy)
-                    if severity not in ["critical"]:
-                        severity = "high"
+                    severity = "critical"
                     is_consistent = False
+
+                # Check leverage limits
+                current_leverage = Decimal(str(risk_metrics.get("current_leverage", 1)))
+                max_leverage = Decimal(
+                    str(getattr(self.config, "risk", {}).get("max_leverage", 10))
+                )
+
+                if current_leverage > max_leverage:
+                    discrepancy = {
+                        "type": "leverage_limit_exceeded",
+                        "current_leverage": str(current_leverage),
+                        "max_allowed": str(max_leverage),
+                        "excess": str(current_leverage - max_leverage),
+                    }
+                    discrepancies.append(discrepancy)
+                    severity = "critical"
+                    is_consistent = False
+
+            except Exception as e:
+                self.logger.error(f"Error initializing risk management components: {e}")
+                # Continue with default values
+
+            # Check stop loss compliance via service
+            positions_without_stop = await db_service.count_positions_without_stop_loss()
+
+            if positions_without_stop > 0:
+                discrepancy = {
+                    "type": "stop_loss_missing",
+                    "positions_without_stop_loss": positions_without_stop,
+                    "severity": "high",
+                }
+                discrepancies.append(discrepancy)
+                if severity not in ["critical"]:
+                    severity = "high"
+                is_consistent = False
 
             # Check maximum drawdown limits
             current_drawdown = Decimal(str(risk_metrics.get("current_drawdown", 0)))
@@ -700,6 +715,15 @@ class StateMonitor:
                 "discrepancies": [{"error": str(e), "type": "risk_compliance_error"}],
                 "severity": "critical",
             }
+        finally:
+            # Clean up service connections
+            try:
+                if "db_service" in locals():
+                    await db_service.cleanup()
+                if "risk_service" in locals():
+                    await risk_service.cleanup()
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup services during risk compliance check: {e}")
 
     async def reconcile_state(self, component: str, discrepancies: list[dict[str, Any]]) -> bool:
         """Attempt to reconcile state discrepancies."""
@@ -757,97 +781,90 @@ class StateMonitor:
         """Reconcile portfolio balance discrepancies."""
         # Using centralized decimal utilities from utils module
 
-        from src.database.influxdb_client import InfluxDBClientWrapper
-        from src.database.manager import DatabaseManager
-        from src.database.redis_client import RedisClient
-        from src.exchanges.factory import ExchangeFactory
-
         try:
             self.logger.info("Reconciling portfolio balances", discrepancy_count=len(discrepancies))
 
-            db_manager = DatabaseManager(self.config)
-            redis_client = RedisClient(self.config)
-            influx_client = InfluxDBClientWrapper(self.config)
+            # Use service layer for data access
+            try:
+                from src.database.service import DatabaseService
+                from src.exchanges.factory import ExchangeFactory
 
-            reconciled_count = 0
+                db_service = DatabaseService(self.config)
+                await db_service.initialize()
 
-            for discrepancy in discrepancies:
-                if discrepancy.get("type") != "balance_mismatch":
-                    continue
+                reconciled_count = 0
 
-                key = discrepancy.get("key", "")
-                if not key:
-                    continue
+                for discrepancy in discrepancies:
+                    if discrepancy.get("type") != "balance_mismatch":
+                        continue
 
-                parts = key.split(":")
-                if len(parts) < 2:
-                    continue
+                    key = discrepancy.get("key", "")
+                    if not key:
+                        continue
 
-                exchange_name = parts[0]
-                currency = parts[1]
+                    parts = key.split(":")
+                    if len(parts) < 2:
+                        continue
 
-                # Get truth from exchange (most reliable source)
-                try:
-                    exchange = ExchangeFactory.create(exchange_name, self.config)
-                    if hasattr(exchange, "get_account_balance"):
-                        balance = await exchange.get_account_balance()
-                        if currency in balance:
-                            true_balance = {
-                                "available": Decimal(str(balance[currency].get("free", 0))),
-                                "locked": Decimal(str(balance[currency].get("used", 0))),
-                                "total": Decimal(str(balance[currency].get("total", 0))),
-                            }
+                    exchange_name = parts[0]
+                    currency = parts[1]
 
-                            # Update database
-                            # Note: Using str() to preserve Decimal precision in database
-                            async with db_manager.get_session() as session:
-                                await session.execute(
-                                    """UPDATE balances
-                                       SET available = :available, locked = :locked,
-                                           updated_at = NOW()
-                                       WHERE exchange = :exchange AND currency = :currency""",
-                                    {
+                    # Get truth from exchange (most reliable source)
+                    try:
+                        exchange = ExchangeFactory.create(exchange_name, self.config)
+                        if hasattr(exchange, "get_account_balance"):
+                            balance = await exchange.get_account_balance()
+                            if currency in balance:
+                                true_balance = {
+                                    "available": Decimal(str(balance[currency].get("free", 0))),
+                                    "locked": Decimal(str(balance[currency].get("used", 0))),
+                                    "total": Decimal(str(balance[currency].get("total", 0))),
+                                }
+
+                                # Update database via service
+                                await db_service.update_balance(
+                                    exchange=exchange_name,
+                                    currency=currency,
+                                    available=str(true_balance["available"]),
+                                    locked=str(true_balance["locked"]),
+                                )
+
+                                # Update cache via service
+                                await db_service.update_balance_cache(
+                                    exchange=exchange_name,
+                                    currency=currency,
+                                    balance_data={
                                         "available": str(true_balance["available"]),
                                         "locked": str(true_balance["locked"]),
-                                        "exchange": exchange_name,
-                                        "currency": currency,
+                                        "total": str(true_balance["total"]),
+                                        "updated_at": datetime.now(timezone.utc).isoformat(),
                                     },
                                 )
-                                await session.commit()
 
-                            # Update Redis cache
-                            cache_key = f"balance:{exchange_name}:{currency}"
-                            await redis_client.set(
-                                cache_key,
-                                {
-                                    "available": str(true_balance["available"]),
-                                    "locked": str(true_balance["locked"]),
-                                    "total": str(true_balance["total"]),
-                                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                                },
-                                expiry=300,  # 5 minutes cache
-                            )
+                                # Update metrics via service
+                                await db_service.record_balance_reconciliation(
+                                    exchange=exchange_name,
+                                    currency=currency,
+                                    balance_data={
+                                        "available": str(true_balance["available"]),
+                                        "locked": str(true_balance["locked"]),
+                                        "total": str(true_balance["total"]),
+                                    },
+                                )
 
-                            # Update InfluxDB metrics
-                            await influx_client.write_point(
-                                measurement="balance_reconciliation",
-                                tags={"exchange": exchange_name, "currency": currency},
-                                fields={
-                                    "available": str(true_balance["available"]),
-                                    "locked": str(true_balance["locked"]),
-                                    "total": str(true_balance["total"]),
-                                },
-                            )
+                                reconciled_count += 1
+                                self.logger.info(
+                                    f"Reconciled balance for {key}",
+                                    true_balance=str(true_balance["total"]),
+                                )
 
-                            reconciled_count += 1
-                            self.logger.info(
-                                f"Reconciled balance for {key}",
-                                true_balance=str(true_balance["total"]),
-                            )
+                    except Exception as e:
+                        self.logger.error(f"Failed to reconcile balance for {key}: {e}")
+                        continue
 
-                except Exception as e:
-                    self.logger.error(f"Failed to reconcile balance for {key}: {e}")
-                    continue
+            except Exception as e:
+                self.logger.error(f"Error during reconciliation setup: {e}")
+                reconciled_count = 0
 
             success = reconciled_count == len(
                 [d for d in discrepancies if d.get("type") == "balance_mismatch"]
@@ -865,130 +882,123 @@ class StateMonitor:
             return success
 
         except Exception as e:
-            self.logger.error("Portfolio balance reconciliation failed", error=str(e))
+            self.logger.error(f"Failed to reconcile portfolio balances: {e}")
             return False
+        finally:
+            # Clean up service connections
+            try:
+                if "db_service" in locals():
+                    await db_service.cleanup()
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup services during balance reconciliation: {e}")
 
     async def _reconcile_position_quantities(self, discrepancies: list[dict[str, Any]]) -> bool:
         """Reconcile position quantity discrepancies."""
-
-        from src.database.manager import DatabaseManager
-        from src.database.redis_client import RedisClient
-        from src.exchanges.factory import ExchangeFactory
-        from src.risk_management.base import RiskManager
 
         try:
             self.logger.info(
                 "Reconciling position quantities", discrepancy_count=len(discrepancies)
             )
 
-            db_manager = DatabaseManager(self.config)
-            redis_client = RedisClient(self.config)
-            risk_manager = RiskManager(self.config)
+            # Use service layer for data access
+            try:
+                from src.database.service import DatabaseService
+                from src.exchanges.factory import ExchangeFactory
+                from src.risk_management.service import RiskManagementService
 
-            reconciled_count = 0
+                db_service = DatabaseService(self.config)
+                risk_service = RiskManagementService(self.config)
+                await db_service.initialize()
+                await risk_service.initialize()
 
-            for discrepancy in discrepancies:
-                if discrepancy.get("type") != "position_quantity_mismatch":
-                    continue
+                reconciled_count = 0
 
-                key = discrepancy.get("key", "")
-                if not key:
-                    continue
+                for discrepancy in discrepancies:
+                    if discrepancy.get("type") != "position_quantity_mismatch":
+                        continue
 
-                parts = key.split(":")
-                if len(parts) < 3:
-                    continue
+                    key = discrepancy.get("key", "")
+                    if not key:
+                        continue
 
-                exchange_name = parts[0]
-                symbol = parts[1]
-                side = parts[2]
+                    parts = key.split(":")
+                    if len(parts) < 3:
+                        continue
 
-                # Get truth from exchange
-                try:
-                    exchange = ExchangeFactory.create(exchange_name, self.config)
-                    if hasattr(exchange, "get_positions"):
-                        positions = await exchange.get_positions()
+                    exchange_name = parts[0]
+                    symbol = parts[1]
+                    side = parts[2]
 
-                        true_position = None
-                        for pos in positions:
-                            if pos.symbol == symbol and pos.side == side:
-                                true_position = pos
-                                break
+                    # Get truth from exchange
+                    try:
+                        exchange = ExchangeFactory.create(exchange_name, self.config)
+                        if hasattr(exchange, "get_positions"):
+                            positions = await exchange.get_positions()
 
-                        if true_position:
-                            # Update database
-                            async with db_manager.get_session() as session:
-                                await session.execute(
-                                    """UPDATE positions
-                                       SET quantity = :quantity,
-                                           current_price = :current_price,
-                                           updated_at = NOW()
-                                       WHERE exchange = :exchange
-                                         AND symbol = :symbol
-                                         AND side = :side
-                                         AND status = 'open'""",
-                                    {
+                            true_position = None
+                            for pos in positions:
+                                if pos.symbol == symbol and pos.side == side:
+                                    true_position = pos
+                                    break
+
+                            if true_position:
+                                # Update database via service
+                                await db_service.update_position(
+                                    exchange=exchange_name,
+                                    symbol=symbol,
+                                    side=side,
+                                    quantity=str(true_position.quantity),
+                                    current_price=str(true_position.current_price),
+                                )
+
+                                # Update cache via service
+                                await db_service.update_position_cache(
+                                    exchange=exchange_name,
+                                    symbol=symbol,
+                                    side=side,
+                                    position_data={
                                         "quantity": str(true_position.quantity),
+                                        "entry_price": str(true_position.entry_price),
                                         "current_price": str(true_position.current_price),
-                                        "exchange": exchange_name,
-                                        "symbol": symbol,
-                                        "side": side,
+                                        "status": "open",
+                                        "updated_at": datetime.now(timezone.utc).isoformat(),
                                     },
                                 )
-                                await session.commit()
 
-                            # Update Redis cache
-                            cache_key = f"position:{exchange_name}:{symbol}:{side}"
-                            await redis_client.set(
-                                cache_key,
-                                {
-                                    "quantity": str(true_position.quantity),
-                                    "entry_price": str(true_position.entry_price),
-                                    "current_price": str(true_position.current_price),
-                                    "status": "open",
-                                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                                },
-                                expiry=300,
-                            )
-
-                            # Update risk management system
-                            await risk_manager.update_position(
-                                symbol=symbol,
-                                quantity=true_position.quantity,
-                                side=side,
-                                exchange=exchange_name,
-                            )
-
-                            reconciled_count += 1
-                            self.logger.info(
-                                f"Reconciled position for {key}",
-                                true_quantity=str(true_position.quantity),
-                            )
-                        else:
-                            # Position closed on exchange, update local state
-                            async with db_manager.get_session() as session:
-                                await session.execute(
-                                    """UPDATE positions
-                                       SET status = 'closed',
-                                           closed_at = NOW()
-                                       WHERE exchange = :exchange
-                                         AND symbol = :symbol
-                                         AND side = :side
-                                         AND status = 'open'""",
-                                    {"exchange": exchange_name, "symbol": symbol, "side": side},
+                                # Update risk management system via service
+                                await risk_service.update_position(
+                                    symbol=symbol,
+                                    quantity=true_position.quantity,
+                                    side=side,
+                                    exchange=exchange_name,
                                 )
-                                await session.commit()
 
-                            # Remove from cache
-                            cache_key = f"position:{exchange_name}:{symbol}:{side}"
-                            await redis_client.delete(cache_key)
+                                reconciled_count += 1
+                                self.logger.info(
+                                    f"Reconciled position for {key}",
+                                    true_quantity=str(true_position.quantity),
+                                )
+                            else:
+                                # Position closed on exchange, update local state via service
+                                await db_service.close_position(
+                                    exchange=exchange_name, symbol=symbol, side=side
+                                )
 
-                            reconciled_count += 1
-                            self.logger.info(f"Marked position {key} as closed")
+                                # Remove from cache via service
+                                await db_service.remove_position_from_cache(
+                                    exchange=exchange_name, symbol=symbol, side=side
+                                )
 
-                except Exception as e:
-                    self.logger.error(f"Failed to reconcile position for {key}: {e}")
-                    continue
+                                reconciled_count += 1
+                                self.logger.info(f"Marked position {key} as closed")
+
+                    except Exception as e:
+                        self.logger.error(f"Failed to reconcile position for {key}: {e}")
+                        continue
+
+            except Exception as e:
+                self.logger.error(f"Error during position reconciliation setup: {e}")
+                reconciled_count = 0
 
             success = reconciled_count == len(
                 [d for d in discrepancies if d.get("type") == "position_quantity_mismatch"]
@@ -1005,137 +1015,125 @@ class StateMonitor:
 
             return success
 
-        except Exception as e:
-            self.logger.error("Position quantity reconciliation failed", error=str(e))
-            return False
+        finally:
+            # Clean up service connections
+            try:
+                if "db_service" in locals():
+                    await db_service.cleanup()
+                if "risk_service" in locals():
+                    await risk_service.cleanup()
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup services during position reconciliation: {e}")
 
     async def _reconcile_order_statuses(self, discrepancies: list[dict[str, Any]]) -> bool:
         """Reconcile order status discrepancies."""
-        from src.database.manager import DatabaseManager
-        from src.database.redis_client import RedisClient
-        from src.exchanges.factory import ExchangeFactory
-        from src.execution.order_manager import OrderManager
 
         try:
             self.logger.info("Reconciling order statuses", discrepancy_count=len(discrepancies))
 
-            db_manager = DatabaseManager(self.config)
-            redis_client = RedisClient(self.config)
-            order_manager = OrderManager(self.config)
+            # Use service layer for data access
+            try:
+                from src.database.service import DatabaseService
+                from src.exchanges.factory import ExchangeFactory
+                from src.execution.service import ExecutionService
 
-            reconciled_count = 0
+                db_service = DatabaseService(self.config)
+                execution_service = ExecutionService(self.config)
+                await db_service.initialize()
+                await execution_service.initialize()
 
-            for discrepancy in discrepancies:
-                if discrepancy.get("type") not in [
-                    "order_status_mismatch",
-                    "order_filled_quantity_mismatch",
-                ]:
-                    continue
+                reconciled_count = 0
 
-                order_id = discrepancy.get("order_id")
-                if not order_id:
-                    continue
+                for discrepancy in discrepancies:
+                    if discrepancy.get("type") not in [
+                        "order_status_mismatch",
+                        "order_filled_quantity_mismatch",
+                    ]:
+                        continue
 
-                # Determine exchange from order_id or discrepancy data
-                exchange_name = None
-                for key in ["db_status", "cache_status", "exchange_status", "execution_status"]:
-                    if key in discrepancy and discrepancy[key] != "N/A":
-                        # Try to get exchange from database
-                        async with db_manager.get_session() as session:
-                            result = await session.execute(
-                                "SELECT exchange FROM orders WHERE order_id = :order_id",
-                                {"order_id": order_id},
-                            )
-                            row = result.first()
-                            if row:
-                                exchange_name = row.exchange
-                                break
+                    order_id = discrepancy.get("order_id")
+                    if not order_id:
+                        continue
 
-                if not exchange_name:
-                    self.logger.warning(f"Could not determine exchange for order {order_id}")
-                    continue
-
-                # Get truth from exchange
-                try:
-                    exchange = ExchangeFactory.create(exchange_name, self.config)
-                    if hasattr(exchange, "get_order"):
-                        true_order = await exchange.get_order(order_id)
-
-                        if true_order:
-                            # Update database
+                    # Determine exchange from order_id or discrepancy data
+                    exchange_name = None
+                    for key in ["db_status", "cache_status", "exchange_status", "execution_status"]:
+                        if key in discrepancy and discrepancy[key] != "N/A":
+                            # Try to get exchange from database
                             async with db_manager.get_session() as session:
-                                await session.execute(
-                                    """UPDATE orders
-                                       SET status = :status,
-                                           filled_quantity = :filled,
-                                           remaining_quantity = :remaining,
-                                           updated_at = NOW()
-                                       WHERE order_id = :order_id""",
-                                    {
-                                        "status": true_order.status,
-                                        "filled": str(true_order.filled_quantity),
-                                        "remaining": str(true_order.remaining_quantity),
-                                        "order_id": order_id,
-                                    },
-                                )
-                                await session.commit()
-
-                            # Update Redis cache
-                            cache_key = f"order:{order_id}"
-                            await redis_client.set(
-                                cache_key,
-                                {
-                                    "order_id": order_id,
-                                    "status": true_order.status,
-                                    "filled_quantity": str(true_order.filled_quantity),
-                                    "remaining_quantity": str(true_order.remaining_quantity),
-                                    "exchange": exchange_name,
-                                    "symbol": true_order.symbol,
-                                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                                },
-                                expiry=300,
-                            )
-
-                            # Update execution engine
-                            await order_manager.update_order_status(
-                                order_id=order_id,
-                                status=true_order.status,
-                                filled_quantity=true_order.filled_quantity,
-                                remaining_quantity=true_order.remaining_quantity,
-                            )
-
-                            reconciled_count += 1
-                            self.logger.info(
-                                f"Reconciled order {order_id}",
-                                true_status=true_order.status,
-                                filled=str(true_order.filled_quantity),
-                            )
-                        else:
-                            # Order not found on exchange, mark as cancelled/expired
-                            async with db_manager.get_session() as session:
-                                await session.execute(
-                                    """UPDATE orders
-                                       SET status = 'cancelled',
-                                           updated_at = NOW()
-                                       WHERE order_id = :order_id
-                                         AND status IN ('new', 'open', 'partially_filled')""",
+                                result = await session.execute(
+                                    "SELECT exchange FROM orders WHERE order_id = :order_id",
                                     {"order_id": order_id},
                                 )
-                                await session.commit()
+                                row = result.first()
+                                if row:
+                                    exchange_name = row.exchange
+                                    break
 
-                            # Update cache
-                            cache_key = f"order:{order_id}"
-                            cached = await redis_client.get(cache_key)
-                            if cached:
-                                cached["status"] = "cancelled"
-                                await redis_client.set(cache_key, cached, expiry=300)
+                    if not exchange_name:
+                        self.logger.warning(f"Could not determine exchange for order {order_id}")
+                        continue
 
-                            reconciled_count += 1
-                            self.logger.info(f"Marked order {order_id} as cancelled")
+                    # Get truth from exchange
+                    try:
+                        exchange = ExchangeFactory.create(exchange_name, self.config)
+                        if hasattr(exchange, "get_order"):
+                            true_order = await exchange.get_order(order_id)
 
-                except Exception as e:
-                    self.logger.error(f"Failed to reconcile order {order_id}: {e}")
-                    continue
+                            if true_order:
+                                # Update database via service
+                                await db_service.update_order_status(
+                                    order_id=order_id,
+                                    status=true_order.status,
+                                    filled_quantity=str(true_order.filled_quantity),
+                                    remaining_quantity=str(true_order.remaining_quantity),
+                                )
+
+                                # Update cache via service
+                                await db_service.update_order_cache(
+                                    order_id=order_id,
+                                    order_data={
+                                        "order_id": order_id,
+                                        "status": true_order.status,
+                                        "filled_quantity": str(true_order.filled_quantity),
+                                        "remaining_quantity": str(true_order.remaining_quantity),
+                                        "exchange": exchange_name,
+                                        "symbol": true_order.symbol,
+                                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                                    },
+                                )
+
+                                # Update execution engine via service
+                                await execution_service.update_order_status(
+                                    order_id=order_id,
+                                    status=true_order.status,
+                                    filled_quantity=true_order.filled_quantity,
+                                    remaining_quantity=true_order.remaining_quantity,
+                                )
+
+                                reconciled_count += 1
+                                self.logger.info(
+                                    f"Reconciled order {order_id}",
+                                    true_status=true_order.status,
+                                    filled=str(true_order.filled_quantity),
+                                )
+                            else:
+                                # Order not found on exchange, mark as cancelled/expired via service
+                                await db_service.cancel_order(order_id)
+
+                                # Update cache via service
+                                await db_service.update_order_cache_status(order_id, "cancelled")
+
+                                reconciled_count += 1
+                                self.logger.info(f"Marked order {order_id} as cancelled")
+
+                    except Exception as e:
+                        self.logger.error(f"Failed to reconcile order {order_id}: {e}")
+                        continue
+
+            except Exception as e:
+                self.logger.error(f"Error during order reconciliation setup: {e}")
+                reconciled_count = 0
 
             relevant_discrepancies = [
                 d
@@ -1155,26 +1153,33 @@ class StateMonitor:
 
             return success
 
-        except Exception as e:
-            self.logger.error("Order status reconciliation failed", error=str(e))
-            return False
+        finally:
+            # Clean up service connections
+            try:
+                if "db_service" in locals():
+                    await db_service.cleanup()
+                if "execution_service" in locals():
+                    await execution_service.cleanup()
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup services during order reconciliation: {e}")
 
     async def _reconcile_risk_limits(self, discrepancies: list[dict[str, Any]]) -> bool:
         """Reconcile risk limit compliance issues."""
-        # Using centralized decimal utilities from utils module
-
-        from src.database.manager import DatabaseManager
-        from src.execution.order_manager import OrderManager
-        from src.risk_management.base import RiskManager
-        from src.risk_management.emergency_controls import EmergencyControls
 
         try:
             self.logger.info("Reconciling risk limits", discrepancy_count=len(discrepancies))
 
-            risk_manager = RiskManager(self.config)
-            emergency_controls = EmergencyControls(self.config)
-            order_manager = OrderManager(self.config)
-            db_manager = DatabaseManager(self.config)
+            # Use service layer for data access
+            from src.database.service import DatabaseService
+            from src.execution.service import ExecutionService
+            from src.risk_management.service import RiskManagementService
+
+            db_service = DatabaseService(self.config)
+            execution_service = ExecutionService(self.config)
+            risk_service = RiskManagementService(self.config)
+            await db_service.initialize()
+            await execution_service.initialize()
+            await risk_service.initialize()
 
             reconciled_count = 0
             critical_actions_taken = []
@@ -1184,118 +1189,58 @@ class StateMonitor:
 
                 try:
                     if discrepancy_type == "position_size_limit_exceeded":
-                        # Reduce position size
                         symbol = discrepancy.get("symbol")
                         excess = Decimal(discrepancy.get("excess", "0"))
 
                         if symbol and excess > 0:
-                            # Cancel pending orders for this symbol
-                            await order_manager.cancel_orders_by_symbol(symbol)
-
-                            # Reduce position by excess amount
-                            await risk_manager.reduce_position(symbol=symbol, amount=excess)
-
+                            await execution_service.cancel_orders_by_symbol(symbol)
+                            await risk_service.reduce_position(symbol=symbol, amount=excess)
                             critical_actions_taken.append(
                                 f"Reduced position for {symbol} by {excess}"
                             )
                             reconciled_count += 1
 
                     elif discrepancy_type == "portfolio_exposure_limit_exceeded":
-                        # Reduce overall exposure
                         excess = Decimal(discrepancy.get("excess", "0"))
-
-                        # Cancel all pending orders
-                        await order_manager.cancel_all_orders()
-
-                        # Reduce positions proportionally
-                        await risk_manager.reduce_portfolio_exposure(excess)
-
+                        await execution_service.cancel_all_orders()
+                        await risk_service.reduce_portfolio_exposure(excess)
                         critical_actions_taken.append(f"Reduced portfolio exposure by {excess}")
                         reconciled_count += 1
 
                     elif discrepancy_type == "leverage_limit_exceeded":
-                        # Reduce leverage
                         current_leverage = Decimal(discrepancy.get("current_leverage", "1"))
                         max_leverage = Decimal(discrepancy.get("max_allowed", "1"))
-
-                        # Calculate reduction needed
                         reduction_factor = max_leverage / current_leverage
-
-                        # Reduce all positions proportionally
-                        await risk_manager.adjust_leverage(reduction_factor)
-
+                        await risk_service.adjust_leverage(reduction_factor)
                         critical_actions_taken.append(
                             f"Reduced leverage from {current_leverage} to {max_leverage}"
                         )
                         reconciled_count += 1
 
                     elif discrepancy_type == "stop_loss_missing":
-                        # Add stop losses to positions
                         positions_without_stop = discrepancy.get("positions_without_stop_loss", 0)
-
-                        async with db_manager.get_session() as session:
-                            # Get positions without stop loss
-                            result = await session.execute(
-                                """SELECT position_id, symbol, entry_price, side
-                                   FROM positions
-                                   WHERE status = 'open' AND stop_loss_price IS NULL"""
-                            )
-
-                            for row in result:
-                                # Calculate stop loss price (2% from entry)
-                                stop_loss_pct = Decimal("0.02")
-                                entry_price = Decimal(str(row.entry_price))
-
-                                if row.side == "long":
-                                    stop_loss_price = entry_price * (Decimal("1") - stop_loss_pct)
-                                else:
-                                    stop_loss_price = entry_price * (Decimal("1") + stop_loss_pct)
-
-                                # Update position with stop loss
-                                await session.execute(
-                                    """UPDATE positions
-                                       SET stop_loss_price = :stop_loss
-                                       WHERE position_id = :position_id""",
-                                    {
-                                        "stop_loss": str(stop_loss_price),
-                                        "position_id": row.position_id,
-                                    },
-                                )
-
-                            await session.commit()
-
+                        updated_positions = await db_service.add_missing_stop_losses()
                         critical_actions_taken.append(
-                            f"Added stop losses to {positions_without_stop} positions"
+                            f"Added stop losses to {updated_positions} positions"
                         )
                         reconciled_count += 1
 
                     elif discrepancy_type == "max_drawdown_exceeded":
-                        # Activate emergency controls
-                        await emergency_controls.activate_emergency_shutdown(
-                            "Max drawdown exceeded"
-                        )
-
+                        await risk_service.activate_emergency_shutdown("Max drawdown exceeded")
                         critical_actions_taken.append(
                             "Activated emergency shutdown due to max drawdown"
                         )
                         reconciled_count += 1
 
                     elif discrepancy_type == "daily_loss_limit_exceeded":
-                        # Stop trading for the day
-                        await risk_manager.halt_trading("Daily loss limit exceeded")
-
-                        # Cancel all pending orders
-                        await order_manager.cancel_all_orders()
-
+                        await risk_service.halt_trading("Daily loss limit exceeded")
+                        await execution_service.cancel_all_orders()
                         critical_actions_taken.append("Halted trading due to daily loss limit")
                         reconciled_count += 1
 
                     elif discrepancy_type == "correlation_risk_exceeded":
-                        # Reduce correlated positions
                         excess = Decimal(discrepancy.get("excess", "0"))
-
-                        await risk_manager.reduce_correlation_risk(excess)
-
+                        await risk_service.reduce_correlation_risk(excess)
                         critical_actions_taken.append(f"Reduced correlation risk by {excess}")
                         reconciled_count += 1
 
@@ -1308,15 +1253,12 @@ class StateMonitor:
                 self.logger.critical(
                     "Risk limit reconciliation actions taken", actions=critical_actions_taken
                 )
-
-                # Send alerts
                 for action in critical_actions_taken:
-                    await risk_manager.send_alert(
+                    await risk_service.send_alert(
                         level="critical", message=f"Risk reconciliation: {action}"
                     )
 
             success = reconciled_count == len(discrepancies)
-
             if success:
                 self.logger.info(
                     f"Successfully reconciled all {reconciled_count} risk limit violations"
@@ -1331,6 +1273,17 @@ class StateMonitor:
         except Exception as e:
             self.logger.error("Risk limit reconciliation failed", error=str(e))
             return False
+        finally:
+            # Clean up service connections
+            try:
+                if "db_service" in locals():
+                    await db_service.cleanup()
+                if "execution_service" in locals():
+                    await execution_service.cleanup()
+                if "risk_service" in locals():
+                    await risk_service.cleanup()
+            except Exception as e:
+                self.logger.error(f"Failed to cleanup services during risk reconciliation: {e}")
 
     async def start_monitoring(self):
         """Start continuous state monitoring."""

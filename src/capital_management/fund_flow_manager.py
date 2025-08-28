@@ -18,11 +18,13 @@ Version: 2.0.0
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
 
-from src.core.base.component import BaseComponent
-from src.core.config import Config
-from src.core.exceptions import ValidationError
+# Remove direct infrastructure dependencies
+# Use service protocols for time series and caching
+from typing import Any, Protocol
+
+from src.core.base.service import TransactionalService
+from src.core.exceptions import ServiceError, ValidationError
 
 # MANDATORY: Import from P-001
 from src.core.types.capital import (
@@ -30,19 +32,28 @@ from src.core.types.capital import (
     ExtendedCapitalProtection as CapitalProtection,
     ExtendedWithdrawalRule as WithdrawalRule,
 )
-
-# Database connections will be provided through service layer
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import PartialFillRecovery
 from src.utils.decorators import time_execution
 from src.utils.formatters import format_currency
 from src.utils.validators import ValidationFramework
 
-# Conditional import for InfluxDB
-try:
-    from influxdb_client import Point
-except ImportError:
-    Point = None  # Handle case where influxdb_client is not installed
+# Import service interfaces
+from .interfaces import AbstractFundFlowManagementService
+
+
+class TimeSeriesServiceProtocol(Protocol):
+    """Protocol for time series data storage."""
+
+    async def write_point(
+        self, measurement: str, tags: dict[str, str], fields: dict[str, Any]
+    ) -> None: ...
+
+
+class CacheServiceProtocol(Protocol):
+    """Protocol for caching operations."""
+
+    async def get(self, key: str) -> Any: ...
+    async def set(self, key: str, value: Any, ttl: int) -> None: ...
+
 
 # MANDATORY: Use structured logging from src.core.logging for all capital
 # management operations
@@ -52,7 +63,7 @@ except ImportError:
 # From P-007A - MANDATORY: Use decorators and validators
 
 
-class FundFlowManager(BaseComponent):
+class FundFlowManager(AbstractFundFlowManagementService, TransactionalService):
     """
     Deposit/withdrawal management system.
 
@@ -60,50 +71,34 @@ class FundFlowManager(BaseComponent):
     and implements auto-compounding features for optimal capital growth.
     """
 
-    def __init__(self, config: Config, error_handler: ErrorHandler | None = None):
+    def __init__(
+        self,
+        cache_service: CacheServiceProtocol | None = None,
+        time_series_service: TimeSeriesServiceProtocol | None = None,
+        correlation_id: str | None = None,
+    ) -> None:
         """
-        Initialize the fund flow manager.
+        Initialize the fund flow manager service.
 
         Args:
-            config: Application configuration
-            error_handler: Optional error handler instance (uses DI if not provided)
+            correlation_id: Request correlation ID for tracing
         """
-        super().__init__()  # Initialize BaseComponent
+        super().__init__(
+            name="FundFlowManagerService",
+            correlation_id=correlation_id,
+        )
 
-        # Validate config
-        if not hasattr(config, "capital_management"):
-            raise ValidationError("Missing capital_management configuration")
+        # Inject service dependencies
+        self._cache_service = cache_service
+        self._time_series_service = time_series_service
 
-        self.config = config.capital_management
-
-        # Validate required config attributes with defaults
-        self._validate_config()
+        # Configuration will be loaded in _do_start
+        self.config: dict[str, Any] = {}
 
         # Flow tracking
         self.fund_flows: list[FundFlow] = []
         self.withdrawal_rules: dict[str, WithdrawalRule] = {}
-        self.capital_protection = CapitalProtection(
-            protection_id="fund_flow_protection",
-            enabled=True,
-            min_capital_threshold=Decimal(str(self.config.total_capital * 0.1)),
-            stop_trading_threshold=Decimal(str(self.config.total_capital * 0.05)),
-            reduce_size_threshold=Decimal(str(self.config.total_capital * 0.2)),
-            size_reduction_factor=0.5,
-            max_daily_loss=Decimal(str(self.config.total_capital * self.config.max_daily_loss_pct)),
-            max_weekly_loss=Decimal(
-                str(self.config.total_capital * self.config.max_weekly_loss_pct)
-            ),
-            max_monthly_loss=Decimal(
-                str(self.config.total_capital * self.config.max_monthly_loss_pct)
-            ),
-            emergency_threshold=Decimal(str(self.config.total_capital * 0.02)),
-            emergency_reserve_pct=self.config.emergency_reserve_pct,
-            max_daily_loss_pct=self.config.max_daily_loss_pct,
-            max_weekly_loss_pct=self.config.max_weekly_loss_pct,
-            max_monthly_loss_pct=self.config.max_monthly_loss_pct,
-            profit_lock_pct=self.config.profit_lock_pct,
-            auto_compound_enabled=self.config.auto_compound_enabled,
-        )
+        self.capital_protection: CapitalProtection | None = None  # Will be initialized in _do_start
 
         # Performance tracking
         self.strategy_performance: dict[str, dict[str, float]] = {}
@@ -117,27 +112,11 @@ class FundFlowManager(BaseComponent):
 
         # Auto-compounding tracking
         self.last_compound_date = datetime.now(timezone.utc)
-        self.compound_schedule = self._calculate_compound_schedule()
+        self.compound_schedule: dict[str, Any] = {}  # Will be initialized in _do_start
 
-        # Error handler - use dependency injection or provided instance
-        if error_handler:
-            self.error_handler = error_handler
-        else:
-            try:
-                from src.core.dependency_injection import get_container
-
-                self.error_handler = get_container().get("ErrorHandler")
-            except (ImportError, KeyError):
-                # Fallback to creating instance if DI not available
-                self.error_handler = ErrorHandler(config)
-
-        # Recovery scenarios
-        self.partial_fill_recovery = PartialFillRecovery(config)
-
-        # Database clients will be injected through service layer
-        self.redis_client = None
-        self.influx_client = None
-        self.logger.info("Database connections will be managed by service layer")
+        # Service dependencies - injected, not directly imported
+        self._cache_service: CacheServiceProtocol | None = None
+        self._time_series_service: TimeSeriesServiceProtocol | None = None
 
         # Cache keys
         self.cache_keys = {
@@ -149,62 +128,127 @@ class FundFlowManager(BaseComponent):
         # Cache TTL (seconds)
         self.cache_ttl = 300  # 5 minutes
 
-        # Initialize withdrawal rules
-        self._initialize_withdrawal_rules()
+    async def _do_start(self) -> None:
+        """Start the fund flow manager service."""
+        try:
+            # Resolve services if not injected
+            if not self._cache_service:
+                try:
+                    self._cache_service = self.resolve_dependency("CacheService")
+                except Exception as e:
+                    self._logger.warning(f"CacheService not available via DI: {e}")
 
-        self.logger.info(
-            "Fund flow manager initialized",
-            auto_compound_enabled=self.config.auto_compound_enabled,
-            profit_threshold=format_currency(float(self.config.profit_threshold)),
+            if not self._time_series_service:
+                try:
+                    self._time_series_service = self.resolve_dependency("TimeSeriesService")
+                except Exception as e:
+                    self._logger.warning(f"TimeSeriesService not available via DI: {e}")
+
+            # Load configuration
+            await self._load_configuration()
+
+            # Initialize withdrawal rules
+            self._initialize_withdrawal_rules()
+
+            # Initialize capital protection
+            self._initialize_capital_protection()
+
+            # Initialize compound schedule
+            self.compound_schedule = self._calculate_compound_schedule()
+
+            self._logger.info(
+                "Fund flow manager service started",
+                auto_compound_enabled=self.config.get("auto_compound_enabled", True),
+                profit_threshold=format_currency(float(self.config.get("profit_threshold", 1000))),
+            )
+        except Exception as e:
+            self._logger.error(f"Failed to start FundFlowManager service: {e}")
+            raise ServiceError(f"FundFlowManager startup failed: {e}") from e
+
+    async def _load_configuration(self) -> None:
+        """Load configuration from ConfigService."""
+        try:
+            config_service = self.resolve_dependency("ConfigService")
+            self.config = config_service.get_config_value("capital_management", {})
+        except Exception as e:
+            self._logger.warning(f"Failed to load configuration: {e}, using defaults")
+            # Use defaults
+            self._validate_config()
+
+    def _initialize_capital_protection(self) -> None:
+        """Initialize capital protection with current config."""
+        total_capital = self.config.get("total_capital", 100000)
+        self.capital_protection = CapitalProtection(
+            protection_id="fund_flow_protection",
+            enabled=True,
+            min_capital_threshold=Decimal(str(total_capital * 0.1)),
+            stop_trading_threshold=Decimal(str(total_capital * 0.05)),
+            reduce_size_threshold=Decimal(str(total_capital * 0.2)),
+            size_reduction_factor=0.5,
+            max_daily_loss=Decimal(
+                str(total_capital * self.config.get("max_daily_loss_pct", 0.05))
+            ),
+            max_weekly_loss=Decimal(
+                str(total_capital * self.config.get("max_weekly_loss_pct", 0.10))
+            ),
+            max_monthly_loss=Decimal(
+                str(total_capital * self.config.get("max_monthly_loss_pct", 0.20))
+            ),
+            emergency_threshold=Decimal(str(total_capital * 0.02)),
+            emergency_reserve_pct=self.config.get("emergency_reserve_pct", 0.1),
+            max_daily_loss_pct=self.config.get("max_daily_loss_pct", 0.05),
+            max_weekly_loss_pct=self.config.get("max_weekly_loss_pct", 0.10),
+            max_monthly_loss_pct=self.config.get("max_monthly_loss_pct", 0.20),
+            profit_lock_pct=self.config.get("profit_lock_pct", 0.5),
+            auto_compound_enabled=self.config.get("auto_compound_enabled", True),
         )
 
     async def _cache_fund_flows(self, flows: list[FundFlow]) -> None:
-        """Cache fund flows in Redis."""
-        if not self.redis_client:
+        """Cache fund flows via cache service."""
+        if not self._cache_service:
             return
         try:
             # Convert FundFlow objects to dict for caching
             cache_data = [flow.model_dump() for flow in flows]
-            await self.redis_client.set(
-                self.cache_keys["fund_flows"], cache_data, ttl=self.cache_ttl
-            )
+            await self._cache_service.set(self.cache_keys["fund_flows"], cache_data, self.cache_ttl)
         except Exception as e:
-            self.logger.warning("Failed to cache fund flows", error=str(e))
+            self._logger.warning("Failed to cache fund flows", error=str(e))
 
     async def _get_cached_fund_flows(self) -> list[FundFlow] | None:
-        """Get cached fund flows from Redis."""
-        if not self.redis_client:
+        """Get cached fund flows via cache service."""
+        if not self._cache_service:
             return None
         try:
-            cached_data = await self.redis_client.get(self.cache_keys["fund_flows"])
+            cached_data = await self._cache_service.get(self.cache_keys["fund_flows"])
             if cached_data:
                 # Convert cached data back to FundFlow objects
                 flows = [FundFlow(**data) for data in cached_data]
                 return flows
         except Exception as e:
-            self.logger.warning("Failed to get cached fund flows", error=str(e))
+            self._logger.warning("Failed to get cached fund flows", error=str(e))
         return None
 
-    async def _store_fund_flow_influxdb(self, flow: FundFlow) -> None:
-        """Store fund flow in InfluxDB for time series analysis."""
-        if not self.influx_client or Point is None:
+    async def _store_fund_flow_time_series(self, flow: FundFlow) -> None:
+        """Store fund flow in time series service for analysis."""
+        if not self._time_series_service:
             return
         try:
-            # Create a point for fund flows
-            point = (
-                Point("fund_flows")
-                .tag("component", "fund_flow_manager")
-                .tag("currency", flow.currency)
-                .tag("reason", flow.reason)
-                .tag("from_exchange", flow.from_exchange or "none")
-                .tag("to_exchange", flow.to_exchange or "none")
-                .field("amount", float(flow.amount))
-            )
+            # Prepare time series data
+            tags = {
+                "component": "fund_flow_manager",
+                "currency": getattr(flow, "currency", "USDT"),
+                "reason": flow.reason,
+                "from_exchange": flow.from_exchange or "none",
+                "to_exchange": flow.to_exchange or "none",
+            }
+            fields = {
+                "amount": float(flow.amount),
+            }
 
-            # Write to InfluxDB
-            self.influx_client.write_api().write(bucket="trading_bot", record=point)
+            # Write to time series service
+            await self._time_series_service.write_point("fund_flows", tags, fields)
         except Exception as e:
-            self.logger.warning("Failed to store fund flow in InfluxDB", error=str(e))
+            self._logger.warning("Failed to store fund flow in time series", error=str(e))
 
     @time_execution
     async def process_deposit(
@@ -226,9 +270,9 @@ class FundFlowManager(BaseComponent):
             if not ValidationFramework.validate_quantity(float(amount)):
                 raise ValidationError(f"Invalid deposit amount: {amount}")
 
-            if amount < Decimal(str(self.config.min_deposit_amount)):
+            if amount < Decimal(str(self.config.get("min_deposit_amount", 100))):
                 raise ValidationError(
-                    f"Deposit amount {amount} below minimum {self.config.min_deposit_amount}"
+                    f"Deposit amount {amount} below minimum {self.config.get('min_deposit_amount', 100)}"
                 )
 
             # Create fund flow record
@@ -249,10 +293,10 @@ class FundFlowManager(BaseComponent):
             # Cache fund flows
             await self._cache_fund_flows(self.fund_flows)
 
-            # Store fund flow in InfluxDB
-            await self._store_fund_flow_influxdb(flow)
+            # Store fund flow in time series
+            await self._store_fund_flow_time_series(flow)
 
-            self.logger.info(
+            self._logger.info(
                 "Deposit processed successfully",
                 amount=format_currency(float(amount), currency),
                 exchange=exchange,
@@ -280,7 +324,7 @@ class FundFlowManager(BaseComponent):
             await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
 
             # Log detailed error information
-            self.logger.error(
+            self._logger.error(
                 "Deposit processing failed",
                 error_id=context.error_id,
                 severity=context.severity.value,
@@ -319,9 +363,9 @@ class FundFlowManager(BaseComponent):
                 raise ValidationError(f"Invalid withdrawal amount: {amount}")
 
             # Check minimum withdrawal amount
-            if amount < Decimal(str(self.config.min_withdrawal_amount)):
+            if amount < Decimal(str(self.config.get("min_withdrawal_amount", 100))):
                 raise ValidationError(
-                    f"Withdrawal amount {amount} below minimum {self.config.min_withdrawal_amount}"
+                    f"Withdrawal amount {amount} below minimum {self.config.get('min_withdrawal_amount', 100)}"
                 )
 
             # Validate withdrawal rules
@@ -329,13 +373,15 @@ class FundFlowManager(BaseComponent):
 
             # Check maximum withdrawal percentage
             if self.total_capital > Decimal("0"):
-                max_withdrawal = self.total_capital * Decimal(str(self.config.max_withdrawal_pct))
+                max_withdrawal = self.total_capital * Decimal(
+                    str(self.config.get("max_withdrawal_pct", 0.2))
+                )
                 if amount > max_withdrawal:
                     raise ValidationError(
                         f"Withdrawal amount {amount} exceeds maximum {max_withdrawal}"
                     )
             else:
-                self.logger.warning(
+                self._logger.warning(
                     "Total capital not set, skipping withdrawal percentage validation"
                 )
 
@@ -357,7 +403,7 @@ class FundFlowManager(BaseComponent):
             # Add to flow history
             self.fund_flows.append(flow)
 
-            self.logger.info(
+            self._logger.info(
                 "Withdrawal processed successfully",
                 amount=format_currency(float(amount), currency),
                 exchange=exchange,
@@ -387,7 +433,7 @@ class FundFlowManager(BaseComponent):
             await self.error_handler.handle_error(e, context, self.partial_fill_recovery)
 
             # Log detailed error information
-            self.logger.error(
+            self._logger.error(
                 "Withdrawal processing failed",
                 error_id=context.error_id,
                 severity=context.severity.value,
@@ -421,7 +467,7 @@ class FundFlowManager(BaseComponent):
             # Check maximum daily reallocation
             if self.total_capital > Decimal("0"):
                 max_daily_reallocation = self.total_capital * Decimal(
-                    str(self.config.max_daily_reallocation_pct)
+                    str(self.config.get("max_daily_reallocation_pct", 0.1))
                 )
                 daily_reallocation = await self._get_daily_reallocation_amount()
 
@@ -431,7 +477,9 @@ class FundFlowManager(BaseComponent):
                         f"Requested: {amount}, Limit: {max_daily_reallocation}"
                     )
             else:
-                self.logger.warning("Total capital not set, skipping reallocation limit validation")
+                self._logger.warning(
+                    "Total capital not set, skipping reallocation limit validation"
+                )
 
             # Create fund flow record
             flow = FundFlow(
@@ -447,7 +495,7 @@ class FundFlowManager(BaseComponent):
             # Add to flow history
             self.fund_flows.append(flow)
 
-            self.logger.info(
+            self._logger.info(
                 "Strategy reallocation processed",
                 from_strategy=from_strategy,
                 to_strategy=to_strategy,
@@ -458,14 +506,14 @@ class FundFlowManager(BaseComponent):
             return flow
 
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Strategy reallocation failed",
                 from_strategy=from_strategy,
                 to_strategy=to_strategy,
                 amount=format_currency(float(amount)),
                 error=str(e),
             )
-            raise
+            raise ServiceError(f"Strategy reallocation failed: {e}") from e
 
     @time_execution
     async def process_auto_compound(self) -> FundFlow | None:
@@ -476,7 +524,7 @@ class FundFlowManager(BaseComponent):
             Optional[FundFlow]: Compound flow record if applicable
         """
         try:
-            if not self.config.auto_compound_enabled:
+            if not self.config.get("auto_compound_enabled", True):
                 return None
 
             # Check if it's time to compound
@@ -507,7 +555,7 @@ class FundFlowManager(BaseComponent):
             self.last_compound_date = datetime.now(timezone.utc)
             self.locked_profit += compound_amount
 
-            self.logger.info(
+            self._logger.info(
                 "Auto-compound processed",
                 compound_amount=format_currency(float(compound_amount)),
                 total_locked_profit=format_currency(float(self.locked_profit)),
@@ -516,8 +564,8 @@ class FundFlowManager(BaseComponent):
             return flow
 
         except Exception as e:
-            self.logger.error("Auto-compound processing failed", error=str(e))
-            raise
+            self._logger.error("Auto-compound processing failed", error=str(e))
+            raise ServiceError(f"Auto-compound processing failed: {e}") from e
 
     @time_execution
     async def update_performance(
@@ -537,14 +585,14 @@ class FundFlowManager(BaseComponent):
             if "total_pnl" in performance_metrics:
                 self.total_profit = Decimal(str(performance_metrics["total_pnl"]))
 
-            self.logger.debug(
+            self._logger.debug(
                 "Performance updated",
                 strategy_id=strategy_id,
                 total_profit=format_currency(float(self.total_profit)),
             )
 
         except Exception as e:
-            self.logger.error("Performance update failed", strategy_id=strategy_id, error=str(e))
+            self._logger.error("Performance update failed", strategy_id=strategy_id, error=str(e))
 
     @time_execution
     async def get_flow_history(self, days: int = 30) -> list[FundFlow]:
@@ -565,8 +613,8 @@ class FundFlowManager(BaseComponent):
             return recent_flows
 
         except Exception as e:
-            self.logger.error("Failed to get flow history", error=str(e))
-            raise
+            self._logger.error("Failed to get flow history", error=str(e))
+            raise ServiceError(f"Failed to get flow history: {e}") from e
 
     @time_execution
     async def get_flow_summary(self, days: int = 30) -> dict[str, Any]:
@@ -628,21 +676,21 @@ class FundFlowManager(BaseComponent):
             return summary
 
         except Exception as e:
-            self.logger.error("Failed to get flow summary", error=str(e))
-            raise
+            self._logger.error("Failed to get flow summary", error=str(e))
+            raise ServiceError(f"Failed to get flow summary: {e}") from e
 
     def _initialize_withdrawal_rules(self) -> None:
         """Initialize withdrawal rules from configuration."""
         # Check if withdrawal_rules is a dict
         withdrawal_rules_config = self.config.withdrawal_rules
         if not isinstance(withdrawal_rules_config, dict):
-            self.logger.warning("No withdrawal rules configured")
+            self._logger.warning("No withdrawal rules configured")
             return
 
         for rule_name, rule_config in withdrawal_rules_config.items():
             # Ensure rule_config is a dict
             if not isinstance(rule_config, dict):
-                self.logger.warning(f"Invalid config for withdrawal rule {rule_name}")
+                self._logger.warning(f"Invalid config for withdrawal rule {rule_name}")
                 continue
 
             rule = WithdrawalRule(
@@ -717,8 +765,8 @@ class FundFlowManager(BaseComponent):
                         )
 
         except Exception as e:
-            self.logger.error("Withdrawal rule validation failed", error=str(e))
-            raise
+            self._logger.error("Withdrawal rule validation failed", error=str(e))
+            raise ServiceError(f"Withdrawal rule validation failed: {e}") from e
 
     async def _check_withdrawal_cooldown(self) -> None:
         """
@@ -733,7 +781,7 @@ class FundFlowManager(BaseComponent):
 
             if recent_withdrawals:
                 last_withdrawal = max(recent_withdrawals, key=lambda f: f.timestamp)
-                cooldown_hours = self.config.fund_flow_cooldown_minutes / 60
+                cooldown_hours = self.config.get("fund_flow_cooldown_minutes", 60) / 60
 
                 if datetime.now(timezone.utc) - last_withdrawal.timestamp < timedelta(
                     hours=cooldown_hours
@@ -744,8 +792,8 @@ class FundFlowManager(BaseComponent):
                     )
 
         except Exception as e:
-            self.logger.error("Withdrawal cooldown check failed", error=str(e))
-            raise
+            self._logger.error("Withdrawal cooldown check failed", error=str(e))
+            raise ServiceError(f"Withdrawal cooldown check failed: {e}") from e
 
     async def _calculate_minimum_capital_required(self) -> Decimal:
         """Calculate minimum capital required for all strategies."""
@@ -770,7 +818,7 @@ class FundFlowManager(BaseComponent):
             return total_minimum
 
         except Exception as e:
-            self.logger.error("Failed to calculate minimum capital required", error=str(e))
+            self._logger.error("Failed to calculate minimum capital required", error=str(e))
             return Decimal("1000")  # Default minimum
 
     async def _check_performance_threshold(self, threshold: float) -> bool:
@@ -806,7 +854,7 @@ class FundFlowManager(BaseComponent):
             return False
 
         except Exception as e:
-            self.logger.error("Failed to check performance threshold", error=str(e))
+            self._logger.error("Failed to check performance threshold", error=str(e))
             return False
 
     async def _get_daily_reallocation_amount(self) -> Decimal:
@@ -822,61 +870,64 @@ class FundFlowManager(BaseComponent):
             return sum(flow.amount for flow in today_flows)
 
         except Exception as e:
-            self.logger.error("Failed to get daily reallocation amount", error=str(e))
+            self._logger.error("Failed to get daily reallocation amount", error=str(e))
             return Decimal("0")
 
     def _should_compound(self) -> bool:
         """Check if it's time to compound profits."""
         try:
-            if not self.config.auto_compound_enabled:
+            if not self.config.get("auto_compound_enabled", True):
                 return False
 
             # Check frequency
-            if self.config.auto_compound_frequency == "weekly":
+            frequency = self.config.get("auto_compound_frequency", "weekly")
+            if frequency == "weekly":
                 days_since_last = (datetime.now(timezone.utc) - self.last_compound_date).days
                 return days_since_last >= 7
-            elif self.config.auto_compound_frequency == "monthly":
+            elif frequency == "monthly":
                 days_since_last = (datetime.now(timezone.utc) - self.last_compound_date).days
                 return days_since_last >= 30
             else:
                 return False
 
         except Exception as e:
-            self.logger.error("Failed to check compound timing", error=str(e))
+            self._logger.error("Failed to check compound timing", error=str(e))
             return False
 
     async def _calculate_compound_amount(self) -> Decimal:
         """Calculate amount to compound based on profits."""
         try:
-            if self.total_profit <= self.config.profit_threshold:
+            profit_threshold = Decimal(str(self.config.get("profit_threshold", 1000)))
+            if self.total_profit <= profit_threshold:
                 return Decimal("0")
 
             # Calculate compound amount (profit above threshold)
-            compound_amount = self.total_profit - self.config.profit_threshold
+            compound_amount = self.total_profit - profit_threshold
 
             # Apply profit lock percentage
-            locked_amount = compound_amount * Decimal(str(self.config.profit_lock_pct))
+            locked_amount = compound_amount * Decimal(str(self.config.get("profit_lock_pct", 0.5)))
 
             return locked_amount
 
         except Exception as e:
-            self.logger.error("Failed to calculate compound amount", error=str(e))
+            self._logger.error("Failed to calculate compound amount", error=str(e))
             return Decimal("0")
 
     def _calculate_compound_schedule(self) -> dict[str, Any]:
         """Calculate compound schedule based on frequency."""
         try:
+            frequency = self.config.get("auto_compound_frequency", "weekly")
             schedule = {
-                "frequency": self.config.auto_compound_frequency,
+                "frequency": frequency,
                 "next_compound": self.last_compound_date
-                + timedelta(days=7 if self.config.auto_compound_frequency == "weekly" else 30),
-                "enabled": self.config.auto_compound_enabled,
+                + timedelta(days=7 if frequency == "weekly" else 30),
+                "enabled": self.config.get("auto_compound_enabled", True),
             }
 
             return schedule
 
         except Exception as e:
-            self.logger.error("Failed to calculate compound schedule", error=str(e))
+            self._logger.error("Failed to calculate compound schedule", error=str(e))
             return {}
 
     async def update_total_capital(self, total_capital: Decimal) -> None:
@@ -888,12 +939,12 @@ class FundFlowManager(BaseComponent):
         """
         try:
             self.total_capital = total_capital
-            self.logger.info(
+            self._logger.info(
                 "Total capital updated", total_capital=format_currency(float(total_capital))
             )
         except Exception as e:
-            self.logger.error("Failed to update total capital", error=str(e))
-            raise
+            self._logger.error("Failed to update total capital", error=str(e))
+            raise ServiceError(f"Failed to update total capital: {e}") from e
 
     async def get_total_capital(self) -> Decimal:
         """Get current total capital."""
@@ -921,8 +972,8 @@ class FundFlowManager(BaseComponent):
             return status
 
         except Exception as e:
-            self.logger.error("Failed to get capital protection status", error=str(e))
-            raise
+            self._logger.error("Failed to get capital protection status", error=str(e))
+            raise ServiceError(f"Failed to get capital protection status: {e}") from e
 
     async def get_performance_summary(self) -> dict[str, Any]:
         """Get performance summary for all strategies."""
@@ -967,10 +1018,10 @@ class FundFlowManager(BaseComponent):
             return summary
 
         except Exception as e:
-            self.logger.error("Failed to get performance summary", error=str(e))
-            raise
+            self._logger.error("Failed to get performance summary", error=str(e))
+            raise ServiceError(f"Failed to get performance summary: {e}") from e
 
-    def set_capital_allocator(self, capital_allocator) -> None:
+    def set_capital_allocator(self, capital_allocator: Any) -> None:
         """
         Set the capital allocator for integration.
 
@@ -978,7 +1029,7 @@ class FundFlowManager(BaseComponent):
             capital_allocator: CapitalAllocator instance
         """
         self.capital_allocator = capital_allocator
-        self.logger.info("Capital allocator integration established")
+        self._logger.info("Capital allocator integration established")
 
     def _validate_config(self) -> None:
         """Validate and set default configuration values."""
@@ -1005,4 +1056,6 @@ class FundFlowManager(BaseComponent):
         for key, default_value in config_defaults.items():
             if not hasattr(self.config, key):
                 setattr(self.config, key, default_value)
-                self.logger.warning(f"Config missing {key}, using default: {default_value}")
+                self._logger.warning(
+                    f"Config missing {key}, using default: {default_value}"
+                ) if hasattr(self, "_logger") else None

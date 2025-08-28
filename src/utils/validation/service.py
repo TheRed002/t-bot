@@ -631,8 +631,9 @@ class ValidationService(BaseService):
         cache_ttl: int = 300,
         enable_cache: bool = True,
         max_cache_size: int = 10000,
+        validation_framework: ValidationFramework | None = None,
     ):
-        """Initialize ValidationService.
+        """Initialize ValidationService with dependency injection.
 
         Args:
             name: Service name for identification
@@ -641,6 +642,7 @@ class ValidationService(BaseService):
             cache_ttl: Cache time-to-live in seconds
             enable_cache: Enable validation result caching
             max_cache_size: Maximum cache size
+            validation_framework: Injected ValidationFramework instance
         """
         # Call BaseService constructor with proper parameters
         super().__init__(
@@ -653,8 +655,17 @@ class ValidationService(BaseService):
         self.registry = ValidatorRegistry()
         self.enable_cache = enable_cache
 
-        # Use ValidationFramework as single source of truth
-        self.framework = ValidationFramework()
+        # Use dependency injection for ValidationFramework
+        if validation_framework is None:
+            from src.core.dependency_injection import injector
+
+            try:
+                self.framework = injector.resolve("ValidationFramework")
+            except Exception:
+                # Fallback to direct instantiation to avoid circular dependency
+                self.framework = ValidationFramework()
+        else:
+            self.framework = validation_framework
 
     async def _do_start(self) -> None:
         """Override BaseService start method."""
@@ -1203,12 +1214,11 @@ class ValidationService(BaseService):
         await self.shutdown()
 
 
-# Singleton instance for backward compatibility
-_validation_service_instance: ValidationService | None = None
+# ValidationService registration is handled by service_registry.py
 
 
 async def get_validation_service(reload: bool = False) -> ValidationService:
-    """Get or create the global ValidationService instance.
+    """Get or create the global ValidationService instance from DI container.
 
     Args:
         reload: Force reload of validation service
@@ -1216,19 +1226,40 @@ async def get_validation_service(reload: bool = False) -> ValidationService:
     Returns:
         Global ValidationService instance
     """
-    global _validation_service_instance
+    from src.core.dependency_injection import injector
 
-    if _validation_service_instance is None or reload:
-        _validation_service_instance = ValidationService()
-        await _validation_service_instance.initialize()
+    if reload:
+        # Clear and re-register the service
+        injector.get_container().clear()
+        from ..service_registry import register_util_services
 
-    return _validation_service_instance
+        register_util_services()
+
+    try:
+        service = injector.resolve("ValidationService")
+    except Exception:
+        # Register ValidationService factory if not found
+        def validation_service_factory() -> ValidationService:
+            return ValidationService()
+
+        injector.register_factory("ValidationService", validation_service_factory, singleton=True)
+        service = injector.resolve("ValidationService")
+
+    # Initialize if not already running
+    if not service.is_running:
+        await service.initialize()
+
+    return service
 
 
 async def shutdown_validation_service() -> None:
     """Shutdown the global validation service."""
-    global _validation_service_instance
+    from src.core.dependency_injection import injector
 
-    if _validation_service_instance:
-        await _validation_service_instance.shutdown()
-        _validation_service_instance = None
+    try:
+        service = injector.resolve("ValidationService")
+        if service.is_running:
+            await service.shutdown()
+    except Exception:
+        # Service not found or already shut down
+        pass

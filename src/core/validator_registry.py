@@ -59,7 +59,7 @@ class ValidatorRegistry:
     This eliminates duplication of validation logic across modules.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize validator registry."""
         self._validators: dict[str, ValidatorInterface] = {}
         self._validator_classes: dict[str, type[ValidatorInterface]] = {}

@@ -56,7 +56,8 @@ class MarketDataRecord(Base, TimestampMixin):
     )
 
     def __repr__(self):
-        return f"<MarketDataRecord {self.symbol} {self.exchange} {self.interval} @ {self.data_timestamp}>"
+        timestamp_str = str(self.data_timestamp)[:19] if self.data_timestamp else "None"
+        return f"<MarketDataRecord {self.symbol} {self.exchange} {self.interval} @ {timestamp_str}>"
 
     @property
     def price_change(self) -> Decimal:

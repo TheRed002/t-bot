@@ -107,22 +107,41 @@ except ImportError:
 
 from src.core import MonitoringError, get_logger
 
+# Import error handling with fallback
+try:
+    from src.error_handling import (
+        get_global_error_handler,
+        with_error_context,
+        with_retry,
+    )
+except ImportError:
+    # Fallback implementations
+    def get_global_error_handler():
+        return None
 
-from src.error_handling import (
-    ErrorContext,
-    get_global_error_handler,
-    with_error_context,
-    with_retry,
-)
+    def with_error_context(context_name):
+        def decorator(func):
+            return func
+
+        return decorator
+
+    def with_retry(max_attempts=3, backoff_factor=2.0, exceptions=(Exception,)):
+        def decorator(func):
+            return func
+
+        return decorator
+
 
 # Initialize logger with error handling
 try:
     logger = get_logger(__name__)
-except Exception:
+except Exception as e:
     # Fallback to basic logging if get_logger fails
     import logging
 
     logger = logging.getLogger(__name__)
+    logger.warning(f"Failed to get logger from get_logger: {e}")
+    raise
 
 
 @dataclass
@@ -160,7 +179,7 @@ class OpenTelemetryConfig:
     max_attributes_per_event: int = 100
 
     # Custom attributes
-    custom_resource_attributes: dict[str, str] = None
+    custom_resource_attributes: dict[str, str] | None = None
 
     def __post_init__(self):
         """Post-initialization setup."""
@@ -329,7 +348,6 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
         MonitoringError: If telemetry setup fails
     """
     try:
-        error_handler = get_global_error_handler()
         # Create resource with service information
         resource_attributes = {
             "service.name": config.service_name,
@@ -365,26 +383,9 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
                     exporters.append(jaeger_exporter)
                     logger.info("Jaeger exporter configured")
                 except (ImportError, ConnectionError, OSError) as e:
-                    if error_handler:
-                        error_handler.handle_error_sync(
-                            e,
-                            component="Telemetry",
-                            operation="configure_jaeger_exporter",
-                            details={"error_type": type(e).__name__},
-                        )
                     logger.warning(f"Failed to configure Jaeger exporter: {e}")
                 except Exception as e:
                     logger.error(f"Unexpected error configuring Jaeger exporter: {e}")
-                    if error_handler:
-                        error_handler.handle_error_sync(
-                            e,
-                            component="Telemetry",
-                            operation="configure_jaeger_exporter",
-                            details={
-                                "error_type": "unexpected",
-                                "error_class": type(e).__name__,
-                            },
-                        )
 
             # OTLP exporter
             if config.otlp_enabled:
@@ -393,12 +394,6 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
                     exporters.append(otlp_exporter)
                     logger.info("OTLP exporter configured")
                 except Exception as e:
-                    if error_handler:
-                        error_handler.handle_error_sync(
-                            e,
-                            component="Telemetry",
-                            operation="configure_otlp_exporter",
-                        )
                     logger.warning(f"Failed to configure OTLP exporter: {e}")
 
             # Console exporter (for debugging)
@@ -434,16 +429,8 @@ def setup_telemetry(config: OpenTelemetryConfig) -> TradingTracer:
         return trading_tracer
 
     except Exception as e:
-        if error_handler:
-            error_handler.handle_error_sync(
-                e,
-                component="Telemetry",
-                operation="setup_telemetry",
-                service_name=config.service_name,
-            )
-        raise MonitoringError(
-            f"Failed to setup OpenTelemetry: {e}", error_code="MONITORING_003"
-        ) from e
+        logger.error(f"Failed to setup OpenTelemetry: {e}")
+        raise MonitoringError(f"Failed to setup OpenTelemetry: {e}", error_code="MON_1005") from e
 
 
 def _setup_auto_instrumentation(config: OpenTelemetryConfig) -> None:
@@ -555,7 +542,8 @@ def instrument_fastapi(app, config: OpenTelemetryConfig):
                 else:
                     # Convert ExcludeList or other objects to string
                     excluded_urls_param = str(excluded_urls) if excluded_urls else ""
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to process excluded URLs: {e}")
                 excluded_urls_param = ""
 
             FastAPIInstrumentor.instrument_app(

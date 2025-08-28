@@ -34,7 +34,8 @@ from src.analytics.types import (
     BenchmarkData,
     RiskMetrics,
 )
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
+from src.core.exceptions import DataError, RiskCalculationError, ValidationError, OptimizationError
 from src.core.types.trading import Position
 from src.monitoring.metrics import get_metrics_collector
 from src.utils.datetime_utils import get_current_utc_timestamp

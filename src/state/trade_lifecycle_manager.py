@@ -29,16 +29,19 @@ from src.core.exceptions import StateError
 from src.core.types import ExecutionResult, OrderRequest, OrderSide, OrderType
 from src.database.service import DatabaseService
 
+# Service layer imports instead of direct database access
+from .services import StatePersistenceServiceProtocol
+
 # Backward compatibility imports for tests
 try:
     from src.database.manager import DatabaseManager
 except ImportError:
-    DatabaseManager = None
+    DatabaseManager = None  # type: ignore
 
 try:
     from src.database.redis_client import RedisClient
 except ImportError:
-    RedisClient = None
+    RedisClient = None  # type: ignore
 
 from .utils_imports import time_execution
 
@@ -207,14 +210,16 @@ class TradeLifecycleManager(BaseComponent):
         config: Config,
         database_service: DatabaseService | None = None,
         cache_service: Any | None = None,
+        persistence_service: StatePersistenceServiceProtocol | None = None,
     ):
         """
         Initialize the trade lifecycle manager.
 
         Args:
             config: Application configuration
-            database_service: Database service for data persistence
+            database_service: Database service for data persistence (legacy)
             cache_service: Cache service for performance optimization
+            persistence_service: Service layer for persistence operations
         """
         super().__init__(
             name="TradeLifecycleManager",
@@ -222,7 +227,10 @@ class TradeLifecycleManager(BaseComponent):
         )
         self.config = config
 
-        # Injected services (with fallback handling)
+        # Service layer components (preferred)
+        self._persistence_service = persistence_service
+
+        # Legacy services (with fallback handling)
         self.database_service = database_service
         self.cache_service = cache_service
 
@@ -275,14 +283,24 @@ class TradeLifecycleManager(BaseComponent):
     async def initialize(self) -> None:
         """Initialize the trade lifecycle manager with service dependencies."""
         try:
-            # Initialize database service if available
-            if self.database_service and not self.database_service.is_running:
-                await self.database_service.start()
-                self.logger.info("Database service initialized")
-            elif not self.database_service:
+            # Initialize persistence service if available
+            if not self._persistence_service and self.database_service:
+                # Create persistence service wrapper for legacy database service
+                from .services import StatePersistenceService
+
+                self._persistence_service = StatePersistenceService(self.database_service)
+                if hasattr(self._persistence_service, "start"):
+                    await self._persistence_service.start()
+                self.logger.info("Persistence service initialized")
+            elif not self._persistence_service:
                 self.logger.warning(
-                    "Database service not available - persistence operations will be limited"
+                    "No persistence service available - persistence operations will be limited"
                 )
+
+            # Initialize legacy database service if needed
+            if self.database_service and not getattr(self.database_service, "is_running", False):
+                await self.database_service.start()
+                self.logger.info("Legacy database service initialized")
 
             # Initialize cache service if available
             if not self.cache_service:
@@ -307,6 +325,55 @@ class TradeLifecycleManager(BaseComponent):
         except Exception as e:
             self.logger.error(f"TradeLifecycleManager initialization failed: {e}")
             raise StateError(f"Failed to initialize TradeLifecycleManager: {e}") from e
+
+    async def cleanup(self) -> None:
+        """Cleanup trade lifecycle manager resources."""
+        try:
+            self.logger.info("Starting TradeLifecycleManager cleanup")
+
+            # Cancel monitoring task if running
+            if (
+                hasattr(self, "_monitoring_task")
+                and self._monitoring_task
+                and not self._monitoring_task.done()
+            ):
+                self._monitoring_task.cancel()
+                try:
+                    await asyncio.wait_for(self._monitoring_task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                except Exception as e:
+                    self.logger.warning(f"Monitoring task cleanup error: {e}")
+
+            # Clear task reference
+            if hasattr(self, "_monitoring_task"):
+                self._monitoring_task = None
+
+            # Cleanup persistence service
+            if self._persistence_service and hasattr(self._persistence_service, "stop"):
+                try:
+                    await self._persistence_service.stop()
+                    self.logger.info("Persistence service stopped")
+                except Exception as e:
+                    self.logger.warning(f"Persistence service stop error: {e}")
+
+            # Cleanup legacy database service if we started it
+            if self.database_service and getattr(self.database_service, "is_running", False):
+                try:
+                    await self.database_service.stop()
+                    self.logger.info("Legacy database service stopped")
+                except Exception as e:
+                    self.logger.warning(f"Database service stop error: {e}")
+
+            self.logger.info("TradeLifecycleManager cleanup completed")
+
+        except Exception as e:
+            self.logger.error(f"Error during TradeLifecycleManager cleanup: {e}")
+            raise
+        finally:
+            # Ensure task reference is cleared even if cleanup fails
+            if hasattr(self, "_monitoring_task"):
+                self._monitoring_task = None
 
     @time_execution
     @cache_invalidate(patterns=["trade_lifecycle:*"], namespace="state")
@@ -795,34 +862,65 @@ class TradeLifecycleManager(BaseComponent):
     # Private helper methods
 
     async def _cache_trade_context(self, trade_context: TradeContext) -> None:
-        """Cache trade context using cache service abstraction."""
-        if not self.cache_service:
-            # No cache service available - skip caching
-            return
-
+        """Cache trade context using cache service abstraction or persistence service."""
         try:
-            cache_key = CacheKeys.trade_lifecycle(trade_context.trade_id)
-            context_data = {
-                "trade_id": trade_context.trade_id,
-                "bot_id": trade_context.bot_id,
-                "strategy_name": trade_context.strategy_name,
-                "symbol": trade_context.symbol,
-                "side": trade_context.side.value,
-                "current_state": trade_context.current_state.value,
-                "original_quantity": str(trade_context.original_quantity),
-                "filled_quantity": str(trade_context.filled_quantity),
-                "average_fill_price": str(trade_context.average_fill_price),
-                "fees_paid": str(trade_context.fees_paid),
-                "signal_timestamp": trade_context.signal_timestamp.isoformat(),
-            }
+            # Try persistence service first (more reliable)
+            if self._persistence_service:
+                # Create a pseudo-state for the trade context
+                from .state_service import StateMetadata, StateType
 
-            await self.cache_service.set(
-                cache_key,
-                context_data,
-                namespace="state",
-                ttl=3600,  # 1 hour TTL
-                data_type="state",
-            )
+                context_data = {
+                    "trade_id": trade_context.trade_id,
+                    "bot_id": trade_context.bot_id,
+                    "strategy_name": trade_context.strategy_name,
+                    "symbol": trade_context.symbol,
+                    "side": trade_context.side.value,
+                    "current_state": trade_context.current_state.value,
+                    "original_quantity": str(trade_context.original_quantity),
+                    "filled_quantity": str(trade_context.filled_quantity),
+                    "average_fill_price": str(trade_context.average_fill_price),
+                    "fees_paid": str(trade_context.fees_paid),
+                    "signal_timestamp": trade_context.signal_timestamp.isoformat(),
+                }
+
+                # Create metadata
+                metadata = StateMetadata(
+                    state_id=trade_context.trade_id,
+                    state_type=StateType.TRADE_STATE,
+                    version=1,
+                    source_component="TradeLifecycleManager",
+                )
+
+                # Save through persistence service
+                await self._persistence_service.save_state(
+                    StateType.TRADE_STATE, trade_context.trade_id, context_data, metadata
+                )
+
+            # Fall back to cache service if available
+            elif self.cache_service:
+                cache_key = CacheKeys.trade_lifecycle(trade_context.trade_id)
+                context_data = {
+                    "trade_id": trade_context.trade_id,
+                    "bot_id": trade_context.bot_id,
+                    "strategy_name": trade_context.strategy_name,
+                    "symbol": trade_context.symbol,
+                    "side": trade_context.side.value,
+                    "current_state": trade_context.current_state.value,
+                    "original_quantity": str(trade_context.original_quantity),
+                    "filled_quantity": str(trade_context.filled_quantity),
+                    "average_fill_price": str(trade_context.average_fill_price),
+                    "fees_paid": str(trade_context.fees_paid),
+                    "signal_timestamp": trade_context.signal_timestamp.isoformat(),
+                }
+
+                await self.cache_service.set(
+                    cache_key,
+                    context_data,
+                    namespace="state",
+                    ttl=3600,  # 1 hour TTL
+                    data_type="state",
+                )
+            # If neither service is available, context is only stored in memory
 
         except Exception as e:
             self.logger.warning(f"Failed to cache trade context: {e}")
@@ -830,9 +928,8 @@ class TradeLifecycleManager(BaseComponent):
     async def _log_trade_event(
         self, trade_id: str, event: TradeEvent, event_data: dict[str, Any]
     ) -> None:
-        """Log a trade event."""
+        """Log a trade event through service layer."""
         try:
-            # Log to database (simplified)
             event_record = {
                 "trade_id": trade_id,
                 "event": event.value,
@@ -840,8 +937,26 @@ class TradeLifecycleManager(BaseComponent):
                 "data": event_data,
             }
 
-            # In a full implementation, this would write to a trade_events table
-            self.logger.debug(f"Trade event logged: {event_record}")
+            # Use persistence service if available
+            if self._persistence_service:
+                from .state_service import StateMetadata, StateType
+
+                # Create event state for logging
+                event_state_id = f"{trade_id}_{event.value}_{datetime.now().timestamp()}"
+                metadata = StateMetadata(
+                    state_id=event_state_id,
+                    state_type=StateType.TRADE_STATE,  # Use trade state type for events
+                    version=1,
+                    source_component="TradeLifecycleManager",
+                )
+
+                # Save event through service layer
+                await self._persistence_service.save_state(
+                    StateType.TRADE_STATE, event_state_id, event_record, metadata
+                )
+            else:
+                # Fall back to logging only
+                self.logger.debug(f"Trade event logged: {event_record}")
 
         except Exception as e:
             self.logger.warning(f"Failed to log trade event: {e}")
@@ -893,7 +1008,42 @@ class TradeLifecycleManager(BaseComponent):
                 ).total_seconds()
                 history_record.execution_time_seconds = execution_duration
 
-            # Add to history
+            # Persist history record through service layer
+            if self._persistence_service:
+                from .state_service import StateMetadata, StateType
+
+                # Convert history record to dict for persistence
+                history_data = {
+                    "trade_id": history_record.trade_id,
+                    "bot_id": history_record.bot_id,
+                    "strategy_name": history_record.strategy_name,
+                    "symbol": history_record.symbol,
+                    "side": history_record.side.value,
+                    "quantity": str(history_record.quantity),
+                    "average_price": str(history_record.average_price),
+                    "pnl": str(history_record.pnl),
+                    "fees": str(history_record.fees),
+                    "net_pnl": str(history_record.net_pnl),
+                    "quality_score": history_record.quality_score,
+                    "execution_time_seconds": history_record.execution_time_seconds,
+                    "signal_time": history_record.signal_time.isoformat(),
+                    "execution_time": history_record.execution_time.isoformat(),
+                    "settlement_time": history_record.settlement_time.isoformat(),
+                    "status": "finalized",
+                }
+
+                metadata = StateMetadata(
+                    state_id=f"{trade_id}_history",
+                    state_type=StateType.TRADE_STATE,
+                    version=1,
+                    source_component="TradeLifecycleManager",
+                )
+
+                await self._persistence_service.save_state(
+                    StateType.TRADE_STATE, f"{trade_id}_history", history_data, metadata
+                )
+
+            # Add to in-memory history
             self.trade_history.append(history_record)
 
             # Remove from active trades
@@ -951,19 +1101,59 @@ class TradeLifecycleManager(BaseComponent):
     async def _load_active_trades(self) -> None:
         """Load active trades from persistence layer."""
         try:
-            if not self.cache_service:
-                self.logger.info("No cache service available - starting with empty active trades")
-                return
+            # Try persistence service first
+            if self._persistence_service:
+                from .state_service import StateType
 
-            # In a full implementation, this would scan cache service for active trade contexts
-            # For now, we'll use a simple pattern-based scan if supported by the cache service
-            if hasattr(self.cache_service, "invalidate_pattern"):
-                # Cache service supports pattern operations
-                self.logger.info("Cache service available for trade context persistence")
+                # Load all trade states from persistence
+                states = await self._persistence_service.list_states(
+                    StateType.TRADE_STATE,
+                    limit=1000,  # Reasonable limit for active trades
+                )
+
+                # Reconstruct trade contexts from persisted data
+                loaded_count = 0
+                for state_info in states:
+                    try:
+                        trade_data = state_info.get("data", {})
+                        trade_id = trade_data.get("trade_id")
+
+                        if trade_id and trade_data.get("current_state") not in [
+                            "cancelled",
+                            "rejected",
+                            "attributed",
+                        ]:
+                            # Reconstruct trade context (simplified)
+                            context = TradeContext(
+                                trade_id=trade_id,
+                                bot_id=trade_data.get("bot_id", ""),
+                                strategy_name=trade_data.get("strategy_name", ""),
+                                symbol=trade_data.get("symbol", ""),
+                                side=OrderSide(trade_data.get("side", "BUY")),
+                                original_quantity=Decimal(
+                                    str(trade_data.get("original_quantity", "0"))
+                                ),
+                                filled_quantity=Decimal(
+                                    str(trade_data.get("filled_quantity", "0"))
+                                ),
+                            )
+
+                            self.active_trades[trade_id] = context
+                            loaded_count += 1
+
+                    except Exception as e:
+                        self.logger.warning(f"Failed to reconstruct trade context: {e}")
+
+                self.logger.info(f"Loaded {loaded_count} active trades from persistence")
+
+            # Fall back to cache service
+            elif self.cache_service:
+                if hasattr(self.cache_service, "invalidate_pattern"):
+                    self.logger.info("Cache service available for trade context persistence")
+                else:
+                    self.logger.info("Cache service available but limited pattern support")
             else:
-                self.logger.info("Cache service available but limited pattern support")
-
-            self.logger.info("Active trades loading completed")
+                self.logger.info("No persistence available - starting with empty active trades")
 
         except Exception as e:
             self.logger.warning(f"Failed to load active trades: {e}")

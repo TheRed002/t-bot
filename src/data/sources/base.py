@@ -44,7 +44,7 @@ class RateLimiter:
 class SimpleCache(DataCacheInterface):
     """Simple in-memory cache implementation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize cache."""
         self._cache: dict[str, Any] = {}
         self._timestamps: dict[str, datetime] = {}

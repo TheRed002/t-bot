@@ -38,7 +38,8 @@ from src.analytics.types import (
     TimeSeries,
     TradeAnalytics,
 )
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
+from src.core.exceptions import DataError, RiskCalculationError, ValidationError, ComponentError
 from src.core.types.trading import Order, Position, Trade
 from src.monitoring.metrics import get_metrics_collector
 from src.utils.datetime_utils import get_current_utc_timestamp
@@ -104,7 +105,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
         # Risk monitoring
         self._var_history: deque = deque(maxlen=252)
-        self._volatility_surface: dict[str, dict[str, Decimal]] = defaultdict(dict)
+        self._volatility_surface: dict[str, dict[str, Any]] = defaultdict(dict)
         self._correlation_cache: dict[str, dict[str, Decimal]] = defaultdict(dict)
 
         # Transaction cost analysis
@@ -127,8 +128,8 @@ class RealtimeAnalyticsEngine(BaseComponent):
         self._broadcast_queue: asyncio.Queue = asyncio.Queue()
 
         # Redis integration for caching
-        self._redis_client = None
-        self._cache_enabled = False
+        self._redis_client: Any = None
+        self._cache_enabled: bool = False
 
         # Stress testing and scenario analysis
         self._stress_scenarios: dict[str, dict[str, Any]] = {
@@ -264,7 +265,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
         """
         return await self._calculate_portfolio_metrics()
 
-    async def get_position_metrics(self, symbol: str = None) -> list[PositionMetrics]:
+    async def get_position_metrics(self, symbol: str | None = None) -> list[PositionMetrics]:
         """
         Get position metrics.
 
@@ -287,7 +288,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
         return metrics
 
-    async def get_strategy_metrics(self, strategy: str = None) -> list[StrategyMetrics]:
+    async def get_strategy_metrics(self, strategy: str | None = None) -> list[StrategyMetrics]:
         """
         Get strategy performance metrics.
 
@@ -320,7 +321,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
         return list(self._active_alerts.values())
 
     async def get_trade_analytics(
-        self, trade_id: str = None, symbol: str = None
+        self, trade_id: str | None = None, symbol: str | None = None
     ) -> list[TradeAnalytics]:
         """
         Get detailed trade analytics with execution quality metrics.
@@ -360,7 +361,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
         """
         return await self._calculate_performance_attribution(period_days)
 
-    async def get_execution_quality_metrics(self, symbol: str = None) -> dict[str, Any]:
+    async def get_execution_quality_metrics(self, symbol: str | None = None) -> dict[str, Any]:
         """
         Get execution quality metrics including slippage and market impact.
 
@@ -372,6 +373,98 @@ class RealtimeAnalyticsEngine(BaseComponent):
         """
         return await self._calculate_execution_quality_metrics(symbol)
 
+    async def get_position_analytics(self) -> dict[str, Any]:
+        """Get detailed position analytics with consistent error handling."""
+        try:
+            position_analytics = {}
+            for symbol, position in self._positions.items():
+                # Use consistent attribute access pattern
+                if position.is_open():
+                    # Get current price from price cache
+                    current_price = self._price_cache.get(position.symbol, position.entry_price)
+                    position_value = position.quantity * current_price
+
+                    # Calculate unrealized PnL with consistent pattern
+                    unrealized_pnl = position.calculate_pnl(current_price)
+
+                    position_analytics[symbol] = {
+                        "value": position_value,
+                        "quantity": position.quantity,
+                        "entry_price": position.entry_price,
+                        "current_price": current_price,
+                        "unrealized_pnl": unrealized_pnl,
+                        "side": position.side.value,
+                        "exchange": position.exchange,
+                    }
+            return position_analytics
+        except Exception as e:
+            self.logger.error(f"Error getting position analytics: {e}")
+            # Use consistent error propagation pattern from data pipeline
+            raise DataError(
+                "Failed to calculate position analytics",
+                error_code="ANALYTICS_001",
+                data_type="position_analytics",
+                context={"error": str(e), "positions_count": len(self._positions)},
+            )
+
+    async def get_portfolio_risk_metrics(self) -> dict[str, Any]:
+        """Get portfolio risk metrics."""
+        try:
+            return {
+                "var_95": self._var_history[-1] if self._var_history else Decimal("0"),
+                "volatility": self._calculate_portfolio_volatility(),
+                "max_drawdown": self._calculate_max_drawdown(),
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting portfolio risk metrics: {e}")
+            raise RiskCalculationError(
+                "Failed to calculate portfolio risk metrics",
+                error_code="ANALYTICS_002",
+                calculation_type="portfolio_risk",
+                context={"error": str(e)},
+            )
+
+    def _calculate_portfolio_volatility(self) -> Decimal:
+        """Calculate portfolio volatility."""
+        if len(self._daily_returns) < 20:
+            return Decimal("0")
+        returns = [float(r) for r in self._daily_returns]
+        volatility = np.std(returns) * np.sqrt(252)
+        return safe_decimal(volatility)
+
+    def _calculate_max_drawdown(self) -> Decimal:
+        """Calculate maximum drawdown."""
+        if len(self._portfolio_value_history) < 2:
+            return Decimal("0")
+        values = [float(v) for v in self._portfolio_value_history]
+        peak = values[0]
+        max_dd = 0.0
+        for value in values[1:]:
+            if value > peak:
+                peak = value
+            dd = (peak - value) / peak
+            max_dd = max(max_dd, dd)
+        return safe_decimal(max_dd)
+
+    async def _get_current_portfolio_value(self) -> Decimal:
+        """Get current portfolio value."""
+        try:
+            total_value = Decimal("0")
+            for position in self._positions.values():
+                if hasattr(position, "size") and hasattr(position, "current_price"):
+                    total_value += getattr(position, "size", Decimal("0")) * getattr(
+                        position, "current_price", Decimal("1")
+                    )
+            return total_value
+        except Exception as e:
+            self.logger.error(f"Error calculating portfolio value: {e}")
+            raise RiskCalculationError(
+                "Failed to calculate portfolio value",
+                error_code="ANALYTICS_003",
+                calculation_type="portfolio_value",
+                context={"error": str(e)},
+            )
+
     async def _portfolio_analytics_loop(self) -> None:
         """Background loop for portfolio analytics calculation."""
         while self._running:
@@ -382,6 +475,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 break
             except Exception as e:
                 self.logger.error(f"Error in portfolio analytics loop: {e}")
+                # Don't re-raise here as this is a background task
                 await asyncio.sleep(5)
 
     async def _position_analytics_loop(self) -> None:
@@ -524,6 +618,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating portfolio analytics: {e}")
+            raise
 
     async def _calculate_position_analytics(self, position: Position) -> None:
         """Calculate analytics for individual position."""
@@ -563,6 +658,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating position analytics: {e}")
+            raise
 
     async def _calculate_trade_analytics(self, trade: Trade) -> None:
         """Calculate analytics for executed trade."""
@@ -581,6 +677,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating trade analytics: {e}")
+            raise
 
     async def _calculate_execution_analytics(self, order: Order) -> None:
         """Calculate execution quality analytics."""
@@ -603,6 +700,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error calculating execution analytics: {e}")
+            raise
 
     async def _update_strategy_performance(self, strategy: str, trade: Trade) -> None:
         """Update strategy performance metrics."""
@@ -647,6 +745,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error updating strategy performance: {e}")
+            raise
 
     async def _update_realtime_pnl(self, symbol: str) -> None:
         """Update real-time P&L for positions with updated prices."""
@@ -664,6 +763,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
         except Exception as e:
             self.logger.error(f"Error updating real-time P&L: {e}")
+            raise
 
     async def _check_risk_thresholds(self) -> None:
         """Check risk thresholds and generate alerts."""
@@ -881,7 +981,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                 for trade in perf["trades"]:
                     if hasattr(trade, "pnl") and hasattr(trade, "value"):
                         pnl = getattr(trade, "pnl", Decimal("0"))
-                        value = getattr(trade, "value", position.quantity * trade.price)
+                        value = getattr(trade, "value", trade.quantity * trade.price)
                         if value > 0:
                             trade_return = float(pnl / value)
                             trade_returns.append(trade_return)
@@ -926,7 +1026,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
         try:
             # Store price return for volatility calculation
             if symbol not in self._volatility_surface:
-                self._volatility_surface[symbol] = defaultdict(lambda: deque(maxlen=252))
+                self._volatility_surface[symbol] = defaultdict(lambda: deque(maxlen=252))  # type: ignore
 
             self._volatility_surface[symbol]["returns"].append(float(price_return))
 
@@ -1203,7 +1303,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
                     sector_allocation[sector] += (position_value / start_value) * position_return
 
             # Factor attribution (simplified)
-            factor_attribution = {}
+            factor_attribution: dict[str, Decimal] = {}
 
             # Calculate tracking error and information ratio
             benchmark_return = None  # Would need benchmark data
@@ -1240,14 +1340,21 @@ class RealtimeAnalyticsEngine(BaseComponent):
             self.logger.error(f"Error calculating performance attribution: {e}")
             return None
 
-    async def _calculate_execution_quality_metrics(self, symbol: str = None) -> dict[str, Any]:
+    async def _calculate_execution_quality_metrics(
+        self, symbol: str | None = None
+    ) -> dict[str, Any]:
         """Calculate comprehensive execution quality metrics."""
         try:
-            metrics = {"overall": {}, "by_symbol": {}, "by_strategy": {}, "time_series": {}}
+            metrics: dict[str, Any] = {
+                "overall": {},
+                "by_symbol": {},
+                "by_strategy": {},
+                "time_series": {},
+            }
 
             # Calculate overall execution metrics
             if self._slippage_tracker:
-                all_slippage = []
+                all_slippage: list[float] = []
                 for slippage_list in self._slippage_tracker.values():
                     all_slippage.extend(slippage_list)
 
@@ -1258,7 +1365,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
             # Market impact metrics
             if self._market_impact_tracker:
-                all_impact = []
+                all_impact: list[float] = []
                 for impact_list in self._market_impact_tracker.values():
                     all_impact.extend(impact_list)
 
@@ -1313,7 +1420,7 @@ class RealtimeAnalyticsEngine(BaseComponent):
             if hasattr(self.config, "redis_enabled") and self.config.redis_enabled:
                 from src.database.redis_client import RedisClient
 
-                self._redis_client = RedisClient()
+                self._redis_client = RedisClient("redis://localhost:6379/0")
                 await self._redis_client.connect()
                 self._cache_enabled = True
                 self.logger.info("Redis cache initialized for analytics")
@@ -1521,8 +1628,8 @@ class RealtimeAnalyticsEngine(BaseComponent):
 
             # Calculate position weights
             position_weights = {}
-            sector_weights = defaultdict(float)
-            currency_weights = defaultdict(float)
+            sector_weights: dict[str, float] = defaultdict(float)
+            currency_weights: dict[str, float] = defaultdict(float)
 
             for symbol, position in self._positions.items():
                 position_value = position.size * position.current_price
@@ -1574,7 +1681,9 @@ class RealtimeAnalyticsEngine(BaseComponent):
             self.logger.error(f"Error calculating concentration risk: {e}")
             return {}
 
-    async def calculate_advanced_var(self, confidence_levels: list[float] = None) -> dict[str, Any]:
+    async def calculate_advanced_var(
+        self, confidence_levels: list[float] | None = None
+    ) -> dict[str, Any]:
         """
         Calculate advanced Value at Risk metrics using multiple methodologies.
 

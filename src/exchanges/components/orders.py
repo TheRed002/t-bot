@@ -113,7 +113,9 @@ class OrderManager:
         if symbol:
             params["symbol"] = symbol
         elif order_id in self._orders:
-            params["symbol"] = self._orders[order_id].get("symbol")
+            symbol_from_cache = self._orders[order_id].get("symbol")
+            if isinstance(symbol_from_cache, str):
+                params["symbol"] = symbol_from_cache
 
         try:
             response = await self.connection.request(
@@ -154,7 +156,9 @@ class OrderManager:
         if symbol:
             params["symbol"] = symbol
         elif order_id in self._orders:
-            params["symbol"] = self._orders[order_id].get("symbol")
+            symbol_from_cache = self._orders[order_id].get("symbol")
+            if isinstance(symbol_from_cache, str):
+                params["symbol"] = symbol_from_cache
 
         try:
             response = await self.connection.request(
@@ -190,12 +194,20 @@ class OrderManager:
             )
 
             # Update local cache
-            for order in response:
-                order_id = order.get("orderId")
-                if order_id:
-                    self._orders[order_id] = order
-
-            return response
+            if isinstance(response, list):
+                for order in response:
+                    order_id = order.get("orderId")
+                    if order_id:
+                        self._orders[order_id] = order
+                return response
+            else:
+                # Handle case where response is a single dict instead of list
+                if isinstance(response, dict):
+                    order_id = response.get("orderId")
+                    if order_id:
+                        self._orders[order_id] = response
+                    return [response]
+                return []
 
         except Exception as e:
             self._logger.error(f"Failed to get open orders: {e}")
@@ -232,7 +244,13 @@ class OrderManager:
                 method="GET", endpoint="/api/v3/allOrders", params=params, signed=True
             )
 
-            return response
+            # Ensure response is a list
+            if isinstance(response, list):
+                return response
+            elif isinstance(response, dict):
+                return [response]
+            else:
+                return []
 
         except Exception as e:
             self._logger.error(f"Failed to get order history: {e}")
@@ -277,10 +295,17 @@ class OrderManager:
                 Decimal(current_order.get("price", 0)) if current_order.get("price") else None
             )
 
+            # Ensure we have valid values for the new order
+            side_value = current_order.get("side")
+            type_value = current_order.get("type")
+
+            if not isinstance(side_value, str) or not isinstance(type_value, str):
+                raise ValueError("Invalid order data: missing side or type")
+
             return await self.place_order(
                 symbol=symbol,
-                side=current_order.get("side"),
-                order_type=current_order.get("type"),
+                side=side_value,
+                order_type=type_value,
                 quantity=new_quantity,
                 price=new_price,
                 **kwargs,

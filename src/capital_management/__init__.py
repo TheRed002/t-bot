@@ -38,12 +38,37 @@ from .currency_manager import CurrencyManager
 from .exchange_distributor import ExchangeDistributor
 from .fund_flow_manager import FundFlowManager
 
+# Export service interfaces
+from .interfaces import (
+    AbstractCapitalService,
+    AbstractCurrencyManagementService,
+    AbstractExchangeDistributionService,
+    AbstractFundFlowManagementService,
+    CapitalServiceProtocol,
+    CurrencyManagementServiceProtocol,
+    ExchangeDistributionServiceProtocol,
+    FundFlowManagementServiceProtocol,
+)
+from .service import CapitalService
+
 __all__ = [
+    # Service interfaces - alphabetical
+    "AbstractCapitalService",
+    "AbstractCurrencyManagementService",
+    "AbstractExchangeDistributionService",
+    "AbstractFundFlowManagementService",
+    # Main service implementations - alphabetical  
     "CapitalAllocator",
+    "CapitalService",
     "CurrencyManager",
     "ExchangeDistributor",
     "FundFlowManager",
-    # Types
+    # Service protocols - alphabetical
+    "CapitalServiceProtocol",
+    "CurrencyManagementServiceProtocol",
+    "ExchangeDistributionServiceProtocol",
+    "FundFlowManagementServiceProtocol",
+    # Types - alphabetical
     "CapitalCurrencyExposure",
     "CapitalExchangeAllocation",
     "CapitalFundFlow",

@@ -24,7 +24,7 @@ from src.core.base.interfaces import (
 )
 from src.core.exceptions import ComponentError, ConfigurationError
 from src.core.logging import get_logger
-from src.core.types.base import ConfigDict
+from pydantic import ConfigDict
 
 
 class BaseComponent(

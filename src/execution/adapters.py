@@ -114,7 +114,8 @@ class ExecutionResultAdapter:
                 if hasattr(child_order, "timestamp") and child_order.timestamp:
                     try:
                         fill_data["timestamp"] = child_order.timestamp.isoformat()
-                    except Exception:
+                    except Exception as e:
+                        self.logger.warning("Failed to convert timestamp to ISO format", error=str(e))
                         fill_data["timestamp"] = None
 
                 fills.append(fill_data)

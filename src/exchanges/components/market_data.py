@@ -91,8 +91,17 @@ class MarketDataProvider:
 
             # Standardize and cache each ticker
             tickers = []
-            for ticker_data in response:
-                ticker = self._standardize_ticker(ticker_data)
+            if isinstance(response, list):
+                for ticker_data in response:
+                    if isinstance(ticker_data, dict):
+                        ticker = self._standardize_ticker(ticker_data)
+                        symbol = ticker.get("symbol")
+                        if symbol:
+                            cache_key = f"ticker_{symbol}"
+                            self._ticker_cache[cache_key] = ticker
+                        tickers.append(ticker)
+            elif isinstance(response, dict):
+                ticker = self._standardize_ticker(response)
                 symbol = ticker.get("symbol")
                 if symbol:
                     cache_key = f"ticker_{symbol}"
@@ -177,7 +186,13 @@ class MarketDataProvider:
             )
 
             # Standardize response
-            trades = [self._standardize_trade(trade) for trade in response]
+            trades = []
+            if isinstance(response, list):
+                trades = [
+                    self._standardize_trade(trade) for trade in response if isinstance(trade, dict)
+                ]
+            elif isinstance(response, dict):
+                trades = [self._standardize_trade(response)]
 
             # Cache result
             self._trades_cache[cache_key] = trades
@@ -222,7 +237,19 @@ class MarketDataProvider:
             )
 
             # Standardize response
-            klines = [self._standardize_kline(kline) for kline in response]
+            klines: list[dict[str, Any]] = []
+            if isinstance(response, list):
+                # Check if it's a list of klines or a single kline
+                if response and isinstance(response[0], list):
+                    # Multiple klines
+                    klines = [
+                        self._standardize_kline(kline)
+                        for kline in response
+                        if isinstance(kline, list)
+                    ]
+                elif response and isinstance(response[0], (int, float, str)):
+                    # Single kline as a list of values
+                    klines = [self._standardize_kline(response)]
 
             return klines
 

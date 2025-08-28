@@ -353,5 +353,20 @@ class FinancialCalculator:
         return total_wins / total_losses
 
 
-# Create singleton instance
-calc = FinancialCalculator()
+# FinancialCalculator registration is handled by service_registry.py
+
+
+# Backward compatibility - get instance from DI container
+def get_financial_calculator() -> FinancialCalculator:
+    """Get FinancialCalculator instance from DI container with lazy initialization."""
+    from src.core.dependency_injection import injector
+
+    try:
+        return injector.resolve("FinancialCalculator")
+    except Exception:
+        # Register if not found
+        injector.register_service("FinancialCalculator", FinancialCalculator(), singleton=True)
+        return injector.resolve("FinancialCalculator")
+
+
+calc = get_financial_calculator()

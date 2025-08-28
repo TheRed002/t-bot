@@ -736,36 +736,42 @@ class GrafanaDashboardManager:
                     # Track deployment failures
                     if self._error_handler:
                         error_msg = f"Grafana API error {response.status}: {error_text}"
-                        await self._error_handler.handle_error(
-                            Exception(error_msg),
-                            ErrorContext(
-                                error=Exception(error_msg),
-                                component="GrafanaDashboardManager",
-                                operation="deploy_dashboard",
-                                details={
-                                    "dashboard_title": dashboard.title,
-                                    "status_code": response.status,
-                                    "error_text": error_text,
-                                },
-                            ),
-                        )
+                        if hasattr(self._error_handler, "handle_error"):
+                            await self._error_handler.handle_error(
+                                Exception(error_msg),
+                                ErrorContext(
+                                    error=Exception(error_msg),
+                                    component="GrafanaDashboardManager",
+                                    operation="deploy_dashboard",
+                                    details={
+                                        "dashboard_title": dashboard.title,
+                                        "status_code": response.status,
+                                        "error_text": error_text,
+                                    },
+                                ),
+                            )
+                        else:
+                            logger.error(f"Error handler has no handle_error method: {error_msg}")
                     return False
 
         except Exception as e:
             # Track deployment errors
             if self._error_handler:
-                await self._error_handler.handle_error(
-                    e,
-                    ErrorContext(
-                        error=e,
-                        component="GrafanaDashboardManager",
-                        operation="deploy_dashboard",
-                        details={
-                            "dashboard_title": dashboard.title,
-                            "grafana_url": self.grafana_url,
-                        },
-                    ),
-                )
+                if hasattr(self._error_handler, "handle_error"):
+                    await self._error_handler.handle_error(
+                        e,
+                        ErrorContext(
+                            error=e,
+                            component="GrafanaDashboardManager",
+                            operation="deploy_dashboard",
+                            details={
+                                "dashboard_title": dashboard.title,
+                                "grafana_url": self.grafana_url,
+                            },
+                        ),
+                    )
+                else:
+                    logger.error(f"Error handler has no handle_error method for {e}")
             logger.error(f"Error deploying dashboard to Grafana: {e}")
             raise  # Let retry decorator handle it
         finally:

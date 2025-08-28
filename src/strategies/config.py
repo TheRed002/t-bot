@@ -139,6 +139,21 @@ class StrategyConfigurationManager:
 
             return config
 
+        except FileNotFoundError as e:
+            self.logger.error(
+                "Strategy config file not found", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"Configuration file not found for {strategy_name}: {e!s}")
+        except yaml.YAMLError as e:
+            self.logger.error(
+                "Invalid YAML in strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"Invalid YAML configuration for {strategy_name}: {e!s}")
+        except json.JSONDecodeError as e:
+            self.logger.error(
+                "Invalid JSON in strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"Invalid JSON configuration for {strategy_name}: {e!s}")
         except Exception as e:
             self.logger.error(
                 "Failed to load strategy config", strategy_name=strategy_name, error=str(e)
@@ -154,20 +169,30 @@ class StrategyConfigurationManager:
         Returns:
             Configuration dictionary
         """
-        with open(config_file) as f:
-            if config_file.suffix == ".yaml" or config_file.suffix == ".yml":
-                data = yaml.safe_load(f)
-                # Handle nested strategy configuration
-                if isinstance(data, dict) and "strategy" in data:
-                    return data["strategy"]
-                return data
-            elif config_file.suffix == ".json":
-                data = json.load(f)
-                if isinstance(data, dict) and "strategy" in data:
-                    return data["strategy"]
-                return data
-            else:
-                raise ConfigurationError(f"Unsupported config file format: {config_file.suffix}")
+        try:
+            with open(config_file) as f:
+                if config_file.suffix == ".yaml" or config_file.suffix == ".yml":
+                    data = yaml.safe_load(f)
+                    # Handle nested strategy configuration
+                    if isinstance(data, dict) and "strategy" in data:
+                        return data["strategy"]
+                    return data
+                elif config_file.suffix == ".json":
+                    data = json.load(f)
+                    if isinstance(data, dict) and "strategy" in data:
+                        return data["strategy"]
+                    return data
+                else:
+                    raise ConfigurationError(f"Unsupported config file format: {config_file.suffix}")
+        except FileNotFoundError as e:
+            self.logger.error("Config file not found", config_file=str(config_file))
+            raise ConfigurationError(f"Configuration file not found: {config_file}") from e
+        except yaml.YAMLError as e:
+            self.logger.error("Invalid YAML format", config_file=str(config_file), error=str(e))
+            raise ConfigurationError(f"Invalid YAML in {config_file}: {e!s}") from e
+        except json.JSONDecodeError as e:
+            self.logger.error("Invalid JSON format", config_file=str(config_file), error=str(e))
+            raise ConfigurationError(f"Invalid JSON in {config_file}: {e!s}") from e
 
     def _get_default_config(self, strategy_name: str) -> dict[str, Any]:
         """Get default configuration for strategy.
@@ -215,6 +240,21 @@ class StrategyConfigurationManager:
                 "Strategy config saved", strategy_name=strategy_name, config_file=str(config_file)
             )
 
+        except PermissionError as e:
+            self.logger.error(
+                "Permission denied saving strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"Permission denied saving configuration for {strategy_name}: {e!s}")
+        except OSError as e:
+            self.logger.error(
+                "OS error saving strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"OS error saving configuration for {strategy_name}: {e!s}")
+        except yaml.YAMLError as e:
+            self.logger.error(
+                "YAML serialization error", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"Failed to serialize YAML for {strategy_name}: {e!s}")
         except Exception as e:
             self.logger.error(
                 "Failed to save strategy config", strategy_name=strategy_name, error=str(e)
@@ -235,6 +275,12 @@ class StrategyConfigurationManager:
             # Basic validation - let Pydantic handle it
             StrategyConfig(**config)
             return True
+        except ValueError as e:
+            self.logger.warning("Configuration validation failed - invalid values", error=str(e))
+            return False
+        except TypeError as e:
+            self.logger.warning("Configuration validation failed - type error", error=str(e))
+            return False
         except Exception as e:
             self.logger.warning("Configuration validation failed", error=str(e))
             return False
@@ -320,6 +366,9 @@ class StrategyConfigurationManager:
                 )
                 return False
 
+        except ConfigurationError:
+            # Re-raise configuration errors
+            raise
         except Exception as e:
             self.logger.error(
                 "Failed to update config parameter",
@@ -373,6 +422,14 @@ class StrategyConfigurationManager:
 
             return config
 
+        except ConfigurationError:
+            # Re-raise configuration errors
+            raise
+        except ValueError as e:
+            self.logger.error(
+                "Invalid parameter values for strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            raise ConfigurationError(f"Invalid parameter values for {strategy_name}: {e!s}")
         except Exception as e:
             self.logger.error(
                 "Failed to create strategy config", strategy_name=strategy_name, error=str(e)
@@ -404,6 +461,16 @@ class StrategyConfigurationManager:
                 )
                 return False
 
+        except PermissionError as e:
+            self.logger.error(
+                "Permission denied deleting strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            return False
+        except OSError as e:
+            self.logger.error(
+                "OS error deleting strategy config", strategy_name=strategy_name, error=str(e)
+            )
+            return False
         except Exception as e:
             self.logger.error(
                 "Failed to delete strategy config", strategy_name=strategy_name, error=str(e)

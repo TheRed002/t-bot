@@ -199,17 +199,17 @@ def parse_datetime(dt_str: str, format_str: str | None = None) -> datetime:
 def get_redis_key_ttl(key: str, default_ttl: int = 3600) -> int:
     """
     Get TTL for Redis key based on key pattern and current time.
-    
+
     Args:
         key: Redis key string
         default_ttl: Default TTL in seconds
-        
+
     Returns:
         TTL in seconds
     """
     # Pattern-based TTL logic
     key_lower = key.lower()
-    
+
     if "metrics" in key_lower:
         return 300  # 5 minutes for metrics
     elif "cache" in key_lower:
@@ -236,5 +236,5 @@ def get_redis_key_ttl(key: str, default_ttl: int = 3600) -> int:
         return 30  # 30 seconds for distributed locks
     elif "rate_limit" in key_lower:
         return 60  # 1 minute for rate limit data
-    
+
     return default_ttl

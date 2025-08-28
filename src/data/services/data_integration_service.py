@@ -17,7 +17,7 @@ import warnings
 from datetime import datetime
 from typing import Any
 
-from src.base import BaseComponent
+from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.types import MarketData, StorageMode
 

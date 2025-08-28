@@ -48,6 +48,7 @@ class MarketRegime(Enum):
     MEDIUM_CORRELATION = "medium_correlation"
     LOW_CORRELATION = "low_correlation"
 
+
 class NewsSentiment(Enum):
     """News sentiment classification."""
 

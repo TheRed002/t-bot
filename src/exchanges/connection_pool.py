@@ -184,11 +184,14 @@ class ConnectionWrapper:
 
     async def close(self) -> None:
         """Close the connection."""
+        session = None
         try:
-            await self.session.close()
-            self.metrics.status = ConnectionStatus.DISCONNECTED
+            session = self.session
+            if session:
+                await session.close()
         except Exception as e:
             logger.warning(f"Error closing connection {self.connection_id}: {e}")
+        finally:
             # Ensure connection is marked as disconnected even if close fails
             self.metrics.status = ConnectionStatus.DISCONNECTED
             # Invalidate the session to prevent reuse
@@ -824,37 +827,65 @@ class EnhancedConnectionPool(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup pool resources."""
+        tasks_to_cancel = []
+        connections_to_close = []
+        try:
+            # Store references to avoid modification during iteration
+            tasks_to_cancel = list(self._background_tasks)
+            connections_to_close = list(self.connections)
+        except Exception as e:
+            self.logger.error(f"Error storing cleanup references: {e}")
+
         try:
             # Cancel background tasks
-            for task in self._background_tasks:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            for task in tasks_to_cancel:
+                if task and not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        self.logger.error(f"Error canceling task: {e}")
+        except Exception as e:
+            self.logger.error(f"Error canceling background tasks: {e}")
+        finally:
+            self._background_tasks.clear()
 
+        try:
             # Close all connections
-            for connection in self.connections:
-                await connection.close()
-
-            # Clear state
+            for connection in connections_to_close:
+                if connection:
+                    try:
+                        await connection.close()
+                    except Exception as e:
+                        self.logger.error(
+                            f"Error closing connection {connection.connection_id}: {e}"
+                        )
+        except Exception as e:
+            self.logger.error(f"Error closing connections: {e}")
+        finally:
+            # Clear state regardless of errors
             self.connections.clear()
             self.active_connections.clear()
             self.affinity_map.clear()
 
             # Clear queue
-            while not self.available_connections.empty():
-                try:
-                    self.available_connections.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+            try:
+                while not self.available_connections.empty():
+                    try:
+                        self.available_connections.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    except Exception as e:
+                        self.logger.error(f"Error getting queue item during cleanup: {e}")
+                        break
+            except Exception as e:
+                self.logger.error(f"Error clearing connection queue: {e}")
 
             self.logger.info(
                 f"Connection pool cleaned up for {self.exchange} {self.connection_type.value}"
             )
-
-        except Exception as e:
-            self.logger.error(f"Error during pool cleanup: {e}")
 
 
 class ConnectionPoolManager(BaseComponent):
@@ -950,7 +981,22 @@ class ConnectionPoolManager(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup all connection pools."""
-        for pool in self.pools.values():
-            await pool.cleanup()
-        self.pools.clear()
+        pools_to_cleanup = []
+        try:
+            pools_to_cleanup = list(self.pools.values())
+        except Exception as e:
+            self.logger.error(f"Error creating pools list for cleanup: {e}")
+
+        for pool in pools_to_cleanup:
+            try:
+                if pool:
+                    await pool.cleanup()
+            except Exception as e:
+                self.logger.error(f"Error cleaning up pool: {e}")
+
+        try:
+            self.pools.clear()
+        except Exception as e:
+            self.logger.error(f"Error clearing pools dict: {e}")
+
         self.logger.info("All connection pools cleaned up")

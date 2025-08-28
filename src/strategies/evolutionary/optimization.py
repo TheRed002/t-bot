@@ -1218,7 +1218,7 @@ class MultiObjectiveOptimizer:
         )
 
     @time_execution
-    @retry(max_attempts=3, exceptions=(OptimizationError,))
+    @retry(max_attempts=3)
     async def optimize_strategy(
         self,
         strategy_class: type,
@@ -1328,8 +1328,13 @@ class MultiObjectiveOptimizer:
             "pareto_frontier": self.get_pareto_frontier_data(),
         }
 
-        with open(filepath, "w") as f:
+        f = None
+        try:
+            f = open(filepath, "w")
             json.dump(results, f, indent=2, default=str)
+        finally:
+            if f:
+                f.close()
 
         self.logger.info("Optimization results exported", filepath=filepath)
 
