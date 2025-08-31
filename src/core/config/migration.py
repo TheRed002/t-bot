@@ -19,12 +19,13 @@ Usage:
     ```
 """
 
-import logging
 from pathlib import Path
+
+from src.core.logging import get_logger
 
 from .service import ConfigService, register_config_service_in_container
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def setup_config_service(

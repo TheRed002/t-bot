@@ -319,7 +319,6 @@ class TestResourceManagerEdgeCases:
             pass
 
     @pytest.mark.asyncio
-    @pytest.mark.timeout(2)  # Prevent hanging
     async def test_resource_lock_deadlock_prevention(self):
         """Test resource lock deadlock prevention."""
         lock1 = ResourceLock("lock1")

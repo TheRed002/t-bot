@@ -7,6 +7,7 @@ Types are now organized into domain-specific modules for better maintainability.
 
 # Base types and common enums
 from .base import (
+    AlertSeverity,
     ConnectionType,
     ExchangeType,
     MarketType,
@@ -113,6 +114,7 @@ from .trading import (
 
 # Export all for convenience
 __all__ = [
+    "AlertSeverity",
     "AllocationStrategy",
     "ArbitrageOpportunity",
     "Balance",

@@ -142,7 +142,7 @@ class TestExchangeConfig:
         
         ws_config = exchange_config.get_websocket_config('binance')
         assert 'url' in ws_config
-        assert ws_config['reconnect_attempts'] == 5
+        assert ws_config['reconnect_attempts'] == 10
         assert ws_config['ping_interval'] == 30
 
 

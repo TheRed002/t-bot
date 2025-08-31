@@ -19,11 +19,20 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
-from pydantic import ConfigDict as PydanticConfigDict
+from pydantic import BaseModel, ConfigDict as PydanticConfigDict, Field, field_validator
 
 # Type aliases for better readability
 ConfigDict = dict[str, Any]
+
+
+class AlertSeverity(Enum):
+    """Alert severity levels for monitoring and alerting system."""
+
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    INFO = "info"
 
 
 class TradingMode(Enum):

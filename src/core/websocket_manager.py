@@ -7,7 +7,6 @@ reconnection logic, heartbeat mechanisms, and resource management.
 
 import asyncio
 import json
-import logging
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -86,7 +85,9 @@ class WebSocketManager:
         # Resource tracking
         self.resource_id: str | None = None
 
-        self.logger = logging.getLogger(__name__)
+        from src.core.logging import get_logger
+
+        self.logger = get_logger(__name__)
 
     @asynccontextmanager
     async def connection(self) -> AsyncGenerator["WebSocketManager", None]:
@@ -137,12 +138,12 @@ class WebSocketManager:
 
             self.logger.info(f"WebSocket connected to {self.url}")
 
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             self.state = WebSocketState.ERROR
             raise WebSocketError(
                 f"WebSocket connection timeout after {self.connection_timeout}s",
                 websocket_state=self.state.value,
-            )
+            ) from e
         except Exception as e:
             self.state = WebSocketState.ERROR
             raise WebSocketError(
@@ -345,8 +346,8 @@ class WebSocketManager:
             if self.resource_manager and self.resource_id:
                 self.resource_manager.touch_resource(self.resource_id)
 
-        except asyncio.TimeoutError:
-            raise WebSocketError("Message send timeout", websocket_state=self.state.value)
+        except asyncio.TimeoutError as e:
+            raise WebSocketError("Message send timeout", websocket_state=self.state.value) from e
         except Exception as e:
             raise WebSocketError(
                 f"Failed to send message: {e}", websocket_state=self.state.value

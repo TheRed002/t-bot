@@ -277,9 +277,9 @@ class PerformanceOptimizer(BaseComponent):
         try:
             # Performance monitor metrics
             if self.performance_monitor:
-                metrics["performance_monitor"] = (
-                    await self.performance_monitor.get_performance_summary()
-                )
+                metrics[
+                    "performance_monitor"
+                ] = await self.performance_monitor.get_performance_summary()
 
             # Memory optimizer metrics
             if self.memory_optimizer:
@@ -632,9 +632,7 @@ class PerformanceOptimizer(BaseComponent):
                     opp["recommendation"]
                     for opp in latest_opportunities
                     if opp.get("priority") in ["high", "medium"]
-                ][
-                    :5
-                ]  # Top 5 recommendations
+                ][:5]  # Top 5 recommendations
 
         except Exception as e:
             self.logger.error(f"Error generating performance report: {e}")
@@ -657,15 +655,15 @@ class PerformanceOptimizer(BaseComponent):
         try:
             # Force memory optimization
             if self.memory_optimizer:
-                results["memory_optimization"] = (
-                    await self.memory_optimizer.force_memory_optimization()
-                )
+                results[
+                    "memory_optimization"
+                ] = await self.memory_optimizer.force_memory_optimization()
 
             # Force trading optimization analysis
             if self.trading_profiler:
-                results["trading_optimization"] = (
-                    await self.trading_profiler.force_optimization_analysis()
-                )
+                results[
+                    "trading_optimization"
+                ] = await self.trading_profiler.force_optimization_analysis()
 
             # Clear and optimize caches
             if self.cache_layer:

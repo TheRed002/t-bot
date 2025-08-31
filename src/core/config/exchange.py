@@ -87,29 +87,55 @@ class ExchangeConfig(BaseConfig):
     request_timeout: int = Field(default=30, description="Request timeout in seconds")
     max_retries: int = Field(default=3, description="Maximum number of retries")
     retry_delay: float = Field(default=1.0, description="Delay between retries in seconds")
-    
+
     # WebSocket settings
-    websocket_message_timeout: int = Field(default=60, description="WebSocket message timeout in seconds")
-    websocket_ping_interval: int = Field(default=30, description="WebSocket ping interval in seconds")
+    websocket_message_timeout: int = Field(
+        default=60, description="WebSocket message timeout in seconds"
+    )
+    websocket_ping_interval: int = Field(
+        default=30, description="WebSocket ping interval in seconds"
+    )
     websocket_ping_timeout: int = Field(default=10, description="WebSocket ping timeout in seconds")
-    websocket_close_timeout: int = Field(default=10, description="WebSocket close timeout in seconds")
-    websocket_max_reconnect_attempts: int = Field(default=10, description="Maximum WebSocket reconnection attempts")
-    websocket_reconnect_delay: float = Field(default=1.0, description="WebSocket reconnection delay in seconds")
-    websocket_max_reconnect_delay: float = Field(default=60.0, description="Maximum WebSocket reconnection delay in seconds")
-    websocket_heartbeat_interval: float = Field(default=30.0, description="WebSocket heartbeat interval in seconds")
-    websocket_health_check_interval: float = Field(default=30.0, description="WebSocket health check interval in seconds")
-    
+    websocket_close_timeout: int = Field(
+        default=10, description="WebSocket close timeout in seconds"
+    )
+    websocket_max_reconnect_attempts: int = Field(
+        default=10, description="Maximum WebSocket reconnection attempts"
+    )
+    websocket_reconnect_delay: float = Field(
+        default=1.0, description="WebSocket reconnection delay in seconds"
+    )
+    websocket_max_reconnect_delay: float = Field(
+        default=60.0, description="Maximum WebSocket reconnection delay in seconds"
+    )
+    websocket_heartbeat_interval: float = Field(
+        default=30.0, description="WebSocket heartbeat interval in seconds"
+    )
+    websocket_health_check_interval: float = Field(
+        default=30.0, description="WebSocket health check interval in seconds"
+    )
+
     # Connection pool settings
     connection_pool_size: int = Field(default=3, description="Default connection pool size")
     connection_pool_max_size: int = Field(default=10, description="Maximum connection pool size")
-    connection_pool_keepalive_timeout: int = Field(default=300, description="Connection keepalive timeout in seconds")
-    connection_pool_health_check_interval: int = Field(default=60, description="Connection pool health check interval in seconds")
-    connection_pool_retry_attempts: int = Field(default=3, description="Connection pool retry attempts")
-    connection_pool_circuit_breaker_timeout: int = Field(default=60, description="Circuit breaker timeout in seconds")
-    
+    connection_pool_keepalive_timeout: int = Field(
+        default=300, description="Connection keepalive timeout in seconds"
+    )
+    connection_pool_health_check_interval: int = Field(
+        default=60, description="Connection pool health check interval in seconds"
+    )
+    connection_pool_retry_attempts: int = Field(
+        default=3, description="Connection pool retry attempts"
+    )
+    connection_pool_circuit_breaker_timeout: int = Field(
+        default=60, description="Circuit breaker timeout in seconds"
+    )
+
     # Rate limiting settings
     rate_limit_window_seconds: int = Field(default=60, description="Rate limit window in seconds")
-    rate_limit_max_queue_size: int = Field(default=1000, description="Maximum rate limit queue size")
+    rate_limit_max_queue_size: int = Field(
+        default=1000, description="Maximum rate limit queue size"
+    )
 
     @field_validator("default_exchange")
     @classmethod

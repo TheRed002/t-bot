@@ -141,16 +141,17 @@ class SecurityConfig(BaseConfig):
             raise ValueError(f"JWT expire minutes must be between 1 and 1440, got {v}")
         return v
 
-    @field_validator("secret_key", "encryption_key")
     @classmethod
-    def validate_key_length(cls, v):
-        """Validate key lengths and entropy for security."""
+    def _validate_key_basic(cls, v: str) -> None:
+        """Validate basic key requirements."""
         if not v:
             raise ValueError("Key must be set via environment variable")
         if len(v) < 32:
             raise ValueError(f"Key must be at least 32 characters long, got {len(v)}")
 
-        # Check for sufficient entropy (at least different character types)
+    @classmethod
+    def _validate_key_character_types(cls, v: str) -> None:
+        """Validate key contains sufficient character type diversity."""
         has_lower = any(c.islower() for c in v)
         has_upper = any(c.isupper() for c in v)
         has_digit = any(c.isdigit() for c in v)
@@ -163,42 +164,63 @@ class SecurityConfig(BaseConfig):
                 "(lowercase, uppercase, digits, special characters)"
             )
 
-        # Check for obvious patterns and common weak patterns
+    @classmethod
+    def _validate_key_patterns(cls, v: str) -> None:
+        """Validate key doesn't contain common weak patterns."""
         lower_v = v.lower()
-        if any(
-            pattern in lower_v for pattern in ["password", "secret", "admin", "12345", "qwerty"]
-        ):
+        weak_patterns = ["password", "secret", "admin", "12345", "qwerty"]
+        if any(pattern in lower_v for pattern in weak_patterns):
             raise ValueError("Key contains common weak patterns")
 
-        # Check for sufficient unique characters (entropy)
         if len(set(v)) < 10:
             raise ValueError("Key has insufficient entropy (too few unique characters)")
 
-        # Use efficient entropy calculation instead of repetitive pattern detection
+    @classmethod
+    def _calculate_shannon_entropy(cls, s: str) -> float:
+        """Calculate Shannon entropy of a string."""
+        import math
+
+        if not s:
+            return 0.0
+
+        # Count frequency of each character
+        char_counts = {}
+        for c in s:
+            char_counts[c] = char_counts.get(c, 0) + 1
+
+        # Calculate entropy
+        entropy = 0.0
+        length = len(s)
+        for count in char_counts.values():
+            if count > 0:
+                p_c = count / length
+                entropy -= p_c * math.log2(p_c)
+
+        return entropy
+
+    @classmethod
+    def _validate_key_entropy(cls, v: str) -> None:
+        """Validate key cryptographic properties."""
         import hashlib
 
-        # Calculate Shannon entropy for better entropy assessment
-        def calculate_entropy(s: str) -> float:
-            """Calculate Shannon entropy of a string."""
-            if not s:
-                return 0.0
-            entropy = 0
-            for c in set(s):
-                p_c = s.count(c) / len(s)
-                if p_c > 0:
-                    entropy -= p_c * (p_c.bit_length() - 1)
-            return entropy
-
-        entropy = calculate_entropy(v)
+        entropy = cls._calculate_shannon_entropy(v)
         min_entropy = 3.0  # Approximately 8 bits of entropy
         if entropy < min_entropy:
             raise ValueError(f"Key entropy too low: {entropy:.2f} < {min_entropy}")
 
         # Use cryptographically secure hash for pattern detection
-        key_hash = hashlib.sha256(v.encode()).hexdigest()
+        key_hash = hashlib.sha256(v.encode("utf-8")).hexdigest()
         if len(set(key_hash[:16])) < 8:  # Check hash diversity
             raise ValueError("Key shows poor cryptographic properties")
 
+    @field_validator("secret_key", "encryption_key")
+    @classmethod
+    def validate_key_length(cls, v):
+        """Validate key lengths and entropy for security."""
+        cls._validate_key_basic(v)
+        cls._validate_key_character_types(v)
+        cls._validate_key_patterns(v)
+        cls._validate_key_entropy(v)
         return v
 
 
@@ -997,13 +1019,8 @@ class Config(BaseConfig):
             raise FileNotFoundError(f"Configuration file not found: {yaml_path}")
 
         try:
-            file_handle = None
-            try:
-                file_handle = open(yaml_path, encoding="utf-8")
+            with open(yaml_path, encoding="utf-8") as file_handle:
                 yaml_data = yaml.safe_load(file_handle)
-            finally:
-                if file_handle:
-                    file_handle.close()
 
             # Merge with environment variables (env vars take precedence)
             return cls(**yaml_data)
@@ -1027,20 +1044,15 @@ class Config(BaseConfig):
 
         if yaml_path.exists():
             try:
-                file_handle = None
-                try:
-                    file_handle = open(yaml_path, encoding="utf-8")
+                with open(yaml_path, encoding="utf-8") as file_handle:
                     yaml_data = yaml.safe_load(file_handle) or {}
-                finally:
-                    if file_handle:
-                        file_handle.close()
             except yaml.YAMLError as e:
                 # If YAML parsing fails, log the error and fall back to env-only
                 import logging
 
                 logging.getLogger(__name__).warning(
-                    f"Failed to parse YAML configuration from {yaml_path}: {e}. "
-                    f"Falling back to environment variables only."
+                    "Failed to parse YAML configuration, falling back to environment variables",
+                    extra={"yaml_path": str(yaml_path), "error_type": type(e).__name__},
                 )
                 yaml_data = {}
 
@@ -1064,13 +1076,8 @@ class Config(BaseConfig):
         # Convert config to dict and handle nested models
         config_dict = self.model_dump()
 
-        file_handle = None
-        try:
-            file_handle = open(yaml_path, "w", encoding="utf-8")
+        with open(yaml_path, "w", encoding="utf-8") as file_handle:
             yaml.dump(config_dict, file_handle, default_flow_style=False, indent=2)
-        finally:
-            if file_handle:
-                file_handle.close()
 
     def get_database_url(self) -> str:
         """Generate PostgreSQL database URL.
@@ -1139,5 +1146,3 @@ class Config(BaseConfig):
             return True
         except (FileNotFoundError, ValueError, yaml.YAMLError):
             return False
-
-

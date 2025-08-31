@@ -568,11 +568,12 @@ def register_core_services(config: Any) -> None:
             config={"config": config} if config else {},
             dependencies=["ConfigService"],  # Minimal dependencies
         )
-        
+
         # Also register error handling components with DI container
         from src.error_handling.di_registration import configure_error_handling_di
+
         configure_error_handling_di(injector, config)
-        
+
     except ImportError:
         pass  # Service may not exist yet
 
@@ -583,9 +584,21 @@ def register_business_services(config: Any) -> None:
 
     # Register business services with proper error handling
     business_services = [
-        ("CapitalService", "src.capital_management.service", ["DatabaseService", "ErrorHandlingService"]),
-        ("ExecutionService", "src.execution.service", ["DatabaseService", "ErrorHandlingService"]),
-        ("RiskService", "src.risk_management.service", ["DatabaseService", "StateService", "ErrorHandlingService"]),
+        (
+            "CapitalService",
+            "src.capital_management.service",
+            ["DatabaseService", "ErrorHandlingService"],
+        ),
+        (
+            "ExecutionService",
+            "src.execution.service",
+            ["DatabaseService", "ErrorHandlingService"],
+        ),
+        (
+            "RiskService",
+            "src.risk_management.service",
+            ["DatabaseService", "StateService", "ErrorHandlingService"],
+        ),
         ("StrategyService", "src.strategies.service", ["ErrorHandlingService"]),
         ("MLService", "src.ml.service", ["ErrorHandlingService"]),
         (

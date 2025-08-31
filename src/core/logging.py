@@ -463,13 +463,19 @@ def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None
         try:
             if log_file.stat().st_mtime < cutoff_time:
                 log_file.unlink()
-                basic_logging.info(f"Removed old log file: {log_file}")
+                basic_logging.info("Removed old log file", extra={"file": str(log_file)})
         except FileNotFoundError:
             pass
         except PermissionError as e:
-            basic_logging.error(f"Permission denied removing log file {log_file}: {e}")
+            basic_logging.error(
+                "Permission denied removing log file",
+                extra={"file": str(log_file), "error_type": type(e).__name__},
+            )
         except OSError as e:
-            basic_logging.warning(f"Failed to remove old log file {log_file}: {e}")
+            basic_logging.warning(
+                "Failed to remove old log file",
+                extra={"file": str(log_file), "error_type": type(e).__name__},
+            )
 
 
 def setup_production_logging(log_dir: str = "logs", app_name: str = "trading-bot") -> None:
@@ -497,5 +503,3 @@ def setup_development_logging() -> None:
         log_level="DEBUG",
         log_file=None,  # Console only for development
     )
-
-

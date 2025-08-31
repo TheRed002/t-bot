@@ -19,6 +19,8 @@ from src.core.types import (
     OrderStatus,
     OrderType,
     Position,
+    PositionSide,
+    PositionStatus,
     Signal,
     SignalDirection,
     TradingMode,
@@ -321,7 +323,8 @@ class TestPosition:
             entry_price=Decimal("50000.00"),
             current_price=Decimal("51000.00"),
             unrealized_pnl=Decimal("2000.00"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
         )
@@ -331,7 +334,7 @@ class TestPosition:
         assert position.entry_price == Decimal("50000.00")
         assert position.current_price == Decimal("51000.00") 
         assert position.unrealized_pnl == Decimal("2000.00")
-        assert position.side == OrderSide.BUY
+        assert position.side == PositionSide.LONG
         
         # Validate financial calculations
         expected_pnl = (position.current_price - position.entry_price) * position.quantity
@@ -362,12 +365,13 @@ class TestPosition:
             entry_price=Decimal("50000.00"),
             current_price=Decimal("49000.00"),
             unrealized_pnl=Decimal("1000.00"),
-            side=OrderSide.SELL,
+            side=PositionSide.SHORT,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
         )
 
-        assert position.side == OrderSide.SELL
+        assert position.side == PositionSide.SHORT
         assert position.unrealized_pnl == Decimal("1000.00")
 
 
@@ -426,7 +430,8 @@ class TestFinancialCalculationAccuracy:
             entry_price=Decimal("50000.00"),
             current_price=Decimal("52000.00"),
             unrealized_pnl=Decimal("3000.00"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
         )
@@ -442,7 +447,8 @@ class TestFinancialCalculationAccuracy:
             entry_price=Decimal("50000.00"),
             current_price=Decimal("48000.00"),
             unrealized_pnl=Decimal("2000.00"),
-            side=OrderSide.SELL,
+            side=PositionSide.SHORT,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
         )
@@ -574,7 +580,8 @@ class TestTypeValidationEdgeCases:
             entry_price=Decimal("50000.00"),
             current_price=Decimal("50000.00"),
             unrealized_pnl=Decimal("0.00"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
         )
@@ -587,7 +594,8 @@ class TestTypeValidationEdgeCases:
             entry_price=Decimal("50000.00"),
             current_price=Decimal("45000.00"),
             unrealized_pnl=Decimal("-5000.00"),
-            side=OrderSide.BUY,
+            side=PositionSide.LONG,
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
         )
@@ -675,7 +683,8 @@ class TestCrossTypeConsistency:
             entry_price=order.price,
             current_price=Decimal("51000.00"),
             unrealized_pnl=Decimal("1500.00"),  # (51000-50000)*1.5
-            side=order.side,
+            side=PositionSide.LONG,  # Convert OrderSide.BUY to PositionSide.LONG
+            status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
             exchange="binance",
         )
@@ -684,7 +693,7 @@ class TestCrossTypeConsistency:
         assert position.symbol == order.symbol
         assert position.quantity == order.quantity
         assert position.entry_price == order.price
-        assert position.side == order.side
+        assert position.side == PositionSide.LONG  # OrderSide.BUY -> PositionSide.LONG
         
     def test_signal_to_order_consistency(self):
         """Test consistency between signal and generated order."""

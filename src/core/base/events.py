@@ -971,16 +971,18 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             # Already in correct format, ensure it has required metadata
             if "timestamp" not in data:
                 data["timestamp"] = datetime.now(timezone.utc).isoformat()
-            
+
             # Apply consistent financial data transformations
             if "price" in data and data["price"] is not None:
                 from src.utils.decimal_utils import to_decimal
+
                 data["price"] = to_decimal(data["price"])
-            
+
             if "quantity" in data and data["quantity"] is not None:
                 from src.utils.decimal_utils import to_decimal
+
                 data["quantity"] = to_decimal(data["quantity"])
-                
+
             return data
 
         # Transform non-dict data to standard format
@@ -996,10 +998,12 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
             # Apply consistent financial data transformations
             if hasattr(data, "price") and data.price is not None:
                 from src.utils.decimal_utils import to_decimal
+
                 transformed["price"] = to_decimal(data.price)
-            
+
             if hasattr(data, "quantity") and data.quantity is not None:
                 from src.utils.decimal_utils import to_decimal
+
                 transformed["quantity"] = to_decimal(data.quantity)
 
         return transformed

@@ -48,7 +48,14 @@ class DependencyContainer:
                 if singleton:
                     self._singletons[name] = service
 
-            self._logger.debug(f"Registered service: {name} (singleton={singleton})")
+            self._logger.debug(
+                "Registered service",
+                extra={
+                    "service_name": name,
+                    "singleton": singleton,
+                    "service_type": type(service).__name__,
+                },
+            )
 
     def register_class(
         self, name: str, cls: type[T], *args, singleton: bool = False, **kwargs
@@ -72,7 +79,10 @@ class DependencyContainer:
                 try:
                     instance.configure_dependencies(self._injector_instance)
                 except Exception as e:
-                    logger.warning(f"Failed to configure dependencies for {name}: {e}")
+                    logger.warning(
+                        "Failed to configure dependencies for service",
+                        extra={"service_name": name, "error_type": type(e).__name__},
+                    )
 
             return instance
 
@@ -386,8 +396,11 @@ class DependencyInjector:
                 service_instance.configure_dependencies(self)
             except Exception as e:
                 self._logger.warning(
-                    f"Failed to configure dependencies for service: {e}",
-                    service_type=type(service_instance).__name__,
+                    "Failed to configure dependencies for service",
+                    extra={
+                        "service_type": type(service_instance).__name__,
+                        "error_type": type(e).__name__,
+                    },
                 )
         elif hasattr(service_instance, "_dependency_container"):
             service_instance._dependency_container = self

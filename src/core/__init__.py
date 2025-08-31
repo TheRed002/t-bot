@@ -13,6 +13,18 @@ from .caching import CacheKeys, CacheManager, cache_invalidate, cached, get_cach
 from .config import Config, DatabaseConfig
 from .config.service import ConfigService
 from .dependency_injection import get_container
+from .event_constants import (
+    AlertEvents,
+    CapitalEvents,
+    ExchangeEvents,
+    MarketDataEvents,
+    OrderEvents,
+    PositionEvents,
+    RiskEvents,
+    StrategyEvents,
+    SystemEvents,
+    TradeEvents,
+)
 from .exceptions import (
     AuthenticationError,
     ComponentError,
@@ -92,6 +104,7 @@ from .types import (
 from .websocket_manager import WebSocketManager, create_websocket_manager
 
 __all__ = [
+    "AlertEvents",
     "AuthenticationError",
     "BaseComponent",
     "BaseService",
@@ -102,6 +115,7 @@ __all__ = [
     "BotType",
     "CacheKeys",
     "CacheManager",
+    "CapitalEvents",
     "ComponentError",
     "Config",
     "ConfigService",
@@ -119,6 +133,7 @@ __all__ = [
     "ExchangeConnectionError",
     "ExchangeError",
     "ExchangeErrorMapper",
+    "ExchangeEvents",
     "ExchangeInfo",
     "ExchangeInsufficientFundsError",
     "ExchangeRateLimitError",
@@ -131,11 +146,13 @@ __all__ = [
     "HealthStatus",
     "IngestionMode",
     "MarketData",
+    "MarketDataEvents",
     "ModelError",
     "MonitoringError",
     "NetworkError",
     "NewsSentiment",
     "OrderBook",
+    "OrderEvents",
     "OrderRejectionError",
     "OrderRequest",
     "OrderResponse",
@@ -145,9 +162,11 @@ __all__ = [
     "PerformanceMonitor",
     "PipelineStatus",
     "Position",
+    "PositionEvents",
     "PositionLimitError",
     "ProcessingStep",
     "QualityLevel",
+    "RiskEvents",
     "RiskManagementError",
     "SecurityError",
     "ServiceComponent",
@@ -159,8 +178,11 @@ __all__ = [
     "StateConsistencyError",
     "StateError",
     "StorageMode",
+    "StrategyEvents",
+    "SystemEvents",
     "Ticker",
     "Trade",
+    "TradeEvents",
     "TradingBotError",
     "TradingMode",
     "TransactionalService",

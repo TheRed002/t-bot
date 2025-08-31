@@ -125,26 +125,45 @@ class Signal(BaseModel):
         """Validate symbol format requires "/" separator for trading pairs."""
         if not v or not v.strip():
             from src.core.exceptions import ValidationError
+
             raise ValidationError("Symbol cannot be empty")
-        
+
         symbol_norm = v.strip().upper()
-        
+
         # Require "/" separator for trading pairs
         if "/" not in symbol_norm:
             from src.core.exceptions import ValidationError
-            raise ValidationError(f"Symbol must contain '/' separator for trading pairs: {v}")
-        
+
+            raise ValidationError(
+                "Symbol must contain '/' separator for trading pairs",
+                field_name="symbol",
+                field_value=v[:20] + "..." if len(v) > 20 else v,  # Truncate long values
+                validation_rule="symbol_format",
+            )
+
         # Validate format: BASE/QUOTE
         parts = symbol_norm.split("/")
         if len(parts) != 2:
             from src.core.exceptions import ValidationError
-            raise ValidationError(f"Invalid symbol format, expected BASE/QUOTE: {v}")
-        
+
+            raise ValidationError(
+                "Invalid symbol format, expected BASE/QUOTE",
+                field_name="symbol",
+                field_value=v[:20] + "..." if len(v) > 20 else v,  # Truncate long values
+                validation_rule="symbol_format",
+            )
+
         base, quote = parts
         if not base or not quote:
             from src.core.exceptions import ValidationError
-            raise ValidationError(f"Both base and quote currencies must be specified: {v}")
-            
+
+            raise ValidationError(
+                "Both base and quote currencies must be specified",
+                field_name="symbol",
+                field_value=v[:20] + "..." if len(v) > 20 else v,  # Truncate long values
+                validation_rule="symbol_completeness",
+            )
+
         return symbol_norm
 
     @field_validator("timestamp")
@@ -284,12 +303,14 @@ class Position(BaseModel):
     """Trading position information."""
 
     symbol: str
-    side: OrderSide
+    side: PositionSide  # Use PositionSide for consistency with database
     quantity: Decimal
     entry_price: Decimal
+    exit_price: Decimal | None = None
     current_price: Decimal | None = None
     unrealized_pnl: Decimal | None = None
     realized_pnl: Decimal = Decimal("0")
+    status: PositionStatus
     opened_at: datetime
     closed_at: datetime | None = None
     exchange: str
@@ -301,9 +322,9 @@ class Position(BaseModel):
 
     def calculate_pnl(self, current_price: Decimal) -> Decimal:
         """Calculate unrealized PnL."""
-        if self.side == OrderSide.BUY:
+        if self.side == PositionSide.LONG:
             return (current_price - self.entry_price) * self.quantity
-        else:
+        else:  # PositionSide.SHORT
             return (self.entry_price - current_price) * self.quantity
 
 

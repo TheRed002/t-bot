@@ -7,6 +7,7 @@ All new code should import from src.core.types directly, which will use the orga
 
 # Import and re-export base types explicitly
 from .types.base import (
+    AlertSeverity,
     BaseValidatedModel,
     ConfigDict,
     ConnectionType,
@@ -96,6 +97,8 @@ from .types.trading import (
 
 # Re-export all types for backward compatibility
 __all__ = [
+    # Base types
+    "AlertSeverity",
     # Trading types
     "Balance",
     # Base types

@@ -76,6 +76,7 @@ class ResourceMonitor:
         self.logger = logging.getLogger(__name__)
         self._start_time = time.time()
         self._last_gc_check = time.time()
+        self._gc_check_interval = 300
 
     def get_memory_usage(self) -> dict[str, Any]:
         """Get current memory usage statistics."""
@@ -121,7 +122,7 @@ class ResourceMonitor:
         current_time = time.time()
 
         # Force GC if it's been a while
-        if current_time - self._last_gc_check > 300:  # 5 minutes
+        if current_time - self._last_gc_check > self._gc_check_interval:
             collected = gc.collect()
             self._last_gc_check = current_time
 
@@ -163,10 +164,13 @@ class ResourceManager:
         # Resource pools by type
         self._pools: dict[ResourceType, dict[str, Any]] = defaultdict(dict)
 
-        # Configuration
+        # Configuration - default values, can be overridden
         self._cleanup_interval = 60  # seconds
         self._idle_timeout = 300  # seconds
         self._leak_detection_enabled = True
+        self._gc_check_interval = 300  # 5 minutes
+        self._monitor_interval = 300  # 5 minutes
+        self._cleanup_timeout = 30.0  # seconds
 
         # Background tasks
         self._cleanup_task: asyncio.Task | None = None
@@ -182,6 +186,38 @@ class ResourceManager:
             "cleanup_runs": 0,
             "leaks_detected": 0,
         }
+
+    def configure(
+        self,
+        cleanup_interval: int | None = None,
+        idle_timeout: int | None = None,
+        leak_detection_enabled: bool | None = None,
+        gc_check_interval: int | None = None,
+        monitor_interval: int | None = None,
+        cleanup_timeout: float | None = None,
+    ) -> None:
+        """Configure resource manager settings.
+
+        Args:
+            cleanup_interval: Interval between cleanup runs in seconds
+            idle_timeout: Timeout for idle resources in seconds
+            leak_detection_enabled: Whether to enable leak detection
+            gc_check_interval: Interval between garbage collection checks in seconds
+            monitor_interval: Interval between monitoring checks in seconds
+            cleanup_timeout: Timeout for cleanup operations in seconds
+        """
+        if cleanup_interval is not None:
+            self._cleanup_interval = cleanup_interval
+        if idle_timeout is not None:
+            self._idle_timeout = idle_timeout
+        if leak_detection_enabled is not None:
+            self._leak_detection_enabled = leak_detection_enabled
+        if gc_check_interval is not None:
+            self._gc_check_interval = gc_check_interval
+        if monitor_interval is not None:
+            self._monitor_interval = monitor_interval
+        if cleanup_timeout is not None:
+            self._cleanup_timeout = cleanup_timeout
 
     async def start(self):
         """Start the resource manager."""
@@ -323,10 +359,13 @@ class ResourceManager:
         if cleanup_tasks:
             try:
                 await asyncio.wait_for(
-                    asyncio.gather(*cleanup_tasks, return_exceptions=True), timeout=30.0
+                    asyncio.gather(*cleanup_tasks, return_exceptions=True),
+                    timeout=self._cleanup_timeout,
                 )
             except asyncio.TimeoutError:
-                self.logger.warning("Resource cleanup timed out after 30 seconds")
+                self.logger.warning(
+                    f"Resource cleanup timed out after {self._cleanup_timeout} seconds"
+                )
 
         self.logger.info(f"Cleaned up {len(resource_ids)} resources")
 
@@ -374,8 +413,8 @@ class ResourceManager:
                     # Sleep with cancellation check
                     try:
                         await asyncio.wait_for(
-                            asyncio.sleep(300),  # Monitor every 5 minutes
-                            timeout=301.0,
+                            asyncio.sleep(self._monitor_interval),
+                            timeout=self._monitor_interval + 1.0,
                         )
                     except asyncio.TimeoutError:
                         continue
@@ -386,7 +425,7 @@ class ResourceManager:
                     break
                 except Exception as e:
                     self.logger.error(f"Error in monitoring loop: {e}")
-                    await asyncio.sleep(300)
+                    await asyncio.sleep(self._monitor_interval)
 
         except asyncio.CancelledError:
             pass

@@ -173,13 +173,13 @@ class TradingBotError(Exception):
             )
 
             if self.severity == ErrorSeverity.CRITICAL:
-                logger.critical(f"{self.message} | {log_data}")
+                logger.critical(self.message, extra=log_data)
             elif self.severity == ErrorSeverity.HIGH:
-                logger.error(f"{self.message} | {log_data}")
+                logger.error(self.message, extra=log_data)
             elif self.severity == ErrorSeverity.MEDIUM:
-                logger.warning(f"{self.message} | {log_data}")
+                logger.warning(self.message, extra=log_data)
             else:
-                logger.info(f"{self.message} | {log_data}")
+                logger.info(self.message, extra=log_data)
         except Exception:
             # If logging fails, silently ignore to prevent infinite recursion
             # The error will still be raised to the caller
@@ -203,21 +203,25 @@ class TradingBotError(Exception):
 
     def __str__(self) -> str:
         """Return formatted error message with code and essential details."""
-        error_str = f"[{self.error_code}] {self.message}"
+        parts = []
+        if self.error_code:
+            parts.append(f"[{self.error_code}]")
+        parts.append(self.message)
+        error_str = " ".join(parts)
 
         if self.category != ErrorCategory.SYSTEM:
-            error_str += f" (Category: {self.category.value})"
+            error_str += f" (Category: {self.category.value})"  # This is safe as it's an enum value
 
         if self.severity != ErrorSeverity.MEDIUM:
-            error_str += f" (Severity: {self.severity.value})"
+            error_str += f" (Severity: {self.severity.value})"  # This is safe as it's an enum value
 
         if self.retryable and self.retry_after:
-            error_str += f" (Retry after: {self.retry_after}s)"
+            error_str += f" (Retry after: {self.retry_after}s)"  # This is safe as it's a number
 
         # Include some details for debugging
         if self.details:
             details_str = ", ".join(f"{k}={v}" for k, v in list(self.details.items())[:3])
-            error_str += f" (Details: {details_str})"
+            error_str += f" (Details: {details_str})"  # Already sanitized above
 
         return error_str
 
@@ -2005,7 +2009,6 @@ class ExchangeErrorMapper:
             or str(error_data)
         )
 
-
         # Try to detect error type from message
         message_lower = message.lower()
 
@@ -2210,6 +2213,16 @@ class MonitoringError(ComponentError):
     def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "MON_1001")
         kwargs.setdefault("severity", ErrorSeverity.MEDIUM)
+        super().__init__(message, **kwargs)
+
+
+class AnalyticsError(ComponentError):
+    """Analytics calculation and processing errors."""
+
+    def __init__(self, message: str, **kwargs: Any) -> None:
+        kwargs.setdefault("error_code", "ANA_1001")
+        kwargs.setdefault("severity", ErrorSeverity.MEDIUM)
+        kwargs.setdefault("category", ErrorCategory.SYSTEM)
         super().__init__(message, **kwargs)
 
 
@@ -2659,5 +2672,3 @@ def get_retry_delay(error: Exception) -> int | None:
     if isinstance(error, TradingBotError):
         return error.retry_after
     return None
-
-

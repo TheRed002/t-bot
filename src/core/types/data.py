@@ -5,7 +5,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class QualityLevel(Enum):
@@ -101,6 +101,8 @@ class MLMarketData(BaseModel):
 
 class PredictionResult(BaseModel):
     """ML prediction result structure."""
+
+    model_config = ConfigDict(protected_namespaces=())
 
     request_id: str
     model_id: str

@@ -40,7 +40,6 @@ Usage Example:
 
 import asyncio
 import json
-import logging
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -104,7 +103,9 @@ class ConfigCache:
         self._lock = threading.RLock()
         self._default_ttl = default_ttl
         self._access_count: dict[str, int] = {}
-        self.logger = logging.getLogger(f"{__name__}.ConfigCache")
+        from src.core.logging import get_logger
+
+        self.logger = get_logger(f"{__name__}.ConfigCache")
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get cached value with TTL check."""
@@ -164,7 +165,9 @@ class FileConfigProvider:
     def __init__(self, config_file: Path, watch_changes: bool = False):
         self.config_file = config_file
         self.watch_changes_enabled = watch_changes
-        self.logger = logging.getLogger(f"{__name__}.FileConfigProvider")
+        from src.core.logging import get_logger
+
+        self.logger = get_logger(f"{__name__}.FileConfigProvider")
         self._watchers: list[ConfigCallback] = []
         self._last_modified: datetime | None = None
 
@@ -268,7 +271,9 @@ class EnvironmentConfigProvider:
 
     def __init__(self, prefix: str = "TBOT_"):
         self.prefix = prefix
-        self.logger = logging.getLogger(f"{__name__}.EnvironmentConfigProvider")
+        from src.core.logging import get_logger
+
+        self.logger = get_logger(f"{__name__}.EnvironmentConfigProvider")
 
     async def load_config(self) -> ConfigDict:
         """Load configuration from environment variables."""
@@ -313,7 +318,9 @@ class ConfigValidator:
     """Configuration validation service."""
 
     def __init__(self) -> None:
-        self.logger = logging.getLogger(f"{__name__}.ConfigValidator")
+        from src.core.logging import get_logger
+
+        self.logger = get_logger(f"{__name__}.ConfigValidator")
         self._custom_validators: dict[str, Callable[[dict], Any]] = {}
 
     async def validate_database_config(self, config: dict) -> DatabaseConfig:
@@ -446,7 +453,9 @@ class ConfigService:
         self._change_listeners: list[ConfigCallback] = []
         self._hot_reload_task: asyncio.Task | None = None
 
-        self.logger = logging.getLogger(f"{__name__}.ConfigService")
+        from src.core.logging import get_logger
+
+        self.logger = get_logger(f"{__name__}.ConfigService")
 
     async def initialize(
         self, config_file: str | Path | None = None, watch_changes: bool = False
@@ -867,7 +876,7 @@ def register_config_service_in_container(
     container.register("config_service", config_service_factory, singleton=True)
 
     # Log successful registration
-    import logging
+    from src.core.logging import get_logger
 
-    logger = logging.getLogger(__name__)
+    logger = get_logger(__name__)
     logger.info("ConfigService registered in dependency injection container")
