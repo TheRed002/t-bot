@@ -120,7 +120,7 @@ class BaseService(BaseComponent, ServiceComponent):
         self, operation_name: str, operation_func: Any, *args, **kwargs
     ) -> Any:
         """
-        Execute service operation with monitoring and error handling.
+        Execute service operation with monitoring and consistent data validation.
 
         Args:
             operation_name: Name of the operation for tracking
@@ -129,11 +129,25 @@ class BaseService(BaseComponent, ServiceComponent):
             **kwargs: Operation keyword arguments
 
         Returns:
-            Operation result
+            Operation result (with standardized format)
 
         Raises:
             ServiceError: If operation fails after retries
         """
+        # Validate input data format consistency
+        for arg in args:
+            if isinstance(arg, dict) and "data_format" in arg:
+                # Validate data format version compatibility
+                data_format = arg.get("data_format")
+                if not data_format.endswith("_v1"):
+                    self._logger.warning(
+                        "Data format version mismatch detected",
+                        service=self._name,
+                        operation=operation_name,
+                        expected_format_version="v1",
+                        actual_format=data_format,
+                    )
+
         # Check circuit breaker
         if not self._check_circuit_breaker():
             raise ServiceError(
@@ -376,7 +390,13 @@ class BaseService(BaseComponent, ServiceComponent):
             DependencyError: If dependency cannot be resolved
         """
         if not self._dependency_container:
-            raise DependencyError(f"No DI container configured for service {self._name}")
+            raise DependencyError(
+                f"No DI container configured for service {self._name}",
+                dependency_name=dependency_name,
+                error_code="DEP_008",
+                suggested_action="Configure dependency container before resolving dependencies",
+                context={"service": self._name},
+            )
 
         try:
             dependency = self._dependency_container.resolve(dependency_name)
@@ -389,7 +409,11 @@ class BaseService(BaseComponent, ServiceComponent):
 
         except Exception as e:
             raise DependencyError(
-                f"Failed to resolve dependency '{dependency_name}' for service {self._name}: {e}"
+                f"Failed to resolve dependency '{dependency_name}' for service {self._name}",
+                dependency_name=dependency_name,
+                error_code="DEP_009",
+                suggested_action="Ensure dependency is properly registered in DI container",
+                context={"service": self._name, "original_error": str(e)},
             ) from e
 
     # Health Checks

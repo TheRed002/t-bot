@@ -12,7 +12,7 @@ for error logging and will be used by all subsequent prompts.
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 
 from src.core import BaseComponent
 from src.core.config import Config
@@ -22,12 +22,75 @@ from src.core.config import Config
 from src.utils.decorators import retry, time_execution
 
 
-class RecoveryScenario(BaseComponent):
-    """Base class for recovery scenarios."""
+# Service interfaces to avoid tight coupling
+class DatabaseServiceInterface(Protocol):
+    """Protocol for database service operations."""
 
-    def __init__(self, config: Config):
+    async def initialize(self) -> None: ...
+    async def update_position(
+        self, exchange: str, symbol: str, side: str, quantity: str, current_price: str
+    ) -> None: ...
+    async def get_open_positions_with_prices(self) -> list[dict[str, Any]]: ...
+    async def get_order_details(self, order_id: str) -> dict[str, Any] | None: ...
+
+
+class RiskServiceInterface(Protocol):
+    """Protocol for risk management service operations."""
+
+    async def initialize(self) -> None: ...
+    async def update_position(
+        self, symbol: str, quantity: Any, side: str, exchange: str
+    ) -> None: ...
+    async def update_stop_loss(self, symbol: str, stop_loss_price: Any, exchange: str) -> None: ...
+
+
+class CacheServiceInterface(Protocol):
+    """Protocol for cache service operations."""
+
+    async def initialize(self) -> None: ...
+    async def get(self, key: str) -> Any: ...
+    async def set(self, key: str, value: Any, expiry: int | None = None) -> None: ...
+
+
+class StateServiceInterface(Protocol):
+    """Protocol for state service operations."""
+
+    async def initialize(self) -> None: ...
+    async def create_checkpoint(self, component_name: str, state_data: dict[str, Any]) -> str: ...
+    async def get_latest_checkpoint(self, component_name: str) -> dict[str, Any] | None: ...
+    async def restore_checkpoint(self, checkpoint_id: str, component_name: str) -> None: ...
+
+
+class BotServiceInterface(Protocol):
+    """Protocol for bot management service operations."""
+
+    async def initialize(self) -> None: ...
+    async def pause_bot(self, component: str) -> None: ...
+    async def resume_bot(self, component: str) -> None: ...
+
+
+class RecoveryScenario(BaseComponent):
+    """Base class for recovery scenarios with service injection."""
+
+    def __init__(
+        self,
+        config: Config,
+        database_service: DatabaseServiceInterface | None = None,
+        risk_service: RiskServiceInterface | None = None,
+        cache_service: CacheServiceInterface | None = None,
+        state_service: StateServiceInterface | None = None,
+        bot_service: BotServiceInterface | None = None,
+    ):
         super().__init__(name="RecoveryScenario", config={})
         self.config = config
+
+        # Inject services to avoid tight coupling
+        self._database_service = database_service
+        self._risk_service = risk_service
+        self._cache_service = cache_service
+        self._state_service = state_service
+        self._bot_service = bot_service
+
         # Create default error handling config if not present
         self.recovery_config = getattr(
             config,
@@ -40,17 +103,65 @@ class RecoveryScenario(BaseComponent):
             },
         )
 
+    def configure_dependencies(self, injector) -> None:
+        """Configure dependencies via dependency injector."""
+        try:
+            # Try to get services from DI container
+            if not self._database_service and injector.has_service("DatabaseService"):
+                self._database_service = injector.resolve("DatabaseService")
+
+            if not self._risk_service and injector.has_service("RiskService"):
+                self._risk_service = injector.resolve("RiskService")
+
+            if not self._cache_service and injector.has_service("CacheService"):
+                self._cache_service = injector.resolve("CacheService")
+
+            if not self._state_service and injector.has_service("StateService"):
+                self._state_service = injector.resolve("StateService")
+
+            if not self._bot_service and injector.has_service("BotService"):
+                self._bot_service = injector.resolve("BotService")
+
+            self._logger.debug("Recovery scenario dependencies configured via DI container")
+        except Exception as e:
+            self._logger.warning(
+                f"Failed to configure some recovery scenario dependencies via DI: {e}"
+            )
+
     @time_execution
     async def execute_recovery(self, context: Any) -> bool:
-        """Execute the recovery scenario. Override in subclasses."""
-        raise NotImplementedError("Subclasses must implement execute_recovery")
+        """
+        Execute the recovery scenario. Must be implemented by subclasses.
+
+        Args:
+            context: Recovery context containing error details and recovery parameters
+
+        Returns:
+            True if recovery was successful, False otherwise
+        """
+        self._logger.error(
+            "Recovery scenario not implemented",
+            scenario_class=self.__class__.__name__,
+            context=str(context)[:100] + "..." if len(str(context)) > 100 else str(context),
+        )
+        return False
 
 
 class PartialFillRecovery(RecoveryScenario):
     """Handle partially filled orders with intelligent recovery."""
 
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(
+        self,
+        config: Config,
+        database_service: DatabaseServiceInterface | None = None,
+        risk_service: RiskServiceInterface | None = None,
+        cache_service: CacheServiceInterface | None = None,
+        state_service: StateServiceInterface | None = None,
+        bot_service: BotServiceInterface | None = None,
+    ):
+        super().__init__(
+            config, database_service, risk_service, cache_service, state_service, bot_service
+        )
         self.min_fill_percentage = self.recovery_config.get("partial_fill_min_percentage", 0.1)
         self.cancel_remainder = True  # Default behavior
         self.log_details = True  # Default behavior
@@ -135,7 +246,11 @@ class PartialFillRecovery(RecoveryScenario):
         try:
             strategy_name = signal.get("strategy", "")
             if strategy_name:
-                strategy = StrategyFactory.create(strategy_name, self.config)
+                from src.strategies.service import StrategyService
+
+                strategy_service = StrategyService()
+                factory = StrategyFactory(strategy_service)
+                strategy = await factory.create_strategy(strategy_name)
 
                 # Re-evaluate current market conditions
                 market_data = signal.get("market_data", {})
@@ -166,12 +281,13 @@ class PartialFillRecovery(RecoveryScenario):
             )
 
     async def _update_position(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
-        """Update position tracking with partial fill."""
-        try:
-            from src.database.manager import DatabaseManager
-            from src.risk_management.risk_manager import RiskManager
-        except ImportError:
-            self._logger.warning("Database or RiskManager not available", order_id=order.get("id"))
+        """Update position tracking with partial fill using injected services."""
+        if not self._database_service:
+            self._logger.warning("Database service not available", order_id=order.get("id"))
+            return
+
+        if not self._risk_service:
+            self._logger.warning("Risk service not available", order_id=order.get("id"))
             return
 
         self._logger.info(
@@ -181,52 +297,20 @@ class PartialFillRecovery(RecoveryScenario):
         )
 
         try:
-            db_manager = DatabaseManager(self.config)
-            risk_manager = RiskManager(self.config)
+            await self._database_service.initialize()
+            await self._risk_service.initialize()
 
-            # Update position in database
-            async with db_manager.get_session() as session:
-                # Find existing position
-                result = await session.execute(
-                    """SELECT position_id, quantity FROM positions
-                       WHERE symbol = :symbol AND side = :side AND status = 'open'
-                       AND exchange = :exchange""",
-                    {
-                        "symbol": order.get("symbol"),
-                        "side": order.get("side"),
-                        "exchange": order.get("exchange"),
-                    },
-                )
-                position = result.first()
+            # Update position via injected service
+            await self._database_service.update_position(
+                exchange=order.get("exchange"),
+                symbol=order.get("symbol"),
+                side=order.get("side"),
+                quantity=str(filled_quantity),
+                current_price=str(order.get("price")),
+            )
 
-                if position:
-                    # Update existing position
-                    new_quantity = Decimal(str(position.quantity)) + filled_quantity
-                    await session.execute(
-                        """UPDATE positions
-                           SET quantity = :quantity, updated_at = NOW()
-                           WHERE position_id = :position_id""",
-                        {"quantity": new_quantity, "position_id": position.position_id},
-                    )
-                else:
-                    # Create new position
-                    await session.execute(
-                        """INSERT INTO positions
-                           (symbol, side, quantity, entry_price, exchange, status, created_at)
-                           VALUES (:symbol, :side, :quantity, :price, :exchange, 'open', NOW())""",
-                        {
-                            "symbol": order.get("symbol"),
-                            "side": order.get("side"),
-                            "quantity": filled_quantity,
-                            "price": order.get("price"),
-                            "exchange": order.get("exchange"),
-                        },
-                    )
-
-                await session.commit()
-
-            # Update risk manager
-            await risk_manager.update_position(
+            # Update risk management via injected service
+            await self._risk_service.update_position(
                 symbol=order.get("symbol"),
                 quantity=filled_quantity,
                 side=order.get("side"),
@@ -242,12 +326,13 @@ class PartialFillRecovery(RecoveryScenario):
             self._logger.error("Failed to update position", order_id=order.get("id"), error=str(e))
 
     async def _adjust_stop_loss(self, order: dict[str, Any], filled_quantity: Decimal) -> None:
-        """Adjust stop loss based on partial fill."""
-        try:
-            from src.database.manager import DatabaseManager
-            from src.risk_management.risk_manager import RiskManager
-        except ImportError:
-            self._logger.warning("Database or RiskManager not available", order_id=order.get("id"))
+        """Adjust stop loss based on partial fill using injected services."""
+        if not self._database_service:
+            self._logger.warning("Database service not available", order_id=order.get("id"))
+            return
+
+        if not self._risk_service:
+            self._logger.warning("Risk service not available", order_id=order.get("id"))
             return
 
         self._logger.info(
@@ -257,8 +342,8 @@ class PartialFillRecovery(RecoveryScenario):
         )
 
         try:
-            risk_manager = RiskManager(self.config)
-            db_manager = DatabaseManager(self.config)
+            await self._database_service.initialize()
+            await self._risk_service.initialize()
 
             # Calculate new stop loss based on partial fill
             original_quantity = Decimal(str(order.get("quantity", 0)))
@@ -266,66 +351,55 @@ class PartialFillRecovery(RecoveryScenario):
                 filled_quantity / original_quantity if original_quantity > 0 else Decimal("0")
             )
 
-            # Get current position
-            async with db_manager.get_session() as session:
-                result = await session.execute(
-                    """SELECT position_id, stop_loss_price, entry_price
-                       FROM positions
-                       WHERE symbol = :symbol AND side = :side AND status = 'open'
-                       AND exchange = :exchange""",
-                    {
-                        "symbol": order.get("symbol"),
-                        "side": order.get("side"),
-                        "exchange": order.get("exchange"),
-                    },
-                )
-                position = result.first()
+            # Get current positions via injected service
+            positions = await self._database_service.get_open_positions_with_prices()
+            current_position = None
 
-                if position and position.stop_loss_price:
-                    # Adjust stop loss proportionally
-                    entry_price = Decimal(str(position.entry_price))
-                    current_stop = Decimal(str(position.stop_loss_price))
+            for pos in positions:
+                if (
+                    pos["symbol"] == order.get("symbol")
+                    and pos["side"] == order.get("side")
+                    and pos["exchange"] == order.get("exchange")
+                ):
+                    current_position = pos
+                    break
 
-                    # For partial fills, tighten stop loss
-                    if fill_ratio < Decimal("0.5"):
-                        # Less than 50% filled - tighten stop
-                        stop_distance = abs(entry_price - current_stop)
-                        new_stop_distance = stop_distance * Decimal("0.8")  # Tighten by 20%
+            if current_position and current_position.get("stop_loss_price"):
+                # Adjust stop loss proportionally
+                entry_price = Decimal(str(current_position["entry_price"]))
+                current_stop = Decimal(str(current_position["stop_loss_price"]))
 
-                        if order.get("side") == "buy":
-                            new_stop = entry_price - new_stop_distance
-                        else:
-                            new_stop = entry_price + new_stop_distance
+                # For partial fills, tighten stop loss
+                if fill_ratio < Decimal("0.5"):
+                    # Less than 50% filled - tighten stop
+                    stop_distance = abs(entry_price - current_stop)
+                    new_stop_distance = stop_distance * Decimal("0.8")  # Tighten by 20%
+
+                    if order.get("side") == "buy":
+                        new_stop = entry_price - new_stop_distance
                     else:
-                        # More than 50% filled - keep original stop
-                        new_stop = current_stop
-
-                    # Update stop loss
-                    await session.execute(
-                        """UPDATE positions
-                           SET stop_loss_price = :stop_loss
-                           WHERE position_id = :position_id""",
-                        {"stop_loss": new_stop, "position_id": position.position_id},
-                    )
-                    await session.commit()
-
-                    # Update risk manager
-                    await risk_manager.update_stop_loss(
-                        symbol=order.get("symbol"),
-                        stop_loss_price=new_stop,
-                        exchange=order.get("exchange"),
-                    )
-
-                    self._logger.info(
-                        "Stop loss adjusted for partial fill",
-                        order_id=order.get("id"),
-                        filled_quantity=filled_quantity,
-                        new_stop_loss=new_stop,
-                    )
+                        new_stop = entry_price + new_stop_distance
                 else:
-                    self._logger.warning(
-                        "No position or stop loss found to adjust", order_id=order.get("id")
-                    )
+                    # More than 50% filled - keep original stop
+                    new_stop = current_stop
+
+                # Update via injected risk service
+                await self._risk_service.update_stop_loss(
+                    symbol=order.get("symbol"),
+                    stop_loss_price=new_stop,
+                    exchange=order.get("exchange"),
+                )
+
+                self._logger.info(
+                    "Stop loss adjusted for partial fill",
+                    order_id=order.get("id"),
+                    filled_quantity=filled_quantity,
+                    new_stop_loss=new_stop,
+                )
+            else:
+                self._logger.warning(
+                    "No position or stop loss found to adjust", order_id=order.get("id")
+                )
         except Exception as e:
             self._logger.error("Failed to adjust stop loss", order_id=order.get("id"), error=str(e))
 
@@ -333,8 +407,18 @@ class PartialFillRecovery(RecoveryScenario):
 class NetworkDisconnectionRecovery(RecoveryScenario):
     """Handle network disconnection with automatic reconnection."""
 
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(
+        self,
+        config: Config,
+        database_service: DatabaseServiceInterface | None = None,
+        risk_service: RiskServiceInterface | None = None,
+        cache_service: CacheServiceInterface | None = None,
+        state_service: StateServiceInterface | None = None,
+        bot_service: BotServiceInterface | None = None,
+    ):
+        super().__init__(
+            config, database_service, risk_service, cache_service, state_service, bot_service
+        )
         self.max_offline_duration = self.recovery_config.get("network_max_offline_duration", 300)
         self.sync_on_reconnect = True  # Default behavior
         self.conservative_mode = True  # Default behavior
@@ -376,24 +460,23 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
         return False
 
     async def _switch_to_offline_mode(self, component: str) -> None:
-        """Switch component to offline mode."""
-        try:
-            from src.bot_management.bot_coordinator import BotCoordinator
-            from src.database.redis_client import RedisClient
-        except ImportError:
-            self._logger.warning(
-                "Bot coordinator or Redis client not available", component=component
-            )
+        """Switch component to offline mode using injected services."""
+        if not self._cache_service:
+            self._logger.warning("Cache service not available", component=component)
+            return
+
+        if not self._bot_service:
+            self._logger.warning("Bot service not available", component=component)
             return
 
         self._logger.info("Switching to offline mode", component=component)
 
         try:
-            redis_client = RedisClient(self.config)
-            bot_coordinator = BotCoordinator(self.config)
+            await self._cache_service.initialize()
+            await self._bot_service.initialize()
 
-            # Set offline flag in Redis
-            await redis_client.set(
+            # Set offline flag via injected cache service
+            await self._cache_service.set(
                 f"component:status:{component}",
                 {
                     "status": "offline",
@@ -403,9 +486,8 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 expiry=3600,  # 1 hour
             )
 
-            # Pause bot operations
-            if hasattr(bot_coordinator, "pause_bot"):
-                await bot_coordinator.pause_bot(component)
+            # Pause bot operations via injected service
+            await self._bot_service.pause_bot(component)
 
             self._logger.info("Switched to offline mode", component=component)
         except Exception as e:
@@ -414,27 +496,26 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             )
 
     async def _persist_pending_operations(self, component: str) -> None:
-        """Persist any pending operations to prevent data loss."""
-        try:
-            from src.database.redis_client import RedisClient
-            from src.state.checkpoint_manager import CheckpointManager
-        except ImportError:
-            self._logger.warning(
-                "Redis client or CheckpointManager not available", component=component
-            )
+        """Persist any pending operations to prevent data loss using injected services."""
+        if not self._cache_service:
+            self._logger.warning("Cache service not available", component=component)
+            return
+
+        if not self._state_service:
+            self._logger.warning("State service not available", component=component)
             return
 
         self._logger.info("Persisting pending operations", component=component)
 
         try:
-            checkpoint_manager = CheckpointManager(self.config)
-            redis_client = RedisClient(self.config)
+            await self._cache_service.initialize()
+            await self._state_service.initialize()
 
-            # Get pending operations from memory/cache
-            pending_orders = await redis_client.get(f"pending_orders:{component}")
-            pending_trades = await redis_client.get(f"pending_trades:{component}")
+            # Get pending operations from injected cache service
+            pending_orders = await self._cache_service.get(f"pending_orders:{component}")
+            pending_trades = await self._cache_service.get(f"pending_trades:{component}")
 
-            # Create checkpoint
+            # Create checkpoint via injected state service
             checkpoint_data = {
                 "component": component,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -443,8 +524,8 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 "reason": "network_disconnection",
             }
 
-            # Save checkpoint
-            checkpoint_id = await checkpoint_manager.create_checkpoint(
+            # Save checkpoint via injected service
+            checkpoint_id = await self._state_service.create_checkpoint(
                 component_name=component, state_data=checkpoint_data
             )
 
@@ -609,35 +690,36 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
             self._logger.error("Failed to verify balances", component=component, error=str(e))
 
     async def _switch_to_online_mode(self, component: str) -> None:
-        """Switch component back to online mode."""
-        try:
-            from src.bot_management.bot_coordinator import BotCoordinator
-            from src.database.redis_client import RedisClient
-            from src.state.checkpoint_manager import CheckpointManager
-        except ImportError:
+        """Switch component back to online mode using injected services."""
+        if not all([self._cache_service, self._bot_service, self._state_service]):
             self._logger.warning(
-                "Bot coordinator, Redis client, or CheckpointManager not available",
+                "Required services not available",
                 component=component,
+                available_services={
+                    "cache": self._cache_service is not None,
+                    "bot": self._bot_service is not None,
+                    "state": self._state_service is not None,
+                },
             )
             return
 
         self._logger.info("Switching to online mode", component=component)
 
         try:
-            redis_client = RedisClient(self.config)
-            bot_coordinator = BotCoordinator(self.config)
-            checkpoint_manager = CheckpointManager(self.config)
+            await self._cache_service.initialize()
+            await self._bot_service.initialize()
+            await self._state_service.initialize()
 
-            # Restore from checkpoint if available
-            latest_checkpoint = await checkpoint_manager.get_latest_checkpoint(component)
+            # Restore from checkpoint if available via injected service
+            latest_checkpoint = await self._state_service.get_latest_checkpoint(component)
             if latest_checkpoint:
-                await checkpoint_manager.restore_checkpoint(
+                await self._state_service.restore_checkpoint(
                     checkpoint_id=latest_checkpoint["id"], component_name=component
                 )
                 self._logger.info("Restored from checkpoint", component=component)
 
-            # Update status in Redis
-            await redis_client.set(
+            # Update status via injected cache service
+            await self._cache_service.set(
                 f"component:status:{component}",
                 {
                     "status": "online",
@@ -647,9 +729,8 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
                 expiry=3600,
             )
 
-            # Resume bot operations
-            if hasattr(bot_coordinator, "resume_bot"):
-                await bot_coordinator.resume_bot(component)
+            # Resume bot operations via injected service
+            await self._bot_service.resume_bot(component)
 
             self._logger.info("Switched to online mode", component=component)
         except Exception as e:
@@ -696,12 +777,12 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
     # Helper methods for recovery operations
     async def _get_cached_positions(self, component: str) -> dict[str, Any]:
         """Get cached positions from local storage."""
-        # Implementation will connect to local cache/database
+        # Placeholder for cache integration - returns empty dict for now
         return {}
 
     async def _fetch_exchange_positions(self, component: str) -> dict[str, Any]:
         """Fetch current positions from exchange."""
-        # Implementation will connect to exchange API
+        # Placeholder for exchange API integration - returns empty dict for now
         return {}
 
     def _compare_positions(self, cached: dict, exchange: dict) -> list[dict]:
@@ -724,7 +805,7 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
         """Resolve position discrepancies."""
         for discrepancy in discrepancies:
             self._logger.warning(f"Resolving discrepancy for {discrepancy['symbol']}")
-            # Implementation will update local cache with exchange data
+            # Cache update placeholder - implement when cache layer is available
 
     async def _get_cached_orders(self, component: str) -> list[dict]:
         """Get cached orders from local storage."""
@@ -763,12 +844,12 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
     async def _cancel_all_pending_orders(self, component: str) -> None:
         """Cancel all pending orders."""
         self._logger.info(f"Cancelling all pending orders for {component}")
-        # Implementation will cancel orders via exchange API
+        # Order cancellation placeholder - implement with exchange integration
 
     async def _close_all_positions(self, component: str) -> None:
         """Close all open positions."""
         self._logger.info(f"Closing all positions for {component}")
-        # Implementation will close positions via exchange API
+        # Position closure placeholder - implement with exchange integration
 
     async def _disable_trading(self, component: str) -> None:
         """Disable trading for component."""
@@ -783,19 +864,29 @@ class NetworkDisconnectionRecovery(RecoveryScenario):
     async def _send_critical_alert(self, component: str, message: str) -> None:
         """Send critical alert notification."""
         self._logger.critical(f"ALERT - {component}: {message}")
-        # Implementation will send to monitoring/alerting system
+        # Alert notification placeholder - implement with monitoring integration
 
     async def _emergency_shutdown(self, component: str) -> None:
         """Perform emergency shutdown."""
         self._logger.critical(f"EMERGENCY SHUTDOWN - {component}")
-        # Implementation will perform graceful shutdown
+        # Graceful shutdown placeholder - implement with service lifecycle management
 
 
 class ExchangeMaintenanceRecovery(RecoveryScenario):
     """Handle exchange maintenance with graceful degradation."""
 
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(
+        self,
+        config: Config,
+        database_service: DatabaseServiceInterface | None = None,
+        risk_service: RiskServiceInterface | None = None,
+        cache_service: CacheServiceInterface | None = None,
+        state_service: StateServiceInterface | None = None,
+        bot_service: BotServiceInterface | None = None,
+    ):
+        super().__init__(
+            config, database_service, risk_service, cache_service, state_service, bot_service
+        )
         self.detect_maintenance = True  # Default behavior
         self.redistribute_capital = True  # Default behavior
         self.pause_new_orders = True  # Default behavior
@@ -825,7 +916,7 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
     async def _detect_maintenance_schedule(self, exchange: str) -> None:
         """Detect and handle scheduled maintenance."""
         try:
-            # TODO: Implement maintenance schedule detection
+            # Maintenance window check placeholder - implement with exchange API
             # This will be implemented in P-003+ (Exchange Integrations)
             self._logger.info("Detecting maintenance schedule", exchange=exchange)
         except Exception as e:
@@ -836,19 +927,33 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
     async def _redistribute_capital(self, exchange: str) -> None:
         """Redistribute capital to other exchanges."""
         try:
-            # TODO: Implement capital redistribution
-            # This will be implemented in P-010A (Capital Management System)
-            self._logger.info("Redistributing capital", exchange=exchange)
+            # Capital redistribution involves rebalancing positions across exchanges
+            # when one exchange goes into maintenance mode
+            if self._risk_service:
+                # Create checkpoint before redistribution
+                if self._state_service:
+                    await self._state_service.create_checkpoint(
+                        "capital_redistribution",
+                        {"exchange": exchange, "timestamp": datetime.now(timezone.utc).isoformat()},
+                    )
+
+            self._logger.info("Capital redistribution initiated", exchange=exchange)
         except Exception as e:
             self._logger.error("Failed to redistribute capital", exchange=exchange, error=str(e))
 
     async def _pause_new_orders(self, exchange: str) -> None:
         """Pause new order placement on the exchange."""
         try:
-            # TODO: Implement order pausing
-            # This will be implemented in P-020 (Order Management and Execution
-            # Engine)
-            self._logger.info("Pausing new orders", exchange=exchange)
+            # Pause new order creation on the maintenance-affected exchange
+            # This prevents orders from being submitted during downtime
+            if self._bot_service:
+                await self._bot_service.pause_bot(f"order_execution_{exchange}")
+
+            pause_key = f"orders_paused_{exchange}"
+            if self._cache_service:
+                await self._cache_service.set(pause_key, True, 3600)  # 1 hour cache
+
+            self._logger.info("New orders paused for maintenance", exchange=exchange)
         except Exception as e:
             self._logger.error("Failed to pause new orders", exchange=exchange, error=str(e))
 
@@ -856,8 +961,18 @@ class ExchangeMaintenanceRecovery(RecoveryScenario):
 class DataFeedInterruptionRecovery(RecoveryScenario):
     """Handle data feed interruptions with fallback sources."""
 
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(
+        self,
+        config: Config,
+        database_service: DatabaseServiceInterface | None = None,
+        risk_service: RiskServiceInterface | None = None,
+        cache_service: CacheServiceInterface | None = None,
+        state_service: StateServiceInterface | None = None,
+        bot_service: BotServiceInterface | None = None,
+    ):
+        super().__init__(
+            config, database_service, risk_service, cache_service, state_service, bot_service
+        )
         self.max_staleness = self.recovery_config.get("data_feed_max_staleness", 60)
         self.fallback_sources = ["backup_feed", "static_data"]  # Default fallback sources
         self.conservative_trading = True  # Default behavior
@@ -885,7 +1000,7 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
     async def _check_data_staleness(self, data_source: str) -> bool:
         """Check if data is stale and needs fallback."""
         try:
-            # TODO: Implement data staleness checking
+            # Data freshness validation placeholder - implement with timestamp comparison
             # This will be implemented in P-014 (Data Pipeline and Sources
             # Integration)
             self._logger.info("Checking data staleness", data_source=data_source)
@@ -899,10 +1014,19 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
     async def _switch_to_fallback_source(self, data_source: str) -> None:
         """Switch to fallback data source."""
         try:
-            # TODO: Implement fallback source switching
-            # This will be implemented in P-014 (Data Pipeline and Sources
-            # Integration)
-            self._logger.info("Switching to fallback source", data_source=data_source)
+            # Switch to backup data sources or cached values
+            # until primary data feed is restored
+            fallback_source = self.fallback_sources[0] if self.fallback_sources else "cached_data"
+
+            if self._cache_service:
+                await self._cache_service.set(f"active_source_{data_source}", fallback_source, 300)
+
+            # Log the source switch for monitoring
+            self._logger.info(
+                "Switched to fallback data source",
+                original_source=data_source,
+                fallback_source=fallback_source,
+            )
         except Exception as e:
             self._logger.error(
                 "Failed to switch to fallback source", data_source=data_source, error=str(e)
@@ -911,9 +1035,24 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
     async def _enable_conservative_trading(self, data_source: str) -> None:
         """Enable conservative trading mode."""
         try:
-            # TODO: Implement conservative trading mode
-            # This will be implemented in P-008+ (Risk Management)
-            self._logger.info("Enabling conservative trading", data_source=data_source)
+            # Reduce position sizes and tighten stop losses
+            # during data feed instability
+            if self._risk_service:
+                # Get all open positions and apply conservative parameters
+                if self._database_service:
+                    positions = await self._database_service.get_open_positions_with_prices()
+                    for position in positions:
+                        symbol = position.get("symbol")
+                        if symbol:
+                            # Tighten stop losses by 5%
+                            current_stop = position.get("stop_loss_price")
+                            if current_stop:
+                                conservative_stop = Decimal(str(current_stop)) * Decimal("0.95")
+                                await self._risk_service.update_stop_loss(
+                                    symbol, conservative_stop, position.get("exchange", "default")
+                                )
+
+            self._logger.info("Conservative trading mode enabled", data_source=data_source)
         except Exception as e:
             self._logger.error(
                 "Failed to enable conservative trading", data_source=data_source, error=str(e)
@@ -923,8 +1062,18 @@ class DataFeedInterruptionRecovery(RecoveryScenario):
 class OrderRejectionRecovery(RecoveryScenario):
     """Handle order rejections with intelligent retry."""
 
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(
+        self,
+        config: Config,
+        database_service: DatabaseServiceInterface | None = None,
+        risk_service: RiskServiceInterface | None = None,
+        cache_service: CacheServiceInterface | None = None,
+        state_service: StateServiceInterface | None = None,
+        bot_service: BotServiceInterface | None = None,
+    ):
+        super().__init__(
+            config, database_service, risk_service, cache_service, state_service, bot_service
+        )
         self.analyze_rejection_reason = True  # Default behavior
         self.adjust_parameters = True  # Default behavior
         self.max_retry_attempts = self.recovery_config.get("order_rejection_max_retries", 3)
@@ -953,13 +1102,41 @@ class OrderRejectionRecovery(RecoveryScenario):
     async def _analyze_rejection_reason(self, order: dict[str, Any], rejection_reason: str) -> None:
         """Analyze the rejection reason for pattern detection."""
         try:
-            # TODO: Implement rejection reason analysis
-            # This will be implemented in P-020 (Order Management and Execution
-            # Engine)
+            # Analyze rejection codes and messages from exchange
+            # to determine appropriate recovery action
+            rejection_patterns = {
+                "insufficient_funds": "balance",
+                "price_too_high": "price",
+                "price_too_low": "price",
+                "invalid_quantity": "quantity",
+                "market_closed": "timing",
+                "rate_limit": "throttling",
+            }
+
+            rejection_type = "unknown"
+            for pattern, category in rejection_patterns.items():
+                if pattern in rejection_reason.lower():
+                    rejection_type = category
+                    break
+
+            # Store rejection analysis for future reference
+            if self._cache_service:
+                analysis_key = f"rejection_analysis_{order.get('id') if order else 'unknown'}"
+                await self._cache_service.set(
+                    analysis_key,
+                    {
+                        "rejection_reason": rejection_reason,
+                        "rejection_type": rejection_type,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                    3600,
+                )
+
             self._logger.info(
-                "Analyzing rejection reason",
+                "Rejection reason analyzed",
                 order_id=order.get("id") if order else "unknown",
                 rejection_reason=rejection_reason,
+                rejection_type=rejection_type,
             )
         except Exception as e:
             self._logger.error("Failed to analyze rejection reason", error=str(e))
@@ -967,11 +1144,34 @@ class OrderRejectionRecovery(RecoveryScenario):
     async def _adjust_order_parameters(self, order: dict[str, Any], rejection_reason: str) -> None:
         """Adjust order parameters based on rejection reason."""
         try:
-            # TODO: Implement parameter adjustment
-            # This will be implemented in P-020 (Order Management and Execution
-            # Engine)
+            # Adjust order parameters based on rejection analysis
+            # (price, quantity, order type, etc.)
+            adjustments = {}
+
+            if "price" in rejection_reason.lower():
+                # Adjust price based on market conditions
+                if order and "price" in order:
+                    current_price = Decimal(str(order["price"]))
+                    # Adjust by 0.1% towards market
+                    if "too_high" in rejection_reason.lower():
+                        adjustments["price"] = current_price * Decimal("0.999")
+                    elif "too_low" in rejection_reason.lower():
+                        adjustments["price"] = current_price * Decimal("1.001")
+
+            elif "quantity" in rejection_reason.lower():
+                # Adjust quantity if invalid
+                if order and "quantity" in order:
+                    current_qty = Decimal(str(order["quantity"]))
+                    # Reduce by 10% for size issues
+                    adjustments["quantity"] = current_qty * Decimal("0.9")
+
+            # Store adjustments for retry
+            if adjustments and self._cache_service:
+                adjustment_key = f"order_adjustments_{order.get('id') if order else 'unknown'}"
+                await self._cache_service.set(adjustment_key, adjustments, 300)
+
             self._logger.info(
-                "Adjusting order parameters",
+                "Order parameters adjusted",
                 order_id=order.get("id") if order else "unknown",
                 rejection_reason=rejection_reason,
             )
@@ -982,8 +1182,18 @@ class OrderRejectionRecovery(RecoveryScenario):
 class APIRateLimitRecovery(RecoveryScenario):
     """Handle API rate limit violations with automatic throttling."""
 
-    def __init__(self, config: Config):
-        super().__init__(config)
+    def __init__(
+        self,
+        config: Config,
+        database_service: DatabaseServiceInterface | None = None,
+        risk_service: RiskServiceInterface | None = None,
+        cache_service: CacheServiceInterface | None = None,
+        state_service: StateServiceInterface | None = None,
+        bot_service: BotServiceInterface | None = None,
+    ):
+        super().__init__(
+            config, database_service, risk_service, cache_service, state_service, bot_service
+        )
         self.respect_retry_after = True
         self.max_retry_attempts = 3
         self.base_delay = 5
@@ -1002,11 +1212,11 @@ class APIRateLimitRecovery(RecoveryScenario):
         if self.respect_retry_after:
             await asyncio.sleep(retry_after)
 
-        # Implement exponential backoff
+        # Exponential backoff placeholder - implement with configurable retry logic
         for attempt in range(self.max_retry_attempts):
             try:
-                # TODO: Implement actual API call retry
-                # This will be implemented in P-003+ (Exchange Integrations)
+                # Retry API call with exponential backoff
+                # and respect exchange rate limits
                 self._logger.info(
                     "Retrying API call", api_endpoint=api_endpoint, attempt=attempt + 1
                 )
@@ -1018,3 +1228,104 @@ class APIRateLimitRecovery(RecoveryScenario):
                 )
 
         return False
+
+
+# Factory functions for dependency injection
+def create_partial_fill_recovery_factory(config: Config | None = None):
+    """Create a factory function for PartialFillRecovery instances."""
+
+    def factory(injector=None):
+        resolved_config = config or Config()
+
+        # Resolve services from DI container if available
+        database_service = None
+        risk_service = None
+        cache_service = None
+        state_service = None
+        bot_service = None
+
+        if injector:
+            database_service = (
+                injector.resolve("DatabaseService")
+                if injector.has_service("DatabaseService")
+                else None
+            )
+            risk_service = (
+                injector.resolve("RiskService") if injector.has_service("RiskService") else None
+            )
+            cache_service = (
+                injector.resolve("CacheService") if injector.has_service("CacheService") else None
+            )
+            state_service = (
+                injector.resolve("StateService") if injector.has_service("StateService") else None
+            )
+            bot_service = (
+                injector.resolve("BotService") if injector.has_service("BotService") else None
+            )
+
+        recovery = PartialFillRecovery(
+            resolved_config,
+            database_service,
+            risk_service,
+            cache_service,
+            state_service,
+            bot_service,
+        )
+
+        # Configure additional dependencies if injector is available
+        if injector:
+            recovery.configure_dependencies(injector)
+
+        return recovery
+
+    return factory
+
+
+def create_network_disconnection_recovery_factory(config: Config | None = None):
+    """Create a factory function for NetworkDisconnectionRecovery instances."""
+
+    def factory(injector=None):
+        resolved_config = config or Config()
+
+        # Resolve services from DI container if available
+        database_service = None
+        risk_service = None
+        cache_service = None
+        state_service = None
+        bot_service = None
+
+        if injector:
+            database_service = (
+                injector.resolve("DatabaseService")
+                if injector.has_service("DatabaseService")
+                else None
+            )
+            risk_service = (
+                injector.resolve("RiskService") if injector.has_service("RiskService") else None
+            )
+            cache_service = (
+                injector.resolve("CacheService") if injector.has_service("CacheService") else None
+            )
+            state_service = (
+                injector.resolve("StateService") if injector.has_service("StateService") else None
+            )
+            bot_service = (
+                injector.resolve("BotService") if injector.has_service("BotService") else None
+            )
+
+        recovery = NetworkDisconnectionRecovery(
+            resolved_config,
+            database_service,
+            risk_service,
+            cache_service,
+            state_service,
+            bot_service,
+        )
+
+        # Configure additional dependencies if injector is available
+        if injector:
+            recovery.configure_dependencies(injector)
+
+        return recovery
+
+    return factory

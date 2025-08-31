@@ -21,6 +21,7 @@ from src.error_handling.security_sanitizer import (
     SensitivityLevel,
     get_security_sanitizer,
 )
+from src.utils.error_categorization import categorize_error_from_type_and_message
 
 
 class UserRole(Enum):
@@ -105,7 +106,7 @@ class SecureErrorContextManager:
     - Third-party service configurations
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = get_logger(self.__class__.__module__)
         self.sanitizer = get_security_sanitizer()
 
@@ -129,7 +130,7 @@ class SecureErrorContextManager:
             "exchange": "Trading service temporarily unavailable. Please try again later.",
             "rate_limit": "Too many requests. Please wait before trying again.",
             "maintenance": "Service is currently under maintenance. Please try again later.",
-            "internal": "An internal error occurred. Please contact support if this continues.",
+            "internal": "A system error occurred. Please contact support if this continues.",
             "unknown": "An unexpected error occurred. Please try again or contact support.",
         }
 
@@ -261,8 +262,11 @@ class SecureErrorContextManager:
 
     def _generate_error_id(self, error: Exception, security_context: SecurityContext) -> str:
         """Generate a unique error ID for tracking."""
-        # Create hash from error details and timestamp
-        error_details = f"{type(error).__name__}:{error!s}:{security_context.timestamp}"
+        # Create hash from error details and current timestamp for uniqueness
+        import time
+
+        current_timestamp = datetime.now(timezone.utc).isoformat() + f"_{time.time_ns()}"
+        error_details = f"{type(error).__name__}:{error!s}:{current_timestamp}"
         hash_obj = hashlib.sha256(error_details.encode("utf-8"))
         return f"ERR_{hash_obj.hexdigest()[:12].upper()}"
 
@@ -314,8 +318,8 @@ class SecureErrorContextManager:
             )
             return f"{type(error).__name__}: {sanitized_message}"
 
-        else:  # DEBUG
-            # Show everything (for security team and system operations)
+        else:  # Development mode
+            # Show full details for development and debugging
             return f"{type(error).__name__}: {original_message}"
 
     def _filter_context(
@@ -377,7 +381,7 @@ class SecureErrorContextManager:
             # Show comprehensive context with sanitization
             return self.sanitizer.sanitize_context(original_context, SensitivityLevel.HIGH)
 
-        else:  # DEBUG
+        else:  # Development mode
             # Show everything for debugging (security team only)
             return original_context
 
@@ -414,73 +418,29 @@ class SecureErrorContextManager:
 
     def _categorize_error(self, error: Exception) -> str:
         """Categorize error for appropriate messaging."""
-        error_type = type(error).__name__.lower()
-        error_message = str(error).lower()
-
-        # Authentication/Authorization errors
-        if any(keyword in error_type for keyword in ["auth", "permission", "forbidden"]):
-            return "authentication" if "auth" in error_type else "authorization"
-        if any(keyword in error_message for keyword in ["permission", "forbidden", "unauthorized"]):
-            return "authorization"
-
-        # Validation errors
-        if any(keyword in error_type for keyword in ["validation", "value", "type"]):
-            return "validation"
-        if any(keyword in error_message for keyword in ["invalid", "required", "format"]):
-            return "validation"
-
-        # Network errors
-        if any(keyword in error_type for keyword in ["connection", "network", "timeout"]):
-            return "network"
-        if any(keyword in error_message for keyword in ["connection", "timeout", "network"]):
-            return "network"
-
-        # Database errors
-        if any(keyword in error_type for keyword in ["database", "sql", "operational"]):
-            return "database"
-        if any(keyword in error_message for keyword in ["database", "connection pool", "sql"]):
-            return "database"
-
-        # Exchange errors
-        if any(keyword in error_type for keyword in ["exchange", "trading", "order"]):
-            return "exchange"
-        if any(keyword in error_message for keyword in ["exchange", "trading", "market"]):
-            return "exchange"
-
-        # Rate limiting
-        if any(keyword in error_message for keyword in ["rate limit", "too many", "429"]):
-            return "rate_limit"
-
-        # Maintenance
-        if any(keyword in error_message for keyword in ["maintenance", "unavailable", "503"]):
-            return "maintenance"
-
-        # System errors
-        if any(keyword in error_type for keyword in ["system", "os", "memory"]):
-            return "internal"
-
-        return "unknown"
+        error_type = type(error).__name__
+        error_message = str(error)
+        return categorize_error_from_type_and_message(error_type, error_message)
 
     def _get_error_code(self, error: Exception, security_context: SecurityContext) -> str | None:
         """Get standardized error code."""
         error_category = self._categorize_error(error)
-        type(error).__name__
 
         # Generate standardized error code
         code_mapping = {
-            "authentication": "AUTH_001",
-            "authorization": "AUTH_002",
-            "validation": "VAL_001",
+            "authentication": "SEC_001",
+            "authorization": "SEC_002",
+            "validation": "VALID_001",
             "network": "NET_001",
             "database": "DB_001",
-            "exchange": "EXC_001",
-            "rate_limit": "RATE_001",
-            "maintenance": "MAINT_001",
-            "internal": "SYS_001",
-            "unknown": "ERR_001",
+            "exchange": "EXCH_001",
+            "rate_limit": "EXCH_002",
+            "maintenance": "EXCH_001",
+            "internal": "COMP_000",
+            "unknown": "SERV_000",
         }
 
-        base_code = code_mapping.get(error_category, "ERR_001")
+        base_code = code_mapping.get(error_category, "SERV_000")
 
         # Add component suffix if available
         if security_context.component:
@@ -557,7 +517,7 @@ class SecureErrorContextManager:
         """Get safe error handling summary for user's role."""
         info_level = self.role_info_levels.get(security_context.user_role, InformationLevel.MINIMAL)
 
-        summary = {
+        summary: dict[str, Any] = {
             "user_role": security_context.user_role.value,
             "information_level": info_level.value,
             "available_error_categories": list(self.safe_error_messages.keys()),

@@ -72,9 +72,9 @@ class TestConnectionHealth:
         )
 
         health_dict = health.to_dict()
-        assert health_dict["latency_ms"] == 100.0
-        assert health_dict["packet_loss"] == 0.05
-        assert health_dict["connection_quality"] == 0.8
+        assert health_dict["latency_ms"] == "100.0"
+        assert health_dict["packet_loss"] == "0.05"
+        assert health_dict["connection_quality"] == "0.8"
         assert health_dict["uptime_seconds"] == 1800
         assert health_dict["reconnect_count"] == 1
         assert "last_heartbeat" in health_dict

@@ -373,8 +373,8 @@ class SecurePatternAnalytics:
     def _get_ip_region(self, ip_address: str) -> str:
         """Get geographic region from IP (simplified implementation)."""
 
-        # This is a placeholder - in production, you'd use a GeoIP service
-        # but only return region/country, not specific location
+        # GeoIP service placeholder - implement with production geolocation service
+        # Return only region/country for privacy compliance
 
         if ip_address.startswith("192.168.") or ip_address.startswith("10."):
             return "internal"

@@ -84,9 +84,9 @@ class TestValidationFramework:
     def test_validate_price(self):
         """Test price validation."""
         # Valid prices
-        assert self.validator.validate_price(100.0) == 100.0
-        assert self.validator.validate_price(0.00001) == 0.00001
-        assert self.validator.validate_price(1000000.0) == 1000000.0
+        assert self.validator.validate_price(100.0) == Decimal('100.0')
+        assert self.validator.validate_price(0.00001) == Decimal('0.00001')
+        assert self.validator.validate_price(1000000.0) == Decimal('1000000.0')
         
         # Invalid prices
         with pytest.raises(ValidationError):
@@ -101,9 +101,9 @@ class TestValidationFramework:
     def test_validate_quantity(self):
         """Test quantity validation."""
         # Valid quantities
-        assert self.validator.validate_quantity(1.0) == 1.0
-        assert self.validator.validate_quantity(0.00001) == 0.00001
-        assert self.validator.validate_quantity(10000.0) == 10000.0
+        assert self.validator.validate_quantity(1.0) == Decimal('1.0')
+        assert self.validator.validate_quantity(0.00001) == Decimal('0.00001')
+        assert self.validator.validate_quantity(10000.0) == Decimal('10000.0')
         
         # Invalid quantities
         with pytest.raises(ValidationError):
@@ -171,8 +171,8 @@ class TestValidationFramework:
     def test_validate_decimal_precision(self):
         """Test decimal precision validation."""
         # Test that validation handles Decimal types
-        assert self.validator.validate_price(Decimal('50000.12345678')) == 50000.12345678
-        assert self.validator.validate_quantity(Decimal('0.00000001')) == 0.00000001
+        assert self.validator.validate_price(Decimal('50000.12345678')) == Decimal('50000.12345678')
+        assert self.validator.validate_quantity(Decimal('0.00000001')) == Decimal('0.00000001')
 
     def test_validation_caching(self):
         """Test that validation results can be cached."""

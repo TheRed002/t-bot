@@ -7,6 +7,7 @@ ensuring consistent behavior across the entire system.
 
 from __future__ import annotations
 
+import builtins
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Protocol, TypeVar
@@ -204,7 +205,7 @@ class EventEmitter(Protocol):
         """Emit event with optional data."""
         ...
 
-    def on(self, event: str, callback: Any) -> None:
+    def on(self, event: str, callback: Any) -> Any:
         """Subscribe to event."""
         ...
 
@@ -212,7 +213,7 @@ class EventEmitter(Protocol):
         """Unsubscribe from event."""
         ...
 
-    def once(self, event: str, callback: Any) -> None:
+    def once(self, event: str, callback: Any) -> Any:
         """Subscribe to event for single execution."""
         ...
 
@@ -239,6 +240,15 @@ class DIContainer(Protocol):
 
     def is_registered(self, interface: type) -> bool:
         """Check if service is registered."""
+        ...
+
+    def register_factory(
+        self,
+        name: str,
+        factory_func: Any,
+        singleton: bool = False,
+    ) -> None:
+        """Register factory function."""
         ...
 
 
@@ -313,7 +323,7 @@ class RepositoryComponent(Protocol):
 
     # Injectable methods
     def configure_dependencies(self, container: Any) -> None: ...
-    def get_dependencies(self) -> list[str]: ...
+    def get_dependencies(self) -> builtins.list[str]: ...
 
     # Loggable properties
     @property

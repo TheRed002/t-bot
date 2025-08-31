@@ -1,31 +1,9 @@
 """
 Comprehensive Performance Monitoring System
 
-DEPRECATED: This module is deprecated and will be removed in a future version.
-Use src.monitoring.performance.PerformanceProfiler instead for performance monitoring.
-
 This module provides real-time performance monitoring and metrics collection
-for the T-Bot trading system, with focus on achieving <100ms latency targets
+for the T-Bot trading system, with focus on achieving optimal latency targets
 for critical trading operations.
-
-Features:
-- Real-time latency tracking with percentile analysis
-- Trading operation profiling and optimization
-- System resource monitoring (CPU, memory, network, disk)
-- Exchange API performance tracking
-- Database query performance analysis
-- Cache hit ratio monitoring
-- WebSocket connection health tracking
-- Alerting for performance degradation
-- Performance regression detection
-- Comprehensive metrics dashboard data
-
-Performance targets:
-- Trading operations: < 100ms (99th percentile)
-- Database queries: < 50ms (95th percentile)
-- Cache access: < 10ms (99th percentile)
-- WebSocket latency: < 20ms (95th percentile)
-- Memory usage: < 2GB per bot instance
 """
 
 import asyncio
@@ -41,7 +19,7 @@ import psutil
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 
 from src.core.base.component import BaseComponent
-from src.core.config.main import Config
+from src.core.config import Config
 from src.core.exceptions import PerformanceError
 from src.core.logging import get_logger
 from src.utils.decorators import time_execution
@@ -382,7 +360,7 @@ class PerformanceMonitor(BaseComponent):
 
         # Resource monitoring
         self.resource_history: deque = deque(maxlen=3600)  # 1 hour at 1-second intervals
-        self.last_resource_check = 0
+        self.last_resource_check = 0.0
 
         # Error tracking
         self.error_counts: dict[OperationType, int] = defaultdict(int)
@@ -603,8 +581,8 @@ class PerformanceMonitor(BaseComponent):
 
     async def _check_performance_alerts(self) -> None:
         """Check for performance threshold violations and generate alerts."""
-        alerts_to_add = []
-        alerts_to_remove = []
+        alerts_to_add: list[PerformanceAlert] = []
+        alerts_to_remove: list[str] = []
 
         # Check different types of alerts
         await self._check_latency_alerts(alerts_to_add, alerts_to_remove)
@@ -997,7 +975,7 @@ class OperationTracker:
 
 
 # Decorators for automatic performance tracking
-def track_performance(operation_type: OperationType, monitor: PerformanceMonitor = None):
+def track_performance(operation_type: OperationType, monitor: PerformanceMonitor | None = None):
     """Decorator for automatic performance tracking."""
 
     def decorator(func):

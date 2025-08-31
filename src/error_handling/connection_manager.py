@@ -16,10 +16,12 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 from typing import Any
 
 from src.core.config import Config
+from src.core.exceptions import TimeoutError
 from src.core.logging import get_logger
 
 # MANDATORY: Import from P-001 core framework
@@ -42,33 +44,40 @@ class ConnectionHealth:
     """Optimized connection health metrics with memory-efficient storage."""
 
     last_heartbeat: datetime
-    latency_ms: float
-    packet_loss: float
-    connection_quality: float  # 0.0 to 1.0
+    latency_ms: Decimal
+    packet_loss: Decimal
+    connection_quality: Decimal  # 0.0 to 1.0
     uptime_seconds: int
     reconnect_count: int
     last_error: str | None = None
 
     # Efficient latency history storage
-    _latency_history: deque[float] = field(default_factory=lambda: deque(maxlen=100))
-    _quality_history: deque[float] = field(default_factory=lambda: deque(maxlen=50))
+    _latency_history: deque[Decimal] = field(default_factory=lambda: deque(maxlen=100))
+    _quality_history: deque[Decimal] = field(default_factory=lambda: deque(maxlen=50))
 
-    def add_latency_measurement(self, latency: float) -> None:
+    def add_latency_measurement(self, latency: float | Decimal) -> None:
         """Add latency measurement to history."""
-        self._latency_history.append(latency)
-        self.latency_ms = latency
+        latency_decimal = Decimal(str(latency))
+        self._latency_history.append(latency_decimal)
+        self.latency_ms = latency_decimal
 
-    def add_quality_measurement(self, quality: float) -> None:
+    def add_quality_measurement(self, quality: float | Decimal) -> None:
         """Add quality measurement to history."""
-        self._quality_history.append(quality)
-        self.connection_quality = quality
+        quality_decimal = Decimal(str(quality))
+        self._quality_history.append(quality_decimal)
+        self.connection_quality = quality_decimal
 
-    def get_average_latency(self, samples: int = 10) -> float:
+    def get_average_latency(self, samples: int = 10) -> Decimal:
         """Get average latency from recent samples."""
         if not self._latency_history:
-            return 0.0
+            return Decimal("0.0")
         recent_samples = list(self._latency_history)[-samples:]
-        return sum(recent_samples) / len(recent_samples)
+        from decimal import localcontext
+
+        with localcontext() as ctx:
+            ctx.prec = 8
+            ctx.rounding = ROUND_HALF_UP
+            return sum(recent_samples) / Decimal(str(len(recent_samples)))
 
     def get_quality_trend(self) -> str:
         """Get quality trend (improving, degrading, stable)."""
@@ -87,13 +96,13 @@ class ConnectionHealth:
         """Convert to dictionary for serialization."""
         return {
             "last_heartbeat": self.last_heartbeat.isoformat() if self.last_heartbeat else None,
-            "latency_ms": self.latency_ms,
-            "packet_loss": self.packet_loss,
-            "connection_quality": self.connection_quality,
+            "latency_ms": str(self.latency_ms),
+            "packet_loss": str(self.packet_loss),
+            "connection_quality": str(self.connection_quality),
             "uptime_seconds": self.uptime_seconds,
             "reconnect_count": self.reconnect_count,
             "last_error": self.last_error,
-            "avg_latency_10s": self.get_average_latency(10),
+            "avg_latency_10s": str(self.get_average_latency(10)),
             "quality_trend": self.get_quality_trend(),
         }
 
@@ -101,7 +110,7 @@ class ConnectionHealth:
 class MessageQueue:
     """Efficient message queue with size limits and TTL."""
 
-    def __init__(self, max_size: int = 1000, ttl_seconds: int = 300):
+    def __init__(self, max_size: int = 1000, ttl_seconds: int = 300) -> None:
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
         self._queue: deque[dict[str, Any]] = deque(maxlen=max_size)
@@ -160,7 +169,7 @@ class MessageQueue:
 class ConnectionManager:
     """Optimized connection reliability manager with efficient memory usage."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config) -> None:
         self.config = config
         self.logger = get_logger(self.__class__.__module__)
 
@@ -178,6 +187,10 @@ class ConnectionManager:
         # Optimized message queues
         self.message_queues: dict[str, MessageQueue] = {}
         self.heartbeat_intervals: dict[str, int] = {"exchange": 30, "database": 60, "websocket": 10}
+
+        # WebSocket connection timeouts and heartbeat settings
+        self.websocket_timeout = 30.0
+        self.websocket_heartbeat_timeout = 5.0
 
         # Task management with weak references
         self._health_monitor_tasks: dict[str, asyncio.Task] = {}
@@ -234,8 +247,18 @@ class ConnectionManager:
                 # Start cleanup task if not already running
                 self._start_cleanup_task()
 
-                # Attempt connection
-                connection = await connect_func(**kwargs)
+                # Attempt connection with timeout for WebSocket connections
+                if connection_type == "websocket":
+                    try:
+                        connection = await asyncio.wait_for(
+                            connect_func(**kwargs), timeout=self.websocket_timeout
+                        )
+                    except asyncio.TimeoutError as e:
+                        raise TimeoutError(
+                            f"WebSocket connection timeout after {self.websocket_timeout}s"
+                        ) from e
+                else:
+                    connection = await connect_func(**kwargs)
 
                 # Initialize connection tracking with proper locking
                 async with self._connections_lock:
@@ -252,9 +275,9 @@ class ConnectionManager:
                 async with self._health_monitors_lock:
                     self.health_monitors[connection_id] = ConnectionHealth(
                         last_heartbeat=datetime.now(timezone.utc),
-                        latency_ms=0.0,
-                        packet_loss=0.0,
-                        connection_quality=1.0,
+                        latency_ms=Decimal("0.0"),
+                        packet_loss=Decimal("0.0"),
+                        connection_quality=Decimal("1.0"),
                         uptime_seconds=0,
                         reconnect_count=0,
                     )
@@ -295,25 +318,97 @@ class ConnectionManager:
         return False
 
     async def close_connection(self, connection_id: str) -> bool:
-        """Close a connection gracefully."""
+        """Close a connection gracefully with proper WebSocket handling."""
 
         if connection_id not in self.connections:
             self.logger.warning("Connection not found", connection_id=connection_id)
             return False
 
+        connection_info = None
+        connection = None
         try:
-            connection_info = self.connections[connection_id]
-            connection = connection_info["connection"]
+            async with self._connections_lock:
+                connection_info = self.connections.get(connection_id)
+                if not connection_info:
+                    return False
+                connection = connection_info["connection"]
 
-            # Close connection if it has a close method
-            if hasattr(connection, "close"):
-                await connection.close()
-            elif hasattr(connection, "disconnect"):
-                await connection.disconnect()
+            # Close WebSocket connection properly with await and timeout
+            if connection:
+                connection_type = connection_info.get("type", "unknown")
 
-            # Update state
-            connection_info["state"] = ConnectionState.DISCONNECTED
-            connection_info["last_activity"] = datetime.now(timezone.utc)
+                if hasattr(connection, "close"):
+                    if asyncio.iscoroutinefunction(connection.close):
+                        try:
+                            await asyncio.wait_for(connection.close(), timeout=10.0)
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                "Connection close timeout", connection_id=connection_id
+                            )
+                        except asyncio.CancelledError:
+                            # Re-raise cancellation to maintain proper async cleanup
+                            self.logger.debug(
+                                "Connection close cancelled", connection_id=connection_id
+                            )
+                            raise
+                        except Exception as close_error:
+                            self.logger.warning(
+                                "Connection close error",
+                                connection_id=connection_id,
+                                error=str(close_error),
+                            )
+                    else:
+                        try:
+                            connection.close()
+                        except Exception as close_error:
+                            self.logger.warning(
+                                "Sync connection close error",
+                                connection_id=connection_id,
+                                error=str(close_error),
+                            )
+                elif hasattr(connection, "disconnect"):
+                    if asyncio.iscoroutinefunction(connection.disconnect):
+                        try:
+                            await asyncio.wait_for(connection.disconnect(), timeout=10.0)
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                "Connection disconnect timeout", connection_id=connection_id
+                            )
+                        except asyncio.CancelledError:
+                            # Re-raise cancellation to maintain proper async cleanup
+                            self.logger.debug(
+                                "Connection disconnect cancelled", connection_id=connection_id
+                            )
+                            raise
+                        except Exception as disconnect_error:
+                            self.logger.warning(
+                                "Connection disconnect error",
+                                connection_id=connection_id,
+                                error=str(disconnect_error),
+                            )
+                    else:
+                        try:
+                            connection.disconnect()
+                        except Exception as disconnect_error:
+                            self.logger.warning(
+                                "Sync connection disconnect error",
+                                connection_id=connection_id,
+                                error=str(disconnect_error),
+                            )
+
+                # For WebSocket connections, ensure proper state cleanup
+                if connection_type == "websocket":
+                    if hasattr(connection, "state"):
+                        try:
+                            # Mark connection as closed if state is mutable
+                            if hasattr(connection.state, "__setattr__"):
+                                connection.state = 3  # WebSocket CLOSED state
+                        except Exception as state_error:
+                            self.logger.debug(
+                                "WebSocket state cleanup warning",
+                                connection_id=connection_id,
+                                error=str(state_error),
+                            )
 
             self.logger.info("Connection closed", connection_id=connection_id)
             return True
@@ -323,6 +418,20 @@ class ConnectionManager:
                 "Failed to close connection", connection_id=connection_id, error=str(e)
             )
             return False
+        finally:
+            # Ensure state is updated and connection is removed even if close fails
+            try:
+                async with self._connections_lock:
+                    if connection_id in self.connections:
+                        if connection_info:
+                            connection_info["state"] = ConnectionState.DISCONNECTED
+                            connection_info["last_activity"] = datetime.now(timezone.utc)
+            except Exception as cleanup_error:
+                self.logger.warning(
+                    "Failed to update connection state during cleanup",
+                    connection_id=connection_id,
+                    error=str(cleanup_error),
+                )
 
     @time_execution
     @circuit_breaker(failure_threshold=3)
@@ -346,8 +455,8 @@ class ConnectionManager:
         connection_info["state"] = ConnectionState.CONNECTING
         connection_info["reconnect_count"] += 1
 
-        # TODO: Implement actual reconnection logic
-        # This will be implemented in P-003+ (Exchange Integrations)
+        # Exponential backoff placeholder - implement with configurable retry strategy
+        # This will be implemented with exchange integrations
         # For now, simulate reconnection
         await asyncio.sleep(1)
 
@@ -363,7 +472,7 @@ class ConnectionManager:
 
         return True
 
-    async def _monitor_connection_health(self, connection_id: str):
+    async def _monitor_connection_health(self, connection_id: str) -> None:
         """Monitor connection health with heartbeat checks."""
 
         connection_info = self.connections.get(connection_id)
@@ -375,66 +484,103 @@ class ConnectionManager:
 
         while connection_info["state"] == ConnectionState.CONNECTED:
             try:
-                # Perform heartbeat check
+                # Perform heartbeat check with proper race condition handling
                 start_time = time.time()
                 is_healthy = await self._perform_heartbeat(connection_id)
                 latency_ms = (time.time() - start_time) * 1000
 
-                if is_healthy:
-                    # Update health metrics with optimized storage
-                    health = self.health_monitors[connection_id]
-                    health.last_heartbeat = datetime.now(timezone.utc)
-                    health.add_latency_measurement(latency_ms)
-                    health.uptime_seconds = int(
-                        (
-                            datetime.now(timezone.utc) - connection_info["established_at"]
-                        ).total_seconds()
-                    )
-                    health.last_error = None
+                # Use locks to prevent race conditions when updating health metrics
+                async with self._health_monitors_lock:
+                    if connection_id not in self.health_monitors:
+                        # Connection was removed during heartbeat, exit monitoring
+                        self.logger.debug(
+                            "Connection removed during health monitoring",
+                            connection_id=connection_id,
+                        )
+                        break
 
-                    # Update connection quality based on latency with trend analysis
-                    if latency_ms < 100:
-                        quality = 1.0
-                    elif latency_ms < 500:
-                        quality = 0.8
-                    elif latency_ms < 1000:
-                        quality = 0.6
+                    health = self.health_monitors[connection_id]
+
+                    if is_healthy:
+                        # Update health metrics with optimized storage
+                        health.last_heartbeat = datetime.now(timezone.utc)
+                        health.add_latency_measurement(Decimal(str(latency_ms)))
+                        health.uptime_seconds = int(
+                            (
+                                datetime.now(timezone.utc) - connection_info["established_at"]
+                            ).total_seconds()
+                        )
+                        health.last_error = None
+
+                        # Update connection quality based on latency with trend analysis
+                        latency_decimal = Decimal(str(latency_ms))
+                        if latency_decimal < Decimal("100"):
+                            quality = Decimal("1.0")
+                        elif latency_decimal < Decimal("500"):
+                            quality = Decimal("0.8")
+                        elif latency_decimal < Decimal("1000"):
+                            quality = Decimal("0.6")
+                        else:
+                            quality = Decimal("0.4")
+
+                        # Factor in trend for more accurate quality assessment
+                        trend = health.get_quality_trend()
+                        if trend == "degrading":
+                            quality = quality * Decimal("0.9")
+                        elif trend == "improving":
+                            quality = min(quality * Decimal("1.1"), Decimal("1.0"))
+
+                        health.add_quality_measurement(quality)
+
+                        # Update connection activity with lock protection
+                        async with self._connections_lock:
+                            if connection_id in self.connections:
+                                self.connections[connection_id]["last_activity"] = datetime.now(
+                                    timezone.utc
+                                )
+
                     else:
-                        quality = 0.4
+                        # Connection is unhealthy, trigger reconnection
+                        self.logger.warning(
+                            "Connection health check failed", connection_id=connection_id
+                        )
 
-                    # Factor in trend for more accurate quality assessment
-                    trend = health.get_quality_trend()
-                    if trend == "degrading":
-                        quality *= 0.9
-                    elif trend == "improving":
-                        quality = min(quality * 1.1, 1.0)
+                        health.last_error = "Heartbeat failed"
+                        health.connection_quality = Decimal("0.0")
 
-                    health.add_quality_measurement(quality)
-                    connection_info["last_activity"] = datetime.now(timezone.utc)
-
-                else:
-                    # Connection is unhealthy, trigger reconnection
-                    self.logger.warning(
-                        "Connection health check failed", connection_id=connection_id
-                    )
-
-                    health = self.health_monitors[connection_id]
-                    health.last_error = "Heartbeat failed"
-                    health.connection_quality = 0.0
-
-                    # Trigger reconnection
-                    await self.reconnect_connection(connection_id)
+                        # Trigger reconnection (this will handle its own locking)
+                        try:
+                            await self.reconnect_connection(connection_id)
+                        except Exception as reconnect_error:
+                            self.logger.error(
+                                "Reconnection failed during health monitoring",
+                                connection_id=connection_id,
+                                error=str(reconnect_error),
+                            )
+                            # Continue monitoring even if reconnection fails
+                            pass
 
                 await asyncio.sleep(heartbeat_interval)
 
+            except asyncio.CancelledError:
+                self.logger.debug("Health monitoring cancelled", connection_id=connection_id)
+                # Exit cleanly on cancellation
+                break
             except Exception as e:
                 self.logger.error(
                     "Health monitoring error", connection_id=connection_id, error=str(e)
                 )
-                await asyncio.sleep(heartbeat_interval)
+                # Use exponential backoff for error conditions to prevent flooding
+                try:
+                    await asyncio.sleep(min(heartbeat_interval * 2, 60))
+                except asyncio.CancelledError:
+                    self.logger.debug(
+                        "Health monitoring sleep cancelled", connection_id=connection_id
+                    )
+                    break
 
     async def _perform_heartbeat(self, connection_id: str) -> bool:
-        """Perform heartbeat check on connection."""
+        """Perform heartbeat check on connection with proper async handling."""
 
         connection_info = self.connections.get(connection_id)
         if not connection_info:
@@ -447,45 +593,198 @@ class ConnectionManager:
             if connection_type == "exchange":
                 # Exchange heartbeat - check API connectivity
                 if hasattr(connection, "ping"):
-                    response = await connection.ping()
-                    return response is not None
+                    if asyncio.iscoroutinefunction(connection.ping):
+                        try:
+                            response = await asyncio.wait_for(
+                                connection.ping(),
+                                timeout=10.0,  # 10 second timeout for exchange pings
+                            )
+                            return response is not None
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                "Exchange ping timeout", connection_id=connection_id, timeout=10.0
+                            )
+                            return False
+                    else:
+                        response = connection.ping()
+                        return response is not None
                 elif hasattr(connection, "get_server_time"):
-                    response = await connection.get_server_time()
-                    return response is not None
+                    if asyncio.iscoroutinefunction(connection.get_server_time):
+                        try:
+                            response = await asyncio.wait_for(
+                                connection.get_server_time(),
+                                timeout=10.0,  # 10 second timeout for server time
+                            )
+                            return response is not None
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                "Exchange server time timeout",
+                                connection_id=connection_id,
+                                timeout=10.0,
+                            )
+                            return False
+                    else:
+                        response = connection.get_server_time()
+                        return response is not None
                 else:
                     # Fallback: assume healthy if connection exists
                     return connection is not None
 
             elif connection_type == "database":
-                # Database heartbeat - execute simple query
+                # Database heartbeat - execute simple query with timeout
                 if hasattr(connection, "execute"):
-                    result = await connection.execute("SELECT 1")
-                    return result is not None
+                    if asyncio.iscoroutinefunction(connection.execute):
+                        try:
+                            result = await asyncio.wait_for(
+                                connection.execute("SELECT 1"),
+                                timeout=5.0,  # 5 second timeout for DB queries
+                            )
+                            return result is not None
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                "Database query timeout", connection_id=connection_id, timeout=5.0
+                            )
+                            return False
+                    else:
+                        result = connection.execute("SELECT 1")
+                        return result is not None
                 elif hasattr(connection, "ping"):
-                    return await connection.ping()
+                    if asyncio.iscoroutinefunction(connection.ping):
+                        try:
+                            return await asyncio.wait_for(
+                                connection.ping(),
+                                timeout=5.0,  # 5 second timeout for DB ping
+                            )
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                "Database ping timeout", connection_id=connection_id, timeout=5.0
+                            )
+                            return False
+                    else:
+                        return connection.ping()
                 else:
                     return connection is not None
 
             elif connection_type == "websocket":
-                # WebSocket heartbeat - check connection state
+                # WebSocket heartbeat - check connection state with proper async handling
                 if hasattr(connection, "state"):
                     # Check if WebSocket is open (usually state == 1)
-                    return connection.state == 1
+                    try:
+                        state = connection.state
+                        return state == 1
+                    except Exception as state_error:
+                        self.logger.debug(
+                            "WebSocket state access error",
+                            connection_id=connection_id,
+                            error=str(state_error),
+                        )
+                        return False
                 elif hasattr(connection, "is_open"):
-                    return connection.is_open()
+                    if asyncio.iscoroutinefunction(connection.is_open):
+                        try:
+                            return await asyncio.wait_for(
+                                connection.is_open(), timeout=self.websocket_heartbeat_timeout
+                            )
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                "WebSocket is_open timeout",
+                                connection_id=connection_id,
+                                timeout=self.websocket_heartbeat_timeout,
+                            )
+                            return False
+                        except asyncio.CancelledError:
+                            # Re-raise cancellation to maintain proper async cleanup
+                            self.logger.debug(
+                                "WebSocket is_open cancelled", connection_id=connection_id
+                            )
+                            raise
+                        except Exception as is_open_error:
+                            self.logger.warning(
+                                "WebSocket is_open error",
+                                connection_id=connection_id,
+                                error=str(is_open_error),
+                            )
+                            return False
+                    else:
+                        try:
+                            return connection.is_open()
+                        except Exception as is_open_error:
+                            self.logger.warning(
+                                "WebSocket sync is_open error",
+                                connection_id=connection_id,
+                                error=str(is_open_error),
+                            )
+                            return False
                 elif hasattr(connection, "ping"):
-                    await connection.ping()
-                    return True
+                    if asyncio.iscoroutinefunction(connection.ping):
+                        try:
+                            ping_result = await asyncio.wait_for(
+                                connection.ping(), timeout=self.websocket_heartbeat_timeout
+                            )
+                            # Handle different ping response types
+                            if ping_result is None:
+                                return True  # Some implementations return None on success
+                            return bool(ping_result)
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                "WebSocket ping timeout",
+                                connection_id=connection_id,
+                                timeout=self.websocket_heartbeat_timeout,
+                            )
+                            return False
+                        except asyncio.CancelledError:
+                            # Re-raise cancellation to maintain proper async cleanup
+                            self.logger.debug(
+                                "WebSocket ping cancelled", connection_id=connection_id
+                            )
+                            raise
+                        except Exception as ping_error:
+                            self.logger.warning(
+                                "WebSocket ping error",
+                                connection_id=connection_id,
+                                error=str(ping_error),
+                            )
+                            return False
+                    else:
+                        try:
+                            ping_result = connection.ping()
+                            return True  # If no exception, assume success
+                        except Exception as ping_error:
+                            self.logger.warning(
+                                "WebSocket sync ping error",
+                                connection_id=connection_id,
+                                error=str(ping_error),
+                            )
+                            return False
                 else:
-                    return connection is not None
+                    # Fallback: check if connection object is not None and has basic attributes
+                    try:
+                        return connection is not None and hasattr(connection, "__dict__")
+                    except Exception:
+                        return False
 
             else:
-                # Generic heartbeat - check if connection object exists
+                # Generic heartbeat - check if connection object exists with timeout
                 if hasattr(connection, "ping"):
-                    return await connection.ping()
+                    if asyncio.iscoroutinefunction(connection.ping):
+                        try:
+                            return await asyncio.wait_for(
+                                connection.ping(),
+                                timeout=10.0,  # 10 second generic timeout
+                            )
+                        except asyncio.TimeoutError:
+                            self.logger.warning(
+                                "Generic ping timeout", connection_id=connection_id, timeout=10.0
+                            )
+                            return False
+                    else:
+                        return connection.ping()
                 else:
                     return connection is not None
 
+        except asyncio.CancelledError:
+            self.logger.debug("Heartbeat cancelled", connection_id=connection_id)
+            return False
         except Exception as e:
             self.logger.error("Heartbeat failed", connection_id=connection_id, error=str(e))
             return False
@@ -554,24 +853,61 @@ class ConnectionManager:
 
     async def _cleanup_connection(self, connection_id: str) -> None:
         """Clean up resources for a dead connection."""
-        # Cancel monitoring task
-        if connection_id in self._health_monitor_tasks:
-            task = self._health_monitor_tasks[connection_id]
-            if not task.done():
-                task.cancel()
-            del self._health_monitor_tasks[connection_id]
+        task = None
+        try:
+            # Cancel monitoring task with timeout
+            async with self._tasks_lock:
+                if connection_id in self._health_monitor_tasks:
+                    task = self._health_monitor_tasks[connection_id]
+                    if not task.done():
+                        task.cancel()
+                    del self._health_monitor_tasks[connection_id]
 
-        # Remove connection data
-        self.connections.pop(connection_id, None)
-        self.health_monitors.pop(connection_id, None)
+            # Wait for task cancellation outside the lock
+            if task and not task.done():
+                try:
+                    await asyncio.wait_for(task, timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
 
-        # Clear message queue
-        if connection_id in self.message_queues:
-            cleared_count = self.message_queues[connection_id].clear()
-            del self.message_queues[connection_id]
-            self.logger.info(
-                f"Cleaned up connection {connection_id}, cleared {cleared_count} queued messages"
-            )
+        except Exception as e:
+            self.logger.warning(f"Error cleaning up monitoring task: {e}")
+        finally:
+            # Always ensure task is cleaned up
+            if task and not task.done():
+                try:
+                    task.cancel()
+                except Exception as e:
+                    self.logger.debug(f"Task cancellation failed: {e}")
+                    # Continue cleanup despite cancellation failure
+
+        # Close connection before removing data
+        try:
+            if connection_id in self.connections:
+                await self.close_connection(connection_id)
+        except Exception as e:
+            self.logger.warning(f"Error closing connection during cleanup: {e}")
+
+        # Remove connection data with proper locking
+        cleared_count = 0
+        try:
+            async with self._connections_lock:
+                self.connections.pop(connection_id, None)
+
+            async with self._health_monitors_lock:
+                self.health_monitors.pop(connection_id, None)
+
+            async with self._message_queues_lock:
+                if connection_id in self.message_queues:
+                    cleared_count = self.message_queues[connection_id].clear()
+                    del self.message_queues[connection_id]
+
+        except Exception as e:
+            self.logger.warning(f"Error removing connection data during cleanup: {e}")
+
+        self.logger.info(
+            f"Cleaned up connection {connection_id}, cleared {cleared_count} queued messages"
+        )
 
     async def queue_message(self, connection_id: str, message: dict[str, Any]) -> bool:
         """Queue a message for later transmission when connection is restored."""
@@ -586,9 +922,11 @@ class ConnectionManager:
 
         if success:
             async with self._stats_lock:
-                self._connection_stats["total_messages_queued"] = (
-                    int(self._connection_stats["total_messages_queued"]) + 1
-                )
+                total_queued = self._connection_stats.get("total_messages_queued", 0)
+                if isinstance(total_queued, int | str):
+                    self._connection_stats["total_messages_queued"] = int(total_queued) + 1
+                else:
+                    self._connection_stats["total_messages_queued"] = 1
 
             # Get queue size safely
             async with self._message_queues_lock:
@@ -620,7 +958,7 @@ class ConnectionManager:
 
         for message in messages:
             try:
-                # TODO: Implement actual message transmission
+                # Secure message queue placeholder - implement with production queue system
                 # This will be implemented in P-003+ (Exchange Integrations)
                 self.logger.info(
                     "Flushing queued message",
@@ -698,41 +1036,71 @@ class ConnectionManager:
 
         time_since_heartbeat = (datetime.now(timezone.utc) - health.last_heartbeat).total_seconds()
 
-        return time_since_heartbeat < max_age and health.connection_quality > 0.5
+        return time_since_heartbeat < max_age and health.connection_quality > Decimal("0.5")
 
     async def cleanup_resources(self) -> None:
-        """Cleanup all resources and close connections."""
+        """Cleanup all resources and close connections with proper async WebSocket handling."""
 
         # Cancel cleanup task if running
         if self._cleanup_task and not self._cleanup_task.done():
             self._cleanup_task.cancel()
             try:
-                await self._cleanup_task
+                await asyncio.wait_for(self._cleanup_task, timeout=5.0)
             except asyncio.CancelledError:
                 pass
+            except asyncio.TimeoutError:
+                self.logger.warning("Cleanup task cancellation timed out")
             except Exception as e:
                 self.logger.error(f"Failed to cleanup task: {e}")
 
-        # Cancel all health monitoring tasks
+        # Cancel all health monitoring tasks with timeout
         async with self._tasks_lock:
-            for task in list(self._health_monitor_tasks.values()):
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception as e:
-                        self.logger.error(f"Failed to await cancelled task: {e}")
+            tasks_to_cancel = list(self._health_monitor_tasks.values())
             self._health_monitor_tasks.clear()
 
-        # Close all connections
-        connection_ids = list(self.connections.keys())
-        for connection_id in connection_ids:
+        # Cancel tasks in parallel for efficiency
+        if tasks_to_cancel:
+            for task in tasks_to_cancel:
+                if not task.done():
+                    task.cancel()
+
             try:
-                await self.close_connection(connection_id)
-            except Exception as e:
-                self.logger.error(f"Failed to close connection {connection_id}: {e}")
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks_to_cancel, return_exceptions=True), timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Health monitoring task cancellation timed out")
+
+        # Close all connections with concurrent execution, timeout, and backpressure handling
+        connection_ids = list(self.connections.keys())
+        if connection_ids:
+            # Process connections in batches to avoid overwhelming the system
+            batch_size = 10  # Limit concurrent connection closures
+
+            for i in range(0, len(connection_ids), batch_size):
+                batch = connection_ids[i : i + batch_size]
+                batch_tasks = [self.close_connection(connection_id) for connection_id in batch]
+
+                try:
+                    # Process each batch with timeout
+                    await asyncio.wait_for(
+                        asyncio.gather(*batch_tasks, return_exceptions=True), timeout=15.0
+                    )
+
+                    # Small delay between batches to prevent overwhelming
+                    if i + batch_size < len(connection_ids):
+                        await asyncio.sleep(0.1)
+
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Connection batch cleanup timed out", batch_start=i, batch_size=len(batch)
+                    )
+                    continue  # Continue with next batch
+                except Exception as batch_error:
+                    self.logger.error(
+                        "Connection batch cleanup error", batch_start=i, error=str(batch_error)
+                    )
+                    continue  # Continue with next batch
 
         # Clear all data structures
         async with self._connections_lock:

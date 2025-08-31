@@ -7,7 +7,7 @@ across the system to ensure consistency between publishers and subscribers.
 
 class AlertEvents:
     """Alert-related event names."""
-    
+
     FIRED = "alert.fired"
     RESOLVED = "alert.resolved"
     ACKNOWLEDGED = "alert.acknowledged"
@@ -17,7 +17,7 @@ class AlertEvents:
 
 class OrderEvents:
     """Order-related event names."""
-    
+
     CREATED = "order.created"
     FILLED = "order.filled"
     PARTIALLY_FILLED = "order.partially_filled"
@@ -28,7 +28,7 @@ class OrderEvents:
 
 class TradeEvents:
     """Trade-related event names."""
-    
+
     EXECUTED = "trade.executed"
     SETTLED = "trade.settled"
     FAILED = "trade.failed"
@@ -36,7 +36,7 @@ class TradeEvents:
 
 class PositionEvents:
     """Position-related event names."""
-    
+
     OPENED = "position.opened"
     CLOSED = "position.closed"
     MODIFIED = "position.modified"
@@ -45,7 +45,7 @@ class PositionEvents:
 
 class RiskEvents:
     """Risk management event names."""
-    
+
     LIMIT_EXCEEDED = "risk.limit_exceeded"
     MARGIN_CALL = "risk.margin_call"
     CIRCUIT_BREAKER_TRIGGERED = "risk.circuit_breaker_triggered"
@@ -54,7 +54,7 @@ class RiskEvents:
 
 class SystemEvents:
     """System-level event names."""
-    
+
     STARTUP = "system.startup"
     SHUTDOWN = "system.shutdown"
     HEALTH_CHECK_FAILED = "system.health_check_failed"
@@ -64,7 +64,7 @@ class SystemEvents:
 
 class MarketDataEvents:
     """Market data event names."""
-    
+
     PRICE_UPDATE = "market.price_update"
     ORDER_BOOK_UPDATE = "market.order_book_update"
     TRADE_UPDATE = "market.trade_update"
@@ -73,7 +73,7 @@ class MarketDataEvents:
 
 class StrategyEvents:
     """Strategy-related event names."""
-    
+
     SIGNAL_GENERATED = "strategy.signal_generated"
     ENTRY_TRIGGERED = "strategy.entry_triggered"
     EXIT_TRIGGERED = "strategy.exit_triggered"
@@ -82,7 +82,7 @@ class StrategyEvents:
 
 class CapitalEvents:
     """Capital management event names."""
-    
+
     ALLOCATED = "capital.allocated"
     RELEASED = "capital.released"
     REBALANCED = "capital.rebalanced"
@@ -93,7 +93,7 @@ class CapitalEvents:
 
 class ExchangeEvents:
     """Exchange connection event names."""
-    
+
     CONNECTED = "exchange.connected"
     DISCONNECTED = "exchange.disconnected"
     RECONNECTING = "exchange.reconnecting"

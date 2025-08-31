@@ -32,6 +32,9 @@ class CacheManager(BaseComponent):
         self.config = config
         self.metrics = get_cache_metrics()
 
+        # Dependency injection support
+        self._dependency_container: Any | None = None
+
         # Connection management
         self._connection_lock = asyncio.Lock()
         self._connection_retries = 0
@@ -39,21 +42,19 @@ class CacheManager(BaseComponent):
         self._connection_retry_delay = 1.0
         self._shutdown_requested = False
 
-        # Default TTL values for different data types (in seconds)
         self.default_ttls = {
-            "market_data": 5,  # 5 seconds for real-time data
-            "risk_metrics": 60,  # 1 minute for risk calculations
-            "state": 300,  # 5 minutes for state data
-            "orders": 30,  # 30 seconds for order data
-            "strategy": 600,  # 10 minutes for strategy data
-            "bot_config": 3600,  # 1 hour for bot configuration
-            "api_response": 300,  # 5 minutes for API responses
-            "default": 3600,  # 1 hour default
+            "market_data": 5,
+            "risk_metrics": 60,
+            "state": 300,
+            "orders": 30,
+            "strategy": 600,
+            "bot_config": 3600,
+            "api_response": 300,
+            "default": 3600,
         }
 
-        # Lock timeout settings
-        self.lock_timeout = 30  # seconds
-        self.lock_retry_delay = 0.1  # seconds
+        self.lock_timeout = 30
+        self.lock_retry_delay = 0.1
 
     async def _ensure_client(self):
         """Ensure Redis client is available with proper connection management."""
@@ -62,13 +63,24 @@ class CacheManager(BaseComponent):
 
         async with self._connection_lock:
             if not self.redis_client or self.redis_client is None:
-                if self.config:
-                    self.redis_client = RedisClient(self.config)
-                else:
-                    raise CacheError("Redis client not available and no config provided")
+                if self._dependency_container:
+                    try:
+                        self.redis_client = self._dependency_container.resolve("RedisClient")
+                    except Exception:
+                        pass
+
+                if not self.redis_client:
+                    if self.config:
+                        self.redis_client = RedisClient(self.config)
+                    else:
+                        raise CacheError("Redis client not available and no config provided")
 
             # Check if client is connected and healthy
-            if self.redis_client is None or self.redis_client.client is None or not await self._is_client_healthy():
+            if (
+                self.redis_client is None
+                or self.redis_client.client is None
+                or not await self._is_client_healthy()
+            ):
                 await self._reconnect_with_retries()
 
     async def _is_client_healthy(self) -> bool:
@@ -86,10 +98,12 @@ class CacheManager(BaseComponent):
     async def _reconnect_with_retries(self):
         """Reconnect to Redis with exponential backoff."""
         for attempt in range(self._max_connection_retries):
+            client_disconnected = False
             try:
                 if self.redis_client.client is not None:
                     try:
                         await self.redis_client.disconnect()
+                        client_disconnected = True
                     except (ConnectionError, OSError) as e:
                         # Log disconnection errors for debugging
                         # but don't let them block reconnection
@@ -100,7 +114,7 @@ class CacheManager(BaseComponent):
                 await self.redis_client.connect()
 
                 # Test the connection
-                await asyncio.wait_for(await self.redis_client.ping(), timeout=2.0)
+                await asyncio.wait_for(self.redis_client.ping(), timeout=2.0)
 
                 self._connection_retries = 0  # Reset on success
                 self.logger.info("Successfully reconnected to Redis")
@@ -118,6 +132,16 @@ class CacheManager(BaseComponent):
                     await asyncio.sleep(wait_time)
                 else:
                     self.logger.error(f"All Redis connection attempts failed: {e}")
+                    # Ensure disconnection on final failure
+                    if self.redis_client.client is not None and not client_disconnected:
+                        try:
+                            await self.redis_client.disconnect()
+                        except Exception as disconnect_e:
+                            self.logger.warning(
+                                "Failed to disconnect during cleanup",
+                                error=str(disconnect_e),
+                                error_type=type(disconnect_e).__name__,
+                            )
                     raise CacheError(
                         f"Failed to connect to Redis after {self._max_connection_retries} "
                         f"attempts: {e}"
@@ -203,6 +227,9 @@ class CacheManager(BaseComponent):
         try:
             await self._ensure_client()
 
+            if self.redis_client is None:
+                return False
+
             if ttl is None:
                 ttl = self._get_ttl(data_type)
 
@@ -242,7 +269,14 @@ class CacheManager(BaseComponent):
             await self._ensure_client()
             return await self.redis_client.exists(key, namespace)
         except Exception as e:
-            self.logger.error(f"Cache exists check failed for key {key}: {e}")
+            self.logger.error(
+                "Cache exists check failed",
+                key=key,
+                namespace=namespace,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            self.metrics.record_error(namespace, "exists_error")
             return False
 
     async def expire(self, key: str, ttl: int, namespace: str = "cache") -> bool:
@@ -251,13 +285,22 @@ class CacheManager(BaseComponent):
             await self._ensure_client()
             return await self.redis_client.expire(key, ttl, namespace)
         except Exception as e:
-            self.logger.error(f"Cache expire failed for key {key}: {e}")
+            self.logger.error(
+                "Cache expire failed",
+                key=key,
+                namespace=namespace,
+                ttl=ttl,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            self.metrics.record_error(namespace, "expire_error")
             return False
 
     # Advanced operations
     async def get_many(self, keys: list[str], namespace: str = "cache") -> dict[str, Any]:
         """Get multiple values efficiently."""
         results = {}
+        pipeline = None
 
         try:
             await self._ensure_client()
@@ -289,6 +332,12 @@ class CacheManager(BaseComponent):
             self.logger.error(f"Cache get_many failed: {e}")
             self.metrics.record_error(namespace, "get_many_error")
             return {}
+        finally:
+            if pipeline:
+                try:
+                    pipeline.reset()
+                except Exception as cleanup_e:
+                    self.logger.debug(f"Failed to cleanup pipeline: {cleanup_e}")
 
     async def set_many(
         self,
@@ -298,6 +347,7 @@ class CacheManager(BaseComponent):
         data_type: str = "default",
     ) -> bool:
         """Set multiple values efficiently."""
+        pipeline = None
         try:
             await self._ensure_client()
 
@@ -328,6 +378,12 @@ class CacheManager(BaseComponent):
             self.logger.error(f"Cache set_many failed: {e}")
             self.metrics.record_error(namespace, "set_many_error")
             return False
+        finally:
+            if pipeline:
+                try:
+                    pipeline.reset()
+                except Exception as cleanup_e:
+                    self.logger.debug(f"Failed to cleanup pipeline: {cleanup_e}")
 
     # Distributed locking
     async def acquire_lock(
@@ -530,14 +586,29 @@ class CacheManager(BaseComponent):
                     # Properly close the connection with timeout
                     if self.redis_client.client:
                         try:
-                            await asyncio.wait_for(self.redis_client.disconnect(), timeout=10.0)
+                            # Use async context manager pattern for proper cleanup
+                            async with asyncio.timeout(10.0):
+                                await self.redis_client.disconnect()
                         except asyncio.TimeoutError:
                             self.logger.warning("Redis disconnection timed out")
-                            # Force close if needed
-                            if hasattr(self.redis_client.client, "close"):
-                                await self.redis_client.client.close()
+                            # Force close connection with proper error handling
+                            try:
+                                if hasattr(self.redis_client.client, "close"):
+                                    await self.redis_client.client.close()
+                                if hasattr(self.redis_client.client, "wait_closed"):
+                                    await self.redis_client.client.wait_closed()
+                            except Exception as force_close_error:
+                                self.logger.error(
+                                    f"Failed to force close Redis client: {force_close_error}"
+                                )
                         except Exception as e:
                             self.logger.warning(f"Error disconnecting Redis client: {e}")
+                            # Attempt graceful cleanup even on error
+                            try:
+                                if hasattr(self.redis_client.client, "close"):
+                                    await self.redis_client.client.close()
+                            except Exception:
+                                pass  # Best effort cleanup
 
                     self.redis_client = None
                     self.logger.info("Cache manager cleanup completed")
@@ -577,6 +648,15 @@ class CacheManager(BaseComponent):
             self.logger.error(f"Error during cache manager shutdown: {e}")
             # Don't re-raise during shutdown
 
+    def configure_dependencies(self, container: Any) -> None:
+        """Configure dependency injection container."""
+        self._dependency_container = container
+        self.logger.debug("Cache manager dependencies configured")
+
+    def get_dependencies(self) -> list[str]:
+        """Get list of required dependencies."""
+        return ["RedisClient"]
+
     def __del__(self):
         """Ensure cleanup on deletion."""
         if self.redis_client and self.redis_client.client:
@@ -595,3 +675,14 @@ def get_cache_manager(
     if _cache_manager is None:
         _cache_manager = CacheManager(redis_client, config)
     return _cache_manager
+
+
+def create_cache_manager_factory(config: Any | None = None) -> Callable[[], CacheManager]:
+    """Create a factory function for CacheManager to use with DI container."""
+
+    def factory() -> CacheManager:
+        # Create instance without hard-coded dependencies - DI will handle redis_client
+        instance = CacheManager(redis_client=None, config=config)
+        return instance
+
+    return factory

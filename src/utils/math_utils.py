@@ -2,10 +2,8 @@
 
 from decimal import Decimal
 
-import numpy as np
-
 from src.core.exceptions import ValidationError
-from src.utils.decimal_utils import ZERO, to_decimal
+from src.utils.decimal_utils import ZERO, safe_divide, to_decimal
 
 
 def calculate_percentage_change(old_value: Decimal, new_value: Decimal) -> Decimal:
@@ -58,9 +56,7 @@ def calculate_sharpe_ratio(
     # Validate frequency
     valid_frequencies = {"daily": 252, "weekly": 52, "monthly": 12, "yearly": 1}
     if frequency not in valid_frequencies:
-        raise ValidationError(
-            f"Invalid frequency: {frequency}. Must be one of {list(valid_frequencies.keys())}"
-        )
+        raise ValidationError(f"Invalid frequency: {frequency}. Must be one of {list(valid_frequencies.keys())}")
 
     # Convert to Decimal for precise calculations
     decimal_returns = [to_decimal(r) if not isinstance(r, Decimal) else r for r in returns]
@@ -82,9 +78,7 @@ def calculate_sharpe_ratio(
         return ZERO
 
     # Calculate Sharpe ratio
-    rf_rate = (
-        to_decimal(risk_free_rate) if not isinstance(risk_free_rate, Decimal) else risk_free_rate
-    )
+    rf_rate = to_decimal(risk_free_rate) if not isinstance(risk_free_rate, Decimal) else risk_free_rate
     sharpe_ratio = (mean_return - rf_rate) / std_return
 
     return sharpe_ratio
@@ -107,7 +101,8 @@ def calculate_max_drawdown(equity_curve: list[Decimal]) -> tuple[Decimal, int, i
         raise ValidationError("Equity curve cannot be empty")
 
     if len(equity_curve) < 2:
-        raise ValidationError("Need at least 2 points to calculate drawdown")
+        # For single point, return no drawdown
+        return ZERO, 0, 0
 
     # Convert to Decimal for precise calculations
     decimal_equity = [to_decimal(e) if not isinstance(e, Decimal) else e for e in equity_curve]
@@ -122,7 +117,7 @@ def calculate_max_drawdown(equity_curve: list[Decimal]) -> tuple[Decimal, int, i
 
     # Calculate drawdown
     drawdown = []
-    for i, (equity_val, max_val) in enumerate(zip(decimal_equity, running_max, strict=False)):
+    for _i, (equity_val, max_val) in enumerate(zip(decimal_equity, running_max, strict=False)):
         if max_val == ZERO:
             drawdown.append(ZERO)
         else:
@@ -157,11 +152,7 @@ def calculate_var(returns: list[Decimal], confidence_level: Decimal = Decimal("0
     if not returns:
         raise ValidationError("Returns list cannot be empty")
 
-    conf_level = (
-        to_decimal(confidence_level)
-        if not isinstance(confidence_level, Decimal)
-        else confidence_level
-    )
+    conf_level = to_decimal(confidence_level) if not isinstance(confidence_level, Decimal) else confidence_level
     if not (ZERO < conf_level < Decimal("1")):
         raise ValidationError("Confidence level must be between 0 and 1")
 
@@ -180,16 +171,16 @@ def calculate_var(returns: list[Decimal], confidence_level: Decimal = Decimal("0
     return var
 
 
-def calculate_volatility(returns: list[float], window: int | None = None) -> float:
+def calculate_volatility(returns: list[Decimal], window: int | None = None) -> Decimal:
     """
     Calculate volatility (standard deviation) of returns.
 
     Args:
-        returns: List of return values
+        returns: List of Decimal return values
         window: Rolling window size (None for full series)
 
     Returns:
-        Volatility as a float
+        Volatility as a Decimal
 
     Raises:
         ValidationError: If returns list is empty or window is invalid
@@ -200,34 +191,41 @@ def calculate_volatility(returns: list[float], window: int | None = None) -> flo
     if window is not None and (window <= 0 or window > len(returns)):
         raise ValidationError(f"Invalid window size: {window}")
 
-    # Convert to numpy array
-    returns_array = np.array(returns)
+    # Convert to Decimal for precise calculations
+    returns_decimal = [to_decimal(r) if not isinstance(r, Decimal) else r for r in returns]
 
     if window is None:
         # Calculate volatility for entire series
-        volatility = np.std(returns_array, ddof=1)
+        selected_returns = returns_decimal
     else:
         # Calculate rolling volatility
-        if len(returns_array) < window:
+        if len(returns_decimal) < window:
             raise ValidationError(f"Not enough data for window size {window}")
 
         # Use the last window elements
-        recent_returns = returns_array[-window:]
-        volatility = np.std(recent_returns, ddof=1)
+        selected_returns = returns_decimal[-window:]
 
-    return float(volatility)
+    # Calculate standard deviation with Decimal precision
+    n = Decimal(len(selected_returns))
+    if n <= Decimal("1"):
+        return ZERO
+
+    mean = sum(selected_returns) / n
+    variance = sum((r - mean) ** 2 for r in selected_returns) / (n - Decimal("1"))
+
+    return variance.sqrt()
 
 
-def calculate_correlation(series1: list[float], series2: list[float]) -> float:
+def calculate_correlation(series1: list[Decimal], series2: list[Decimal]) -> Decimal:
     """
     Calculate correlation coefficient between two series.
 
     Args:
-        series1: First series of values
-        series2: Second series of values
+        series1: First series of Decimal values
+        series2: Second series of Decimal values
 
     Returns:
-        Correlation coefficient as a float
+        Correlation coefficient as a Decimal
 
     Raises:
         ValidationError: If series are empty or have different lengths
@@ -241,38 +239,54 @@ def calculate_correlation(series1: list[float], series2: list[float]) -> float:
     if len(series1) < 2:
         raise ValidationError("Need at least 2 points to calculate correlation")
 
-    # Convert to numpy arrays
-    arr1 = np.array(series1)
-    arr2 = np.array(series2)
+    # Convert to Decimal for precise calculations
+    series1_decimal = [to_decimal(s) if not isinstance(s, Decimal) else s for s in series1]
+    series2_decimal = [to_decimal(s) if not isinstance(s, Decimal) else s for s in series2]
 
-    # Remove any NaN values from both arrays
-    mask = ~(np.isnan(arr1) | np.isnan(arr2))
-    if np.sum(mask) < 2:
-        raise ValidationError("Not enough valid data points after removing NaN values")
+    # Filter out invalid values (None or infinite)
+    valid_pairs = []
+    for s1, s2 in zip(series1_decimal, series2_decimal, strict=False):
+        if s1.is_finite() and s2.is_finite():
+            valid_pairs.append((s1, s2))
 
-    arr1_clean = arr1[mask]
-    arr2_clean = arr2[mask]
+    if len(valid_pairs) < 2:
+        raise ValidationError("Not enough valid data points after removing invalid values")
 
-    # Calculate correlation
-    correlation = np.corrcoef(arr1_clean, arr2_clean)[0, 1]
+    # Calculate correlation with Decimal precision
+    n = Decimal(len(valid_pairs))
 
-    # Handle NaN values
-    if np.isnan(correlation):
-        return 0.0
+    # Calculate means
+    mean1 = sum(pair[0] for pair in valid_pairs) / n
+    mean2 = sum(pair[1] for pair in valid_pairs) / n
 
-    return float(correlation)
+    # Calculate correlation components
+    numerator = sum((pair[0] - mean1) * (pair[1] - mean2) for pair in valid_pairs)
+    sum_sq1 = sum((pair[0] - mean1) ** 2 for pair in valid_pairs)
+    sum_sq2 = sum((pair[1] - mean2) ** 2 for pair in valid_pairs)
+
+    # Ensure we're working with Decimals
+    sum_sq1_decimal = to_decimal(sum_sq1) if sum_sq1 != ZERO else ZERO
+    sum_sq2_decimal = to_decimal(sum_sq2) if sum_sq2 != ZERO else ZERO
+    numerator_decimal = to_decimal(numerator) if numerator != ZERO else ZERO
+
+    denominator_squared = sum_sq1_decimal * sum_sq2_decimal
+    if denominator_squared <= ZERO:
+        return ZERO
+
+    denominator = denominator_squared.sqrt()
+    return safe_divide(numerator_decimal, denominator)
 
 
-def calculate_beta(asset_returns: list[float], market_returns: list[float]) -> float:
+def calculate_beta(asset_returns: list[Decimal], market_returns: list[Decimal]) -> Decimal:
     """
     Calculate beta coefficient for an asset relative to market.
 
     Args:
-        asset_returns: Asset return series
-        market_returns: Market return series
+        asset_returns: Asset return series as Decimal
+        market_returns: Market return series as Decimal
 
     Returns:
-        Beta coefficient
+        Beta coefficient as Decimal
 
     Raises:
         ValidationError: If series are invalid
@@ -283,55 +297,81 @@ def calculate_beta(asset_returns: list[float], market_returns: list[float]) -> f
     if len(asset_returns) != len(market_returns):
         raise ValidationError("Return series must have the same length")
 
-    # Convert to numpy arrays
-    asset = np.array(asset_returns)
-    market = np.array(market_returns)
+    # Convert to Decimal for precise calculations
+    asset_decimal = [to_decimal(r) if not isinstance(r, Decimal) else r for r in asset_returns]
+    market_decimal = [to_decimal(r) if not isinstance(r, Decimal) else r for r in market_returns]
 
-    # Calculate covariance and variance
-    covariance = np.cov(asset, market)[0, 1]
-    market_variance = np.var(market, ddof=1)
+    n = Decimal(len(asset_decimal))
+    if n <= Decimal("1"):
+        return ZERO
 
-    if market_variance == 0:
-        return 0.0
+    # Calculate means
+    asset_mean = sum(asset_decimal) / n
+    market_mean = sum(market_decimal) / n
 
-    beta = covariance / market_variance
-    return float(beta)
+    # Calculate covariance and market variance
+    covariance = sum(
+        (a - asset_mean) * (m - market_mean) for a, m in zip(asset_decimal, market_decimal, strict=False)
+    ) / (n - Decimal("1"))
+    market_variance = sum((m - market_mean) ** 2 for m in market_decimal) / (n - Decimal("1"))
+
+    if market_variance <= ZERO:
+        return ZERO
+
+    return safe_divide(covariance, market_variance, ZERO)
 
 
 def calculate_sortino_ratio(
-    returns: list[float], risk_free_rate: float = 0.02, periods_per_year: int = 252
-) -> float:
+    returns: list[Decimal], risk_free_rate: Decimal = Decimal("0.02"), periods_per_year: int = 252
+) -> Decimal:
     """
     Calculate Sortino ratio (uses downside deviation).
 
     Args:
-        returns: List of returns
-        risk_free_rate: Annual risk-free rate
+        returns: List of Decimal returns
+        risk_free_rate: Annual risk-free rate as Decimal
         periods_per_year: Number of periods in a year
 
     Returns:
-        Sortino ratio
+        Sortino ratio as Decimal
     """
-    returns_array = np.array(returns)
-    if len(returns_array) < 2:
-        return 0.0
+    if len(returns) < 2:
+        return ZERO
 
-    period_rf_rate = risk_free_rate / periods_per_year
-    excess_returns = returns_array - period_rf_rate
+    # Convert to Decimal for precise calculations
+    returns_decimal = [to_decimal(r) if not isinstance(r, Decimal) else r for r in returns]
+    rf_rate = to_decimal(risk_free_rate)
+    periods_decimal = to_decimal(periods_per_year)
+
+    period_rf_rate = rf_rate / periods_decimal
+    excess_returns = [r - period_rf_rate for r in returns_decimal]
 
     # Calculate downside deviation (only negative returns)
-    downside_returns = excess_returns[excess_returns < 0]
+    downside_returns = [r for r in excess_returns if r < ZERO]
 
     if len(downside_returns) == 0:
-        return float("inf")  # No downside risk
+        return Decimal("inf")  # No downside risk
 
-    downside_std = np.std(downside_returns)
+    # Calculate downside standard deviation
+    n_downside = Decimal(len(downside_returns))
+    if n_downside <= Decimal("1"):
+        return ZERO
 
-    if downside_std == 0:
-        return 0.0
+    mean_downside = sum(downside_returns) / n_downside
+    downside_variance = sum((r - mean_downside) ** 2 for r in downside_returns) / (n_downside - Decimal("1"))
 
-    mean_excess = np.mean(excess_returns)
-    return float((mean_excess / downside_std) * np.sqrt(periods_per_year))
+    if downside_variance <= ZERO:
+        return ZERO
+
+    downside_std = downside_variance.sqrt()
+
+    n_returns = Decimal(len(excess_returns))
+    mean_excess = sum(excess_returns) / n_returns
+
+    if downside_std <= ZERO:
+        return ZERO
+
+    return (mean_excess / downside_std) * periods_decimal.sqrt()
 
 
 def safe_min(*args: Decimal, default: Decimal | None = None) -> Decimal:
@@ -408,7 +448,7 @@ def safe_percentage(value: Decimal, total: Decimal, default: Decimal = ZERO) -> 
         default: Default Decimal value if calculation fails
 
     Returns:
-        Percentage as Decimal (e.g., 0.15 for 15%)
+        Percentage as Decimal (e.g., 15 for 15%)
     """
     from src.utils.decimal_utils import safe_divide
 
@@ -422,8 +462,10 @@ def safe_percentage(value: Decimal, total: Decimal, default: Decimal = ZERO) -> 
         total_decimal = to_decimal(total) if not isinstance(total, Decimal) else total
         default_decimal = to_decimal(default) if not isinstance(default, Decimal) else default
 
-        # Use safe_divide from decimal_utils for proper handling
-        return safe_divide(value_decimal, total_decimal, default_decimal)
+        # Use safe_divide from decimal_utils for proper handling and multiply by 100 for percentage
+        from src.utils.decimal_utils import HUNDRED
+        ratio = safe_divide(value_decimal, total_decimal, default_decimal)
+        return ratio * HUNDRED
 
     except (TypeError, ValueError):
         # Return default on any conversion error

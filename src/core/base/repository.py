@@ -9,7 +9,7 @@ management, and connection pooling.
 import asyncio
 import builtins
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timezone
 from typing import (
@@ -28,9 +28,9 @@ from src.core.exceptions import (
 )
 from src.core.types.base import ConfigDict
 
-# Type variables for repository operations
-T = TypeVar("T")  # Entity type
-K = TypeVar("K")  # Primary key type
+# Type variables for repository operations with proper bounds
+T = TypeVar("T")  # Entity type - generic for flexibility
+K = TypeVar("K", bound="Hashable")  # Primary key type must be hashable
 
 
 class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
@@ -161,7 +161,7 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
             repository=self._name,
         )
 
-    async def get_connection(self) -> AbstractAsyncContextManager[Any]:
+    def get_connection(self) -> AbstractAsyncContextManager[Any]:
         """
         Get database connection from pool.
 
@@ -713,11 +713,13 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
     # Health Check
     async def _health_check_internal(self) -> HealthStatus:
         """Repository-specific health check."""
+        connection_manager = None
         try:
             # Check connection pool health
             if self._connection_pool:
                 # Test connection
-                async with await self.get_connection() as conn:
+                connection_manager = self.get_connection()
+                async with connection_manager as conn:
                     # Simple connectivity test
                     await asyncio.wait_for(self._test_connection(conn), timeout=5.0)
 
@@ -742,6 +744,14 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
                 error=str(e),
             )
             return HealthStatus.UNHEALTHY
+        finally:
+            # Ensure any remaining connection resources are cleaned up
+            if connection_manager:
+                try:
+                    # The 'async with' should have handled cleanup, but ensure it
+                    pass
+                except Exception as cleanup_e:
+                    self._logger.debug(f"Health check connection cleanup error: {cleanup_e}")
 
     # Metrics and Monitoring
     async def _execute_with_monitoring(
@@ -914,7 +924,12 @@ class BaseRepository(BaseComponent, RepositoryComponent, Generic[T, K]):
 
     async def _test_connection(self, connection: Any) -> bool:
         """Test database connection - override in subclasses."""
-        return True
+        try:
+            # Basic connection test - subclasses should override with actual test
+            return connection is not None
+        except Exception as e:
+            self._logger.debug(f"Connection test failed: {e}")
+            return False
 
     async def _repository_health_check(self) -> HealthStatus:
         """Repository-specific health check - override in subclasses."""

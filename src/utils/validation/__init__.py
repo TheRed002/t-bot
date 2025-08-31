@@ -46,28 +46,87 @@ def _get_validator() -> ValidationFramework:
     """Get validator instance from DI container with lazy initialization."""
     from src.core.dependency_injection import injector
 
-    # Try to resolve, register if not found
+    # Try to resolve, if not found, register via service registry
     try:
         return injector.resolve("ValidationFramework")
-    except Exception:
-        # Register ValidationFramework if not already registered
-        injector.register_service("ValidationFramework", ValidationFramework(), singleton=True)
+    except Exception as e:
+        # Use service registry to properly register all services
+        from src.core.logging import get_logger
+
+        logger = get_logger(__name__)
+        logger.debug(f"Failed to resolve ValidationFramework, using service registry: {e}")
+
+        # Import and call service registry to register all util services
+        from ..service_registry import register_util_services
+
+        register_util_services()
+
         return injector.resolve("ValidationFramework")
 
 
-# Lazy initialization to avoid circular dependencies
-validator = _get_validator()
+# Use lazy property to avoid circular dependencies during module import
+_validator_instance = None
 
-# Legacy convenience exports - use ValidationFramework as single source of truth
-validate_order = validator.validate_order
-validate_strategy_params = validator.validate_strategy_params
-validate_price = validator.validate_price
-validate_quantity = validator.validate_quantity
-validate_symbol = validator.validate_symbol
-validate_exchange_credentials = validator.validate_exchange_credentials
-validate_risk_parameters = validator.validate_risk_parameters
-validate_timeframe = validator.validate_timeframe
-validate_batch = validator.validate_batch
+
+def _get_validator_cached() -> ValidationFramework:
+    """Get cached validator instance."""
+    global _validator_instance
+    if _validator_instance is None:
+        _validator_instance = _get_validator()
+    return _validator_instance
+
+
+# Legacy convenience exports - use lazy evaluation to avoid circular dependencies
+def validate_order(*args, **kwargs):
+    """Legacy validation function."""
+    return _get_validator_cached().validate_order(*args, **kwargs)
+
+
+def validate_strategy_params(*args, **kwargs):
+    """Legacy validation function."""
+    return _get_validator_cached().validate_strategy_params(*args, **kwargs)
+
+
+def validate_price(*args, **kwargs):
+    """Legacy validation function."""
+    return _get_validator_cached().validate_price(*args, **kwargs)
+
+
+def validate_quantity(*args, **kwargs):
+    """Legacy validation function."""
+    return _get_validator_cached().validate_quantity(*args, **kwargs)
+
+
+def validate_symbol(*args, **kwargs):
+    """Legacy validation function."""
+    return _get_validator_cached().validate_symbol(*args, **kwargs)
+
+
+def validate_exchange_credentials(*args, **kwargs):
+    """Legacy validation function."""
+    return _get_validator_cached().validate_exchange_credentials(*args, **kwargs)
+
+
+def validate_risk_parameters(*args, **kwargs):
+    """Legacy validation function."""
+    return _get_validator_cached().validate_risk_parameters(*args, **kwargs)
+
+
+def validate_timeframe(*args, **kwargs):
+    """Legacy validation function."""
+    return _get_validator_cached().validate_timeframe(*args, **kwargs)
+
+
+def validate_batch(*args, **kwargs):
+    """Legacy validation function."""
+    return _get_validator_cached().validate_batch(*args, **kwargs)
+
+
+# Expose cached validator for other uses
+def get_validator() -> ValidationFramework:
+    """Get the validation framework instance."""
+    return _get_validator_cached()
+
 
 __all__ = [
     "NumericValidationRule",
@@ -83,6 +142,8 @@ __all__ = [
     "ValidationType",
     "ValidatorRegistry",
     "get_validation_service",
+    # Legacy validation framework accessor
+    "get_validator",
     "shutdown_validation_service",
     "validate_batch",
     "validate_exchange_credentials",
@@ -93,6 +154,4 @@ __all__ = [
     "validate_strategy_params",
     "validate_symbol",
     "validate_timeframe",
-    # Legacy validation framework
-    "validator",
 ]

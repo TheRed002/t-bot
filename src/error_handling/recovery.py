@@ -3,6 +3,7 @@
 import asyncio
 import time
 from collections.abc import Callable
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Protocol, runtime_checkable
 
 from src.core import BaseComponent
@@ -14,6 +15,7 @@ from src.error_handling.security_sanitizer import (
     SensitivityLevel,
     get_security_sanitizer,
 )
+from src.utils.error_categorization import is_retryable_error
 
 
 @runtime_checkable
@@ -40,10 +42,10 @@ class RetryRecovery(BaseComponent):
     def __init__(
         self,
         max_attempts: int = 3,
-        base_delay: float = 1.0,
-        max_delay: float = 60.0,
-        exponential_base: float = 2.0,
-    ):
+        base_delay: Decimal = Decimal("1.0"),
+        max_delay: Decimal = Decimal("60.0"),
+        exponential_base: Decimal = Decimal("2.0"),
+    ) -> None:
         """
         Initialize retry recovery.
 
@@ -67,10 +69,8 @@ class RetryRecovery(BaseComponent):
             return False
 
         # Check for non-retryable errors
-        non_retryable = ["validation", "authentication", "permission", "not found", "invalid"]
         error_msg = str(error).lower()
-
-        return not any(keyword in error_msg for keyword in non_retryable)
+        return is_retryable_error(error_msg)
 
     async def recover(self, error: Exception, context: dict[str, Any]) -> dict[str, Any]:
         """Execute retry with exponential backoff and security controls."""
@@ -98,8 +98,13 @@ class RetryRecovery(BaseComponent):
                 "retry_count": retry_count,
             }
 
-        # Calculate delay
-        delay = min(self.base_delay * (self.exponential_base**retry_count), self.max_delay)
+        # Calculate delay with high precision decimal calculation
+        from decimal import localcontext
+
+        with localcontext() as ctx:
+            ctx.prec = 8
+            ctx.rounding = ROUND_HALF_UP
+            delay = min(self.base_delay * (self.exponential_base**retry_count), self.max_delay)
 
         # Sanitize error information for logging
         sanitizer = get_security_sanitizer()
@@ -115,7 +120,7 @@ class RetryRecovery(BaseComponent):
             sanitized_error=sanitized_error_msg,
         )
 
-        return {"action": "retry", "delay": delay, "retry_count": retry_count + 1}
+        return {"action": "retry", "delay": str(delay), "retry_count": retry_count + 1}
 
     @property
     def max_attempts(self) -> int:
@@ -127,8 +132,11 @@ class CircuitBreakerRecovery(BaseComponent):
     """Circuit breaker recovery strategy."""
 
     def __init__(
-        self, failure_threshold: int = 5, timeout: float = 60.0, half_open_requests: int = 1
-    ):
+        self,
+        failure_threshold: int = 5,
+        timeout: Decimal = Decimal("60.0"),
+        half_open_requests: int = 1,
+    ) -> None:
         """
         Initialize circuit breaker.
 
@@ -146,7 +154,7 @@ class CircuitBreakerRecovery(BaseComponent):
         # Circuit breaker state
         self.state = "closed"  # closed, open, half_open
         self.failure_count = 0
-        self.last_failure_time: float | None = None
+        self.last_failure_time: Decimal | None = None
         self.half_open_count = 0
 
     def can_recover(self, error: Exception, context: dict[str, Any]) -> bool:
@@ -156,7 +164,7 @@ class CircuitBreakerRecovery(BaseComponent):
 
     async def recover(self, error: Exception, context: dict[str, Any]) -> dict[str, Any]:
         """Execute circuit breaker logic with security monitoring."""
-        current_time = time.time()
+        current_time = Decimal(str(time.time()))
         component = context.get("component", "unknown")
 
         # Record failure for security monitoring
@@ -185,7 +193,11 @@ class CircuitBreakerRecovery(BaseComponent):
                     error_type=type(error).__name__,
                     sanitized_error=sanitized_error_msg,
                 )
-                return {"action": "circuit_break", "state": "open", "wait_time": self.timeout}
+                return {
+                    "action": "circuit_break",
+                    "state": "open",
+                    "wait_time": str(self.timeout),
+                }
 
             return {"action": "proceed"}
 
@@ -204,7 +216,7 @@ class CircuitBreakerRecovery(BaseComponent):
             return {
                 "action": "reject",
                 "state": "open",
-                "remaining_time": remaining_time,
+                "remaining_time": str(remaining_time),
             }
 
         elif self.state == "half_open":
@@ -222,7 +234,11 @@ class CircuitBreakerRecovery(BaseComponent):
                 self.state = "open"
                 self.last_failure_time = current_time
                 self._logger.warning("Circuit breaker reopened after half-open test failure")
-                return {"action": "circuit_break", "state": "open", "wait_time": self.timeout}
+                return {
+                    "action": "circuit_break",
+                    "state": "open",
+                    "wait_time": str(self.timeout),
+                }
 
             return {"action": "test", "state": "half_open"}
 
@@ -237,7 +253,7 @@ class CircuitBreakerRecovery(BaseComponent):
 class FallbackRecovery(BaseComponent):
     """Fallback to alternative implementation."""
 
-    def __init__(self, fallback_function: Callable[..., Any], max_attempts: int = 1):
+    def __init__(self, fallback_function: Callable[..., Any], max_attempts: int = 1) -> None:
         """
         Initialize fallback recovery.
 
@@ -290,13 +306,77 @@ class FallbackRecovery(BaseComponent):
             sanitized_args = sanitizer.sanitize_context(args, SensitivityLevel.MEDIUM)
 
             if asyncio.iscoroutinefunction(self.fallback_function):
-                # Execute async fallback
-                result = await self.fallback_function(**sanitized_args)
-                return {"action": "fallback_complete", "result": result}
+                # Execute async fallback with timeout to prevent blocking and memory leaks
+                fallback_task = None
+                try:
+                    # Create task to allow for proper cancellation
+                    fallback_task = asyncio.create_task(self.fallback_function(**sanitized_args))
+
+                    result = await asyncio.wait_for(fallback_task, timeout=30.0)
+                    return {"action": "fallback_complete", "result": result}
+
+                except asyncio.TimeoutError:
+                    self._logger.warning(
+                        "Async fallback function timeout", component=component, timeout=30.0
+                    )
+                    # Ensure task is cancelled to prevent resource leaks
+                    if fallback_task and not fallback_task.done():
+                        fallback_task.cancel()
+                        try:
+                            await asyncio.wait_for(fallback_task, timeout=5.0)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass  # Task cleanup complete
+                    return {"action": "fallback_timeout"}
+
+                except asyncio.CancelledError:
+                    # Ensure proper cleanup on cancellation
+                    if fallback_task and not fallback_task.done():
+                        fallback_task.cancel()
+                        try:
+                            await asyncio.wait_for(fallback_task, timeout=1.0)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass  # Task cleanup complete
+                    # Re-raise cancellation to maintain proper async task cleanup
+                    raise
+
             else:
-                # Execute sync fallback
-                result = self.fallback_function(**sanitized_args)
-                return {"action": "fallback_complete", "result": result}
+                # Execute sync fallback in executor to avoid blocking the event loop
+                loop = asyncio.get_running_loop()
+                executor = None
+                executor_future = None
+
+                try:
+                    # Create executor future for proper cancellation handling
+                    executor_future = loop.run_in_executor(
+                        executor, lambda: self.fallback_function(**sanitized_args)
+                    )
+
+                    result = await asyncio.wait_for(executor_future, timeout=30.0)
+                    return {"action": "fallback_complete", "result": result}
+
+                except asyncio.TimeoutError:
+                    self._logger.warning(
+                        "Sync fallback function timeout", component=component, timeout=30.0
+                    )
+                    # Cancel executor future to prevent resource leaks
+                    if executor_future and not executor_future.done():
+                        executor_future.cancel()
+                        try:
+                            await asyncio.wait_for(executor_future, timeout=5.0)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass  # Executor cleanup complete
+                    return {"action": "fallback_timeout"}
+
+                except asyncio.CancelledError:
+                    # Ensure proper executor cleanup on cancellation
+                    if executor_future and not executor_future.done():
+                        executor_future.cancel()
+                        try:
+                            await asyncio.wait_for(executor_future, timeout=1.0)
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass  # Executor cleanup complete
+                    # Re-raise cancellation to maintain proper async task cleanup
+                    raise
         except Exception as e:
             # Record fallback failure
             record_recovery_failure(

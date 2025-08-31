@@ -29,13 +29,12 @@ Example Usage:
         endpoint="/api/v3/ticker/24hr"
     )
 
-Migration Status: All modules should now use this unified exception system.
-Refer to project documentation for migration guidelines.
 """
 
 import logging
 import re
 from datetime import datetime, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -238,7 +237,6 @@ class TradingBotError(Exception):
 # =============================================================================
 # EXCHANGE-RELATED EXCEPTIONS
 # =============================================================================
-# Consolidated from src/exchanges/errors.py - All exchange errors unified here
 
 
 class ExchangeError(TradingBotError):
@@ -461,8 +459,8 @@ class RiskManagementError(TradingBotError):
         message: str,
         error_code: str = "RISK_000",
         risk_metric: str | None = None,
-        current_value: float | None = None,
-        threshold_value: float | None = None,
+        current_value: Decimal | None = None,
+        threshold_value: Decimal | None = None,
         strategy_id: str | None = None,
         position_id: str | None = None,
         **kwargs: Any,
@@ -499,8 +497,8 @@ class PositionLimitError(RiskManagementError):
         self,
         message: str,
         limit_type: str = "size",  # "size", "count", "concentration"
-        requested_amount: float | None = None,
-        limit_amount: float | None = None,
+        requested_amount: Decimal | None = None,
+        limit_amount: Decimal | None = None,
         symbol: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -626,8 +624,8 @@ class AllocationError(RiskManagementError):
         self,
         message: str,
         allocation_type: str | None = None,
-        requested_amount: float | None = None,
-        available_amount: float | None = None,
+        requested_amount: Decimal | None = None,
+        available_amount: Decimal | None = None,
         strategy_name: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -714,7 +712,6 @@ class EmergencyStopError(RiskManagementError):
 # =============================================================================
 # DATA-RELATED EXCEPTIONS
 # =============================================================================
-# Consolidated from multiple data modules - unified data error handling
 
 
 class DataError(TradingBotError):
@@ -1052,7 +1049,7 @@ class ModelTrainingError(ModelError):
         message: str,
         training_stage: str | None = None,
         epoch: int | None = None,
-        loss_value: float | None = None,
+        loss_value: Decimal | None = None,
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("error_code", "MODEL_004")
@@ -1311,10 +1308,10 @@ class SlippageError(ExecutionError):
     def __init__(
         self,
         message: str,
-        expected_price: float | None = None,
-        actual_price: float | None = None,
-        slippage_pct: float | None = None,
-        slippage_threshold: float | None = None,
+        expected_price: Decimal | None = None,
+        actual_price: Decimal | None = None,
+        slippage_pct: Decimal | None = None,
+        slippage_threshold: Decimal | None = None,
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("error_code", "EXEC_001")
@@ -1369,9 +1366,9 @@ class ExecutionPartialFillError(ExecutionError):
     def __init__(
         self,
         message: str,
-        requested_quantity: float | None = None,
-        filled_quantity: float | None = None,
-        remaining_quantity: float | None = None,
+        requested_quantity: Decimal | None = None,
+        filled_quantity: Decimal | None = None,
+        remaining_quantity: Decimal | None = None,
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("error_code", "EXEC_003")
@@ -1394,7 +1391,6 @@ class ExecutionPartialFillError(ExecutionError):
 # =============================================================================
 # NETWORK AND COMMUNICATION EXCEPTIONS
 # =============================================================================
-# NOTE: Conflicts resolved with exchanges/errors.py NetworkError
 
 
 class NetworkError(TradingBotError):
@@ -1586,7 +1582,6 @@ class ConflictError(StateConsistencyError):
 # =============================================================================
 # SECURITY EXCEPTIONS
 # =============================================================================
-# NOTE: AuthenticationError conflicts with exchanges/errors.py - resolved here
 
 
 class SecurityError(TradingBotError):
@@ -1786,7 +1781,6 @@ class MaxRetriesExceededError(TradingBotError):
 # =============================================================================
 # ERROR MAPPING AND UTILITIES
 # =============================================================================
-# Consolidated from src/exchanges/errors.py ErrorMapper
 
 
 class ErrorCodeRegistry:
@@ -2011,8 +2005,6 @@ class ExchangeErrorMapper:
             or str(error_data)
         )
 
-        # Note: error code could be extracted here if needed for future use
-        # error_code = error_data.get("code") or error_data.get("error_code") or "UNKNOWN"
 
         # Try to detect error type from message
         message_lower = message.lower()
@@ -2073,7 +2065,6 @@ class ExchangeErrorMapper:
 # =============================================================================
 # BASE COMPONENT EXCEPTIONS
 # =============================================================================
-# Exception classes needed by base component system
 
 
 class ComponentError(TradingBotError):
@@ -2083,13 +2074,26 @@ class ComponentError(TradingBotError):
     dependency injection, and resource management errors.
     """
 
-    def __init__(self, message: str, component_name: str | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        message: str,
+        component_name: str | None = None,
+        component: str | None = None,
+        operation: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("error_code", "COMP_000")
         kwargs.setdefault("category", ErrorCategory.SYSTEM)
         kwargs.setdefault("logger_name", "component")
 
+        # Support both component_name (legacy) and component (new) for compatibility
+        self.component = component or component_name
+        self.operation = operation
+
         context = kwargs.get("context", {})
-        context.update({"component_name": component_name})
+        context.update(
+            {"component_name": self.component, "component": self.component, "operation": operation}
+        )
         kwargs["context"] = context
 
         super().__init__(message, **kwargs)
@@ -2205,7 +2209,7 @@ class MonitoringError(ComponentError):
 
     def __init__(self, message: str, **kwargs: Any) -> None:
         kwargs.setdefault("error_code", "MON_1001")
-        kwargs.setdefault("severity", "medium")
+        kwargs.setdefault("severity", ErrorSeverity.MEDIUM)
         super().__init__(message, **kwargs)
 
 
@@ -2313,8 +2317,8 @@ class ConvergenceError(OptimizationError):
         self,
         message: str,
         convergence_metric: str | None = None,
-        current_value: float | None = None,
-        threshold_value: float | None = None,
+        current_value: Decimal | None = None,
+        threshold_value: Decimal | None = None,
         iterations_completed: int | None = None,
         **kwargs: Any,
     ) -> None:
@@ -2375,7 +2379,7 @@ class GeneticAlgorithmError(OptimizationError):
         message: str,
         generation: int | None = None,
         population_size: int | None = None,
-        fitness_value: float | None = None,
+        fitness_value: Decimal | None = None,
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("error_code", "OPT_005")
@@ -2435,8 +2439,8 @@ class PerformanceError(TradingBotError):
         error_code: str = "PERF_000",
         operation_type: str | None = None,
         performance_metric: str | None = None,
-        expected_value: float | None = None,
-        actual_value: float | None = None,
+        expected_value: Decimal | None = None,
+        actual_value: Decimal | None = None,
         **kwargs: Any,
     ) -> None:
         # Add performance specific context
@@ -2657,18 +2661,3 @@ def get_retry_delay(error: Exception) -> int | None:
     return None
 
 
-# =============================================================================
-# IMPLEMENTATION NOTES
-# =============================================================================
-# This unified exception system replaces all previous error handling modules.
-#
-# All components should import and use exceptions from this module.
-# For migration details, refer to the project documentation.
-#
-# The system provides:
-# - Standardized error codes and categorization
-# - Rich context and metadata for debugging
-# - Automatic logging with appropriate severity levels
-# - Integration with circuit breakers and retry mechanisms
-# - Consistent error handling across all components
-#

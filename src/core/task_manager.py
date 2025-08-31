@@ -256,11 +256,14 @@ class TaskManager:
             if await self.cancel_task(task_id):
                 cancelled_count += 1
 
-        # Clear all queues
+        # Clear all queues and properly close coroutines
         for queue in self._task_queues.values():
             while not queue.empty():
                 try:
-                    queue.get_nowait()
+                    task_id, coro = queue.get_nowait()
+                    # Properly close the coroutine to avoid RuntimeWarning
+                    if hasattr(coro, "close"):
+                        coro.close()
                     queue.task_done()
                 except asyncio.QueueEmpty:
                     break
@@ -411,7 +414,7 @@ class TaskManager:
                     self.logger.error(f"Error in cleanup callback for {task_id}: {e}")
 
             # Unregister from resource manager
-            self._resource_manager.unregister_resource(task_id)
+            await self._resource_manager.unregister_resource(task_id)
 
     async def _cleanup_loop(self):
         """Background cleanup of completed tasks."""

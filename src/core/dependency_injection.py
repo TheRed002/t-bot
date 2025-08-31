@@ -65,7 +65,16 @@ class DependencyContainer:
         """
 
         def factory():
-            return cls(*args, **kwargs)
+            instance = cls(*args, **kwargs)
+
+            # Configure dependencies if service supports it
+            if hasattr(instance, "configure_dependencies") and hasattr(self, "_injector_instance"):
+                try:
+                    instance.configure_dependencies(self._injector_instance)
+                except Exception as e:
+                    logger.warning(f"Failed to configure dependencies for {name}: {e}")
+
+            return instance
 
         self.register(name, factory, singleton=singleton)
 
@@ -154,6 +163,9 @@ class DependencyInjector:
         with self._lock:
             if not hasattr(self, "_initialized"):
                 self._container = DependencyContainer()
+                self._container._injector_instance = (
+                    self  # Back-reference for dependency configuration
+                )
                 self._logger = logger
                 self._initialized = True
 
@@ -313,6 +325,36 @@ class DependencyInjector:
                 context={"factory_type": type(factory).__name__, "registration_error": str(e)},
             ) from e
 
+    def register_singleton(self, name: str, service: Any) -> None:
+        """
+        Register a singleton service instance.
+
+        Args:
+            name: Service name
+            service: Service instance or factory
+
+        Raises:
+            DependencyError: If registration fails
+        """
+        self.register_service(name, service, singleton=True)
+
+    def register_transient(self, name: str, service_class: type) -> None:
+        """
+        Register a transient service class.
+
+        Args:
+            name: Service name
+            service_class: Service class to instantiate
+
+        Raises:
+            DependencyError: If registration fails
+        """
+
+        def factory():
+            return service_class()
+
+        self.register_factory(name, factory, singleton=False)
+
     def has_service(self, name: str) -> bool:
         """Check if service is registered."""
         return self._container.has(name)
@@ -331,6 +373,24 @@ class DependencyInjector:
     def get_container(self) -> DependencyContainer:
         """Get the dependency container."""
         return self._container
+
+    def configure_service_dependencies(self, service_instance: Any) -> None:
+        """
+        Configure dependencies for a service instance.
+
+        Args:
+            service_instance: Service instance to configure
+        """
+        if hasattr(service_instance, "configure_dependencies"):
+            try:
+                service_instance.configure_dependencies(self)
+            except Exception as e:
+                self._logger.warning(
+                    f"Failed to configure dependencies for service: {e}",
+                    service_type=type(service_instance).__name__,
+                )
+        elif hasattr(service_instance, "_dependency_container"):
+            service_instance._dependency_container = self
 
 
 # Global injector instance

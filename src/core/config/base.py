@@ -1,6 +1,7 @@
 """Base configuration class for the T-Bot trading system."""
 
 from collections.abc import Callable
+from typing import Any
 
 from pydantic_settings import BaseSettings
 
@@ -20,7 +21,7 @@ class BaseConfig(BaseSettings):
         "populate_by_name": True,  # Allow both field names and aliases
     }
 
-    def __init__(self, **kwargs):
+    def __init__(self, **kwargs: Any) -> None:
         """Initialize with validators list for extensibility."""
         super().__init__(**kwargs)
         self._validators: list[Callable] = []

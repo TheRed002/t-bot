@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from src.core.dependency_injection import injector
+from src.core.base.interfaces import DIContainer
 from src.core.exceptions import DependencyError, ServiceError
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class ServiceManager:
     4. Handling service shutdown gracefully
     """
 
-    def __init__(self) -> None:
+    def __init__(self, injector: DIContainer) -> None:
         """Initialize the service manager."""
         self._injector = injector
         self._services: dict[str, Any] = {}
@@ -65,11 +65,24 @@ class ServiceManager:
             "singleton": singleton,
         }
 
-        # Register factory with DI container
+        # Register factory with DI container - factory should handle its own dependencies
         def service_factory():
-            return self._create_service(service_name)
+            instance = self._create_service(service_name)
+            # Configure dependencies if the instance supports it
+            if hasattr(instance, "configure_dependencies"):
+                try:
+                    instance.configure_dependencies(self._injector)
+                except Exception as e:
+                    self._logger.warning(
+                        f"Failed to configure dependencies for {service_name}: {e}"
+                    )
+            return instance
 
-        self._injector.register_factory(service_name, service_factory, singleton=singleton)
+        try:
+            self._injector.register_factory(service_name, service_factory, singleton=singleton)
+        except Exception as e:
+            self._logger.error(f"Failed to register service factory for {service_name}: {e}")
+            raise ServiceError(f"Service registration failed: {service_name}") from e
 
     def _create_service(self, service_name: str) -> Any:
         """Create a service instance with resolved dependencies."""
@@ -81,7 +94,11 @@ class ServiceManager:
 
         try:
             # Resolve dependencies
-            resolved_deps = self._resolve_dependencies(service_name, config["dependencies"])
+            try:
+                resolved_deps = self._resolve_dependencies(service_name, config["dependencies"])
+            except DependencyError as e:
+                self._logger.error(f"Failed to resolve dependencies for {service_name}: {e}")
+                raise ServiceError(f"Dependency resolution failed: {service_name}") from e
 
             # Create service instance
             service_instance = self._instantiate_service(config, resolved_deps)
@@ -104,8 +121,26 @@ class ServiceManager:
         resolved_deps = {}
         for dep_name in dependencies:
             if dep_name not in self._service_configs:
-                raise DependencyError(f"Unknown dependency: {dep_name}")
-            resolved_deps[dep_name] = self._injector.resolve(dep_name)
+                raise DependencyError(
+                    f"Unknown dependency: {dep_name}",
+                    dependency_name=dep_name,
+                    error_code="DEP_001",
+                    suggested_action="Register the dependency service first",
+                    context={
+                        "requesting_service": service_name,
+                        "available_services": list(self._service_configs.keys()),
+                    },
+                )
+            try:
+                resolved_deps[dep_name] = self._injector.resolve(dep_name)
+            except Exception as e:
+                raise DependencyError(
+                    f"Failed to resolve dependency '{dep_name}' for service '{service_name}'",
+                    dependency_name=dep_name,
+                    error_code="DEP_002",
+                    suggested_action="Check dependency service registration and startup order",
+                    context={"requesting_service": service_name, "original_error": str(e)},
+                ) from e
         return resolved_deps
 
     def _instantiate_service(self, config: dict[str, Any], resolved_deps: dict[str, Any]) -> Any:
@@ -175,7 +210,13 @@ class ServiceManager:
 
     def _configure_service_instance(self, service_instance: Any) -> None:
         """Configure service instance after creation."""
-        if hasattr(service_instance, "_dependency_container"):
+        # Set dependency container if service supports it
+        if hasattr(service_instance, "configure_dependencies"):
+            try:
+                service_instance.configure_dependencies(self._injector)
+            except Exception as e:
+                self._logger.warning(f"Failed to configure dependencies for service: {e}")
+        elif hasattr(service_instance, "_dependency_container"):
             service_instance._dependency_container = self._injector
 
     def _calculate_startup_order(self) -> list[str]:
@@ -276,7 +317,11 @@ class ServiceManager:
             self._services.clear()
             self._service_configs.clear()
         except Exception as e:
-            self._logger.error(f"Error clearing service references: {e}")
+            self._logger.warning(
+                "Error clearing service references during shutdown (continuing)",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
 
         self._initialized = False
         self._logger.info("All services stopped")
@@ -301,7 +346,12 @@ class ServiceManager:
             self._logger.info(f"Service stopped: {service_name}")
 
         except Exception as e:
-            self._logger.error(f"Failed to stop service {service_name}: {e}")
+            self._logger.error(
+                "Failed to stop service (continuing shutdown)",
+                service=service_name,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             # Continue stopping other services
 
     def get_service(self, service_name: str) -> Any:
@@ -351,31 +401,34 @@ class ServiceManager:
         """Perform health check on all running services using consistent patterns."""
         health_status = {}
 
-        # Use consistent batch processing for health checks
+        # Use consistent batch processing for health checks with proper error handling
         health_tasks = []
         for service_name in self._running_services:
             task = asyncio.create_task(self._check_service_health(service_name))
             health_tasks.append((service_name, task))
 
-        # Wait for all health checks with timeout
+        # Wait for all health checks with timeout and consistent error handling
         for service_name, task in health_tasks:
             try:
-                health_status[service_name] = await asyncio.wait_for(task, timeout=30.0)
+                result = await asyncio.wait_for(task, timeout=30.0)
+                # Apply consistent health status format
+                health_status[service_name] = self._normalize_health_status(result)
             except asyncio.TimeoutError:
                 health_status[service_name] = {
                     "status": "timeout",
                     "error": "Health check timed out",
+                    "timestamp": datetime.now().isoformat(),
                 }
             except Exception as e:
-                health_status[service_name] = {"status": "error", "error": str(e)}
+                health_status[service_name] = {
+                    "status": "error",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "timestamp": datetime.now().isoformat(),
+                }
 
-        # Consistent status aggregation
-        healthy_statuses = ["healthy", "running"]
-        overall_status = (
-            "healthy"
-            if all(status.get("status") in healthy_statuses for status in health_status.values())
-            else "degraded"
-        )
+        # Consistent status aggregation using core health status patterns
+        overall_status = self._aggregate_health_status(health_status)
 
         return {
             "overall_status": overall_status,
@@ -386,29 +439,62 @@ class ServiceManager:
         }
 
     async def _check_service_health(self, service_name: str) -> dict[str, Any]:
-        """Check health of a single service with consistent error handling."""
+        """Check health of a single service with consistent error handling patterns."""
         try:
             service = self._services.get(service_name)
             if service and hasattr(service, "health_check"):
                 result = await service.health_check()
-                # Ensure consistent health check result format
-                if isinstance(result, dict):
-                    return result
-                else:
-                    return {"status": "healthy", "details": result}
+                # Apply consistent health check result transformation
+                return self._normalize_health_status(result)
+            elif service and hasattr(service, "get_health_status"):
+                # Check for core health status method
+                result = await service.get_health_status()
+                return self._normalize_health_status(result)
             else:
-                return {"status": "running", "details": "No health check method available"}
+                return {
+                    "status": "running",
+                    "details": "No health check method available",
+                    "timestamp": datetime.now().isoformat(),
+                }
         except Exception as e:
-            return {"status": "error", "error": str(e), "error_type": type(e).__name__}
+            return {
+                "status": "error",
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "timestamp": datetime.now().isoformat(),
+            }
 
 
-# Global service manager instance
-service_manager = ServiceManager()
+# Global service manager instance - initialized lazily
+_service_manager: ServiceManager | None = None
 
 
 def get_service_manager() -> ServiceManager:
     """Get the global service manager instance."""
-    return service_manager
+    global _service_manager
+    if _service_manager is None:
+        from src.core.dependency_injection import injector
+
+        _service_manager = ServiceManager(injector)
+
+        # Register core infrastructure factories with DI container
+        try:
+            from src.core.memory_manager import create_memory_manager_factory
+
+            memory_factory = create_memory_manager_factory(config=None)
+            injector.register_factory("MemoryManager", memory_factory, singleton=True)
+        except ImportError as e:
+            _service_manager._logger.warning(f"MemoryManager factory not available: {e}")
+
+        try:
+            from src.core.caching.cache_manager import create_cache_manager_factory
+
+            cache_factory = create_cache_manager_factory(config=None)
+            injector.register_factory("CacheManager", cache_factory, singleton=True)
+        except ImportError as e:
+            _service_manager._logger.warning(f"CacheManager factory not available: {e}")
+
+    return _service_manager
 
 
 def register_core_services(config: Any) -> None:
@@ -417,128 +503,144 @@ def register_core_services(config: Any) -> None:
 
     This function sets up the proper dependency chain to avoid circular imports.
     """
-    from src.core.config.service import ConfigService
-    from src.database.service import DatabaseService
-    from src.state.state_service import StateService
-    from src.utils.validation.service import ValidationService
+    service_manager = get_service_manager()
+    injector = service_manager._injector
 
-    # Register services in dependency order
+    # Register basic config first if provided
+    if config:
+        injector.register_singleton("Config", config)
 
-    # 1. Configuration service (no dependencies)
-    service_manager.register_service(
-        "ConfigService",
-        ConfigService,
-        config={"config": config} if config else {},
-        dependencies=[],
-    )
+    # Register core infrastructure services with minimal dependencies
+    try:
+        from src.core.config.service import ConfigService
 
-    # 2. Validation service (no dependencies)
-    service_manager.register_service(
-        "ValidationService",
-        ValidationService,
-        dependencies=[],
-    )
+        service_manager.register_service(
+            "ConfigService",
+            ConfigService,
+            config={"config": config} if config else {},
+            dependencies=[],
+        )
+    except ImportError:
+        pass  # Service may not exist yet
 
-    # 3. Database service (depends on config and validation)
-    service_manager.register_service(
-        "DatabaseService",
-        DatabaseService,
-        config={"config": config} if config else {},
-        dependencies=["ConfigService", "ValidationService"],
-    )
+    try:
+        from src.utils.validation.service import ValidationService
 
-    # 4. State service (depends on database)
-    service_manager.register_service(
-        "StateService",
-        StateService,
-        config={"config": config} if config else {},
-        dependencies=["DatabaseService"],
-    )
+        service_manager.register_service(
+            "ValidationService",
+            ValidationService,
+            dependencies=[],
+        )
+    except ImportError:
+        pass  # Service may not exist yet
+
+    try:
+        from src.database.service import DatabaseService
+
+        service_manager.register_service(
+            "DatabaseService",
+            DatabaseService,
+            config={"config": config} if config else {},
+            dependencies=["ConfigService", "ErrorHandlingService"],  # Include error handling
+        )
+    except ImportError:
+        pass  # Service may not exist yet
+
+    try:
+        from src.state.state_service import StateService
+
+        service_manager.register_service(
+            "StateService",
+            StateService,
+            config={"config": config} if config else {},
+            dependencies=["DatabaseService"],
+        )
+    except ImportError:
+        pass  # Service may not exist yet
+
+    # Register ErrorHandlingService as core infrastructure
+    try:
+        from src.error_handling.service import ErrorHandlingService
+
+        service_manager.register_service(
+            "ErrorHandlingService",
+            ErrorHandlingService,
+            config={"config": config} if config else {},
+            dependencies=["ConfigService"],  # Minimal dependencies
+        )
+        
+        # Also register error handling components with DI container
+        from src.error_handling.di_registration import configure_error_handling_di
+        configure_error_handling_di(injector, config)
+        
+    except ImportError:
+        pass  # Service may not exist yet
 
 
 def register_business_services(config: Any) -> None:
     """Register business logic services."""
-    from src.bot_management.service import BotService
-    from src.capital_management.service import CapitalService
-    from src.execution.service import ExecutionService
-    from src.ml.service import MLService
-    from src.risk_management.service import RiskService
-    from src.strategies.service import StrategyService
+    service_manager = get_service_manager()
 
-    # 5. Capital management service
-    service_manager.register_service(
-        "CapitalService",
-        CapitalService,
-        config={"config": config} if config else {},
-        dependencies=["DatabaseService"],
-    )
+    # Register business services with proper error handling
+    business_services = [
+        ("CapitalService", "src.capital_management.service", ["DatabaseService", "ErrorHandlingService"]),
+        ("ExecutionService", "src.execution.service", ["DatabaseService", "ErrorHandlingService"]),
+        ("RiskService", "src.risk_management.service", ["DatabaseService", "StateService", "ErrorHandlingService"]),
+        ("StrategyService", "src.strategies.service", ["ErrorHandlingService"]),
+        ("MLService", "src.ml.service", ["ErrorHandlingService"]),
+        (
+            "BotService",
+            "src.bot_management.service",
+            [
+                "DatabaseService",
+                "StateService",
+                "RiskService",
+                "ExecutionService",
+                "StrategyService",
+                "CapitalService",
+                "ErrorHandlingService",
+            ],
+        ),
+    ]
 
-    # 6. Execution service
-    service_manager.register_service(
-        "ExecutionService",
-        ExecutionService,
-        config={"config": config} if config else {},
-        dependencies=["DatabaseService"],
-    )
-
-    # 7. Risk management service
-    service_manager.register_service(
-        "RiskService",
-        RiskService,
-        config={"config": config} if config else {},
-        dependencies=["DatabaseService", "StateService"],
-    )
-
-    # 8. Strategy service (minimal dependencies)
-    service_manager.register_service(
-        "StrategyService",
-        StrategyService,
-        config={"config": config} if config else {},
-        dependencies=[],
-    )
-
-    # 9. ML service
-    service_manager.register_service(
-        "MLService",
-        MLService,
-        config={"config": config} if config else {},
-        dependencies=[],
-    )
-
-    # 10. Bot service (depends on all other business services)
-    service_manager.register_service(
-        "BotService",
-        BotService,
-        config={"config": config} if config else {},
-        dependencies=[
-            "DatabaseService",
-            "StateService",
-            "RiskService",
-            "ExecutionService",
-            "StrategyService",
-            "CapitalService",
-        ],
-    )
+    for service_name, module_path, deps in business_services:
+        try:
+            module = __import__(module_path, fromlist=[service_name])
+            service_class = getattr(module, service_name)
+            service_manager.register_service(
+                service_name,
+                service_class,
+                config={"config": config} if config else {},
+                dependencies=deps,
+            )
+        except (ImportError, AttributeError) as e:
+            service_manager._logger.warning(f"Business service {service_name} not available: {e}")
+            continue
 
 
 def register_application_services(config: Any) -> None:
     """Register application-level services."""
-    from src.backtesting.service import BacktestService
+    service_manager = get_service_manager()
 
-    # 11. Backtesting service (depends on all business services)
-    service_manager.register_service(
-        "BacktestService",
-        BacktestService,
-        config={"config": config} if config else {},
-        dependencies=[
-            "DatabaseService",
-            "ExecutionService",
-            "RiskService",
-            "StrategyService",
-            "CapitalService",
-            "MLService",
-        ],
-    )
+    # Register application services with error handling
+    try:
+        from src.backtesting.service import BacktestService
+
+        service_manager.register_service(
+            "BacktestService",
+            BacktestService,
+            config={"config": config} if config else {},
+            dependencies=[
+                "DatabaseService",
+                "ExecutionService",
+                "RiskService",
+                "StrategyService",
+                "CapitalService",
+                "MLService",
+            ],
+        )
+    except ImportError as e:
+        service_manager._logger.warning(f"BacktestService not available: {e}")
 
 
 async def initialize_all_services(config: Any) -> ServiceManager:
@@ -552,6 +654,8 @@ async def initialize_all_services(config: Any) -> ServiceManager:
         Initialized service manager
     """
     logger.info("Initializing all services...")
+
+    service_manager = get_service_manager()
 
     try:
         # Register all services
@@ -574,5 +678,66 @@ async def initialize_all_services(config: Any) -> ServiceManager:
 async def shutdown_all_services() -> None:
     """Shutdown all services gracefully."""
     logger.info("Shutting down all services...")
+    service_manager = get_service_manager()
     await service_manager.stop_all_services()
     logger.info("All services shut down")
+
+    def _normalize_health_status(self, status_result: Any) -> dict[str, Any]:
+        """Normalize health status to consistent format across all services."""
+        base_result = {"timestamp": datetime.now().isoformat()}
+
+        if isinstance(status_result, dict):
+            base_result.update(status_result)
+            # Ensure status field exists
+            if "status" not in base_result:
+                base_result["status"] = "unknown"
+            return base_result
+
+        # Handle HealthStatus enum from core.base.interfaces
+        if hasattr(status_result, "value"):
+            base_result["status"] = status_result.value.lower()
+            return base_result
+
+        # Handle string status
+        if isinstance(status_result, str):
+            base_result["status"] = status_result.lower()
+            return base_result
+
+        # Handle boolean (True = healthy, False = unhealthy)
+        if isinstance(status_result, bool):
+            base_result["status"] = "healthy" if status_result else "unhealthy"
+            return base_result
+
+        # Default case
+        base_result["status"] = "unknown"
+        base_result["details"] = str(status_result)
+        return base_result
+
+    def _aggregate_health_status(self, service_statuses: dict[str, dict[str, Any]]) -> str:
+        """Aggregate individual service health statuses using consistent logic."""
+        if not service_statuses:
+            return "unknown"
+
+        # Define status priority (higher number = worse status)
+        status_priority = {
+            "healthy": 1,
+            "running": 2,
+            "degraded": 3,
+            "timeout": 4,
+            "unhealthy": 5,
+            "error": 6,
+            "unknown": 7,
+        }
+
+        # Find the worst status across all services
+        worst_priority = 0
+        worst_status = "healthy"
+
+        for service_status in service_statuses.values():
+            status = service_status.get("status", "unknown")
+            priority = status_priority.get(status, 7)
+            if priority > worst_priority:
+                worst_priority = priority
+                worst_status = status
+
+        return worst_status

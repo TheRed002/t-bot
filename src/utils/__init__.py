@@ -11,12 +11,17 @@ Key Components:
 - Validators: Financial data validation, configuration validation, API input validation
 - Formatters: Financial formatting, API response formatting, log formatting
 - Constants: System-wide constants and enumerations
+- Exchange Utilities: Shared utilities for exchange implementations to eliminate duplication
 
 Modern Usage (Recommended):
     ```python
     # Use service-based approach with dependency injection
     def __init__(self, validation_service: ValidationService):
         self.validation_service = validation_service
+
+    # Use shared exchange utilities to eliminate duplication
+    from src.utils.exchange_order_utils import OrderManagementUtils
+    from src.utils.exchange_validation_utils import ExchangeValidationUtils
     ```
 
 Legacy Usage (Backward Compatibility):
@@ -65,6 +70,7 @@ from .decimal_utils import (
     ZERO,
     clamp_decimal,
     format_decimal,
+    round_to_precision,
     safe_divide,
     to_decimal,
 )
@@ -130,6 +136,8 @@ from .helpers import (
     calculate_sharpe_ratio,
     calculate_var,
     calculate_volatility,
+    # Network utilities
+    check_connection,
     # Data conversion utilities
     convert_currency,
     convert_timezone,
@@ -143,15 +151,12 @@ from .helpers import (
     parse_datetime,
     parse_trading_pair,
     ping_host,
-    round_to_precision,
-    round_to_precision_decimal,
+    # REMOVED: round_to_precision, round_to_precision_decimal (use decimal_utils)
     # File operations
     safe_read_file,
     safe_write_file,
     # String utilities
     sanitize_symbol,
-    # Network utilities
-    test_connection,
 )
 from .interfaces import (
     BaseUtilityService,
@@ -161,6 +166,7 @@ from .validation import (
     # Framework and service exports
     ValidationFramework,
     ValidationService,
+    get_validator,
     validate_batch,
     validate_exchange_credentials,
     # Core validation exports
@@ -171,17 +177,56 @@ from .validation import (
     validate_strategy_params,
     validate_symbol,
     validate_timeframe,
-    validator,
 )
-from .validators import (
-    # Standalone validation functions for backward compatibility
-    validate_decimal,
-    validate_positive_number,
+
+# State management utilities (new)
+from .state_utils import (
+    calculate_state_checksum,
+    create_state_change_record,
+    create_state_metadata,
+    deserialize_state_data,
+    detect_state_changes,
+    ensure_directory_exists,
+    format_cache_key,
+    serialize_state_data,
+    store_in_redis_with_timeout,
+    get_from_redis_with_timeout
 )
+
+# State validation utilities (new)
+from .state_validation_utils import (
+    validate_bot_id_format,
+    validate_bot_status,
+    validate_capital_allocation,
+    validate_cash_balance,
+    validate_decimal_field_with_details,
+    validate_order_price_logic,
+    validate_positive_value_with_details,
+    validate_required_fields_with_details,
+    validate_strategy_params,
+    validate_symbol_format,
+    validate_var_limits
+)
+
+# State constants (new)
+from .state_constants import (
+    DEFAULT_CACHE_TTL,
+    DEFAULT_COMPRESSION_THRESHOLD,
+    DEFAULT_MAX_CHECKPOINTS,
+    CHECKPOINT_FILE_EXTENSION,
+    BOT_STATE_REQUIRED_FIELDS,
+    STATE_TYPES,
+    VALIDATION_ERROR_TYPES
+)
+
+# REMOVED: validation functions moved to validation/service.py
+# from .validators import (
+#     validate_decimal,     -> use ValidationService.validate_decimal()
+#     validate_positive_number,  -> use NumericValidationRule
+# )
 
 __all__ = [
     "API_ENDPOINTS",
-    "BaseUtilityService",
     "DEFAULT_VALUES",
     "ERROR_CODES",
     "ERROR_MESSAGES",
@@ -203,12 +248,13 @@ __all__ = [
     "TIMEOUTS",
     "TRADING_PAIRS",
     "ZERO",
+    "BaseUtilityService",
     "UnifiedDecorator",
-    # Interfaces
-    "ValidationServiceInterface",
     # Validation framework
     "ValidationFramework",
     "ValidationService",
+    # Interfaces
+    "ValidationServiceInterface",
     "api_throttle",
     "cache_result",
     "cached",
@@ -218,6 +264,7 @@ __all__ = [
     "calculate_sharpe_ratio",
     "calculate_var",
     "calculate_volatility",
+    "check_connection",
     "circuit_breaker",
     "clamp_decimal",
     "convert_currency",
@@ -248,6 +295,7 @@ __all__ = [
     "format_timestamp",
     "format_trade_report",
     "get_trading_session",
+    "get_validator",
     "is_market_open",
     "load_config_file",
     "log_calls",
@@ -266,12 +314,10 @@ __all__ = [
     "retry",
     "robust",
     "round_to_precision",
-    "round_to_precision_decimal",
     "safe_divide",
     "safe_read_file",
     "safe_write_file",
     "sanitize_symbol",
-    "test_connection",
     # Decorators
     "time_execution",
     "timeout",
@@ -279,13 +325,12 @@ __all__ = [
     "ttl_cache",
     "type_check",
     "validate_batch",
-    "validate_decimal",
+    # "validate_decimal", "validate_positive_number", - REMOVED: use ValidationService
     "validate_exchange_credentials",
     "validate_input",
     # Validators - core validation exports
     "validate_order",
     "validate_output",
-    "validate_positive_number",
     "validate_price",
     "validate_quantity",
     "validate_risk_parameters",
@@ -293,7 +338,6 @@ __all__ = [
     "validate_symbol",
     "validate_timeframe",
     "validated",
-    "validator",
 ]
 
 __version__ = "1.0.0"

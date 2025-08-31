@@ -27,7 +27,7 @@ class DatabaseConfig(BaseConfig):
         description="PostgreSQL username",
         alias="DB_USER",
     )
-    postgresql_password: str = Field(
+    postgresql_password: str | None = Field(
         default="tbot_password",
         min_length=8,
         description="PostgreSQL password",
@@ -92,10 +92,16 @@ class DatabaseConfig(BaseConfig):
     @property
     def postgresql_url(self) -> str:
         """Build PostgreSQL connection URL."""
-        return (
-            f"postgresql://{self.postgresql_username}:{self.postgresql_password}"
-            f"@{self.postgresql_host}:{self.postgresql_port}/{self.postgresql_database}"
-        )
+        if self.postgresql_password:
+            return (
+                f"postgresql://{self.postgresql_username}:{self.postgresql_password}"
+                f"@{self.postgresql_host}:{self.postgresql_port}/{self.postgresql_database}"
+            )
+        else:
+            return (
+                f"postgresql://{self.postgresql_username}"
+                f"@{self.postgresql_host}:{self.postgresql_port}/{self.postgresql_database}"
+            )
 
     @property
     def redis_url(self) -> str:

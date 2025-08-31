@@ -36,13 +36,6 @@ Usage Example:
     max_position_size: Decimal = self.config_service.get_risk_config().max_position_size
     ```
 
-TODO: Update the following modules to use ConfigService:
-- src/main.py (replace direct Config import)
-- src/risk_management/*.py (15+ files with direct imports)
-- src/bot_management/*.py (20+ files with direct imports)
-- src/execution/*.py (10+ files with direct imports)
-- src/strategies/*.py (25+ files with direct imports)
-- All other modules with direct config imports (50+ files)
 """
 
 import asyncio
@@ -191,13 +184,15 @@ class FileConfigProvider:
                 self.config_file.stat().st_mtime, tz=timezone.utc
             )
 
-            with open(self.config_file) as f:
+            file_handle = None
+            try:
+                file_handle = open(self.config_file)
                 if self.config_file.suffix.lower() in [".yaml", ".yml"]:
                     import yaml
 
-                    config_data = yaml.safe_load(f)
+                    config_data = yaml.safe_load(file_handle)
                 elif self.config_file.suffix.lower() == ".json":
-                    config_data = json.load(f)
+                    config_data = json.load(file_handle)
                 else:
                     raise ConfigurationError(
                         f"Unsupported config file format: {self.config_file.suffix}",
@@ -208,6 +203,9 @@ class FileConfigProvider:
                             "suffix": self.config_file.suffix,
                         },
                     )
+            finally:
+                if file_handle:
+                    file_handle.close()
 
             self._last_modified = current_modified
             self.logger.info(f"Loaded configuration from {self.config_file}")
@@ -229,13 +227,13 @@ class FileConfigProvider:
             # Ensure directory exists
             self.config_file.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(self.config_file, "w") as f:
+            with open(self.config_file, "w") as file_handle:
                 if self.config_file.suffix.lower() in [".yaml", ".yml"]:
                     import yaml
 
-                    yaml.dump(config, f, default_flow_style=False, sort_keys=True)
+                    yaml.dump(config, file_handle, default_flow_style=False, sort_keys=True)
                 elif self.config_file.suffix.lower() == ".json":
-                    json.dump(config, f, indent=2, sort_keys=True, default=str)
+                    json.dump(config, file_handle, indent=2, sort_keys=True, default=str)
                 else:
                     raise ConfigurationError(
                         f"Unsupported config file format for saving: {self.config_file.suffix}",
@@ -314,7 +312,7 @@ class EnvironmentConfigProvider:
 class ConfigValidator:
     """Configuration validation service."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger(f"{__name__}.ConfigValidator")
         self._custom_validators: dict[str, Callable[[dict], Any]] = {}
 
@@ -602,7 +600,7 @@ class ConfigService:
         """Notify listeners of configuration changes."""
         # Compare configurations and notify of changes
         # This is a simplified implementation
-        changes = []
+        changes: list[tuple[str, Any, Any]] = []
 
         # Compare each domain config
         if old_config.database != new_config.database:
@@ -662,7 +660,7 @@ class ConfigService:
             if cached is not None:
                 return cached
 
-            config = self._config.exchange
+            config: ExchangeConfig = self._config.exchange
             self.cache.set("exchange_config", config)
             return config
 
@@ -700,7 +698,7 @@ class ConfigService:
             if cached is not None:
                 return cached
 
-            config = self._config.strategy
+            config: StrategyConfig = self._config.strategy
             self.cache.set("strategy_config", config)
             return config
 

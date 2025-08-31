@@ -9,44 +9,19 @@ must use Decimal to prevent floating-point errors that could lead
 to financial losses.
 """
 
-import logging
 import warnings
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, setcontext
 from typing import Any
 
 from src.core.exceptions import ValidationError
+from src.core.logging import get_logger
 
 # Module level logger for static methods
+logger = get_logger(__name__)
 
 
-def safe_decimal(value: Any, default: Decimal | None = None) -> Decimal:
-    """
-    Safely convert a value to Decimal with a default fallback.
+# Deprecated safe_decimal function removed - use to_decimal() instead
 
-    Args:
-        value: Value to convert
-        default: Default value to return on conversion failure (default: ZERO)
-
-    Returns:
-        Decimal representation or default value
-
-    Note:
-        This function is deprecated. Use to_decimal() for proper validation.
-    """
-    if isinstance(value, Decimal):
-        return value
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError, TypeError, OverflowError) as e:
-        default_val = default if default is not None else Decimal("0")
-        logger.warning(
-            f"safe_decimal: Failed to convert {type(value).__name__} '{value}' "
-            f"to Decimal: {e}, returning {default_val}"
-        )
-        return default_val
-
-
-logger = logging.getLogger(__name__)
 
 # Set global decimal context for financial precision
 # 28 significant digits should be sufficient for all cryptocurrency calculations
@@ -60,6 +35,9 @@ FINANCIAL_CONTEXT = Context(
     flags=[],  # Clear all flags
     traps=[],  # Don't trap any conditions
 )
+
+# Export DECIMAL_CONTEXT for backward compatibility
+DECIMAL_CONTEXT = FINANCIAL_CONTEXT
 
 # Set as default context
 setcontext(FINANCIAL_CONTEXT)
@@ -218,6 +196,28 @@ def round_quantity(quantity: Decimal, lot_size: Decimal) -> Decimal:
     return (quantity / lot_size).quantize(ONE, rounding=ROUND_DOWN) * lot_size
 
 
+def round_to_precision(value: Any, precision: int) -> Decimal:
+    """
+    Round a value to a specified number of decimal places.
+
+    Args:
+        value: Value to round (will be converted to Decimal)
+        precision: Number of decimal places
+
+    Returns:
+        Rounded Decimal value
+    """
+    decimal_value = to_decimal(value)
+    if precision < 0:
+        raise ValidationError("Precision must be non-negative")
+
+    quantizer = Decimal(10) ** -precision
+    return decimal_value.quantize(quantizer, rounding=ROUND_HALF_UP)
+
+
+# REMOVED: round_to_precision_decimal - use round_to_precision instead
+
+
 def calculate_percentage(value: Decimal, percentage: Decimal) -> Decimal:
     """
     Calculate a percentage of a value with full precision.
@@ -340,12 +340,31 @@ def format_decimal(value: Decimal, decimals: int = 8, thousands_sep: bool = True
     Returns:
         Formatted string representation
     """
+    # For very small numbers, preserve their original precision
+    # Handle scientific notation by checking the exponent
+    if abs(value) < Decimal('0.1') and value != 0:
+        # For small numbers, calculate needed precision from the value itself
+        # Convert to string without scientific notation to get precision
+        abs_val = abs(value)
+        needed_precision = 0
+        temp_val = abs_val
+        while temp_val < 1 and needed_precision < 28:
+            temp_val *= 10
+            needed_precision += 1
+        # Add precision for significant digits
+        if needed_precision > decimals:
+            decimals = min(needed_precision + 3, 18)  # Add buffer for significant digits
+    
     # Quantize to specified decimals
     quantizer = Decimal(10) ** -decimals
-    value = value.quantize(quantizer, rounding=ROUND_HALF_UP)
+    formatted_value = value.quantize(quantizer, rounding=ROUND_HALF_UP)
 
-    # Convert to string
-    result = str(value)
+    # Convert to string, forcing fixed-point notation for small numbers
+    if abs(formatted_value) < 1 and formatted_value != 0:
+        # Force fixed-point notation for small numbers
+        result = f"{formatted_value:f}"
+    else:
+        result = str(formatted_value)
 
     if thousands_sep and "." in result:
         # Add thousands separators
@@ -353,7 +372,7 @@ def format_decimal(value: Decimal, decimals: int = 8, thousands_sep: bool = True
         integer_part = f"{int(integer_part):,}"
         result = f"{integer_part}.{decimal_part}"
     elif thousands_sep:
-        result = f"{int(value):,}"
+        result = f"{int(formatted_value):,}"
 
     return result
 
@@ -444,8 +463,7 @@ def decimal_to_float(value: Decimal) -> float:
     # FloatDeprecationWarning is defined later in the file
     # Direct warning for now
     warnings.warn(
-        "decimal_to_float conversion: Use Decimal for all financial calculations to prevent "
-        "precision loss.",
+        "decimal_to_float conversion: Use Decimal for all financial calculations to prevent " "precision loss.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -500,9 +518,7 @@ class FloatDeprecationWarning:
         warnings.filterwarnings("always", category=DeprecationWarning)
         return self
 
-    def __exit__(
-        self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any | None
-    ) -> None:
+    def __exit__(self, exc_type: type | None, exc_val: Exception | None, exc_tb: Any | None) -> None:
         """Disable float deprecation warnings."""
         warnings.filterwarnings("default", category=DeprecationWarning)
 
@@ -522,9 +538,4 @@ class FloatDeprecationWarning:
         )
 
 
-# Module initialization - Only log in debug mode to avoid spam
-# logger.debug(
-#     "Decimal utilities initialized",
-#     precision=FINANCIAL_CONTEXT.prec,
-#     rounding=FINANCIAL_CONTEXT.rounding,
-# )
+# Module initialization complete

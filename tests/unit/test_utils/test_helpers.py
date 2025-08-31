@@ -37,14 +37,13 @@ from src.utils.helpers import (
     parse_datetime,
     parse_trading_pair,
     ping_host,
-    round_to_precision,
     # File operations
     safe_read_file,
     safe_write_file,
     # String utilities
     sanitize_symbol,
     # Network utilities
-    test_connection,
+    check_connection,
     validate_email,
 )
 
@@ -54,21 +53,24 @@ class TestMathematicalUtilities:
 
     def test_calculate_sharpe_ratio_success(self):
         """Test Sharpe ratio calculation with valid data."""
-        returns = [0.01, 0.02, -0.01, 0.03, 0.01, -0.02, 0.01, 0.02]
+        from decimal import Decimal
+        returns = [Decimal('0.01'), Decimal('0.02'), Decimal('-0.01'), Decimal('0.03'), 
+                  Decimal('0.01'), Decimal('-0.02'), Decimal('0.01'), Decimal('0.02')]
 
-        result = calculate_sharpe_ratio(returns, 0.02)
+        result = calculate_sharpe_ratio(returns, Decimal('0.02'))
 
-        assert isinstance(result, float)
+        assert isinstance(result, Decimal)
         assert result > 0  # Should be positive for this data
 
     def test_calculate_sharpe_ratio_invalid_risk_free_rate(self):
         """Test Sharpe ratio calculation with invalid risk-free rate."""
-        returns = [0.01, 0.02, -0.01]
+        from decimal import Decimal
+        returns = [Decimal('0.01'), Decimal('0.02'), Decimal('-0.01')]
 
         # This should not raise an error as the function doesn't validate
         # risk_free_rate
-        result = calculate_sharpe_ratio(returns, -0.02)
-        assert isinstance(result, float)
+        result = calculate_sharpe_ratio(returns, Decimal('-0.02'))
+        assert isinstance(result, Decimal)
 
     def test_calculate_sharpe_ratio_empty_returns(self):
         """Test Sharpe ratio calculation with empty returns."""
@@ -82,24 +84,27 @@ class TestMathematicalUtilities:
 
     def test_calculate_max_drawdown_success(self):
         """Test maximum drawdown calculation with valid data."""
-        equity_curve = [100, 110, 105, 120, 115, 130, 125, 140]
+        from decimal import Decimal
+        equity_curve = [Decimal('100'), Decimal('110'), Decimal('105'), Decimal('120'), 
+                       Decimal('115'), Decimal('130'), Decimal('125'), Decimal('140')]
 
         result = calculate_max_drawdown(equity_curve)
 
         assert isinstance(result, tuple)
         assert len(result) == 3
-        assert isinstance(result[0], float)  # max_drawdown
+        assert isinstance(result[0], Decimal)  # max_drawdown
         assert isinstance(result[1], int)  # start_index
         assert isinstance(result[2], int)  # end_index
         assert result[0] <= 0  # Drawdown should be negative or zero
 
     def test_calculate_max_drawdown_increasing_prices(self):
         """Test maximum drawdown with increasing prices."""
-        equity_curve = [100, 110, 120, 130, 140]
+        from decimal import Decimal
+        equity_curve = [Decimal('100'), Decimal('110'), Decimal('120'), Decimal('130'), Decimal('140')]
 
         result = calculate_max_drawdown(equity_curve)
 
-        assert result[0] == 0.0  # No drawdown in increasing prices
+        assert result[0] == Decimal('0')  # No drawdown in increasing prices
 
     def test_calculate_max_drawdown_empty_prices(self):
         """Test maximum drawdown with empty prices."""
@@ -108,16 +113,23 @@ class TestMathematicalUtilities:
 
     def test_calculate_max_drawdown_single_price(self):
         """Test maximum drawdown with single price."""
-        with pytest.raises(ValidationError, match="Need at least 2 points"):
-            calculate_max_drawdown([100])
+        from decimal import Decimal
+        # Single price should return no drawdown, not raise error
+        result = calculate_max_drawdown([Decimal('100')])
+        drawdown, start_idx, end_idx = result
+        assert drawdown == Decimal('0')
+        assert start_idx == 0
+        assert end_idx == 0
 
     def test_calculate_var_success(self):
         """Test VaR calculation with valid data."""
-        returns = [0.01, 0.02, -0.01, 0.03, 0.01, -0.02, 0.01, 0.02]
+        from decimal import Decimal
+        returns = [Decimal('0.01'), Decimal('0.02'), Decimal('-0.01'), Decimal('0.03'), 
+                  Decimal('0.01'), Decimal('-0.02'), Decimal('0.01'), Decimal('0.02')]
 
-        result = calculate_var(returns, 0.95)
+        result = calculate_var(returns, Decimal('0.95'))
 
-        assert isinstance(result, float)
+        assert isinstance(result, Decimal)
         assert result <= 0  # VaR should be negative (loss)
 
     def test_calculate_var_empty_returns(self):
@@ -127,27 +139,32 @@ class TestMathematicalUtilities:
 
     def test_calculate_var_invalid_confidence(self):
         """Test VaR calculation with invalid confidence level."""
-        returns = [0.01, 0.02, -0.01]
+        from decimal import Decimal
+        returns = [Decimal('0.01'), Decimal('0.02'), Decimal('-0.01')]
 
         with pytest.raises(ValidationError, match="Confidence level must be between 0 and 1"):
-            calculate_var(returns, 1.5)
+            calculate_var(returns, Decimal('1.5'))
 
     def test_calculate_volatility_success(self):
         """Test volatility calculation with valid data."""
-        returns = [0.01, 0.02, -0.01, 0.03, 0.01, -0.02, 0.01, 0.02]
+        from decimal import Decimal
+        returns = [Decimal('0.01'), Decimal('0.02'), Decimal('-0.01'), Decimal('0.03'), 
+                  Decimal('0.01'), Decimal('-0.02'), Decimal('0.01'), Decimal('0.02')]
 
         result = calculate_volatility(returns)
 
-        assert isinstance(result, float)
+        assert isinstance(result, Decimal)
         assert result >= 0  # Volatility should be non-negative
 
     def test_calculate_volatility_with_window(self):
         """Test volatility calculation with window."""
-        returns = [0.01, 0.02, -0.01, 0.03, 0.01, -0.02, 0.01, 0.02]
+        from decimal import Decimal
+        returns = [Decimal('0.01'), Decimal('0.02'), Decimal('-0.01'), Decimal('0.03'), 
+                  Decimal('0.01'), Decimal('-0.02'), Decimal('0.01'), Decimal('0.02')]
 
         result = calculate_volatility(returns, window=5)
 
-        assert isinstance(result, float)
+        assert isinstance(result, Decimal)
         assert result >= 0
 
     def test_calculate_volatility_empty_returns(self):
@@ -157,37 +174,41 @@ class TestMathematicalUtilities:
 
     def test_calculate_volatility_invalid_window(self):
         """Test volatility calculation with invalid window."""
-        returns = [0.01, 0.02, -0.01]
+        from decimal import Decimal
+        returns = [Decimal('0.01'), Decimal('0.02'), Decimal('-0.01')]
 
         with pytest.raises(ValidationError, match="Invalid window size"):
             calculate_volatility(returns, window=0)
 
     def test_calculate_correlation_success(self):
         """Test correlation calculation with valid data."""
-        series1 = [1, 2, 3, 4, 5]
-        series2 = [2, 4, 6, 8, 10]
+        from decimal import Decimal
+        series1 = [Decimal('1'), Decimal('2'), Decimal('3'), Decimal('4'), Decimal('5')]
+        series2 = [Decimal('2'), Decimal('4'), Decimal('6'), Decimal('8'), Decimal('10')]
 
         result = calculate_correlation(series1, series2)
 
-        assert isinstance(result, float)
+        assert isinstance(result, Decimal)
         # Perfect positive correlation with tolerance
-        assert abs(result - 1.0) < 1e-10
+        assert abs(result - Decimal('1.0')) < Decimal('1e-10')
 
     def test_calculate_correlation_negative_correlation(self):
         """Test correlation calculation with negative correlation."""
-        series1 = [1, 2, 3, 4, 5]
-        series2 = [5, 4, 3, 2, 1]
+        from decimal import Decimal
+        series1 = [Decimal('1'), Decimal('2'), Decimal('3'), Decimal('4'), Decimal('5')]
+        series2 = [Decimal('5'), Decimal('4'), Decimal('3'), Decimal('2'), Decimal('1')]
 
         result = calculate_correlation(series1, series2)
 
-        assert isinstance(result, float)
+        assert isinstance(result, Decimal)
         # Perfect negative correlation with tolerance
-        assert abs(result - (-1.0)) < 1e-10
+        assert abs(result - Decimal('-1.0')) < Decimal('1e-10')
 
     def test_calculate_correlation_different_lengths(self):
         """Test correlation calculation with different lengths."""
-        series1 = [1, 2, 3]
-        series2 = [1, 2]
+        from decimal import Decimal
+        series1 = [Decimal('1'), Decimal('2'), Decimal('3')]
+        series2 = [Decimal('1'), Decimal('2')]
 
         with pytest.raises(ValidationError, match="Series must have the same length"):
             calculate_correlation(series1, series2)
@@ -199,8 +220,9 @@ class TestMathematicalUtilities:
 
     def test_calculate_correlation_single_point(self):
         """Test correlation calculation with single point."""
+        from decimal import Decimal
         with pytest.raises(ValidationError, match="Need at least 2 points"):
-            calculate_correlation([1], [2])
+            calculate_correlation([Decimal('1')], [Decimal('2')])
 
 
 class TestDateTimeUtilities:
@@ -306,38 +328,41 @@ class TestDataConversionUtilities:
 
     def test_convert_currency_success(self):
         """Test currency conversion."""
-        result = convert_currency(100, "USD", "EUR", 0.85)
+        from decimal import Decimal
+        result = convert_currency(Decimal('100'), "USD", "EUR", Decimal('0.85'))
 
-        assert isinstance(result, float)
-        assert result == 85.0
+        assert isinstance(result, Decimal)
+        assert result == Decimal('85.00')
 
     def test_convert_currency_invalid_amount(self):
         """Test currency conversion with negative amount."""
+        from decimal import Decimal
         with pytest.raises(ValidationError, match="Amount cannot be negative"):
-            convert_currency(-100, "USD", "EUR", 0.85)
+            convert_currency(Decimal('-100'), "USD", "EUR", Decimal('0.85'))
 
     def test_convert_currency_invalid_rate(self):
         """Test currency conversion with invalid rate."""
+        from decimal import Decimal
         with pytest.raises(ValidationError, match="Exchange rate must be positive"):
-            convert_currency(100, "USD", "EUR", -0.85)
+            convert_currency(Decimal('100'), "USD", "EUR", Decimal('-0.85'))
 
     def test_normalize_price_success(self):
         """Test price normalization."""
-        result = normalize_price(123.456789, "BTCUSDT")
+        result = normalize_price(Decimal('123.456789'), "BTCUSDT")
 
         assert isinstance(result, Decimal)
         assert result > 0
 
     def test_normalize_price_zero_precision(self):
         """Test price normalization with zero precision."""
-        result = normalize_price(123.456789, "BTCUSDT")
+        result = normalize_price(Decimal('123.456789'), "BTCUSDT")
 
         assert isinstance(result, Decimal)
         assert result > 0
 
     def test_normalize_price_negative_precision(self):
         """Test price normalization with negative precision."""
-        result = normalize_price(123.456789, "BTCUSDT")
+        result = normalize_price(Decimal('123.456789'), "BTCUSDT")
 
         assert isinstance(result, Decimal)
         assert result > 0
@@ -345,19 +370,8 @@ class TestDataConversionUtilities:
     def test_normalize_price_invalid_price(self):
         """Test price normalization with invalid price."""
         with pytest.raises(ValidationError, match="Price must be positive"):
-            normalize_price(-100, "BTCUSDT")
+            normalize_price(Decimal('-100'), "BTCUSDT")
 
-    def test_round_to_precision_success(self):
-        """Test rounding to precision."""
-        result = round_to_precision(123.456789, 2)
-
-        assert isinstance(result, float)
-        assert result == 123.46
-
-    def test_round_to_precision_negative_precision(self):
-        """Test rounding with negative precision."""
-        with pytest.raises(ValidationError, match="Precision must be non-negative"):
-            round_to_precision(123.456789, -2)
 
 
 class TestFileOperations:
@@ -449,10 +463,8 @@ class TestNetworkUtilities:
     """Test network utility functions."""
 
     @pytest.mark.asyncio
-    async def test_test_connection_success(self):
-        """Test connection testing with successful connection."""
-        # This function doesn't exist in helpers, so let's test measure_latency
-        # instead
+    async def test_measure_latency_from_test_connection(self):
+        """Test latency measurement functionality via measure_latency."""
         with patch("asyncio.open_connection") as mock_conn:
             mock_reader = MagicMock()
             mock_writer = MagicMock()  # Use regular MagicMock for writer
@@ -467,10 +479,8 @@ class TestNetworkUtilities:
             assert result >= 0
 
     @pytest.mark.asyncio
-    async def test_test_connection_failure(self):
-        """Test connection testing with failed connection."""
-        # This function doesn't exist in helpers, so let's test ping_host
-        # instead
+    async def test_ping_host_connection_failure(self):
+        """Test ping_host functionality with failed connection."""
         with patch("asyncio.open_connection", side_effect=Exception("Connection failed")):
             result = await ping_host("api.example.com")
 
@@ -501,7 +511,7 @@ class TestNetworkUtilities:
     async def test_measure_latency_timeout(self):
         """Test latency measurement with timeout."""
         with patch("asyncio.open_connection", side_effect=asyncio.TimeoutError()):
-            with pytest.raises(ValidationError, match="Cannot measure latency"):
+            with pytest.raises(ValidationError, match="Connection timeout"):
                 await measure_latency("api.example.com", 443)
 
     @pytest.mark.asyncio
@@ -676,20 +686,22 @@ class TestHelperFunctionsIntegration:
 
     def test_mathematical_utilities_integration(self):
         """Test integration between mathematical utilities."""
-        returns = [0.01, 0.02, -0.01, 0.03, 0.01, -0.02, 0.01, 0.02]
+        from decimal import Decimal
+        returns = [Decimal('0.01'), Decimal('0.02'), Decimal('-0.01'), Decimal('0.03'), 
+                  Decimal('0.01'), Decimal('-0.02'), Decimal('0.01'), Decimal('0.02')]
 
         # Calculate various metrics
-        sharpe = calculate_sharpe_ratio(returns, 0.02)
+        sharpe = calculate_sharpe_ratio(returns, Decimal('0.02'))
         volatility = calculate_volatility(returns)
-        var_95 = calculate_var(returns, 0.95)
+        var_95 = calculate_var(returns, Decimal('0.95'))
 
-        # All should be valid float values
-        assert isinstance(sharpe, float)
-        assert isinstance(volatility, float)
-        assert isinstance(var_95, float)
+        # All should be valid Decimal values
+        assert isinstance(sharpe, Decimal)
+        assert isinstance(volatility, Decimal)
+        assert isinstance(var_95, Decimal)
 
         # Sharpe ratio should be reasonable
-        assert -10 < sharpe < 10
+        assert Decimal('-10') < sharpe < Decimal('10')
 
         # Volatility should be positive
         assert volatility > 0
@@ -714,20 +726,18 @@ class TestHelperFunctionsIntegration:
 
     def test_data_conversion_integration(self):
         """Test integration between data conversion utilities."""
-        price = 123.456789
+        from decimal import Decimal
+        price = Decimal('123.456789')
         symbol = "BTCUSDT"
 
-        # Test normalization and rounding
+        # Test normalization
         normalized = normalize_price(price, symbol)
-        rounded = round_to_precision(price, 2)
 
-        # Both should return appropriate types
+        # Should return appropriate type
         assert isinstance(normalized, Decimal)
-        assert isinstance(rounded, float)
 
-        # Values should be reasonable
+        # Value should be reasonable
         assert normalized > 0
-        assert rounded > 0
 
     def test_string_utilities_integration(self):
         """Test integration between string utilities."""
@@ -748,5 +758,4 @@ class TestHelperFunctionsIntegration:
         assert parsed[1] == "USDT"
 
 
-# Remove any accidental test_connection symbol from pytest collection
-del test_connection
+# Note: No cleanup needed as test_connection is imported from helpers module

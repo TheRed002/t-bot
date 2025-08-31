@@ -11,7 +11,6 @@ full observability for authorized personnel and audit compliance.
 import json
 import logging
 import logging.handlers
-import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -669,20 +668,32 @@ class SecureLogger:
         """Start background thread for flushing log buffers."""
 
         def flush_periodically():
-            while True:
-                time.sleep(self.config.flush_interval_seconds)
-                try:
-                    with self._lock:
-                        if self._log_buffer:
-                            self._flush_log_buffer()
-                        if self._audit_buffer:
-                            self._flush_audit_buffer()
-                except Exception as e:
-                    # Log flushing error to stderr to avoid recursion
-                    print(f"Error flushing log buffers: {e}", file=os.sys.stderr)
+            try:
+                while True:
+                    time.sleep(self.config.flush_interval_seconds)
+                    try:
+                        with self._lock:
+                            if self._log_buffer:
+                                self._flush_log_buffer()
+                            if self._audit_buffer:
+                                self._flush_audit_buffer()
+                    except Exception as e:
+                        # Log flushing error to stderr to avoid recursion
+                        import sys
 
-        flush_thread = threading.Thread(target=flush_periodically, daemon=True)
-        flush_thread.start()
+                        sys.stderr.write(f"Error flushing log buffers: {e}\n")
+                        sys.stderr.flush()
+            except Exception as e:
+                # Thread termination - log to stderr
+                import sys
+
+                sys.stderr.write(f"Background flush thread terminated: {e}\n")
+                sys.stderr.flush()
+
+        # Store thread reference for cleanup
+        if not hasattr(self, "_flush_thread") or not self._flush_thread.is_alive():
+            self._flush_thread = threading.Thread(target=flush_periodically, daemon=True)
+            self._flush_thread.start()
 
     def _flush_log_buffer(self) -> None:
         """Flush log buffer to file."""
@@ -729,32 +740,54 @@ class SecureLogger:
 
         with self._lock:
             # Flush any remaining data
-            self._flush_log_buffer()
-            self._flush_audit_buffer()
+            try:
+                self._flush_log_buffer()
+                self._flush_audit_buffer()
+            except Exception as e:
+                import sys
 
-            # Close all handlers
-            for handler in self.logger.handlers[:]:
+                sys.stderr.write(f"Failed to flush buffers during close: {e}\n")
+                sys.stderr.flush()
+
+            # Stop background flush thread
+            if hasattr(self, "_flush_thread") and self._flush_thread.is_alive():
                 try:
-                    handler.close()
-                    self.logger.removeHandler(handler)
+                    # Since it's a daemon thread, it will be cleaned up automatically
+                    # but we can try to signal termination gracefully
+                    pass
                 except Exception as e:
-                    # Use print as logger might be compromised during shutdown
-                    print(f"Failed to close logger handler: {e}")
+                    import sys
+
+                    sys.stderr.write(f"Error stopping flush thread: {e}\n")
+                    sys.stderr.flush()
+
+            # Close all handlers with proper resource cleanup
+            handlers_to_close = []
+            handlers_to_close.extend(
+                [(self.logger, handler) for handler in self.logger.handlers[:]]
+            )
 
             if hasattr(self, "audit_logger"):
-                for handler in self.audit_logger.handlers[:]:
-                    try:
-                        handler.close()
-                        self.audit_logger.removeHandler(handler)
-                    except Exception as e:
-                        print(f"Failed to close audit logger handler: {e}")
+                handlers_to_close.extend(
+                    [(self.audit_logger, handler) for handler in self.audit_logger.handlers[:]]
+                )
 
-            for handler in self.security_logger.handlers[:]:
+            handlers_to_close.extend(
+                [(self.security_logger, handler) for handler in self.security_logger.handlers[:]]
+            )
+
+            for logger, handler in handlers_to_close:
                 try:
                     handler.close()
-                    self.security_logger.removeHandler(handler)
-                except Exception as e:
-                    print(f"Failed to close security logger handler: {e}")
+                    logger.removeHandler(handler)
+                finally:
+                    # Ensure handler is always removed even if close() fails
+                    if handler in logger.handlers:
+                        try:
+                            logger.removeHandler(handler)
+                        except Exception:
+                            # Continue cleanup even if handler removal fails
+                            pass
 
     def get_logger_stats(self) -> dict[str, Any]:
         """Get logging system statistics."""
@@ -800,12 +833,17 @@ def close_all_loggers() -> None:
     """Close all logger instances and cleanup resources."""
 
     with _logger_lock:
-        for logger in _loggers.values():
+        loggers_to_close = list(_loggers.values())
+        _loggers.clear()
+
+        for logger in loggers_to_close:
             try:
                 logger.close()
             except Exception as e:
-                print(f"Failed to close logger during shutdown: {e}")
-        _loggers.clear()
+                import sys
+
+                sys.stderr.write(f"Failed to close logger during shutdown: {e}\n")
+                sys.stderr.flush()
 
 
 def log_security_error(

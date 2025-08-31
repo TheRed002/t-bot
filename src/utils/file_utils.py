@@ -1,16 +1,16 @@
 """File operations utilities for the T-Bot trading system."""
 
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from src.core.exceptions import ValidationError
+from src.core.logging import get_logger
 
 # Module level logger for static methods
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def safe_read_file(file_path: str, encoding: str = "utf-8") -> str:
@@ -76,13 +76,12 @@ def safe_write_file(file_path: str, content: str, encoding: str = "utf-8") -> No
 
     except Exception as e:
         # Clean up temp file on failure
-        if temp_path.exists():
+        if temp_path and temp_path.exists():
             try:
                 temp_path.unlink()
             except (OSError, PermissionError) as cleanup_e:
                 # Log cleanup errors but don't fail the operation
                 logger.debug(f"Failed to cleanup temp file {temp_path}: {cleanup_e}")
-                pass
 
         logger.error(f"Failed to write file {file_path}: {e!s}")
         raise ValidationError(f"Cannot write file '{file_path}': {e!s}") from e

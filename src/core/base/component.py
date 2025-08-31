@@ -1,9 +1,8 @@
 """
 Base component implementation providing common functionality.
 
-This module contains the enhanced BaseComponent class that replaces the
-basic implementation in src/base.py with comprehensive lifecycle management,
-health checks, and monitoring capabilities.
+This module contains the enhanced BaseComponent class with comprehensive
+lifecycle management, health checks, and monitoring capabilities.
 """
 
 import asyncio
@@ -11,6 +10,8 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
+
+from pydantic import ConfigDict
 
 from src.core.base.interfaces import (
     Configurable,
@@ -24,7 +25,6 @@ from src.core.base.interfaces import (
 )
 from src.core.exceptions import ComponentError, ConfigurationError
 from src.core.logging import get_logger
-from pydantic import ConfigDict
 
 
 class BaseComponent(
@@ -258,7 +258,7 @@ class BaseComponent(
         if self._is_running:
             await self.stop()
 
-        await asyncio.sleep(0.1)  # Brief pause between stop and start
+        await asyncio.sleep(0.1)
         await self.start()
 
         self._metrics["restart_count"] += 1
@@ -353,10 +353,10 @@ class BaseComponent(
         try:
             # Basic responsiveness test
             start_time = datetime.now(timezone.utc)
-            await asyncio.sleep(0.001)  # Minimal async operation
+            await asyncio.sleep(0.001)
             response_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
-            if response_time > 1.0:  # More than 1 second is concerning
+            if response_time > 1.0:
                 return HealthCheckResult(
                     status=HealthStatus.DEGRADED,
                     message="Component responding slowly",
@@ -415,18 +415,29 @@ class BaseComponent(
         Returns:
             bool: True if configuration is valid
         """
-        # Basic validation - override in subclasses for specific validation
         return isinstance(config, dict)
 
     # Dependency Injection
     def configure_dependencies(self, container: Any) -> None:
         """Configure component dependencies."""
         self._dependency_container = container
+
+        self._auto_resolve_dependencies()
+
         self._logger.debug(
             "Dependencies configured",
             name=self._name,
             dependencies=list(self._dependencies),
         )
+
+    # Legacy compatibility methods
+    async def initialize(self) -> None:
+        """Initialize the component (async compatibility)."""
+        self._logger.debug(f"Component {self._name} initialized")
+
+    async def cleanup(self) -> None:
+        """Cleanup the component (async compatibility)."""
+        self._logger.debug(f"Component {self._name} cleaned up")
 
     def get_dependencies(self) -> list[str]:
         """Get list of required dependencies."""
@@ -439,6 +450,33 @@ class BaseComponent(
     def remove_dependency(self, dependency_name: str) -> None:
         """Remove a dependency requirement."""
         self._dependencies.discard(dependency_name)
+
+    def _auto_resolve_dependencies(self) -> None:
+        """
+        Auto-resolve dependencies from the container.
+        """
+        if not self._dependency_container or not self._dependencies:
+            return
+
+        for dep_name in self._dependencies:
+            try:
+                dependency = self._dependency_container.resolve(dep_name)
+                attr_name = f"_{dep_name.lower().replace('service', '')}"
+                setattr(self, attr_name, dependency)
+
+                self._logger.debug(
+                    "Auto-resolved dependency",
+                    component=self._name,
+                    dependency=dep_name,
+                    attribute=attr_name,
+                )
+            except Exception as e:
+                self._logger.warning(
+                    "Failed to auto-resolve dependency",
+                    component=self._name,
+                    dependency=dep_name,
+                    error=str(e),
+                )
 
     # Metrics and Monitoring
     def get_metrics(self) -> dict[str, Any]:
@@ -513,7 +551,6 @@ class BaseComponent(
         )
 
 
-# Legacy compatibility - enhanced version of the original BaseComponent
 class EnhancedBaseComponent(BaseComponent):
     """
     Enhanced version of the original BaseComponent with backward compatibility.
@@ -524,7 +561,7 @@ class EnhancedBaseComponent(BaseComponent):
     def __init__(self, *args, **kwargs):
         """Initialize with backward compatibility."""
         super().__init__(*args, **kwargs)
-        self._initialized = False  # Original property
+        self._initialized = False
 
     @property
     def initialized(self) -> bool:
@@ -533,12 +570,10 @@ class EnhancedBaseComponent(BaseComponent):
 
     def initialize(self) -> None:
         """Initialize the component (legacy compatibility)."""
-        # This should be replaced with async start() in new code
         self._initialized = True
         self.logger.debug(f"{self.__class__.__name__} initialized")
 
     def cleanup(self) -> None:
         """Cleanup the component (legacy compatibility)."""
-        # This should be replaced with async stop() in new code
         self._initialized = False
         self.logger.debug(f"{self.__class__.__name__} cleaned up")

@@ -119,7 +119,7 @@ class StrategyMetrics(BaseModel):
     win_rate: float = 0.0
     avg_win: Decimal = Decimal("0")
     avg_loss: Decimal = Decimal("0")
-    profit_factor: float = 0.0
+    profit_factor: Decimal = Decimal("0")
     sharpe_ratio: float = 0.0
     sortino_ratio: float = 0.0
     max_drawdown: float = 0.0
@@ -135,15 +135,19 @@ class StrategyMetrics(BaseModel):
         if self.total_trades > 0:
             self.win_rate = self.winning_trades / self.total_trades
 
-    def calculate_profit_factor(self) -> float:
+    def calculate_profit_factor(self) -> Decimal:
         """Calculate profit factor (gross profits / gross losses)."""
         if self.avg_loss == 0 or self.losing_trades == 0:
-            return float("inf") if self.winning_trades > 0 else 0.0
+            return Decimal("inf") if self.winning_trades > 0 else Decimal("0")
 
-        gross_profits = self.avg_win * self.winning_trades
-        gross_losses = abs(self.avg_loss) * self.losing_trades
+        gross_profits = self.avg_win * Decimal(str(self.winning_trades))
+        gross_losses = abs(self.avg_loss) * Decimal(str(self.losing_trades))
 
-        return float(gross_profits / gross_losses) if gross_losses != 0 else float("inf")
+        return (
+            (gross_profits / gross_losses).quantize(Decimal("0.0001"))
+            if gross_losses != 0
+            else Decimal("inf")
+        )
 
 
 class RegimeChangeEvent(BaseModel):

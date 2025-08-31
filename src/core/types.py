@@ -89,6 +89,7 @@ from .types.trading import (
     OrderType,
     Position,
     PositionSide,
+    PositionStatus,
     TimeInForce,
     TradeFill,
 )
@@ -142,6 +143,7 @@ __all__ = [
     "Position",
     "PositionRisk",
     "PositionSide",
+    "PositionStatus",
     "ProcessingStep",
     "QualityLevel",
     "RequestType",

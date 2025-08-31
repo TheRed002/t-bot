@@ -22,6 +22,11 @@ from src.error_handling.security_sanitizer import (
     SensitivityLevel,
     get_security_sanitizer,
 )
+from src.utils.error_categorization import (
+    contains_keywords,
+    detect_auth_token_error,
+    is_sensitive_key,
+)
 
 
 class AuthenticationErrorHandler(ErrorHandlerBase):
@@ -128,7 +133,7 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
             return True
 
         # Check error message
-        if any(keyword in error_message for keyword in auth_keywords):
+        if contains_keywords(error_message, auth_keywords):
             return True
 
         # Check HTTP status codes in error messages
@@ -266,32 +271,9 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
         # Start with base sanitization
         sanitized = self.sanitizer.sanitize_context(context, SensitivityLevel.CRITICAL)
 
-        # Additional authentication-specific sanitization
-        sensitive_auth_keys = [
-            "password",
-            "passwd",
-            "pwd",
-            "secret",
-            "token",
-            "key",
-            "credential",
-            "auth",
-            "authorization",
-            "bearer",
-            "jwt",
-            "api_key",
-            "access_key",
-            "private_key",
-            "session_data",
-            "oauth_token",
-            "refresh_token",
-            "id_token",
-            "saml_assertion",
-        ]
-
         # Remove or mask sensitive authentication data
         for key in list(sanitized.keys()):
-            if any(sensitive in key.lower() for sensitive in sensitive_auth_keys):
+            if is_sensitive_key(key):
                 sanitized[key] = "[REDACTED_AUTH_DATA]"
 
         # Add security metadata
@@ -373,7 +355,7 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
             return "rate_limited"
 
         # Generic token issues
-        if any(keyword in error_message for keyword in ["token", "bearer", "jwt", "authorization"]):
+        if detect_auth_token_error(error_message):
             return "token_invalid"
 
         return "invalid_credentials"  # Default safe response
@@ -559,7 +541,7 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
             "reason": f"authentication_failed_{error_category}",
             "user_message": user_message,
             "technical_message": f"Authentication error: {sanitized_error}",
-            "delay": delay,
+            "delay": str(delay),
             "security_action": "progressive_delay",
             "recoverable": error_category not in ["account_locked", "account_disabled"],
             "error_category": error_category,

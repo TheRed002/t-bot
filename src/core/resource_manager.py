@@ -58,6 +58,7 @@ class ResourceInfo:
     created_at: datetime
     last_accessed: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     cleanup_callback: Callable[[], None] | None = None
+    async_cleanup_callback: Callable[[], Any] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     access_count: int = 0
     memory_usage_bytes: int = 0
@@ -93,7 +94,7 @@ class ResourceMonitor:
         """Get connection statistics."""
         try:
             process = psutil.Process()
-            connections = process.connections()
+            connections = process.net_connections()
 
             stats = {
                 "total_connections": len(connections),
@@ -230,6 +231,7 @@ class ResourceManager:
         resource_type: ResourceType,
         resource_id: str | None = None,
         cleanup_callback: Callable[[], None] | None = None,
+        async_cleanup_callback: Callable[[], Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> str:
         """Register a resource for management."""
@@ -243,6 +245,7 @@ class ResourceManager:
                 state=ResourceState.CREATED,
                 created_at=datetime.now(timezone.utc),
                 cleanup_callback=cleanup_callback,
+                async_cleanup_callback=async_cleanup_callback,
                 metadata=metadata or {},
             )
 
@@ -260,8 +263,9 @@ class ResourceManager:
         self.logger.debug(f"Registered resource: {resource_id} ({resource_type.value})")
         return resource_id
 
-    def unregister_resource(self, resource_id: str):
+    async def unregister_resource(self, resource_id: str):
         """Unregister and cleanup a resource."""
+        resource_info = None
         with self._resource_lock:
             resource_info = self._resources.get(resource_id)
             if not resource_info:
@@ -270,19 +274,26 @@ class ResourceManager:
             # Mark as cleanup pending
             resource_info.state = ResourceState.CLEANUP_PENDING
 
-            # Execute cleanup callback
-            if resource_info.cleanup_callback:
-                try:
-                    resource_info.cleanup_callback()
-                except Exception as e:
-                    self.logger.error(f"Error in cleanup callback for {resource_id}: {e}")
+        # Execute cleanup callbacks outside the lock to prevent deadlocks
+        if resource_info.async_cleanup_callback:
+            try:
+                await resource_info.async_cleanup_callback()
+            except Exception as e:
+                self.logger.error(f"Error in async cleanup callback for {resource_id}: {e}")
+        elif resource_info.cleanup_callback:
+            try:
+                resource_info.cleanup_callback()
+            except Exception as e:
+                self.logger.error(f"Error in cleanup callback for {resource_id}: {e}")
 
-            # Remove from tracking
-            resource_info.state = ResourceState.DESTROYED
-            del self._resources[resource_id]
-            self._resource_refs.pop(resource_id, None)
-
-            self._stats["resources_destroyed"] += 1
+        # Remove from tracking
+        with self._resource_lock:
+            if resource_id in self._resources:
+                resource_info = self._resources[resource_id]
+                resource_info.state = ResourceState.DESTROYED
+                del self._resources[resource_id]
+                self._resource_refs.pop(resource_id, None)
+                self._stats["resources_destroyed"] += 1
 
         self.logger.debug(f"Unregistered resource: {resource_id}")
 
@@ -300,11 +311,22 @@ class ResourceManager:
         with self._resource_lock:
             resource_ids = list(self._resources.keys())
 
+        # Use asyncio.gather for concurrent cleanup of WebSocket connections
+        cleanup_tasks = []
         for resource_id in resource_ids:
             try:
-                self.unregister_resource(resource_id)
+                cleanup_tasks.append(self.unregister_resource(resource_id))
             except Exception as e:
-                self.logger.error(f"Error cleaning up resource {resource_id}: {e}")
+                self.logger.error(f"Error setting up cleanup for resource {resource_id}: {e}")
+
+        # Execute all cleanup tasks concurrently with timeout
+        if cleanup_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*cleanup_tasks, return_exceptions=True), timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("Resource cleanup timed out after 30 seconds")
 
         self.logger.info(f"Cleaned up {len(resource_ids)} resources")
 
@@ -385,13 +407,29 @@ class ResourceManager:
                     resource_info.state = ResourceState.IDLE
                     idle_resources.append(resource_id)
 
-        # Cleanup idle resources
+        # Cleanup idle resources with concurrent processing
+        cleanup_tasks = []
         for resource_id in idle_resources:
+            cleanup_tasks.append(self._cleanup_idle_resource(resource_id))
+
+        if cleanup_tasks:
+            # Process cleanup tasks concurrently with timeout
             try:
-                self.unregister_resource(resource_id)
-                self.logger.debug(f"Cleaned up idle resource: {resource_id}")
-            except Exception as e:
-                self.logger.error(f"Error cleaning up idle resource {resource_id}: {e}")
+                await asyncio.wait_for(
+                    asyncio.gather(*cleanup_tasks, return_exceptions=True), timeout=60.0
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    f"Idle resource cleanup timed out for {len(cleanup_tasks)} resources"
+                )
+
+    async def _cleanup_idle_resource(self, resource_id: str):
+        """Cleanup a single idle resource."""
+        try:
+            await self.unregister_resource(resource_id)
+            self.logger.debug(f"Cleaned up idle resource: {resource_id}")
+        except Exception as e:
+            self.logger.error(f"Error cleaning up idle resource {resource_id}: {e}")
 
     def _detect_leaks(self):
         """Detect potential resource leaks."""

@@ -102,6 +102,8 @@ from .trading import (
     OrderStatus,
     OrderType,
     Position,
+    PositionSide,
+    PositionStatus,
     Signal,
     SignalDirection,
     TimeInForce,
@@ -163,7 +165,9 @@ __all__ = [
     "PortfolioState",
     "Position",
     "PositionLimits",
+    "PositionSide",
     "PositionSizeMethod",
+    "PositionStatus",
     "PredictionResult",
     "ProcessingStep",
     # Data

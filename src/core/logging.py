@@ -81,17 +81,14 @@ def _safe_unicode_decoder(
     """Safe unicode decoder for event dict."""
     if event_dict is None:
         return {}
-    # Ensure we have a dict before processing
     if not isinstance(event_dict, dict):
         return {}
     try:
         result = structlog.processors.UnicodeDecoder()(logger, method_name, event_dict)
-        # Verify result is a dict before returning
         if isinstance(result, dict):
             return result
-        return event_dict  # Return original if decoder failed
+        return event_dict
     except (UnicodeError, ValueError) as e:
-        # If decoding fails, log the issue and return original dict
         if event_dict:
             event_dict["decode_error"] = str(e)
         return event_dict
@@ -128,9 +125,7 @@ def setup_logging(
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
-        # Add correlation ID processor with proper None handling
         _add_correlation_id,
-        # Custom UnicodeDecoder that handles None for tests
         _safe_unicode_decoder,
     ]
 
@@ -176,8 +171,12 @@ def setup_logging(
             try:
                 handler.flush()
             except (OSError, ValueError) as e:
-                # Log handler flush failures but continue
-                print(f"Warning: Failed to flush log handler: {e}", file=sys.stderr)
+                logger = structlog.get_logger()
+                logger.warning(
+                    "Failed to flush log handler",
+                    error=str(e),
+                    handler_type=type(handler).__name__,
+                )
 
         # Clean up old log files based on retention policy
         _cleanup_old_logs(log_path.parent, log_path.stem, retention_days)
@@ -452,7 +451,6 @@ def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None
         log_name: Base name of log files
         retention_days: Number of days to retain log files
     """
-    # Import logging here since structured logger may not be set up
     import logging as basic_logging
 
     if not log_dir.exists():
@@ -467,7 +465,6 @@ def _cleanup_old_logs(log_dir: Path, log_name: str, retention_days: int) -> None
                 log_file.unlink()
                 basic_logging.info(f"Removed old log file: {log_file}")
         except FileNotFoundError:
-            # File was already removed, ignore
             pass
         except PermissionError as e:
             basic_logging.error(f"Permission denied removing log file {log_file}: {e}")
@@ -502,4 +499,3 @@ def setup_development_logging() -> None:
     )
 
 
-# Note: Logging must be initialized explicitly by calling setup_logging()

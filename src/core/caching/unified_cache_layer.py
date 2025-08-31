@@ -33,10 +33,10 @@ from pickle import PicklingError
 from typing import Any
 
 import redis.asyncio as redis
-from cachetools import TTLCache
+from cachetools import TTLCache  # type: ignore
 
 from src.core.base.component import BaseComponent
-from src.core.config.main import Config
+from src.core.config import Config
 from src.core.exceptions import CacheError
 from src.core.logging import get_logger
 from src.data.cache.data_cache import DataCache
@@ -608,7 +608,12 @@ class L3RedisCache(CacheInterface):
 
             return data
         except Exception as e:
-            logger.error(f"Serialization error: {e}")
+            logger.error(
+                "Serialization error",
+                error=str(e),
+                error_type=type(e).__name__,
+                value_type=type(value).__name__,
+            )
             raise
 
     def _deserialize(self, data: bytes) -> Any:
@@ -625,7 +630,12 @@ class L3RedisCache(CacheInterface):
             json_str = data.decode("utf-8")
             return json.loads(json_str)
         except Exception as e:
-            logger.error(f"Deserialization error: {e}")
+            logger.error(
+                "Deserialization error",
+                error=str(e),
+                error_type=type(e).__name__,
+                data_size=len(data) if data else 0,
+            )
             raise
 
     def _update_access_time(self, start_time: float) -> None:

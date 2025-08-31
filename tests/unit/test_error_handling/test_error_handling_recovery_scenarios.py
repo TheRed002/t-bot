@@ -44,9 +44,9 @@ class TestRecoveryScenario:
 
     @pytest.mark.asyncio
     async def test_recovery_scenario_execute_recovery_not_implemented(self, recovery_scenario):
-        """Test that base recovery scenario raises NotImplementedError."""
-        with pytest.raises(NotImplementedError):
-            await recovery_scenario.execute_recovery({})
+        """Test that base recovery scenario returns False (not implemented)."""
+        result = await recovery_scenario.execute_recovery({})
+        assert result is False  # Base implementation should return False
 
 
 class TestPartialFillRecovery:

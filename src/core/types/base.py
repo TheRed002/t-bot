@@ -11,11 +11,6 @@ Key Features:
 - Type conversion utilities
 - Comprehensive documentation and examples
 
-TODO: Update the following modules to use consolidated types:
-- src/exchanges/types.py (consolidate ExchangeCapability)
-- src/risk_management/emergency_controls.py (use base ValidationLevel)
-- src/state/quality_controller.py (remove duplicate ValidationLevel)
-- All modules using duplicate Status enums
 """
 
 import json
@@ -24,7 +19,11 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
+from pydantic import ConfigDict as PydanticConfigDict
+
+# Type aliases for better readability
+ConfigDict = dict[str, Any]
 
 
 class TradingMode(Enum):
@@ -41,8 +40,8 @@ class TradingMode(Enum):
 
     Example:
         >>> mode = TradingMode.LIVE
-        >>> print(f"Trading in {mode.value} mode")
-        Trading in live mode
+        >>> f"Trading in {mode.value} mode"
+        'Trading in live mode'
     """
 
     LIVE = "live"
@@ -95,7 +94,8 @@ class ExchangeType(Enum):
 
     Example:
         >>> exchange = ExchangeType.BINANCE
-        >>> print(f"Rate limit: {exchange.get_rate_limit()} req/min")
+        >>> f"Rate limit: {exchange.get_rate_limit()} req/min"
+        'Rate limit: 1200 req/min'
         Rate limit: 1200 req/min
     """
 
@@ -293,7 +293,7 @@ class ValidationLevel(Enum):
     Example:
         >>> level = ValidationLevel.CRITICAL
         >>> if level.should_halt_system():
-        ...     print("System halt required")
+        ...     logger.critical("System halt required")
         System halt required
     """
 
@@ -425,15 +425,30 @@ class BaseValidatedModel(BaseModel):
         """Check if metadata key exists."""
         return key in self.metadata
 
-    model_config = ConfigDict(
+    model_config = PydanticConfigDict(
         use_enum_values=True,
         validate_assignment=True,
         arbitrary_types_allowed=True,
-        json_encoders={
-            Decimal: str,  # Encode Decimals as strings for JSON serialization
-            datetime: lambda dt: dt.isoformat(),
-        },
     )
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, schema_generator) -> dict[str, Any]:
+        """Custom JSON schema for proper serialization."""
+        schema = super().__get_pydantic_json_schema__(schema_generator)
+        return schema
+
+    def model_dump_json(self, **kwargs) -> str:
+        """Custom JSON serialization handling Decimal and datetime types."""
+
+        def custom_serializer(obj):
+            if isinstance(obj, Decimal):
+                return str(obj)
+            elif isinstance(obj, datetime):
+                return obj.isoformat()
+            return obj
+
+        data = self.model_dump(**kwargs)
+        return json.dumps(data, default=custom_serializer)
 
 
 class FinancialBaseModel(BaseValidatedModel):
@@ -508,12 +523,21 @@ class FinancialBaseModel(BaseValidatedModel):
                     return False
         return True
 
-    model_config = ConfigDict(
+    model_config = PydanticConfigDict(
         use_enum_values=True,
         validate_assignment=True,
         arbitrary_types_allowed=True,
-        json_encoders={
-            Decimal: str,  # Always encode Decimals as strings
-            datetime: lambda dt: dt.isoformat(),
-        },
     )
+
+    def model_dump_json(self, **kwargs) -> str:
+        """Custom JSON serialization handling Decimal and datetime types."""
+
+        def custom_serializer(obj):
+            if isinstance(obj, Decimal):
+                return str(obj)
+            elif isinstance(obj, datetime):
+                return obj.isoformat()
+            return obj
+
+        data = self.model_dump(**kwargs)
+        return json.dumps(data, default=custom_serializer)

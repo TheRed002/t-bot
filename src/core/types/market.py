@@ -86,7 +86,7 @@ class Ticker(BaseModel):
     timestamp: datetime
     exchange: str
     price_change: Decimal | None = None
-    price_change_percent: float | None = None
+    price_change_percent: Decimal | None = None
 
     @property
     def spread(self) -> Decimal:
@@ -94,12 +94,12 @@ class Ticker(BaseModel):
         return self.ask_price - self.bid_price
 
     @property
-    def spread_percent(self) -> float:
+    def spread_percent(self) -> Decimal:
         """Calculate spread as percentage of mid price."""
-        mid_price = (self.bid_price + self.ask_price) / 2
+        mid_price = (self.bid_price + self.ask_price) / Decimal("2")
         if mid_price == 0:
-            return 0.0
-        return float((self.spread / mid_price) * 100)
+            return Decimal("0")
+        return ((self.spread / mid_price) * Decimal("100")).quantize(Decimal("0.0001"))
 
 
 class OrderBookLevel(BaseModel):

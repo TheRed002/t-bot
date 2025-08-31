@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 
 from src.core.dependency_injection import injectable
@@ -198,7 +199,7 @@ class ValidatorRegistry:
 class RangeValidator(ValidatorInterface):
     """Validator for numeric ranges."""
 
-    def __init__(self, min_value: float | None = None, max_value: float | None = None):
+    def __init__(self, min_value: Decimal | None = None, max_value: Decimal | None = None):
         """
         Initialize range validator.
 
@@ -211,7 +212,7 @@ class RangeValidator(ValidatorInterface):
 
     def validate(self, data: Any, **kwargs) -> bool:
         """Validate that data is within range."""
-        if not isinstance(data, int | float):
+        if not isinstance(data, int | float | Decimal):
             raise ValidationError(f"Expected numeric value, got {type(data)}")
 
         if self.min_value is not None and data < self.min_value:
@@ -311,13 +312,16 @@ _validator_registry.register_validator_class("type", TypeValidator)
 
 
 # Common validation rules
+
 _validator_registry.register_rule(
-    "price", lambda x: isinstance(x, int | float) and x > 0, "Price must be a positive number"
+    "price",
+    lambda x: isinstance(x, int | float | Decimal) and x > 0,
+    "Price must be a positive number",
 )
 
 _validator_registry.register_rule(
     "quantity",
-    lambda x: isinstance(x, int | float) and x > 0,
+    lambda x: isinstance(x, int | float | Decimal) and x > 0,
     "Quantity must be a positive number",
 )
 

@@ -52,7 +52,7 @@ class ExecutionInstruction(BaseModel):
     algorithm: ExecutionAlgorithm
 
     # Algorithm parameters
-    urgency: float = Field(ge=0.0, le=1.0, default=0.5)
+    urgency: Decimal = Field(ge=Decimal("0"), le=Decimal("1"), default=Decimal("0.5"))
     start_time: datetime | None = None
     end_time: datetime | None = None
 
@@ -72,8 +72,8 @@ class ExecutionInstruction(BaseModel):
     avoid_venues: list[str] = Field(default_factory=list)
 
     # Risk controls
-    max_slippage_pct: float = 0.01
-    max_spread_pct: float = 0.002
+    max_slippage_pct: Decimal = Decimal("0.01")
+    max_spread_pct: Decimal = Decimal("0.002")
     cancel_on_disconnect: bool = True
 
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -100,11 +100,11 @@ class ExecutionResult(BaseModel):
     # Slippage analysis
     expected_cost: Decimal
     actual_cost: Decimal
-    slippage_bps: float  # basis points
+    slippage_bps: Decimal  # basis points
     slippage_amount: Decimal
 
     # Execution quality
-    fill_rate: float
+    fill_rate: Decimal
     execution_time: int  # seconds
     num_fills: int
     num_orders: int
@@ -124,11 +124,13 @@ class ExecutionResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @property
-    def fill_percentage(self) -> float:
+    def fill_percentage(self) -> Decimal:
         """Calculate fill percentage."""
         if self.target_quantity == 0:
-            return 0.0
-        return float(self.filled_quantity / self.target_quantity * 100)
+            return Decimal("0")
+        return (self.filled_quantity / self.target_quantity * Decimal("100")).quantize(
+            Decimal("0.01")
+        )
 
     @property
     def is_complete(self) -> bool:
@@ -151,26 +153,26 @@ class SlippageMetrics(BaseModel):
     total_volume: Decimal
 
     # Slippage by type
-    market_impact_bps: float
-    timing_cost_bps: float
-    spread_cost_bps: float
-    total_slippage_bps: float
+    market_impact_bps: Decimal
+    timing_cost_bps: Decimal
+    spread_cost_bps: Decimal
+    total_slippage_bps: Decimal
 
     # Slippage by size
-    small_order_slippage: float  # < 10% ADV
-    medium_order_slippage: float  # 10-50% ADV
-    large_order_slippage: float  # > 50% ADV
+    small_order_slippage: Decimal  # < 10% ADV
+    medium_order_slippage: Decimal  # 10-50% ADV
+    large_order_slippage: Decimal  # > 50% ADV
 
     # Slippage by time
-    market_open_slippage: float
-    market_close_slippage: float
-    intraday_slippage: float
+    market_open_slippage: Decimal
+    market_close_slippage: Decimal
+    intraday_slippage: Decimal
 
     # Slippage by market condition
-    high_volatility_slippage: float
-    low_volatility_slippage: float
-    trending_slippage: float
-    ranging_slippage: float
+    high_volatility_slippage: Decimal
+    low_volatility_slippage: Decimal
+    trending_slippage: Decimal
+    ranging_slippage: Decimal
 
     # Cost analysis
     total_slippage_cost: Decimal

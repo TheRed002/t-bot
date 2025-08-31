@@ -8,14 +8,17 @@ from src.error_handling.security_sanitizer import (
     SensitivityLevel,
     get_security_sanitizer,
 )
+from src.utils.error_categorization import detect_data_validation_error
 
 
 class ValidationErrorHandler(ErrorHandlerBase):
     """Handler for validation errors with secure sanitization."""
 
-    def __init__(self, next_handler=None):
+    def __init__(self, next_handler=None, sanitizer=None):
         super().__init__(next_handler)
-        self.sanitizer = get_security_sanitizer()
+        self.sanitizer = sanitizer
+        if self.sanitizer is None:
+            raise ValueError("SecuritySanitizer must be injected via dependency injection")
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a validation error."""
@@ -101,16 +104,16 @@ class ValidationErrorHandler(ErrorHandlerBase):
 class DataValidationErrorHandler(ErrorHandlerBase):
     """Handler for data validation errors with secure sanitization."""
 
-    def __init__(self, next_handler=None):
+    def __init__(self, next_handler=None, sanitizer=None):
         super().__init__(next_handler)
-        self.sanitizer = get_security_sanitizer()
+        self.sanitizer = sanitizer
+        if self.sanitizer is None:
+            raise ValueError("SecuritySanitizer must be injected via dependency injection")
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a data validation error."""
         error_msg = str(error).lower()
-        data_keywords = ["data", "schema", "json", "parse", "decode", "malformed", "corrupt"]
-
-        return any(keyword in error_msg for keyword in data_keywords)
+        return detect_data_validation_error(error_msg)
 
     async def handle(
         self, error: Exception, context: dict[str, Any] | None = None

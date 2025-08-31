@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
@@ -107,7 +107,7 @@ class BotConfiguration(BaseModel):
     heartbeat_interval: int = 60  # Legacy attribute
     metrics_interval: int = 300  # seconds
     alert_settings: dict[str, Any] = Field(default_factory=dict)
-    
+
     # Priority setting
     priority: BotPriority = BotPriority.NORMAL
 
@@ -115,7 +115,7 @@ class BotConfiguration(BaseModel):
     updated_at: datetime | None = None
 
     metadata: dict[str, Any] = Field(default_factory=dict)
-    
+
     @property
     def bot_name(self) -> str:
         """Legacy property alias for name."""
@@ -133,7 +133,7 @@ class BotMetrics(BaseModel):
     successful_trades: int = 0
     failed_trades: int = 0
     total_pnl: Decimal = Decimal("0")
-    
+
     # Legacy attributes for compatibility
     profitable_trades: int = 0
     losing_trades: int = 0
@@ -231,20 +231,20 @@ class ResourceAllocation(BaseModel):
     resource_type: ResourceType
 
     # Allocation limits
-    allocated_amount: float
-    used_amount: float
-    available_amount: float
-    utilization_percent: float
+    allocated_amount: Decimal
+    used_amount: Decimal
+    available_amount: Decimal
+    utilization_percent: Decimal
 
     # Quotas
-    soft_limit: float
-    hard_limit: float
-    burst_limit: float | None = None
+    soft_limit: Decimal
+    hard_limit: Decimal
+    burst_limit: Decimal | None = None
 
     # Usage tracking
-    peak_usage: float
-    avg_usage: float
-    total_consumed: float
+    peak_usage: Decimal
+    avg_usage: Decimal
+    total_consumed: Decimal
 
     # Time windows
     measurement_window: int  # seconds

@@ -2,7 +2,6 @@
 
 import asyncio
 import functools
-import logging
 import threading
 import time
 import uuid
@@ -12,11 +11,12 @@ from decimal import Decimal
 from typing import Any, ClassVar, ParamSpec, TypeVar, cast
 
 from src.core.exceptions import ValidationError
+from src.core.logging import get_logger
 
 # Note: Validation should be done via dependency injection, not global import
 
 # Logger for module-level functions
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # Exception classification for retry logic
@@ -54,6 +54,10 @@ class ExceptionCategory:
         "NetworkError",
         "SocketError",
         "DNSError",
+        "WebSocketError",
+        "ConnectionResetError",
+        "ConnectionAbortedError",
+        "ConnectionRefusedError",
     }
 
     # Resource errors - may be transient or permanent
@@ -133,13 +137,12 @@ class ExceptionCategory:
             # Extract rate limit reset time if available
             if "retry after" in exc_message.lower():
                 try:
-                    # Try to extract seconds from message
                     import re
 
                     match = re.search(r"retry after (\d+)", exc_message.lower())
                     if match:
                         return float(match.group(1))
-                except (ImportError, AttributeError) as e:
+                except (ImportError, AttributeError, ValueError) as e:
                     logger.debug(f"Failed to extract retry delay from rate limit message: {e}")
                     pass
             # Default rate limit backoff
@@ -181,9 +184,7 @@ class UnifiedDecorator:
     _cleanup_in_progress: ClassVar[bool] = False  # Prevent concurrent cleanups
 
     @classmethod
-    def _get_cache_key(
-        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> str:
+    def _get_cache_key(cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
         """Generate cache key from function and arguments."""
         func_name = f"{func.__module__}.{func.__name__}"
         # Create hashable key from args and kwargs
@@ -212,9 +213,7 @@ class UnifiedDecorator:
             cls._cache_timestamps[key] = datetime.now(timezone.utc) + timedelta(seconds=ttl)
 
     @classmethod
-    def _get_cached_result(
-        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> Any | None:
+    def _get_cached_result(cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any | None:
         """Get cached result if still valid."""
         key = cls._get_cache_key(func, args, kwargs)
 
@@ -252,28 +251,30 @@ class UnifiedDecorator:
             cls._cleanup_in_progress = True
             try:
                 # Remove expired entries
-                expired_keys = [
-                    key for key, timestamp in cls._cache_timestamps.items() if now >= timestamp
-                ]
+                expired_keys = [key for key, timestamp in cls._cache_timestamps.items() if now >= timestamp]
 
                 for key in expired_keys:
-                    cls._cache.pop(key, None)
-                    cls._cache_timestamps.pop(key, None)
+                    try:
+                        cls._cache.pop(key, None)
+                        cls._cache_timestamps.pop(key, None)
+                    except KeyError as e:
+                        logger.debug(f"Key removed during cache cleanup: {e}")
+                        pass
 
                 # If still too many entries, remove oldest 20%
                 if len(cls._cache) > cls._max_cache_entries * 0.8:
-                    sorted_items = sorted(
-                        cls._cache_timestamps.items(), key=lambda x: x[1], reverse=True
-                    )
+                    sorted_items = sorted(cls._cache_timestamps.items(), key=lambda x: x[1], reverse=True)
                     # Keep 80% of max entries
                     keep_count = int(cls._max_cache_entries * 0.8)
                     keep_keys = {k for k, _ in sorted_items[:keep_count]}
 
                     # Remove entries not in keep_keys
-                    cls._cache = {k: v for k, v in cls._cache.items() if k in keep_keys}
-                    cls._cache_timestamps = {
-                        k: v for k, v in cls._cache_timestamps.items() if k in keep_keys
-                    }
+                    try:
+                        cls._cache = {k: v for k, v in cls._cache.items() if k in keep_keys}
+                        cls._cache_timestamps = {k: v for k, v in cls._cache_timestamps.items() if k in keep_keys}
+                    except RuntimeError as e:
+                        logger.debug(f"Dictionary changed during cleanup: {e}")
+                        pass
 
                 cls._last_cache_cleanup = now
             finally:
@@ -288,8 +289,12 @@ class UnifiedDecorator:
         expired_keys = [key for key, timestamp in cls._cache_timestamps.items() if now >= timestamp]
 
         for key in expired_keys:
-            cls._cache.pop(key, None)
-            cls._cache_timestamps.pop(key, None)
+            try:
+                cls._cache.pop(key, None)
+                cls._cache_timestamps.pop(key, None)
+            except KeyError as e:
+                logger.debug(f"Key removed during force cleanup: {e}")
+                pass
 
         # If still at capacity, remove oldest 30%
         if len(cls._cache) >= cls._max_cache_entries:
@@ -298,10 +303,12 @@ class UnifiedDecorator:
             keep_count = int(cls._max_cache_entries * 0.7)
             keep_keys = {k for k, _ in sorted_items[:keep_count]}
 
-            cls._cache = {k: v for k, v in cls._cache.items() if k in keep_keys}
-            cls._cache_timestamps = {
-                k: v for k, v in cls._cache_timestamps.items() if k in keep_keys
-            }
+            try:
+                cls._cache = {k: v for k, v in cls._cache.items() if k in keep_keys}
+                cls._cache_timestamps = {k: v for k, v in cls._cache_timestamps.items() if k in keep_keys}
+            except RuntimeError as e:
+                logger.debug(f"Dictionary changed during force cleanup: {e}")
+                pass
 
     @classmethod
     def clear_cache(cls) -> None:
@@ -381,8 +388,7 @@ class UnifiedDecorator:
             raise last_exception
         else:
             final_error = RuntimeError(
-                f"Failed to execute {func.__name__} after {retry_times} attempts. "
-                f"Correlation: {correlation_id}"
+                f"Failed to execute {func.__name__} after {retry_times} attempts. " f"Correlation: {correlation_id}"
             )
             final_error.correlation_id = correlation_id  # type: ignore
             raise final_error
@@ -392,13 +398,11 @@ class UnifiedDecorator:
         """Record execution metrics (placeholder for actual metrics system)."""
         # This would integrate with your metrics system
         # For now, just log it using the base logger
-        base_logger = logging.getLogger(__name__)
+        base_logger = get_logger(__name__)
         base_logger.debug(f"Metrics: {func.__name__} completed in {execution_time:.3f}s")
 
     @classmethod
-    def _bind_function_arguments(
-        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> Any:
+    def _bind_function_arguments(cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
         """Bind function arguments and apply defaults."""
         import inspect
 
@@ -408,22 +412,22 @@ class UnifiedDecorator:
             bound.apply_defaults()
             return bound
         except TypeError as e:
-            raise ValueError(f"Invalid arguments for {func.__name__}: {e}") from e
+            raise ValidationError(f"Invalid arguments for {func.__name__}: {e}") from e
 
     @classmethod
     def _validate_numeric_param(cls, param_name: str, value: Any) -> None:
         """Validate numeric parameters like price and quantity."""
         if not isinstance(value, int | float | Decimal):
-            raise ValueError(f"{param_name} must be numeric, got {type(value).__name__}")
+            raise ValidationError(f"{param_name} must be numeric, got {type(value).__name__}")
         # Use Decimal for comparison to maintain precision
         if Decimal(str(value)) <= 0:
-            raise ValueError(f"{param_name} must be positive")
+            raise ValidationError(f"{param_name} must be positive")
 
     @classmethod
     def _validate_symbol_param(cls, param_name: str, value: Any) -> None:
         """Validate symbol parameters."""
         if not isinstance(value, str) or not value.strip():
-            raise ValueError(f"{param_name} must be a non-empty string")
+            raise ValidationError(f"{param_name} must be a non-empty string")
 
     @classmethod
     def _validate_single_param(cls, param_name: str, value: Any) -> None:
@@ -438,14 +442,10 @@ class UnifiedDecorator:
             elif "symbol" in param_name.lower():
                 cls._validate_symbol_param(param_name, value)
         except Exception as validation_error:
-            raise ValueError(
-                f"Validation failed for {param_name}: {validation_error}"
-            ) from validation_error
+            raise ValidationError(f"Validation failed for {param_name}: {validation_error}") from validation_error
 
     @classmethod
-    def _validate_args(
-        cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
-    ) -> None:
+    def _validate_args(cls, func: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
         """Validate function arguments based on annotations."""
         import inspect
 
@@ -492,11 +492,9 @@ class UnifiedDecorator:
         }
 
     @classmethod
-    def _prepare_execution_context(
-        cls, func: Callable[..., Any], config: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _prepare_execution_context(cls, func: Callable[..., Any], config: dict[str, Any]) -> dict[str, Any]:
         """Prepare execution context for enhanced function."""
-        logger = logging.getLogger(func.__module__) if config["log"] else None
+        logger = get_logger(func.__module__) if config["log"] else None
         start_time = time.time()
         return {"logger": logger, "start_time": start_time}
 
@@ -661,20 +659,25 @@ class UnifiedDecorator:
             return cached_result
 
         try:
-            # Execute function
+            # Execute function with timeout handling
             if config["timeout"]:
-                result = await asyncio.wait_for(
-                    cls._execute_with_retry(
-                        func,
-                        args,
-                        kwargs,
-                        config["retry"],
-                        config["retry_times"],
-                        config["retry_delay"],
-                        context["logger"],
-                    ),
-                    timeout=config["timeout"],
-                )
+                try:
+                    result = await asyncio.wait_for(
+                        cls._execute_with_retry(
+                            func,
+                            args,
+                            kwargs,
+                            config["retry"],
+                            config["retry_times"],
+                            config["retry_delay"],
+                            context["logger"],
+                        ),
+                        timeout=config["timeout"],
+                    )
+                except asyncio.TimeoutError as timeout_error:
+                    # Add timeout context for better error tracking
+                    timeout_error.correlation_id = getattr(timeout_error, "correlation_id", str(uuid.uuid4())[:8])  # type: ignore
+                    raise timeout_error
             else:
                 result = await cls._execute_with_retry(
                     func,
@@ -807,16 +810,13 @@ class UnifiedDecorator:
 
         if context["logger"]:
             context["logger"].error(
-                f"{func.__name__} failed: {type(error).__name__}: {error}. "
-                f"Correlation: {correlation_id}"
+                f"{func.__name__} failed: {type(error).__name__}: {error}. " f"Correlation: {correlation_id}"
             )
 
         # Use fallback if provided
         if config["fallback"]:
             if context["logger"]:
-                context["logger"].info(
-                    f"Using fallback for {func.__name__}. Correlation: {correlation_id}"
-                )
+                context["logger"].info(f"Using fallback for {func.__name__}. Correlation: {correlation_id}")
 
             try:
                 fallback_result = config["fallback"](*args, **kwargs)
@@ -856,16 +856,13 @@ class UnifiedDecorator:
 
         if context["logger"]:
             context["logger"].error(
-                f"{func.__name__} failed: {type(error).__name__}: {error}. "
-                f"Correlation: {correlation_id}"
+                f"{func.__name__} failed: {type(error).__name__}: {error}. " f"Correlation: {correlation_id}"
             )
 
         # Use fallback if provided
         if config["fallback"]:
             if context["logger"]:
-                context["logger"].info(
-                    f"Using fallback for {func.__name__}. Correlation: {correlation_id}"
-                )
+                context["logger"].info(f"Using fallback for {func.__name__}. Correlation: {correlation_id}")
             try:
                 return config["fallback"](*args, **kwargs)
             except Exception as fallback_error:
@@ -911,9 +908,7 @@ dec = UnifiedDecorator
 
 
 # Simple decorator functions for common use cases
-def retry(
-    max_attempts: int = 3, delay: float = 1.0, base_delay: float | None = None
-) -> Callable[[F], F]:
+def retry(max_attempts: int = 3, delay: float = 1.0, base_delay: float | None = None) -> Callable[[F], F]:
     """Retry decorator with exponential backoff."""
     # Handle different parameter names for backward compatibility
     actual_delay = base_delay if base_delay is not None else delay
@@ -945,50 +940,57 @@ def timeout(seconds: float) -> Callable[[F], F]:
     return dec.enhance(timeout=seconds)
 
 
-# Helper function to create bare decorators that can be used without parentheses
-def _make_bare_decorator(decorator_func: Callable[..., Callable[[F], F]]) -> Callable[..., Any]:
-    """Create a decorator that can be used both with and without parentheses."""
+# Hybrid factory functions supporting both bare and parameterized usage
+def _make_hybrid_decorator(
+    base_decorator: Callable[..., Callable[[F], F]], default_args: tuple = (), default_kwargs: dict | None = None
+) -> Callable[..., Any]:
+    """Create a hybrid decorator that works with or without parameters."""
+    default_kwargs = default_kwargs or {}
 
-    def wrapper(func_or_args: F | Any | None = None, **kwargs: Any) -> F | Callable[[F], F]:
-        if func_or_args is None or callable(func_or_args):
-            # Used as @decorator or @decorator(func)
-            if func_or_args is None:
-                # Called with () - return the decorator
-                return decorator_func(**kwargs)
-            else:
-                # Called without () - func_or_args is the function
-                if callable(func_or_args):
-                    return decorator_func()(cast(F, func_or_args))
-                else:
-                    return decorator_func(**kwargs)
+    def hybrid(func_or_param: F | Any = None, **kwargs: Any) -> F | Callable[[F], F]:
+        if callable(func_or_param):
+            # Used as bare decorator: @decorator
+            return base_decorator(*default_args, **default_kwargs)(cast(F, func_or_param))
         else:
-            # Called with arguments - return the decorator
-            return decorator_func(func_or_args, **kwargs)
+            # Used with parameters: @decorator(param) or @decorator(param=value)
+            if func_or_param is not None:
+                # Positional parameter provided
+                if default_args:
+                    # Replace first default arg with provided value
+                    args = (func_or_param, *default_args[1:])
+                else:
+                    args = (func_or_param,)
+                # Merge kwargs, giving priority to explicitly passed kwargs
+                merged_kwargs = {**default_kwargs, **kwargs}
+                return base_decorator(*args, **merged_kwargs)
+            else:
+                # Only keyword arguments provided, don't use default_args to avoid conflicts
+                merged_kwargs = {**default_kwargs, **kwargs}
+                return base_decorator(**merged_kwargs)
 
-    return wrapper
+    return hybrid
 
 
-# Additional aliases for backward compatibility - these work as bare decorators
-cache_result = _make_bare_decorator(lambda ttl=300: cached(ttl))
-validate_input = _make_bare_decorator(lambda: validated())
-log_calls = _make_bare_decorator(lambda level="info": logged(level))
-log_errors = _make_bare_decorator(lambda level="error": logged(level))
-log_performance = _make_bare_decorator(lambda: monitored())
-api_throttle = _make_bare_decorator(lambda: monitored())
+# Factory functions using hybrid pattern for backward compatibility
+cache_result = _make_hybrid_decorator(cached, (300,))
+validate_input = _make_hybrid_decorator(validated, ())
+log_calls = _make_hybrid_decorator(logged, ("info",))
+log_errors = _make_hybrid_decorator(logged, ("error",))
+log_performance = _make_hybrid_decorator(monitored, ())
+api_throttle = _make_hybrid_decorator(monitored, ())
+rate_limit = _make_hybrid_decorator(monitored, ())
+redis_cache = _make_hybrid_decorator(cached, (300,))
+time_execution = _make_hybrid_decorator(monitored, ())
+ttl_cache = _make_hybrid_decorator(cached, (300,))
+type_check = _make_hybrid_decorator(validated, ())
+validate_output = _make_hybrid_decorator(validated, ())
+cpu_usage = _make_hybrid_decorator(monitored, ())
+memory_usage = _make_hybrid_decorator(monitored, ())
 
 
 def circuit_breaker(failure_threshold: int = 5, recovery_timeout: int = 60) -> Callable[[F], F]:
+    """Circuit breaker decorator factory."""
     return dec.enhance(retry=True, retry_times=failure_threshold)
-
-
-rate_limit = _make_bare_decorator(lambda: monitored())
-redis_cache = _make_bare_decorator(lambda ttl=300: cached(ttl))
-time_execution = _make_bare_decorator(lambda: monitored())
-ttl_cache = _make_bare_decorator(lambda ttl=300: cached(ttl))
-type_check = _make_bare_decorator(lambda: validated())
-validate_output = _make_bare_decorator(lambda: validated())
-cpu_usage = _make_bare_decorator(lambda: monitored())
-memory_usage = _make_bare_decorator(lambda: monitored())
 
 
 def robust() -> Callable[[F], F]:

@@ -82,13 +82,18 @@ class Config:
 
     def _parse_config_file(self, config_path: Path) -> dict[str, Any]:
         """Parse config file based on format."""
-        with open(config_path) as f:
+        file_handle = None
+        try:
+            file_handle = open(config_path)
             if config_path.suffix in [".yaml", ".yml"]:
-                return yaml.safe_load(f)
+                return yaml.safe_load(file_handle)
             elif config_path.suffix == ".json":
-                return json.load(f)
+                return json.load(file_handle)
             else:
                 raise ValueError(f"Unsupported config file format: {config_path.suffix}")
+        finally:
+            if file_handle:
+                file_handle.close()
 
     def _apply_config_data(self, config_data: dict[str, Any]) -> None:
         """Apply configuration data to domain configs."""
@@ -148,11 +153,11 @@ class Config:
 
     def _write_config_file(self, config_path: Path, config_data: dict[str, Any]) -> None:
         """Write configuration data to file in appropriate format."""
-        with open(config_path, "w") as f:
+        with open(config_path, "w") as file_handle:
             if config_path.suffix in [".yaml", ".yml"]:
-                yaml.dump(config_data, f, default_flow_style=False)
+                yaml.dump(config_data, file_handle, default_flow_style=False)
             elif config_path.suffix == ".json":
-                json.dump(config_data, f, indent=2, default=self._json_serializer)
+                json.dump(config_data, file_handle, indent=2, default=self._json_serializer)
             else:
                 raise ValueError(f"Unsupported config file format: {config_path.suffix}")
 
@@ -200,7 +205,7 @@ class Config:
         return self.database.postgresql_username
 
     @property
-    def postgresql_password(self) -> str:
+    def postgresql_password(self) -> str | None:
         """Backward compatibility."""
         return self.database.postgresql_password
 

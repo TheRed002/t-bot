@@ -87,6 +87,29 @@ class ExchangeConfig(BaseConfig):
     request_timeout: int = Field(default=30, description="Request timeout in seconds")
     max_retries: int = Field(default=3, description="Maximum number of retries")
     retry_delay: float = Field(default=1.0, description="Delay between retries in seconds")
+    
+    # WebSocket settings
+    websocket_message_timeout: int = Field(default=60, description="WebSocket message timeout in seconds")
+    websocket_ping_interval: int = Field(default=30, description="WebSocket ping interval in seconds")
+    websocket_ping_timeout: int = Field(default=10, description="WebSocket ping timeout in seconds")
+    websocket_close_timeout: int = Field(default=10, description="WebSocket close timeout in seconds")
+    websocket_max_reconnect_attempts: int = Field(default=10, description="Maximum WebSocket reconnection attempts")
+    websocket_reconnect_delay: float = Field(default=1.0, description="WebSocket reconnection delay in seconds")
+    websocket_max_reconnect_delay: float = Field(default=60.0, description="Maximum WebSocket reconnection delay in seconds")
+    websocket_heartbeat_interval: float = Field(default=30.0, description="WebSocket heartbeat interval in seconds")
+    websocket_health_check_interval: float = Field(default=30.0, description="WebSocket health check interval in seconds")
+    
+    # Connection pool settings
+    connection_pool_size: int = Field(default=3, description="Default connection pool size")
+    connection_pool_max_size: int = Field(default=10, description="Maximum connection pool size")
+    connection_pool_keepalive_timeout: int = Field(default=300, description="Connection keepalive timeout in seconds")
+    connection_pool_health_check_interval: int = Field(default=60, description="Connection pool health check interval in seconds")
+    connection_pool_retry_attempts: int = Field(default=3, description="Connection pool retry attempts")
+    connection_pool_circuit_breaker_timeout: int = Field(default=60, description="Circuit breaker timeout in seconds")
+    
+    # Rate limiting settings
+    rate_limit_window_seconds: int = Field(default=60, description="Rate limit window in seconds")
+    rate_limit_max_queue_size: int = Field(default=1000, description="Maximum rate limit queue size")
 
     @field_validator("default_exchange")
     @classmethod
@@ -148,12 +171,19 @@ class ExchangeConfig(BaseConfig):
         except ValueError:
             return False
 
-    def get_websocket_config(self, exchange: str) -> dict:
+    def get_websocket_config(self, exchange: str) -> dict[str, Any]:
         """Get WebSocket configuration for a specific exchange."""
-        base_config = {
-            "reconnect_attempts": 5,
-            "ping_interval": 30,
+        base_config: dict[str, Any] = {
+            "reconnect_attempts": self.websocket_max_reconnect_attempts,
+            "ping_interval": self.websocket_ping_interval,
+            "ping_timeout": self.websocket_ping_timeout,
+            "close_timeout": self.websocket_close_timeout,
+            "message_timeout": self.websocket_message_timeout,
             "timeout": self.connection_timeout,
+            "reconnect_delay": self.websocket_reconnect_delay,
+            "max_reconnect_delay": self.websocket_max_reconnect_delay,
+            "heartbeat_interval": self.websocket_heartbeat_interval,
+            "health_check_interval": self.websocket_health_check_interval,
         }
 
         exchange = exchange.lower()
@@ -167,3 +197,25 @@ class ExchangeConfig(BaseConfig):
             raise ValueError(f"Unknown exchange: {exchange}")
 
         return base_config
+
+    def get_connection_pool_config(self) -> dict[str, Any]:
+        """Get connection pool configuration."""
+        return {
+            "pool_size": self.connection_pool_size,
+            "max_pool_size": self.connection_pool_max_size,
+            "keepalive_timeout": self.connection_pool_keepalive_timeout,
+            "health_check_interval": self.connection_pool_health_check_interval,
+            "retry_attempts": self.connection_pool_retry_attempts,
+            "circuit_breaker_timeout": self.connection_pool_circuit_breaker_timeout,
+            "connection_timeout": self.connection_timeout,
+            "request_timeout": self.request_timeout,
+        }
+
+    def get_rate_limit_config(self) -> dict[str, Any]:
+        """Get rate limiting configuration."""
+        return {
+            "requests_per_second": self.rate_limit_per_second,
+            "window_seconds": self.rate_limit_window_seconds,
+            "buffer": self.rate_limit_buffer,
+            "max_queue_size": self.rate_limit_max_queue_size,
+        }

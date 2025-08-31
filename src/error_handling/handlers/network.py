@@ -1,6 +1,7 @@
 """Network-specific error handlers with secure data sanitization."""
 
 import asyncio
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from src.error_handling.base import ErrorHandlerBase
@@ -8,6 +9,7 @@ from src.error_handling.security_sanitizer import (
     SensitivityLevel,
     get_security_sanitizer,
 )
+from src.utils.error_categorization import detect_rate_limiting
 
 
 class NetworkErrorHandler(ErrorHandlerBase):
@@ -16,9 +18,10 @@ class NetworkErrorHandler(ErrorHandlerBase):
     def __init__(
         self,
         max_retries: int = 3,
-        base_delay: float = 1.0,
+        base_delay: Decimal = Decimal("1.0"),
         next_handler: ErrorHandlerBase | None = None,
-    ):
+        sanitizer=None,
+    ) -> None:
         """
         Initialize network error handler with secure sanitization.
 
@@ -26,11 +29,14 @@ class NetworkErrorHandler(ErrorHandlerBase):
             max_retries: Maximum number of retry attempts
             base_delay: Base delay between retries (exponential backoff)
             next_handler: Next handler in chain
+            sanitizer: Security sanitizer (injected via DI)
         """
         super().__init__(next_handler)
         self.max_retries = max_retries
         self.base_delay = base_delay
-        self.sanitizer = get_security_sanitizer()
+        self.sanitizer = sanitizer
+        if self.sanitizer is None:
+            raise ValueError("SecuritySanitizer must be injected via dependency injection")
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a network error."""
@@ -62,7 +68,7 @@ class NetworkErrorHandler(ErrorHandlerBase):
         self, error: Exception, context: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         """
-        Handle network error with retry strategy.
+        Handle network error by delegating to service layer.
 
         Args:
             error: The network error
@@ -87,8 +93,8 @@ class NetworkErrorHandler(ErrorHandlerBase):
                 "sanitized_error": sanitized_msg,
             }
 
-        # Calculate delay with exponential backoff
-        delay = self.base_delay * (2**retry_count)
+        # Delegate delay calculation to service layer
+        delay = self._calculate_retry_delay(retry_count)
 
         sanitized_msg = self.sanitizer.sanitize_error_message(str(error), SensitivityLevel.MEDIUM)
         self._logger.warning(
@@ -98,32 +104,35 @@ class NetworkErrorHandler(ErrorHandlerBase):
 
         return {
             "action": "retry",
-            "delay": delay,
+            "delay": str(delay),
             "retry_count": retry_count + 1,
             "max_retries": self.max_retries,
             "sanitized_error": sanitized_msg,
         }
 
+    def _calculate_retry_delay(self, retry_count: int) -> Decimal:
+        """Calculate retry delay - moved business logic to separate method."""
+        from decimal import localcontext
+
+        with localcontext() as ctx:
+            ctx.prec = 8
+            ctx.rounding = ROUND_HALF_UP
+            return self.base_delay * (Decimal("2") ** retry_count)
+
 
 class RateLimitErrorHandler(ErrorHandlerBase):
     """Handler for rate limit errors with secure sanitization."""
 
-    def __init__(self, next_handler=None):
+    def __init__(self, next_handler: ErrorHandlerBase | None = None, sanitizer=None) -> None:
         super().__init__(next_handler)
-        self.sanitizer = get_security_sanitizer()
+        self.sanitizer = sanitizer
+        if self.sanitizer is None:
+            raise ValueError("SecuritySanitizer must be injected via dependency injection")
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a rate limit error."""
         error_msg = str(error).lower()
-        rate_limit_keywords = [
-            "rate limit",
-            "too many requests",
-            "429",
-            "throttle",
-            "quota exceeded",
-        ]
-
-        return any(keyword in error_msg for keyword in rate_limit_keywords)
+        return detect_rate_limiting(error_msg)
 
     async def handle(
         self, error: Exception, context: dict[str, Any] | None = None
@@ -150,21 +159,25 @@ class RateLimitErrorHandler(ErrorHandlerBase):
             f"Rate limit exceeded: {sanitized_msg}. Waiting {retry_after}s before retry"
         )
 
+        # Return wait instruction instead of blocking - let service layer handle timing
+
         return {
             "action": "wait",
-            "delay": retry_after,
+            "delay": str(retry_after),
             "reason": "rate_limit",
             "circuit_break": True,  # Suggest circuit breaker activation
             "sanitized_error": sanitized_msg,
         }
 
     def _extract_retry_after(
-        self, error: Exception, context: dict[str, Any] | None
-    ) -> float | None:
+        self, error: Exception, context: dict[str, Any] | None = None
+    ) -> Decimal | None:
         """Extract retry-after value from error or context."""
+        from decimal import Decimal
+
         # Check context first
         if context and "retry_after" in context:
-            return float(context["retry_after"])
+            return Decimal(str(context["retry_after"]))
 
         # Try to parse from error message
         import re
@@ -174,11 +187,11 @@ class RateLimitErrorHandler(ErrorHandlerBase):
         # Look for patterns like "retry after 30 seconds"
         match = re.search(r"retry[\s\-_]?after[\s:]*(\d+)", error_str, re.IGNORECASE)
         if match:
-            return float(match.group(1))
+            return Decimal(match.group(1))
 
         # Look for "429" status with time
         match = re.search(r"429.*?(\d+)\s*(?:seconds?|s)", error_str, re.IGNORECASE)
         if match:
-            return float(match.group(1))
+            return Decimal(match.group(1))
 
         return None

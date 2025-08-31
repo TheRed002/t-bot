@@ -27,7 +27,7 @@ from src.core.exceptions import (
 from src.core.types.base import ConfigDict
 
 # Type variables for factory operations
-T = TypeVar("T")  # Product type
+T = TypeVar("T", covariant=True)  # Product type
 P = TypeVar("P")  # Protocol type
 
 
@@ -88,7 +88,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
         super().__init__(name, config, correlation_id)
 
         self._product_type = product_type
-        self._creators: dict[str, CreatorFunction[T]] = {}
+        self._creators: dict[str, type[T] | CreatorFunction[T] | Callable[..., T]] = {}
         self._creator_configs: dict[str, dict[str, Any]] = {}
         self._creator_metadata: dict[str, dict[str, Any]] = {}
 
@@ -302,7 +302,16 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
 
                 # Perform dependency injection
                 if self._auto_inject and self._dependency_container:
-                    kwargs = self._inject_dependencies(name, kwargs)
+                    try:
+                        kwargs = self._inject_dependencies(name, kwargs)
+                    except Exception as e:
+                        self._logger.warning(
+                            "Dependency injection failed during creation",
+                            factory=self._name,
+                            creator=name,
+                            error=str(e),
+                        )
+                        # Continue without injection rather than failing
 
                 # Execute creator
                 creator = self._creators[name]
@@ -389,9 +398,14 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                 if hasattr(instance, "cleanup"):
                     try:
                         instance.cleanup()
-                    except Exception as e:
+                    except Exception as cleanup_error:
                         # Log cleanup errors for debugging but don't fail the overall cleanup
-                        self.logger.debug(f"Failed to cleanup factory instance: {e}")
+                        self._logger.warning(
+                            "Failed to cleanup factory instance during batch creation failure",
+                            factory=self._name,
+                            error=str(cleanup_error),
+                            error_type=type(cleanup_error).__name__,
+                        )
 
             raise CreationError(f"Batch creation failed in factory {self._name}: {e}") from e
 
@@ -458,7 +472,14 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                     param_type = type_hints[param_name]
 
                     try:
-                        dependency = self._dependency_container.resolve(param_type)
+                        # Try resolving by type first
+                        if hasattr(self._dependency_container, "resolve"):
+                            dependency = self._dependency_container.resolve(param_type.__name__)
+                        elif hasattr(self._dependency_container, "get"):
+                            dependency = self._dependency_container.get(param_type.__name__)
+                        else:
+                            raise ValueError("Invalid dependency container")
+
                         kwargs[param_name] = dependency
 
                         self._logger.debug(
@@ -470,9 +491,34 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                         )
 
                     except Exception as e:
-                        # Dependency injection is optional, log for debugging
-                        self.logger.debug(f"Failed to inject dependency {param_name}: {e}")
-                        continue
+                        # Try resolving by parameter name as fallback
+                        try:
+                            if hasattr(self._dependency_container, "resolve"):
+                                dependency = self._dependency_container.resolve(param_name)
+                            elif hasattr(self._dependency_container, "get"):
+                                dependency = self._dependency_container.get(param_name)
+                            else:
+                                raise ValueError("Invalid dependency container")
+
+                            kwargs[param_name] = dependency
+
+                            self._logger.debug(
+                                "Dependency injected by name",
+                                factory=self._name,
+                                creator=creator_name,
+                                parameter=param_name,
+                            )
+                        except Exception:
+                            # Dependency injection is optional, log for debugging
+                            self._logger.debug(
+                                "Failed to inject dependency (optional)",
+                                factory=self._name,
+                                creator=creator_name,
+                                parameter=param_name,
+                                error=str(e),
+                                error_type=type(e).__name__,
+                            )
+                            continue
 
             return kwargs
 
@@ -602,7 +648,11 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
 
     def get_all_creator_info(self) -> dict[str, dict[str, Any]]:
         """Get information about all registered creators."""
-        return {name: self.get_creator_info(name) for name in self._creators.keys()}
+        return {
+            name: info
+            for name in self._creators.keys()
+            if (info := self.get_creator_info(name)) is not None
+        }
 
     # Singleton Management
     def get_singleton(self, name: str) -> T | None:
@@ -687,7 +737,7 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
                         return HealthStatus.DEGRADED
 
                 except Exception as e:
-                    self.logger.debug(f"Failed to check creator info for {name}: {e}")
+                    self._logger.debug(f"Failed to check creator info for {name}: {e}")
                     return HealthStatus.DEGRADED
 
             # Check creation error rate
@@ -781,27 +831,30 @@ class BaseFactory(BaseComponent, FactoryComponent, Generic[T]):
             validate_products=validate_products,
         )
 
-    def configure_dependency_injection(
-        self,
-        container: Any | None = None,
-        auto_inject: bool = True,
-    ) -> None:
+    def configure_dependencies(self, container: Any) -> None:
         """
-        Configure dependency injection.
+        Configure component dependencies.
 
         Args:
             container: Dependency injection container
-            auto_inject: Enable automatic dependency injection
         """
         self._dependency_container = container
-        self._auto_inject = auto_inject
+        self._auto_inject = True  # Enable auto-injection when container is available
 
         self._logger.info(
-            "Dependency injection configured",
+            "Dependencies configured",
             factory=self._name,
             has_container=container is not None,
-            auto_inject=auto_inject,
         )
+
+    def get_dependencies(self) -> list[str]:
+        """
+        Get list of required dependencies.
+
+        Returns:
+            List of dependency names
+        """
+        return []  # Factories typically don't have dependencies
 
     # Lifecycle Management
     async def _do_stop(self) -> None:

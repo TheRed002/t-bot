@@ -432,7 +432,15 @@ class HealthCheckManager(BaseComponent):
                             check_time=datetime.now(timezone.utc),
                         )
                     else:
-                        results[name] = result
+                        results[name] = (
+                            result
+                            if isinstance(result, HealthCheckResult)
+                            else HealthCheckResult(
+                                status=HealthStatus.UNKNOWN,
+                                message=f"Invalid result type: {type(result)}",
+                                check_time=datetime.now(timezone.utc),
+                            )
+                        )
 
             else:
                 # Run checks sequentially
@@ -738,7 +746,11 @@ class HealthCheckManager(BaseComponent):
 
     def get_all_component_info(self) -> dict[str, dict[str, Any]]:
         """Get information about all registered components."""
-        return {name: self.get_component_info(name) for name in self._components.keys()}
+        return {
+            name: info
+            for name in self._components.keys()
+            if (info := self.get_component_info(name)) is not None
+        }
 
     def list_components(self, enabled_only: bool = False) -> list[str]:
         """

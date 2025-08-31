@@ -44,10 +44,7 @@ class TestCorrelationContext:
             assert correlation_context.get_correlation_id() == "test_correlation_id"
             assert cid == "test_correlation_id"
 
-        # Note: The correlation context might persist in some environments
-        # This is expected behavior for some implementations
         current_id = correlation_context.get_correlation_id()
-        # Either None or the test ID, both are acceptable
         assert current_id is None or current_id == "test_correlation_id"
 
     def test_correlation_context_auto_generate(self):

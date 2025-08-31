@@ -130,7 +130,10 @@ def migrate_legacy_config_usage() -> None:
     - ✅ Configuration change notifications
     """
 
-    print(migration_guide)
+    from src.core.logging import get_logger
+
+    migration_logger = get_logger(__name__)
+    migration_logger.info("Configuration migration guide", guide=migration_guide)
 
 
 def validate_migration_status() -> dict[str, bool]:

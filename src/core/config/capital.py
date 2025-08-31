@@ -68,7 +68,7 @@ class CapitalManagementConfig(BaseModel):
         le=Decimal("1.0"),
     )
 
-    withdrawal_limits: dict[str, float] = Field(
+    withdrawal_limits: dict[str, Decimal] = Field(
         default_factory=dict, description="Per-exchange withdrawal limits"
     )
 
@@ -91,29 +91,47 @@ class CapitalManagementConfig(BaseModel):
 
     hedging_enabled: bool = Field(default=True, description="Enable currency hedging")
 
-    hedging_threshold: float = Field(
-        default=0.2, description="Threshold for triggering hedging operations", ge=0.0, le=1.0
+    hedging_threshold: Decimal = Field(
+        default=Decimal("0.2"),
+        description="Threshold for triggering hedging operations",
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
-    hedge_ratio: float = Field(
-        default=0.5, description="Ratio of exposure to hedge", ge=0.0, le=1.0
+    hedge_ratio: Decimal = Field(
+        default=Decimal("0.5"),
+        description="Ratio of exposure to hedge",
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
     # Capital protection settings
-    max_daily_loss_pct: float = Field(
-        default=0.05, description="Maximum daily loss percentage", ge=0.0, le=1.0
+    max_daily_loss_pct: Decimal = Field(
+        default=Decimal("0.05"),
+        description="Maximum daily loss percentage",
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
-    max_weekly_loss_pct: float = Field(
-        default=0.15, description="Maximum weekly loss percentage", ge=0.0, le=1.0
+    max_weekly_loss_pct: Decimal = Field(
+        default=Decimal("0.15"),
+        description="Maximum weekly loss percentage",
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
-    max_monthly_loss_pct: float = Field(
-        default=0.25, description="Maximum monthly loss percentage", ge=0.0, le=1.0
+    max_monthly_loss_pct: Decimal = Field(
+        default=Decimal("0.25"),
+        description="Maximum monthly loss percentage",
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
-    profit_lock_pct: float = Field(
-        default=0.1, description="Percentage of profit to lock in", ge=0.0, le=1.0
+    profit_lock_pct: Decimal = Field(
+        default=Decimal("0.1"),
+        description="Percentage of profit to lock in",
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
     auto_compound_enabled: bool = Field(
@@ -124,23 +142,33 @@ class CapitalManagementConfig(BaseModel):
         default="daily", description="Frequency of auto-compounding (daily, weekly, monthly)"
     )
 
-    profit_threshold: float = Field(
-        default=0.05, description="Minimum profit threshold for operations", ge=0.0
+    profit_threshold: Decimal = Field(
+        default=Decimal("0.05"),
+        description="Minimum profit threshold for operations",
+        ge=Decimal("0.0"),
     )
 
     # Fund flow settings
-    min_deposit_amount: float = Field(default=1000.0, description="Minimum deposit amount", gt=0)
-
-    min_withdrawal_amount: float = Field(
-        default=100.0, description="Minimum withdrawal amount", gt=0
+    min_deposit_amount: Decimal = Field(
+        default=Decimal("1000.0"), description="Minimum deposit amount", gt=0
     )
 
-    max_withdrawal_pct: float = Field(
-        default=0.2, description="Maximum withdrawal percentage per transaction", ge=0.0, le=1.0
+    min_withdrawal_amount: Decimal = Field(
+        default=Decimal("100.0"), description="Minimum withdrawal amount", gt=0
     )
 
-    max_daily_reallocation_pct: float = Field(
-        default=0.1, description="Maximum daily reallocation percentage", ge=0.0, le=1.0
+    max_withdrawal_pct: Decimal = Field(
+        default=Decimal("0.2"),
+        description="Maximum withdrawal percentage per transaction",
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
+    )
+
+    max_daily_reallocation_pct: Decimal = Field(
+        default=Decimal("0.1"),
+        description="Maximum daily reallocation percentage",
+        ge=Decimal("0.0"),
+        le=Decimal("1.0"),
     )
 
     fund_flow_cooldown_minutes: int = Field(
@@ -151,7 +179,7 @@ class CapitalManagementConfig(BaseModel):
         default_factory=dict, description="Withdrawal rules configuration"
     )
 
-    per_strategy_minimum: dict[str, float] = Field(
+    per_strategy_minimum: dict[str, Decimal] = Field(
         default_factory=dict, description="Minimum allocation per strategy type"
     )
 

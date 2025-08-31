@@ -4,13 +4,15 @@ This module provides utilities for GPU acceleration throughout the codebase.
 It automatically detects available GPUs and provides fallback to CPU when needed.
 """
 
-import logging
 from collections.abc import Callable
 from typing import Any
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
+
+from src.core.exceptions import ServiceError
+from src.core.logging import get_logger
 
 # Try to import GPU libraries with graceful fallbacks
 try:
@@ -55,7 +57,7 @@ except ImportError:
     cuml_module = None
 
 # Configure logging
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class GPUManager:
@@ -77,11 +79,12 @@ class GPUManager:
             try:
                 if torch_module.cuda.is_available():
                     TORCH_DEVICE = torch_module.device("cuda")
-                    # Only set default tensor type if CUDA is available
+                    # Use modern PyTorch API instead of deprecated set_default_tensor_type
                     try:
-                        torch_module.set_default_tensor_type("torch.cuda.FloatTensor")
+                        torch_module.set_default_dtype(torch_module.float32)
+                        torch_module.set_default_device("cuda")
                     except Exception as e:
-                        logger.warning(f"Could not set default CUDA tensor type: {e}")
+                        logger.warning(f"Could not set default CUDA settings: {e}")
                         TORCH_DEVICE = torch_module.device("cpu")
                 else:
                     TORCH_DEVICE = torch_module.device("cpu")
@@ -110,7 +113,7 @@ class GPUManager:
                     return True
             except Exception as e:
                 logger.debug(f"PyTorch GPU check failed: {e}")
-                pass
+                # Continue checking other GPU libraries
 
         if TF_AVAILABLE and tf_module:
             try:
@@ -118,7 +121,7 @@ class GPUManager:
                     return True
             except Exception as e:
                 logger.debug(f"TensorFlow GPU check failed: {e}")
-                pass
+                # Continue checking other GPU libraries
 
         if CUPY_AVAILABLE and cp_module:
             try:
@@ -126,7 +129,7 @@ class GPUManager:
                 return True
             except Exception as e:
                 logger.debug(f"CuPy GPU check failed: {e}")
-                pass
+                # Continue checking other GPU libraries
 
         return False
 
@@ -171,9 +174,7 @@ class GPUManager:
     def _log_gpu_status(self) -> None:
         """Log GPU status information."""
         if self.gpu_available:
-            logger.info(
-                f"GPU acceleration enabled: {self.device_info['device_count']} device(s) available"
-            )
+            logger.info(f"GPU acceleration enabled: {self.device_info['device_count']} device(s) available")
             for device in self.device_info["devices"]:
                 memory_gb = device["total_memory"] / 1e9
                 logger.info(f"  Device {device['index']}: {device['name']} ({memory_gb:.2f} GB)")
@@ -181,6 +182,10 @@ class GPUManager:
             logger.warning("GPU acceleration not available, using CPU")
 
         logger.debug(f"Available libraries: {self.device_info['libraries']}")
+
+    def is_available(self) -> bool:
+        """Check if GPU is available for factory pattern interface compliance."""
+        return self.gpu_available
 
     def get_memory_info(self, device_id: int = 0) -> dict[str, float]:
         """Get GPU memory information."""
@@ -273,11 +278,7 @@ class GPUManager:
     def _is_tensor_like(self, data: Any) -> bool:
         """Check if data is a tensor-like object."""
         return bool(
-            TORCH_AVAILABLE
-            and torch_module
-            and TORCH_DEVICE
-            and hasattr(data, "to")
-            and hasattr(data, "device")
+            TORCH_AVAILABLE and torch_module and TORCH_DEVICE and hasattr(data, "to") and hasattr(data, "device")
         )
 
     def _convert_tensor_to_gpu(self, data: Any) -> Any:
@@ -296,9 +297,7 @@ class GPUManager:
 
             # Handle PyTorch tensors
             if TORCH_AVAILABLE and torch_module:
-                if hasattr(data, "cpu") and hasattr(
-                    data, "numpy"
-                ):  # Check if it's a tensor-like object
+                if hasattr(data, "cpu") and hasattr(data, "numpy"):  # Check if it's a tensor-like object
                     return data.cpu().numpy()
 
             # Handle cuDF DataFrames
@@ -315,50 +314,50 @@ class GPUManager:
         if not self.gpu_available:
             return func(*args, **kwargs)
 
-        # Move inputs to GPU
-        gpu_args = [self.to_gpu(arg) for arg in args]
-        gpu_kwargs = {k: self.to_gpu(v) for k, v in kwargs.items()}
+        gpu_args = []
+        gpu_kwargs = {}
 
-        # Run computation
         try:
+            # Move inputs to GPU
+            gpu_args = [self.to_gpu(arg) for arg in args]
+            gpu_kwargs = {k: self.to_gpu(v) for k, v in kwargs.items()}
+
+            # Run computation
             result = func(*gpu_args, **gpu_kwargs)
             # Move result back to CPU if needed
             return self.to_cpu(result)
         except Exception as e:
             logger.warning(f"GPU computation failed, falling back to CPU: {e}")
             return func(*args, **kwargs)
+        finally:
+            # Clear GPU memory to prevent memory leaks
+            if TORCH_AVAILABLE and torch_module and torch_module.cuda.is_available():
+                try:
+                    torch_module.cuda.empty_cache()
+                except Exception as cleanup_e:
+                    logger.debug(f"Failed to clear GPU cache: {cleanup_e}")
+            # Explicitly delete GPU tensors/arrays
+            try:
+                del gpu_args
+                del gpu_kwargs
+            except Exception as e:
+                # GPU memory cleanup can fail safely
+                logger.debug(f"GPU memory cleanup failed: {e}")
+                pass
 
 
 # GPUManager registration is handled by service_registry.py
 
 
-def get_optimal_batch_size(
-    data_size: int, memory_limit_gb: float = 4.0, gpu_manager: GPUManager | None = None
-) -> int:
+def get_optimal_batch_size(data_size: int, memory_limit_gb: float = 4.0, gpu_manager: GPUManager | None = None) -> int:
     """Calculate optimal batch size based on available GPU memory."""
     if gpu_manager is None:
-        from src.core.dependency_injection import injector
+        # Use proper dependency injection instead of direct instantiation
+        gpu_manager = _get_gpu_manager_service()
 
-        try:
-            gpu_manager = injector.resolve("GPUManager")
-        except Exception:
-            # Register if not found
-            injector.register_service("GPUManager", GPUManager(), singleton=True)
-            gpu_manager = injector.resolve("GPUManager")
-
-    if not gpu_manager.gpu_available:
+    if not gpu_manager.is_available():
         # CPU batch size
         return min(1024, data_size)
-
-    if gpu_manager is None:
-        from src.core.dependency_injection import injector
-
-        try:
-            gpu_manager = injector.resolve("GPUManager")
-        except Exception:
-            # Register if not found
-            injector.register_service("GPUManager", GPUManager(), singleton=True)
-            gpu_manager = injector.resolve("GPUManager")
 
     memory_info = gpu_manager.get_memory_info()
     available_memory_gb = memory_info.get("free", 4.0)
@@ -378,11 +377,38 @@ def get_optimal_batch_size(
     return batch_size
 
 
+def _get_gpu_manager_service() -> GPUManager:
+    """Get GPU manager using service locator pattern."""
+    from src.core.dependency_injection import injector
+
+    try:
+        return injector.resolve("GPUManager")
+    except Exception as e:
+        # Register services if not available and retry
+        logger.debug(f"Failed to resolve GPUManager from DI container: {e}")
+        try:
+            from src.utils.service_registry import register_util_services
+
+            register_util_services()
+            return injector.resolve("GPUManager")
+        except Exception as registry_error:
+            logger.error(f"Failed to register util services: {registry_error}")
+            # Raise error instead of violating service layer architecture
+            raise ServiceError(
+                "GPUManager service not available. Ensure service registration is completed during application startup.",
+                error_code="SERV_000"
+            ) from registry_error
+
+
 def parallel_apply(
-    df: pd.DataFrame, func: Any, axis: int = 0, use_gpu: bool = True
+    df: pd.DataFrame, func: Any, axis: int = 0, use_gpu: bool = True, gpu_manager: "GPUManager | None" = None
 ) -> pd.DataFrame:
     """Apply function to DataFrame with GPU acceleration if available."""
-    if use_gpu and gpu_manager.gpu_available and RAPIDS_AVAILABLE and cudf_module:
+    if gpu_manager is None:
+        # Use proper dependency injection instead of direct instantiation
+        gpu_manager = _get_gpu_manager_service()
+
+    if use_gpu and gpu_manager.is_available() and RAPIDS_AVAILABLE and cudf_module:
         try:
             # Convert to cuDF and apply
             gdf = cudf_module.from_pandas(df)
@@ -395,10 +421,17 @@ def parallel_apply(
     return df.apply(func, axis=axis)
 
 
-def gpu_accelerated_correlation(data: NDArray[np.float64]) -> NDArray[np.float64]:
+def gpu_accelerated_correlation(
+    data: NDArray[np.float64], gpu_manager: "GPUManager | None" = None
+) -> NDArray[np.float64]:
     """Calculate correlation matrix with GPU acceleration."""
-    if gpu_manager.gpu_available:
-        try:
+    if gpu_manager is None:
+        # Use proper dependency injection instead of direct instantiation
+        gpu_manager = _get_gpu_manager_service()
+
+    gpu_data = None
+    try:
+        if gpu_manager.is_available():
             if CUPY_AVAILABLE and cp_module:
                 gpu_data = cp_module.asarray(data)
                 corr = cp_module.corrcoef(gpu_data.T)
@@ -412,8 +445,24 @@ def gpu_accelerated_correlation(data: NDArray[np.float64]) -> NDArray[np.float64
                 # Calculate correlation
                 corr = torch_module.mm(standardized.T, standardized) / (gpu_data.shape[0] - 1)
                 return corr.cpu().numpy()
-        except Exception as e:
-            logger.warning(f"GPU correlation calculation failed, using CPU: {e}")
+    except Exception as e:
+        logger.warning(f"GPU correlation calculation failed, using CPU: {e}")
+    finally:
+        # Clean up GPU memory
+        if gpu_data is not None:
+            try:
+                del gpu_data
+            except Exception as e:
+                # GPU memory cleanup can fail safely
+                logger.debug(f"GPU memory cleanup failed: {e}")
+                pass
+        if TORCH_AVAILABLE and torch_module and torch_module.cuda.is_available():
+            try:
+                torch_module.cuda.empty_cache()
+            except Exception as e:
+                # GPU memory cleanup can fail safely
+                logger.debug(f"GPU memory cleanup failed: {e}")
+                pass
 
     # Fallback to NumPy
     return np.corrcoef(data.T)
@@ -424,17 +473,14 @@ def gpu_accelerated_rolling_window(
 ) -> NDArray[np.float64]:
     """Apply rolling window function with GPU acceleration."""
     if gpu_manager is None:
-        from src.core.dependency_injection import injector
+        # Use proper dependency injection instead of direct instantiation
+        gpu_manager = _get_gpu_manager_service()
 
-        try:
-            gpu_manager = injector.resolve("GPUManager")
-        except Exception:
-            # Register if not found
-            injector.register_service("GPUManager", GPUManager(), singleton=True)
-            gpu_manager = injector.resolve("GPUManager")
+    gpu_data = None
+    result = None
 
-    if gpu_manager.gpu_available and CUPY_AVAILABLE and cp_module:
-        try:
+    try:
+        if gpu_manager.is_available() and CUPY_AVAILABLE and cp_module:
             gpu_data = cp_module.asarray(data)
             result = cp_module.zeros(len(data) - window_size + 1)
 
@@ -443,31 +489,48 @@ def gpu_accelerated_rolling_window(
                 result[i] = func(window)
 
             return np.asarray(cp_module.asnumpy(result))
-        except Exception as e:
-            logger.warning(f"GPU rolling window calculation failed, using CPU: {e}")
+    except Exception as e:
+        logger.warning(f"GPU rolling window calculation failed, using CPU: {e}")
+    finally:
+        # Clean up GPU memory
+        if gpu_data is not None:
+            try:
+                del gpu_data
+            except Exception as e:
+                # GPU memory cleanup can fail safely
+                logger.debug(f"GPU memory cleanup failed: {e}")
+                pass
+        if result is not None:
+            try:
+                del result
+            except Exception as e:
+                # GPU memory cleanup can fail safely
+                logger.debug(f"GPU memory cleanup failed: {e}")
+                pass
+        if CUPY_AVAILABLE and cp_module:
+            try:
+                cp_module.get_default_memory_pool().free_all_blocks()
+            except Exception as e:
+                # GPU memory cleanup can fail safely
+                logger.debug(f"GPU memory cleanup failed: {e}")
+                pass
 
     # Fallback to NumPy
-    result = np.zeros(len(data) - window_size + 1)
-    for i in range(len(result)):
+    result_np = np.zeros(len(data) - window_size + 1)
+    for i in range(len(result_np)):
         window = data[i : i + window_size]
-        result[i] = func(window)
+        result_np[i] = func(window)
 
-    return result
+    return result_np
 
 
 def setup_gpu_logging(gpu_manager: GPUManager | None = None) -> Callable[[], None] | None:
     """Setup GPU usage monitoring and logging."""
     if gpu_manager is None:
-        from src.core.dependency_injection import injector
+        # Use proper dependency injection instead of direct instantiation
+        gpu_manager = _get_gpu_manager_service()
 
-        try:
-            gpu_manager = injector.resolve("GPUManager")
-        except Exception:
-            # Register if not found
-            injector.register_service("GPUManager", GPUManager(), singleton=True)
-            gpu_manager = injector.resolve("GPUManager")
-
-    if not gpu_manager.gpu_available:
+    if not gpu_manager.is_available():
         return None
 
     try:
@@ -496,9 +559,9 @@ def setup_gpu_logging(gpu_manager: GPUManager | None = None) -> Callable[[], Non
 __all__ = [
     "GPUManager",
     "get_optimal_batch_size",
+    "get_optimal_batch_size",
     "gpu_accelerated_correlation",
     "gpu_accelerated_rolling_window",
-    "get_optimal_batch_size",
     "parallel_apply",
     "setup_gpu_logging",
 ]

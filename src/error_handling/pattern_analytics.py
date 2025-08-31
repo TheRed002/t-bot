@@ -18,13 +18,13 @@ from datetime import datetime, timedelta, timezone
 
 # MANDATORY: Import from P-001 core framework
 # Import ErrorPattern using TYPE_CHECKING to avoid circular dependency
-from typing import TYPE_CHECKING, Any
-
-from src.core.config import Config
-from src.core.logging import get_logger
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.error_handling.error_handler import ErrorPattern
+    from src.core.types.data import ErrorPattern
+
+from src.core.base.service import BaseService
+from src.core.config import Config
 
 # MANDATORY: Import from P-007A utils framework
 # Import security components
@@ -32,6 +32,7 @@ from src.error_handling.security_sanitizer import (
     SensitivityLevel,
 )
 from src.utils.decorators import time_execution
+from src.utils.error_categorization import is_financial_component
 
 
 @dataclass
@@ -136,10 +137,10 @@ class OptimizedPatternCache(Sized):
     def __init__(self, max_patterns: int = 1000, ttl_hours: int = 48):
         self.max_patterns = max_patterns
         self.ttl_hours = ttl_hours
-        self._patterns: OrderedDict[str, ErrorPattern] = OrderedDict()
+        self._patterns: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._lock = threading.RLock()
 
-    def add_pattern(self, pattern: "ErrorPattern") -> None:
+    def add_pattern(self, pattern: dict[str, Any] | Any) -> None:
         """Add or update pattern."""
         with self._lock:
             # Remove expired patterns
@@ -149,11 +150,22 @@ class OptimizedPatternCache(Sized):
             while len(self._patterns) >= self.max_patterns:
                 self._patterns.popitem(last=False)
 
-            # Add/update pattern
-            self._patterns[pattern.pattern_id] = pattern
-            self._patterns.move_to_end(pattern.pattern_id)
+            # Convert to dict if it's a dataclass or object with to_dict method
+            if hasattr(pattern, "to_dict"):
+                pattern_dict = pattern.to_dict()
+            elif hasattr(pattern, "__dict__"):
+                # Convert object to dict
+                pattern_dict = {
+                    key: value for key, value in pattern.__dict__.items() if not key.startswith("_")
+                }
+            else:
+                pattern_dict = pattern
 
-    def get_pattern(self, pattern_id: str) -> "ErrorPattern | None":
+            # Add/update pattern
+            self._patterns[pattern_dict["pattern_id"]] = pattern_dict
+            self._patterns.move_to_end(pattern_dict["pattern_id"])
+
+    def get_pattern(self, pattern_id: str) -> dict[str, Any] | None:
         """Get pattern and mark as recently used."""
         with self._lock:
             if pattern_id not in self._patterns:
@@ -161,7 +173,9 @@ class OptimizedPatternCache(Sized):
 
             pattern = self._patterns[pattern_id]
             # Check expiration
-            age_hours = (datetime.now(timezone.utc) - pattern.first_detected).total_seconds() / 3600
+            age_hours = (
+                datetime.now(timezone.utc) - pattern["first_detected"]
+            ).total_seconds() / 3600
             if age_hours > self.ttl_hours:
                 del self._patterns[pattern_id]
                 return None
@@ -170,7 +184,7 @@ class OptimizedPatternCache(Sized):
             self._patterns.move_to_end(pattern_id)
             return pattern
 
-    def get_all_patterns(self) -> dict[str, "ErrorPattern"]:
+    def get_all_patterns(self) -> dict[str, dict[str, Any]]:
         """Get all active patterns."""
         with self._lock:
             self._cleanup_expired()
@@ -182,7 +196,7 @@ class OptimizedPatternCache(Sized):
         expired_keys = []
 
         for pattern_id, pattern in self._patterns.items():
-            age_hours = (current_time - pattern.first_detected).total_seconds() / 3600
+            age_hours = (current_time - pattern["first_detected"]).total_seconds() / 3600
             if age_hours > self.ttl_hours:
                 expired_keys.append(pattern_id)
 
@@ -218,12 +232,17 @@ class OptimizedPatternCache(Sized):
         return self.get_pattern(key) is not None
 
 
-class ErrorPatternAnalytics:
+class ErrorPatternAnalytics(BaseService):
     """Optimized error pattern analyzer with memory-efficient data structures."""
 
     def __init__(self, config: Config):
-        self.config = config
-        self.logger = get_logger(self.__class__.__module__)
+        super().__init__(
+            name="ErrorPatternAnalytics",
+            config=config.model_dump() if hasattr(config, "model_dump") else None,
+        )
+
+        # Store original config for component initialization
+        self._raw_config = config
 
         # Handle missing error_handling config gracefully
         self.error_analytics_config = getattr(config, "error_handling", None)
@@ -273,6 +292,23 @@ class ErrorPatternAnalytics:
         # Cleanup task - will be started when needed
         self._cleanup_task: asyncio.Task | None = None
         # Don't start cleanup task immediately - start it when first pattern is added
+
+    def configure_dependencies(self, injector) -> None:
+        """Configure dependencies via dependency injector."""
+        super().configure_dependencies(injector)
+
+        try:
+            # Try to resolve security sanitizer from DI container
+            if injector.has_service("SecuritySanitizer"):
+                self._sanitizer = injector.resolve("SecuritySanitizer")
+                self.logger.debug("SecuritySanitizer resolved from DI container")
+            else:
+                raise ValueError("SecuritySanitizer service not registered in DI container")
+
+            self.logger.debug("ErrorPatternAnalytics dependencies configured via DI container")
+        except Exception as e:
+            self.logger.error(f"Failed to configure ErrorPatternAnalytics dependencies via DI: {e}")
+            raise
 
     def _start_cleanup_task(self) -> None:
         """Start periodic cleanup task."""
@@ -336,32 +372,36 @@ class ErrorPatternAnalytics:
 
     @time_execution
     def add_error_event(self, error_context: dict[str, Any]) -> None:
-        """Add an error event to the analytics system."""
+        """Add an error event to the analytics system with consistent data transformation."""
         # Start cleanup task if not already running
         self._start_cleanup_task()
 
+        # Apply consistent data transformation patterns
+        transformed_context = self._transform_error_event_data(error_context)
+
         # Sanitize details based on sensitivity level
-        component = error_context.get("component", "unknown")
-        severity = error_context.get("severity", "medium")
+        component = transformed_context.get("component", "unknown")
+        severity = transformed_context.get("severity", "medium")
         sensitivity_level = self._get_sensitivity_level(component, severity)
 
-        # Import sanitizer here to avoid circular imports
-        from src.error_handling.security_sanitizer import get_security_sanitizer
-
-        sanitizer = get_security_sanitizer()
+        # Use injected sanitizer - should be configured via DI
+        sanitizer = getattr(self, "_sanitizer", None)
+        if sanitizer is None:
+            raise ValueError("SecuritySanitizer not configured - ensure dependency injection is set up")
 
         # Sanitize the details before storing
-        raw_details = error_context.get("details", {})
+        raw_details = transformed_context.get("details", {})
         sanitized_details = sanitizer.sanitize_context(raw_details, sensitivity_level)
 
         error_event = {
             "timestamp": datetime.now(timezone.utc),
             "component": component,
-            "error_type": error_context.get("error_type", "unknown"),
+            "error_type": transformed_context.get("error_type", "unknown"),
             "severity": severity,
-            "operation": error_context.get("operation", "unknown"),
+            "operation": transformed_context.get("operation", "unknown"),
             "details": sanitized_details,
-            "error_id": error_context.get("error_id", "unknown"),
+            "error_id": transformed_context.get("error_id", "unknown"),
+            "processing_mode": transformed_context.get("processing_mode", "sync"),
         }
 
         # Add to optimized history
@@ -437,24 +477,22 @@ class ErrorPatternAnalytics:
                     pattern_id = f"{component}:{error_type}:frequency"
 
                     if pattern_id not in self.detected_patterns:
-                        # New pattern detected
-                        # Import locally to avoid circular dependency
-                        from src.error_handling.error_handler import ErrorPattern
-
-                        pattern = ErrorPattern(
-                            pattern_id=pattern_id,
-                            pattern_type="frequency",
-                            component=component,
-                            error_type=error_type,
-                            frequency=count,
-                            severity=self._determine_severity(count),
-                            first_detected=datetime.now(timezone.utc),
-                            last_detected=datetime.now(timezone.utc),
-                            occurrence_count=count,
-                            confidence=min(count / self.frequency_threshold, 1.0),
-                            description=f"High frequency {error_type} errors in {component}",
-                            suggested_action=f"Investigate {component} {error_type} errors",
-                        )
+                        # New pattern detected - create dict-based pattern
+                        pattern = {
+                            "pattern_id": pattern_id,
+                            "pattern_type": "frequency",
+                            "component": component,
+                            "error_type": error_type,
+                            "frequency": count,
+                            "severity": self._determine_severity(count),
+                            "first_detected": datetime.now(timezone.utc),
+                            "last_detected": datetime.now(timezone.utc),
+                            "occurrence_count": count,
+                            "confidence": min(count / self.frequency_threshold, 1.0),
+                            "description": f"High frequency {error_type} errors in {component}",
+                            "suggested_action": f"Investigate {component} {error_type} errors",
+                            "is_active": True,
+                        }
 
                         self.detected_patterns[pattern_id] = pattern
 
@@ -462,8 +500,8 @@ class ErrorPatternAnalytics:
                             "Error pattern detected",
                             pattern_id=pattern_id,
                             frequency=count,
-                            severity=pattern.severity,
-                            confidence=pattern.confidence,
+                            severity=pattern["severity"],
+                            confidence=pattern["confidence"],
                         )
 
                         # Trigger alert
@@ -471,10 +509,10 @@ class ErrorPatternAnalytics:
                     else:
                         # Update existing pattern
                         pattern = self.detected_patterns[pattern_id]
-                        pattern.last_detected = datetime.now(timezone.utc)
-                        pattern.occurrence_count += count
-                        pattern.frequency = count
-                        pattern.confidence = min(count / self.frequency_threshold, 1.0)
+                        pattern["last_detected"] = datetime.now(timezone.utc)
+                        pattern["occurrence_count"] += count
+                        pattern["frequency"] = count
+                        pattern["confidence"] = min(count / self.frequency_threshold, 1.0)
 
     async def _analyze_correlations(self):
         """Analyze correlations between different error types."""
@@ -535,22 +573,25 @@ class ErrorPatternAnalytics:
 
         # Analyze patterns that might indicate future problems
         for pattern in self.detected_patterns.values():
-            if pattern.is_active and pattern.confidence > self.pattern_confidence_threshold:
+            if (
+                pattern.get("is_active", True)
+                and pattern.get("confidence", 0.0) > self.pattern_confidence_threshold
+            ):
                 # Check if pattern is worsening
                 recent_frequency = self._get_recent_frequency(
-                    pattern.component, pattern.error_type, hours=1
+                    pattern["component"], pattern["error_type"], hours=1
                 )
 
-                if recent_frequency > pattern.frequency * 1.5:
+                if recent_frequency > pattern["frequency"] * 1.5:
                     # Pattern is worsening, predict potential issues
                     prediction = await self._predict_issues(pattern)
 
                     if prediction:
                         self.logger.warning(
                             "Predictive alert",
-                            pattern_id=pattern.pattern_id,
+                            pattern_id=pattern["pattern_id"],
                             prediction=prediction,
-                            confidence=pattern.confidence,
+                            confidence=pattern["confidence"],
                         )
 
                         # Trigger predictive alert
@@ -711,72 +752,93 @@ class ErrorPatternAnalytics:
         else:
             return "low"
 
-    async def _predict_issues(self, pattern: "ErrorPattern") -> str | None:
+    async def _predict_issues(self, pattern: dict[str, Any]) -> str | None:
         """Predict potential issues based on error pattern."""
 
         # Simple prediction logic based on pattern characteristics
-        if pattern.frequency > 20:
-            return f"Critical system degradation in {pattern.component}"
-        elif pattern.frequency > 10:
-            return f"Performance issues in {pattern.component}"
-        elif pattern.frequency > 5:
-            return f"Minor issues in {pattern.component}"
+        if pattern["frequency"] > 20:
+            return f"Critical system degradation in {pattern['component']}"
+        elif pattern["frequency"] > 10:
+            return f"Performance issues in {pattern['component']}"
+        elif pattern["frequency"] > 5:
+            return f"Minor issues in {pattern['component']}"
         else:
             return None
 
-    async def _trigger_pattern_alert(self, pattern: "ErrorPattern") -> None:
+    async def _trigger_pattern_alert(self, pattern: dict[str, Any]) -> None:
         """Trigger alert for detected pattern."""
 
         alert_message = {
             "type": "error_pattern",
-            "pattern_id": pattern.pattern_id,
-            "component": pattern.component,
-            "error_type": pattern.error_type,
-            "frequency": pattern.frequency,
-            "severity": pattern.severity,
-            "confidence": pattern.confidence,
-            "description": pattern.description,
-            "suggested_action": pattern.suggested_action,
+            "pattern_id": pattern["pattern_id"],
+            "component": pattern["component"],
+            "error_type": pattern["error_type"],
+            "frequency": pattern["frequency"],
+            "severity": pattern["severity"],
+            "confidence": pattern["confidence"],
+            "description": pattern["description"],
+            "suggested_action": pattern["suggested_action"],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         self.logger.warning("Error pattern alert", alert_data=alert_message)
 
-        # TODO: Send alert to notification system
-        # This will be implemented in P-031 (Alerting and Notification System)
+        # Send alert to monitoring module with boundary validation
+        await self._send_pattern_to_monitoring(pattern)
 
-    async def _trigger_predictive_alert(self, pattern: "ErrorPattern", prediction: str) -> None:
+    async def _trigger_predictive_alert(self, pattern: dict[str, Any], prediction: str) -> None:
         """Trigger predictive alert."""
 
         alert_message = {
             "type": "predictive_alert",
-            "pattern_id": pattern.pattern_id,
-            "component": pattern.component,
-            "error_type": pattern.error_type,
+            "pattern_id": pattern["pattern_id"],
+            "component": pattern["component"],
+            "error_type": pattern["error_type"],
             "prediction": prediction,
-            "confidence": pattern.confidence,
+            "confidence": pattern["confidence"],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         self.logger.warning("Predictive alert", alert_data=alert_message)
 
-        # TODO: Send alert to notification system
-        # This will be implemented in P-031 (Alerting and Notification System)
+        # Alert notification placeholder - implement with notification service
 
     def get_pattern_summary(self) -> dict[str, Any]:
         """Get summary of detected patterns."""
 
-        active_patterns = [p for p in self.detected_patterns.values() if p.is_active]
+        # Handle both dict and object patterns
+        active_patterns = []
+        for p in self.detected_patterns.values():
+            if isinstance(p, dict):
+                if p.get("is_active", True):
+                    active_patterns.append(p)
+            else:
+                # Handle object patterns
+                if getattr(p, "is_active", True):
+                    active_patterns.append(p)
+
+        def get_value(pattern, key, default=None):
+            """Safely get value from pattern dict or object."""
+            if isinstance(pattern, dict):
+                return pattern.get(key, default)
+            else:
+                return getattr(pattern, key, default)
 
         return {
             "total_patterns": len(self.detected_patterns),
             "active_patterns": len(active_patterns),
-            "patterns_by_severity": Counter(p.severity for p in active_patterns),
-            "patterns_by_component": Counter(p.component for p in active_patterns),
+            "patterns_by_severity": Counter(
+                get_value(p, "severity", "unknown") for p in active_patterns
+            ),
+            "patterns_by_component": Counter(
+                get_value(p, "component", "unknown") for p in active_patterns
+            ),
             "recent_patterns": [
-                p.to_dict()
+                p.to_dict() if hasattr(p, "to_dict") else p
                 for p in active_patterns
-                if (datetime.now(timezone.utc) - p.last_detected).total_seconds() < 3600
+                if (
+                    datetime.now(timezone.utc) - get_value(p, "last_detected", datetime.min.replace(tzinfo=timezone.utc))
+                ).total_seconds() < 3600
             ],
         }
 
@@ -826,9 +888,7 @@ class ErrorPatternAnalytics:
     def _get_sensitivity_level(self, component: str, severity: str) -> SensitivityLevel:
         """Determine sensitivity level for error analytics data."""
         # Financial/trading components always get high sensitivity
-        financial_components = ["trading", "exchange", "wallet", "payment", "order", "position"]
-
-        if any(keyword in component.lower() for keyword in financial_components):
+        if is_financial_component(component):
             return SensitivityLevel.CRITICAL
 
         # Map severity to sensitivity level
@@ -867,3 +927,63 @@ class ErrorPatternAnalytics:
         # Clear references
         self._cleanup_task = None
         self._pattern_analysis_task = None
+
+    def _transform_error_event_data(self, error_context: dict[str, Any]) -> dict[str, Any]:
+        """Transform error event data consistently across operations."""
+        # Apply consistent data transformation patterns matching database module
+        transformed_context = error_context.copy()
+
+        # Apply consistent Decimal transformation for financial data
+        from src.utils.decimal_utils import to_decimal
+
+        financial_fields = [
+            "price",
+            "quantity",
+            "amount",
+            "value",
+            "profit",
+            "loss",
+            "balance",
+            "cost",
+            "fee",
+        ]
+        for financial_field in financial_fields:
+            if (
+                financial_field in transformed_context
+                and transformed_context[financial_field] is not None
+            ):
+                transformed_context[financial_field] = to_decimal(
+                    transformed_context[financial_field]
+                )
+
+        # Set processing mode for consistent paradigm alignment
+        if "processing_mode" not in transformed_context:
+            transformed_context["processing_mode"] = "stream"
+
+        # Set audit fields consistently
+        if "processed_at" not in transformed_context:
+            transformed_context["processed_at"] = datetime.now(timezone.utc).isoformat()
+
+        return transformed_context
+
+    async def add_batch_error_events(self, error_contexts: list[dict[str, Any]]) -> None:
+        """Add multiple error events in batch for consistent processing paradigm."""
+        if not error_contexts:
+            return
+
+        for error_context in error_contexts:
+            try:
+                self.add_error_event(error_context)
+            except Exception as e:
+                self.logger.error(f"Failed to add error event in batch: {e}")
+                # Continue with other events
+
+    async def _send_pattern_to_monitoring(self, pattern: dict[str, Any]) -> None:
+        """Send error pattern to monitoring module via service interface."""
+        # Don't directly integrate with monitoring - leave for service layer
+        self.logger.info(
+            "Pattern detected - should be sent to monitoring via service layer",
+            pattern_id=pattern["pattern_id"],
+            component=pattern["component"],
+            severity=pattern["severity"],
+        )

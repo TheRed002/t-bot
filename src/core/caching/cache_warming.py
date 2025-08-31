@@ -590,7 +590,7 @@ class CacheWarmer(BaseComponent):
             # Update stats
             current_success = self._warming_stats.get("successful_tasks", 0)
             self._warming_stats["successful_tasks"] = (current_success or 0) + 1
-            
+
             current_hits = self._warming_stats.get("cache_hits_generated", 0)
             self._warming_stats["cache_hits_generated"] = (current_hits or 0) + 1
 

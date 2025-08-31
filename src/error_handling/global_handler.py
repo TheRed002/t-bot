@@ -6,16 +6,19 @@ import traceback
 from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from src.error_handling.context import ErrorContext, ErrorContextFactory
+    from src.error_handling.factory import ErrorHandlerChain, ErrorHandlerFactory
+
+from src.core.base.service import BaseService
 from src.core.logging import get_logger
-from src.error_handling.context import ErrorContextFactory
-from src.error_handling.factory import ErrorHandlerChain, ErrorHandlerFactory
 
 logger = get_logger(__name__)
 
 
-class GlobalErrorHandler:
+class GlobalErrorHandler(BaseService):
     """
     Global error handler that provides consistent error handling across the application.
 
@@ -23,23 +26,40 @@ class GlobalErrorHandler:
     are handled consistently.
     """
 
-    def __init__(self):
-        """Initialize global error handler."""
-        self._logger = logger
+    def __init__(
+        self, config: Any | None = None, context_factory: "ErrorContextFactory | None" = None
+    ):
+        """Initialize global error handler with optional configuration and dependencies."""
+        super().__init__(name="GlobalErrorHandler", config=config)
+
         self._error_callbacks: list[Callable] = []
         self._critical_callbacks: list[Callable] = []
         self._recovery_strategies: dict[type, Callable] = {}
 
-        # Initialize error handler chain
-        self._setup_error_handlers()
+        # Context factory should be injected via DI
+        self._context_factory = context_factory
 
         # Statistics
         self._error_count = 0
         self._errors_by_type: dict[str, int] = {}
         self._last_error_time: datetime | None = None
 
+        # Add dependencies for proper DI
+        self.add_dependency("ErrorHandlerFactory")
+        self.add_dependency("ErrorContextFactory")
+
+    async def _do_start(self) -> None:
+        """Initialize error handler chain through service pattern."""
+        await super()._do_start()
+
+        # Set up error handler chain after dependencies are resolved
+        self._setup_error_handlers()
+
     def _setup_error_handlers(self):
         """Set up the error handler chain."""
+        # Import at runtime to avoid circular dependencies
+        from src.error_handling.factory import ErrorHandlerFactory, ErrorHandlerChain
+
         # Register only handlers that don't have database dependencies
         try:
             from src.error_handling.handlers.validation import (
@@ -50,7 +70,7 @@ class GlobalErrorHandler:
             ErrorHandlerFactory.register("validation", ValidationErrorHandler)
             ErrorHandlerFactory.register("data_validation", DataValidationErrorHandler)
         except ImportError:
-            logger.debug("Validation error handlers not available")
+            self.logger.debug("Validation error handlers not available")
 
         try:
             from src.error_handling.handlers.network import (
@@ -61,10 +81,33 @@ class GlobalErrorHandler:
             ErrorHandlerFactory.register("network", NetworkErrorHandler)
             ErrorHandlerFactory.register("rate_limit", RateLimitErrorHandler)
         except ImportError:
-            logger.debug("Network error handlers not available")
+            self.logger.debug("Network error handlers not available")
 
         # Create handler chain with registered handlers
-        self._handler_chain = ErrorHandlerChain(["validation", "data_validation", "network"])
+        try:
+            self._handler_chain = ErrorHandlerChain(["validation", "data_validation", "network"])
+        except Exception as e:
+            self.logger.warning(f"Failed to create handler chain: {e}")
+            self._handler_chain = None
+
+    def configure_dependencies(self, injector) -> None:
+        """Configure dependencies via dependency injector."""
+        super().configure_dependencies(injector)
+
+        try:
+            # Configure context factory if not already provided
+            if not self._context_factory and injector.has_service("ErrorContextFactory"):
+                self._context_factory = injector.resolve("ErrorContextFactory")
+
+            # Configure ErrorHandlerFactory with DI container for chain
+            from src.error_handling.factory import ErrorHandlerFactory
+
+            ErrorHandlerFactory.set_dependency_container(injector)
+
+            self.logger.debug("GlobalErrorHandler dependencies configured via DI container")
+        except Exception as e:
+            self.logger.error(f"Failed to configure GlobalErrorHandler dependencies via DI: {e}")
+            raise
 
     def register_database_handler(self):
         """Register database error handler separately to avoid circular dependencies."""
@@ -133,11 +176,16 @@ class GlobalErrorHandler:
         self._errors_by_type[error_type] = self._errors_by_type.get(error_type, 0) + 1
         self._last_error_time = datetime.now(timezone.utc)
 
-        # Create error context
-        error_context = ErrorContextFactory.create_context(error, context or {})
+        # Create error context using factory or direct creation
+        if self._context_factory:
+            # Factory returns dict, convert to ErrorContext for compatibility
+            self._context_factory.create(error, **(context or {}))
+            error_context = ErrorContext.from_exception(error, **(context or {}))
+        else:
+            error_context = ErrorContext.from_exception(error, **(context or {}))
 
         # Log the error
-        self._logger.error(
+        self.logger.error(
             f"Error handled: {error_type}",
             error_message=str(error),
             error_type=error_type,
@@ -154,7 +202,7 @@ class GlobalErrorHandler:
                 else:
                     callback(error, error_context.to_dict())
             except Exception as cb_error:
-                self._logger.error(
+                self.logger.error(
                     f"Error in callback: {cb_error}",
                     callback=callback.__name__,
                     original_error=str(error),
@@ -169,7 +217,7 @@ class GlobalErrorHandler:
                     else:
                         callback(error, error_context.to_dict())
                 except Exception as cb_error:
-                    self._logger.error(
+                    self.logger.error(
                         f"Error in critical callback: {cb_error}",
                         callback=callback.__name__,
                         original_error=str(error),
@@ -185,14 +233,19 @@ class GlobalErrorHandler:
                 else:
                     recovery_result = strategy(error, error_context)
             except Exception as recovery_error:
-                self._logger.error(
+                self.logger.error(
                     f"Recovery strategy failed: {recovery_error}",
                     strategy=strategy.__name__,
                     original_error=str(error),
                 )
 
-        # Use handler chain for additional processing
-        handler_result = await self._handler_chain.handle(error, error_context.to_dict())
+        # Use handler chain for additional processing if available
+        handler_result = None
+        if hasattr(self, "_handler_chain") and self._handler_chain:
+            try:
+                handler_result = await self._handler_chain.handle(error, error_context.to_dict())
+            except Exception as chain_error:
+                self.logger.error(f"Handler chain error: {chain_error}")
 
         return {
             "error_type": error_type,
@@ -228,9 +281,14 @@ class GlobalErrorHandler:
         try:
             loop = asyncio.get_running_loop()
             # Already in async context, create task
-            future = asyncio.ensure_future(self.handle_error(error, context, severity))
+            task = asyncio.ensure_future(self.handle_error(error, context, severity))
+            # Store task reference to prevent garbage collection
+            if not hasattr(self, "_background_tasks"):
+                self._background_tasks = set()
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
             # Can't wait synchronously in running loop
-            self._logger.warning(
+            self.logger.warning(
                 "handle_error_sync called from async context, scheduled as task",
                 error_type=type(error).__name__,
             )
@@ -244,13 +302,22 @@ class GlobalErrorHandler:
             }
         except RuntimeError:
             # No running loop, safe to use run_until_complete
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            loop = None
             try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 return loop.run_until_complete(self.handle_error(error, context, severity))
             finally:
-                loop.close()
-                asyncio.set_event_loop(None)
+                if loop:
+                    try:
+                        loop.close()
+                    except Exception as e:
+                        self.logger.warning(f"Error closing event loop: {e}")
+                    finally:
+                        try:
+                            asyncio.set_event_loop(None)
+                        except Exception:
+                            pass
 
     def handle_exception_hook(self, exc_type, exc_value, exc_traceback):
         """
@@ -264,7 +331,7 @@ class GlobalErrorHandler:
             return
 
         # Log critical unhandled exception
-        self._logger.critical(
+        self.logger.critical(
             "Unhandled exception",
             exc_type=exc_type.__name__,
             exc_value=str(exc_value),
@@ -278,17 +345,29 @@ class GlobalErrorHandler:
             "traceback": traceback.format_tb(exc_traceback),
         }
 
-        # Handle the error asynchronously with proper task management
-        error_task = asyncio.create_task(self.handle_error(exc_value, context, severity="critical"))
-        # Add done callback to log any exceptions from the error handling itself
-        error_task.add_done_callback(self._log_error_handler_exception)
+        # Try to handle via event loop, but don't break on failure
+        try:
+            loop = asyncio.get_running_loop()
+            # Handle the error asynchronously with proper task management
+            error_task = loop.create_task(
+                self.handle_error(exc_value, context, severity="critical")
+            )
+            # Add done callback to log any exceptions from the error handling itself
+            error_task.add_done_callback(self._log_error_handler_exception)
+        except RuntimeError:
+            # No event loop - just log the error
+            self.logger.error(
+                "Cannot process unhandled exception - no event loop",
+                exc_type=exc_type.__name__,
+                exc_value=str(exc_value),
+            )
 
     def _log_error_handler_exception(self, task: asyncio.Task) -> None:
         """Log exceptions that occur in error handling tasks."""
         try:
             exception = task.exception()
             if exception and not isinstance(exception, asyncio.CancelledError):
-                self._logger.critical(
+                self.logger.critical(
                     "Exception in error handler task",
                     handler_exception=str(exception),
                     exc_info=exception,
@@ -347,10 +426,18 @@ class GlobalErrorHandler:
                         "args": str(args)[:200],  # Truncate for safety
                         "kwargs": str(kwargs)[:200],
                     }
-                    # Use asyncio.create_task for async handling with proper task management
-                    error_task = asyncio.create_task(self.handle_error(e, context, severity))
-                    # Add done callback to log any exceptions from the error handling itself
-                    error_task.add_done_callback(self._log_error_handler_exception)
+                    # Try to handle via event loop, but don't break on failure
+                    try:
+                        loop = asyncio.get_running_loop()
+                        error_task = loop.create_task(self.handle_error(e, context, severity))
+                        error_task.add_done_callback(self._log_error_handler_exception)
+                    except RuntimeError:
+                        # No event loop - just log the error
+                        self.logger.error(
+                            "Error in sync function - no event loop for async handling",
+                            error=str(e),
+                            function=func.__name__,
+                        )
                     if reraise:
                         raise
                     return default_return
@@ -382,28 +469,22 @@ class GlobalErrorHandler:
         self._last_error_time = None
 
 
-# Create singleton instance
-_global_handler: GlobalErrorHandler | None = None
+# Factory functions for dependency injection
+def create_global_error_handler_factory(config: Any | None = None):
+    """Create a factory function for GlobalErrorHandler instances."""
+
+    def factory():
+        return GlobalErrorHandler(config)
+
+    return factory
 
 
-def get_global_error_handler() -> GlobalErrorHandler:
-    """Get the global error handler instance."""
-    global _global_handler
-    if _global_handler is None:
-        _global_handler = GlobalErrorHandler()
-    return _global_handler
-
-
-def register_with_di(container: Any) -> None:
+def register_global_error_handler_with_di(injector, config: Any | None = None) -> None:
     """Register GlobalErrorHandler with dependency injection container.
 
     Args:
-        container: The dependency injection container
+        injector: The dependency injection container
+        config: Optional configuration to pass to handler
     """
-    try:
-        # Register as singleton
-        container.register(GlobalErrorHandler, get_global_error_handler(), singleton=True)
-    except Exception:
-        # If registration fails, just log and continue
-        # The get_global_error_handler() function will still work
-        logger.debug("Failed to register GlobalErrorHandler with DI container")
+    factory = create_global_error_handler_factory(config)
+    injector.register_factory("GlobalErrorHandler", factory, singleton=True)

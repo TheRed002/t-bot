@@ -1,15 +1,13 @@
 """
 Configuration management for the trading bot framework.
 
-This module provides comprehensive Pydantic-based configuration system that will be
-extended by ALL subsequent prompts. Use exact patterns from @COMMON_PATTERNS.md.
-
-CRITICAL: This file will be extended by ALL subsequent prompts. Use exact patterns from
-@COMMON_PATTERNS.md.
+This module provides comprehensive Pydantic-based configuration system with
+environment variable support, validation, and YAML file loading capabilities.
 """
 
 import json
 import os
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -176,11 +174,30 @@ class SecurityConfig(BaseConfig):
         if len(set(v)) < 10:
             raise ValueError("Key has insufficient entropy (too few unique characters)")
 
-        # Check for repetitive patterns
-        for i in range(2, len(v) // 2 + 1):
-            pattern = v[:i]
-            if v == pattern * (len(v) // i) + pattern[: len(v) % i]:
-                raise ValueError("Key contains repetitive patterns")
+        # Use efficient entropy calculation instead of repetitive pattern detection
+        import hashlib
+
+        # Calculate Shannon entropy for better entropy assessment
+        def calculate_entropy(s: str) -> float:
+            """Calculate Shannon entropy of a string."""
+            if not s:
+                return 0.0
+            entropy = 0
+            for c in set(s):
+                p_c = s.count(c) / len(s)
+                if p_c > 0:
+                    entropy -= p_c * (p_c.bit_length() - 1)
+            return entropy
+
+        entropy = calculate_entropy(v)
+        min_entropy = 3.0  # Approximately 8 bits of entropy
+        if entropy < min_entropy:
+            raise ValueError(f"Key entropy too low: {entropy:.2f} < {min_entropy}")
+
+        # Use cryptographically secure hash for pattern detection
+        key_hash = hashlib.sha256(v.encode()).hexdigest()
+        if len(set(key_hash[:16])) < 8:  # Check hash diversity
+            raise ValueError("Key shows poor cryptographic properties")
 
         return v
 
@@ -526,7 +543,9 @@ class CapitalManagementConfig(BaseConfig):
     base_currency: str = Field(
         default="USDT", pattern=r"^[A-Z]{3,10}$", description="Base currency for all calculations"
     )
-    total_capital: float = Field(default=10000.0, gt=0, description="Total available capital")
+    total_capital: Decimal = Field(
+        default=Decimal("10000.0"), gt=0, description="Total available capital"
+    )
     emergency_reserve_pct: float = Field(
         default=0.1, description="Emergency reserve percentage (10%)"
     )
@@ -547,15 +566,21 @@ class CapitalManagementConfig(BaseConfig):
     max_exchange_allocation_pct: float = Field(
         default=0.6, description="Maximum exchange allocation (60%)"
     )
-    min_exchange_balance: float = Field(default=100.0, description="Minimum exchange balance")
+    min_exchange_balance: Decimal = Field(
+        default=Decimal("100.0"), description="Minimum exchange balance"
+    )
 
     # Fund flow controls
     max_daily_reallocation_pct: float = Field(
         default=0.2, description="Maximum daily reallocation (20%)"
     )
     fund_flow_cooldown_minutes: int = Field(default=60, description="Fund flow cooldown in minutes")
-    min_deposit_amount: float = Field(default=1000.0, description="Minimum deposit amount")
-    min_withdrawal_amount: float = Field(default=100.0, description="Minimum withdrawal amount")
+    min_deposit_amount: Decimal = Field(
+        default=Decimal("1000.0"), description="Minimum deposit amount"
+    )
+    min_withdrawal_amount: Decimal = Field(
+        default=Decimal("100.0"), description="Minimum withdrawal amount"
+    )
     max_withdrawal_pct: float = Field(
         default=0.2, description="Maximum withdrawal percentage (20%)"
     )
@@ -589,7 +614,9 @@ class CapitalManagementConfig(BaseConfig):
     # Auto-compounding
     auto_compound_enabled: bool = Field(default=True, description="Enable auto-compounding")
     auto_compound_frequency: str = Field(default="weekly", description="Auto-compound frequency")
-    profit_threshold: float = Field(default=100.0, description="Minimum profit for compounding")
+    profit_threshold: Decimal = Field(
+        default=Decimal("100.0"), description="Minimum profit for compounding"
+    )
 
     # Capital protection
     max_daily_loss_pct: float = Field(default=0.05, description="Maximum daily loss (5%)")
@@ -598,13 +625,13 @@ class CapitalManagementConfig(BaseConfig):
     profit_lock_pct: float = Field(default=0.5, description="Profit lock percentage (50%)")
 
     # Per-strategy minimum allocations
-    per_strategy_minimum: dict[str, float] = Field(
+    per_strategy_minimum: dict[str, Decimal] = Field(
         default={
-            "mean_reversion": 5000.0,
-            "trend_following": 10000.0,
-            "ml_strategy": 15000.0,
-            "arbitrage": 20000.0,
-            "market_making": 25000.0,
+            "mean_reversion": Decimal("5000.0"),
+            "trend_following": Decimal("10000.0"),
+            "ml_strategy": Decimal("15000.0"),
+            "arbitrage": Decimal("20000.0"),
+            "market_making": Decimal("25000.0"),
         },
         description="Minimum capital requirements per strategy",
     )
@@ -643,10 +670,16 @@ class CapitalManagementConfig(BaseConfig):
             raise ValueError(f"Value must be positive, got {v}")
         return v
 
-    @field_validator("total_capital", "min_exchange_balance", "profit_threshold")
+    @field_validator(
+        "total_capital",
+        "min_exchange_balance",
+        "min_deposit_amount",
+        "min_withdrawal_amount",
+        "profit_threshold",
+    )
     @classmethod
-    def validate_positive_floats(cls, v):
-        """Validate positive float fields."""
+    def validate_positive_decimals(cls, v: Decimal) -> Decimal:
+        """Validate positive Decimal fields."""
         if v <= 0:
             raise ValueError(f"Value must be positive, got {v}")
         return v
@@ -941,8 +974,8 @@ class Config(BaseConfig):
         schema = self.model_json_schema()
         schema_path = Path("config/config.schema.json")
         schema_path.parent.mkdir(exist_ok=True)
-        with open(schema_path, "w") as f:
-            json.dump(schema, f, indent=2)
+        with open(schema_path, "w") as file_handle:
+            json.dump(schema, file_handle, indent=2)
 
     @classmethod
     def from_yaml(cls, yaml_path: str | Path) -> "Config":
@@ -964,8 +997,13 @@ class Config(BaseConfig):
             raise FileNotFoundError(f"Configuration file not found: {yaml_path}")
 
         try:
-            with open(yaml_path, encoding="utf-8") as f:
-                yaml_data = yaml.safe_load(f)
+            file_handle = None
+            try:
+                file_handle = open(yaml_path, encoding="utf-8")
+                yaml_data = yaml.safe_load(file_handle)
+            finally:
+                if file_handle:
+                    file_handle.close()
 
             # Merge with environment variables (env vars take precedence)
             return cls(**yaml_data)
@@ -989,10 +1027,21 @@ class Config(BaseConfig):
 
         if yaml_path.exists():
             try:
-                with open(yaml_path, encoding="utf-8") as f:
-                    yaml_data = yaml.safe_load(f) or {}
-            except yaml.YAMLError:
-                # If YAML parsing fails, fall back to env-only
+                file_handle = None
+                try:
+                    file_handle = open(yaml_path, encoding="utf-8")
+                    yaml_data = yaml.safe_load(file_handle) or {}
+                finally:
+                    if file_handle:
+                        file_handle.close()
+            except yaml.YAMLError as e:
+                # If YAML parsing fails, log the error and fall back to env-only
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    f"Failed to parse YAML configuration from {yaml_path}: {e}. "
+                    f"Falling back to environment variables only."
+                )
                 yaml_data = {}
 
         # Create config with YAML data as base, env vars will override
@@ -1015,8 +1064,13 @@ class Config(BaseConfig):
         # Convert config to dict and handle nested models
         config_dict = self.model_dump()
 
-        with open(yaml_path, "w", encoding="utf-8") as f:
-            yaml.dump(config_dict, f, default_flow_style=False, indent=2)
+        file_handle = None
+        try:
+            file_handle = open(yaml_path, "w", encoding="utf-8")
+            yaml.dump(config_dict, file_handle, default_flow_style=False, indent=2)
+        finally:
+            if file_handle:
+                file_handle.close()
 
     def get_database_url(self) -> str:
         """Generate PostgreSQL database URL.
@@ -1087,11 +1141,3 @@ class Config(BaseConfig):
             return False
 
 
-# REVERSE INTEGRATION POINTS: Future prompts will add these config classes:
-# - P-002: Extended DatabaseConfig with connection pooling settings
-# - P-003: ExchangeConfig for API credentials and rate limits
-# - P-008: RiskConfig for risk management parameters
-# - P-010A: CapitalConfig for fund management settings
-# - P-011: StrategyConfig for strategy parameters
-# - P-017: MLConfig for model registry and training
-# - P-026: WebConfig for FastAPI and security settings

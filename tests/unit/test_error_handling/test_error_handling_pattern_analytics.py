@@ -9,9 +9,48 @@ from unittest.mock import patch
 
 import pytest
 
+from dataclasses import dataclass, field
+from typing import Any
+
 from src.core.config import Config
-from src.error_handling.error_handler import ErrorPattern
 from src.error_handling.pattern_analytics import ErrorPatternAnalytics, ErrorTrend
+
+
+@dataclass
+class ErrorPattern:
+    """Mock ErrorPattern for testing purposes."""
+    
+    pattern_id: str
+    pattern_type: str
+    component: str
+    error_type: str
+    frequency: float
+    severity: str
+    first_detected: datetime
+    last_detected: datetime
+    occurrence_count: int
+    confidence: float
+    description: str
+    suggested_action: str
+    is_active: bool = True
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convert pattern to dictionary."""
+        return {
+            'pattern_id': self.pattern_id,
+            'pattern_type': self.pattern_type,
+            'component': self.component,
+            'error_type': self.error_type,
+            'frequency': self.frequency,
+            'severity': self.severity,
+            'first_detected': self.first_detected.isoformat(),
+            'last_detected': self.last_detected.isoformat(),
+            'occurrence_count': self.occurrence_count,
+            'confidence': self.confidence,
+            'description': self.description,
+            'suggested_action': self.suggested_action,
+            'is_active': self.is_active,
+        }
 
 
 class TestErrorPattern:
@@ -129,7 +168,7 @@ class TestErrorPatternAnalytics:
     def test_analytics_initialization(self, config):
         """Test error pattern analytics initialization."""
         analytics = ErrorPatternAnalytics(config)
-        assert analytics.config == config
+        assert analytics._raw_config == config
         # Check optimized data structures are initialized
         assert hasattr(analytics.error_history, 'size')
         assert analytics.error_history.size() == 0

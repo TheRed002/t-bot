@@ -14,11 +14,6 @@ Key Features:
 - Automatic garbage collection optimization
 - Memory-mapped files for large datasets
 
-Performance Targets:
-- Memory usage: Stable under 2GB for normal operations
-- Object allocation: <1μs for pooled objects
-- Memory leak detection: <5MB growth per hour
-- GC pause time: <10ms for minor collections
 """
 
 import asyncio
@@ -36,7 +31,7 @@ from typing import Any, Generic, TypeVar
 
 import psutil
 
-from src.core.config.main import Config
+from src.core.config import Config
 from src.core.logging import get_logger
 
 T = TypeVar("T")
@@ -46,10 +41,10 @@ T = TypeVar("T")
 class MemoryStats:
     """Memory usage statistics."""
 
-    rss_mb: float  # Resident Set Size
-    vms_mb: float  # Virtual Memory Size
-    heap_mb: float  # Heap memory
-    available_mb: float  # Available system memory
+    rss_mb: float
+    vms_mb: float
+    heap_mb: float
+    available_mb: float
     gc_collections: dict[int, int] = field(default_factory=dict)
     gc_time_ms: float = 0.0
     object_counts: dict[str, int] = field(default_factory=dict)
@@ -371,17 +366,22 @@ class MemoryMappedCache:
 
     def _open_mmap(self):
         """Open memory-mapped file."""
+        file_handle = None
         try:
-            self.file_handle = open(self.file_path, "r+b")
-            self.mmap_file = mmap.mmap(self.file_handle.fileno(), self.max_size)
-        except Exception as e:
-            if self.file_handle:
-                self.file_handle.close()
-            raise e
+            file_handle = open(self.file_path, "r+b")
+            self.mmap_file = mmap.mmap(file_handle.fileno(), self.max_size)
+            self.file_handle = file_handle
+        except Exception:
+            if file_handle:
+                file_handle.close()
+            raise
 
     def write_data(self, offset: int, data: bytes) -> bool:
         """Write data at offset."""
         if offset + len(data) > self.max_size:
+            return False
+
+        if self.mmap_file is None:
             return False
 
         try:
@@ -397,6 +397,9 @@ class MemoryMappedCache:
         if offset + length > self.current_size:
             return None
 
+        if self.mmap_file is None:
+            return None
+
         try:
             return self.mmap_file[offset : offset + length]
         except (ValueError, OSError) as e:
@@ -405,18 +408,39 @@ class MemoryMappedCache:
 
     def close(self):
         """Close memory-mapped file."""
-        if self.mmap_file:
-            self.mmap_file.close()
-        if self.file_handle:
-            self.file_handle.close()
+        try:
+            if self.mmap_file:
+                self.mmap_file.close()
+        except Exception as e:
+            self.logger.warning(f"Error closing memory-mapped file: {e}")
+        finally:
+            self.mmap_file = None
+
+        try:
+            if self.file_handle:
+                self.file_handle.close()
+        except Exception as e:
+            self.logger.warning(f"Error closing file handle: {e}")
+        finally:
+            self.file_handle = None
 
 
 class HighPerformanceMemoryManager:
     """Comprehensive memory management system."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config | None = None):
         self.config = config
         self.logger = get_logger(__name__)
+
+        # Dependency injection support
+        self._dependency_container: Any | None = None
+
+        # Resolve config from DI container if not provided
+        if not self.config and self._dependency_container:
+            try:
+                self.config = self._dependency_container.resolve("Config")
+            except Exception:
+                pass
 
         # Object pools for common objects
         self.pools: dict[str, ObjectPool[Any]] = {}
@@ -730,6 +754,23 @@ class HighPerformanceMemoryManager:
 
         self.logger.info("Memory manager cleaned up")
 
+    def configure_dependencies(self, container: Any) -> None:
+        """Configure dependency injection container."""
+        self._dependency_container = container
+
+        # Resolve config if not already set
+        if not self.config:
+            try:
+                self.config = container.resolve("Config")
+            except Exception:
+                pass
+
+        self.logger.debug("Memory manager dependencies configured")
+
+    def get_dependencies(self) -> list[str]:
+        """Get list of required dependencies."""
+        return ["Config"]
+
 
 # Global memory manager instance
 _memory_manager: HighPerformanceMemoryManager | None = None
@@ -745,6 +786,18 @@ def initialize_memory_manager(config: Config) -> HighPerformanceMemoryManager:
 def get_memory_manager() -> HighPerformanceMemoryManager | None:
     """Get global memory manager instance."""
     return _memory_manager
+
+
+def create_memory_manager_factory(
+    config: Config | None = None,
+) -> Callable[[], HighPerformanceMemoryManager]:
+    """Create a factory function for MemoryManager to use with DI container."""
+
+    def factory() -> HighPerformanceMemoryManager:
+        # Let DI container handle any additional dependencies if needed
+        return HighPerformanceMemoryManager(config=config)
+
+    return factory
 
 
 def borrow_dict() -> dict:

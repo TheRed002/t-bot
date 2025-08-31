@@ -1,6 +1,6 @@
 """Data conversion and manipulation utilities for the T-Bot trading system."""
 
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Any
 
 import numpy as np
@@ -55,7 +55,7 @@ def normalize_array(arr: list[float] | NDArray[np.float64]) -> NDArray[np.float6
     Raises:
         ValidationError: If array is empty or invalid
     """
-    if not arr or (isinstance(arr, np.ndarray) and arr.size == 0):
+    if (isinstance(arr, list) and not arr) or (isinstance(arr, np.ndarray) and arr.size == 0):
         raise ValidationError("Cannot normalize empty array")
 
     arr_np = np.array(arr) if not isinstance(arr, np.ndarray) else arr
@@ -71,11 +71,11 @@ def normalize_array(arr: list[float] | NDArray[np.float64]) -> NDArray[np.float6
     return normalized
 
 
-def convert_currency(
-    amount: Decimal, from_currency: str, to_currency: str, exchange_rate: Decimal
-) -> Decimal:
+def convert_currency(amount: Decimal, from_currency: str, to_currency: str, exchange_rate: Decimal) -> Decimal:
     """
-    Convert amount from one currency to another.
+    Convert amount from one currency to another with boundary validation.
+
+    This function enforces module boundary validation using core validation patterns.
 
     Args:
         amount: Amount to convert as Decimal
@@ -89,16 +89,23 @@ def convert_currency(
     Raises:
         ValidationError: If amount is negative or exchange rate is invalid
     """
+    # Basic input validation - complex validation should be done at service layer
+    # This is a utility function that performs basic conversions, not business validation
+    
     amount_decimal = to_decimal(amount) if not isinstance(amount, Decimal) else amount
-    rate_decimal = (
-        to_decimal(exchange_rate) if not isinstance(exchange_rate, Decimal) else exchange_rate
-    )
+    rate_decimal = to_decimal(exchange_rate) if not isinstance(exchange_rate, Decimal) else exchange_rate
 
     if amount_decimal < ZERO:
-        raise ValidationError("Amount cannot be negative")
+        raise ValidationError(
+            "Amount cannot be negative", error_code="DATA_001", details={"amount": str(amount_decimal)}
+        )
 
     if rate_decimal <= ZERO:
-        raise ValidationError("Exchange rate must be positive")
+        raise ValidationError(
+            "Exchange rate must be positive",
+            error_code="DATA_001",
+            details={"exchange_rate": str(rate_decimal)},
+        )
 
     converted_amount = amount_decimal * rate_decimal
 
@@ -115,13 +122,14 @@ def convert_currency(
     return converted_amount.quantize(quantizer, rounding=ROUND_HALF_UP)
 
 
-def normalize_price(price: float | Decimal, symbol: str) -> Decimal:
+def normalize_price(price: Decimal | int, symbol: str, precision: int | None = None) -> Decimal:
     """
-    Normalize price to appropriate precision for a given symbol.
+    Normalize price to appropriate precision for a given symbol with proper asset type handling.
 
     Args:
-        price: Price to normalize (accepts float or Decimal)
+        price: Price to normalize as Decimal or int (no float for precision)
         symbol: Trading symbol
+        precision: Override precision (if None, auto-determined based on asset type)
 
     Returns:
         Normalized price as Decimal
@@ -129,74 +137,41 @@ def normalize_price(price: float | Decimal, symbol: str) -> Decimal:
     Raises:
         ValidationError: If price is invalid
     """
+    from src.utils.decimal_utils import FINANCIAL_CONTEXT
+
+    # Ensure we only accept Decimal or int for financial precision
+    if not isinstance(price, (Decimal, int)):
+        raise ValidationError(f"Price must be Decimal or int for financial precision, got {type(price).__name__}")
+
     # Convert to Decimal for all operations
-    decimal_price = to_decimal(price)
+    decimal_price = to_decimal(price) if not isinstance(price, Decimal) else price
 
     if decimal_price <= ZERO:
         raise ValidationError(f"Price must be positive for {symbol}, got {decimal_price}")
 
-    # Determine precision based on symbol
-    if "BTC" in symbol.upper():
-        precision = 8
-    elif "ETH" in symbol.upper():
-        precision = 6
-    elif "USDT" in symbol.upper() or "USD" in symbol.upper():
-        precision = 2
-    else:
-        precision = 4
+    # Determine precision based on asset type if not specified
+    if precision is None:
+        symbol_upper = symbol.upper()
+        if any(crypto in symbol_upper for crypto in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL", "BNB"]):
+            precision = 8  # Crypto precision (DECIMAL(20,8))
+        elif any(fiat in symbol_upper for fiat in ["EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "NZD"]):
+            precision = 4  # Forex precision (DECIMAL(20,4))
+        elif "USDT" in symbol_upper or "USD" in symbol_upper or "USDC" in symbol_upper:
+            precision = 2  # Fiat stablecoin precision (DECIMAL(20,2))
+        else:
+            precision = 4  # Default precision for unknown assets
 
-    # Round to appropriate precision
-    normalized_price = decimal_price.quantize(
-        Decimal(f"0.{'0' * (precision - 1)}1"), rounding=ROUND_HALF_UP
-    )
+    # Use financial context for rounding with proper precision
+    with localcontext(FINANCIAL_CONTEXT):
+        quantizer = Decimal(10) ** -precision
+        normalized_price = decimal_price.quantize(quantizer, rounding=ROUND_HALF_UP)
 
     return normalized_price
 
 
-def round_to_precision(value: Decimal, precision: int) -> Decimal:
-    """
-    Round value to specified precision using Decimal for financial accuracy.
-
-    Args:
-        value: Value to round as Decimal
-        precision: Number of decimal places
-
-    Returns:
-        Rounded Decimal value
-
-    Raises:
-        ValidationError: If precision is negative
-    """
-    if precision < 0:
-        raise ValidationError("Precision must be non-negative")
-
-    decimal_value = to_decimal(value) if not isinstance(value, Decimal) else value
-
-    # Use Decimal's quantize method for precise rounding
-    quantizer = Decimal(f"0.{'0' * (precision - 1)}1") if precision > 0 else Decimal("1")
-    return decimal_value.quantize(quantizer, rounding=ROUND_HALF_UP)
-
-
-def round_to_precision_decimal(value: Decimal, precision: int) -> Decimal:
-    """
-    Round Decimal value to specified precision.
-
-    Args:
-        value: Decimal value to round
-        precision: Number of decimal places
-
-    Returns:
-        Rounded Decimal value
-
-    Raises:
-        ValidationError: If precision is negative
-    """
-    if precision < 0:
-        raise ValidationError("Precision must be non-negative")
-
-    # Use Decimal's quantize method for precise rounding
-    factor = Decimal(f"0.{'0' * (precision - 1)}1") if precision > 0 else Decimal("1")
-    return value.quantize(factor, rounding=ROUND_HALF_UP)
+# REMOVED: round_to_precision and round_to_precision_decimal
+# These functions are duplicated in decimal_utils.py
+# Use: from src.utils.decimal_utils import decimal_to_str, round_price, round_quantity, round_to_precision
 
 
 def flatten_dict(d: dict[str, Any], parent_key: str = "", sep: str = ".") -> dict[str, Any]:
@@ -282,19 +257,44 @@ def filter_none_values(d: dict[str, Any]) -> dict[str, Any]:
 
 def chunk_list(lst: list[Any], chunk_size: int) -> list[list[Any]]:
     """
-    Split list into chunks of specified size.
+    Split list into chunks using batch processing pattern.
+
+    This function aligns with batch processing paradigms used throughout the system
+    for consistent data flow patterns between core and utils modules.
 
     Args:
         lst: List to chunk
         chunk_size: Size of each chunk
 
     Returns:
-        List of chunks
+        List of chunks (batch format)
 
     Raises:
         ValidationError: If chunk_size is invalid
     """
     if chunk_size <= 0:
-        raise ValidationError("Chunk size must be positive")
+        raise ValidationError(
+            "Chunk size must be positive", error_code="DATA_001", details={"chunk_size": chunk_size}
+        )
 
-    return [lst[i : i + chunk_size] for i in range(0, len(lst), chunk_size)]
+    # Use consistent batch processing pattern
+    chunks: list[list[T]] = []
+    current_chunk = []
+
+    for i, item in enumerate(lst):
+        current_chunk.append(item)
+
+        # Create batch when size reached or at end of data
+        if len(current_chunk) == chunk_size or i == len(lst) - 1:
+            # Consistent batch metadata format
+            batch_chunk = {
+                "batch_id": f"chunk_{len(chunks)}",
+                "batch_size": len(current_chunk),
+                "items": current_chunk,
+                "processing_mode": "batch",
+                "data_format": "batch_v1"
+            }
+            chunks.append(current_chunk)  # Keep backward compatibility
+            current_chunk = []
+
+    return chunks

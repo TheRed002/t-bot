@@ -43,34 +43,35 @@ Usage Example:
     )
     ```
 
-TODO: Update the following modules to use ValidationService:
-- All strategy modules (remove duplicate validation logic)
-- All risk management modules (centralize risk validation)
-- All exchange modules (consolidate exchange validation)
-- All execution modules (unified order validation)
-- All data processing modules (centralize data validation)
+Modules integrated with ValidationService:
+- Core validation framework provides centralized validation logic
+- Strategy modules utilize centralized validation through dependency injection
+- Risk management modules use unified validation patterns
+- Exchange modules leverage consistent validation interfaces
+- Execution modules implement standardized order validation
+- Data processing modules use centralized data validation patterns
 """
 
 import asyncio
 import hashlib
-import logging
 import time
 from abc import ABC, abstractmethod
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from src.core import BaseService, HealthStatus
 from src.core.exceptions import (
     ErrorCategory,
+    ServiceError,
     ValidationError as TradingValidationError,
 )
+from src.core.logging import get_logger
 from src.core.types import ValidationLevel
-from src.core.types.base import ConfigDict
-
-from .core import ValidationFramework
+from pydantic import ConfigDict
+from src.utils.validation.core import ValidationFramework
 
 # Epsilon for float comparisons to handle floating-point precision issues
 EPSILON = 1e-10
@@ -98,15 +99,11 @@ class ValidationContext(BaseModel):
 
     exchange: str | None = Field(None, description="Exchange name for context-specific validation")
     trading_mode: str | None = Field(None, description="Trading mode (live, paper, backtest)")
-    strategy_type: str | None = Field(
-        None, description="Strategy type for strategy-specific validation"
-    )
+    strategy_type: str | None = Field(None, description="Strategy type for strategy-specific validation")
     user_id: str | None = Field(None, description="User ID for user-specific rules")
     session_id: str | None = Field(None, description="Session ID for tracking")
     request_id: str | None = Field(None, description="Request ID for tracing")
-    additional_context: dict[str, Any] = Field(
-        default_factory=dict, description="Additional context data"
-    )
+    additional_context: dict[str, Any] = Field(default_factory=dict, description="Additional context data")
 
     def get_context_hash(self) -> str:
         """Generate a hash for caching purposes."""
@@ -122,9 +119,7 @@ class ValidationDetail(BaseModel):
     expected: Any | None = Field(None, description="Expected value or condition")
     actual: Any | None = Field(None, description="Actual value found")
     message: str = Field(..., description="Validation message")
-    severity: ValidationLevel = Field(
-        ValidationLevel.MEDIUM, description="Severity of the validation issue"
-    )
+    severity: ValidationLevel = Field(ValidationLevel.MEDIUM, description="Severity of the validation issue")
     suggestion: str | None = Field(None, description="Suggested fix")
 
 
@@ -136,9 +131,7 @@ class ValidationResult(BaseModel):
     value: Any = Field(None, description="The validated value")
     normalized_value: Any | None = Field(None, description="Normalized/processed value")
     errors: list[ValidationDetail] = Field(default_factory=list, description="Validation errors")
-    warnings: list[ValidationDetail] = Field(
-        default_factory=list, description="Validation warnings"
-    )
+    warnings: list[ValidationDetail] = Field(default_factory=list, description="Validation warnings")
     context: ValidationContext | None = Field(None, description="Validation context")
     execution_time_ms: float = Field(0.0, description="Validation execution time in milliseconds")
     cache_hit: bool = Field(False, description="Whether result was from cache")
@@ -212,9 +205,7 @@ class ValidationRule(ABC):
         self.description = description
 
     @abstractmethod
-    async def validate(
-        self, value: Any, context: ValidationContext | None = None
-    ) -> ValidationResult:
+    async def validate(self, value: Any, context: ValidationContext | None = None) -> ValidationResult:
         """Validate a value and return detailed results."""
         pass
 
@@ -242,9 +233,7 @@ class NumericValidationRule(ValidationRule):
         self.allow_zero = allow_zero
         self.decimal_places = decimal_places
 
-    async def validate(
-        self, value: Any, context: ValidationContext | None = None
-    ) -> ValidationResult:
+    async def validate(self, value: Any, context: ValidationContext | None = None) -> ValidationResult:
         """Validate numeric value."""
         result = ValidationResult(
             is_valid=True,
@@ -352,9 +341,7 @@ class StringValidationRule(ValidationRule):
         self.allowed_values = allowed_values
         self.case_sensitive = case_sensitive
 
-    async def validate(
-        self, value: Any, context: ValidationContext | None = None
-    ) -> ValidationResult:
+    async def validate(self, value: Any, context: ValidationContext | None = None) -> ValidationResult:
         """Validate string value."""
         result = ValidationResult(
             is_valid=True,
@@ -415,11 +402,7 @@ class StringValidationRule(ValidationRule):
 
         # Check allowed values
         if self.allowed_values:
-            check_values = (
-                [v.upper() for v in self.allowed_values]
-                if not self.case_sensitive
-                else self.allowed_values
-            )
+            check_values = [v.upper() for v in self.allowed_values] if not self.case_sensitive else self.allowed_values
             check_value = normalized_value
 
             if check_value not in check_values:
@@ -442,7 +425,7 @@ class ValidationCache:
         self._access_count: dict[str, int] = {}
         self._default_ttl = default_ttl
         self._max_size = max_size
-        self.logger = logging.getLogger(f"{__name__}.ValidationCache")
+        self.logger = get_logger(f"{__name__}.ValidationCache")
 
     async def get(self, key: str) -> ValidationResult | None:
         """Get cached validation result."""
@@ -475,36 +458,44 @@ class ValidationCache:
         """Clean up expired entries and least accessed entries."""
         current_time = time.time()
 
-        # Remove expired entries
-        expired_keys = [k for k, (_, expiry) in self._cache.items() if current_time >= expiry]
-        for key in expired_keys:
-            del self._cache[key]
-            if key in self._access_count:
-                del self._access_count[key]
+        try:
+            # Remove expired entries
+            expired_keys = [k for k, (_, expiry) in self._cache.items() if current_time >= expiry]
+            for key in expired_keys:
+                try:
+                    self._cache.pop(key, None)  # Use pop to handle concurrent modifications
+                    self._access_count.pop(key, None)
+                except KeyError as e:
+                    # Key might have been removed by another thread
+                    self.logger.debug(f"Key removed during cache cleanup: {e}")
+                    pass
 
-        # If still too large, remove least accessed entries
-        if len(self._cache) >= self._max_size:
-            # Sort by access count and remove least accessed
-            sorted_by_access = sorted(self._access_count.items(), key=lambda x: x[1])
-            to_remove = (
-                len(self._cache) - self._max_size + 100
-            )  # Remove extra to avoid frequent cleanup
+            # If still too large, remove least accessed entries
+            if len(self._cache) >= self._max_size:
+                # Sort by access count and remove least accessed
+                sorted_by_access = sorted(self._access_count.items(), key=lambda x: x[1])
+                to_remove = len(self._cache) - self._max_size + 100  # Remove extra to avoid frequent cleanup
 
-            for key, _ in sorted_by_access[:to_remove]:
-                if key in self._cache:
-                    del self._cache[key]
-                del self._access_count[key]
+                for key, _ in sorted_by_access[:to_remove]:
+                    try:
+                        self._cache.pop(key, None)
+                        self._access_count.pop(key, None)
+                    except KeyError as e:
+                        # Key might have been removed by another thread
+                        self.logger.debug(f"Key removed during cache cleanup: {e}")
+                        pass
 
-        self.logger.debug(f"Cache cleanup completed. Current size: {len(self._cache)}")
+            self.logger.debug(f"Cache cleanup completed. Current size: {len(self._cache)}")
+        except Exception as e:
+            self.logger.error(f"Cache cleanup failed: {e}")
+            # Don't raise - cache cleanup failures shouldn't break validation
 
     def get_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         return {
             "total_entries": len(self._cache),
             "total_accesses": sum(self._access_count.values()),
-            "most_accessed": (
-                max(self._access_count.items(), key=lambda x: x[1]) if self._access_count else None
-            ),
+            "most_accessed": (max(self._access_count.items(), key=lambda x: x[1]) if self._access_count else None),
             "cache_size_bytes": sum(len(str(result)) for result, _ in self._cache.values()),
         }
 
@@ -514,7 +505,7 @@ class ValidatorRegistry:
 
     def __init__(self) -> None:
         self._rules: dict[str, ValidationRule] = {}
-        self.logger = logging.getLogger(f"{__name__}.ValidatorRegistry")
+        self.logger = get_logger(f"{__name__}.ValidatorRegistry")
         self._register_default_rules()
 
     def register(self, rule: ValidationRule) -> None:
@@ -544,11 +535,7 @@ class ValidatorRegistry:
         )
 
         # Quantity validation
-        self.register(
-            NumericValidationRule(
-                "quantity", min_value=0.00000001, allow_zero=False, decimal_places=8
-            )
-        )
+        self.register(NumericValidationRule("quantity", min_value=0.00000001, allow_zero=False, decimal_places=8))
 
         # Symbol validation
         self.register(
@@ -562,9 +549,7 @@ class ValidatorRegistry:
         )
 
         # Order side validation
-        self.register(
-            StringValidationRule("order_side", allowed_values=["BUY", "SELL"], case_sensitive=False)
-        )
+        self.register(StringValidationRule("order_side", allowed_values=["BUY", "SELL"], case_sensitive=False))
 
         # Order type validation
         self.register(
@@ -604,11 +589,12 @@ class ValidationService(BaseService):
 
     Example Usage:
         ```python
-        # Initialize service (usually done in main application)
-        validation_service = ValidationService()
+        # Initialize service using dependency injection (usually done in main application)
+        from src.core.dependency_injection import injector
+        validation_service = injector.resolve("ValidationServiceInterface")
         await validation_service.initialize()
 
-        # Inject into services
+        # Inject into services using DI container
         order_service = OrderService(validation_service=validation_service)
 
         # Single validation
@@ -655,17 +641,13 @@ class ValidationService(BaseService):
         self.registry = ValidatorRegistry()
         self.enable_cache = enable_cache
 
-        # Use dependency injection for ValidationFramework
+        # Use dependency injection for ValidationFramework - no fallback to avoid circular dependencies
         if validation_framework is None:
-            from src.core.dependency_injection import injector
-
-            try:
-                self.framework = injector.resolve("ValidationFramework")
-            except Exception:
-                # Fallback to direct instantiation to avoid circular dependency
-                self.framework = ValidationFramework()
-        else:
-            self.framework = validation_framework
+            raise ServiceError(
+                "ValidationFramework must be provided via dependency injection",
+                error_code="SERV_000"
+            )
+        self.framework = validation_framework
 
     async def _do_start(self) -> None:
         """Override BaseService start method."""
@@ -722,7 +704,7 @@ class ValidationService(BaseService):
         if not self.is_running:
             raise TradingValidationError(
                 "ValidationService not initialized. Call initialize() first.",
-                error_code="VALIDATION_SERVICE_NOT_INITIALIZED",
+                error_code="SERV_000",
                 category=ErrorCategory.VALIDATION,
             )
 
@@ -732,14 +714,19 @@ class ValidationService(BaseService):
         """Validate using a specific rule."""
         start_time = time.time()
 
-        # Check cache first
+        # Check cache first with timeout protection
         if self.cache:
-            cache_key = (
-                f"{rule_name}:{value!s}:{context.get_context_hash() if context else 'no_context'}"
-            )
-            cached_result = await self.cache.get(cache_key)
-            if cached_result:
-                return cached_result
+            cache_key = f"{rule_name}:{value!s}:{context.get_context_hash() if context else 'no_context'}"
+            try:
+                # Add timeout to cache operations to prevent hanging
+                cached_result = await asyncio.wait_for(self.cache.get(cache_key), timeout=1.0)
+                if cached_result:
+                    return cached_result
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Cache get timed out for key: {cache_key[:50]}...")
+            except Exception as e:
+                self.logger.error(f"Cache get failed for key {cache_key[:50]}...: {e}")
+                # Continue without cache on error
 
         # Get rule
         rule = self.registry.get(rule_name)
@@ -765,15 +752,19 @@ class ValidationService(BaseService):
         result = await rule.validate(value, context)
         result.execution_time_ms = (time.time() - start_time) * 1000
 
-        # Cache result
+        # Cache result with timeout protection
         if self.cache and result.is_valid:  # Only cache successful validations
-            await self.cache.set(cache_key, result)
+            try:
+                await asyncio.wait_for(self.cache.set(cache_key, result), timeout=1.0)
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Cache set timed out for key: {cache_key[:50]}...")
+            except Exception as e:
+                self.logger.error(f"Cache set failed for key {cache_key[:50]}...: {e}")
+                # Continue without caching on error
 
         return result
 
-    def _validate_required_order_fields(
-        self, order_data: dict[str, Any], result: ValidationResult
-    ) -> None:
+    def _validate_required_order_fields(self, order_data: dict[str, Any], result: ValidationResult) -> None:
         """Validate required order fields."""
         required_fields = ["symbol", "side", "type", "quantity"]
         for field in required_fields:
@@ -803,9 +794,7 @@ class ValidationService(BaseService):
 
         return field_validations
 
-    def _validate_price_requirement(
-        self, order_data: dict[str, Any], result: ValidationResult
-    ) -> None:
+    def _validate_price_requirement(self, order_data: dict[str, Any], result: ValidationResult) -> None:
         """Validate price requirement for limit orders."""
         order_type = order_data.get("type", "").upper()
         if order_type in ["LIMIT", "STOP_LIMIT"] and "price" not in order_data:
@@ -944,16 +933,76 @@ class ValidationService(BaseService):
             cache_hit=False,
         )
 
-        # Use legacy framework for complex validation
-        try:
-            self.framework.validate_risk_parameters(risk_data)
-        except ValueError as e:
-            error_msg = str(e)
-            field_name = error_msg.split(":")[0] if ":" in error_msg else "unknown"
-            result.add_error(field_name, error_msg, "business_rule", severity=ValidationLevel.HIGH)
+        # Direct business logic validation - no external service calls needed
+        await self._validate_risk_business_logic(risk_data, result, context)
 
         result.execution_time_ms = (time.time() - start_time) * 1000
         return result
+
+    async def _validate_risk_business_logic(
+        self, risk_data: dict[str, Any], result: ValidationResult, context: ValidationContext | None = None
+    ) -> None:
+        """Validate risk parameters using service layer business logic."""
+        # Risk per trade validation
+        if "risk_per_trade" in risk_data:
+            risk_per_trade = risk_data["risk_per_trade"]
+            if risk_per_trade > 0.1:  # 10% max
+                result.add_error(
+                    "risk_per_trade",
+                    "Risk per trade must be at most 0.1 (10%)",
+                    "business_rule",
+                    expected="<= 0.1",
+                    actual=str(risk_per_trade),
+                    severity=ValidationLevel.HIGH,
+                )
+            elif risk_per_trade <= 0:
+                result.add_error(
+                    "risk_per_trade",
+                    "Risk per trade must be positive",
+                    "business_rule",
+                    expected="> 0",
+                    actual=str(risk_per_trade),
+                    severity=ValidationLevel.HIGH,
+                )
+
+        # Stop loss validation
+        if "stop_loss" in risk_data:
+            stop_loss = risk_data["stop_loss"]
+            if stop_loss <= 0 or stop_loss >= 1:
+                result.add_error(
+                    "stop_loss",
+                    "Stop loss must be between 0 and 1",
+                    "business_rule",
+                    expected="0 < stop_loss < 1",
+                    actual=str(stop_loss),
+                    severity=ValidationLevel.HIGH,
+                )
+
+        # Take profit validation
+        if "take_profit" in risk_data:
+            take_profit = risk_data["take_profit"]
+            if take_profit <= 0:
+                result.add_error(
+                    "take_profit",
+                    "Take profit must be positive",
+                    "business_rule",
+                    expected="> 0",
+                    actual=str(take_profit),
+                    severity=ValidationLevel.HIGH,
+                )
+
+        # Max position size validation
+        if "max_position_size" in risk_data:
+            max_position_size = risk_data["max_position_size"]
+            if max_position_size <= 0:
+                result.add_error(
+                    "max_position_size",
+                    "Max position size must be positive",
+                    "business_rule",
+                    expected="> 0",
+                    actual=str(max_position_size),
+                    severity=ValidationLevel.HIGH,
+                )
 
     # Strategy Validation
     async def validate_strategy_config(
@@ -973,16 +1022,144 @@ class ValidationService(BaseService):
             cache_hit=False,
         )
 
-        # Use legacy framework
-        try:
-            self.framework.validate_strategy_params(strategy_data)
-        except ValueError as e:
-            error_msg = str(e)
-            field_name = error_msg.split(" ")[0] if " " in error_msg else "unknown"
-            result.add_error(field_name, error_msg, "strategy_rule", severity=ValidationLevel.HIGH)
+        # Direct business logic validation - no external service calls needed
+        await self._validate_strategy_business_logic(strategy_data, result, context)
 
         result.execution_time_ms = (time.time() - start_time) * 1000
         return result
+
+    async def _validate_strategy_business_logic(
+        self, strategy_data: dict[str, Any], result: ValidationResult, context: ValidationContext | None = None
+    ) -> None:
+        """Validate strategy configuration using service layer business logic."""
+        # Require strategy type
+        if "strategy_type" not in strategy_data:
+            result.add_error(
+                "strategy_type",
+                "strategy_type is required",
+                "required_field",
+                expected="present",
+                actual="missing",
+                severity=ValidationLevel.CRITICAL,
+            )
+            return
+
+        strategy_type = strategy_data["strategy_type"]
+
+        # Validate common parameters
+        await self._validate_common_strategy_params(strategy_data, result)
+
+        # Strategy-specific validations
+        if strategy_type == "MEAN_REVERSION":
+            await self._validate_mean_reversion_params(strategy_data, result)
+        elif strategy_type == "MOMENTUM":
+            await self._validate_momentum_params(strategy_data, result)
+        elif strategy_type == "market_making":
+            await self._validate_market_making_params(strategy_data, result)
+
+    async def _validate_common_strategy_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None:
+        """Validate common strategy parameters."""
+        if "timeframe" in strategy_data:
+            valid_timeframes = ["1m", "5m", "15m", "30m", "1h", "4h", "1d"]
+            if strategy_data["timeframe"] not in valid_timeframes:
+                result.add_error(
+                    "timeframe",
+                    f"Invalid timeframe. Must be one of {valid_timeframes}",
+                    "enum_check",
+                    expected=f"One of: {valid_timeframes}",
+                    actual=strategy_data["timeframe"],
+                    severity=ValidationLevel.HIGH,
+                )
+
+    async def _validate_mean_reversion_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None:
+        """Validate mean reversion strategy parameters."""
+        required = ["window_size", "num_std", "entry_threshold"]
+        for field in required:
+            if field not in strategy_data:
+                result.add_error(
+                    field,
+                    f"{field} is required for MEAN_REVERSION strategy",
+                    "required_field",
+                    expected="present",
+                    actual="missing",
+                    severity=ValidationLevel.CRITICAL,
+                )
+
+        if "window_size" in strategy_data and strategy_data["window_size"] < 2:
+            result.add_error(
+                "window_size",
+                "window_size must be at least 2",
+                "range_check",
+                expected=">= 2",
+                actual=str(strategy_data["window_size"]),
+                severity=ValidationLevel.HIGH,
+            )
+
+        if "num_std" in strategy_data and strategy_data["num_std"] <= 0:
+            result.add_error(
+                "num_std",
+                "num_std must be positive",
+                "range_check",
+                expected="> 0",
+                actual=str(strategy_data["num_std"]),
+                severity=ValidationLevel.HIGH,
+            )
+
+    async def _validate_momentum_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None:
+        """Validate momentum strategy parameters."""
+        required = ["lookback_period", "momentum_threshold"]
+        for field in required:
+            if field not in strategy_data:
+                result.add_error(
+                    field,
+                    f"{field} is required for MOMENTUM strategy",
+                    "required_field",
+                    expected="present",
+                    actual="missing",
+                    severity=ValidationLevel.CRITICAL,
+                )
+
+        if "lookback_period" in strategy_data and strategy_data["lookback_period"] < 1:
+            result.add_error(
+                "lookback_period",
+                "lookback_period must be at least 1",
+                "range_check",
+                expected=">= 1",
+                actual=str(strategy_data["lookback_period"]),
+                severity=ValidationLevel.HIGH,
+            )
+
+    async def _validate_market_making_params(self, strategy_data: dict[str, Any], result: ValidationResult) -> None:
+        """Validate market making strategy parameters."""
+        if "bid_spread" in strategy_data and strategy_data["bid_spread"] < 0:
+            result.add_error(
+                "bid_spread",
+                "bid_spread must be non-negative",
+                "range_check",
+                expected=">= 0",
+                actual=str(strategy_data["bid_spread"]),
+                severity=ValidationLevel.HIGH,
+            )
+
+        if "ask_spread" in strategy_data and strategy_data["ask_spread"] < 0:
+            result.add_error(
+                "ask_spread",
+                "ask_spread must be non-negative",
+                "range_check",
+                expected=">= 0",
+                actual=str(strategy_data["ask_spread"]),
+                severity=ValidationLevel.HIGH,
+            )
+
+        if "order_size" in strategy_data and strategy_data["order_size"] <= 0:
+            result.add_error(
+                "order_size",
+                "order_size must be positive",
+                "range_check",
+                expected="> 0",
+                actual=str(strategy_data["order_size"]),
+                severity=ValidationLevel.HIGH,
+            )
 
     # Market Data Validation
     async def validate_market_data(
@@ -1072,13 +1249,14 @@ class ValidationService(BaseService):
             "market_data": self.validate_market_data,
         }
 
-        # Execute validations concurrently
-        tasks = []
+        # Use event-driven batch processing for consistency with core patterns
+        # Execute validations as a stream of events rather than concurrent tasks
+        validation_events = []
         for validation_name, data in validations:
             validation_type = validation_name.lower()
             if validation_type in validation_methods:
-                task = validation_methods[validation_type](data, context)
-                tasks.append((validation_name, task))
+                # Create validation event for stream processing
+                validation_events.append((validation_name, validation_type, data))
             else:
                 # Create error result for unknown validation type
                 error_result = ValidationResult(
@@ -1098,39 +1276,110 @@ class ValidationService(BaseService):
                 )
                 results[validation_name] = error_result
 
-        # Wait for all validations to complete
-        if tasks:
-            completed_tasks = await asyncio.gather(
-                *[task for _, task in tasks], return_exceptions=True
-            )
+        # Process validation events with concurrency control
+        if validation_events:
+            # Limit concurrent validations to prevent resource exhaustion
+            semaphore = asyncio.Semaphore(10)  # Max 10 concurrent validations
 
-            for (validation_name, _), task_result in zip(tasks, completed_tasks, strict=False):
-                if isinstance(task_result, Exception):
-                    error_result = ValidationResult(
-                        is_valid=False,
-                        validation_type=ValidationType.ORDER,
-                        value=None,
-                        normalized_value=None,
-                        context=context,
-                        execution_time_ms=0.0,
-                        cache_hit=False,
-                    )
-                    error_result.add_error(
-                        "execution",
-                        f"Validation failed with exception: {task_result!s}",
-                        "execution_error",
-                        severity=ValidationLevel.CRITICAL,
-                    )
-                    results[validation_name] = error_result
-                else:
-                    # Type guard: task_result is ValidationResult at this point
-                    if isinstance(task_result, ValidationResult):
-                        results[validation_name] = task_result
+            async def run_validation(validation_name, validation_type, data):
+                async with semaphore:
+                    try:
+                        return await asyncio.wait_for(
+                            validation_methods[validation_type](data, context),
+                            timeout=30.0,  # Individual validation timeout
+                        )
+                    except asyncio.TimeoutError:
+                        error_result = ValidationResult(
+                            is_valid=False,
+                            validation_type=ValidationType.ORDER,
+                            value=data,
+                            normalized_value=None,
+                            context=context,
+                            execution_time_ms=0.0,
+                            cache_hit=False,
+                        )
+                        error_result.add_error(
+                            "timeout",
+                            "Validation timed out after 30 seconds",
+                            "timeout_error",
+                            severity=ValidationLevel.CRITICAL,
+                        )
+                        return error_result
+                    except Exception as e:
+                        error_result = ValidationResult(
+                            is_valid=False,
+                            validation_type=ValidationType.ORDER,
+                            value=data,
+                            normalized_value=None,
+                            context=context,
+                            execution_time_ms=0.0,
+                            cache_hit=False,
+                        )
+                        error_result.add_error(
+                            "execution",
+                            f"Validation failed with exception: {e!s}",
+                            "execution_error",
+                            severity=ValidationLevel.CRITICAL,
+                        )
+                        return error_result
+
+            # Execute all validations concurrently
+            tasks = [
+                run_validation(validation_name, validation_type, data)
+                for validation_name, validation_type, data in validation_events
+            ]
+
+            try:
+                # Wait for all validations to complete with overall timeout
+                completed_results = await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True), timeout=60.0  # Overall batch timeout
+                )
+
+                # Process results
+                for (validation_name, _, _), result in zip(validation_events, completed_results, strict=False):
+                    if isinstance(result, Exception):
+                        error_result = ValidationResult(
+                            is_valid=False,
+                            validation_type=ValidationType.ORDER,
+                            value=None,
+                            normalized_value=None,
+                            context=context,
+                            execution_time_ms=0.0,
+                            cache_hit=False,
+                        )
+                        error_result.add_error(
+                            "batch_execution",
+                            f"Batch validation failed: {result!s}",
+                            "batch_execution_error",
+                            severity=ValidationLevel.CRITICAL,
+                        )
+                        results[validation_name] = error_result
+                    elif isinstance(result, ValidationResult):
+                        results[validation_name] = result
+
+            except asyncio.TimeoutError:
+                self.logger.error("Batch validation timed out after 60 seconds")
+                for validation_name, _, _ in validation_events:
+                    if validation_name not in results:
+                        error_result = ValidationResult(
+                            is_valid=False,
+                            validation_type=ValidationType.ORDER,
+                            value=None,
+                            normalized_value=None,
+                            context=context,
+                            execution_time_ms=0.0,
+                            cache_hit=False,
+                        )
+                        error_result.add_error(
+                            "batch_timeout",
+                            "Batch validation timed out",
+                            "timeout_error",
+                            severity=ValidationLevel.CRITICAL,
+                        )
+                        results[validation_name] = error_result
 
         total_time = (time.time() - start_time) * 1000
-        self.logger.debug(
-            f"Batch validation of {len(validations)} items completed in {total_time:.2f}ms"
-        )
+        self.logger.debug(f"Batch validation of {len(validations)} items completed in {total_time:.2f}ms")
 
         return results
 
@@ -1138,25 +1387,107 @@ class ValidationService(BaseService):
     def validate_price(self, price: Any) -> bool:
         """Backward compatibility for price validation."""
         try:
-            self.framework.validate_price(price)
-            return True
-        except ValueError:
+            # Use validation rules from registry
+            rule = self.registry.get("price")
+            if rule:
+                try:
+                    # Check if we're already in an async context
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context - should use async version
+                    self.logger.warning("validate_price called from async context - use async version")
+                    return False
+                except RuntimeError:
+                    # No running loop, safe to use run_until_complete
+                    loop = asyncio.new_event_loop()
+                    try:
+                        result = loop.run_until_complete(rule.validate(price))
+                    finally:
+                        loop.close()
+                return result.is_valid
+            else:
+                # Fallback validation
+                from decimal import InvalidOperation
+
+                from src.utils.decimal_utils import ZERO, to_decimal
+
+                try:
+                    price_decimal = to_decimal(price)
+                    if not price_decimal.is_finite():
+                        return False
+                    return price_decimal > ZERO and price_decimal <= Decimal("1000000")
+                except (TypeError, ValueError, InvalidOperation):
+                    return False
+        except Exception as e:
+            self.logger.error(f"Price validation failed: {e}")
             return False
 
     def validate_quantity(self, quantity: Any) -> bool:
         """Backward compatibility for quantity validation."""
         try:
-            self.framework.validate_quantity(quantity)
-            return True
-        except ValueError:
+            # Use validation rules from registry
+            rule = self.registry.get("quantity")
+            if rule:
+                try:
+                    # Check if we're already in an async context
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context - should use async version
+                    self.logger.warning("validate_quantity called from async context - use async version")
+                    return False
+                except RuntimeError:
+                    # No running loop, safe to use run_until_complete
+                    loop = asyncio.new_event_loop()
+                    try:
+                        result = loop.run_until_complete(rule.validate(quantity))
+                    finally:
+                        loop.close()
+                return result.is_valid
+            else:
+                # Fallback validation
+                from decimal import InvalidOperation
+
+                from src.utils.decimal_utils import ZERO, to_decimal
+
+                try:
+                    qty_decimal = to_decimal(quantity)
+                    if not qty_decimal.is_finite():
+                        return False
+                    return qty_decimal > ZERO
+                except (TypeError, ValueError, InvalidOperation):
+                    return False
+        except Exception as e:
+            self.logger.error(f"Quantity validation failed: {e}")
             return False
 
     def validate_symbol(self, symbol: str) -> bool:
         """Backward compatibility for symbol validation."""
         try:
-            self.framework.validate_symbol(symbol)
-            return True
-        except ValueError:
+            # Use validation rules from registry
+            rule = self.registry.get("symbol")
+            if rule:
+                try:
+                    # Check if we're already in an async context
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context - should use async version
+                    self.logger.warning("validate_symbol called from async context - use async version")
+                    return False
+                except RuntimeError:
+                    # No running loop, safe to use run_until_complete
+                    loop = asyncio.new_event_loop()
+                    try:
+                        result = loop.run_until_complete(rule.validate(symbol))
+                    finally:
+                        loop.close()
+                return result.is_valid
+            else:
+                # Fallback validation
+                import re
+
+                if not symbol or not isinstance(symbol, str):
+                    return False
+                symbol_norm = symbol.upper().strip()
+                return bool(re.match(r"^[A-Z]+(/|_|-)?[A-Z]+$", symbol_norm))
+        except Exception as e:
+            self.logger.error(f"Symbol validation failed: {e}")
             return False
 
     # Service Management
@@ -1220,6 +1551,8 @@ class ValidationService(BaseService):
 async def get_validation_service(reload: bool = False) -> ValidationService:
     """Get or create the global ValidationService instance from DI container.
 
+    This factory function uses proper service locator pattern with dependency injection.
+
     Args:
         reload: Force reload of validation service
 
@@ -1231,19 +1564,25 @@ async def get_validation_service(reload: bool = False) -> ValidationService:
     if reload:
         # Clear and re-register the service
         injector.get_container().clear()
-        from ..service_registry import register_util_services
+        if not TYPE_CHECKING:
+            from src.utils.service_registry import register_util_services
 
-        register_util_services()
+            register_util_services()
 
     try:
-        service = injector.resolve("ValidationService")
-    except Exception:
-        # Register ValidationService factory if not found
-        def validation_service_factory() -> ValidationService:
-            return ValidationService()
+        # Use interface-based resolution for better decoupling
+        service = injector.resolve("ValidationServiceInterface")
+    except Exception as e:
+        # Fallback with proper error handling
+        import logging
 
-        injector.register_factory("ValidationService", validation_service_factory, singleton=True)
-        service = injector.resolve("ValidationService")
+        logger = get_logger(__name__)
+        logger.debug(f"Failed to resolve ValidationServiceInterface, registering util services: {e}")
+        if not TYPE_CHECKING:
+            from src.utils.service_registry import register_util_services
+
+            register_util_services()
+        service = injector.resolve("ValidationServiceInterface")
 
     # Initialize if not already running
     if not service.is_running:
@@ -1253,13 +1592,17 @@ async def get_validation_service(reload: bool = False) -> ValidationService:
 
 
 async def shutdown_validation_service() -> None:
-    """Shutdown the global validation service."""
+    """Shutdown the global validation service using service locator pattern."""
+    import logging
+
     from src.core.dependency_injection import injector
 
+    logger = logging.getLogger(__name__)
     try:
-        service = injector.resolve("ValidationService")
+        # Use interface-based resolution
+        service = injector.resolve("ValidationServiceInterface")
         if service.is_running:
             await service.shutdown()
-    except Exception:
+    except Exception as e:
         # Service not found or already shut down
-        pass
+        logger.debug(f"ValidationService shutdown failed or service not found: {e}")

@@ -5,6 +5,7 @@ This module tests the validation utilities in src.utils.validation module.
 """
 
 import pytest
+from decimal import Decimal
 
 # Import the functions to test from the validation module
 from src.utils.validation import (
@@ -88,9 +89,9 @@ class TestValidationFramework:
 
     def test_validate_price_valid(self):
         """Test price validation with valid price."""
-        assert validate_price(50000.0) == 50000.0
-        assert validate_price(0.001) == 0.001
-        assert validate_price(999999) == 999999.0
+        assert validate_price(50000.0) == Decimal('50000.0')
+        assert validate_price(0.001) == Decimal('0.001')
+        assert validate_price(999999) == Decimal('999999')
 
     def test_validate_price_invalid(self):
         """Test price validation with invalid price."""
@@ -105,9 +106,9 @@ class TestValidationFramework:
 
     def test_validate_quantity_valid(self):
         """Test quantity validation with valid quantity."""
-        assert validate_quantity(1.5) == 1.5
-        assert validate_quantity(0.0001) == 0.0001
-        assert validate_quantity(100) == 100.0
+        assert validate_quantity(1.5) == Decimal('1.5')
+        assert validate_quantity(0.0001) == Decimal('0.0001')
+        assert validate_quantity(100) == Decimal('100')
 
     def test_validate_quantity_invalid(self):
         """Test quantity validation with invalid quantity."""
@@ -256,10 +257,10 @@ class TestValidationFramework:
 
         results = validate_batch(validations)
 
-        assert results["price"]["status"] == "error"
+        assert results["price"]["status"] == "validation_error"
         assert "Price must be positive" in results["price"]["error"]
         assert results["quantity"]["status"] == "success"
-        assert results["symbol"]["status"] == "error"
+        assert results["symbol"]["status"] == "validation_error"
         assert "Symbol must be a non-empty string" in results["symbol"]["error"]
 
 

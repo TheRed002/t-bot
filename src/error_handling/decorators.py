@@ -12,7 +12,7 @@ for repetitive try-catch blocks throughout the codebase. Features include:
 - Graceful degradation patterns
 - Context-aware error handling
 
-GOAL: Replace 1,807 repetitive try-catch blocks with intelligent decorators.
+Replace repetitive try-catch blocks with intelligent decorators.
 """
 
 import asyncio
@@ -28,13 +28,16 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from enum import Enum
 from typing import Any, ClassVar, TypeVar
 
+# Import consolidated classes from context module
 from src.core.exceptions import (
     ConfigurationError,
     DatabaseConnectionError,
     DataError,
+    ErrorCategory,
     ExchangeError,
     ExecutionError,
     ModelError,
@@ -47,11 +50,14 @@ from src.core.exceptions import (
     ValidationError,
 )
 from src.core.logging import correlation_context, get_logger
-
-# Import consolidated classes from context module
-from src.error_handling.context import ErrorCategory, ErrorContext
+from src.error_handling.context import ErrorContext
 from src.error_handling.security_sanitizer import (
     SensitivityLevel,
+)
+from src.utils.error_categorization import (
+    categorize_by_keywords,
+    get_fallback_type_keywords,
+    is_sensitive_key,
 )
 
 # Import existing decorators to avoid duplication
@@ -60,17 +66,37 @@ logger = get_logger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
+# Configuration Constants
+DEFAULT_CACHE_SIZE = 1000
+DEFAULT_CACHE_TTL_SECONDS = 3600  # 1 hour
+DEFAULT_CACHE_MEMORY_LIMIT_MB = 100
+DEFAULT_EVICTION_PERCENTAGE = 0.3  # 30%
+DEFAULT_CLEANUP_INTERVAL_MINUTES = 30
+DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS = 30
+DEFAULT_MAX_OPERATION_TIMES = 1000
+DEFAULT_TASK_TIMEOUT_SECONDS = 30
+DEFAULT_FALLBACK_CACHE_TTL_SECONDS = 1800  # 30 min
+DEFAULT_RESULT_CACHE_TTL_SECONDS = 300  # 5 min
+
+# Memory usage thresholds
+HIGH_MEMORY_WARNING_THRESHOLD_MB = 50
+MEMORY_CLEANUP_SLEEP_SECONDS = 30
+PERIODIC_CLEANUP_SLEEP_SECONDS = 1
+PERIODIC_CLEANUP_ITERATIONS = 300  # 5 minutes
+
 
 class LRUCache:
     """Thread-safe LRU cache with TTL support and memory limits."""
 
-    def __init__(self, max_size: int = 1000, ttl_seconds: int = 3600):
+    def __init__(
+        self, max_size: int = DEFAULT_CACHE_SIZE, ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS
+    ) -> None:
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
         self._cache: OrderedDict[str, tuple[Any, datetime]] = OrderedDict()
         self._lock = threading.RLock()
         self._memory_usage = 0
-        self._max_memory_mb = 100  # 100MB limit per cache
+        self._max_memory_mb = DEFAULT_CACHE_MEMORY_LIMIT_MB
 
     def get(self, key: str) -> Any | None:
         """Get value from cache if not expired."""
@@ -102,7 +128,7 @@ class LRUCache:
 
             # Check memory limit
             if self._memory_usage + estimated_size > self._max_memory_mb * 1024 * 1024:
-                self._evict_lru_entries(0.3)  # Evict 30% of entries
+                self._evict_lru_entries(DEFAULT_EVICTION_PERCENTAGE)
 
             # Remove LRU entries if at max size
             while len(self._cache) >= self.max_size:
@@ -206,9 +232,9 @@ class RetryConfig:
     """
 
     max_attempts: int = 3
-    base_delay: float = 1.0
-    max_delay: float = 60.0
-    backoff_factor: float = 2.0
+    base_delay: Decimal = Decimal("1.0")
+    max_delay: Decimal = Decimal("60.0")
+    backoff_factor: Decimal = Decimal("2.0")
     jitter: bool = True
     exponential: bool = True
     retriable_errors: tuple = (
@@ -229,18 +255,22 @@ class RetryConfig:
                 f"max_attempts must be an integer between 1 and 10, got {self.max_attempts}"
             )
 
-        if not isinstance(self.base_delay, int | float) or not (0.1 <= self.base_delay <= 30.0):
+        if not isinstance(self.base_delay, int | float | Decimal) or not (
+            Decimal("0.1") <= Decimal(str(self.base_delay)) <= Decimal("30.0")
+        ):
             raise ValueError(
                 f"base_delay must be between 0.1 and 30.0 seconds, got {self.base_delay}"
             )
 
-        if not isinstance(self.max_delay, int | float) or not (1.0 <= self.max_delay <= 300.0):
+        if not isinstance(self.max_delay, int | float | Decimal) or not (
+            Decimal("1.0") <= Decimal(str(self.max_delay)) <= Decimal("300.0")
+        ):
             raise ValueError(
                 f"max_delay must be between 1.0 and 300.0 seconds, got {self.max_delay}"
             )
 
-        if not isinstance(self.backoff_factor, int | float) or not (
-            1.1 <= self.backoff_factor <= 10.0
+        if not isinstance(self.backoff_factor, int | float | Decimal) or not (
+            Decimal("1.1") <= Decimal(str(self.backoff_factor)) <= Decimal("10.0")
         ):
             raise ValueError(
                 f"backoff_factor must be between 1.1 and 10.0, got {self.backoff_factor}"
@@ -248,7 +278,8 @@ class RetryConfig:
 
         if self.base_delay > self.max_delay:
             raise ValueError(
-                f"base_delay ({self.base_delay}) cannot be greater than max_delay ({self.max_delay})"
+                f"base_delay ({self.base_delay}) cannot be greater than "
+                f"max_delay ({self.max_delay})"
             )
 
         if not isinstance(self.retriable_errors, tuple):
@@ -274,7 +305,7 @@ class CircuitBreakerConfig:
     """
 
     failure_threshold: int = 5
-    recovery_timeout: float = 60.0
+    recovery_timeout: Decimal = Decimal("60.0")
     half_open_max_calls: int = 3
     expected_exception: type = Exception
 
@@ -289,11 +320,12 @@ class CircuitBreakerConfig:
                 f"failure_threshold must be between 1 and 50, got {self.failure_threshold}"
             )
 
-        if not isinstance(self.recovery_timeout, int | float) or not (
-            1.0 <= self.recovery_timeout <= 3600.0
+        if not isinstance(self.recovery_timeout, int | float | Decimal) or not (
+            Decimal("1.0") <= Decimal(str(self.recovery_timeout)) <= Decimal("3600.0")
         ):
             raise ValueError(
-                f"recovery_timeout must be between 1.0 and 3600.0 seconds, got {self.recovery_timeout}"
+                f"recovery_timeout must be between 1.0 and 3600.0 seconds, "
+                f"got {self.recovery_timeout}"
             )
 
         if not isinstance(self.half_open_max_calls, int) or not (
@@ -539,7 +571,7 @@ class ErrorMetrics:
             self._perform_cleanup()
 
     async def _cleanup_old_metrics_async(self) -> None:
-        """Remove old metrics to prevent memory growth (async version with better error handling)."""
+        """Remove old metrics to prevent memory growth (async version with error handling)."""
         start_time = time.time()
         try:
             with self._lock:
@@ -608,7 +640,7 @@ error_metrics = ErrorMetrics()
 class HandlerRegistry:
     """Thread-safe registry for tracking active UniversalErrorHandler instances."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._handlers: weakref.WeakSet = weakref.WeakSet()
         self._lock = threading.RLock()
 
@@ -654,16 +686,16 @@ def categorize_error(error: Exception) -> ErrorCategory:
 
     # Check if error_type is actually a class before using issubclass
     if not isinstance(error_type, type):
-        return ErrorCategory.UNKNOWN
+        return ErrorCategory.SYSTEM
 
     if issubclass(error_type, NetworkError | ConnectionError | TimeoutError):
         return ErrorCategory.NETWORK
     elif issubclass(error_type, DatabaseConnectionError | DataError):
-        return ErrorCategory.DATABASE
+        return ErrorCategory.DATA_QUALITY
     elif issubclass(error_type, ValidationError | ValueError | TypeError):
         return ErrorCategory.VALIDATION
     elif issubclass(error_type, ExchangeError):
-        return ErrorCategory.EXCHANGE
+        return ErrorCategory.NETWORK  # Exchange errors are network-related
     elif issubclass(error_type, ConfigurationError):
         return ErrorCategory.CONFIGURATION
     elif issubclass(error_type, ServiceError | TradingBotError):
@@ -671,10 +703,10 @@ def categorize_error(error: Exception) -> ErrorCategory:
     elif issubclass(error_type, OSError | MemoryError | SystemError):
         return ErrorCategory.SYSTEM
     else:
-        return ErrorCategory.UNKNOWN
+        return ErrorCategory.SYSTEM
 
 
-def calculate_retry_delay(attempt: int, config: RetryConfig) -> float:
+def calculate_retry_delay(attempt: int, config: RetryConfig) -> Decimal:
     """Calculate retry delay with backoff and jitter."""
     if config.exponential:
         delay = config.base_delay * (config.backoff_factor ** (attempt - 1))
@@ -686,14 +718,15 @@ def calculate_retry_delay(attempt: int, config: RetryConfig) -> float:
 
     # Apply jitter to avoid thundering herd
     if config.jitter:
-        jitter = random.uniform(0.1, 0.9) * delay
-        delay = delay * 0.5 + jitter
+        jitter_factor = Decimal(str(random.uniform(0.1, 0.9)))
+        jitter = jitter_factor * delay
+        delay = delay * Decimal("0.5") + jitter
 
     return delay
 
 
 class UniversalErrorHandler:
-    """Production-grade universal error handler with intelligent routing and comprehensive monitoring.
+    """Production-grade universal error handler with intelligent routing and monitoring.
 
     This handler provides:
     - Context manager support for resource cleanup
@@ -712,9 +745,11 @@ class UniversalErrorHandler:
     """
 
     # Class-level constants
-    HEALTH_CHECK_INTERVAL_SECONDS: ClassVar[float] = 30.0
+    HEALTH_CHECK_INTERVAL_SECONDS: ClassVar[Decimal] = Decimal(
+        str(DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS)
+    )
     MAX_CIRCUIT_BREAKER_FAILURES: ClassVar[int] = 100
-    MEMORY_USAGE_THRESHOLD_MB: ClassVar[float] = 100.0
+    MEMORY_USAGE_THRESHOLD_MB: ClassVar[Decimal] = Decimal(str(DEFAULT_CACHE_MEMORY_LIMIT_MB))
 
     def __init__(
         self,
@@ -772,11 +807,13 @@ class UniversalErrorHandler:
 
         # Performance tracking
         self._operation_times: list[float] = []
-        self._max_operation_times = 1000  # Keep last 1000 operation times
+        self._max_operation_times = DEFAULT_MAX_OPERATION_TIMES
         self._performance_lock = threading.RLock()
 
         # LRU cache for fallback values with memory limits
-        self._fallback_cache = LRUCache(max_size=500, ttl_seconds=1800)  # 30 min TTL
+        self._fallback_cache = LRUCache(
+            max_size=DEFAULT_CACHE_SIZE // 2, ttl_seconds=DEFAULT_FALLBACK_CACHE_TTL_SECONDS
+        )
         self._cache_hits = 0
         self._cache_requests = 0
 
@@ -850,18 +887,19 @@ class UniversalErrorHandler:
 
                         # Log memory usage
                         memory_usage = self._fallback_cache.memory_usage_mb()
-                        if memory_usage > 50:  # Log if over 50MB
+                        if memory_usage > HIGH_MEMORY_WARNING_THRESHOLD_MB:
                             logger.warning(
                                 "High fallback cache memory usage",
                                 memory_mb=memory_usage,
                                 entries=self._fallback_cache.size(),
+                                threshold_mb=HIGH_MEMORY_WARNING_THRESHOLD_MB,
                             )
 
                     # Check for shutdown every second for 5 minutes
-                    for _ in range(300):
+                    for _ in range(PERIODIC_CLEANUP_ITERATIONS):
                         if self._shutdown_flag:
                             return  # Exit cleanly on shutdown
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(PERIODIC_CLEANUP_SLEEP_SECONDS)
 
                 except asyncio.CancelledError:
                     logger.debug("Cleanup task cancelled during operation")
@@ -870,7 +908,7 @@ class UniversalErrorHandler:
                     logger.error("Error in periodic cleanup", error=str(e))
                     if not self._shutdown_flag:
                         try:
-                            await asyncio.sleep(30)  # Shorter sleep on error
+                            await asyncio.sleep(MEMORY_CLEANUP_SLEEP_SECONDS)
                         except asyncio.CancelledError:
                             logger.debug("Cleanup task cancelled during error recovery")
                             return
@@ -1050,7 +1088,7 @@ class UniversalErrorHandler:
             or self._failure_count > self.MAX_CIRCUIT_BREAKER_FAILURES
         ):
             self._health_status["status"] = "unhealthy"
-        elif success_rate < 80 or memory_usage > self.MEMORY_USAGE_THRESHOLD_MB * 0.7:
+        elif success_rate < 80 or memory_usage > self.MEMORY_USAGE_THRESHOLD_MB * Decimal("0.7"):
             self._health_status["status"] = "degraded"
         else:
             self._health_status["status"] = "healthy"
@@ -1095,7 +1133,7 @@ class UniversalErrorHandler:
                             )
 
                     # Wait for next check
-                    await asyncio.sleep(self.HEALTH_CHECK_INTERVAL_SECONDS)
+                    await asyncio.sleep(float(self.HEALTH_CHECK_INTERVAL_SECONDS))
 
                 except asyncio.CancelledError:
                     break
@@ -1138,6 +1176,7 @@ class UniversalErrorHandler:
                 self.shutdown_sync()
         except Exception:
             # Ignore all errors in destructor to avoid issues during shutdown
+            # Don't log during shutdown as logging infrastructure may be unavailable
             pass
 
     def _should_retry(self, error: Exception, attempt: int) -> bool:
@@ -1420,30 +1459,24 @@ class UniversalErrorHandler:
         """
         function_name = context.function_name or ""
 
-        # Analyze function name for collection type hints
-        name_lower = function_name.lower()
+        # Analyze function name for collection type hints using shared utilities
+        type_map = {
+            "list": [],
+            "dict": {},
+            "set": set(),
+            "tuple": tuple(),
+            "str": "",
+            "int": 0,
+            "bool": False,
+        }
 
-        if any(keyword in name_lower for keyword in ["list", "array", "items", "elements"]):
-            return []
-        elif any(keyword in name_lower for keyword in ["dict", "map", "mapping", "config"]):
-            return {}
-        elif any(keyword in name_lower for keyword in ["set", "unique"]):
-            return set()
-        elif any(keyword in name_lower for keyword in ["tuple", "pair"]):
-            return tuple()
-        elif any(keyword in name_lower for keyword in ["str", "string", "text"]):
-            return ""
-        elif any(keyword in name_lower for keyword in ["int", "count", "num", "id"]):
-            return 0
-        elif any(keyword in name_lower for keyword in ["bool", "is_", "has_", "can_"]):
-            return False
-        else:
-            return None
+        detected_type = categorize_by_keywords(function_name, get_fallback_type_keywords())
+        return type_map.get(detected_type) if detected_type is not None else None
 
     def _log_error(
         self, context: ErrorContext, resolved: bool = False, operation_time_ms: float | None = None
     ) -> None:
-        """Log error with comprehensive structured information.
+        """Log error with comprehensive structured information and consistent propagation patterns.
 
         Args:
             context: Error context containing error details
@@ -1455,7 +1488,7 @@ class UniversalErrorHandler:
 
         # Note: sensitivity level could be used for future sanitization features
 
-        # Prepare log data with enhanced information
+        # Prepare log data with enhanced information and error propagation metadata
         log_data = {
             "handler_id": self.handler_id,
             "function": context.function_name,
@@ -1469,6 +1502,15 @@ class UniversalErrorHandler:
             "operation_time_ms": operation_time_ms,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "severity": self._get_error_severity(context.error),
+            # Error propagation metadata for consistent flow between modules
+            "error_propagation": {
+                "source_module": "error_handling",
+                "target_modules": ["core", "monitoring", "database"],
+                "propagation_method": "structured_logging",
+                "data_format": "error_context_v1",
+                "processing_stage": "error_logging",
+                "boundary_crossed": True
+            }
         }
 
         # Add metadata if available, with sanitization
@@ -1476,10 +1518,10 @@ class UniversalErrorHandler:
             # Only include non-sensitive metadata in logs
             safe_metadata = {}
             for key, value in context.metadata.items():
-                if key not in ["password", "token", "key", "secret", "auth"]:
+                if not is_sensitive_key(key):
                     safe_metadata[key] = value
             if safe_metadata:
-                log_data["metadata"] = safe_metadata
+                log_data["metadata"] = str(safe_metadata)
 
         # Add performance context if available
         with self._performance_lock:
@@ -1672,14 +1714,16 @@ class UniversalErrorHandler:
 
         # Map error categories to sensitivity levels
         category_mapping = {
-            ErrorCategory.EXCHANGE: SensitivityLevel.CRITICAL,
-            ErrorCategory.DATABASE: SensitivityLevel.HIGH,
             ErrorCategory.NETWORK: SensitivityLevel.MEDIUM,
+            ErrorCategory.DATA_QUALITY: SensitivityLevel.HIGH,
             ErrorCategory.VALIDATION: SensitivityLevel.LOW,
             ErrorCategory.CONFIGURATION: SensitivityLevel.MEDIUM,
             ErrorCategory.BUSINESS_LOGIC: SensitivityLevel.HIGH,
             ErrorCategory.SYSTEM: SensitivityLevel.MEDIUM,
-            ErrorCategory.UNKNOWN: SensitivityLevel.MEDIUM,
+            ErrorCategory.PERMISSION: SensitivityLevel.CRITICAL,
+            ErrorCategory.RATE_LIMIT: SensitivityLevel.MEDIUM,
+            ErrorCategory.RETRYABLE: SensitivityLevel.LOW,
+            ErrorCategory.FATAL: SensitivityLevel.CRITICAL,
         }
 
         return category_mapping.get(context.category, SensitivityLevel.MEDIUM)
@@ -1739,7 +1783,10 @@ def enhanced_error_handler(
         )
 
         # LRU cache for successful results with memory management
-        result_cache = LRUCache(max_size=1000 if cache_results else 100, ttl_seconds=cache_ttl)
+        result_cache = LRUCache(
+            max_size=DEFAULT_CACHE_SIZE if cache_results else (DEFAULT_CACHE_SIZE // 10),
+            ttl_seconds=cache_ttl,
+        )
 
         def _create_cache_key(*args, **kwargs) -> str:
             """Create cache key from arguments."""
@@ -1826,6 +1873,7 @@ def enhanced_error_handler(
                                 correlation_id=correlation_id,
                             )
 
+                        # Ensure proper await for async functions
                         result = await func(*args, **kwargs)
 
                         # Calculate operation time
@@ -2114,14 +2162,18 @@ def handle_database_errors(
     """Decorator specifically for database operations."""
     return enhanced_error_handler(
         retry_config=RetryConfig(
-            max_attempts=3, base_delay=0.5, retriable_errors=(DatabaseConnectionError, DataError)
+            max_attempts=3,
+            base_delay=Decimal("0.5"),
+            retriable_errors=(DatabaseConnectionError, DataError),
         ),
         fallback_config=FallbackConfig(
             strategy=FallbackStrategy.RETURN_DEFAULT,
             default_value=fallback_value,
             use_cache=enable_cache,
         ),
-        circuit_breaker_config=CircuitBreakerConfig(failure_threshold=5, recovery_timeout=30.0),
+        circuit_breaker_config=CircuitBreakerConfig(
+            failure_threshold=5, recovery_timeout=Decimal("30.0")
+        ),
     )
 
 
@@ -2132,9 +2184,9 @@ def handle_network_errors(
     return enhanced_error_handler(
         retry_config=RetryConfig(
             max_attempts=max_retries,
-            base_delay=1.0,
-            max_delay=60.0,
-            backoff_factor=2.0,
+            base_delay=Decimal("1.0"),
+            max_delay=Decimal("60.0"),
+            backoff_factor=Decimal("2.0"),
             retriable_errors=(NetworkError, ExchangeError, ConnectionError, TimeoutError),
         ),
         fallback_config=FallbackConfig(
@@ -2145,7 +2197,9 @@ def handle_network_errors(
             ),
             fallback_function=fallback_function,
         ),
-        circuit_breaker_config=CircuitBreakerConfig(failure_threshold=3, recovery_timeout=60.0),
+        circuit_breaker_config=CircuitBreakerConfig(
+            failure_threshold=3, recovery_timeout=Decimal("60.0")
+        ),
     )
 
 
@@ -2159,7 +2213,9 @@ def handle_validation_errors(strict: bool = True) -> Callable[[F], F]:
             retriable_errors=(),
         ),
         fallback_config=FallbackConfig(strategy=strategy),
-        circuit_breaker_config=CircuitBreakerConfig(failure_threshold=10, recovery_timeout=5.0),
+        circuit_breaker_config=CircuitBreakerConfig(
+            failure_threshold=10, recovery_timeout=Decimal("5.0")
+        ),
     )
 
 
@@ -2168,7 +2224,7 @@ def handle_trading_errors(emergency_stop: bool = True) -> Callable[[F], F]:
     return enhanced_error_handler(
         retry_config=RetryConfig(
             max_attempts=2,  # Minimal retries for trading
-            base_delay=0.1,
+            base_delay=Decimal("0.1"),
             retriable_errors=(NetworkError, ExchangeError),
         ),
         fallback_config=FallbackConfig(
@@ -2178,7 +2234,7 @@ def handle_trading_errors(emergency_stop: bool = True) -> Callable[[F], F]:
         ),
         circuit_breaker_config=CircuitBreakerConfig(
             failure_threshold=2,  # Low threshold for trading
-            recovery_timeout=120.0,
+            recovery_timeout=Decimal("120.0"),
         ),
     )
 
@@ -2198,9 +2254,9 @@ def reset_error_metrics(function_name: str | None = None) -> None:
 
 def create_custom_retry_config(
     max_attempts: int = 3,
-    base_delay: float = 1.0,
-    max_delay: float = 60.0,
-    backoff_factor: float = 2.0,
+    base_delay: Decimal = Decimal("1.0"),
+    max_delay: Decimal = Decimal("60.0"),
+    backoff_factor: Decimal = Decimal("2.0"),
     retriable_errors: tuple = (Exception,),
 ) -> RetryConfig:
     """Create custom retry configuration."""
@@ -2229,9 +2285,9 @@ def create_custom_fallback_config(
 
 def retry_with_backoff(
     max_attempts: int = 3,
-    base_delay: float = 1.0,
-    max_delay: float = 60.0,
-    backoff_factor: float = 2.0,
+    base_delay: Decimal = Decimal("1.0"),
+    max_delay: Decimal = Decimal("60.0"),
+    backoff_factor: Decimal = Decimal("2.0"),
     exceptions: tuple = (Exception,),
     **kwargs,
 ):
@@ -2254,7 +2310,7 @@ def with_circuit_breaker(
     """Circuit breaker decorator - wrapper around enhanced_error_handler."""
     circuit_config = CircuitBreakerConfig(
         failure_threshold=failure_threshold,
-        recovery_timeout=recovery_timeout,
+        recovery_timeout=Decimal(str(recovery_timeout)),
         expected_exception=expected_exception,
     )
     return enhanced_error_handler(circuit_breaker_config=circuit_config)
@@ -2263,10 +2319,10 @@ def with_circuit_breaker(
 def with_retry(
     max_retries: int | None = None,
     max_attempts: int | None = None,
-    base_delay: float = 1.0,
-    max_delay: float = 60.0,
-    exponential_base: float | None = None,
-    backoff_factor: float | None = None,
+    base_delay: Decimal = Decimal("1.0"),
+    max_delay: Decimal = Decimal("60.0"),
+    exponential_base: Decimal | None = None,
+    backoff_factor: Decimal | None = None,
     exceptions: tuple | None = None,
 ):
     """Retry decorator - wrapper around enhanced_error_handler."""
@@ -2279,7 +2335,10 @@ def with_retry(
     if backoff_factor is not None:
         exponential_base = backoff_factor
     elif exponential_base is None:
-        exponential_base = 2.0
+        exponential_base = Decimal("2.0")
+
+    # At this point exponential_base is guaranteed to be Decimal
+    assert exponential_base is not None, "exponential_base should not be None"
 
     # Handle exceptions parameter
     retriable_errors = (
@@ -2392,7 +2451,7 @@ cleanup_all_error_handlers = shutdown_all_error_handlers
 
 
 # Add weakref finalizer to handle emergency cleanup
-def _emergency_cleanup():
+def _emergency_cleanup() -> None:
     """Emergency cleanup when module is being unloaded."""
     try:
         # Try to get the current event loop and schedule cleanup
@@ -2400,13 +2459,16 @@ def _emergency_cleanup():
             loop = asyncio.get_running_loop()
             if not loop.is_closed():
                 # Create a task for emergency cleanup if there's still a loop
-                # Store the task reference to avoid RUF006 warning
-                _emergency_cleanup._last_task = loop.create_task(_handler_registry.shutdown_all())
+                # Create cleanup task
+                cleanup_task = loop.create_task(_handler_registry.shutdown_all())
+                # Store task reference to prevent garbage collection
+                _emergency_cleanup._last_task = cleanup_task  # type: ignore[attr-defined]
         except RuntimeError:
             # No event loop available, just do synchronous cleanup
             pass
     except Exception:
         # Ignore all errors during emergency cleanup
+        # Don't log during shutdown as logging infrastructure may be unavailable
         pass
 
 

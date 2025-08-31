@@ -111,7 +111,7 @@ class CacheMonitor(BaseComponent):
         # Monitoring state
         self._monitoring_active = False
         self._monitoring_task: asyncio.Task | None = None
-        self._last_health_check: datetime | None = None
+        self._last_monitoring_check: datetime | None = None
         self._health_check_interval = 30  # seconds
 
         # Historical data for trend analysis
@@ -159,7 +159,7 @@ class CacheMonitor(BaseComponent):
             # Check for alerts
             await self._check_alerts(health_data)
 
-            self._last_health_check = datetime.now(timezone.utc)
+            self._last_monitoring_check = datetime.now(timezone.utc)
 
         except Exception as e:
             self.logger.error(f"Health check failed: {e}")

@@ -103,7 +103,9 @@ class EventHandler:
             self.last_called = datetime.now(timezone.utc)
 
             if self.is_async:
-                await self.handler(event_context.data)
+                result = self.handler(event_context.data)
+                if result is not None:
+                    await result
             else:
                 self.handler(event_context.data)
 
@@ -137,7 +139,7 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         # Subscribe to events
         @emitter.on("order.created")
         async def handle_order_created(data):
-            print(f"Order created: {data}")
+            logger.info("Order created", order_data=data)
 
 
         # Subscribe with pattern
@@ -474,23 +476,30 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         tags: dict[str, Any] | None = None,
     ) -> None:
         """
-        Emit event synchronously.
+        Emit event synchronously with consistent data transformation.
 
         Args:
             event: Event name
-            data: Event data
+            data: Event data (will be transformed to standard format)
             priority: Event priority
             source: Event source identifier
             tags: Additional event tags
         """
+        # Apply consistent data transformation patterns
+        transformed_data = self._transform_event_data(data)
+
         if self._enable_async_processing:
-            # Queue for async processing
-            task = asyncio.create_task(self.emit_async(event, data, priority, source, tags))
+            # Queue for async processing with consistent pattern
+            task = asyncio.create_task(
+                self.emit_async(event, transformed_data, priority, source, tags)
+            )
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
         else:
-            # Process synchronously
-            task = asyncio.create_task(self._emit_sync(event, data, priority, source, tags))
+            # Process synchronously with same data format
+            task = asyncio.create_task(
+                self._emit_sync(event, transformed_data, priority, source, tags)
+            )
             self._background_tasks.add(task)
             task.add_done_callback(self._background_tasks.discard)
 
@@ -503,16 +512,19 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         tags: dict[str, Any] | None = None,
     ) -> None:
         """
-        Emit event asynchronously.
+        Emit event asynchronously with consistent data transformation.
 
         Args:
             event: Event name
-            data: Event data
+            data: Event data (will be transformed to standard format)
             priority: Event priority
             source: Event source identifier
             tags: Additional event tags
         """
-        await self._emit_sync(event, data, priority, source, tags)
+        # Apply consistent data transformation
+        transformed_data = self._transform_event_data(data)
+
+        await self._emit_sync(event, transformed_data, priority, source, tags)
 
     async def _emit_sync(
         self,
@@ -949,3 +961,45 @@ class BaseEventEmitter(BaseComponent, EventEmitter):
         self.reset_metrics()
 
         self._logger.debug("Event emitter stopped and cleaned up", emitter=self._name)
+
+    def _transform_event_data(self, data: Any) -> dict[str, Any] | None:
+        """Transform event data to consistent format across all emission methods."""
+        if data is None:
+            return None
+
+        if isinstance(data, dict):
+            # Already in correct format, ensure it has required metadata
+            if "timestamp" not in data:
+                data["timestamp"] = datetime.now(timezone.utc).isoformat()
+            
+            # Apply consistent financial data transformations
+            if "price" in data and data["price"] is not None:
+                from src.utils.decimal_utils import to_decimal
+                data["price"] = to_decimal(data["price"])
+            
+            if "quantity" in data and data["quantity"] is not None:
+                from src.utils.decimal_utils import to_decimal
+                data["quantity"] = to_decimal(data["quantity"])
+                
+            return data
+
+        # Transform non-dict data to standard format
+        transformed = {
+            "payload": data,
+            "type": type(data).__name__,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Apply financial data transformation if applicable
+        if hasattr(data, "price") or hasattr(data, "quantity"):
+            transformed["financial_data"] = True
+            # Apply consistent financial data transformations
+            if hasattr(data, "price") and data.price is not None:
+                from src.utils.decimal_utils import to_decimal
+                transformed["price"] = to_decimal(data.price)
+            
+            if hasattr(data, "quantity") and data.quantity is not None:
+                from src.utils.decimal_utils import to_decimal
+                transformed["quantity"] = to_decimal(data.quantity)
+
+        return transformed

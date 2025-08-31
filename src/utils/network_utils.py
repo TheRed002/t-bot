@@ -1,17 +1,17 @@
 """Network utilities for the T-Bot trading system."""
 
 import asyncio
-import logging
 from typing import Any
 from urllib.parse import urlparse
 
 from src.core.exceptions import ValidationError
+from src.core.logging import get_logger
 
 # Module level logger for static methods
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
-async def test_connection(host: str, port: int, timeout: float = 5.0) -> bool:
+async def check_connection(host: str, port: int, timeout: float = 5.0) -> bool:
     """
     Test network connection to a host and port.
 
@@ -25,18 +25,11 @@ async def test_connection(host: str, port: int, timeout: float = 5.0) -> bool:
     """
     writer = None
     try:
-        # Create connection task
-        conn_task = asyncio.create_task(asyncio.open_connection(host, port))
+        # Create connection with timeout using async context management
         try:
-            reader, writer = await asyncio.wait_for(conn_task, timeout=timeout)
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
             return True
         except asyncio.TimeoutError:
-            # Cancel the connection task if it times out
-            conn_task.cancel()
-            try:
-                await conn_task
-            except asyncio.CancelledError:
-                pass
             logger.debug(f"Connection test timed out for {host}:{port}")
             return False
     except Exception as e:
@@ -46,11 +39,11 @@ async def test_connection(host: str, port: int, timeout: float = 5.0) -> bool:
         if writer:
             try:
                 writer.close()
-                await writer.wait_closed()
+                # Add timeout to wait_closed to prevent hanging
+                await asyncio.wait_for(writer.wait_closed(), timeout=2.0)
             except (OSError, asyncio.TimeoutError, ConnectionResetError) as e:
                 # Ignore expected errors during cleanup
                 logger.debug(f"Error during writer cleanup in test_connection: {e}")
-                pass
 
 
 async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
@@ -73,17 +66,10 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
         loop = asyncio.get_running_loop()
         start_time = loop.time()
 
-        # Create connection task
-        conn_task = asyncio.create_task(asyncio.open_connection(host, port))
+        # Create connection with timeout
         try:
-            reader, writer = await asyncio.wait_for(conn_task, timeout=timeout)
+            reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=timeout)
         except asyncio.TimeoutError:
-            # Cancel the connection task if it times out
-            conn_task.cancel()
-            try:
-                await conn_task
-            except asyncio.CancelledError:
-                pass
             raise ValidationError(f"Connection timeout to {host}:{port}") from None
 
         end_time = loop.time()
@@ -100,11 +86,11 @@ async def measure_latency(host: str, port: int, timeout: float = 5.0) -> float:
         if writer:
             try:
                 writer.close()
-                await writer.wait_closed()
+                # Add timeout to wait_closed to prevent hanging
+                await asyncio.wait_for(writer.wait_closed(), timeout=2.0)
             except (OSError, asyncio.TimeoutError, ConnectionResetError) as e:
                 # Ignore expected errors during cleanup
                 logger.debug(f"Error during writer cleanup in measure_latency: {e}")
-                pass
 
 
 async def ping_host(host: str, count: int = 3, port: int = 80) -> dict[str, Any]:
@@ -148,9 +134,7 @@ async def ping_host(host: str, count: int = 3, port: int = 80) -> dict[str, Any]
         return {"host": host, "success": False, "error": str(e)}
 
 
-async def check_multiple_hosts(
-    hosts: list[tuple[str, int]], timeout: float = 5.0
-) -> dict[str, bool]:
+async def check_multiple_hosts(hosts: list[tuple[str, int]], timeout: float = 5.0) -> dict[str, bool]:
     """
     Check connectivity to multiple hosts in parallel.
 
@@ -164,21 +148,39 @@ async def check_multiple_hosts(
     if not hosts:
         return {}
 
-    # Create tasks for parallel execution
+    # Create tasks for parallel execution with connection limit
+    max_concurrent = min(len(hosts), 20)  # Limit concurrent connections
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def test_with_semaphore(host: str, port: int) -> bool:
+        """Test connection with semaphore for backpressure."""
+        async with semaphore:
+            return await check_connection(host, port, timeout)
+
     tasks = []
     host_port_mapping = []
-    
+
     for host, port in hosts:
         host_port = f"{host}:{port}"
-        task = test_connection(host, port, timeout)
+        task = asyncio.create_task(test_with_semaphore(host, port))
         tasks.append(task)
         host_port_mapping.append(host_port)
 
-    # Execute all tasks concurrently using asyncio.gather
+    # Execute all tasks concurrently using asyncio.gather with proper error handling
     try:
         results_list = await asyncio.gather(*tasks, return_exceptions=True)
     except Exception as e:
         logger.error(f"Unexpected error in check_multiple_hosts: {e}")
+        # Cancel remaining tasks on failure
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        # Wait for cancelled tasks to complete
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except Exception as e:
+            logger.debug(f"Error during task cancellation: {e}")
+            pass  # Ignore cancellation errors
         # Return all False if gather fails unexpectedly
         return {host_port: False for host_port in host_port_mapping}
 
@@ -190,7 +192,8 @@ async def check_multiple_hosts(
             logger.warning(f"Failed to check {host_port}: {result}")
             results[host_port] = False
         else:
-            results[host_port] = result
+            # result is guaranteed to be bool here due to isinstance check
+            results[host_port] = bool(result)
 
     return results
 
@@ -242,30 +245,40 @@ def parse_url(url: str) -> dict[str, Any]:
         raise ValidationError(f"Failed to parse URL '{url}': {e!s}") from e
 
 
-async def wait_for_service(
-    host: str, port: int, max_wait: float = 30.0, check_interval: float = 1.0
-) -> bool:
+async def wait_for_service(host: str, port: int, max_wait: float = 30.0, check_interval: float = 1.0) -> bool:
     """
-    Wait for a service to become available.
+    Wait for a service to become available with exponential backoff.
 
     Args:
         host: Service hostname
         port: Service port
         max_wait: Maximum time to wait in seconds
-        check_interval: Interval between checks
+        check_interval: Initial interval between checks
 
     Returns:
         True if service became available, False if timeout
     """
     loop = asyncio.get_running_loop()
     start_time = loop.time()
+    current_interval = check_interval
+    max_interval = min(check_interval * 8, 10.0)  # Cap at 10 seconds
 
     while loop.time() - start_time < max_wait:
-        if await test_connection(host, port, timeout=2.0):
-            logger.info(f"Service {host}:{port} is now available")
-            return True
+        try:
+            if await check_connection(host, port, timeout=2.0):
+                logger.info(f"Service {host}:{port} is now available")
+                return True
+        except Exception as e:
+            logger.debug(f"Connection test failed for {host}:{port}: {e}")
 
-        await asyncio.sleep(check_interval)
+        # Wait with current interval
+        await asyncio.sleep(current_interval)
+
+        # Exponential backoff with jitter
+        import random
+
+        jitter = random.uniform(0.1, 0.3) * current_interval
+        current_interval = min(current_interval * 1.5 + jitter, max_interval)
 
     logger.warning(f"Service {host}:{port} did not become available within {max_wait}s")
     return False

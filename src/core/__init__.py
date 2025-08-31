@@ -89,6 +89,7 @@ from .types import (
     ValidationLevel,
     ValidationResult,
 )
+from .websocket_manager import WebSocketManager, create_websocket_manager
 
 __all__ = [
     "AuthenticationError",
@@ -166,9 +167,11 @@ __all__ = [
     "ValidationError",
     "ValidationLevel",
     "ValidationResult",
+    "WebSocketManager",
     "cache_invalidate",
     "cached",
     "correlation_context",
+    "create_websocket_manager",
     "get_cache_manager",
     "get_container",
     "get_logger",

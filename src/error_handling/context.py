@@ -9,36 +9,14 @@ import inspect
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Any
 
-from src.core.base.component import BaseComponent
+from src.core.base.factory import BaseFactory
+from src.core.exceptions import ErrorCategory, ErrorSeverity
 from src.error_handling.security_sanitizer import (
     SensitivityLevel,
     get_security_sanitizer,
 )
-
-
-class ErrorSeverity(Enum):
-    """Error severity levels for classification and escalation."""
-
-    CRITICAL = "critical"  # System failure, data corruption, security breach
-    HIGH = "high"  # Trading halted, model failure, risk limit breach
-    MEDIUM = "medium"  # Performance degradation, data quality issues
-    LOW = "low"  # Configuration warnings, minor validation errors
-
-
-class ErrorCategory(Enum):
-    """Error categories for intelligent routing."""
-
-    NETWORK = "network"
-    DATABASE = "database"
-    VALIDATION = "validation"
-    EXCHANGE = "exchange"
-    CONFIGURATION = "configuration"
-    BUSINESS_LOGIC = "business_logic"
-    SYSTEM = "system"
-    UNKNOWN = "unknown"
 
 
 @dataclass
@@ -59,7 +37,7 @@ class ErrorContext:
 
     # Error classification
     severity: ErrorSeverity = ErrorSeverity.MEDIUM
-    category: ErrorCategory = ErrorCategory.UNKNOWN
+    category: ErrorCategory = ErrorCategory.SYSTEM
 
     # Context information
     component: str | None = None
@@ -137,7 +115,8 @@ class ErrorContext:
     def to_dict(
         self, sanitize: bool = True, sensitivity_level: SensitivityLevel = SensitivityLevel.MEDIUM
     ) -> dict[str, Any]:
-        """Convert context to dictionary for serialization with optional sanitization."""
+        """Convert context to dictionary with consistent data structure across modules."""
+        # Standard base structure that matches core module expectations
         base_dict = {
             "error_id": self.error_id,
             "timestamp": self.timestamp.isoformat(),
@@ -165,6 +144,15 @@ class ErrorContext:
             "correlation_id": self.correlation_id,
             "attempt_number": self.attempt_number,
         }
+
+        # Add standard data processing fields for consistency with core modules
+        base_dict.update(
+            {
+                "data_format": "error_context_v1",
+                "processing_stage": "error_handling",
+                "validation_status": "validated" if self.details else "pending",
+            }
+        )
 
         if sanitize:
             sanitizer = get_security_sanitizer()
@@ -318,13 +306,62 @@ class ErrorContext:
         )
 
 
-class ErrorContextFactory(BaseComponent):
-    """Factory for creating standardized error contexts - maintained for backward compatibility."""
+class ErrorContextFactory(BaseFactory[ErrorContext]):
+    """Factory for creating standardized error contexts with DI support."""
 
-    @staticmethod
-    def create(error: Exception, **kwargs) -> dict[str, Any]:
+    def __init__(self, dependency_container: Any | None = None):
+        """Initialize factory with proper core.base.factory pattern."""
+        # Use proper config structure from core.types
+        from src.core.types.base import ConfigDict
+        
+        config = ConfigDict({}) if dependency_container is None else None
+        super().__init__(product_type=ErrorContext, name="ErrorContextFactory", config=config)
+
+        # Register default context creators using proper BaseFactory interface
+        try:
+            # Create wrapper functions that match the expected signature
+            def standard_creator(*args, **kwargs) -> ErrorContext:
+                error = args[0] if args else kwargs.get('error')
+                if not error:
+                    raise ValueError("Error parameter is required for standard creator")
+                return ErrorContext.from_exception(error, **kwargs)
+            
+            def decorator_creator(*args, **kwargs) -> ErrorContext:
+                error = args[0] if args else kwargs.get('error')
+                function_name = args[1] if len(args) > 1 else kwargs.get('function_name', 'unknown')
+                call_args = args[2] if len(args) > 2 else kwargs.get('args', ())
+                call_kwargs = args[3] if len(args) > 3 else kwargs.get('kwargs', {})
+                return ErrorContext.from_decorator_context(
+                    error=error or Exception("Unknown"),
+                    function_name=function_name,
+                    args=call_args,
+                    kwargs=call_kwargs,
+                    **{k: v for k, v in kwargs.items() if k not in ['error', 'function_name', 'args', 'kwargs']}
+                )
+            
+            self.register("standard", standard_creator)
+            self.register("decorator", decorator_creator)
+        except Exception as e:
+            # Log but don't fail initialization
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to register some context creators: {e}")
+
+        # Configure dependencies if available using core pattern
+        if dependency_container and hasattr(self, 'configure_dependencies'):
+            try:
+                self.configure_dependencies(dependency_container)
+            except Exception as e:
+                # Log but continue without DI
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Failed to configure dependencies: {e}")
+
+    def create_context_dict(self, error: Exception, **kwargs) -> dict[str, Any]:
         """
-        Create standardized error context.
+        Create standardized error context using simplified factory pattern.
 
         This method automatically captures:
         - Timestamp
@@ -340,56 +377,139 @@ class ErrorContextFactory(BaseComponent):
         Returns:
             Standardized error context dictionary
         """
-        # Get caller frame information
-        frame = inspect.currentframe()
-        if frame and frame.f_back:
-            caller_frame = frame.f_back
-            module = caller_frame.f_globals.get("__name__", "unknown")
-            function = caller_frame.f_code.co_name
-            line = caller_frame.f_lineno
-            filename = caller_frame.f_code.co_filename
-        else:
-            module = "unknown"
-            function = "unknown"
-            line = 0
-            filename = "unknown"
+        try:
+            # Get caller frame information using simplified approach
+            frame = inspect.currentframe()
+            if frame and frame.f_back:
+                caller_frame = frame.f_back
+                module = caller_frame.f_globals.get("__name__", "unknown")
+                function = caller_frame.f_code.co_name
+                line = caller_frame.f_lineno
+                filename = caller_frame.f_code.co_filename
+            else:
+                module = "unknown"
+                function = "unknown"
+                line = 0
+                filename = "unknown"
 
-        # Create ErrorContext and convert to dict for backward compatibility
-        context = ErrorContext.from_exception(
-            error=error,
-            component=kwargs.get("component"),
-            operation=kwargs.get("operation"),
-            module=module,
-            function_name=function,
-            **kwargs,
-        )
+            # Create ErrorContext using factory pattern
+            # Extract specific fields to avoid duplicate keyword arguments
+            context_kwargs = kwargs.copy()
+            component = context_kwargs.pop("component", None)
+            operation = context_kwargs.pop("operation", None)
+            should_sanitize = context_kwargs.pop("sanitize", True)
+            sensitivity_level = context_kwargs.pop("sensitivity_level", SensitivityLevel.MEDIUM)
 
-        # Determine if sanitization should be applied based on context
-        should_sanitize = kwargs.get("sanitize", True)
-        sensitivity_level = kwargs.get("sensitivity_level", SensitivityLevel.MEDIUM)
+            # Use factory pattern for context creation
+            try:
+                context = self.create_context(
+                    context_type="standard",
+                    error=error,
+                    component=component,
+                    operation=operation,
+                    module=module,
+                    function_name=function,
+                    **context_kwargs,
+                )
+            except Exception:
+                # Fallback to direct creation
+                context = ErrorContext.from_exception(
+                    error=error,
+                    component=component,
+                    operation=operation,
+                    module=module,
+                    function_name=function,
+                    **context_kwargs,
+                )
 
-        result = context.to_legacy_dict(
-            sanitize=should_sanitize, sensitivity_level=sensitivity_level
-        )
-        result.update(
-            {
-                "line": line,
-                "filename": filename,
-            }
-        )
+            result = context.to_legacy_dict(
+                sanitize=should_sanitize, sensitivity_level=sensitivity_level
+            )
+            result.update(
+                {
+                    "line": line,
+                    "filename": filename,
+                }
+            )
 
-        # Sanitize filename if needed
-        if should_sanitize:
-            sanitizer = get_security_sanitizer()
-            # Use public API method to sanitize filename
-            file_context = {"filename": filename}
-            sanitized_context = sanitizer.sanitize_context(file_context, sensitivity_level)
-            result["filename"] = sanitized_context.get("filename", filename)
+            # Sanitize filename if needed using simplified approach
+            if should_sanitize:
+                try:
+                    sanitizer = get_security_sanitizer()
+                    file_context = {"filename": filename}
+                    sanitized_context = sanitizer.sanitize_context(file_context, sensitivity_level)
+                    result["filename"] = sanitized_context.get("filename", filename)
+                except Exception as e:
+                    # Fallback to original filename if sanitization fails
+                    import logging
 
-        return result
+                    logger = logging.getLogger(__name__)
+                    logger.debug(f"Failed to sanitize filename: {e}")
+                    # Keep original filename
 
-    @staticmethod
-    def create_from_frame(error: Exception, frame: Any | None = None, **kwargs) -> dict[str, Any]:
+            return result
+
+        except Exception as e:
+            # Fallback to minimal context if factory pattern fails
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Factory pattern failed, using minimal context: {e}")
+            return self.create_minimal(error)
+
+    def create(self, error: Exception, **kwargs) -> dict[str, Any]:
+        """
+        Legacy create method for backward compatibility.
+
+        Args:
+            error: The exception
+            **kwargs: Additional context to include
+
+        Returns:
+            Error context dictionary
+        """
+        return self.create_context_dict(error, **kwargs)
+
+    def create_context(
+        self, context_type: str = "standard", error: Exception | None = None, **kwargs
+    ) -> ErrorContext:
+        """
+        Create ErrorContext using registered creator with proper BaseFactory interface.
+
+        Args:
+            context_type: Type of context to create ('standard' or 'decorator')
+            error: The exception (required for standard contexts)
+            **kwargs: Additional context parameters
+
+        Returns:
+            ErrorContext instance
+        """
+        try:
+            # Use proper BaseFactory.create method with correct parameters
+            if context_type == "standard" and error:
+                # Call parent create method, not recursive self.create_context
+                return super().create("standard", error, **kwargs)
+            elif context_type == "decorator":
+                return super().create("decorator", error, **kwargs)
+            else:
+                raise ValueError(
+                    f"Invalid context type '{context_type}' or missing error parameter"
+                )
+        except Exception as e:
+            # Fallback to direct creation if factory fails
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Factory creation failed, using direct creation: {e}")
+
+            if error:
+                return ErrorContext.from_exception(error, **kwargs)
+            else:
+                return ErrorContext(error=Exception("Unknown error"), **kwargs)
+
+    def create_from_frame(
+        self, error: Exception, frame: Any | None = None, **kwargs
+    ) -> dict[str, Any]:
         """
         Create error context from a specific frame.
 
@@ -431,8 +551,7 @@ class ErrorContextFactory(BaseComponent):
 
         return result
 
-    @staticmethod
-    def create_minimal(error: Exception) -> dict[str, Any]:
+    def create_minimal(self, error: Exception) -> dict[str, Any]:
         """
         Create minimal error context (for logging with less overhead).
 
@@ -448,8 +567,7 @@ class ErrorContextFactory(BaseComponent):
             "error_message": str(error),
         }
 
-    @staticmethod
-    def enrich_context(base_context: dict[str, Any], **additional) -> dict[str, Any]:
+    def enrich_context(self, base_context: dict[str, Any], **additional) -> dict[str, Any]:
         """
         Enrich existing context with additional information.
 

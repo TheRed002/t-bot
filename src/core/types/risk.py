@@ -212,8 +212,8 @@ class CircuitBreakerEvent(BaseModel):
     breaker_type: CircuitBreakerType
     status: CircuitBreakerStatus
     triggered_at: datetime
-    trigger_value: float
-    threshold_value: float
+    trigger_value: Decimal
+    threshold_value: Decimal
     cooldown_period: int  # seconds
     reset_at: datetime | None = None
     affected_symbols: list[str] = Field(default_factory=list)

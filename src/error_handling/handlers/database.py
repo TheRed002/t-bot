@@ -12,9 +12,11 @@ from src.error_handling.security_sanitizer import (
 class DatabaseErrorHandler(ErrorHandlerBase):
     """Handler for database-related errors with secure sanitization."""
 
-    def __init__(self, next_handler=None):
+    def __init__(self, next_handler=None, sanitizer=None):
         super().__init__(next_handler)
-        self.sanitizer = get_security_sanitizer()
+        self.sanitizer = sanitizer
+        if self.sanitizer is None:
+            raise ValueError("SecuritySanitizer must be injected via dependency injection")
 
     def can_handle(self, error: Exception) -> bool:
         """Check if this is a database error."""
@@ -74,7 +76,7 @@ class DatabaseErrorHandler(ErrorHandlerBase):
             self._logger.warning(f"Database deadlock detected: {sanitized_msg}")
             return {
                 "action": "retry",
-                "delay": 0.1,  # Small delay
+                "delay": "0.1",  # Small delay
                 "reason": "deadlock",
                 "max_retries": 3,
                 "sanitized_error": sanitized_msg,
@@ -86,7 +88,7 @@ class DatabaseErrorHandler(ErrorHandlerBase):
             self._logger.error(f"Database connection error: {sanitized_msg}")
             return {
                 "action": "reconnect",
-                "delay": 5,
+                "delay": "5",
                 "reason": "connection_lost",
                 "sanitized_error": sanitized_msg,
             }
@@ -112,7 +114,7 @@ class DatabaseErrorHandler(ErrorHandlerBase):
             self._logger.warning(f"Database lock timeout: {sanitized_msg}")
             return {
                 "action": "retry",
-                "delay": 2,
+                "delay": "2",
                 "reason": "lock_timeout",
                 "max_retries": 2,
                 "sanitized_error": sanitized_msg,

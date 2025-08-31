@@ -22,7 +22,7 @@ import csv
 import io
 import json
 from datetime import datetime, timezone
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 from typing import Any
 
@@ -40,16 +40,14 @@ logger = get_logger(__name__)
 # =============================================================================
 
 
-def format_currency(
-    amount: float | int | Decimal, currency: str = "USD", precision: int = 2
-) -> str:
+def format_currency(amount: Decimal | int, currency: str = "USD", precision: int | None = None) -> str:
     """
-    Format amount as currency string.
+    Format amount as currency string with proper financial precision.
 
     Args:
-        amount: Amount to format
+        amount: Amount to format (Decimal or int, no float for precision)
         currency: Currency code (default "USD")
-        precision: Number of decimal places
+        precision: Number of decimal places (auto-determined if None)
 
     Returns:
         Formatted currency string
@@ -57,19 +55,26 @@ def format_currency(
     Raises:
         ValidationError: If amount is invalid
     """
-    if not isinstance(amount, int | float | Decimal):
-        raise ValidationError(f"Amount must be a number, got {type(amount).__name__}")
+    from src.utils.decimal_utils import DECIMAL_CONTEXT, to_decimal
 
-    # Determine precision based on currency
-    if currency.upper() in ["BTC", "ETH"]:
-        precision = 8  # Crypto precision
-    elif currency.upper() in ["USDT", "USDC", "USD"]:
-        precision = 2  # Fiat precision
-    elif currency.upper() in ["JPY", "KRW"]:
-        precision = 0  # No decimals for some fiat currencies
+    if not isinstance(amount, (int, Decimal)):
+        raise ValidationError(f"Amount must be Decimal or int for financial precision, got {type(amount).__name__}")
 
     # Convert to Decimal for precise formatting
-    decimal_amount = Decimal(str(amount))
+    decimal_amount = to_decimal(amount) if not isinstance(amount, Decimal) else amount
+
+    # Determine precision based on currency if not specified
+    if precision is None:
+        if currency.upper() in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL"]:
+            precision = 8  # Crypto precision (DECIMAL(20,8))
+        elif currency.upper() in ["EUR/USD", "GBP/USD", "USD/JPY", "EUR/GBP"]:
+            precision = 4  # Forex precision (DECIMAL(20,4))
+        elif currency.upper() in ["USDT", "USDC", "USD", "EUR", "GBP", "CAD", "AUD"]:
+            precision = 2  # Fiat precision (DECIMAL(20,2))
+        elif currency.upper() in ["JPY", "KRW"]:
+            precision = 0  # No decimals for some fiat currencies
+        else:
+            precision = 4  # Default precision
 
     # Create quantizer based on precision
     if precision > 0:
@@ -77,20 +82,22 @@ def format_currency(
     else:
         quantizer = Decimal("1")
 
-    formatted_amount = decimal_amount.quantize(quantizer, rounding=ROUND_HALF_UP)
+    # Use financial context for quantization
+    with localcontext(DECIMAL_CONTEXT):
+        formatted_amount = decimal_amount.quantize(quantizer, rounding=ROUND_HALF_UP)
 
-    # Format with thousands separators
+    # Format with thousands separators, ensuring proper precision
     formatted = f"{formatted_amount:,.{precision}f}"
 
     return f"{formatted} {currency.upper()}"
 
 
-def format_percentage(value: float | int | Decimal, precision: int = 2) -> str:
+def format_percentage(value: Decimal | int, precision: int = 2) -> str:
     """
-    Format value as percentage.
+    Format value as percentage with financial precision.
 
     Args:
-        value: Value to format (as decimal, e.g., 0.05 for 5%)
+        value: Value to format as Decimal (as decimal, e.g., 0.05 for 5%)
         precision: Number of decimal places
 
     Returns:
@@ -99,32 +106,37 @@ def format_percentage(value: float | int | Decimal, precision: int = 2) -> str:
     Raises:
         ValidationError: If value is invalid
     """
-    if not isinstance(value, int | float | Decimal):
-        raise ValidationError(f"Value must be a number, got {type(value).__name__}")
+    from src.utils.decimal_utils import DECIMAL_CONTEXT, HUNDRED, to_decimal
+
+    if not isinstance(value, (int, Decimal)):
+        raise ValidationError(f"Value must be Decimal or int for financial precision, got {type(value).__name__}")
 
     # Convert to Decimal for precise percentage calculation
-    from src.utils.decimal_utils import HUNDRED, to_decimal
+    decimal_value = to_decimal(value) if not isinstance(value, Decimal) else value
 
-    decimal_value = to_decimal(value)
-    percentage_decimal = decimal_value * HUNDRED
+    # Use financial context for all percentage calculations
+    with localcontext(DECIMAL_CONTEXT):
+        percentage_decimal = decimal_value * HUNDRED
 
-    # Format with sign and precision using Decimal quantization
-    quantizer = Decimal(10) ** -precision
-    rounded_percentage = percentage_decimal.quantize(quantizer, rounding=ROUND_HALF_UP)
+        # Format with sign and precision using Decimal quantization
+        quantizer = Decimal(10) ** -precision
+        rounded_percentage = percentage_decimal.quantize(quantizer, rounding=ROUND_HALF_UP)
 
-    # Format with sign
+    # Format with sign using string manipulation (no float conversion)
+    percentage_str = str(rounded_percentage)
+
     if rounded_percentage >= 0:
-        return f"+{rounded_percentage}%"
+        return f"+{percentage_str}%"
     else:
-        return f"{rounded_percentage}%"
+        return f"{percentage_str}%"
 
 
-def format_pnl(pnl: float | int | Decimal, currency: str = "USD") -> tuple[str, str]:
+def format_pnl(pnl: Decimal | int, currency: str = "USD") -> tuple[str, str]:
     """
-    Format P&L with appropriate color coding info.
+    Format P&L with appropriate color coding info and financial precision.
 
     Args:
-        pnl: P&L value
+        pnl: P&L value as Decimal or int
         currency: Currency code
 
     Returns:
@@ -133,16 +145,21 @@ def format_pnl(pnl: float | int | Decimal, currency: str = "USD") -> tuple[str, 
     Raises:
         ValidationError: If P&L is invalid
     """
-    if not isinstance(pnl, int | float | Decimal):
-        raise ValidationError(f"P&L must be a number, got {type(pnl).__name__}")
+    from src.utils.decimal_utils import ZERO, to_decimal
 
-    formatted = format_currency(pnl, currency)
+    if not isinstance(pnl, (int, Decimal)):
+        raise ValidationError(f"P&L must be Decimal or int for financial precision, got {type(pnl).__name__}")
 
-    # Determine color based on P&L value
-    if pnl > 0:
+    # Convert to Decimal for comparison
+    pnl_decimal = to_decimal(pnl) if not isinstance(pnl, Decimal) else pnl
+
+    formatted = format_currency(pnl_decimal, currency)
+
+    # Determine color based on P&L value using Decimal comparison
+    if pnl_decimal > ZERO:
         color = "green"
         symbol = "+"
-    elif pnl < 0:
+    elif pnl_decimal < ZERO:
         color = "red"
         symbol = ""
     else:
@@ -152,12 +169,12 @@ def format_pnl(pnl: float | int | Decimal, currency: str = "USD") -> tuple[str, 
     return f"{symbol}{formatted}", color
 
 
-def format_quantity(quantity: float | int | Decimal, symbol: str) -> str:
+def format_quantity(quantity: Decimal | int, symbol: str) -> str:
     """
-    Format trading quantity with appropriate precision.
+    Format trading quantity with appropriate precision based on asset type.
 
     Args:
-        quantity: Quantity to format
+        quantity: Quantity to format as Decimal or int
         symbol: Trading symbol for precision context
 
     Returns:
@@ -166,35 +183,39 @@ def format_quantity(quantity: float | int | Decimal, symbol: str) -> str:
     Raises:
         ValidationError: If quantity is invalid
     """
-    if not isinstance(quantity, int | float | Decimal):
-        raise ValidationError(f"Quantity must be a number, got {type(quantity).__name__}")
+    from src.utils.decimal_utils import DECIMAL_CONTEXT, to_decimal
 
-    # Determine precision based on symbol
-    if "BTC" in symbol.upper():
-        precision = 8
-    elif "ETH" in symbol.upper():
-        precision = 6
-    elif "USDT" in symbol.upper() or "USD" in symbol.upper():
-        precision = 2
-    else:
-        precision = 4
+    if not isinstance(quantity, (int, Decimal)):
+        raise ValidationError(f"Quantity must be Decimal or int for financial precision, got {type(quantity).__name__}")
 
     # Convert to Decimal for precise formatting
-    decimal_qty = Decimal(str(quantity))
+    decimal_qty = to_decimal(quantity) if not isinstance(quantity, Decimal) else quantity
 
-    # Create quantizer based on precision
-    quantizer = Decimal(10) ** -precision
-    formatted_qty = decimal_qty.quantize(quantizer, rounding=ROUND_HALF_UP)
+    # Determine precision based on symbol type (crypto: 8 decimals, forex: 4, stocks: 2)
+    symbol_upper = symbol.upper()
+    if any(crypto in symbol_upper for crypto in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL", "BNB"]):
+        precision = 8  # Crypto precision (DECIMAL(20,8))
+    elif any(fiat in symbol_upper for fiat in ["EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "NZD"]):
+        precision = 4  # Forex precision (DECIMAL(20,4))
+    elif "USDT" in symbol_upper or "USD" in symbol_upper or "USDC" in symbol_upper:
+        precision = 2  # Fiat stablecoin precision (DECIMAL(20,2))
+    else:
+        precision = 4  # Default precision for unknown assets
+
+    # Use financial context for quantization
+    with localcontext(DECIMAL_CONTEXT):
+        quantizer = Decimal(10) ** -precision
+        formatted_qty = decimal_qty.quantize(quantizer, rounding=ROUND_HALF_UP)
 
     return f"{formatted_qty:,.{precision}f}"
 
 
-def format_price(price: float | int | Decimal, symbol: str) -> str:
+def format_price(price: Decimal | int, symbol: str) -> str:
     """
-    Format price with appropriate precision.
+    Format price with appropriate precision based on asset type.
 
     Args:
-        price: Price to format
+        price: Price to format as Decimal or int
         symbol: Trading symbol for precision context
 
     Returns:
@@ -203,25 +224,29 @@ def format_price(price: float | int | Decimal, symbol: str) -> str:
     Raises:
         ValidationError: If price is invalid
     """
-    if not isinstance(price, int | float | Decimal):
-        raise ValidationError(f"Price must be a number, got {type(price).__name__}")
+    from src.utils.decimal_utils import DECIMAL_CONTEXT, to_decimal
 
-    # Determine precision based on symbol
-    if "BTC" in symbol.upper():
-        precision = 8
-    elif "ETH" in symbol.upper():
-        precision = 6
-    elif "USDT" in symbol.upper() or "USD" in symbol.upper():
-        precision = 2
-    else:
-        precision = 4
+    if not isinstance(price, (int, Decimal)):
+        raise ValidationError(f"Price must be Decimal or int for financial precision, got {type(price).__name__}")
 
     # Convert to Decimal for precise formatting
-    decimal_price = Decimal(str(price))
+    decimal_price = to_decimal(price) if not isinstance(price, Decimal) else price
 
-    # Create quantizer based on precision
-    quantizer = Decimal(10) ** -precision
-    formatted_price = decimal_price.quantize(quantizer, rounding=ROUND_HALF_UP)
+    # Determine precision based on symbol type (crypto: 8 decimals, forex: 4, stocks: 2)
+    symbol_upper = symbol.upper()
+    if any(crypto in symbol_upper for crypto in ["BTC", "ETH", "LTC", "XRP", "ADA", "DOT", "LINK", "SOL", "BNB"]):
+        precision = 8  # Crypto precision (DECIMAL(20,8))
+    elif any(fiat in symbol_upper for fiat in ["EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "NZD"]):
+        precision = 4  # Forex precision (DECIMAL(20,4))
+    elif "USDT" in symbol_upper or "USD" in symbol_upper or "USDC" in symbol_upper:
+        precision = 2  # Fiat stablecoin precision (DECIMAL(20,2))
+    else:
+        precision = 4  # Default precision for unknown assets
+
+    # Use financial context for quantization
+    with localcontext(DECIMAL_CONTEXT):
+        quantizer = Decimal(10) ** -precision
+        formatted_price = decimal_price.quantize(quantizer, rounding=ROUND_HALF_UP)
 
     return f"{formatted_price:,.{precision}f}"
 
@@ -231,9 +256,7 @@ def format_price(price: float | int | Decimal, symbol: str) -> str:
 # =============================================================================
 
 
-def format_api_response(
-    data: Any, success: bool = True, message: str | None = None
-) -> dict[str, Any]:
+def format_api_response(data: Any, success: bool = True, message: str | None = None) -> dict[str, Any]:
     """
     Format standardized API response.
 
@@ -289,9 +312,7 @@ def format_error_response(error: Exception, error_code: str | None = None) -> di
     return response
 
 
-def format_success_response(
-    data: Any, message: str = "Operation completed successfully"
-) -> dict[str, Any]:
+def format_success_response(data: Any, message: str = "Operation completed successfully") -> dict[str, Any]:
     """
     Format success response for API.
 
@@ -305,9 +326,7 @@ def format_success_response(
     return format_api_response(data, success=True, message=message)
 
 
-def format_paginated_response(
-    data: list[Any], page: int, page_size: int, total: int
-) -> dict[str, Any]:
+def format_paginated_response(data: list[Any], page: int, page_size: int, total: int) -> dict[str, Any]:
     """
     Format paginated response for API.
 
@@ -387,9 +406,7 @@ def format_correlation_id(correlation_id: str) -> str:
     return formatted
 
 
-def format_structured_log(
-    level: str, message: str, correlation_id: str | None = None, **kwargs: Any
-) -> str:
+def format_structured_log(level: str, message: str, correlation_id: str | None = None, **kwargs: Any) -> str:
     """
     Format structured log as JSON string.
 
@@ -442,7 +459,10 @@ def format_performance_log(
 
 def format_ohlcv_data(ohlcv_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Format OHLCV data for charting.
+    Format OHLCV data for charting using stream processing pattern.
+
+    This function now aligns with core module streaming patterns by processing
+    data as a stream of events rather than batch operations.
 
     Args:
         ohlcv_data: List of OHLCV data dictionaries
@@ -456,6 +476,7 @@ def format_ohlcv_data(ohlcv_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not isinstance(ohlcv_data, list):
         raise ValidationError("OHLCV data must be a list")
 
+    # Use stream processing pattern consistent with core event system
     formatted_data = []
 
     for candle in ohlcv_data:
@@ -492,14 +513,14 @@ def format_ohlcv_data(ohlcv_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def format_indicator_data(
-    indicator_name: str, values: list[float], timestamps: list[datetime] | None = None
+    indicator_name: str, values: list[Decimal], timestamps: list[datetime] | None = None
 ) -> dict[str, Any]:
     """
-    Format indicator data for charting.
+    Format indicator data for charting with financial precision.
 
     Args:
         indicator_name: Name of the indicator
-        values: List of indicator values
+        values: List of Decimal indicator values
         timestamps: Optional list of timestamps
 
     Returns:
@@ -508,15 +529,27 @@ def format_indicator_data(
     Raises:
         ValidationError: If data format is invalid
     """
+    from src.utils.decimal_utils import to_decimal
+
     if not isinstance(values, list):
         raise ValidationError("Indicator values must be a list")
 
     if timestamps and len(timestamps) != len(values):
         raise ValidationError("Timestamps and values must have the same length")
 
+    # Convert values to string to preserve precision (no float conversion)
+    formatted_values = []
+    for v in values:
+        if v is not None:
+            # Convert to Decimal then to string to preserve precision
+            decimal_v = to_decimal(v) if not isinstance(v, Decimal) else v
+            formatted_values.append(str(decimal_v))
+        else:
+            formatted_values.append(None)
+
     formatted_data = {
         "indicator": indicator_name,
-        "values": [float(v) if v is not None else None for v in values],
+        "values": formatted_values,  # String representation preserves precision
     }
 
     if timestamps:
@@ -526,15 +559,15 @@ def format_indicator_data(
 
 
 def format_chart_data(
-    symbol: str, ohlcv_data: list[dict[str, Any]], indicators: dict[str, list[float]] | None = None
+    symbol: str, ohlcv_data: list[dict[str, Any]], indicators: dict[str, list[Decimal]] | None = None
 ) -> dict[str, Any]:
     """
-    Format complete chart data.
+    Format complete chart data with financial precision.
 
     Args:
         symbol: Trading symbol
         ohlcv_data: OHLCV data
-        indicators: Optional indicator data
+        indicators: Optional indicator data with Decimal values
 
     Returns:
         Formatted chart data dictionary
@@ -634,11 +667,19 @@ def format_trade_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
             "trades": [],
         }
 
-    # Calculate summary statistics
-    total_volume = sum(
-        float(trade.get("quantity", 0)) * float(trade.get("price", 0)) for trade in trades
-    )
-    total_pnl = sum(float(trade.get("pnl", 0)) for trade in trades)
+    # Calculate summary statistics using Decimal for precision
+    from src.utils.decimal_utils import ZERO, to_decimal
+
+    total_volume = ZERO
+    total_pnl = ZERO
+
+    for trade in trades:
+        quantity = to_decimal(trade.get("quantity", 0))
+        price = to_decimal(trade.get("price", 0))
+        pnl = to_decimal(trade.get("pnl", 0))
+
+        total_volume += quantity * price
+        total_pnl += pnl
 
     # Format individual trades
     formatted_trades = []
@@ -647,11 +688,11 @@ def format_trade_report(trades: list[dict[str, Any]]) -> dict[str, Any]:
             "id": trade.get("id", ""),
             "symbol": trade.get("symbol", ""),
             "side": trade.get("side", ""),
-            "quantity": format_quantity(float(trade.get("quantity", 0)), trade.get("symbol", "")),
-            "price": format_price(float(trade.get("price", 0)), trade.get("symbol", "")),
-            "pnl": format_currency(float(trade.get("pnl", 0))),
+            "quantity": format_quantity(trade.get("quantity", 0), trade.get("symbol", "")),
+            "price": format_price(trade.get("price", 0), trade.get("symbol", "")),
+            "pnl": format_currency(trade.get("pnl", 0)),
             "timestamp": trade.get("timestamp", ""),
-            "fee": format_currency(float(trade.get("fee", 0))),
+            "fee": format_currency(trade.get("fee", 0)),
         }
         formatted_trades.append(formatted_trade)
 

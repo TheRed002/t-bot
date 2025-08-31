@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -141,16 +142,16 @@ class ValidationFramework:
         return True
 
     @staticmethod
-    def validate_price(price: Any, max_price: float = 1_000_000) -> float:
+    def validate_price(price: Any, max_price: Decimal = Decimal("1000000")) -> Decimal:
         """
-        Validate and normalize price.
+        Validate and normalize price using Decimal for financial precision.
 
         Args:
             price: Price to validate
-            max_price: Maximum allowed price
+            max_price: Maximum allowed price as Decimal
 
         Returns:
-            Normalized price value (rounded to 8 decimals)
+            Normalized price value as Decimal (8 decimal precision)
 
         Raises:
             ValidationError: If price is invalid
@@ -159,36 +160,37 @@ class ValidationFramework:
             raise ValidationError("Price cannot be None")
 
         try:
-            # Use Decimal for precision, then convert to float for comparison
-            price_decimal = Decimal(str(price))
+            from src.utils.decimal_utils import ZERO, to_decimal
+
+            price_decimal = to_decimal(price)
             # Check if the Decimal is valid (not NaN or infinite)
             if not price_decimal.is_finite():
                 raise ValidationError(f"Price must be a valid number, got {price}")
-            price_float = float(price_decimal)
+
         except (TypeError, ValueError, InvalidOperation) as e:
             raise ValidationError(f"Price must be numeric, got {type(price)}") from e
 
-        if price_float <= 0:
+        if price_decimal <= ZERO:
             raise ValidationError("Price must be positive")
-        if price_float > max_price:
-            raise ValidationError(f"Price {price_float} exceeds maximum {max_price}")
-        if price_float == float("inf"):
-            raise ValidationError("Price cannot be infinity")
 
-        # Round to 8 decimals for crypto precision
-        return round(price_float, 8)
+        max_price_decimal = to_decimal(max_price)
+        if price_decimal > max_price_decimal:
+            raise ValidationError(f"Price {price_decimal} exceeds maximum {max_price_decimal}")
+
+        # Round to 8 decimals for crypto precision using Decimal quantize
+        return price_decimal.quantize(Decimal("0.00000001"))
 
     @staticmethod
-    def validate_quantity(quantity: Any, min_qty: float = 0.00000001) -> float:
+    def validate_quantity(quantity: Any, min_qty: Decimal = Decimal("0.00000001")) -> Decimal:
         """
-        Validate and normalize quantity.
+        Validate and normalize quantity using Decimal for financial precision.
 
         Args:
             quantity: Quantity to validate
-            min_qty: Minimum allowed quantity
+            min_qty: Minimum allowed quantity as Decimal
 
         Returns:
-            Normalized quantity value
+            Normalized quantity value as Decimal (8 decimal precision)
 
         Raises:
             ValidationError: If quantity is invalid
@@ -197,23 +199,24 @@ class ValidationFramework:
             raise ValidationError("Quantity cannot be None")
 
         try:
-            # Use Decimal for precision, then convert to float for comparison
-            qty_decimal = Decimal(str(quantity))
+            from src.utils.decimal_utils import ZERO, to_decimal
+
+            qty_decimal = to_decimal(quantity)
             # Check if the Decimal is valid (not NaN or infinite)
             if not qty_decimal.is_finite():
                 raise ValidationError(f"Quantity must be a valid number, got {quantity}")
-            qty_float = float(qty_decimal)
         except (TypeError, ValueError, InvalidOperation) as e:
             raise ValidationError(f"Quantity must be numeric, got {type(quantity)}") from e
 
-        if qty_float <= 0:
+        if qty_decimal <= ZERO:
             raise ValidationError("Quantity must be positive")
-        if qty_float < min_qty:
-            raise ValidationError(f"Quantity {qty_float} below minimum {min_qty}")
-        if qty_float == float("inf"):
-            raise ValidationError("Quantity cannot be infinity")
 
-        return qty_float
+        min_qty_decimal = to_decimal(min_qty)
+        if qty_decimal < min_qty_decimal:
+            raise ValidationError(f"Quantity {qty_decimal} below minimum {min_qty_decimal}")
+
+        # Round to 8 decimals for crypto precision using Decimal quantize
+        return qty_decimal.quantize(Decimal("0.00000001"))
 
     @staticmethod
     def validate_symbol(symbol: str) -> str:
@@ -404,21 +407,67 @@ class ValidationFramework:
     @staticmethod
     def validate_batch(validations: list[tuple[str, Callable[[Any], Any], Any]]) -> dict[str, Any]:
         """
-        Run multiple validations and collect results.
+        Run multiple validations and collect results with consistent error handling.
+
+        This method uses consistent error propagation patterns matching the messaging 
+        system's ErrorPropagationMixin for cross-module compatibility.
 
         Args:
             validations: List of (name, validator_func, data) tuples
 
         Returns:
-            Dictionary with validation results
+            Dictionary with validation results in consistent format
         """
         results = {}
 
         for name, validator_func, data in validations:
             try:
                 result = validator_func(data)
-                results[name] = {"status": "success", "result": result}
+                results[name] = {
+                    "status": "success",
+                    "result": result,
+                    "timestamp": datetime.now().isoformat(),
+                    "context": f"validation_{name}",
+                    "processing_mode": "batch"
+                }
+            except ValidationError as ve:
+                # Consistent with ErrorPropagationMixin pattern
+                from src.core.logging import get_logger
+                logger = get_logger(__name__)
+                logger.error(f"Validation error in {name}: {ve}")
+                
+                results[name] = {
+                    "status": "validation_error",
+                    "error": str(ve),
+                    "error_type": "ValidationError",
+                    "error_code": getattr(ve, 'error_code', None),
+                    "timestamp": datetime.now().isoformat(),
+                    "context": f"validation_{name}",
+                    "processing_mode": "batch"
+                }
             except Exception as e:
-                results[name] = {"status": "error", "error": str(e)}
+                # Wrap other errors consistently with ErrorPropagationMixin
+                from src.core.exceptions import DataValidationError
+                from src.core.logging import get_logger
+                logger = get_logger(__name__)
+                logger.error(f"Validation error in {name}: {e}")
+                
+                wrapped_error = DataValidationError(
+                    f"Value error in validation_{name}: {e}",
+                    field_name=name,
+                    field_value=str(data),
+                    expected_type="valid value",
+                )
+                
+                results[name] = {
+                    "status": "error",
+                    "error": str(wrapped_error),
+                    "error_type": "DataValidationError",
+                    "original_error": str(e),
+                    "original_error_type": type(e).__name__,
+                    "timestamp": datetime.now().isoformat(),
+                    "context": f"validation_{name}",
+                    "processing_mode": "batch"
+                }
 
         return results

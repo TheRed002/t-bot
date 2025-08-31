@@ -1,9 +1,10 @@
 """Service interfaces for the utils module."""
 
 from abc import ABC, abstractmethod
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from src.core.types.base import ConfigDict
+from pydantic import ConfigDict
 
 if TYPE_CHECKING:
     from src.utils.validation.service import ValidationContext, ValidationResult
@@ -49,6 +50,66 @@ class ValidationServiceInterface(Protocol):
         ...
 
 
+@runtime_checkable
+class GPUInterface(Protocol):
+    """Interface for GPU management services."""
+
+    @abstractmethod
+    def is_available(self) -> bool:
+        """Check if GPU is available."""
+        ...
+
+    @abstractmethod
+    def get_memory_info(self) -> dict[str, Any]:
+        """Get GPU memory information."""
+        ...
+
+
+@runtime_checkable
+class PrecisionInterface(Protocol):
+    """Interface for precision tracking services."""
+
+    @abstractmethod
+    def track_operation(self, operation: str, input_precision: int, output_precision: int) -> None:
+        """Track precision changes during operations."""
+        ...
+
+    @abstractmethod
+    def get_precision_stats(self) -> dict[str, Any]:
+        """Get precision tracking statistics."""
+        ...
+
+
+@runtime_checkable
+class DataFlowInterface(Protocol):
+    """Interface for data flow validation services."""
+
+    @abstractmethod
+    def validate_data_integrity(self, data: Any) -> bool:
+        """Validate data integrity."""
+        ...
+
+    @abstractmethod
+    def get_validation_report(self) -> dict[str, Any]:
+        """Get validation report."""
+        ...
+
+
+@runtime_checkable
+class CalculatorInterface(Protocol):
+    """Interface for financial calculation services."""
+
+    @abstractmethod
+    def calculate_compound_return(self, principal: Decimal, rate: Decimal, periods: int) -> Decimal:
+        """Calculate compound return."""
+        ...
+
+    @abstractmethod
+    def calculate_sharpe_ratio(self, returns: list[Decimal], risk_free_rate: Decimal) -> Decimal:
+        """Calculate Sharpe ratio."""
+        ...
+
+
 class BaseUtilityService(ABC):
     """Base class for utility services."""
 
@@ -70,5 +131,9 @@ class BaseUtilityService(ABC):
 
 __all__ = [
     "BaseUtilityService",
+    "CalculatorInterface",
+    "DataFlowInterface",
+    "GPUInterface",
+    "PrecisionInterface",
     "ValidationServiceInterface",
 ]

@@ -86,20 +86,21 @@ class TestNetworkErrorHandler:
     @pytest.mark.asyncio
     async def test_network_error_retry_strategy(self):
         """Test network error retry strategy."""
-        handler = NetworkErrorHandler(max_retries=3, base_delay=1.0)
+        from decimal import Decimal
+        handler = NetworkErrorHandler(max_retries=3, base_delay=Decimal("1.0"))
         
         error = ConnectionError("Connection failed")
         
         # First retry
         result = await handler.handle(error, {'retry_count': 0})
         assert result['action'] == 'retry'
-        assert result['delay'] == 1.0  # base_delay * 2^0
+        assert result['delay'] == '1.0'  # base_delay * 2^0
         assert result['retry_count'] == 1
         
         # Second retry
         result = await handler.handle(error, {'retry_count': 1})
         assert result['action'] == 'retry'
-        assert result['delay'] == 2.0  # base_delay * 2^1
+        assert result['delay'] == '2.0'  # base_delay * 2^1
         assert result['retry_count'] == 2
         
         # Max retries exceeded
@@ -133,7 +134,7 @@ class TestRateLimitErrorHandler:
         
         result = await handler.handle(error, {})
         assert result['action'] == 'wait'
-        assert result['delay'] == 30  # Extracted from message
+        assert result['delay'] == '30'  # Extracted from message
         assert result['reason'] == 'rate_limit'
         assert result['circuit_break'] == True
 
@@ -191,7 +192,7 @@ class TestDatabaseErrorHandler:
         
         result = await handler.handle(error, {})
         assert result['action'] == 'retry'
-        assert result['delay'] == 0.1
+        assert result['delay'] == '0.1'
         assert result['reason'] == 'deadlock'
 
     @pytest.mark.asyncio
@@ -203,7 +204,7 @@ class TestDatabaseErrorHandler:
         
         result = await handler.handle(error, {})
         assert result['action'] == 'reconnect'
-        assert result['delay'] == 5
+        assert result['delay'] == '5'
         assert result['reason'] == 'connection_lost'
 
 
@@ -283,6 +284,22 @@ class TestErrorHandlerChain:
         validation_error = ValidationError("Invalid")
         result = await chain.handle(validation_error, {})
         assert result['action'] == 'reject'
+    
+    def test_default_chain_creation(self):
+        """Test creating a simple default chain."""
+        # Register the handlers first
+        ErrorHandlerFactory.clear()
+        ErrorHandlerFactory.register('network', NetworkErrorHandler)
+        ErrorHandlerFactory.register('database', DatabaseErrorHandler)
+        ErrorHandlerFactory.register('validation', ValidationErrorHandler)
+        
+        # Create chain with available handlers
+        chain = ErrorHandlerChain(['network', 'database', 'validation'])
+        
+        assert chain.chain is not None
+        # The chain is built in reverse order, so the first in list becomes last in chain
+        # With ['network', 'database', 'validation'], the chain head is actually network
+        assert isinstance(chain.chain, NetworkErrorHandler)
 
 
 class TestErrorContextFactory:
@@ -290,8 +307,9 @@ class TestErrorContextFactory:
 
     def test_create_context(self):
         """Test creating error context."""
+        factory = ErrorContextFactory()
         error = ValueError("Test error")
-        context = ErrorContextFactory.create(error, user_id=123, request_id='abc')
+        context = factory.create(error, user_id=123, request_id='abc')
         
         assert context['error_type'] == 'ValueError'
         assert context['error_message'] == 'Test error'
@@ -302,8 +320,9 @@ class TestErrorContextFactory:
 
     def test_create_minimal_context(self):
         """Test creating minimal error context."""
+        factory = ErrorContextFactory()
         error = ValueError("Test error")
-        context = ErrorContextFactory.create_minimal(error)
+        context = factory.create_minimal(error)
         
         assert context['error_type'] == 'ValueError'
         assert context['error_message'] == 'Test error'
@@ -312,8 +331,9 @@ class TestErrorContextFactory:
 
     def test_enrich_context(self):
         """Test enriching error context."""
+        factory = ErrorContextFactory()
         base_context = {'error': 'test', 'code': 500}
-        enriched = ErrorContextFactory.enrich_context(
+        enriched = factory.enrich_context(
             base_context,
             user_id=123,
             session_id='xyz'
@@ -331,7 +351,8 @@ class TestRecoveryStrategies:
     @pytest.mark.asyncio
     async def test_retry_recovery(self):
         """Test retry recovery strategy."""
-        recovery = RetryRecovery(max_attempts=3, base_delay=1.0)
+        from decimal import Decimal
+        recovery = RetryRecovery(max_attempts=3, base_delay=Decimal("1.0"))
         
         error = ConnectionError("Failed")
         context = {'retry_count': 0}
@@ -341,7 +362,7 @@ class TestRecoveryStrategies:
         
         result = await recovery.recover(error, context)
         assert result['action'] == 'retry'
-        assert result['delay'] == 1.0
+        assert result['delay'] == '1.0'
         assert result['retry_count'] == 1
         
         # Max attempts exceeded
@@ -351,9 +372,10 @@ class TestRecoveryStrategies:
     @pytest.mark.asyncio
     async def test_circuit_breaker_recovery(self):
         """Test circuit breaker recovery strategy."""
+        from decimal import Decimal
         recovery = CircuitBreakerRecovery(
             failure_threshold=2,
-            timeout=10.0
+            timeout=Decimal("10.0")
         )
         
         error = ConnectionError("Failed")
