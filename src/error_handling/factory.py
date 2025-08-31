@@ -158,7 +158,7 @@ class ErrorHandlerFactory(BaseFactory[ErrorHandlerProtocol]):
         # Only inject dependencies that the handler actually needs
         service_mappings = {
             "Config": "config",
-            "SecuritySanitizer": "sanitizer", 
+            "SecuritySanitizer": "sanitizer",
             "SecurityRateLimiter": "rate_limiter",
         }
 
@@ -173,7 +173,9 @@ class ErrorHandlerFactory(BaseFactory[ErrorHandlerProtocol]):
                 else:
                     # Required dependencies must be available
                     if service_name in ["SecuritySanitizer", "SecurityRateLimiter"]:
-                        raise ValueError(f"Required service {service_name} not registered in DI container")
+                        raise ValueError(
+                            f"Required service {service_name} not registered in DI container"
+                        )
 
     @classmethod
     def clear(cls) -> None:

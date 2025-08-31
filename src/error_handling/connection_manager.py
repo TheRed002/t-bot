@@ -24,9 +24,17 @@ from src.core.config import Config
 from src.core.exceptions import TimeoutError
 from src.core.logging import get_logger
 
-# MANDATORY: Import from P-001 core framework
-# MANDATORY: Import from P-007A utils framework
+# Core framework imports
 from src.utils.decorators import circuit_breaker, time_execution
+
+# Production configuration constants
+DEFAULT_LATENCY_SAMPLES = 10
+DEFAULT_QUEUE_SIZE = 1000
+DEFAULT_QUEUE_TTL_SECONDS = 300
+DEFAULT_MAX_SIZE_BYTES = 10 * 1024 * 1024
+DEFAULT_WEBSOCKET_TIMEOUT = 30.0
+DEFAULT_WEBSOCKET_HEARTBEAT_TIMEOUT = 5.0
+DEFAULT_CONNECTION_BATCH_SIZE = 10
 
 
 class ConnectionState(Enum):
@@ -67,7 +75,7 @@ class ConnectionHealth:
         self._quality_history.append(quality_decimal)
         self.connection_quality = quality_decimal
 
-    def get_average_latency(self, samples: int = 10) -> Decimal:
+    def get_average_latency(self, samples: int = DEFAULT_LATENCY_SAMPLES) -> Decimal:
         """Get average latency from recent samples."""
         if not self._latency_history:
             return Decimal("0.0")
@@ -110,12 +118,14 @@ class ConnectionHealth:
 class MessageQueue:
     """Efficient message queue with size limits and TTL."""
 
-    def __init__(self, max_size: int = 1000, ttl_seconds: int = 300) -> None:
+    def __init__(
+        self, max_size: int = DEFAULT_QUEUE_SIZE, ttl_seconds: int = DEFAULT_QUEUE_TTL_SECONDS
+    ) -> None:
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
         self._queue: deque[dict[str, Any]] = deque(maxlen=max_size)
         self._total_size_bytes = 0
-        self._max_size_bytes = 10 * 1024 * 1024  # 10MB limit
+        self._max_size_bytes = DEFAULT_MAX_SIZE_BYTES
 
     def add_message(self, message: dict[str, Any]) -> bool:
         """Add message to queue with size and TTL checks."""
@@ -189,8 +199,8 @@ class ConnectionManager:
         self.heartbeat_intervals: dict[str, int] = {"exchange": 30, "database": 60, "websocket": 10}
 
         # WebSocket connection timeouts and heartbeat settings
-        self.websocket_timeout = 30.0
-        self.websocket_heartbeat_timeout = 5.0
+        self.websocket_timeout = DEFAULT_WEBSOCKET_TIMEOUT
+        self.websocket_heartbeat_timeout = DEFAULT_WEBSOCKET_HEARTBEAT_TIMEOUT
 
         # Task management with weak references
         self._health_monitor_tasks: dict[str, asyncio.Task] = {}
@@ -1075,7 +1085,7 @@ class ConnectionManager:
         connection_ids = list(self.connections.keys())
         if connection_ids:
             # Process connections in batches to avoid overwhelming the system
-            batch_size = 10  # Limit concurrent connection closures
+            batch_size = DEFAULT_CONNECTION_BATCH_SIZE
 
             for i in range(0, len(connection_ids), batch_size):
                 batch = connection_ids[i : i + batch_size]

@@ -54,17 +54,18 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
         state_monitor: StateMonitorInterface | None = None,
     ) -> None:
         # Configuration constants
-        self._background_task_timeout = 10.0  # Seconds to wait for background task cleanup
-        
+        self._background_task_timeout = 10.0
+
         # Convert Config to ConfigDict properly for BaseService
         from src.core.types.base import ConfigDict
+
         if hasattr(config, "model_dump"):
             config_dict = ConfigDict(config.model_dump())
         elif isinstance(config, dict):
             config_dict = ConfigDict(config)
         else:
             config_dict = ConfigDict({})
-            
+
         super().__init__(name="ErrorHandlingService", config=config_dict)
 
         # Store the original config for component initialization
@@ -182,10 +183,13 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
         """Implementation of error handling business logic."""
         await self._ensure_initialized()
 
-        # Apply consistent error propagation patterns - preserve ValidationError
+        # Apply consistent error propagation patterns matching database module validation
         if isinstance(error, (ValidationError, DataValidationError)):
-            # Re-raise validation errors as-is for consistency with monitoring module
-            self.propagate_validation_error(error, f"{component}.{operation}")
+            # Apply same error propagation pattern as database module
+            from src.utils.messaging_patterns import ErrorPropagationMixin
+
+            propagator = ErrorPropagationMixin()
+            propagator.propagate_validation_error(error, f"{component}.{operation}")
             # propagate_validation_error should always raise, but add explicit raise for mypy
             raise error
 
@@ -406,32 +410,32 @@ class ErrorHandlingService(BaseService, ErrorPropagationMixin):
             self.logger.error(f"Failed to get error handler metrics: {e}")
             raise ServiceError(f"Error handler metrics retrieval failed: {e}") from e
 
-    def _transform_error_context(self, context: dict[str, Any], component: str) -> dict[str, Any]:
+    def _transform_error_context(
+        self, context: dict[str, Any], component: str
+    ) -> dict[str, Any]:
         """Transform error context data consistently across operations."""
-        # Apply consistent data transformation patterns matching database module
+        # Apply consistent data transformation patterns matching database module exactly
         transformed_context = context.copy()
 
-        # Standardize context format for consistent processing
+        # Use same messaging patterns transformation as database module
+        from src.utils.messaging_patterns import MessagingCoordinator
+
+        coordinator = MessagingCoordinator("ErrorHandlingTransform")
+        transformed_context = coordinator._apply_data_transformation(transformed_context)
+
+        # Standardize context format for consistent processing with database module
         transformed_context.update(
             {
                 "processing_mode": "async",
                 "processing_stage": "error_handling",
                 "data_format": "error_context_v1",
+                # Add fields consistent with database module patterns
+                "validation_status": "validated",
+                "boundary_crossed": True,
             }
         )
 
-        # Apply consistent Decimal transformation for financial data
-        if "price" in transformed_context and transformed_context["price"] is not None:
-            from src.utils.decimal_utils import to_decimal
-
-            transformed_context["price"] = to_decimal(transformed_context["price"])
-
-        if "quantity" in transformed_context and transformed_context["quantity"] is not None:
-            from src.utils.decimal_utils import to_decimal
-
-            transformed_context["quantity"] = to_decimal(transformed_context["quantity"])
-
-        # Set audit fields consistently
+        # Set audit fields consistently matching database module
         transformed_context["processed_at"] = datetime.now(timezone.utc).isoformat()
 
         return transformed_context

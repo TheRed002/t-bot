@@ -310,7 +310,7 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 )
 
                 error_handling_service = injector.resolve("ErrorHandlingService")
-                
+
                 return ErrorHandlingServiceAdapter(
                     config=resolved_config,
                     error_handling_service=error_handling_service,
@@ -319,7 +319,9 @@ def register_error_handling_services(injector, config: Config | None = None) -> 
                 logger.error(f"Failed to create ErrorHandlingServiceAdapter: {e}")
                 raise
 
-        injector.register_factory("ErrorHandlingServiceAdapter", service_adapter_factory, singleton=True)
+        injector.register_factory(
+            "ErrorHandlingServiceAdapter", service_adapter_factory, singleton=True
+        )
         logger.debug("Registered ErrorHandlingServiceAdapter")
 
         # Register ErrorHandlerFactory and configure handlers using simplified pattern
@@ -486,24 +488,12 @@ def _register_error_handlers(factory) -> None:
         handler_registry = {
             "network": {
                 "class": NetworkErrorHandler,
-                "config": {"max_retries": 3, "base_delay": 1.0}
+                "config": {"max_retries": 3, "base_delay": 1.0},
             },
-            "rate_limit": {
-                "class": RateLimitErrorHandler,
-                "config": {}
-            },
-            "database": {
-                "class": DatabaseErrorHandler,
-                "config": {}
-            },
-            "validation": {
-                "class": ValidationErrorHandler,
-                "config": {}
-            },
-            "data_validation": {
-                "class": DataValidationErrorHandler,
-                "config": {}
-            },
+            "rate_limit": {"class": RateLimitErrorHandler, "config": {}},
+            "database": {"class": DatabaseErrorHandler, "config": {}},
+            "validation": {"class": ValidationErrorHandler, "config": {}},
+            "data_validation": {"class": DataValidationErrorHandler, "config": {}},
         }
 
         for handler_name, handler_info in handler_registry.items():

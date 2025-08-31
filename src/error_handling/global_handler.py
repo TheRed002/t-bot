@@ -58,7 +58,7 @@ class GlobalErrorHandler(BaseService):
     def _setup_error_handlers(self):
         """Set up the error handler chain."""
         # Import at runtime to avoid circular dependencies
-        from src.error_handling.factory import ErrorHandlerFactory, ErrorHandlerChain
+        from src.error_handling.factory import ErrorHandlerChain, ErrorHandlerFactory
 
         # Register only handlers that don't have database dependencies
         try:
@@ -326,7 +326,7 @@ class GlobalErrorHandler(BaseService):
         This is set as sys.excepthook to catch all unhandled exceptions.
         """
         if issubclass(exc_type, KeyboardInterrupt):
-            # Allow keyboard interrupt to work normally
+            # Pass through keyboard interrupts for graceful shutdown
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
             return
 

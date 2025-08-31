@@ -145,12 +145,21 @@ class ErrorContext:
             "attempt_number": self.attempt_number,
         }
 
-        # Add standard data processing fields for consistency with core modules
+        # Apply consistent data transformation patterns matching database module
+        from src.utils.messaging_patterns import MessagingCoordinator
+
+        coordinator = MessagingCoordinator("ErrorContextTransform")
+        base_dict = coordinator._apply_data_transformation(base_dict)
+
+        # Add standard data processing fields for consistency with core modules and database
         base_dict.update(
             {
                 "data_format": "error_context_v1",
                 "processing_stage": "error_handling",
                 "validation_status": "validated" if self.details else "pending",
+                # Add fields consistent with database module boundary validation
+                "boundary_crossed": True,
+                "processing_mode": "async",
             }
         )
 
@@ -313,7 +322,7 @@ class ErrorContextFactory(BaseFactory[ErrorContext]):
         """Initialize factory with proper core.base.factory pattern."""
         # Use proper config structure from core.types
         from src.core.types.base import ConfigDict
-        
+
         config = ConfigDict({}) if dependency_container is None else None
         super().__init__(product_type=ErrorContext, name="ErrorContextFactory", config=config)
 
@@ -321,24 +330,28 @@ class ErrorContextFactory(BaseFactory[ErrorContext]):
         try:
             # Create wrapper functions that match the expected signature
             def standard_creator(*args, **kwargs) -> ErrorContext:
-                error = args[0] if args else kwargs.get('error')
+                error = args[0] if args else kwargs.get("error")
                 if not error:
                     raise ValueError("Error parameter is required for standard creator")
                 return ErrorContext.from_exception(error, **kwargs)
-            
+
             def decorator_creator(*args, **kwargs) -> ErrorContext:
-                error = args[0] if args else kwargs.get('error')
-                function_name = args[1] if len(args) > 1 else kwargs.get('function_name', 'unknown')
-                call_args = args[2] if len(args) > 2 else kwargs.get('args', ())
-                call_kwargs = args[3] if len(args) > 3 else kwargs.get('kwargs', {})
+                error = args[0] if args else kwargs.get("error")
+                function_name = args[1] if len(args) > 1 else kwargs.get("function_name", "unknown")
+                call_args = args[2] if len(args) > 2 else kwargs.get("args", ())
+                call_kwargs = args[3] if len(args) > 3 else kwargs.get("kwargs", {})
                 return ErrorContext.from_decorator_context(
                     error=error or Exception("Unknown"),
                     function_name=function_name,
                     args=call_args,
                     kwargs=call_kwargs,
-                    **{k: v for k, v in kwargs.items() if k not in ['error', 'function_name', 'args', 'kwargs']}
+                    **{
+                        k: v
+                        for k, v in kwargs.items()
+                        if k not in ["error", "function_name", "args", "kwargs"]
+                    },
                 )
-            
+
             self.register("standard", standard_creator)
             self.register("decorator", decorator_creator)
         except Exception as e:
@@ -349,7 +362,7 @@ class ErrorContextFactory(BaseFactory[ErrorContext]):
             logger.warning(f"Failed to register some context creators: {e}")
 
         # Configure dependencies if available using core pattern
-        if dependency_container and hasattr(self, 'configure_dependencies'):
+        if dependency_container and hasattr(self, "configure_dependencies"):
             try:
                 self.configure_dependencies(dependency_container)
             except Exception as e:

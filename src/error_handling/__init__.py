@@ -11,6 +11,7 @@ layer and will be used by all subsequent prompts for robust error handling.
 from src.core.exceptions import ErrorSeverity
 
 from .connection_manager import ConnectionManager, ConnectionState
+from .context import ErrorContext
 from .decorators import (
     FallbackStrategy,
     get_active_handler_count,
@@ -21,18 +22,16 @@ from .decorators import (
     with_retry,
 )
 from .di_registration import configure_error_handling_di, register_error_handling_services
-from .context import ErrorContext
 from .error_handler import ErrorHandler
 from .global_handler import GlobalErrorHandler
 from .interfaces import (
-    ErrorHandlingServiceInterface,
-    ErrorPatternAnalyticsInterface,
     ErrorHandlerInterface,
-    GlobalErrorHandlerInterface,
+    ErrorHandlingServiceInterface,
     ErrorHandlingServicePort,
+    ErrorPatternAnalyticsInterface,
+    GlobalErrorHandlerInterface,
 )
 from .pattern_analytics import ErrorPatternAnalytics
-from .service_adapter import ErrorHandlingServiceAdapter, create_error_handling_service_adapter
 from .recovery_scenarios import (
     APIRateLimitRecovery,
     DataFeedInterruptionRecovery,
@@ -43,6 +42,7 @@ from .recovery_scenarios import (
     RecoveryScenario,
 )
 from .service import ErrorHandlingService
+from .service_adapter import ErrorHandlingServiceAdapter, create_error_handling_service_adapter
 from .state_monitor import StateMonitor
 
 # Global error handler instance

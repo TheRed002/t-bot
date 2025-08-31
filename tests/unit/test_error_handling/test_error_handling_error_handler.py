@@ -220,13 +220,59 @@ class TestErrorHandler:
         return Config()
 
     @pytest.fixture
-    def error_handler(self, config):
-        """Provide error handler instance."""
-        return ErrorHandler(config)
+    def mock_sanitizer(self):
+        """Provide mock sanitizer for testing."""
+        sanitizer = MagicMock()
+        sanitizer.sanitize_error_message = MagicMock(side_effect=lambda msg, level: f"sanitized: {msg}")
+        
+        def mock_sanitize_context(ctx, level):
+            """Mock context sanitization that replaces sensitive data."""
+            sanitized_ctx = ctx.copy()
+            # Mock sanitization of sensitive data
+            for key, value in sanitized_ctx.items():
+                if isinstance(value, str) and any(sensitive_word in key.lower() for sensitive_word in ['key', 'token', 'password', 'secret']):
+                    sanitized_ctx[key] = f"HASH_{hash(value) % 10000:04d}"
+                elif isinstance(value, str) and len(value) > 10 and any(char.isdigit() for char in value):
+                    # Mask potential sensitive strings
+                    sanitized_ctx[key] = "*" * 8
+            return sanitized_ctx
+            
+        sanitizer.sanitize_context = MagicMock(side_effect=mock_sanitize_context)
+        sanitizer.sanitize_stack_trace = MagicMock(side_effect=lambda trace, level: f"sanitized: {trace}")
+        return sanitizer
+
+    @pytest.fixture
+    def mock_rate_limiter(self):
+        """Provide mock rate limiter for testing."""
+        rate_limiter = MagicMock()
+        # Create async mock for check_rate_limit
+        async_mock = AsyncMock()
+        async_mock.return_value = MagicMock(allowed=True, reason=None, suggested_retry_after=None)
+        rate_limiter.check_rate_limit = async_mock
+        return rate_limiter
+
+    @pytest.fixture
+    def error_handler(self, config, mock_sanitizer, mock_rate_limiter):
+        """Provide error handler instance with mocked dependencies."""
+        return ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
 
     def test_error_handler_initialization(self, config):
         """Test error handler initialization."""
+        # Test initialization without dependencies (design expectation)
         handler = ErrorHandler(config)
+        assert handler.config == config
+        assert isinstance(handler.error_patterns, ErrorPatternCache)
+        assert handler.sanitizer is None  # Dependencies are injected, not auto-initialized
+        assert handler.rate_limiter is None  # Dependencies are injected, not auto-initialized
+        assert "network_errors" in handler.retry_policies
+        assert "api_rate_limits" in handler.retry_policies
+        assert "database_errors" in handler.retry_policies
+        assert "api_calls" in handler.circuit_breakers
+        assert "database_connections" in handler.circuit_breakers
+
+    def test_error_handler_initialization_with_dependencies(self, config, mock_sanitizer, mock_rate_limiter):
+        """Test error handler initialization with injected dependencies."""
+        handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
         assert handler.config == config
         assert isinstance(handler.error_patterns, ErrorPatternCache)
         assert handler.sanitizer is not None
@@ -333,17 +379,14 @@ class TestErrorHandler:
         def mock_recovery(ctx):
             return True
 
-        # Mock rate limiter to allow requests
-        with patch.object(error_handler.rate_limiter, 'check_rate_limit', new_callable=AsyncMock) as mock_rate_limit:
-            mock_rate_limit.return_value = MagicMock(allowed=True)
-            
-            result = await error_handler.handle_error(error, context, mock_recovery)
+        # Rate limiter is already mocked in fixture, just verify behavior
+        result = await error_handler.handle_error(error, context, mock_recovery)
 
-            # Handler prepares recovery context for service layer, doesn't execute directly
-            assert result is True
-            mock_rate_limit.assert_called_once()
-            # Recovery attempts should be incremented
-            assert context.recovery_attempts == 1
+        # Handler prepares recovery context for service layer, doesn't execute directly
+        assert result is True
+        error_handler.rate_limiter.check_rate_limit.assert_called_once()
+        # Recovery attempts should be incremented
+        assert context.recovery_attempts == 1
 
     @pytest.mark.asyncio
     async def test_handle_error_without_recovery(self, error_handler):
@@ -353,14 +396,11 @@ class TestErrorHandler:
             error=error, component="data", operation="validate_data"
         )
 
-        # Mock rate limiter to allow requests
-        with patch.object(error_handler.rate_limiter, 'check_rate_limit', new_callable=AsyncMock) as mock_rate_limit:
-            mock_rate_limit.return_value = MagicMock(allowed=True)
-            
-            result = await error_handler.handle_error(error, context)
+        # Rate limiter is already mocked in fixture, just verify behavior
+        result = await error_handler.handle_error(error, context)
 
-            # Should return False for non-critical errors without recovery
-            assert result is False
+        # Should return False for non-critical errors without recovery
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_handle_error_critical_escalation(self, error_handler):
@@ -370,11 +410,8 @@ class TestErrorHandler:
             error=error, component="state", operation="validate_state"
         )
 
-        # Mock rate limiter and escalation
-        with patch.object(error_handler.rate_limiter, 'check_rate_limit', new_callable=AsyncMock) as mock_rate_limit, \
-             patch.object(error_handler, "_escalate_error", new_callable=AsyncMock) as mock_escalate:
-            mock_rate_limit.return_value = MagicMock(allowed=True)
-            
+        # Mock escalation
+        with patch.object(error_handler, "_escalate_error", new_callable=AsyncMock) as mock_escalate:
             result = await error_handler.handle_error(error, context)
 
             assert result is False
@@ -391,11 +428,8 @@ class TestErrorHandler:
         # Set recovery attempts to max
         context.recovery_attempts = context.max_recovery_attempts
 
-        # Mock rate limiter and escalation
-        with patch.object(error_handler.rate_limiter, 'check_rate_limit', new_callable=AsyncMock) as mock_rate_limit, \
-             patch.object(error_handler, "_escalate_error", new_callable=AsyncMock) as mock_escalate:
-            mock_rate_limit.return_value = MagicMock(allowed=True)
-            
+        # Mock escalation
+        with patch.object(error_handler, "_escalate_error", new_callable=AsyncMock) as mock_escalate:
             result = await error_handler.handle_error(error, context)
 
             assert result is False
@@ -435,11 +469,45 @@ class TestErrorHandlerDecorator:
         """Provide test configuration."""
         return Config()
 
-    @pytest.mark.asyncio
-    async def test_error_handler_decorator_success(self, config):
-        """Test error handler decorator with successful function."""
+    @pytest.fixture
+    def mock_sanitizer(self):
+        """Provide mock sanitizer for testing."""
+        sanitizer = MagicMock()
+        sanitizer.sanitize_error_message = MagicMock(side_effect=lambda msg, level: f"sanitized: {msg}")
+        
+        def mock_sanitize_context(ctx, level):
+            """Mock context sanitization that replaces sensitive data."""
+            sanitized_ctx = ctx.copy()
+            # Mock sanitization of sensitive data
+            for key, value in sanitized_ctx.items():
+                if isinstance(value, str) and any(sensitive_word in key.lower() for sensitive_word in ['key', 'token', 'password', 'secret']):
+                    sanitized_ctx[key] = f"HASH_{hash(value) % 10000:04d}"
+                elif isinstance(value, str) and len(value) > 10 and any(char.isdigit() for char in value):
+                    # Mask potential sensitive strings
+                    sanitized_ctx[key] = "*" * 8
+            return sanitized_ctx
+            
+        sanitizer.sanitize_context = MagicMock(side_effect=mock_sanitize_context)
+        sanitizer.sanitize_stack_trace = MagicMock(side_effect=lambda trace, level: f"sanitized: {trace}")
+        return sanitizer
 
-        @error_handler_decorator("test", "successful_function")
+    @pytest.fixture
+    def mock_rate_limiter(self):
+        """Provide mock rate limiter for testing."""
+        rate_limiter = MagicMock()
+        # Create async mock for check_rate_limit
+        async_mock = AsyncMock()
+        async_mock.return_value = MagicMock(allowed=True, reason=None, suggested_retry_after=None)
+        rate_limiter.check_rate_limit = async_mock
+        return rate_limiter
+
+    @pytest.mark.asyncio
+    async def test_error_handler_decorator_success(self, config, mock_sanitizer, mock_rate_limiter):
+        """Test error handler decorator with successful function."""
+        # Create handler with mocked dependencies
+        handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
+
+        @error_handler_decorator("test", "successful_function", error_handler=handler)
         async def successful_function():
             return "success"
 
@@ -447,10 +515,12 @@ class TestErrorHandlerDecorator:
         assert result == "success"
 
     @pytest.mark.asyncio
-    async def test_error_handler_decorator_exception(self, config):
+    async def test_error_handler_decorator_exception(self, config, mock_sanitizer, mock_rate_limiter):
         """Test error handler decorator with exception."""
+        # Create handler with mocked dependencies
+        handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
 
-        @error_handler_decorator("test", "failing_function")
+        @error_handler_decorator("test", "failing_function", error_handler=handler)
         async def failing_function():
             raise ValidationError("Test validation error")
 
@@ -458,12 +528,15 @@ class TestErrorHandlerDecorator:
             await failing_function()
 
     @pytest.mark.asyncio
-    async def test_error_handler_decorator_with_recovery(self, config):
+    async def test_error_handler_decorator_with_recovery(self, config, mock_sanitizer, mock_rate_limiter):
         """Test error handler decorator with recovery strategy."""
         async def mock_recovery(context):
             return True
 
-        @error_handler_decorator("test", "function_with_recovery", recovery_strategy=mock_recovery)
+        # Create handler with mocked dependencies
+        handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
+
+        @error_handler_decorator("test", "function_with_recovery", error_handler=handler, recovery_strategy=mock_recovery)
         async def function_with_recovery():
             raise ExchangeError("Test exchange error")
 
@@ -473,20 +546,24 @@ class TestErrorHandlerDecorator:
         # Test passes if decorator handles exception without crashing
         # Recovery strategy is prepared but not executed by the decorator
 
-    def test_error_handler_decorator_sync_function(self, config):
+    def test_error_handler_decorator_sync_function(self, config, mock_sanitizer, mock_rate_limiter):
         """Test error handler decorator with synchronous function."""
+        # Create handler with mocked dependencies
+        handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
 
-        @error_handler_decorator("test", "sync_function")
+        @error_handler_decorator("test", "sync_function", error_handler=handler)
         def sync_function():
             return "sync success"
 
         result = sync_function()
         assert result == "sync success"
 
-    def test_error_handler_decorator_sync_exception(self, config):
+    def test_error_handler_decorator_sync_exception(self, config, mock_sanitizer, mock_rate_limiter):
         """Test error handler decorator with synchronous exception."""
+        # Create handler with mocked dependencies
+        handler = ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
 
-        @error_handler_decorator("test", "sync_failing_function")
+        @error_handler_decorator("test", "sync_failing_function", error_handler=handler)
         def sync_failing_function():
             raise ValidationError("Test validation error")
 
@@ -636,9 +713,41 @@ class TestErrorHandlerIntegration:
         return Config()
 
     @pytest.fixture
-    def error_handler(self, config):
-        """Provide error handler instance."""
-        return ErrorHandler(config)
+    def mock_sanitizer(self):
+        """Provide mock sanitizer for testing."""
+        sanitizer = MagicMock()
+        sanitizer.sanitize_error_message = MagicMock(side_effect=lambda msg, level: f"sanitized: {msg}")
+        
+        def mock_sanitize_context(ctx, level):
+            """Mock context sanitization that replaces sensitive data."""
+            sanitized_ctx = ctx.copy()
+            # Mock sanitization of sensitive data
+            for key, value in sanitized_ctx.items():
+                if isinstance(value, str) and any(sensitive_word in key.lower() for sensitive_word in ['key', 'token', 'password', 'secret']):
+                    sanitized_ctx[key] = f"HASH_{hash(value) % 10000:04d}"
+                elif isinstance(value, str) and len(value) > 10 and any(char.isdigit() for char in value):
+                    # Mask potential sensitive strings
+                    sanitized_ctx[key] = "*" * 8
+            return sanitized_ctx
+            
+        sanitizer.sanitize_context = MagicMock(side_effect=mock_sanitize_context)
+        sanitizer.sanitize_stack_trace = MagicMock(side_effect=lambda trace, level: f"sanitized: {trace}")
+        return sanitizer
+
+    @pytest.fixture
+    def mock_rate_limiter(self):
+        """Provide mock rate limiter for testing."""
+        rate_limiter = MagicMock()
+        # Create async mock for check_rate_limit
+        async_mock = AsyncMock()
+        async_mock.return_value = MagicMock(allowed=True, reason=None, suggested_retry_after=None)
+        rate_limiter.check_rate_limit = async_mock
+        return rate_limiter
+
+    @pytest.fixture
+    def error_handler(self, config, mock_sanitizer, mock_rate_limiter):
+        """Provide error handler instance with mocked dependencies."""
+        return ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
 
     @pytest.mark.asyncio
     async def test_error_handler_with_circuit_breaker(self, error_handler):
@@ -671,26 +780,23 @@ class TestErrorHandlerIntegration:
     @pytest.mark.asyncio
     async def test_error_handler_pattern_detection(self, error_handler):
         """Test error handler pattern detection."""
-        # Mock rate limiter to allow requests
-        with patch.object(error_handler.rate_limiter, 'check_rate_limit', new_callable=AsyncMock) as mock_rate_limit:
-            mock_rate_limit.return_value = MagicMock(allowed=True)
-            
-            # Create multiple similar errors
-            for i in range(3):
-                error = ExchangeError(f"API timeout {i}")
-                context = error_handler.create_error_context(
-                    error=error, component="exchange", operation="place_order"
-                )
+        # Rate limiter is already mocked in fixture
+        # Create multiple similar errors
+        for i in range(3):
+            error = ExchangeError(f"API timeout {i}")
+            context = error_handler.create_error_context(
+                error=error, component="exchange", operation="place_order"
+            )
 
-                await error_handler.handle_error(error, context)
+            await error_handler.handle_error(error, context)
 
-            # Check if pattern was detected
-            patterns = error_handler.get_error_patterns()
-            assert len(patterns) > 0
+        # Check if pattern was detected
+        patterns = error_handler.get_error_patterns()
+        assert len(patterns) > 0
 
-            # Should have a pattern for exchange errors
-            exchange_patterns = [p for p in patterns.values() if p.get("component") == "exchange"]
-            assert len(exchange_patterns) > 0
+        # Should have a pattern for exchange errors
+        exchange_patterns = [p for p in patterns.values() if p.get("component") == "exchange"]
+        assert len(exchange_patterns) > 0
 
     @pytest.mark.asyncio
     async def test_error_handler_retry_policy(self, error_handler):
@@ -718,11 +824,8 @@ class TestErrorHandlerIntegration:
             error=error, component="state", operation="validate_state"
         )
 
-        # Mock rate limiter and escalation
-        with patch.object(error_handler.rate_limiter, 'check_rate_limit', new_callable=AsyncMock) as mock_rate_limit, \
-             patch.object(error_handler, "_escalate_error", new_callable=AsyncMock) as mock_escalate:
-            mock_rate_limit.return_value = MagicMock(allowed=True)
-            
+        # Mock escalation
+        with patch.object(error_handler, "_escalate_error", new_callable=AsyncMock) as mock_escalate:
             await error_handler.handle_error(error, context)
 
             # Should escalate critical errors
@@ -762,9 +865,41 @@ class TestErrorHandlerSecurity:
         return Config()
 
     @pytest.fixture
-    def error_handler(self, config):
-        """Provide error handler instance."""
-        return ErrorHandler(config)
+    def mock_sanitizer(self):
+        """Provide mock sanitizer for testing."""
+        sanitizer = MagicMock()
+        sanitizer.sanitize_error_message = MagicMock(side_effect=lambda msg, level: f"sanitized: {msg}")
+        
+        def mock_sanitize_context(ctx, level):
+            """Mock context sanitization that replaces sensitive data."""
+            sanitized_ctx = ctx.copy()
+            # Mock sanitization of sensitive data
+            for key, value in sanitized_ctx.items():
+                if isinstance(value, str) and any(sensitive_word in key.lower() for sensitive_word in ['key', 'token', 'password', 'secret']):
+                    sanitized_ctx[key] = f"HASH_{hash(value) % 10000:04d}"
+                elif isinstance(value, str) and len(value) > 10 and any(char.isdigit() for char in value):
+                    # Mask potential sensitive strings
+                    sanitized_ctx[key] = "*" * 8
+            return sanitized_ctx
+            
+        sanitizer.sanitize_context = MagicMock(side_effect=mock_sanitize_context)
+        sanitizer.sanitize_stack_trace = MagicMock(side_effect=lambda trace, level: f"sanitized: {trace}")
+        return sanitizer
+
+    @pytest.fixture
+    def mock_rate_limiter(self):
+        """Provide mock rate limiter for testing."""
+        rate_limiter = MagicMock()
+        # Create async mock for check_rate_limit
+        async_mock = AsyncMock()
+        async_mock.return_value = MagicMock(allowed=True, reason=None, suggested_retry_after=None)
+        rate_limiter.check_rate_limit = async_mock
+        return rate_limiter
+
+    @pytest.fixture
+    def error_handler(self, config, mock_sanitizer, mock_rate_limiter):
+        """Provide error handler instance with mocked dependencies."""
+        return ErrorHandler(config, sanitizer=mock_sanitizer, rate_limiter=mock_rate_limiter)
 
     def test_sanitizer_integration(self, error_handler):
         """Test that sanitizer is properly integrated."""
@@ -799,19 +934,18 @@ class TestErrorHandlerSecurity:
             error=error, component="test", operation="test_op"
         )
         
-        # Mock rate limiter to deny request
-        with patch.object(error_handler.rate_limiter, 'check_rate_limit', new_callable=AsyncMock) as mock_rate_limit:
-            mock_rate_limit.return_value = MagicMock(
-                allowed=False,
-                reason="Rate limit exceeded",
-                suggested_retry_after=60.0
-            )
-            
-            result = await error_handler.handle_error(error, context)
-            
-            # Should return False when rate limited
-            assert result is False
-            mock_rate_limit.assert_called_once()
+        # Configure rate limiter to deny request
+        error_handler.rate_limiter.check_rate_limit.return_value = MagicMock(
+            allowed=False,
+            reason="Rate limit exceeded",
+            suggested_retry_after=60.0
+        )
+        
+        result = await error_handler.handle_error(error, context)
+        
+        # Should return False when rate limited
+        assert result is False
+        error_handler.rate_limiter.check_rate_limit.assert_called()
 
     def test_memory_usage_stats(self, error_handler):
         """Test memory usage statistics."""
@@ -863,11 +997,8 @@ class TestErrorHandlerSecurity:
             api_key="sk_test_123456",  # This should be sanitized
         )
 
-        # Mock rate limiter to allow request
-        with patch.object(error_handler.rate_limiter, 'check_rate_limit', new_callable=AsyncMock) as mock_rate_limit:
-            mock_rate_limit.return_value = MagicMock(allowed=True)
-            
-            await error_handler.handle_error(original_error, context)
+        # Rate limiter is already mocked in fixture
+        await error_handler.handle_error(original_error, context)
 
         # Verify context is preserved but sensitive data is sanitized
         assert context.error_id is not None

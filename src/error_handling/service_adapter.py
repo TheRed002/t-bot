@@ -18,7 +18,7 @@ from src.error_handling.interfaces import (
 class ErrorHandlingServiceAdapter(BaseService, ErrorHandlingServicePort):
     """
     Service adapter that implements proper service layer architecture.
-    
+
     This adapter ensures that:
     1. Business logic is separated from infrastructure concerns
     2. Dependencies are properly injected
@@ -33,7 +33,7 @@ class ErrorHandlingServiceAdapter(BaseService, ErrorHandlingServicePort):
     ) -> None:
         super().__init__(name="ErrorHandlingServiceAdapter", config=config)
         self._error_handling_service = error_handling_service
-        
+
         if not error_handling_service:
             raise ValueError("ErrorHandlingService must be injected via DI")
 
@@ -46,7 +46,7 @@ class ErrorHandlingServiceAdapter(BaseService, ErrorHandlingServicePort):
     ) -> dict[str, Any]:
         """
         Process an error through the service layer.
-        
+
         This method provides a clean interface for error processing while
         ensuring proper service layer architecture.
         """
@@ -58,7 +58,7 @@ class ErrorHandlingServiceAdapter(BaseService, ErrorHandlingServicePort):
                 raise ServiceError("Component parameter is required")
             if not operation:
                 raise ServiceError("Operation parameter is required")
-            
+
             # Delegate to underlying service with proper error handling
             return await self._error_handling_service.handle_error(
                 error=error,
@@ -66,7 +66,7 @@ class ErrorHandlingServiceAdapter(BaseService, ErrorHandlingServicePort):
                 operation=operation,
                 context=context,
             )
-            
+
         except Exception as e:
             self.logger.error(f"Failed to process error: {e}")
             raise ServiceError(f"Error processing failed: {e}") from e
@@ -95,9 +95,7 @@ class ErrorHandlingServiceAdapter(BaseService, ErrorHandlingServicePort):
         """Handle critical error through global handler."""
         try:
             return await self._error_handling_service.handle_global_error(
-                error=error,
-                context=context,
-                severity="critical"
+                error=error, context=context, severity="critical"
             )
         except Exception as e:
             self.logger.error(f"Failed to handle critical error: {e}")
@@ -127,11 +125,11 @@ def create_error_handling_service_adapter(
 ) -> ErrorHandlingServiceAdapter:
     """
     Factory function for creating ErrorHandlingServiceAdapter.
-    
+
     Args:
         config: Application configuration
         error_handling_service: Injected error handling service
-        
+
     Returns:
         Configured service adapter
     """

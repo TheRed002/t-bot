@@ -16,13 +16,13 @@ from typing import Any
 
 from src.core.logging import get_logger
 
-# Configuration constants for rate limits and intervals
-DEFAULT_MAINTENANCE_INTERVAL_SECONDS = 300  # 5 minutes background maintenance
-DEFAULT_CLEANUP_TIMEOUT_SECONDS = 5.0  # Seconds to wait for cleanup
-SECURITY_ALERT_RATE_LIMIT = 10  # Max security alerts per hour
-TRADING_ERROR_RATE_LIMIT = 20  # Max trading error alerts per hour
-DATABASE_ERROR_RATE_LIMIT = 30  # Max database error alerts per hour
-NETWORK_ERROR_RATE_LIMIT = 100  # Max network error alerts per hour
+# Production configuration constants
+DEFAULT_MAINTENANCE_INTERVAL_SECONDS = 300
+DEFAULT_CLEANUP_TIMEOUT_SECONDS = 5.0
+SECURITY_ALERT_RATE_LIMIT = 10
+TRADING_ERROR_RATE_LIMIT = 20
+DATABASE_ERROR_RATE_LIMIT = 30
+NETWORK_ERROR_RATE_LIMIT = 100
 from src.error_handling.secure_context_manager import (
     InformationLevel,
     SecureErrorReport,
@@ -175,8 +175,7 @@ class SecureErrorReporter:
             ReportingRule(
                 name="database_errors",
                 condition=(
-                    "error_category == 'database' "
-                    "and alert_severity in ['error', 'critical']"
+                    "error_category == 'database' and alert_severity in ['error', 'critical']"
                 ),
                 channels=[ReportingChannel.LOG, ReportingChannel.DATABASE, ReportingChannel.ALERT],
                 min_user_role=UserRole.DEVELOPER,

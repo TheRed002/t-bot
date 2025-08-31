@@ -10,6 +10,7 @@ and other sensitive security information while maintaining proper error handling
 
 import hashlib
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 from src.core.logging import get_logger
@@ -55,9 +56,9 @@ class AuthenticationErrorHandler(ErrorHandlerBase):
         self._suspicious_patterns: dict[str, dict] = {}  # Pattern tracking
 
         # Progressive delay settings
-        self.base_delay_seconds = 1.0
-        self.max_delay_seconds = 300.0  # 5 minutes
-        self.delay_multiplier = 2.0
+        self.base_delay_seconds = Decimal("1.0")
+        self.max_delay_seconds = Decimal("300.0")
+        self.delay_multiplier = Decimal("2.0")
 
         # Blocking settings
         self.max_failed_attempts = 5

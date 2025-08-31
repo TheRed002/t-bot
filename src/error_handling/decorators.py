@@ -60,29 +60,27 @@ from src.utils.error_categorization import (
     is_sensitive_key,
 )
 
-# Import existing decorators to avoid duplication
-
 logger = get_logger(__name__)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
-# Configuration Constants
+# Configuration Constants - Production Values
 DEFAULT_CACHE_SIZE = 1000
-DEFAULT_CACHE_TTL_SECONDS = 3600  # 1 hour
+DEFAULT_CACHE_TTL_SECONDS = 3600
 DEFAULT_CACHE_MEMORY_LIMIT_MB = 100
-DEFAULT_EVICTION_PERCENTAGE = 0.3  # 30%
+DEFAULT_EVICTION_PERCENTAGE = 0.3
 DEFAULT_CLEANUP_INTERVAL_MINUTES = 30
 DEFAULT_HEALTH_CHECK_INTERVAL_SECONDS = 30
 DEFAULT_MAX_OPERATION_TIMES = 1000
 DEFAULT_TASK_TIMEOUT_SECONDS = 30
-DEFAULT_FALLBACK_CACHE_TTL_SECONDS = 1800  # 30 min
-DEFAULT_RESULT_CACHE_TTL_SECONDS = 300  # 5 min
+DEFAULT_FALLBACK_CACHE_TTL_SECONDS = 1800
+DEFAULT_RESULT_CACHE_TTL_SECONDS = 300
 
 # Memory usage thresholds
 HIGH_MEMORY_WARNING_THRESHOLD_MB = 50
 MEMORY_CLEANUP_SLEEP_SECONDS = 30
 PERIODIC_CLEANUP_SLEEP_SECONDS = 1
-PERIODIC_CLEANUP_ITERATIONS = 300  # 5 minutes
+PERIODIC_CLEANUP_ITERATIONS = 300
 
 
 class LRUCache:
@@ -719,8 +717,9 @@ def calculate_retry_delay(attempt: int, config: RetryConfig) -> Decimal:
     # Apply jitter to avoid thundering herd
     if config.jitter:
         jitter_factor = Decimal(str(random.uniform(0.1, 0.9)))
-        jitter = jitter_factor * delay
-        delay = delay * Decimal("0.5") + jitter
+        delay_decimal = Decimal(str(delay))
+        jitter = jitter_factor * delay_decimal
+        delay = float(delay_decimal * Decimal("0.5") + jitter)
 
     return delay
 
@@ -778,6 +777,7 @@ class UniversalErrorHandler:
         self.circuit_breaker_config = circuit_breaker_config or CircuitBreakerConfig()
         self.fallback_config = fallback_config or FallbackConfig()
         self.enable_metrics = enable_metrics
+        # Production logging configuration
         self.enable_logging = enable_logging
 
         # Handler identification
@@ -1486,8 +1486,6 @@ class UniversalErrorHandler:
         if not self.enable_logging:
             return
 
-        # Note: sensitivity level could be used for future sanitization features
-
         # Prepare log data with enhanced information and error propagation metadata
         log_data = {
             "handler_id": self.handler_id,
@@ -1509,9 +1507,18 @@ class UniversalErrorHandler:
                 "propagation_method": "structured_logging",
                 "data_format": "error_context_v1",
                 "processing_stage": "error_logging",
-                "boundary_crossed": True
-            }
+                "boundary_crossed": True,
+            },
         }
+
+        # Apply consistent data transformation for production logging
+        try:
+            from src.utils.messaging_patterns import MessagingCoordinator
+            coordinator = MessagingCoordinator("ErrorDecoratorLogging")
+            log_data = coordinator._apply_data_transformation(log_data)
+        except ImportError:
+            # Graceful fallback if messaging patterns not available
+            pass
 
         # Add metadata if available, with sanitization
         if context.metadata:

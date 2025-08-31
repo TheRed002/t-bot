@@ -20,8 +20,7 @@ from src.core.exceptions import ValidationError
 from src.core.logging import get_logger
 from src.utils.decimal_utils import to_decimal
 
-# MANDATORY: Import from P-001 core framework
-# MANDATORY: Import from P-007A utils framework
+# Core framework imports
 from src.utils.decorators import retry, time_execution
 
 
@@ -157,7 +156,7 @@ class StateMonitor:
         self.reconciliation_config = self.state_monitoring_config
         self.auto_reconcile = self.reconciliation_config.get("auto_reconciliation_enabled", True)
         self.max_discrepancy = self.reconciliation_config.get("max_discrepancy_threshold", 0.01)
-        self.force_sync_threshold = 0.05  # Default threshold
+        self.force_sync_threshold = Decimal("0.05")
 
         # State tracking
         self.last_validation_results: dict[str, StateValidationResult] = {}
@@ -213,7 +212,7 @@ class StateMonitor:
                 value=value,
                 error=str(e),
             )
-            raise ValidationError(f"Invalid {field_name} for decimal conversion: {value}")
+            raise ValidationError(f"Invalid {field_name} for decimal conversion: {value}") from e
 
     @time_execution
     @retry(max_attempts=2)

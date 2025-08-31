@@ -11,7 +11,7 @@ from typing import Any, Protocol, runtime_checkable
 from src.core.base.interfaces import HealthCheckResult
 
 
-@runtime_checkable 
+@runtime_checkable
 class ErrorHandlingServiceInterface(Protocol):
     """Protocol for error handling service layer."""
 
@@ -159,10 +159,10 @@ class ErrorHandlingRepositoryPort(ABC):
 
 
 __all__ = [
-    "ErrorHandlingServiceInterface",
-    "ErrorPatternAnalyticsInterface", 
     "ErrorHandlerInterface",
-    "GlobalErrorHandlerInterface",
-    "ErrorHandlingServicePort",
     "ErrorHandlingRepositoryPort",
+    "ErrorHandlingServiceInterface",
+    "ErrorHandlingServicePort",
+    "ErrorPatternAnalyticsInterface",
+    "GlobalErrorHandlerInterface",
 ]
