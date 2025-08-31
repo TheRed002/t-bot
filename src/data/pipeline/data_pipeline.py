@@ -25,14 +25,15 @@ import uuid
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from enum import Enum
 from typing import Any
 
 from src.core.base.component import BaseComponent
 from src.core.config import Config
 from src.core.exceptions import DataError, DataValidationError
+from src.core.logging import get_logger
 from src.core.types import MarketData
+from src.data.interfaces import DataServiceInterface, DataStorageInterface
 
 # Import from P-002A error handling
 from src.error_handling import ErrorHandler, with_circuit_breaker
@@ -44,6 +45,8 @@ from src.monitoring import MetricsCollector, Status, StatusCode, get_tracer
 # Import from P-007A utilities
 from src.utils.decorators import time_execution
 from src.utils.validators import validate_decimal_precision, validate_market_data
+
+logger = get_logger(__name__)
 
 
 class PipelineStage(Enum):
@@ -124,35 +127,29 @@ class DataTransformation:
 
     @staticmethod
     async def normalize_prices(data: MarketData) -> MarketData:
-        """Normalize price data for consistency."""
+        """Normalize price data for consistency with database precision DECIMAL(20,8)."""
         try:
-            # Use standardized decimal precision from utils
-            from src.utils.decimal_utils import normalize_decimal_precision
+            from decimal import Decimal
 
-            # Ensure price precision for financial calculations
-            if data.price:
-                data.price = normalize_decimal_precision(data.price)
+            # Use consistent 8 decimal place precision matching database schema
+            precision_quantizer = Decimal("0.00000001")  # 8 decimal places
 
-            if data.high_price:
-                data.high_price = normalize_decimal_precision(data.high_price)
+            # Create new MarketData with normalized precision
+            normalized_data = MarketData(
+                symbol=data.symbol,
+                exchange=data.exchange,
+                timestamp=data.timestamp,
+                open=data.open.quantize(precision_quantizer) if data.open else None,
+                high=data.high.quantize(precision_quantizer) if data.high else None,
+                low=data.low.quantize(precision_quantizer) if data.low else None,
+                close=data.close.quantize(precision_quantizer) if data.close else None,
+                bid_price=data.bid_price.quantize(precision_quantizer) if data.bid_price else None,
+                ask_price=data.ask_price.quantize(precision_quantizer) if data.ask_price else None,
+                volume=data.volume.quantize(precision_quantizer) if data.volume else None,
+                metadata=getattr(data, "metadata", {}),
+            )
 
-            if data.low_price:
-                data.low_price = normalize_decimal_precision(data.low_price)
-
-            if data.open_price:
-                data.open_price = normalize_decimal_precision(data.open_price)
-
-            if data.bid:
-                data.bid = normalize_decimal_precision(data.bid)
-
-            if data.ask:
-                data.ask = normalize_decimal_precision(data.ask)
-
-            # Normalize volume
-            if data.volume:
-                data.volume = normalize_decimal_precision(data.volume)
-
-            return data
+            return normalized_data
 
         except Exception as e:
             from src.core.exceptions import DataProcessingError
@@ -193,7 +190,8 @@ class DataTransformation:
 
             return True
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Market data validation failed: {e}")
             return False
 
     @staticmethod
@@ -225,7 +223,8 @@ class DataTransformation:
 
             return outliers
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Outlier detection failed for {symbol}: {e}")
             return [False] * len(data)
 
 
@@ -358,14 +357,16 @@ class EnhancedDataPipeline(BaseComponent):
     def __init__(
         self,
         config: Config,
-        data_service=None,
+        data_service: "DataServiceInterface | None" = None,
+        data_storage_interface: DataStorageInterface | None = None,
         feature_store=None,
         metrics_collector: MetricsCollector | None = None,
     ):
         """Initialize the Enhanced Data Pipeline."""
         super().__init__()
         self.config = config
-        self.data_service = data_service
+        self.data_service = data_service  # Preferred - use service layer
+        self.data_storage = data_storage_interface  # Fallback - for legacy compatibility
         self.feature_store = feature_store
         self.error_handler = ErrorHandler(config)
 
@@ -434,8 +435,9 @@ class EnhancedDataPipeline(BaseComponent):
             await self._start_workers()
 
             # Start monitoring tasks
-            asyncio.create_task(self._metrics_monitoring_loop())
-            asyncio.create_task(self._quality_monitoring_loop())
+            metrics_task = asyncio.create_task(self._metrics_monitoring_loop())
+            quality_task = asyncio.create_task(self._quality_monitoring_loop())
+            self._workers.extend([metrics_task, quality_task])
 
             self._initialized = True
             self.logger.info("Enhanced Data Pipeline initialized successfully")
@@ -719,7 +721,7 @@ class EnhancedDataPipeline(BaseComponent):
     async def _process_cleansing(self, record: PipelineRecord) -> None:
         """Process data cleansing stage."""
         # Remove or fix data anomalies
-        if record.data.price and float(record.data.price) <= 0:
+        if record.data.close and float(record.data.close) <= 0:
             raise DataValidationError("Invalid price data cannot be cleansed")
 
         # Handle missing data
@@ -748,47 +750,73 @@ class EnhancedDataPipeline(BaseComponent):
             )
 
     async def _process_storage(self, record: PipelineRecord) -> None:
-        """Process data storage stage with consistent interface patterns."""
-        if self.data_service:
-            try:
-                # Use consistent storage interface with streaming service
-                success = await self.data_service.store_market_data(
-                    record.data,
-                    exchange=getattr(record.data, "exchange", "unknown"),
-                    validate=False,  # Already validated
-                    source="pipeline",  # Consistent source labeling
+        """Process data storage stage through service layer."""
+        # Pipeline should use a data service, not storage directly
+        # Create a temporary data service if needed for proper service layer architecture
+        try:
+            # Validate record data at module boundary
+            validation_result = record.validation_result
+            if not validation_result or not validation_result.is_valid:
+                raise DataError(
+                    "Invalid data cannot be stored",
+                    error_code="PIPELINE_VALIDATION_001",
+                    data_type="market_data",
+                    context={"record_id": record.record_id},
                 )
 
-                if not success:
-                    # Use consistent error propagation pattern
-                    raise DataError(
-                        "Pipeline data storage failed",
-                        error_code="PIPELINE_STORAGE_001",
-                        data_type="market_data",
-                        context={
-                            "record_id": record.record_id,
-                            "symbol": getattr(record.data, "symbol", "unknown"),
-                            "stage": record.stage.value,
-                        },
-                    )
-            except Exception as e:
-                # Re-raise with consistent error context
-                if not isinstance(e, DataError):
-                    raise DataError(
-                        f"Storage operation failed for record {record.record_id}",
-                        error_code="PIPELINE_STORAGE_002",
-                        data_type="market_data",
-                        context={"record_id": record.record_id},
-                    ) from e
-                raise
-        else:
-            # Use consistent error for missing dependencies
-            raise DataError(
-                "DataService not available for storage",
-                error_code="PIPELINE_DEPENDENCY_001",
-                data_type="service_dependency",
-                context={"required_service": "DataService", "record_id": record.record_id},
+            # Use proper service layer - pipeline should not directly call storage
+            # Create a minimal data service instance for proper layering
+
+            # Use service layer architecture - prefer data service over storage
+            data_service = self.data_service
+            if not data_service and self.data_storage:
+                # Create a minimal data service for proper service layer architecture
+                from src.data.services.refactored_data_service import RefactoredDataService
+
+                data_service = RefactoredDataService(
+                    config=self.config, storage=self.data_storage, cache=None, validator=None
+                )
+                await data_service.initialize()
+            elif not data_service:
+                raise DataError(
+                    "No data service or storage available for pipeline",
+                    error_code="PIPELINE_DEPENDENCY_001",
+                    data_type="service_dependency",
+                    context={
+                        "required_service": "DataService or DataStorage",
+                        "record_id": record.record_id,
+                    },
+                )
+
+            # Use service layer to store data
+            success = await data_service.store_market_data(
+                data=[record.data],
+                exchange=getattr(record.data, "exchange", "unknown"),
+                validate=False,  # Already validated in pipeline
             )
+
+            if not success:
+                raise DataError(
+                    "Pipeline data storage failed through service layer",
+                    error_code="PIPELINE_STORAGE_001",
+                    data_type="market_data",
+                    context={
+                        "record_id": record.record_id,
+                        "symbol": getattr(record.data, "symbol", "unknown"),
+                        "stage": record.stage.value,
+                    },
+                )
+
+        except Exception as e:
+            # Re-raise with consistent error context
+            if not isinstance(e, DataError):
+                raise DataError(
+                    f"Storage operation failed for record {record.record_id}",
+                    error_code="PIPELINE_STORAGE_002",
+                    data_type="market_data",
+                    context={"record_id": record.record_id},
+                ) from e
+            raise
 
     async def _process_indexing(self, record: PipelineRecord) -> None:
         """Process data indexing stage."""
@@ -891,7 +919,7 @@ class EnhancedDataPipeline(BaseComponent):
             "components": {},
         }
 
-        # Check data service
+        # Check data service first, then storage
         if self.data_service:
             try:
                 data_health = await self.data_service.health_check()
@@ -899,8 +927,15 @@ class EnhancedDataPipeline(BaseComponent):
             except Exception as e:
                 health["components"]["data_service"] = f"unhealthy: {e}"
                 health["status"] = "degraded"
+        elif self.data_storage:
+            try:
+                data_health = await self.data_storage.health_check()
+                health["components"]["data_storage"] = data_health["status"]
+            except Exception as e:
+                health["components"]["data_storage"] = f"unhealthy: {e}"
+                health["status"] = "degraded"
         else:
-            health["components"]["data_service"] = "not_configured"
+            health["components"]["data_layer"] = "not_configured"
 
         # Check feature store
         if self.feature_store:
@@ -923,16 +958,27 @@ class EnhancedDataPipeline(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup pipeline resources."""
+        workers = []
+        queues = {}
         try:
             self.logger.info("Starting pipeline cleanup...")
 
+            # Collect resources for cleanup
+            workers = list(self._workers)
+            queues = dict(self._processing_queues)
+
             # Cancel all workers
-            for worker in self._workers:
+            for worker in workers:
                 worker.cancel()
 
-            # Wait for workers to finish
-            if self._workers:
-                await asyncio.gather(*self._workers, return_exceptions=True)
+            # Wait for workers to finish with timeout
+            if workers:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*workers, return_exceptions=True), timeout=30.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning("Timeout waiting for workers to finish")
 
             # Clear queues with proper error handling
             try:
@@ -945,7 +991,7 @@ class EnhancedDataPipeline(BaseComponent):
                 self.logger.warning(f"Error clearing ingestion queue: {e}")
 
             # Clear each processing queue independently
-            for queue_name, queue in self._processing_queues.items():
+            for queue_name, queue in queues.items():
                 try:
                     while not queue.empty():
                         try:
@@ -957,9 +1003,56 @@ class EnhancedDataPipeline(BaseComponent):
 
             # Clear active records
             self._active_records.clear()
+            self._workers.clear()
+            self._processing_queues.clear()
 
             self._initialized = False
             self.logger.info("Pipeline cleanup completed")
 
         except Exception as e:
             self.logger.error(f"Pipeline cleanup error: {e}")
+        finally:
+            # Force cleanup any remaining resources
+            try:
+                # Force cancel any remaining workers
+                for worker in workers:
+                    if not worker.done():
+                        worker.cancel()
+                        try:
+                            await worker
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            pass
+
+                # Force clear queues
+                try:
+                    while not self._ingestion_queue.empty():
+                        try:
+                            self._ingestion_queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        except Exception:
+                            break
+                except Exception:
+                    pass
+
+                for queue_name, queue in queues.items():
+                    try:
+                        while not queue.empty():
+                            try:
+                                queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                            except Exception:
+                                break
+                    except Exception:
+                        pass
+
+                # Clear all resources
+                self._active_records.clear()
+                self._workers.clear()
+                self._processing_queues.clear()
+                self._initialized = False
+            except Exception as e:
+                self.logger.warning(f"Error in final pipeline cleanup: {e}")

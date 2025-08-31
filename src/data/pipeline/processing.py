@@ -20,8 +20,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+from src.core.base.component import BaseComponent
 from src.core.config import Config
-from src.core.exceptions import DataError
+from src.core.exceptions import DataError, DataValidationError
 
 # Import from P-001 core components
 from src.core.types import MarketData, ProcessingStep
@@ -60,7 +61,7 @@ class ProcessingResult:
     error_message: str | None = None
 
 
-class DataProcessor:
+class DataProcessor(BaseComponent):
     """
     Comprehensive data processing pipeline for multi-source data transformation.
 
@@ -83,10 +84,10 @@ class DataProcessor:
         if hasattr(processing_config, "get"):
             self.processing_config = ProcessingConfig(
                 steps=[
-                    ProcessingStep.NORMALIZE,
-                    ProcessingStep.ENRICH,
-                    ProcessingStep.AGGREGATE,
-                    ProcessingStep.VALIDATE,
+                    ProcessingStep.CLEANING,
+                    ProcessingStep.ENRICHMENT,
+                    ProcessingStep.AGGREGATION,
+                    ProcessingStep.VALIDATION,
                 ],
                 window_size=processing_config.get("window_size", 100),
                 aggregation_interval=processing_config.get("aggregation_interval", 60),
@@ -97,10 +98,10 @@ class DataProcessor:
         else:
             self.processing_config = ProcessingConfig(
                 steps=[
-                    ProcessingStep.NORMALIZE,
-                    ProcessingStep.ENRICH,
-                    ProcessingStep.AGGREGATE,
-                    ProcessingStep.VALIDATE,
+                    ProcessingStep.CLEANING,
+                    ProcessingStep.ENRICHMENT,
+                    ProcessingStep.AGGREGATION,
+                    ProcessingStep.VALIDATION,
                 ],
                 window_size=100,
                 aggregation_interval=60,
@@ -124,12 +125,12 @@ class DataProcessor:
 
         # Processing functions registry
         self.processors = {
-            ProcessingStep.NORMALIZE: self._normalize_data,
-            ProcessingStep.ENRICH: self._enrich_data,
-            ProcessingStep.AGGREGATE: self._aggregate_data,
-            ProcessingStep.TRANSFORM: self._transform_data,
-            ProcessingStep.VALIDATE: self._validate_data,
-            ProcessingStep.FILTER: self._filter_data,
+            ProcessingStep.CLEANING: self._normalize_data,
+            ProcessingStep.ENRICHMENT: self._enrich_data,
+            ProcessingStep.AGGREGATION: self._aggregate_data,
+            ProcessingStep.TRANSFORMATION: self._transform_data,
+            ProcessingStep.VALIDATION: self._validate_data,
+            ProcessingStep.INGESTION: self._filter_data,
         }
 
         self.logger.info("DataProcessor initialized")
@@ -291,16 +292,22 @@ class DataProcessor:
             if data_type == "market_data" and isinstance(data, MarketData):
                 # Normalize market data
                 normalized_data = MarketData(
-                    symbol=data.symbol.upper() if data.symbol else None,
-                    price=self._normalize_price(data.price) if data.price else None,
-                    volume=self._normalize_volume(data.volume) if data.volume else None,
-                    timestamp=self._normalize_timestamp(data.timestamp) if data.timestamp else None,
-                    exchange=data.exchange.lower() if data.exchange else None,
-                    bid=self._normalize_price(data.bid) if data.bid else None,
-                    ask=self._normalize_price(data.ask) if data.ask else None,
-                    open_price=self._normalize_price(data.open_price) if data.open_price else None,
-                    high_price=self._normalize_price(data.high_price) if data.high_price else None,
-                    low_price=self._normalize_price(data.low_price) if data.low_price else None,
+                    symbol=data.symbol.upper() if data.symbol else "",
+                    close=self._normalize_price(data.price) if data.price else Decimal("0"),
+                    volume=self._normalize_volume(data.volume) if data.volume else Decimal("0"),
+                    timestamp=self._normalize_timestamp(data.timestamp)
+                    if data.timestamp
+                    else datetime.now(timezone.utc),
+                    exchange=data.exchange.lower() if data.exchange else "",
+                    bid_price=self._normalize_price(data.bid) if data.bid else None,
+                    ask_price=self._normalize_price(data.ask) if data.ask else None,
+                    open=self._normalize_price(data.open_price)
+                    if data.open_price
+                    else Decimal("0"),
+                    high=self._normalize_price(data.high_price)
+                    if data.high_price
+                    else Decimal("0"),
+                    low=self._normalize_price(data.low_price) if data.low_price else Decimal("0"),
                 )
                 return normalized_data
             else:
@@ -312,20 +319,20 @@ class DataProcessor:
             return data
 
     def _normalize_price(self, price: Decimal) -> Decimal:
-        """Normalize price values."""
+        """Normalize price values with consistent precision matching database schema."""
         if not price:
             return price
 
-        # Ensure price precision (8 decimal places for crypto)
-        return Decimal(str(float(price))).quantize(Decimal("0.00000001"))
+        # Use consistent 8 decimal places precision matching DECIMAL(20,8) in database
+        return Decimal(str(price)).quantize(Decimal("0.00000001"))
 
     def _normalize_volume(self, volume: Decimal) -> Decimal:
-        """Normalize volume values."""
+        """Normalize volume values with consistent precision matching database schema."""
         if not volume:
             return volume
 
-        # Ensure volume precision (8 decimal places)
-        return Decimal(str(float(volume))).quantize(Decimal("0.00000001"))
+        # Use consistent 8 decimal places precision matching DECIMAL(20,8) in database
+        return Decimal(str(volume)).quantize(Decimal("0.00000001"))
 
     def _normalize_timestamp(self, timestamp: datetime) -> datetime:
         """Normalize timestamp to UTC timezone."""
@@ -361,8 +368,8 @@ class DataProcessor:
 
                     enriched_data.metadata.update(
                         {
-                            "spread": float(spread),
-                            "spread_percentage": float(spread_percentage),
+                            "spread": spread,
+                            "spread_percentage": spread_percentage,
                             "enriched_at": datetime.now(timezone.utc).isoformat(),
                         }
                     )
@@ -374,9 +381,7 @@ class DataProcessor:
                     if window:
                         last_price = window[-1].price if hasattr(window[-1], "price") else None
                         if last_price and data.price:
-                            price_change = calculate_percentage_change(
-                                float(last_price), float(data.price)
-                            )
+                            price_change = calculate_percentage_change(last_price, data.price)
 
                             if not hasattr(enriched_data, "metadata"):
                                 enriched_data.metadata = {}
@@ -433,8 +438,8 @@ class DataProcessor:
     def _calculate_aggregations(self, window: list[MarketData]) -> dict[str, float]:
         """Calculate aggregations for a data window."""
         try:
-            prices = [float(item.price) for item in window if item.price]
-            volumes = [float(item.volume) for item in window if item.volume]
+            prices = [Decimal(str(item.price)) for item in window if item.price]
+            volumes = [Decimal(str(item.volume)) for item in window if item.volume]
 
             aggregations = {}
 
@@ -478,49 +483,66 @@ class DataProcessor:
             return data
 
     async def _validate_data(self, data: Any, data_type: str) -> Any:
-        """Validate processed data."""
+        """Validate processed data with consistent error handling."""
         try:
             if not self.processing_config.validation_enabled:
                 return data
 
             if data_type == "market_data" and isinstance(data, MarketData):
-                # Validate market data
-                is_valid = True
+                # Module boundary validation with consistent error propagation
                 validation_errors = []
 
-                # Price validation
+                # Price validation with consistent error handling
                 if data.price:
                     try:
                         ValidationFramework.validate_price(data.price)
-                    except ValueError as e:
-                        is_valid = False
+                    except Exception as e:
                         validation_errors.append(f"Invalid price: {e!s}")
 
-                # Volume validation
+                # Volume validation with consistent error handling
                 if data.volume:
                     try:
                         ValidationFramework.validate_quantity(data.volume)
-                    except ValueError as e:
-                        is_valid = False
+                    except Exception as e:
                         validation_errors.append(f"Invalid volume: {e!s}")
 
-                # Symbol validation
+                # Symbol validation with consistent patterns
                 if not data.symbol or len(data.symbol) < 3:
-                    is_valid = False
-                    validation_errors.append("Invalid symbol")
+                    validation_errors.append("Invalid symbol format")
 
-                if not is_valid:
-                    self.logger.warning(f"Data validation failed: {validation_errors}")
-                    # Could raise exception or mark data as invalid
-                    if not hasattr(data, "metadata"):
-                        data.metadata = {}
-                    data.metadata["validation_errors"] = validation_errors
+                # Timestamp validation at module boundary
+                if not data.timestamp:
+                    validation_errors.append("Missing timestamp")
+                elif data.timestamp.tzinfo is None:
+                    validation_errors.append("Timestamp must have timezone information")
+
+                # Raise consistent validation error if validation fails
+                if validation_errors:
+                    raise DataValidationError(
+                        f"Market data validation failed: {'; '.join(validation_errors)}",
+                        error_code="PROCESSING_VALIDATION_001",
+                        validation_rule="market_data_processing_validation",
+                        invalid_fields=validation_errors,
+                        data_type="market_data",
+                        context={"symbol": getattr(data, "symbol", "unknown")},
+                    )
 
             return data
 
         except Exception as e:
+            # Re-raise validation errors as-is
+            if isinstance(e, DataValidationError):
+                raise
+
+            # Wrap other errors in consistent format
             self.logger.error(f"Data validation failed: {e!s}")
-            return data
+            raise DataValidationError(
+                "Validation process failed",
+                error_code="PROCESSING_VALIDATION_002",
+                validation_rule="validation_system_error",
+                data_type=data_type,
+                context={"error": str(e)},
+            ) from e
 
     async def _filter_data(self, data: Any, data_type: str) -> Any:
         """Filter data based on criteria."""

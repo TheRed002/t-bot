@@ -27,6 +27,7 @@ from enum import Enum
 from typing import Any
 
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import HealthCheckResult, HealthStatus
 from src.core.config import Config
 
 # Import from P-002A error handling
@@ -401,11 +402,11 @@ class DataMonitoringService(BaseComponent):
     - Integration with external monitoring systems
     """
 
-    def __init__(self, config: Config, data_service_manager=None):
+    def __init__(self, config: Config, metrics_provider=None):
         """Initialize the Data Monitoring Service."""
         super().__init__()
         self.config = config
-        self.data_service_manager = data_service_manager
+        self.metrics_provider = metrics_provider
         self.error_handler = ErrorHandler(config)
 
         # Configuration
@@ -423,6 +424,9 @@ class DataMonitoringService(BaseComponent):
         # Metrics storage
         self.metrics_history: list[dict[str, Any]] = []
         self.max_history_size = 10000
+
+        # Background task management
+        self._background_tasks: list[asyncio.Task] = []
 
         self._initialized = False
         self._shutdown_requested = False
@@ -450,9 +454,11 @@ class DataMonitoringService(BaseComponent):
             self.logger.info("Initializing Data Monitoring Service...")
 
             # Start monitoring loops
-            asyncio.create_task(self._monitoring_loop())
-            asyncio.create_task(self._alert_cleanup_loop())
-            asyncio.create_task(self._metrics_cleanup_loop())
+            monitoring_task = asyncio.create_task(self._monitoring_loop())
+            alert_cleanup_task = asyncio.create_task(self._alert_cleanup_loop())
+            metrics_cleanup_task = asyncio.create_task(self._metrics_cleanup_loop())
+            
+            self._background_tasks.extend([monitoring_task, alert_cleanup_task, metrics_cleanup_task])
 
             self._initialized = True
             self.logger.info("Data Monitoring Service initialized successfully")
@@ -467,10 +473,10 @@ class DataMonitoringService(BaseComponent):
             try:
                 await asyncio.sleep(self.monitoring_config["check_interval"])
 
-                # Get metrics from DataService Manager
-                if self.data_service_manager:
+                # Get metrics from metrics provider
+                if self.metrics_provider:
                     try:
-                        metrics = self.data_service_manager.get_comprehensive_metrics()
+                        metrics = await self._get_metrics_from_provider()
 
                         # Store metrics
                         self.metrics_history.append(
@@ -488,12 +494,28 @@ class DataMonitoringService(BaseComponent):
                         await self._run_monitoring_checks(metrics)
 
                     except Exception as e:
-                        self.logger.error(f"Failed to get metrics from DataService Manager: {e}")
+                        self.logger.error(f"Failed to get metrics from metrics provider: {e}")
 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 self.logger.error(f"Monitoring loop error: {e}")
+
+    async def _get_metrics_from_provider(self) -> dict[str, Any]:
+        """Get metrics from the configured metrics provider."""
+        if hasattr(self.metrics_provider, "get_comprehensive_metrics"):
+            return self.metrics_provider.get_comprehensive_metrics()
+        elif hasattr(self.metrics_provider, "get_metrics"):
+            return await self.metrics_provider.get_metrics()
+        else:
+            # Fallback to calling it directly if it's callable
+            if callable(self.metrics_provider):
+                result = self.metrics_provider()
+                if hasattr(result, "__await__"):
+                    return await result
+                return result
+            else:
+                return {}
 
     async def _run_monitoring_checks(self, metrics: dict[str, Any]) -> None:
         """Run all monitoring checks and handle alerts."""
@@ -670,29 +692,47 @@ class DataMonitoringService(BaseComponent):
 
         return summary
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> HealthCheckResult:
         """Perform monitoring service health check."""
-        health = {
-            "status": "healthy",
+        critical_alerts = len(
+            [a for a in self.active_alerts.values() if a.severity == AlertSeverity.CRITICAL]
+        )
+
+        details = {
             "initialized": self._initialized,
             "active_alerts": len(self.active_alerts),
-            "critical_alerts": len(
-                [a for a in self.active_alerts.values() if a.severity == AlertSeverity.CRITICAL]
-            ),
+            "critical_alerts": critical_alerts,
             "metrics_history_size": len(self.metrics_history),
         }
 
         # Check if there are critical alerts
-        if health["critical_alerts"] > 0:
-            health["status"] = "degraded"
+        if critical_alerts > 0:
+            status = HealthStatus.DEGRADED
+            message = f"Monitoring service degraded: {critical_alerts} critical alerts"
+        else:
+            status = HealthStatus.HEALTHY
+            message = "Monitoring service healthy"
 
-        return health
+        return HealthCheckResult(status=status, details=details, message=message)
 
     async def cleanup(self) -> None:
         """Cleanup monitoring service resources."""
         try:
             self.logger.info("Starting monitoring service cleanup...")
             self._shutdown_requested = True
+
+            # Cancel background tasks
+            if self._background_tasks:
+                for task in self._background_tasks:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        self.logger.warning(f"Error cancelling monitoring task: {e}")
+
+                self._background_tasks.clear()
 
             # Clear active alerts
             self.active_alerts.clear()

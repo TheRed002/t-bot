@@ -17,13 +17,14 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, getcontext
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from src.core.base.component import BaseComponent
+from src.core.base.interfaces import HealthCheckResult, HealthStatus
 from src.core.config import Config
 from src.core.types import MarketData
 
@@ -77,7 +78,7 @@ class FeatureValue:
 
     feature_id: str
     symbol: str
-    value: float | dict[str, float] | None
+    value: Decimal | dict[str, Decimal] | None
     timestamp: datetime
     status: CalculationStatus
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -213,6 +214,9 @@ class FeatureStore(BaseComponent):
             "duplicate_calculations_avoided": 0,
         }
 
+        # Background task management
+        self._background_tasks: list[asyncio.Task] = []
+
         self._initialized = False
 
     def _setup_configuration(self) -> None:
@@ -252,7 +256,8 @@ class FeatureStore(BaseComponent):
             await self._initialize_alternative_features()
 
             # Start cache cleanup task
-            asyncio.create_task(self._cache_cleanup_loop())
+            cleanup_task = asyncio.create_task(self._cache_cleanup_loop())
+            self._background_tasks.append(cleanup_task)
 
             self._initialized = True
             self.logger.info("FeatureStore initialized successfully")
@@ -589,14 +594,15 @@ class FeatureStore(BaseComponent):
                 market_data.append(
                     MarketData(
                         symbol=record.symbol,
-                        price=Decimal(str(record.price)) if record.price else None,
-                        volume=Decimal(str(record.volume)) if record.volume else None,
+                        close=Decimal(str(record.price)) if record.price else Decimal("0"),
+                        volume=Decimal(str(record.volume)) if record.volume else Decimal("0"),
                         timestamp=record.timestamp,
-                        high_price=Decimal(str(record.high_price)) if record.high_price else None,
-                        low_price=Decimal(str(record.low_price)) if record.low_price else None,
-                        open_price=Decimal(str(record.open_price)) if record.open_price else None,
-                        bid=Decimal(str(record.bid)) if record.bid else None,
-                        ask=Decimal(str(record.ask)) if record.ask else None,
+                        high=Decimal(str(record.high_price)) if record.high_price else Decimal("0"),
+                        low=Decimal(str(record.low_price)) if record.low_price else Decimal("0"),
+                        open=Decimal(str(record.open_price)) if record.open_price else Decimal("0"),
+                        bid_price=Decimal(str(record.bid)) if record.bid else None,
+                        ask_price=Decimal(str(record.ask)) if record.ask else None,
+                        exchange=getattr(record, "exchange", "unknown"),
                     )
                 )
 
@@ -608,7 +614,13 @@ class FeatureStore(BaseComponent):
 
     def _build_cache_key(self, symbol: str, feature_name: str, parameters: dict[str, Any]) -> str:
         """Build cache key for feature value."""
-        param_hash = hash(json.dumps(parameters, sort_keys=True, default=str))
+        try:
+            param_hash = hash(json.dumps(parameters, sort_keys=True, default=str))
+        except (TypeError, ValueError) as e:
+            self.logger.warning(
+                f"Failed to serialize parameters for cache key, using fallback: {e}"
+            )
+            param_hash = hash(str(sorted(parameters.items())))
         return f"{symbol}:{feature_name}:{param_hash}"
 
     async def _cache_results(self, results: list[FeatureValue]) -> None:
@@ -661,42 +673,47 @@ class FeatureStore(BaseComponent):
     # Built-in feature calculators
     async def _calculate_sma(
         self, market_data: list[MarketData], period: int = 20, **kwargs
-    ) -> float | None:
+    ) -> Decimal | None:
         """Calculate Simple Moving Average."""
         try:
-            prices = [float(data.price) for data in market_data[-period:] if data.price]
+            prices = [Decimal(str(data.price)) for data in market_data[-period:] if data.price]
             if len(prices) < period:
                 return None
-            return sum(prices) / len(prices)
-        except Exception:
+            getcontext().prec = 16
+            result = sum(prices) / Decimal(str(len(prices)))
+            return result.quantize(Decimal("0.00000001"))
+        except Exception as e:
+            self.logger.error(f"Simple moving average calculation failed: {e}")
             return None
 
     async def _calculate_ema(
         self, market_data: list[MarketData], period: int = 20, **kwargs
-    ) -> float | None:
+    ) -> Decimal | None:
         """Calculate Exponential Moving Average."""
         try:
-            prices = [float(data.price) for data in market_data if data.price]
+            prices = [Decimal(str(data.price)) for data in market_data if data.price]
             if len(prices) < period:
                 return None
 
             # Calculate EMA
-            multiplier = 2 / (period + 1)
+            getcontext().prec = 16
+            multiplier = Decimal("2") / (Decimal(str(period)) + Decimal("1"))
             ema = prices[0]
 
             for price in prices[1:]:
-                ema = (price * multiplier) + (ema * (1 - multiplier))
+                ema = (price * multiplier) + (ema * (Decimal("1") - multiplier))
 
-            return ema
-        except Exception:
+            return ema.quantize(Decimal("0.00000001"))
+        except Exception as e:
+            self.logger.error(f"Exponential moving average calculation failed: {e}")
             return None
 
     async def _calculate_rsi(
         self, market_data: list[MarketData], period: int = 14, **kwargs
-    ) -> float | None:
+    ) -> Decimal | None:
         """Calculate Relative Strength Index."""
         try:
-            prices = [float(data.price) for data in market_data if data.price]
+            prices = [Decimal(str(data.price)) for data in market_data if data.price]
             if len(prices) < period + 1:
                 return None
 
@@ -708,23 +725,25 @@ class FeatureStore(BaseComponent):
                 change = prices[i] - prices[i - 1]
                 if change >= 0:
                     gains.append(change)
-                    losses.append(0)
+                    losses.append(Decimal("0"))
                 else:
-                    gains.append(0)
+                    gains.append(Decimal("0"))
                     losses.append(abs(change))
 
             # Calculate average gains and losses
-            avg_gain = sum(gains[-period:]) / period
-            avg_loss = sum(losses[-period:]) / period
+            getcontext().prec = 16
+            avg_gain = sum(gains[-period:]) / Decimal(str(period))
+            avg_loss = sum(losses[-period:]) / Decimal(str(period))
 
             if avg_loss == 0:
-                return 100.0
+                return Decimal("100.0")
 
             rs = avg_gain / avg_loss
-            rsi = 100 - (100 / (1 + rs))
+            rsi = Decimal("100") - (Decimal("100") / (Decimal("1") + rs))
 
-            return rsi
-        except Exception:
+            return rsi.quantize(Decimal("0.0001"))
+        except Exception as e:
+            self.logger.error(f"Relative strength index calculation failed: {e}")
             return None
 
     async def _calculate_macd(
@@ -734,14 +753,15 @@ class FeatureStore(BaseComponent):
         slow: int = 26,
         signal: int = 9,
         **kwargs,
-    ) -> dict[str, float] | None:
+    ) -> dict[str, Decimal] | None:
         """Calculate MACD."""
         try:
-            prices = [float(data.price) for data in market_data if data.price]
+            prices = [Decimal(str(data.price)) for data in market_data if data.price]
             if len(prices) < slow + signal:
                 return None
 
-            # Calculate EMAs for all prices
+            # Calculate EMAs for all prices using Decimal precision
+            getcontext().prec = 16
             fast_ema_values = []
             slow_ema_values = []
 
@@ -752,9 +772,9 @@ class FeatureStore(BaseComponent):
                 else:
                     # Calculate fast EMA up to this point
                     ema = prices[0]
-                    multiplier = 2 / (fast + 1)
+                    multiplier = Decimal("2") / (Decimal(str(fast)) + Decimal("1"))
                     for j in range(1, i + 1):
-                        ema = (prices[j] * multiplier) + (ema * (1 - multiplier))
+                        ema = (prices[j] * multiplier) + (ema * (Decimal("1") - multiplier))
                     fast_ema_values.append(ema)
 
                 if i < slow - 1:
@@ -762,9 +782,9 @@ class FeatureStore(BaseComponent):
                 else:
                     # Calculate slow EMA up to this point
                     ema = prices[0]
-                    multiplier = 2 / (slow + 1)
+                    multiplier = Decimal("2") / (Decimal(str(slow)) + Decimal("1"))
                     for j in range(1, i + 1):
-                        ema = (prices[j] * multiplier) + (ema * (1 - multiplier))
+                        ema = (prices[j] * multiplier) + (ema * (Decimal("1") - multiplier))
                     slow_ema_values.append(ema)
 
             # Calculate MACD line values
@@ -783,10 +803,12 @@ class FeatureStore(BaseComponent):
             # Calculate signal line (EMA of MACD line)
             valid_macd = [v for v in macd_values if v is not None]
             signal_ema = valid_macd[0]
-            multiplier = 2 / (signal + 1)
+            multiplier = Decimal("2") / (Decimal(str(signal)) + Decimal("1"))
 
             for i in range(1, len(valid_macd)):
-                signal_ema = (valid_macd[i] * multiplier) + (signal_ema * (1 - multiplier))
+                signal_ema = (valid_macd[i] * multiplier) + (
+                    signal_ema * (Decimal("1") - multiplier)
+                )
 
             # Use latest values
             macd_line = macd_values[-1]
@@ -794,103 +816,132 @@ class FeatureStore(BaseComponent):
             histogram = macd_line - signal_line
 
             return {
-                "macd": macd_line,
-                "signal": signal_line,
-                "histogram": histogram,
+                "macd": macd_line.quantize(Decimal("0.00000001")),
+                "signal": signal_line.quantize(Decimal("0.00000001")),
+                "histogram": histogram.quantize(Decimal("0.00000001")),
             }
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Simple moving average calculation failed: {e}")
             return None
 
     async def _calculate_bollinger_bands(
-        self, market_data: list[MarketData], period: int = 20, std_dev: float = 2, **kwargs
-    ) -> dict[str, float] | None:
+        self,
+        market_data: list[MarketData],
+        period: int = 20,
+        std_dev: Decimal = Decimal("2"),
+        **kwargs,
+    ) -> dict[str, Decimal] | None:
         """Calculate Bollinger Bands."""
         try:
-            prices = [float(data.price) for data in market_data[-period:] if data.price]
+            prices = [Decimal(str(data.price)) for data in market_data[-period:] if data.price]
             if len(prices) < period:
                 return None
 
-            # Calculate SMA and standard deviation
-            sma = sum(prices) / len(prices)
-            variance = sum((price - sma) ** 2 for price in prices) / len(prices)
-            std = variance**0.5
+            # Calculate SMA and standard deviation using Decimal precision
+            getcontext().prec = 16
+            sma = sum(prices) / Decimal(str(len(prices)))
+
+            # Calculate variance using Decimal arithmetic
+            variance_sum = sum((price - sma) ** 2 for price in prices)
+            variance = variance_sum / Decimal(str(len(prices)))
+
+            # For standard deviation, we need to convert to float temporarily for sqrt
+            std = Decimal(str(float(variance) ** 0.5))
 
             upper = sma + (std_dev * std)
             lower = sma - (std_dev * std)
+            width = upper - lower
 
             return {
-                "upper": upper,
-                "middle": sma,
-                "lower": lower,
-                "width": upper - lower,
-                "position": (prices[-1] - lower) / (upper - lower) if upper != lower else 0.5,
+                "upper": upper.quantize(Decimal("0.00000001")),
+                "middle": sma.quantize(Decimal("0.00000001")),
+                "lower": lower.quantize(Decimal("0.00000001")),
+                "width": width.quantize(Decimal("0.00000001")),
+                "position": (
+                    (prices[-1] - lower) / width if width != 0 else Decimal("0.5")
+                ).quantize(Decimal("0.0001")),
             }
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Simple moving average calculation failed: {e}")
             return None
 
     async def _calculate_volatility(
         self, market_data: list[MarketData], window: int = 20, **kwargs
-    ) -> float | None:
+    ) -> Decimal | None:
         """Calculate price volatility."""
         try:
-            prices = [float(data.price) for data in market_data[-window:] if data.price]
+            prices = [Decimal(str(data.price)) for data in market_data[-window:] if data.price]
             if len(prices) < window:
                 return None
 
-            # Calculate returns
+            # Calculate returns using Decimal precision
+            getcontext().prec = 16
             returns = []
             for i in range(1, len(prices)):
-                ret = (prices[i] - prices[i - 1]) / prices[i - 1]
-                returns.append(ret)
+                if prices[i - 1] != 0:
+                    ret = (prices[i] - prices[i - 1]) / prices[i - 1]
+                    returns.append(ret)
 
             # Calculate volatility (standard deviation of returns)
             if not returns:
                 return None
 
-            mean_return = sum(returns) / len(returns)
-            variance = sum((ret - mean_return) ** 2 for ret in returns) / len(returns)
-            volatility = variance**0.5
+            mean_return = sum(returns) / Decimal(str(len(returns)))
+            variance_sum = sum((ret - mean_return) ** 2 for ret in returns)
+            variance = variance_sum / Decimal(str(len(returns)))
 
-            return volatility
-        except Exception:
+            # For standard deviation, convert to float temporarily for sqrt
+            volatility = Decimal(str(float(variance) ** 0.5))
+
+            return volatility.quantize(Decimal("0.000001"))
+        except Exception as e:
+            self.logger.error(f"Volatility calculation failed: {e}")
             return None
 
     async def _calculate_momentum(
         self, market_data: list[MarketData], window: int = 10, **kwargs
-    ) -> float | None:
+    ) -> Decimal | None:
         """Calculate price momentum."""
         try:
-            prices = [float(data.price) for data in market_data if data.price]
+            prices = [Decimal(str(data.price)) for data in market_data if data.price]
             if len(prices) < window + 1:
                 return None
 
+            getcontext().prec = 16
             current_price = prices[-1]
             past_price = prices[-(window + 1)]
 
-            momentum = (current_price - past_price) / past_price
-            return momentum
-        except Exception:
+            if past_price != 0:
+                momentum = (current_price - past_price) / past_price
+                return momentum.quantize(Decimal("0.000001"))
+            else:
+                return Decimal("0")
+        except Exception as e:
+            self.logger.error(f"Momentum calculation failed: {e}")
             return None
 
     async def _calculate_volume_trend(
         self, market_data: list[MarketData], window: int = 20, **kwargs
-    ) -> float | None:
+    ) -> Decimal | None:
         """Calculate volume trend."""
         try:
-            volumes = [float(data.volume) for data in market_data[-window:] if data.volume]
+            volumes = [Decimal(str(data.volume)) for data in market_data[-window:] if data.volume]
             if len(volumes) < window:
                 return None
 
-            # Simple volume trend calculation
-            recent_avg = sum(volumes[-window // 2 :]) / (window // 2)
-            past_avg = sum(volumes[: window // 2]) / (window // 2)
+            # Simple volume trend calculation using Decimal precision
+            getcontext().prec = 16
+            half_window = window // 2
+            recent_avg = sum(volumes[-half_window:]) / Decimal(str(half_window))
+            past_avg = sum(volumes[:half_window]) / Decimal(str(half_window))
 
             if past_avg == 0:
-                return 0.0
+                return Decimal("0")
 
             trend = (recent_avg - past_avg) / past_avg
-            return trend
-        except Exception:
+            return trend.quantize(Decimal("0.000001"))
+        except Exception as e:
+            self.logger.error(f"Volume trend calculation failed: {e}")
             return None
 
     def get_metrics(self) -> dict[str, Any]:
@@ -915,10 +966,10 @@ class FeatureStore(BaseComponent):
             "active_locks": len(self._calculation_locks),
         }
 
-    async def health_check(self) -> dict[str, Any]:
+    async def health_check(self) -> HealthCheckResult:
         """Perform FeatureStore health check."""
-        health = {
-            "status": "healthy",
+        status = HealthStatus.HEALTHY
+        details = {
             "initialized": self._initialized,
             "metrics": self.get_metrics(),
             "components": {},
@@ -927,28 +978,38 @@ class FeatureStore(BaseComponent):
         # Check data service connectivity
         if self.data_service:
             try:
-                data_health = await self.data_service.health_check()
-                health["components"]["data_service"] = data_health["status"]
+                await self.data_service.health_check()
+                details["components"]["data_service"] = "healthy"
             except Exception as e:
-                health["components"]["data_service"] = f"unhealthy: {e}"
-                health["status"] = "degraded"
+                details["components"]["data_service"] = f"unhealthy: {e}"
+                status = HealthStatus.DEGRADED
         else:
-            health["components"]["data_service"] = "not_configured"
-            health["status"] = "degraded"
+            details["components"]["data_service"] = "not_configured"
+            status = HealthStatus.DEGRADED
 
-        return health
+        return HealthCheckResult(
+            status=status, details=details, message=f"FeatureStore health: {status.value}"
+        )
 
     async def cleanup(self) -> None:
         """Cleanup FeatureStore resources."""
         try:
+            # Cancel background tasks
+            if self._background_tasks:
+                for task in self._background_tasks:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        self.logger.warning(f"Error cancelling feature store task: {e}")
+
+                self._background_tasks.clear()
+
             # Clear caches
             self._feature_cache.clear()
             self._calculation_locks.clear()
-
-            # Cancel any running tasks
-            for task in asyncio.all_tasks():
-                if hasattr(task, "_coro") and "cache_cleanup_loop" in str(task._coro):
-                    task.cancel()
 
             self._initialized = False
             self.logger.info("FeatureStore cleanup completed")

@@ -30,10 +30,15 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from src.core.base.component import BaseComponent
 from src.core.config import Config
-from src.core.exceptions import NetworkError, ValidationError, ConfigurationError
+from src.core.exceptions import (
+    ConfigurationError,
+    DataError,
+    DataProcessingError,
+    DataValidationError,
+    NetworkError,
+)
 from src.core.types import MarketData
-from src.data.services.data_service import DataService
-from src.data.validation.data_validator import DataValidator
+from src.data.interfaces import DataServiceInterface, DataValidatorInterface
 
 
 class StreamState(Enum):
@@ -101,7 +106,7 @@ class StreamConfig(BaseModel):
     enable_deduplication: bool = True
     max_latency_ms: int = Field(1000, ge=10, le=10000)
 
-    model_config = ConfigDict(use_enum_values=True)
+    model_config = ConfigDict(use_enum_values=False)
 
 
 class StreamBuffer:
@@ -222,6 +227,7 @@ class WebSocketConnection:
             )
 
             self.websocket = websocket
+            websocket = None  # Prevent cleanup of successfully assigned websocket
             self.state = StreamState.CONNECTED
             self.connection_start_time = datetime.now(timezone.utc)
 
@@ -232,12 +238,27 @@ class WebSocketConnection:
 
         except Exception as e:
             self.state = StreamState.ERROR
+            # Clean up websocket connection on error
+            if self.websocket:
+                try:
+                    await self.websocket.close()
+                except Exception as close_e:
+                    if hasattr(self, "logger"):
+                        self.logger.error(
+                            f"Failed to close assigned websocket during cleanup: {close_e}"
+                        )
+                finally:
+                    self.websocket = None
+
+            raise NetworkError(f"WebSocket connection failed: {e}")
+        finally:
+            # Clean up any unassigned websocket connection
             if websocket:
                 try:
                     await websocket.close()
-                except Exception:
-                    pass
-            raise NetworkError(f"WebSocket connection failed: {e}")
+                except Exception as e:
+                    if hasattr(self, "logger"):
+                        self.logger.error(f"Failed to close websocket in finally block: {e}")
 
     async def _send_subscription(self) -> None:
         """Send subscription message for symbols and data types."""
@@ -291,15 +312,23 @@ class WebSocketConnection:
             if self.websocket:
                 websocket = self.websocket
                 self.websocket = None
-                await websocket.close()
+                await asyncio.wait_for(websocket.close(), timeout=5.0)
+        except asyncio.TimeoutError:
+            if hasattr(self, "logger"):
+                self.logger.warning("WebSocket close timeout, forcing disconnect")
         except Exception as e:
-            self.logger.warning(f"Failed to close WebSocket during cleanup: {e}")
+            if hasattr(self, "logger"):
+                self.logger.warning(f"Failed to close WebSocket during cleanup: {e}")
         finally:
             if websocket and not websocket.closed:
                 try:
-                    await websocket.close()
+                    await asyncio.wait_for(websocket.close(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    if hasattr(self, "logger"):
+                        self.logger.warning("WebSocket final close timeout")
                 except Exception as e:
-                    self.logger.warning(f"Failed to close WebSocket in finally block: {e}")
+                    if hasattr(self, "logger"):
+                        self.logger.warning(f"Failed to close WebSocket in finally block: {e}")
             self.state = StreamState.DISCONNECTED
 
     def is_connected(self) -> bool:
@@ -329,8 +358,8 @@ class StreamingDataService(BaseComponent):
     def __init__(
         self,
         config: Config,
-        data_service: DataService | None = None,
-        validator: DataValidator | None = None,
+        data_service: DataServiceInterface | None = None,
+        validator: DataValidatorInterface | None = None,
     ):
         """Initialize streaming data service."""
         super().__init__()
@@ -350,6 +379,7 @@ class StreamingDataService(BaseComponent):
 
         # Background tasks
         self._background_tasks: list[asyncio.Task] = []
+        self._shutdown_events: dict[str, asyncio.Event] = {}  # Shutdown events per exchange
 
         # Message handlers
         self._message_handlers: dict[str, Callable] = {}
@@ -357,6 +387,7 @@ class StreamingDataService(BaseComponent):
         # Deduplication cache
         self._dedup_cache: dict[str, set] = {}
         self._dedup_cache_size = 10000
+        self._dedup_lock = asyncio.Lock()  # Protect concurrent access to dedup cache
 
         self._initialized = False
 
@@ -442,6 +473,9 @@ class StreamingDataService(BaseComponent):
             if exchange not in self._metrics:
                 self._metrics[exchange] = StreamMetrics()
 
+            # Initialize shutdown event for this exchange
+            self._shutdown_events[exchange] = asyncio.Event()
+
             # Start background tasks
             stream_task = asyncio.create_task(self._stream_task(exchange))
             processor_task = asyncio.create_task(self._processor_task(exchange))
@@ -458,6 +492,10 @@ class StreamingDataService(BaseComponent):
     async def stop_stream(self, exchange: str) -> bool:
         """Stop streaming for an exchange."""
         try:
+            # Signal shutdown to background tasks
+            if exchange in self._shutdown_events:
+                self._shutdown_events[exchange].set()
+
             # Disconnect WebSocket
             if exchange in self._connections:
                 await self._connections[exchange].disconnect()
@@ -466,6 +504,10 @@ class StreamingDataService(BaseComponent):
             # Clear buffer
             if exchange in self._buffers:
                 await self._buffers[exchange].clear()
+
+            # Cleanup shutdown event
+            if exchange in self._shutdown_events:
+                del self._shutdown_events[exchange]
 
             self.logger.info(f"Stopped streaming for {exchange}")
             return True
@@ -479,82 +521,120 @@ class StreamingDataService(BaseComponent):
         connection = self._connections[exchange]
         buffer = self._buffers[exchange]
         metrics = self._metrics[exchange]
-        self._stream_configs[exchange]
+        shutdown_event = self._shutdown_events[exchange]
 
-        while connection.is_connected():
-            try:
-                async for message in connection.listen():
-                    # Update metrics
-                    metrics.messages_received += 1
-                    metrics.last_message_time = datetime.now(timezone.utc)
+        try:
+            while connection.is_connected() and not shutdown_event.is_set():
+                try:
+                    async for message in connection.listen():
+                        # Check for shutdown during message processing
+                        if shutdown_event.is_set():
+                            break
 
-                    if isinstance(message, str):
-                        metrics.bytes_received += len(message.encode("utf-8"))
-                    elif isinstance(message, dict):
-                        metrics.bytes_received += len(json.dumps(message).encode("utf-8"))
+                        # Update metrics
+                        metrics.messages_received += 1
+                        metrics.last_message_time = datetime.now(timezone.utc)
 
-                    # Add to buffer
-                    success = await buffer.put(message)
-                    if not success:
-                        metrics.messages_dropped += 1
+                        if isinstance(message, str):
+                            metrics.bytes_received += len(message.encode("utf-8"))
+                        elif isinstance(message, dict):
+                            metrics.bytes_received += len(json.dumps(message).encode("utf-8"))
 
-                    # Update buffer utilization
-                    metrics.buffer_utilization = buffer.utilization()
+                        # Add to buffer
+                        success = await buffer.put(message)
+                        if not success:
+                            metrics.messages_dropped += 1
 
-            except ConnectionClosed:
-                self.logger.warning(f"Connection closed for {exchange}, attempting reconnect...")
-                await self._reconnect(exchange)
-            except Exception as e:
-                self.logger.error(f"Streaming error for {exchange}: {e}")
-                await asyncio.sleep(1)
+                        # Update buffer utilization
+                        metrics.buffer_utilization = buffer.utilization()
+
+                except ConnectionClosed:
+                    if not shutdown_event.is_set():
+                        self.logger.warning(f"Connection closed for {exchange}, attempting reconnect...")
+                        await self._reconnect(exchange)
+                    else:
+                        break
+                except Exception as e:
+                    self.logger.error(f"Streaming error for {exchange}: {e}")
+                    if shutdown_event.is_set():
+                        break
+                    await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            self.logger.info(f"Stream task cancelled for {exchange}")
+        finally:
+            self.logger.info(f"Stream task stopped for {exchange}")
 
     async def _processor_task(self, exchange: str) -> None:
         """Background task for processing buffered data."""
         buffer = self._buffers[exchange]
         metrics = self._metrics[exchange]
         config = self._stream_configs[exchange]
+        shutdown_event = self._shutdown_events[exchange]
 
-        while True:
-            try:
-                # Get batch of messages
-                messages = await buffer.get_batch(config.batch_size, timeout=config.flush_interval)
+        try:
+            while not shutdown_event.is_set():
+                try:
+                    # Get batch of messages with timeout to allow shutdown check
+                    messages = await buffer.get_batch(config.batch_size, timeout=config.flush_interval)
 
-                if messages:
-                    # Process batch
-                    await self._process_message_batch(exchange, messages)
+                    if messages:
+                        # Process batch
+                        await self._process_message_batch(exchange, messages)
 
-                    # Update metrics
-                    metrics.messages_processed += len(messages)
+                        # Update metrics
+                        metrics.messages_processed += len(messages)
 
-                    # Calculate processing rate
-                    if metrics.last_message_time:
-                        elapsed = (
-                            datetime.now(timezone.utc) - metrics.last_message_time
-                        ).total_seconds()
-                        if elapsed > 0:
-                            metrics.processing_rate_per_second = len(messages) / elapsed
+                        # Calculate processing rate
+                        if metrics.last_message_time:
+                            elapsed = (
+                                datetime.now(timezone.utc) - metrics.last_message_time
+                            ).total_seconds()
+                            if elapsed > 0:
+                                metrics.processing_rate_per_second = len(messages) / elapsed
 
-            except Exception as e:
-                self.logger.error(f"Processing error for {exchange}: {e}")
-                await asyncio.sleep(1)
+                except Exception as e:
+                    self.logger.error(f"Processing error for {exchange}: {e}")
+                    # Check if we should exit due to shutdown
+                    if shutdown_event.is_set():
+                        break
+                    await asyncio.sleep(1)
+
+        except asyncio.CancelledError:
+            self.logger.info(f"Processor task cancelled for {exchange}")
+        finally:
+            self.logger.info(f"Processor task stopped for {exchange}")
 
     async def _process_message_batch(self, exchange: str, messages: list[dict[str, Any]]) -> None:
-        """Process batch of messages using consistent data flow patterns."""
+        """Process batch of messages using consistent data flow patterns from pipeline."""
         config = self._stream_configs[exchange]
         handler = self._message_handlers.get(exchange, self._message_handlers["default"])
 
-        # Use consistent transformation patterns from pipeline
-        from src.data.pipeline.data_pipeline import DataTransformation
+        # Module boundary validation - ensure we have valid configuration
+        if not config or not handler:
+            raise DataProcessingError(
+                f"Invalid streaming configuration for {exchange}",
+                error_code="STREAM_CONFIG_001",
+                processing_step="configuration_validation",
+                data_source=exchange,
+                pipeline_stage="ingestion",
+            )
 
-        # Convert messages to MarketData objects with consistent error handling
+        # Use consistent transformation patterns from pipeline
         market_data_list = []
         processing_errors = []
 
         for message in messages:
             try:
+                # Validate raw message at module boundary
+                if not isinstance(message, dict) or not message:
+                    continue
+
                 market_data = await handler(message, exchange)
                 if market_data:
                     # Apply consistent normalization using pipeline patterns
+                    from src.data.pipeline.data_pipeline import DataTransformation
+
                     normalized_data = await DataTransformation.normalize_prices(market_data)
 
                     # Deduplication check with consistent pattern
@@ -566,47 +646,46 @@ class StreamingDataService(BaseComponent):
 
             except Exception as e:
                 # Use consistent error propagation pattern from pipeline
-                from src.core.exceptions import DataProcessingError
-
-                processing_errors.append(
-                    DataProcessingError(
-                        f"Message processing failed for {exchange}",
-                        processing_step="streaming_message_conversion",
-                        input_data_sample={"exchange": exchange},
-                        data_source=exchange,
-                        data_type="streaming_message",
-                        pipeline_stage="ingestion",
-                    )
+                processing_error = DataProcessingError(
+                    f"Message processing failed for {exchange}",
+                    error_code="STREAM_PROCESSING_001",
+                    processing_step="streaming_message_conversion",
+                    input_data_sample={
+                        "exchange": exchange,
+                        "message_keys": list(message.keys()) if isinstance(message, dict) else [],
+                    },
+                    data_source=exchange,
+                    data_type="streaming_message",
+                    pipeline_stage="ingestion",
                 )
+                processing_errors.append(processing_error)
                 self.logger.error(f"Message processing error: {e}")
 
         if not market_data_list:
             return
 
+        # Module boundary validation - ensure we have valid data
+        if not market_data_list:
+            if processing_errors:
+                # Log processing errors but don't fail the entire batch
+                self.logger.warning(
+                    f"All messages failed processing for {exchange}: {len(processing_errors)} errors"
+                )
+            return
+
         # Use consistent validation patterns from pipeline
         if config.enable_validation and self.validator:
             try:
-                # Use batch validation with consistent interface
-                validation_results = await self.validator.validate_market_data(
-                    market_data_list, include_statistical=True
-                )
-
-                # Filter valid data using consistent quality thresholds
-                valid_data = []
-                for i, result in enumerate(validation_results):
-                    # Use same quality score threshold as pipeline (70%)
-                    if result.is_valid or result.quality_score.overall > 0.7:
-                        valid_data.append(market_data_list[i])
-
-                market_data_list = valid_data
+                # Validate at module boundary before storage
+                validated_data = await self.validator.validate_market_data(market_data_list)
+                market_data_list = validated_data
 
             except Exception as e:
-                from src.core.exceptions import DataValidationError
-
                 raise DataValidationError(
                     f"Streaming data validation failed for {exchange}",
-                    validation_type="market_data_batch",
-                    failed_rules=["streaming_quality_check"],
+                    error_code="STREAM_VALIDATION_001",
+                    validation_rule="market_data_batch_validation",
+                    invalid_fields=["batch_validation"],
                     data_source=exchange,
                 ) from e
 
@@ -617,47 +696,54 @@ class StreamingDataService(BaseComponent):
                 success = await self.data_service.store_market_data(
                     market_data_list,
                     exchange=exchange,
-                    validate=False,  # Already validated
-                    source="streaming",
+                    validate=False,  # Already validated at boundary
                 )
 
                 if not success:
-                    from src.core.exceptions import DataError
-
                     raise DataError(
-                        "Streaming data storage failed",
+                        f"Data storage operation failed for {exchange}",
                         error_code="STREAM_STORAGE_001",
                         data_type="market_data_batch",
-                        context={"exchange": exchange, "count": len(market_data_list)},
+                        data_source=exchange,
+                        context={"batch_size": len(market_data_list)},
                     )
 
             except Exception as e:
-                # Consistent error propagation
-                self.logger.error(f"Data storage error: {e}")
+                # Consistent error propagation with pipeline patterns
+                if not isinstance(e, (DataError, DataValidationError)):
+                    # Wrap generic errors in consistent format
+                    raise DataError(
+                        f"Streaming storage error for {exchange}",
+                        error_code="STREAM_STORAGE_002",
+                        data_type="market_data_batch",
+                        data_source=exchange,
+                        context={"original_error": str(e)},
+                    ) from e
                 raise
 
     async def _is_duplicate(self, exchange: str, data: MarketData) -> bool:
-        """Check if data is duplicate."""
-        if exchange not in self._dedup_cache:
-            self._dedup_cache[exchange] = set()
+        """Check if data is duplicate with proper concurrency control."""
+        async with self._dedup_lock:
+            if exchange not in self._dedup_cache:
+                self._dedup_cache[exchange] = set()
 
-        cache = self._dedup_cache[exchange]
+            cache = self._dedup_cache[exchange]
 
-        # Create unique key
-        key = f"{data.symbol}:{data.price}:{data.timestamp}"
+            # Create unique key
+            key = f"{data.symbol}:{data.price}:{data.timestamp}"
 
-        if key in cache:
-            return True
+            if key in cache:
+                return True
 
-        # Add to cache
-        cache.add(key)
+            # Add to cache
+            cache.add(key)
 
-        # Limit cache size
-        if len(cache) > self._dedup_cache_size:
-            # Remove oldest entries (simplified - should use LRU)
-            cache.clear()
+            # Limit cache size
+            if len(cache) > self._dedup_cache_size:
+                # Remove oldest entries (simplified - should use LRU)
+                cache.clear()
 
-        return False
+            return False
 
     async def _reconnect(self, exchange: str) -> None:
         """Reconnect to exchange stream."""
@@ -677,8 +763,8 @@ class StreamingDataService(BaseComponent):
                 )
                 connection = WebSocketConnection(config, message_handler)
 
-                # Connect
-                await connection.connect()
+                # Connect with timeout
+                await asyncio.wait_for(connection.connect(), timeout=config.connection_timeout)
 
                 # Update connection
                 self._connections[exchange] = connection
@@ -845,27 +931,72 @@ class StreamingDataService(BaseComponent):
 
     async def cleanup(self) -> None:
         """Cleanup streaming service resources."""
+        background_tasks = []
+        connections = {}
         try:
+            # Collect resources for cleanup
+            background_tasks = list(self._background_tasks)
+            connections = dict(self._connections)
+
             # Cancel background tasks
-            for task in self._background_tasks:
+            for task in background_tasks:
                 task.cancel()
                 try:
                     await task
                 except asyncio.CancelledError:
                     pass
 
-            # Disconnect all streams
-            for exchange in list(self._connections.keys()):
-                await self.stop_stream(exchange)
+            # Disconnect all streams with timeout
+            disconnect_tasks = [self.stop_stream(exchange) for exchange in list(connections.keys())]
+            if disconnect_tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*disconnect_tasks, return_exceptions=True), timeout=30.0
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Timeout during stream cleanup, some connections may not have closed cleanly"
+                    )
 
             # Clear resources
             self._connections.clear()
             self._buffers.clear()
             self._metrics.clear()
             self._dedup_cache.clear()
+            self._background_tasks.clear()
 
             self._initialized = False
             self.logger.info("StreamingDataService cleanup completed")
 
         except Exception as e:
             self.logger.error(f"StreamingDataService cleanup error: {e}")
+        finally:
+            # Force cleanup any remaining resources
+            try:
+                # Force cancel any remaining background tasks
+                for task in background_tasks:
+                    if not task.done():
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception:
+                            pass
+
+                # Force disconnect any remaining connections
+                for exchange, connection in connections.items():
+                    try:
+                        await connection.disconnect()
+                    except Exception as e:
+                        self.logger.warning(f"Error force disconnecting {exchange}: {e}")
+
+                # Clear all resources
+                self._connections.clear()
+                self._buffers.clear()
+                self._metrics.clear()
+                self._dedup_cache.clear()
+                self._background_tasks.clear()
+                self._initialized = False
+            except Exception as e:
+                self.logger.warning(f"Error in final streaming cleanup: {e}")

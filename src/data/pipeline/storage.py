@@ -24,9 +24,7 @@ from src.core.config import Config
 
 # Import from P-001 core components
 from src.core.types import MarketData, StorageMode
-from src.database import InfluxDBClient as InfluxDBClientWrapper, get_async_session
-from src.database.models import MarketDataRecord
-from src.database.queries import DatabaseQueries
+from src.database import InfluxDBClient as InfluxDBClientWrapper
 
 # Import from P-002A error handling
 from src.error_handling.error_handler import ErrorHandler
@@ -76,7 +74,7 @@ class DataStorageManager(BaseComponent):
             self.buffer_threshold = 50
             self.cleanup_interval = 3600
 
-        # Initialize InfluxDB client for time series market data
+        # Initialize InfluxDB client for time series market data (connection will be established in initialize())
         influx_config = getattr(config, "influxdb", {})
         if isinstance(influx_config, dict):
             self.influx_client = InfluxDBClientWrapper(
@@ -85,27 +83,17 @@ class DataStorageManager(BaseComponent):
                 org=influx_config.get("org", "trading-bot"),
                 bucket=influx_config.get("bucket", "market-data"),
             )
-            # Ensure connection is established
-            try:
-                self.influx_client.connect()
-            except Exception as e:
-                self.logger.warning(
-                    f"InfluxDB connection could not be established during initialization: {e}"
-                )
         else:
             # Default InfluxDB configuration
             self.influx_client = InfluxDBClientWrapper(
                 url="http://localhost:8086", token="", org="trading-bot", bucket="market-data"
             )
-            try:
-                self.influx_client.connect()
-            except Exception as e:
-                self.logger.warning(
-                    f"InfluxDB connection could not be established during initialization (default): {e}"
-                )
 
         # Storage buffers
         self.storage_buffer: list[dict[str, Any]] = []
+
+        # Initialization flag
+        self._initialized = False
 
         # Storage metrics
         self.metrics = StorageMetrics(
@@ -118,6 +106,29 @@ class DataStorageManager(BaseComponent):
         )
 
         self.logger.info("DataStorageManager initialized")
+
+    async def initialize(self) -> None:
+        """Initialize storage manager with async operations."""
+        try:
+            if self._initialized:
+                return
+
+            self.logger.info("Initializing DataStorageManager...")
+
+            # Establish InfluxDB connection
+            if self.influx_client:
+                try:
+                    await self.influx_client.connect()
+                    self.logger.info("InfluxDB connection established")
+                except Exception as e:
+                    self.logger.warning(f"InfluxDB connection failed: {e}")
+
+            self._initialized = True
+            self.logger.info("DataStorageManager initialized successfully")
+
+        except Exception as e:
+            self.logger.error(f"DataStorageManager initialization failed: {e}")
+            raise
 
     @time_execution
     @retry(max_attempts=3, base_delay=1.0)
@@ -132,6 +143,9 @@ class DataStorageManager(BaseComponent):
             bool: True if successful, False otherwise
         """
         try:
+            if not self._initialized:
+                await self.initialize()
+
             if self.storage_mode == StorageMode.HOT:
                 return await self._store_real_time(data)
             elif self.storage_mode == StorageMode.STREAM:
@@ -147,24 +161,27 @@ class DataStorageManager(BaseComponent):
     async def _store_real_time(self, data: MarketData) -> bool:
         """Store data immediately to InfluxDB."""
         try:
+            if not self._initialized:
+                await self.initialize()
+
             # Write market data to InfluxDB
             # Prepare fields dict per client wrapper API
             fields = {
-                "price": float(data.price),
+                "price": float(data.price),  # InfluxDB requires float for numeric fields
                 "volume": float(data.volume) if data.volume is not None else 0.0,
             }
             if data.bid is not None:
-                fields["bid"] = float(data.bid)
+                fields["bid"] = float(data.bid)  # InfluxDB requires float
             if data.ask is not None:
-                fields["ask"] = float(data.ask)
+                fields["ask"] = float(data.ask)  # InfluxDB requires float
             if data.high_price is not None:
-                fields["high"] = float(data.high_price)
+                fields["high"] = float(data.high_price)  # InfluxDB requires float
             if data.low_price is not None:
-                fields["low"] = float(data.low_price)
+                fields["low"] = float(data.low_price)  # InfluxDB requires float
             if data.open_price is not None:
-                fields["open"] = float(data.open_price)
+                fields["open"] = float(data.open_price)  # InfluxDB requires float
 
-            self.influx_client.write_market_data(
+            await self.influx_client.write_market_data(
                 symbol=data.symbol, data=fields, timestamp=data.timestamp
             )
 
@@ -220,20 +237,20 @@ class DataStorageManager(BaseComponent):
                 # Write individually to ensure type safety and avoid missing API
                 for md in market_data_points:
                     fields = {
-                        "price": float(md.price),
+                        "price": float(md.price),  # InfluxDB requires float
                         "volume": float(md.volume) if md.volume is not None else 0.0,
                     }
                     if md.bid is not None:
-                        fields["bid"] = float(md.bid)
+                        fields["bid"] = float(md.bid)  # InfluxDB requires float
                     if md.ask is not None:
-                        fields["ask"] = float(md.ask)
+                        fields["ask"] = float(md.ask)  # InfluxDB requires float
                     if md.high_price is not None:
-                        fields["high"] = float(md.high_price)
+                        fields["high"] = float(md.high_price)  # InfluxDB requires float
                     if md.low_price is not None:
-                        fields["low"] = float(md.low_price)
+                        fields["low"] = float(md.low_price)  # InfluxDB requires float
                     if md.open_price is not None:
-                        fields["open"] = float(md.open_price)
-                    self.influx_client.write_market_data(md.symbol, fields, md.timestamp)
+                        fields["open"] = float(md.open_price)  # InfluxDB requires float
+                    await self.influx_client.write_market_data(md.symbol, fields, md.timestamp)
 
                 # Update metrics
                 stored_count = len(market_data_points)
@@ -260,8 +277,11 @@ class DataStorageManager(BaseComponent):
             int: Number of successfully stored records
         """
         try:
+            if not self._initialized:
+                await self.initialize()
+
             # Bulk write to InfluxDB
-            self.influx_client.write_market_data_batch(data_list)
+            await self.influx_client.write_market_data_batch(data_list)
 
             # Also store to PostgreSQL for persistent storage
             if self.storage_mode == StorageMode.WARM or self.storage_mode == StorageMode.ARCHIVE:
@@ -297,7 +317,7 @@ class DataStorageManager(BaseComponent):
             # Delegate cleanup to a storage service if available
             # For now, log the operation
             self.logger.info(f"Cleanup requested for data older than {cutoff_date}")
-            
+
             # This should be handled by a proper storage service
             # Return 0 for now as this is infrastructure concern
             return 0
@@ -335,6 +355,9 @@ class DataStorageManager(BaseComponent):
     async def force_flush(self) -> bool:
         """Force flush all buffered data."""
         try:
+            if not self._initialized:
+                await self.initialize()
+
             if self.storage_buffer:
                 return await self._flush_buffer()
             return True
@@ -354,7 +377,7 @@ class DataStorageManager(BaseComponent):
             if self.influx_client:
                 influx_client = self.influx_client
                 self.influx_client = None
-                influx_client.disconnect()
+                await influx_client.disconnect()
 
             self.logger.info("DataStorageManager cleanup completed")
 
@@ -363,7 +386,7 @@ class DataStorageManager(BaseComponent):
         finally:
             if influx_client:
                 try:
-                    influx_client.disconnect()
+                    await influx_client.disconnect()
                 except Exception as e:
                     self.logger.warning(f"Failed to disconnect InfluxDB client during cleanup: {e}")
 
@@ -383,7 +406,7 @@ class DataStorageManager(BaseComponent):
         try:
             # This should be handled by injected storage dependency
             self.logger.info(f"PostgreSQL storage requested for {len(data_list)} records")
-            
+
             # For now, just return True as this is being refactored
             # to use proper service layer with dependency injection
             return True
