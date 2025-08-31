@@ -3,8 +3,9 @@
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import DECIMAL, Column, DateTime, Index, String
+from sqlalchemy import DECIMAL, CheckConstraint, Column, DateTime, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.database.models.base import Base, TimestampMixin
 
@@ -19,11 +20,11 @@ class MarketDataRecord(Base, TimestampMixin):
     exchange = Column(String(50), nullable=False)
 
     # Price data
-    open_price = Column(DECIMAL(20, 8))
-    high_price = Column(DECIMAL(20, 8))
-    low_price = Column(DECIMAL(20, 8))
-    close_price = Column(DECIMAL(20, 8))
-    volume = Column(DECIMAL(20, 8))
+    open_price: Mapped[Decimal] = mapped_column(DECIMAL(20, 8))
+    high_price: Mapped[Decimal] = mapped_column(DECIMAL(20, 8))
+    low_price: Mapped[Decimal] = mapped_column(DECIMAL(20, 8))
+    close_price: Mapped[Decimal] = mapped_column(DECIMAL(20, 8))
+    volume: Mapped[Decimal] = mapped_column(DECIMAL(20, 8))
 
     # Timestamp for the market data
     data_timestamp = Column(DateTime(timezone=True), nullable=False)
@@ -34,6 +35,10 @@ class MarketDataRecord(Base, TimestampMixin):
     # Data source
     source = Column(String(50), nullable=False, default="exchange")
 
+    # Relationships
+    feature_records = relationship("FeatureRecord", back_populates="market_data")
+    data_quality_records = relationship("DataQualityRecord", back_populates="market_data", cascade="all, delete-orphan")
+
     # Indexes - High-Performance Market Data Access
     __table_args__ = (
         Index("idx_market_data_symbol_exchange", "symbol", "exchange"),
@@ -42,17 +47,25 @@ class MarketDataRecord(Base, TimestampMixin):
         # Critical composite index for real-time data access
         Index("idx_market_data_composite", "symbol", "exchange", "interval", "data_timestamp"),
         # High-frequency trading optimized indexes
-        Index(
-            "idx_market_data_symbol_timestamp", "symbol", "data_timestamp"
-        ),  # Fast symbol lookups
-        Index(
-            "idx_market_data_exchange_timestamp", "exchange", "data_timestamp"
-        ),  # Exchange-specific data
+        Index("idx_market_data_symbol_timestamp", "symbol", "data_timestamp"),  # Fast symbol lookups
+        Index("idx_market_data_exchange_timestamp", "exchange", "data_timestamp"),  # Exchange-specific data
         Index(
             "idx_market_data_recent", "data_timestamp", "symbol", "exchange"
         ),  # BRIN index for time-series optimization
         # Partial index for recent data (last 7 days) - most frequently accessed
         Index("idx_market_data_hot", "symbol", "exchange", "data_timestamp"),
+        # Unique constraint to prevent duplicate market data records
+        UniqueConstraint("symbol", "exchange", "interval", "data_timestamp", name="uq_market_data_record"),
+        CheckConstraint("open_price > 0", name="check_open_price_positive"),
+        CheckConstraint("high_price > 0", name="check_high_price_positive"),
+        CheckConstraint("low_price > 0", name="check_low_price_positive"),
+        CheckConstraint("close_price > 0", name="check_close_price_positive"),
+        CheckConstraint("volume >= 0", name="check_volume_non_negative"),
+        CheckConstraint("high_price >= low_price", name="check_high_low_relationship"),
+        CheckConstraint(
+            "exchange IN ('binance', 'coinbase', 'okx', 'mock')",
+            name="check_market_data_supported_exchange",
+        ),
     )
 
     def __repr__(self):

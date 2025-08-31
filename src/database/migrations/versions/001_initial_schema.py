@@ -79,9 +79,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("idx_bot_instances_user_id", "bot_instances", ["user_id"], unique=False)
-    op.create_index(
-        "idx_bot_instances_strategy_type", "bot_instances", ["strategy_type"], unique=False
-    )
+    op.create_index("idx_bot_instances_strategy_type", "bot_instances", ["strategy_type"], unique=False)
     op.create_index("idx_bot_instances_exchange", "bot_instances", ["exchange"], unique=False)
     op.create_index("idx_bot_instances_status", "bot_instances", ["status"], unique=False)
     op.create_unique_constraint("unique_user_bot_name", "bot_instances", ["user_id", "name"])
@@ -106,9 +104,7 @@ def upgrade() -> None:
         sa.Column("fee_currency", sa.String(length=10), nullable=False),
         sa.Column("status", sa.String(length=20), nullable=False),
         sa.Column("pnl", sa.Numeric(precision=20, scale=8), nullable=True),
-        sa.Column(
-            "timestamp", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("timestamp", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("executed_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
             ["bot_id"],
@@ -148,9 +144,7 @@ def upgrade() -> None:
         sa.Column("realized_pnl", sa.Numeric(precision=20, scale=8), nullable=False),
         sa.Column("stop_loss_price", sa.Numeric(precision=20, scale=8), nullable=True),
         sa.Column("take_profit_price", sa.Numeric(precision=20, scale=8), nullable=True),
-        sa.Column(
-            "opened_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("opened_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
@@ -168,9 +162,7 @@ def upgrade() -> None:
     op.create_index("idx_positions_exchange", "positions", ["exchange"], unique=False)
     op.create_index("idx_positions_symbol", "positions", ["symbol"], unique=False)
     op.create_index("idx_positions_side", "positions", ["side"], unique=False)
-    op.create_unique_constraint(
-        "unique_position", "positions", ["bot_id", "exchange", "symbol", "side"]
-    )
+    op.create_unique_constraint("unique_position", "positions", ["bot_id", "exchange", "symbol", "side"])
     op.create_check_constraint("valid_position_side", "positions", "side IN ('long', 'short')")
     op.create_check_constraint("positive_position_quantity", "positions", "quantity > 0")
     op.create_check_constraint("positive_entry_price", "positions", "entry_price > 0")
@@ -188,9 +180,7 @@ def upgrade() -> None:
         sa.Column("total_balance", sa.Numeric(precision=20, scale=8), nullable=False),
         sa.Column("btc_value", sa.Numeric(precision=20, scale=8), nullable=True),
         sa.Column("usd_value", sa.Numeric(precision=20, scale=8), nullable=True),
-        sa.Column(
-            "timestamp", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("timestamp", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["users.id"],
@@ -198,24 +188,12 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("idx_balance_snapshots_user_id", "balance_snapshots", ["user_id"], unique=False)
-    op.create_index(
-        "idx_balance_snapshots_exchange", "balance_snapshots", ["exchange"], unique=False
-    )
-    op.create_index(
-        "idx_balance_snapshots_currency", "balance_snapshots", ["currency"], unique=False
-    )
-    op.create_index(
-        "idx_balance_snapshots_timestamp", "balance_snapshots", ["timestamp"], unique=False
-    )
-    op.create_check_constraint(
-        "non_negative_free_balance", "balance_snapshots", "free_balance >= 0"
-    )
-    op.create_check_constraint(
-        "non_negative_locked_balance", "balance_snapshots", "locked_balance >= 0"
-    )
-    op.create_check_constraint(
-        "non_negative_total_balance", "balance_snapshots", "total_balance >= 0"
-    )
+    op.create_index("idx_balance_snapshots_exchange", "balance_snapshots", ["exchange"], unique=False)
+    op.create_index("idx_balance_snapshots_currency", "balance_snapshots", ["currency"], unique=False)
+    op.create_index("idx_balance_snapshots_timestamp", "balance_snapshots", ["timestamp"], unique=False)
+    op.create_check_constraint("non_negative_free_balance", "balance_snapshots", "free_balance >= 0")
+    op.create_check_constraint("non_negative_locked_balance", "balance_snapshots", "locked_balance >= 0")
+    op.create_check_constraint("non_negative_total_balance", "balance_snapshots", "total_balance >= 0")
 
     # Create strategy_configs table
     op.create_table(
@@ -242,9 +220,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("idx_strategy_configs_name", "strategy_configs", ["name"], unique=False)
-    op.create_index(
-        "idx_strategy_configs_type", "strategy_configs", ["strategy_type"], unique=False
-    )
+    op.create_index("idx_strategy_configs_type", "strategy_configs", ["strategy_type"], unique=False)
     op.create_index("idx_strategy_configs_active", "strategy_configs", ["is_active"], unique=False)
     op.create_unique_constraint("unique_strategy_config", "strategy_configs", ["name", "version"])
 
@@ -291,10 +267,10 @@ def upgrade() -> None:
         sa.Column("total_pnl", sa.Numeric(precision=20, scale=8), nullable=False),
         sa.Column("realized_pnl", sa.Numeric(precision=20, scale=8), nullable=False),
         sa.Column("unrealized_pnl", sa.Numeric(precision=20, scale=8), nullable=False),
-        sa.Column("win_rate", sa.Float(), nullable=False),
-        sa.Column("profit_factor", sa.Float(), nullable=False),
-        sa.Column("sharpe_ratio", sa.Float(), nullable=True),
-        sa.Column("max_drawdown", sa.Float(), nullable=True),
+        sa.Column("win_rate", sa.Numeric(precision=5, scale=4), nullable=False),
+        sa.Column("profit_factor", sa.Numeric(precision=10, scale=4), nullable=False),
+        sa.Column("sharpe_ratio", sa.Numeric(precision=10, scale=4), nullable=True),
+        sa.Column("max_drawdown", sa.Numeric(precision=5, scale=4), nullable=True),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -307,30 +283,14 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "idx_performance_metrics_bot_id", "performance_metrics", ["bot_id"], unique=False
-    )
-    op.create_index(
-        "idx_performance_metrics_date", "performance_metrics", ["metric_date"], unique=False
-    )
-    op.create_unique_constraint(
-        "unique_daily_metrics", "performance_metrics", ["bot_id", "metric_date"]
-    )
-    op.create_check_constraint(
-        "non_negative_total_trades", "performance_metrics", "total_trades >= 0"
-    )
-    op.create_check_constraint(
-        "non_negative_winning_trades", "performance_metrics", "winning_trades >= 0"
-    )
-    op.create_check_constraint(
-        "non_negative_losing_trades", "performance_metrics", "losing_trades >= 0"
-    )
-    op.create_check_constraint(
-        "valid_win_rate", "performance_metrics", "win_rate >= 0 AND win_rate <= 1"
-    )
-    op.create_check_constraint(
-        "non_negative_profit_factor", "performance_metrics", "profit_factor >= 0"
-    )
+    op.create_index("idx_performance_metrics_bot_id", "performance_metrics", ["bot_id"], unique=False)
+    op.create_index("idx_performance_metrics_date", "performance_metrics", ["metric_date"], unique=False)
+    op.create_unique_constraint("unique_daily_metrics", "performance_metrics", ["bot_id", "metric_date"])
+    op.create_check_constraint("non_negative_total_trades", "performance_metrics", "total_trades >= 0")
+    op.create_check_constraint("non_negative_winning_trades", "performance_metrics", "winning_trades >= 0")
+    op.create_check_constraint("non_negative_losing_trades", "performance_metrics", "losing_trades >= 0")
+    op.create_check_constraint("valid_win_rate", "performance_metrics", "win_rate >= 0 AND win_rate <= 1")
+    op.create_check_constraint("non_negative_profit_factor", "performance_metrics", "profit_factor >= 0")
 
     # Create alerts table
     op.create_table(
@@ -344,9 +304,7 @@ def upgrade() -> None:
         sa.Column("message", sa.Text(), nullable=False),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("is_read", sa.Boolean(), nullable=False),
-        sa.Column(
-            "timestamp", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("timestamp", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(
             ["bot_id"],
             ["bot_instances.id"],
@@ -363,9 +321,7 @@ def upgrade() -> None:
     op.create_index("idx_alerts_severity", "alerts", ["severity"], unique=False)
     op.create_index("idx_alerts_read", "alerts", ["is_read"], unique=False)
     op.create_index("idx_alerts_timestamp", "alerts", ["timestamp"], unique=False)
-    op.create_check_constraint(
-        "valid_alert_severity", "alerts", "severity IN ('low', 'medium', 'high', 'critical')"
-    )
+    op.create_check_constraint("valid_alert_severity", "alerts", "severity IN ('low', 'medium', 'high', 'critical')")
 
     # Create audit_logs table
     op.create_table(
@@ -379,9 +335,7 @@ def upgrade() -> None:
         sa.Column("new_value", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("ip_address", sa.String(length=45), nullable=True),
         sa.Column("user_agent", sa.String(length=500), nullable=True),
-        sa.Column(
-            "timestamp", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
-        ),
+        sa.Column("timestamp", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["users.id"],

@@ -10,10 +10,10 @@ from src.database.models.audit import (
     PerformanceAuditLog,
     RiskAuditLog,
 )
-from src.database.repository.core_compliant_base import DatabaseRepository
+from src.database.repository.base import DatabaseRepository
 
 
-class CapitalAuditLogRepository(DatabaseRepository[CapitalAuditLog, str]):
+class CapitalAuditLogRepository(DatabaseRepository):
     """Repository for CapitalAuditLog entities."""
 
     def __init__(self, session: AsyncSession):
@@ -34,16 +34,12 @@ class CapitalAuditLogRepository(DatabaseRepository[CapitalAuditLog, str]):
         """Get audit logs by exchange."""
         return await self.get_all(filters={"exchange": exchange}, order_by="-timestamp")
 
-    async def get_by_date_range(
-        self, start_date: datetime, end_date: datetime
-    ) -> list[CapitalAuditLog]:
+    async def get_by_date_range(self, start_date: datetime, end_date: datetime) -> list[CapitalAuditLog]:
         """Get audit logs by date range."""
-        return await self.get_all(
-            filters={"timestamp": {"gte": start_date, "lte": end_date}}, order_by="-timestamp"
-        )
+        return await self.get_all(filters={"timestamp": {"gte": start_date, "lte": end_date}}, order_by="-timestamp")
 
 
-class ExecutionAuditLogRepository(DatabaseRepository[ExecutionAuditLog, str]):
+class ExecutionAuditLogRepository(DatabaseRepository):
     """Repository for ExecutionAuditLog entities."""
 
     def __init__(self, session: AsyncSession):
@@ -69,7 +65,7 @@ class ExecutionAuditLogRepository(DatabaseRepository[ExecutionAuditLog, str]):
         return await self.get_all(filters={"execution_status": "failed"}, order_by="-timestamp")
 
 
-class RiskAuditLogRepository(DatabaseRepository[RiskAuditLog, str]):
+class RiskAuditLogRepository(DatabaseRepository):
     """Repository for RiskAuditLog entities."""
 
     def __init__(self, session: AsyncSession):
@@ -95,7 +91,7 @@ class RiskAuditLogRepository(DatabaseRepository[RiskAuditLog, str]):
         return await self.get_all(filters={"severity": "critical"}, order_by="-timestamp")
 
 
-class PerformanceAuditLogRepository(DatabaseRepository[PerformanceAuditLog, str]):
+class PerformanceAuditLogRepository(DatabaseRepository):
     """Repository for PerformanceAuditLog entities."""
 
     def __init__(self, session: AsyncSession):

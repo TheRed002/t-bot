@@ -2,8 +2,9 @@
 
 import uuid
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Index, Integer, String
+from sqlalchemy import JSON, Boolean, CheckConstraint, Column, DateTime, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from .base import Base, MetadataMixin, TimestampMixin
 
@@ -35,11 +36,22 @@ class User(Base, TimestampMixin, MetadataMixin):
     # Permissions
     scopes = Column(JSON, default=lambda: ["read"])  # JSON array of permission scopes
 
-    # Indexes
+    # Relationships
+    balance_snapshots = relationship("BalanceSnapshot", back_populates="user")
+
+    # Indexes and constraints
     __table_args__ = (
         Index("idx_users_username", "username"),
         Index("idx_users_email", "email"),
         Index("idx_users_active", "is_active"),
+        Index("idx_users_verified", "is_verified"),  # User verification status
+        Index("idx_users_login", "last_login_at"),  # Recent activity tracking
+        Index("idx_users_locked", "locked_until"),  # Account lockout queries
+        CheckConstraint("failed_login_attempts >= 0", name="check_failed_login_attempts_non_negative"),
+        CheckConstraint("LENGTH(username) >= 3", name="check_username_min_length"),
+        CheckConstraint("LENGTH(email) >= 5", name="check_email_min_length"),
+        CheckConstraint("email LIKE '%@%'", name="check_email_format"),
+        CheckConstraint("failed_login_attempts <= 10", name="check_failed_login_attempts_max"),  # Reasonable limit
     )
 
     def __repr__(self):

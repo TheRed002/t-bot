@@ -6,7 +6,7 @@ from .audit import (
     PerformanceAuditLogRepository,
     RiskAuditLogRepository,
 )
-from .base import BaseRepository, RepositoryInterface
+from .base import DatabaseRepository
 from .bot import BotLogRepository, BotRepository, SignalRepository, StrategyRepository
 from .bot_instance import BotInstanceRepository
 from .capital import (
@@ -15,6 +15,8 @@ from .capital import (
     ExchangeAllocationRepository,
     FundFlowRepository,
 )
+
+# DatabaseRepository now imported from .base
 from .data import DataPipelineRepository, DataQualityRepository, FeatureRepository
 from .market_data import MarketDataRepository
 from .ml import (
@@ -23,6 +25,7 @@ from .ml import (
     MLRepository,
     MLTrainingJobRepository,
 )
+from .service_repository import DatabaseServiceRepository
 from .state import (
     StateBackupRepository,
     StateCheckpointRepository,
@@ -40,52 +43,52 @@ from .trading import OrderFillRepository, OrderRepository, PositionRepository, T
 from .user import UserRepository
 
 __all__ = [
+    # System
+    "AlertRepository",
+    "AuditLogRepository",
+    "BalanceSnapshotRepository",
     # Base
-    "BaseRepository",
-    "RepositoryInterface",
-    # User
-    "UserRepository",
-    # Bot
-    "BotRepository",
+    "DatabaseRepository",
     "BotInstanceRepository",
     "BotLogRepository",
-    "SignalRepository",
-    "StrategyRepository",
-    # Trading
-    "OrderRepository",
-    "OrderFillRepository",
-    "PositionRepository",
-    "TradeRepository",
-    # Audit
-    "CapitalAuditLogRepository",
-    "ExecutionAuditLogRepository",
-    "PerformanceAuditLogRepository",
-    "RiskAuditLogRepository",
+    # Bot
+    "BotRepository",
     # Capital
     "CapitalAllocationRepository",
+    # Audit
+    "CapitalAuditLogRepository",
     "CurrencyExposureRepository",
-    "ExchangeAllocationRepository",
-    "FundFlowRepository",
     # Data
     "DataPipelineRepository",
     "DataQualityRepository",
+    "DatabaseServiceRepository",
+    "ExchangeAllocationRepository",
+    "ExecutionAuditLogRepository",
     "FeatureRepository",
-    # Market Data
-    "MarketDataRepository",
+    "FundFlowRepository",
+    "MLModelMetadataRepository",
+    "MLPredictionRepository",
     # ML
     "MLRepository",
-    "MLPredictionRepository",
-    "MLModelMetadataRepository",
     "MLTrainingJobRepository",
+    # Market Data
+    "MarketDataRepository",
+    "OrderFillRepository",
+    # Trading
+    "OrderRepository",
+    "PerformanceAuditLogRepository",
+    "PerformanceMetricsRepository",
+    "PositionRepository",
+    "RiskAuditLogRepository",
+    "SignalRepository",
     # State
     "StateBackupRepository",
     "StateCheckpointRepository",
     "StateHistoryRepository",
     "StateMetadataRepository",
     "StateSnapshotRepository",
-    # System
-    "AlertRepository",
-    "AuditLogRepository",
-    "BalanceSnapshotRepository",
-    "PerformanceMetricsRepository",
+    "StrategyRepository",
+    "TradeRepository",
+    # User
+    "UserRepository",
 ]

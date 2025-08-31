@@ -1,24 +1,24 @@
 """Bot-specific repository implementations."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.logging import get_logger
 from src.database.models.bot import Bot, BotLog, Signal, Strategy
-from src.database.repository.core_compliant_base import DatabaseRepository
+from src.database.repository.base import DatabaseRepository
+from src.database.repository.utils import RepositoryUtils
 
 logger = get_logger(__name__)
 
 
-class BotRepository(DatabaseRepository[Bot, str]):
+class BotRepository(DatabaseRepository):
     """Repository for Bot entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(
-            session=session, model=Bot, entity_type=Bot, key_type=str, name="BotRepository"
-        )
+        super().__init__(session=session, model=Bot, entity_type=Bot, key_type=str, name="BotRepository")
 
     async def get_active_bots(self) -> list[Bot]:
         """Get all active bots."""
@@ -61,23 +61,11 @@ class BotRepository(DatabaseRepository[Bot, str]):
 
     async def update_bot_status(self, bot_id: str, status: str) -> bool:
         """Update bot status."""
-        bot = await self.get(bot_id)
-        if bot:
-            bot.status = status
-            await self.update(bot)
-            return True
-        return False
+        return await RepositoryUtils.update_entity_status(self, bot_id, status, "Bot")
 
     async def update_bot_metrics(self, bot_id: str, metrics: dict[str, Any]) -> bool:
         """Update bot performance metrics."""
-        bot = await self.get(bot_id)
-        if bot:
-            for key, value in metrics.items():
-                if hasattr(bot, key):
-                    setattr(bot, key, value)
-            await self.update(bot)
-            return True
-        return False
+        return await RepositoryUtils.update_entity_fields(self, bot_id, "Bot", **metrics)
 
     async def get_bot_performance(self, bot_id: str) -> dict[str, Any]:
         """Get bot performance metrics."""
@@ -102,7 +90,7 @@ class BotRepository(DatabaseRepository[Bot, str]):
         }
 
 
-class StrategyRepository(DatabaseRepository[Strategy, str]):
+class StrategyRepository(DatabaseRepository):
     """Repository for Strategy entities."""
 
     def __init__(self, session: AsyncSession):
@@ -124,7 +112,7 @@ class StrategyRepository(DatabaseRepository[Strategy, str]):
 
     async def get_strategies_by_bot(self, bot_id: str) -> list[Strategy]:
         """Get all strategies for a bot."""
-        return await self.get_all(filters={"bot_id": bot_id})
+        return await RepositoryUtils.get_entities_by_field(self, "bot_id", bot_id)
 
     async def get_strategy_by_name(self, bot_id: str, name: str) -> Strategy | None:
         """Get strategy by name within a bot."""
@@ -134,18 +122,14 @@ class StrategyRepository(DatabaseRepository[Strategy, str]):
         """Activate a strategy."""
         strategy = await self.get(strategy_id)
         if strategy and strategy.status in ("INACTIVE", "PAUSED"):
-            strategy.status = "ACTIVE"
-            await self.update(strategy)
-            return True
+            return await RepositoryUtils.update_entity_status(self, strategy_id, "ACTIVE", "Strategy")
         return False
 
     async def deactivate_strategy(self, strategy_id: str) -> bool:
         """Deactivate a strategy."""
         strategy = await self.get(strategy_id)
         if strategy and strategy.status == "ACTIVE":
-            strategy.status = "INACTIVE"
-            await self.update(strategy)
-            return True
+            return await RepositoryUtils.update_entity_status(self, strategy_id, "INACTIVE", "Strategy")
         return False
 
     async def update_strategy_params(self, strategy_id: str, params: dict[str, Any]) -> bool:
@@ -159,23 +143,14 @@ class StrategyRepository(DatabaseRepository[Strategy, str]):
 
     async def update_strategy_metrics(self, strategy_id: str, metrics: dict[str, Any]) -> bool:
         """Update strategy performance metrics."""
-        strategy = await self.get(strategy_id)
-        if strategy:
-            for key, value in metrics.items():
-                if hasattr(strategy, key):
-                    setattr(strategy, key, value)
-            await self.update(strategy)
-            return True
-        return False
+        return await RepositoryUtils.update_entity_fields(self, strategy_id, "Strategy", **metrics)
 
 
-class SignalRepository(DatabaseRepository[Signal, str]):
+class SignalRepository(DatabaseRepository):
     """Repository for Signal entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(
-            session=session, model=Signal, entity_type=Signal, key_type=str, name="SignalRepository"
-        )
+        super().__init__(session=session, model=Signal, entity_type=Signal, key_type=str, name="SignalRepository")
 
     async def get_unexecuted_signals(self, strategy_id: str | None = None) -> list[Signal]:
         """Get unexecuted signals."""
@@ -187,29 +162,14 @@ class SignalRepository(DatabaseRepository[Signal, str]):
 
     async def get_signals_by_strategy(self, strategy_id: str, limit: int = 100) -> list[Signal]:
         """Get signals for a strategy."""
-        return await self.get_all(
-            filters={"strategy_id": strategy_id}, order_by="-created_at", limit=limit
-        )
+        return await self.get_all(filters={"strategy_id": strategy_id}, order_by="-created_at", limit=limit)
 
-    async def get_recent_signals(
-        self, hours: int = 24, strategy_id: str | None = None
-    ) -> list[Signal]:
+    async def get_recent_signals(self, hours: int = 24, strategy_id: str | None = None) -> list[Signal]:
         """Get recent signals."""
-        from sqlalchemy import select
+        additional_filters = {"strategy_id": strategy_id} if strategy_id else None
+        return await RepositoryUtils.get_recent_entities(self, hours, additional_filters)
 
-        since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        stmt = select(Signal).where(Signal.created_at >= since)
-
-        if strategy_id:
-            stmt = stmt.where(Signal.strategy_id == strategy_id)
-
-        stmt = stmt.order_by(Signal.created_at.desc())
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
-
-    async def mark_signal_executed(
-        self, signal_id: str, order_id: str, execution_time: float
-    ) -> bool:
+    async def mark_signal_executed(self, signal_id: str, order_id: str, execution_time: Decimal) -> bool:
         """Mark signal as executed."""
         signal = await self.get(signal_id)
         if signal:
@@ -224,7 +184,7 @@ class SignalRepository(DatabaseRepository[Signal, str]):
         self,
         signal_id: str,
         outcome: str,
-        pnl: float | None = None,  # TODO: Should be Decimal
+        pnl: Decimal | None = None,
     ) -> bool:
         """Update signal outcome."""
         signal = await self.get(signal_id)
@@ -236,9 +196,7 @@ class SignalRepository(DatabaseRepository[Signal, str]):
             return True
         return False
 
-    async def get_signal_statistics(
-        self, strategy_id: str, since: datetime | None = None
-    ) -> dict[str, Any]:
+    async def get_signal_statistics(self, strategy_id: str, since: datetime | None = None) -> dict[str, Any]:
         """Get signal statistics for a strategy."""
         from sqlalchemy import select
 
@@ -270,23 +228,17 @@ class SignalRepository(DatabaseRepository[Signal, str]):
             "successful_signals": len(successful),
             "execution_rate": (len(executed) / len(signals)) * 100,
             "success_rate": (len(successful) / len(executed)) * 100 if executed else 0,
-            "average_execution_time": (
-                sum(execution_times) / len(execution_times) if execution_times else 0
-            ),
+            "average_execution_time": (sum(execution_times) / len(execution_times) if execution_times else 0),
         }
 
 
-class BotLogRepository(DatabaseRepository[BotLog, str]):
+class BotLogRepository(DatabaseRepository):
     """Repository for BotLog entities."""
 
     def __init__(self, session: AsyncSession):
-        super().__init__(
-            session=session, model=BotLog, entity_type=BotLog, key_type=str, name="BotLogRepository"
-        )
+        super().__init__(session=session, model=BotLog, entity_type=BotLog, key_type=str, name="BotLogRepository")
 
-    async def get_logs_by_bot(
-        self, bot_id: str, level: str | None = None, limit: int = 100
-    ) -> list[BotLog]:
+    async def get_logs_by_bot(self, bot_id: str, level: str | None = None, limit: int = 100) -> list[BotLog]:
         """Get logs for a bot."""
         filters = {"bot_id": bot_id}
         if level:
@@ -296,19 +248,10 @@ class BotLogRepository(DatabaseRepository[BotLog, str]):
 
     async def get_error_logs(self, bot_id: str | None = None, hours: int = 24) -> list[BotLog]:
         """Get error logs."""
-        from sqlalchemy import select
-
-        since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        stmt = select(BotLog).where(
-            BotLog.level.in_(["ERROR", "CRITICAL"]), BotLog.created_at >= since
-        )
-
+        filters = {"level": ["ERROR", "CRITICAL"]}
         if bot_id:
-            stmt = stmt.where(BotLog.bot_id == bot_id)
-
-        stmt = stmt.order_by(BotLog.created_at.desc())
-        result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+            filters["bot_id"] = bot_id
+        return await self._execute_recent_query(timestamp_field="created_at", hours=hours, additional_filters=filters)
 
     async def log_event(
         self,
@@ -319,18 +262,57 @@ class BotLogRepository(DatabaseRepository[BotLog, str]):
         context: dict[str, Any] | None = None,
     ) -> BotLog:
         """Log an event."""
-        log = BotLog(
-            bot_id=bot_id, level=level, message=message, category=category, context=context
-        )
+        log = BotLog(bot_id=bot_id, level=level, message=message, category=category, context=context)
 
         return await self.create(log)
 
     async def cleanup_old_logs(self, days: int = 30) -> int:
         """Delete logs older than specified days."""
+        from datetime import timedelta
+
         from sqlalchemy import delete
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        stmt = delete(BotLog).where(BotLog.created_at < cutoff)
+        cutoff_time = datetime.now().replace(tzinfo=None) - timedelta(days=days)
+        stmt = delete(self.model).where(self.model.created_at < cutoff_time)
+
         result = await self.session.execute(stmt)
         await self.session.flush()
         return result.rowcount
+
+    async def _execute_recent_query(
+        self,
+        timestamp_field: str,
+        hours: int,
+        additional_filters: dict[str, Any] | None = None,
+    ) -> list[BotLog]:
+        """Execute query for recent entities within time range."""
+        from datetime import timedelta
+
+        from sqlalchemy import select
+
+        cutoff_time = datetime.now().replace(tzinfo=None) - timedelta(hours=hours)
+        stmt = select(self.model).where(getattr(self.model, timestamp_field) >= cutoff_time)
+
+        if additional_filters:
+            for key, value in additional_filters.items():
+                if hasattr(self.model, key):
+                    column = getattr(self.model, key)
+                    if isinstance(value, list):
+                        stmt = stmt.where(column.in_(value))
+                    else:
+                        stmt = stmt.where(column == value)
+
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def _execute_cleanup_query(self, timestamp_field: str, days: int) -> list[BotLog]:
+        """Execute query to get entities for cleanup."""
+        from datetime import timedelta
+
+        from sqlalchemy import select
+
+        cutoff_time = datetime.now().replace(tzinfo=None) - timedelta(days=days)
+        stmt = select(self.model).where(getattr(self.model, timestamp_field) < cutoff_time)
+
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

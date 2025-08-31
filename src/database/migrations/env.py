@@ -58,9 +58,7 @@ def get_url() -> str:
     except Exception as e:
         logger.error("Failed to get database URL", error=str(e))
         # Fallback to environment variable
-        return os.getenv(
-            "DATABASE_URL", "postgresql://postgres:password@localhost:5432/trading_bot"
-        )
+        return os.getenv("DATABASE_URL", "postgresql://user:pass@host:5432/db")
 
 
 def run_migrations_offline() -> None:
@@ -117,5 +115,6 @@ try:
 except Exception as e:
     # Not in Alembic context, probably being imported for testing
     import logging
+
     logger = logging.getLogger(__name__)
     logger.debug(f"Migration not in Alembic context: {e}")

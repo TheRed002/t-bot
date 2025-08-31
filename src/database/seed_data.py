@@ -20,9 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import Config
 from src.core.logging import get_logger
 from src.core.types import (
-    OrderSide,
-    OrderStatus,
-    OrderType,
     StrategyStatus,
     StrategyType,
 )
@@ -48,6 +45,19 @@ class DatabaseSeeder:
         Args:
             config: Application configuration
         """
+        # Security check - only allow seeding in development mode
+        if not config.debug:
+            raise ValueError(
+                "Database seeding is only allowed in development mode. "
+                "Set DEBUG=True in configuration to enable seeding."
+            )
+
+        if config.environment.lower() == "production":
+            raise ValueError(
+                "CRITICAL: Database seeding is FORBIDDEN in production environment. "
+                "This module contains hardcoded credentials and must never run in production."
+            )
+
         self.config = config
         self.jwt_handler = JWTHandler(config)
         self.seed_data: dict[str, Any] = {}
@@ -60,11 +70,13 @@ class DatabaseSeeder:
             Dictionary containing seed data
         """
         return {
+            # WARNING: These are development seed passwords and API keys
+            # MUST be changed or removed in production environments
             "users": [
                 {
                     "username": "admin",
                     "email": "admin@tbot.com",
-                    "password": "admin123",
+                    "password": "admin123",  # CHANGE IN PRODUCTION
                     "is_active": True,
                     "is_verified": True,
                 },
@@ -104,8 +116,8 @@ class DatabaseSeeder:
                     "is_active": True,
                     "exchange": "binance",
                     "trading_pair": "BTC/USDT",
-                    "initial_balance": 10000.0,
-                    "current_balance": 10500.0,
+                    "initial_balance": Decimal("10000.00"),
+                    "current_balance": Decimal("10500.00"),
                 },
                 {
                     "name": "ETH Mean Reversion",
@@ -113,8 +125,8 @@ class DatabaseSeeder:
                     "is_active": True,
                     "exchange": "okx",
                     "trading_pair": "ETH/USDT",
-                    "initial_balance": 5000.0,
-                    "current_balance": 5250.0,
+                    "initial_balance": Decimal("5000.00"),
+                    "current_balance": Decimal("5250.00"),
                 },
                 {
                     "name": "Multi-Asset Arbitrage",
@@ -122,33 +134,33 @@ class DatabaseSeeder:
                     "is_active": False,
                     "exchange": "coinbase",
                     "trading_pair": "Multiple",
-                    "initial_balance": 20000.0,
-                    "current_balance": 20000.0,
+                    "initial_balance": Decimal("20000.00"),
+                    "current_balance": Decimal("20000.00"),
                 },
             ],
             "strategies": [
                 {
                     "name": "Scalping Strategy",
                     "description": "Quick trades on small price movements",
-                    "strategy_type": StrategyType.STATIC,
+                    "strategy_type": StrategyType.CUSTOM,
                     "status": StrategyStatus.ACTIVE,
                     "parameters": {
                         "timeframe": "1m",
-                        "take_profit": 0.002,
-                        "stop_loss": 0.001,
-                        "position_size": 0.1,
+                        "take_profit": Decimal("0.002"),
+                        "stop_loss": Decimal("0.001"),
+                        "position_size": Decimal("0.1"),
                     },
                 },
                 {
                     "name": "Mean Reversion",
                     "description": "Trade on price deviations from mean",
-                    "strategy_type": StrategyType.STATIC,
+                    "strategy_type": StrategyType.CUSTOM,
                     "status": StrategyStatus.ACTIVE,
                     "parameters": {
                         "timeframe": "15m",
                         "lookback_period": 20,
-                        "entry_threshold": 2.0,
-                        "exit_threshold": 0.5,
+                        "entry_threshold": Decimal("2.0"),
+                        "exit_threshold": Decimal("0.5"),
                     },
                 },
                 {
@@ -157,7 +169,7 @@ class DatabaseSeeder:
                     "strategy_type": StrategyType.ARBITRAGE,
                     "status": StrategyStatus.ACTIVE,
                     "parameters": {
-                        "min_profit": 0.001,
+                        "min_profit": Decimal("0.001"),
                         "max_latency": 100,
                         "exchanges": ["binance", "okx", "coinbase"],
                     },
@@ -211,7 +223,7 @@ class DatabaseSeeder:
 
             # Create new user
             user = User(
-                id=str(uuid.uuid4()),
+                id=uuid.uuid4(),
                 username=user_data["username"],
                 email=user_data["email"],
                 password_hash=self.jwt_handler.hash_password(user_data["password"]),
@@ -226,9 +238,7 @@ class DatabaseSeeder:
         await session.commit()
         return users
 
-    async def seed_bot_instances(
-        self, session: AsyncSession, users: list[User]
-    ) -> list[BotInstance]:
+    async def seed_bot_instances(self, session: AsyncSession, users: list[User]) -> list[BotInstance]:
         """
         Seed bot instance data.
 
@@ -249,7 +259,6 @@ class DatabaseSeeder:
             # Check if bot already exists
             stmt = select(BotInstance).where(
                 BotInstance.name == bot_data["name"],
-                BotInstance.user_id == user.id,
             )
             result = await session.execute(stmt)
             existing_bot = result.scalar_one_or_none()
@@ -261,17 +270,17 @@ class DatabaseSeeder:
 
             # Create new bot
             bot = BotInstance(
-                id=str(uuid.uuid4()),
-                user_id=user.id,
+                id=uuid.uuid4(),
                 name=bot_data["name"],
-                strategy_type=StrategyType.STATIC,  # Default strategy type
+                strategy_type="STATIC",  # Default strategy type
                 exchange=bot_data["exchange"],
-                status=StrategyStatus.ACTIVE if bot_data["is_active"] else StrategyStatus.STOPPED,
+                status="running" if bot_data["is_active"] else "stopped",
                 config={
                     "description": bot_data["description"],
                     "trading_pair": bot_data["trading_pair"],
                     "initial_balance": bot_data["initial_balance"],
                     "current_balance": bot_data["current_balance"],
+                    "user_id": str(user.id),  # Store user reference in config
                 },
             )
 
@@ -282,9 +291,7 @@ class DatabaseSeeder:
         await session.commit()
         return bots
 
-    async def seed_strategies(
-        self, session: AsyncSession, bots: list[BotInstance]
-    ) -> list[Strategy]:
+    async def seed_strategies(self, session: AsyncSession, bots: list[BotInstance]) -> list[Strategy]:
         """
         Seed strategy data.
 
@@ -316,16 +323,15 @@ class DatabaseSeeder:
 
             # Create new strategy
             strategy = Strategy(
-                id=str(uuid.uuid4()),
+                id=uuid.uuid4(),
                 name=strategy_data["name"],
-                strategy_type=strategy_data["strategy_type"].value,
-                parameters=strategy_data["parameters"],
-                risk_parameters={
-                    "max_position_size": 1000,
-                    "stop_loss": 0.05,
-                    "take_profit": 0.10,
-                },
-                is_active=strategy_data["status"] == StrategyStatus.ACTIVE,
+                type=strategy_data["strategy_type"].value,
+                params=strategy_data["parameters"],
+                max_position_size=Decimal("1000"),
+                risk_per_trade=Decimal("0.02"),
+                stop_loss_percentage=Decimal("0.05"),
+                status="ACTIVE" if strategy_data["status"] == StrategyStatus.ACTIVE else "INACTIVE",
+                bot_id=bot.id,
             )
 
             session.add(strategy)
@@ -335,9 +341,7 @@ class DatabaseSeeder:
         await session.commit()
         return strategies
 
-    async def seed_exchange_credentials(
-        self, session: AsyncSession, users: list[User]
-    ) -> list[dict[str, Any]]:
+    async def seed_exchange_credentials(self, session: AsyncSession, users: list[User]) -> list[dict[str, Any]]:
         """
         Seed exchange credential data.
 
@@ -366,9 +370,7 @@ class DatabaseSeeder:
                     "is_testnet": cred_data["is_testnet"],
                 }
                 credentials.append(credential)
-                logger.info(
-                    f"Created credential for {cred_data['exchange']} for user {user.username}"
-                )
+                logger.info(f"Created credential for {cred_data['exchange']} for user {user.username}")
 
         await session.commit()
         return credentials
@@ -400,19 +402,23 @@ class DatabaseSeeder:
             for i in range(10):
                 trade_time = base_time + timedelta(hours=i * 12)
 
+                entry_price = Decimal(str(45000 + (i * 100)))
+                exit_price = Decimal(str(45100 + (i * 100)))
+                quantity = Decimal("0.01")
+                pnl = (exit_price - entry_price) * quantity if i % 2 == 0 else (entry_price - exit_price) * quantity
+
                 trade = Trade(
-                    id=str(uuid.uuid4()),
+                    id=uuid.uuid4(),
                     bot_id=bot.id,
-                    exchange_order_id=f"demo_order_{i}_{bot.id[:8]}",
                     exchange=bot.exchange,
                     symbol=bot.config.get("trading_pair", "BTC/USDT"),
-                    side=OrderSide.BUY if i % 2 == 0 else OrderSide.SELL,
-                    order_type=OrderType.LIMIT,
-                    quantity=Decimal("0.01"),
-                    price=Decimal(str(45000 + (i * 100))),
-                    executed_price=Decimal(str(45000 + (i * 100))),
-                    fee=Decimal("0.001"),
-                    status=OrderStatus.FILLED,
+                    side="BUY" if i % 2 == 0 else "SELL",
+                    quantity=quantity,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    pnl=pnl,
+                    fees=Decimal("0.001"),
+                    net_pnl=pnl - Decimal("0.001"),
                     created_at=trade_time,
                     updated_at=trade_time,
                 )
@@ -433,9 +439,7 @@ class DatabaseSeeder:
 
         # Only run in development mode
         if self.config.environment != "development":
-            logger.warning(
-                f"Seeding is only allowed in development mode. Current: {self.config.environment}"
-            )
+            logger.warning(f"Seeding is only allowed in development mode. Current: {self.config.environment}")
             return
 
         async with get_db_session() as session:
@@ -464,15 +468,11 @@ class DatabaseSeeder:
                     f"{len(strategies)} strategies, {len(credentials)} credentials"
                 )
 
-                # Print login credentials for testing
-                logger.info("\n" + "=" * 50)
-                logger.info("Test Login Credentials:")
-                logger.info("-" * 50)
-                for user_data in self._load_seed_data()["users"]:
-                    logger.info(
-                        f"Username: {user_data['username']}, Password: {user_data['password']}"
-                    )
-                logger.info("=" * 50 + "\n")
+                # Log successful seeding (passwords are not logged for security)
+                logger.info("Database seeded successfully with test data")
+                logger.info(
+                    f"Created {len(self._load_seed_data()['users'])} test users - " "see seed_data.py for credentials"
+                )
 
             except Exception as e:
                 logger.error(f"Error during seeding: {e}")

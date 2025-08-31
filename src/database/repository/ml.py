@@ -6,13 +6,14 @@ predictions, model metadata, and training jobs.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.ml import MLModelMetadata, MLPrediction, MLTrainingJob
-from src.database.repository.core_compliant_base import DatabaseRepository
+from src.database.repository.base import DatabaseRepository
 
 
 class MLPredictionRepository(DatabaseRepository):
@@ -25,11 +26,15 @@ class MLPredictionRepository(DatabaseRepository):
         Args:
             session: Database session
         """
-        super().__init__(session, MLPrediction)
+        super().__init__(
+            session=session,
+            model=MLPrediction,
+            entity_type=MLPrediction,
+            key_type=int,
+            name="MLPredictionRepository",
+        )
 
-    async def get_by_model_and_symbol(
-        self, model_name: str, symbol: str, limit: int = 100
-    ) -> list[MLPrediction]:
+    async def get_by_model_and_symbol(self, model_name: str, symbol: str, limit: int = 100) -> list[MLPrediction]:
         """
         Get predictions by model name and symbol.
 
@@ -130,9 +135,9 @@ class MLPredictionRepository(DatabaseRepository):
         if row:
             return {
                 "total_predictions": row.total_predictions or 0,
-                "avg_confidence": float(row.avg_confidence or 0),
-                "avg_error": float(row.avg_error or 0),
-                "error_stddev": float(row.error_stddev or 0),
+                "avg_confidence": str(row.avg_confidence or 0),
+                "avg_error": str(row.avg_error or 0),
+                "error_stddev": str(row.error_stddev or 0),
             }
 
         return {
@@ -142,9 +147,7 @@ class MLPredictionRepository(DatabaseRepository):
             "error_stddev": 0.0,
         }
 
-    async def update_with_actual(
-        self, prediction_id: int, actual_value: float
-    ) -> MLPrediction | None:
+    async def update_with_actual(self, prediction_id: int, actual_value: Decimal) -> MLPrediction | None:
         """
         Update prediction with actual value for evaluation.
 
@@ -175,7 +178,13 @@ class MLModelMetadataRepository(DatabaseRepository):
         Args:
             session: Database session
         """
-        super().__init__(session, MLModelMetadata)
+        super().__init__(
+            session=session,
+            model=MLModelMetadata,
+            entity_type=MLModelMetadata,
+            key_type=str,
+            name="MLModelMetadataRepository",
+        )
 
     async def get_latest_model(self, model_name: str, model_type: str) -> MLModelMetadata | None:
         """
@@ -194,7 +203,7 @@ class MLModelMetadataRepository(DatabaseRepository):
                 and_(
                     MLModelMetadata.model_name == model_name,
                     MLModelMetadata.model_type == model_type,
-                    MLModelMetadata.is_active == True,
+                    MLModelMetadata.is_active,
                 )
             )
             .order_by(desc(MLModelMetadata.version))
@@ -211,10 +220,31 @@ class MLModelMetadataRepository(DatabaseRepository):
         """
         result = await self.session.execute(
             select(MLModelMetadata)
-            .where(MLModelMetadata.is_active == True)
+            .where(MLModelMetadata.is_active)
             .order_by(MLModelMetadata.model_name, desc(MLModelMetadata.version))
         )
         return list(result.scalars().all())
+
+    async def get_by_version(self, model_name: str, version: int) -> MLModelMetadata | None:
+        """
+        Get model metadata by name and version.
+
+        Args:
+            model_name: Name of the model
+            version: Version number
+
+        Returns:
+            Model metadata or None if not found
+        """
+        result = await self.session.execute(
+            select(MLModelMetadata).where(
+                and_(
+                    MLModelMetadata.model_name == model_name,
+                    MLModelMetadata.version == version,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
 
     async def deactivate_old_versions(self, model_name: str, keep_versions: int = 3) -> int:
         """
@@ -243,7 +273,7 @@ class MLModelMetadataRepository(DatabaseRepository):
                     and_(
                         MLModelMetadata.model_name == model_name,
                         MLModelMetadata.id.notin_(keep_ids),
-                        MLModelMetadata.is_active == True,
+                        MLModelMetadata.is_active,
                     )
                 )
             )
@@ -269,7 +299,13 @@ class MLTrainingJobRepository(DatabaseRepository):
         Args:
             session: Database session
         """
-        super().__init__(session, MLTrainingJob)
+        super().__init__(
+            session=session,
+            model=MLTrainingJob,
+            entity_type=MLTrainingJob,
+            key_type=str,
+            name="MLTrainingJobRepository",
+        )
 
     async def get_running_jobs(self) -> list[MLTrainingJob]:
         """
@@ -279,15 +315,11 @@ class MLTrainingJobRepository(DatabaseRepository):
             List of running training jobs
         """
         result = await self.session.execute(
-            select(MLTrainingJob)
-            .where(MLTrainingJob.status == "running")
-            .order_by(MLTrainingJob.started_at)
+            select(MLTrainingJob).where(MLTrainingJob.status == "running").order_by(MLTrainingJob.started_at)
         )
         return list(result.scalars().all())
 
-    async def get_job_by_model(
-        self, model_name: str, status: str | None = None
-    ) -> list[MLTrainingJob]:
+    async def get_job_by_model(self, model_name: str, status: str | None = None) -> list[MLTrainingJob]:
         """
         Get training jobs for a specific model.
 
@@ -372,9 +404,10 @@ class MLTrainingJobRepository(DatabaseRepository):
 
 class MLRepository:
     """
-    Unified ML repository combining all ML-related repositories.
+    Unified ML repository providing data access to all ML-related repositories.
 
-    This provides a single interface for all ML database operations.
+    This provides a single data access interface for ML database operations.
+    Business logic should be handled by MLService.
     """
 
     def __init__(self, session: AsyncSession):
@@ -388,34 +421,3 @@ class MLRepository:
         self.predictions = MLPredictionRepository(session)
         self.models = MLModelMetadataRepository(session)
         self.training_jobs = MLTrainingJobRepository(session)
-
-    async def get_model_performance_summary(
-        self, model_name: str, days: int = 30
-    ) -> dict[str, Any]:
-        """
-        Get comprehensive performance summary for a model.
-
-        Args:
-            model_name: Name of the model
-            days: Number of days to analyze
-
-        Returns:
-            Dictionary with performance summary
-        """
-        # Get prediction accuracy
-        accuracy = await self.predictions.get_prediction_accuracy(model_name, days=days)
-
-        # Get latest model metadata
-        latest_model = await self.models.get_latest_model(model_name, "prediction")
-
-        # Get recent training jobs
-        recent_jobs = await self.training_jobs.get_job_by_model(model_name, status="completed")
-
-        return {
-            "model_name": model_name,
-            "accuracy_metrics": accuracy,
-            "latest_version": latest_model.version if latest_model else None,
-            "model_parameters": latest_model.parameters if latest_model else {},
-            "recent_training_jobs": len(recent_jobs),
-            "last_training": recent_jobs[0].completed_at if recent_jobs else None,
-        }

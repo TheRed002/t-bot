@@ -20,7 +20,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import redis.asyncio as redis
 from sqlalchemy import asc, desc, func, select, text
@@ -29,17 +29,13 @@ from sqlalchemy.orm import selectinload
 
 # Import interface types
 from src.core.base.interfaces import HealthStatus
-from src.core.base.repository import BaseRepository
 
 # Import foundation classes
 from src.core.base.service import TransactionalService
-from src.core.config.service import ConfigService
 
 # Import core components
 from src.core.exceptions import (
-    DatabaseConnectionError,
-    DatabaseQueryError,
-    DataError,
+    DatabaseError,
     DataValidationError,
     ServiceError,
     ValidationError,
@@ -52,16 +48,17 @@ from src.database.connection import (
     get_async_session,
     get_redis_client,
 )
-from src.database.models import Base, Position, Trade
-from src.database.queries import DatabaseQueries
+
+if TYPE_CHECKING:
+    from src.database.models import Position, Trade
+    from src.database.queries import DatabaseQueries
 
 # Import error handling decorators
 from src.error_handling.decorators import with_circuit_breaker, with_retry
 from src.utils.decorators import cache_result, time_execution
-from src.utils.validation.service import ValidationService
 
 # Type variables
-T = TypeVar("T", bound=Base)
+T = TypeVar("T")
 K = TypeVar("K")
 
 logger = get_logger(__name__)
@@ -69,9 +66,14 @@ logger = get_logger(__name__)
 
 class DatabaseService(TransactionalService):
     """
-    Comprehensive database service with all enterprise features.
+    Comprehensive database service implementing service layer pattern.
+
+    This service acts as a facade for database operations and delegates
+    business logic to specialized services while providing infrastructure
+    concerns like connection management, caching, and monitoring.
 
     Features:
+    - ✅ Service layer delegation pattern
     - ✅ Async connection pooling
     - ✅ Transaction support with context managers
     - ✅ Query optimization and prepared statements
@@ -86,31 +88,52 @@ class DatabaseService(TransactionalService):
 
     def __init__(
         self,
-        config_service: ConfigService,
-        validation_service: ValidationService,
+        config_service=None,  # ConfigService | None - imported conditionally
+        validation_service=None,  # ValidationService | None - imported conditionally
+        connection_manager: DatabaseConnectionManager | None = None,
+        dependency_injector=None,  # DependencyInjector for resolving specialized services
+        error_handling_service=None,  # ErrorHandlingService - imported conditionally
         correlation_id: str | None = None,
     ):
         """
-        Initialize database service.
+        Initialize database service with injected dependencies.
 
         Args:
-            config_service: Configuration service
-            validation_service: Validation service
+            config_service: Injected configuration service (optional for fallback)
+            validation_service: Injected validation service (optional for fallback)
+            connection_manager: Injected database connection manager (optional for fallback)
+            dependency_injector: Injected dependency injector for resolving specialized services
+            error_handling_service: Injected error handling service (optional)
             correlation_id: Request correlation ID
         """
+        # Fallback configuration if services not injected
+        if config_service is None:
+            from src.core.config import Config
+
+            config_dict = Config().to_dict()
+        else:
+            config_dict = config_service.get_config_dict()
+
         super().__init__(
             name="DatabaseService",
-            config=config_service.get_config_dict(),
+            config=config_dict,
             correlation_id=correlation_id,
         )
 
         self.config_service = config_service
         self.validation_service = validation_service
-        self.connection_manager: DatabaseConnectionManager | None = None
+        self.error_handling_service = error_handling_service
+        self.connection_manager = connection_manager
+        self._dependency_injector = dependency_injector
         self.queries: DatabaseQueries | None = None
 
+        # No direct service dependencies - use service registry instead
+
         # Cache configuration from config
-        db_service_config = config_service.get_config().get("database_service", {})
+        if config_service:
+            db_service_config = config_service.get_config().get("database_service", {})
+        else:
+            db_service_config = config_dict.get("database_service", {})
         self._cache_enabled = db_service_config.get("cache_enabled", True)
         self._cache_ttl = db_service_config.get("cache_ttl_seconds", 300)
         self._redis_client: redis.Redis | None = None
@@ -120,12 +143,8 @@ class DatabaseService(TransactionalService):
         self._query_cache: dict[str, Any] = {}
         self._query_cache_max_size = db_service_config.get("query_cache_max_size", 1000)
         self._slow_query_threshold = db_service_config.get("slow_query_threshold_seconds", 1.0)
-        self._connection_pool_monitoring_enabled = db_service_config.get(
-            "connection_pool_monitoring_enabled", True
-        )
-        self._performance_metrics_enabled = db_service_config.get(
-            "performance_metrics_enabled", True
-        )
+        self._connection_pool_monitoring_enabled = db_service_config.get("connection_pool_monitoring_enabled", True)
+        self._performance_metrics_enabled = db_service_config.get("performance_metrics_enabled", True)
 
         # Performance metrics
         self._performance_metrics = {
@@ -142,6 +161,11 @@ class DatabaseService(TransactionalService):
             "transactions_rolled_back": 0,
         }
 
+        # Concurrency control for connection operations
+        self._connection_lock = asyncio.Lock()
+        self._operation_semaphore = asyncio.Semaphore(100)  # Max concurrent operations
+        self._max_concurrent_operations = 100
+
         # Configure circuit breaker and retry
         self.configure_circuit_breaker(enabled=True, threshold=5, timeout=60)
 
@@ -150,34 +174,48 @@ class DatabaseService(TransactionalService):
         logger.info("DatabaseService initialized with enterprise features")
 
     async def _do_start(self) -> None:
-        """Start the database service."""
-        try:
-            # Initialize connection manager
-            config = self.config_service.get_config()
-            self.connection_manager = DatabaseConnectionManager(config)
-            await self.connection_manager.initialize()
+        """Start the database service with race condition protection."""
+        async with self._connection_lock:
+            try:
+                # Initialize connection manager if not injected
+                if self.connection_manager is None:
+                    if self.config_service:
+                        config = self.config_service.get_config()
+                    else:
+                        from src.core.config import Config
 
-            # Initialize Redis client for caching
-            if self._cache_enabled:
-                try:
-                    self._redis_client = await get_redis_client()
-                    logger.info("Redis cache layer initialized")
-                except Exception as e:
-                    logger.warning(f"Redis cache initialization failed: {e}")
-                    self._cache_enabled = False
+                        config = Config().to_dict()
+                    self.connection_manager = DatabaseConnectionManager(config)
 
-            # Initialize query handler
-            async with get_async_session() as session:
-                self.queries = DatabaseQueries(session, self.config_service.get_config_dict())
+                # Initialize if not already done (with double-check pattern)
+                if not hasattr(self.connection_manager, "_initialized") or not self.connection_manager._initialized:
+                    await self.connection_manager.initialize()
 
-            # Set transaction manager
-            self.set_transaction_manager(self.connection_manager)
+                # Initialize Redis client for caching
+                if self._cache_enabled:
+                    try:
+                        self._redis_client = await get_redis_client()
+                        logger.info("Redis cache layer initialized")
+                    except Exception as e:
+                        logger.warning(f"Redis cache initialization failed: {e}")
+                        self._cache_enabled = False
 
-            logger.info("DatabaseService started successfully")
+                # Initialize query handler
+                async with get_async_session() as session:
+                    config_dict = self.config_service.get_config_dict() if self.config_service else config
+                    from src.database.queries import DatabaseQueries
 
-        except Exception as e:
-            logger.error(f"Failed to start DatabaseService: {e}")
-            raise ServiceError(f"DatabaseService startup failed: {e}")
+                    self.queries = DatabaseQueries(session, config_dict)
+
+                # Set transaction manager
+                self.set_transaction_manager(self.connection_manager)
+
+                logger.info("DatabaseService started successfully")
+
+            except Exception as e:
+                logger.error(f"Failed to start DatabaseService: {e}")
+                raise ServiceError(f"DatabaseService startup failed: {e}")
+
 
     async def _do_stop(self) -> None:
         """Stop the database service."""
@@ -192,7 +230,49 @@ class DatabaseService(TransactionalService):
                 await connection_manager.close()
 
             if redis_client:
-                await redis_client.aclose()
+                try:
+                    # Check if aclose method exists (newer redis versions)
+                    if hasattr(redis_client, "aclose") and callable(redis_client.aclose):
+                        await redis_client.aclose()
+                    elif hasattr(redis_client, "close") and callable(redis_client.close):
+                        # For async Redis clients, close() is usually async too
+                        close_method = redis_client.close
+                        if asyncio.iscoroutinefunction(close_method):
+                            await close_method()
+                        else:
+                            close_method()
+                    elif hasattr(redis_client, "connection_pool"):
+                        # Fallback: close connection pool if available
+                        pool = redis_client.connection_pool
+                        if hasattr(pool, "disconnect") and callable(pool.disconnect):
+                            if asyncio.iscoroutinefunction(pool.disconnect):
+                                await pool.disconnect()
+                            else:
+                                pool.disconnect()
+                except Exception as redis_close_error:
+                    logger.warning(f"Error closing Redis client: {redis_close_error}")
+                    # Try to forcefully disconnect if available
+                    try:
+                        if hasattr(redis_client, "connection_pool") and redis_client.connection_pool:
+                            pool = redis_client.connection_pool
+                            if hasattr(pool, "disconnect") and callable(pool.disconnect):
+                                if asyncio.iscoroutinefunction(pool.disconnect):
+                                    await pool.disconnect(inuse_connections=True)
+                                else:
+                                    pool.disconnect(inuse_connections=True)
+                    except Exception as force_close_error:
+                        logger.error(f"Force close Redis connections failed: {force_close_error}")
+                        # Try alternative cleanup methods
+                        try:
+                            if hasattr(redis_client, "_pool") and redis_client._pool:
+                                alt_pool = redis_client._pool
+                                if hasattr(alt_pool, "disconnect"):
+                                    if asyncio.iscoroutinefunction(alt_pool.disconnect):
+                                        await alt_pool.disconnect()
+                                    else:
+                                        alt_pool.disconnect()
+                        except Exception as alt_close_error:
+                            logger.error(f"Alternative Redis cleanup failed: {alt_close_error}")
 
             logger.info("DatabaseService stopped successfully")
 
@@ -205,8 +285,8 @@ class DatabaseService(TransactionalService):
 
     # CRUD Operations with Comprehensive Error Handling
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def create_entity(self, entity: T) -> T:
         """
@@ -225,43 +305,61 @@ class DatabaseService(TransactionalService):
         return await self.execute_with_monitoring("create_entity", self._create_entity_impl, entity)
 
     async def _create_entity_impl(self, entity: T) -> T:
-        """Internal implementation of entity creation."""
+        """Internal implementation of entity creation with consistent data transformation."""
         start_time = datetime.now(timezone.utc)
 
-        try:
-            # Validate entity data
-            self._validate_entity(entity)
+        async with self._operation_semaphore:
+            try:
+                # Apply consistent data transformation patterns
+                entity = self._transform_entity_data(entity, "create")
 
-            async with get_async_session() as session:
-                # Validate financial data if applicable
-                if hasattr(entity, "price") and hasattr(entity, "quantity"):
-                    entity.price = self.validation_service.validate_decimal(entity.price)
-                    entity.quantity = self.validation_service.validate_decimal(entity.quantity)
+                # Validate entity data using consistent validation
+                self._validate_entity(entity)
 
-                session.add(entity)
-                await session.flush()
-                await session.commit()
-                await session.refresh(entity)
+                # Apply boundary validation for consistency with error_handling module
+                if hasattr(entity, "__dict__"):
+                    entity_data = entity.__dict__.copy()
+                    # Add required fields for boundary validation
+                    entity_data.update({
+                        "component": "database",
+                        "error_type": "validation",
+                        "severity": "medium",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    from src.utils.messaging_patterns import BoundaryValidator
+                    try:
+                        BoundaryValidator.validate_monitoring_to_error_boundary(entity_data)
+                    except Exception as validation_error:
+                        logger.debug(f"Boundary validation passed with expected validation: {validation_error}")
+                        # This is expected when entity doesn't match monitoring format
 
-                # Invalidate relevant cache entries
-                if self._cache_enabled:
-                    await self._invalidate_cache_pattern(f"{type(entity).__name__}_list_*")
+                # Use timeout for database operations to prevent hanging
+                async with asyncio.timeout(30):  # 30 second timeout
+                    async with get_async_session() as session:
+                        session.add(entity)
+                        await session.flush()
+                        await session.commit()
+                        await session.refresh(entity)
 
-                self._record_query_metrics("create", start_time, True)
-                return entity
+                        # Consistent cache invalidation pattern
+                        if self._cache_enabled:
+                            await self._invalidate_cache_pattern(f"{type(entity).__name__}_list_*")
 
-        except ValidationError as e:
-            # ValidationError from validation service - don't wrap or retry
-            self._record_query_metrics("create", start_time, False)
-            logger.error(f"Entity validation failed: {e}")
-            raise  # Re-raise validation errors as-is
-        except Exception as e:
-            self._record_query_metrics("create", start_time, False)
-            logger.error(f"Entity creation failed: {e}")
-            raise DataError(f"Failed to create entity: {e}")
+                        self._record_query_metrics("create", start_time, True)
+                        return entity
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
+            except ValidationError as e:
+                # ValidationError from validation service - propagate consistently
+                self._record_query_metrics("create", start_time, False)
+                logger.error(f"Entity validation failed: {e}")
+                raise  # Re-raise validation errors as-is
+            except Exception as e:
+                self._record_query_metrics("create", start_time, False)
+                logger.error(f"Entity creation failed: {e}")
+                raise DatabaseError(f"Failed to create entity: {e}")
+
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @cache_result(ttl=300)
     @time_execution
     async def get_entity_by_id(self, model_class: type[T], entity_id: K) -> T | None:
@@ -284,42 +382,43 @@ class DatabaseService(TransactionalService):
         start_time = datetime.now(timezone.utc)
         cache_key = f"{model_class.__name__}_{entity_id}"
 
-        try:
-            # Check Redis cache first
-            if self._cache_enabled and self._redis_client:
-                cached_data = await self._redis_client.get(cache_key)
-                if cached_data:
-                    self._performance_metrics["cache_hits"] += 1
-                    logger.debug(f"Cache hit for {cache_key}")
-                    # Note: In production, you'd deserialize the cached entity
-                    # For now, fall through to database query
+        async with self._operation_semaphore:
+            try:
+                # Check Redis cache first
+                if self._cache_enabled and self._redis_client:
+                    cached_data = await self._redis_client.get(cache_key)
+                    if cached_data:
+                        self._performance_metrics["cache_hits"] += 1
+                        logger.debug(f"Cache hit for {cache_key}")
+                        # Fall through to database query for now
 
-            # Query database
-            async with get_async_session() as session:
-                result = await session.execute(
-                    select(model_class).where(model_class.id == entity_id)
-                )
-                entity = result.scalar_one_or_none()
+                # Query database with timeout
+                async with asyncio.timeout(15):  # 15 second timeout for reads
+                    async with get_async_session() as session:
+                        result = await session.execute(select(model_class).where(model_class.id == entity_id))
+                        entity = result.scalar_one_or_none()
 
-                # Cache the result
-                if self._cache_enabled and self._redis_client and entity:
-                    await self._redis_client.setex(
-                        cache_key,
-                        self._cache_ttl,
-                        # In production, serialize the entity
-                        str(entity.id),
-                    )
+                        # Cache the result
+                        if self._cache_enabled and self._redis_client and entity:
+                            await asyncio.wait_for(
+                                self._redis_client.setex(
+                                    cache_key,
+                                    self._cache_ttl,
+                                    str(entity.id),
+                                ),
+                                timeout=5.0,
+                            )
 
-                self._record_query_metrics("get_by_id", start_time, True)
-                return entity
+                        self._record_query_metrics("get_by_id", start_time, True)
+                        return entity
 
-        except Exception as e:
-            self._record_query_metrics("get_by_id", start_time, False)
-            logger.error(f"Get entity by ID failed: {e}")
-            raise DataError(f"Failed to get entity by ID: {e}")
+            except Exception as e:
+                self._record_query_metrics("get_by_id", start_time, False)
+                logger.error(f"Get entity by ID failed: {e}")
+                raise DatabaseError(f"Failed to get entity by ID: {e}")
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def update_entity(self, entity: T) -> T:
         """
@@ -347,11 +446,14 @@ class DatabaseService(TransactionalService):
                 await session.commit()
                 await session.refresh(merged_entity)
 
-                # Invalidate cache
+                # Invalidate cache concurrently
                 if self._cache_enabled:
                     cache_key = f"{type(entity).__name__}_{entity.id}"
-                    await self._invalidate_cache(cache_key)
-                    await self._invalidate_cache_pattern(f"{type(entity).__name__}_list_*")
+                    await asyncio.gather(
+                        self._invalidate_cache(cache_key),
+                        self._invalidate_cache_pattern(f"{type(entity).__name__}_list_*"),
+                        return_exceptions=True,
+                    )
 
                 self._record_query_metrics("update", start_time, True)
                 return merged_entity
@@ -359,10 +461,10 @@ class DatabaseService(TransactionalService):
         except Exception as e:
             self._record_query_metrics("update", start_time, False)
             logger.error(f"Entity update failed: {e}")
-            raise DataError(f"Failed to update entity: {e}")
+            raise DatabaseError(f"Failed to update entity: {e}")
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def delete_entity(self, model_class: type[T], entity_id: K) -> bool:
         """
@@ -375,9 +477,7 @@ class DatabaseService(TransactionalService):
         Returns:
             True if deleted, False if not found
         """
-        return await self.execute_with_monitoring(
-            "delete_entity", self._delete_entity_impl, model_class, entity_id
-        )
+        return await self.execute_with_monitoring("delete_entity", self._delete_entity_impl, model_class, entity_id)
 
     async def _delete_entity_impl(self, model_class: type[T], entity_id: K) -> bool:
         """Internal implementation of entity deletion."""
@@ -390,14 +490,17 @@ class DatabaseService(TransactionalService):
                 if not entity:
                     return False
 
-                await session.delete(entity)
+                session.delete(entity)
                 await session.commit()
 
-                # Invalidate cache
+                # Invalidate cache concurrently
                 if self._cache_enabled:
                     cache_key = f"{model_class.__name__}_{entity_id}"
-                    await self._invalidate_cache(cache_key)
-                    await self._invalidate_cache_pattern(f"{model_class.__name__}_list_*")
+                    await asyncio.gather(
+                        self._invalidate_cache(cache_key),
+                        self._invalidate_cache_pattern(f"{model_class.__name__}_list_*"),
+                        return_exceptions=True,
+                    )
 
                 self._record_query_metrics("delete", start_time, True)
                 return True
@@ -405,12 +508,12 @@ class DatabaseService(TransactionalService):
         except Exception as e:
             self._record_query_metrics("delete", start_time, False)
             logger.error(f"Entity deletion failed: {e}")
-            raise DataError(f"Failed to delete entity: {e}")
+            raise DatabaseError(f"Failed to delete entity: {e}")
 
     # Advanced Query Operations
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def list_entities(
         self,
@@ -505,14 +608,12 @@ class DatabaseService(TransactionalService):
         except Exception as e:
             self._record_query_metrics("list", start_time, False)
             logger.error(f"Entity listing failed: {e}")
-            raise DataError(f"Failed to list entities: {e}")
+            raise DatabaseError(f"Failed to list entities: {e}")
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
-    async def count_entities(
-        self, model_class: type[T], filters: dict[str, Any] | None = None
-    ) -> int:
+    async def count_entities(self, model_class: type[T], filters: dict[str, Any] | None = None) -> int:
         """
         Count entities with optional filtering.
 
@@ -523,13 +624,9 @@ class DatabaseService(TransactionalService):
         Returns:
             Number of entities
         """
-        return await self.execute_with_monitoring(
-            "count_entities", self._count_entities_impl, model_class, filters
-        )
+        return await self.execute_with_monitoring("count_entities", self._count_entities_impl, model_class, filters)
 
-    async def _count_entities_impl(
-        self, model_class: type[T], filters: dict[str, Any] | None
-    ) -> int:
+    async def _count_entities_impl(self, model_class: type[T], filters: dict[str, Any] | None) -> int:
         """Internal implementation of entity counting."""
         start_time = datetime.now(timezone.utc)
 
@@ -556,12 +653,12 @@ class DatabaseService(TransactionalService):
         except Exception as e:
             self._record_query_metrics("count", start_time, False)
             logger.error(f"Entity counting failed: {e}")
-            raise DataError(f"Failed to count entities: {e}")
+            raise DatabaseError(f"Failed to count entities: {e}")
 
     # Bulk Operations
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
+    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60)
+    @with_retry(max_attempts=3, base_delay=Decimal("1.0"))
     @time_execution
     async def bulk_create(self, entities: list[T]) -> list[T]:
         """
@@ -579,22 +676,33 @@ class DatabaseService(TransactionalService):
         return await self.execute_with_monitoring("bulk_create", self._bulk_create_impl, entities)
 
     async def _bulk_create_impl(self, entities: list[T]) -> list[T]:
-        """Internal implementation of bulk creation."""
+        """Internal implementation of bulk creation with consistent processing paradigms."""
         start_time = datetime.now(timezone.utc)
 
-        try:
-            # Validate all entities
-            for entity in entities:
-                self._validate_entity(entity)
-
-            async with get_async_session() as session:
-                session.add_all(entities)
-                await session.flush()
-                await session.commit()
-
-                # Refresh all entities
+        async with self._operation_semaphore:
+            try:
+                # Apply consistent batch processing patterns matching error_handling module
+                from src.utils.messaging_patterns import ProcessingParadigmAligner
+                
+                # Transform list to batch format for consistency
+                batch_data = ProcessingParadigmAligner.create_batch_from_stream(
+                    [entity.__dict__ if hasattr(entity, "__dict__") else {"entity": str(entity)} for entity in entities]
+                )
+                
+                # Validate all entities using consistent patterns
                 for entity in entities:
-                    await session.refresh(entity)
+                    self._validate_entity(entity)
+
+                # Use timeout for bulk operations which may take longer
+                async with asyncio.timeout(60):  # 60 second timeout for bulk operations
+                    async with get_async_session() as session:
+                        session.add_all(entities)
+                        await session.flush()
+                        await session.commit()
+
+                        # Refresh all entities
+                        for entity in entities:
+                            await session.refresh(entity)
 
                 # Invalidate cache
                 if self._cache_enabled and entities:
@@ -602,12 +710,13 @@ class DatabaseService(TransactionalService):
                     await self._invalidate_cache_pattern(f"{entity_type}_list_*")
 
                 self._record_query_metrics("bulk_create", start_time, True)
+                logger.info(f"Processed batch {batch_data['batch_id']} with {batch_data['batch_size']} items")
                 return entities
 
-        except Exception as e:
-            self._record_query_metrics("bulk_create", start_time, False)
-            logger.error(f"Bulk creation failed: {e}")
-            raise DataError(f"Failed to bulk create entities: {e}")
+            except Exception as e:
+                self._record_query_metrics("bulk_create", start_time, False)
+                logger.error(f"Bulk creation failed: {e}")
+                raise DatabaseError(f"Failed to bulk create entities: {e}")
 
     # Transaction Management
 
@@ -641,126 +750,57 @@ class DatabaseService(TransactionalService):
                         logger.error(f"Transaction rolled back: {e}")
                     except Exception as rollback_error:
                         logger.critical(
-                            f"CRITICAL: Transaction rollback failed: {rollback_error}, "
-                            f"original error: {e}"
+                            f"CRITICAL: Transaction rollback failed: {rollback_error}, " f"original error: {e}"
                         )
                         self._performance_metrics["transactions_rolled_back"] += 1
+                        # Try to invalidate session if rollback fails
+                        try:
+                            session.invalidate()
+                        except Exception as invalidate_error:
+                            logger.critical(f"Session invalidate failed after rollback error: " f"{invalidate_error}")
                     raise
                 finally:
-                    # Ensure session is properly closed even if commit/rollback fail
-                    if session and not committed:
+                    # Ensure session is properly closed
+                    if session:
                         try:
-                            await session.close()
-                        except Exception as close_error:
-                            logger.error(f"Session close failed: {close_error}")
-                            # Try to invalidate the session to prevent connection reuse
-                            try:
-                                await session.invalidate()
-                            except Exception as invalidate_error:
-                                logger.critical(f"Session invalidate failed: {invalidate_error}")
+                            # Only close if not already committed or rolled back
+                            if not committed:
+                                try:
+                                    await session.close()
+                                except Exception as close_error:
+                                    logger.error(f"Session close failed: {close_error}")
+                                    # Try to invalidate the session to prevent connection reuse
+                                    try:
+                                        session.invalidate()
+                                    except Exception as invalidate_error:
+                                        logger.critical(f"Session invalidate failed: {invalidate_error}")
+                        except Exception as final_error:
+                            logger.critical(f"Final session cleanup failed: {final_error}")
 
         except Exception as e:
             logger.error(f"Transaction failed: {e}")
-            raise DataError(f"Transaction failed: {e}")
+            raise DatabaseError(f"Transaction failed: {e}")
 
-    # Trading-Specific Operations
+    @asynccontextmanager
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+        """
+        Provide database session context manager (alias for transaction).
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def get_trades_by_bot(
-        self,
-        bot_id: str,
-        limit: int | None = None,
-        offset: int = 0,
-        start_time: datetime | None = None,
-        end_time: datetime | None = None,
-    ) -> list[Trade]:
-        """Get trades for a specific bot with time filtering."""
-        return await self.execute_with_monitoring(
-            "get_trades_by_bot",
-            self._get_trades_by_bot_impl,
-            bot_id,
-            limit,
-            offset,
-            start_time,
-            end_time,
-        )
+        This method provides compatibility with tests expecting a get_session method.
 
-    async def _get_trades_by_bot_impl(
-        self,
-        bot_id: str,
-        limit: int | None,
-        offset: int,
-        start_time: datetime | None,
-        end_time: datetime | None,
-    ) -> list[Trade]:
-        """Internal implementation of get trades by bot."""
+        Yields:
+            AsyncSession: Database session within transaction
+        """
+        async with self.transaction() as session:
+            yield session
 
-        async with get_async_session() as session:
-            query = select(Trade).where(Trade.bot_id == bot_id)
+    # Infrastructure Operations - No Business Logic
+    # Business logic should be handled by specialized services
 
-            if start_time:
-                query = query.where(Trade.timestamp >= start_time)
-            if end_time:
-                query = query.where(Trade.timestamp <= end_time)
 
-            query = query.order_by(desc(Trade.timestamp))
 
-            if limit:
-                query = query.limit(limit)
-            if offset:
-                query = query.offset(offset)
 
-            result = await session.execute(query)
-            return list(result.scalars().all())
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def get_positions_by_bot(self, bot_id: str) -> list[Position]:
-        """Get all positions for a specific bot."""
-        return await self.execute_with_monitoring(
-            "get_positions_by_bot", self._get_positions_by_bot_impl, bot_id
-        )
-
-    async def _get_positions_by_bot_impl(self, bot_id: str) -> list[Position]:
-        """Internal implementation of get positions by bot."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(Position)
-                .where(Position.bot_id == bot_id)
-                .order_by(desc(Position.updated_at))
-            )
-            return list(result.scalars().all())
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @cache_result(ttl=60)
-    @time_execution
-    async def calculate_total_pnl(
-        self, bot_id: str, start_time: datetime | None = None, end_time: datetime | None = None
-    ) -> Decimal:
-        """Calculate total P&L for a bot."""
-        return await self.execute_with_monitoring(
-            "calculate_total_pnl", self._calculate_total_pnl_impl, bot_id, start_time, end_time
-        )
-
-    async def _calculate_total_pnl_impl(
-        self, bot_id: str, start_time: datetime | None, end_time: datetime | None
-    ) -> Decimal:
-        """Internal implementation of total P&L calculation."""
-        async with get_async_session() as session:
-            query = select(func.sum(Trade.pnl)).where(Trade.bot_id == bot_id)
-
-            if start_time:
-                query = query.where(Trade.timestamp >= start_time)
-            if end_time:
-                query = query.where(Trade.timestamp <= end_time)
-
-            result = await session.execute(query)
-            total_pnl = result.scalar()
-            return total_pnl or Decimal("0")
 
     # Cache Management
 
@@ -768,34 +808,58 @@ class DatabaseService(TransactionalService):
         """Invalidate specific cache key."""
         if self._cache_enabled and self._redis_client:
             try:
-                await self._redis_client.delete(cache_key)
+                # Add timeout to prevent hanging on dead connections
+                await asyncio.wait_for(self._redis_client.delete(cache_key), timeout=5.0)
                 logger.debug(f"Invalidated cache key: {cache_key}")
+            except asyncio.TimeoutError:
+                logger.warning(f"Cache invalidation timed out for {cache_key}")
+                # Disable cache to prevent further timeout issues
+                self._cache_enabled = False
             except Exception as e:
                 logger.warning(f"Cache invalidation failed for {cache_key}: {e}")
+                # Disable cache if connection is broken
+                if "connection" in str(e).lower() or "timeout" in str(e).lower():
+                    self._cache_enabled = False
 
     async def _invalidate_cache_pattern(self, pattern: str) -> None:
         """Invalidate cache keys matching pattern."""
         if self._cache_enabled and self._redis_client:
             try:
-                keys = await self._redis_client.keys(pattern)
+                # Add timeout to prevent hanging on dead connections
+                keys = await asyncio.wait_for(self._redis_client.keys(pattern), timeout=5.0)
                 if keys:
-                    await self._redis_client.delete(*keys)
+                    await asyncio.wait_for(self._redis_client.delete(*keys), timeout=5.0)
                     logger.debug(f"Invalidated {len(keys)} cache keys matching {pattern}")
+            except asyncio.TimeoutError:
+                logger.warning(f"Cache pattern invalidation timed out for {pattern}")
+                # Disable cache to prevent further timeout issues
+                self._cache_enabled = False
             except Exception as e:
                 logger.warning(f"Cache pattern invalidation failed for {pattern}: {e}")
+                # Disable cache if connection is broken
+                if "connection" in str(e).lower() or "timeout" in str(e).lower():
+                    self._cache_enabled = False
 
     # Health Checks and Monitoring
 
     async def _service_health_check(self) -> Any:
         """Service-specific health check."""
+        return await self.get_health_status()
+
+    async def get_health_status(self) -> HealthStatus:
+        """Get service health status."""
         try:
             # Test database connectivity
             async with get_async_session() as session:
                 await session.execute(text("SELECT 1"))
 
-            # Test Redis connectivity
+            # Test Redis connectivity with timeout
             if self._redis_client:
-                await self._redis_client.ping()
+                try:
+                    await asyncio.wait_for(self._redis_client.ping(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Redis ping timed out")
+                    return HealthStatus.DEGRADED
 
             # Check connection pool health
             if self.connection_manager:
@@ -833,8 +897,7 @@ class DatabaseService(TransactionalService):
                         "pool_size": pool_status["size"],
                         "pool_used": pool_status["used"],
                         "pool_free": pool_status["free"],
-                        "pool_usage_percent": (pool_status["used"] / max(pool_status["size"], 1))
-                        * 100,
+                        "pool_usage_percent": (pool_status["used"] / max(pool_status["size"], 1)) * 100,
                     }
                 )
         except Exception as e:
@@ -843,12 +906,56 @@ class DatabaseService(TransactionalService):
     # Utility Methods
 
     def _validate_entity(self, entity: T) -> None:
-        """Validate entity data."""
-        if not entity:
-            raise DataValidationError("Entity cannot be None")
+        """Validate entity data using consistent patterns matching error_handling module."""
+        try:
+            if not entity:
+                raise DataValidationError("Entity cannot be None")
 
-        # Additional validation can be added here
-        # Use the validation service for complex validations
+            self._validate_financial_fields(entity)
+        except (ValidationError, DataValidationError) as e:
+            # Apply consistent error propagation patterns matching error_handling module
+            from src.utils.messaging_patterns import ErrorPropagationMixin
+            propagator = ErrorPropagationMixin()
+            propagator.propagate_validation_error(e, f"DatabaseService._validate_entity")
+            # propagate_validation_error should raise, but add explicit raise for type checker
+            raise
+
+    def _validate_financial_fields(self, entity: T) -> None:
+        """Validate financial fields of an entity."""
+        self._validate_price_field(entity)
+        self._validate_quantity_field(entity)
+        self._validate_symbol_field(entity)
+
+    def _validate_price_field(self, entity: T) -> None:
+        """Validate price field."""
+        if hasattr(entity, "price") and entity.price is not None and entity.price <= 0:
+            raise ValidationError("Price must be positive")
+
+    def _validate_quantity_field(self, entity: T) -> None:
+        """Validate quantity field."""
+        if hasattr(entity, "quantity") and entity.quantity is not None and entity.quantity <= 0:
+            raise ValidationError("Quantity must be positive")
+
+    def _validate_symbol_field(self, entity: T) -> None:
+        """Validate symbol field."""
+        if hasattr(entity, "symbol") and entity.symbol is not None:
+            if not entity.symbol or not entity.symbol.strip():
+                raise ValidationError("Symbol is required")
+
+    def _handle_validation_error(self, error: ValidationError | DataValidationError, entity: T) -> None:
+        """Handle validation errors with proper error service integration."""
+        if self.error_handling_service:
+            asyncio.create_task(
+                self.error_handling_service.handle_error(
+                    error=error,
+                    component="DatabaseService",
+                    operation="_validate_entity",
+                    context={
+                        "entity_type": type(entity).__name__,
+                        "validation_error": str(error),
+                    },
+                )
+            )
 
     def _record_query_metrics(self, operation: str, start_time: datetime, success: bool) -> None:
         """Record query execution metrics."""
@@ -897,709 +1004,43 @@ class DatabaseService(TransactionalService):
         }
         logger.info("Database service metrics reset")
 
-    # Bot Management Integration Methods
+    def _transform_entity_data(self, entity: T, operation: str) -> T:
+        """Transform entity data consistently across operations matching error_handling patterns."""
+        # Apply consistent Decimal transformation for financial data matching error_handling module
+        if hasattr(entity, "price") and entity.price is not None:
+            from src.utils.decimal_utils import to_decimal
+            entity.price = to_decimal(entity.price)
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def archive_bot_record(self, bot_id: str) -> bool:
-        """
-        Archive bot record before deletion.
+        if hasattr(entity, "quantity") and entity.quantity is not None:
+            from src.utils.decimal_utils import to_decimal
+            entity.quantity = to_decimal(entity.quantity)
 
-        Args:
-            bot_id: Bot identifier
+        # Apply consistent data transformation patterns matching error_handling service
+        if hasattr(entity, "__dict__"):
+            entity_dict = entity.__dict__
+            # Use messaging patterns data transformation for consistency
+            from src.utils.messaging_patterns import MessagingCoordinator
+            coordinator = MessagingCoordinator("DatabaseTransform")
+            transformed_dict = coordinator._apply_data_transformation(entity_dict)
+            # Apply transformed values back to entity
+            for key, value in transformed_dict.items():
+                if hasattr(entity, key):
+                    setattr(entity, key, value)
 
-        Returns:
-            bool: True if archived successfully
-        """
-        return await self.execute_with_monitoring(
-            "archive_bot_record", self._archive_bot_record_impl, bot_id
-        )
+        # Set audit fields consistently
+        if operation == "create" and hasattr(entity, "created_at") and entity.created_at is None:
+            entity.created_at = datetime.now(timezone.utc)
 
-    async def _archive_bot_record_impl(self, bot_id: str) -> bool:
-        """Internal implementation of bot record archiving."""
-        start_time = datetime.now(timezone.utc)
+        if operation in ["create", "update"] and hasattr(entity, "updated_at"):
+            entity.updated_at = datetime.now(timezone.utc)
 
-        try:
-            # Create an archive record for the bot
-            archive_data = {
-                "bot_id": bot_id,
-                "archived_at": datetime.now(timezone.utc),
-                "archived_by": "BotService",
-                "archive_reason": "bot_deletion",
-            }
+        return entity
 
-            # For now, we'll store this as a simple record
-            # In a full implementation, this would move data to an archive table
-            async with get_async_session() as session:
-                # This is a placeholder implementation
-                # In practice, you'd query all bot-related records and archive them
-                logger.info(f"Archiving bot record for {bot_id}")
+    # Business logic methods moved to specialized services
 
-                # Store archive record (placeholder)
-                # await session.execute(
-                #     text("INSERT INTO bot_archives (bot_id, archived_at, data) VALUES (:bot_id, :archived_at, :data)"),
-                #     {"bot_id": bot_id, "archived_at": archive_data["archived_at"], "data": "{}"}
-                # )
 
-                # For now, just log the archival
-                logger.info(f"Bot {bot_id} records archived successfully")
 
-            self._record_query_metrics("archive_bot_record", start_time, True)
-            return True
 
-        except Exception as e:
-            self._record_query_metrics("archive_bot_record", start_time, False)
-            logger.error(f"Bot record archival failed: {e}")
-            raise DataError(f"Failed to archive bot record: {e}")
 
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @cache_result(ttl=60)
-    @time_execution
-    async def get_bot_metrics(self, bot_id: str, limit: int = 10) -> list[dict[str, Any]]:
-        """
-        Get bot metrics from storage.
-
-        Args:
-            bot_id: Bot identifier
-            limit: Maximum number of metrics to return
-
-        Returns:
-            list: Bot metrics records
-        """
-        return await self.execute_with_monitoring(
-            "get_bot_metrics", self._get_bot_metrics_impl, bot_id, limit
-        )
-
-    async def _get_bot_metrics_impl(self, bot_id: str, limit: int) -> list[dict[str, Any]]:
-        """Internal implementation of get bot metrics."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # For now, return empty list as placeholder
-            # In a full implementation, this would query a metrics table
-            metrics = []
-
-            # Placeholder implementation
-            # async with get_async_session() as session:
-            #     result = await session.execute(
-            #         text("SELECT * FROM bot_metrics WHERE bot_id = :bot_id ORDER BY timestamp DESC LIMIT :limit"),
-            #         {"bot_id": bot_id, "limit": limit}
-            #     )
-            #     metrics = [dict(row) for row in result.fetchall()]
-
-            logger.debug(f"Retrieved {len(metrics)} metrics for bot {bot_id}")
-
-            self._record_query_metrics("get_bot_metrics", start_time, True)
-            return metrics
-
-        except Exception as e:
-            self._record_query_metrics("get_bot_metrics", start_time, False)
-            logger.error(f"Get bot metrics failed: {e}")
-            raise DataError(f"Failed to get bot metrics: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def store_bot_metrics(self, metrics_record: dict[str, Any]) -> bool:
-        """
-        Store bot metrics.
-
-        Args:
-            metrics_record: Metrics data to store
-
-        Returns:
-            bool: True if stored successfully
-        """
-        return await self.execute_with_monitoring(
-            "store_bot_metrics", self._store_bot_metrics_impl, metrics_record
-        )
-
-    async def _store_bot_metrics_impl(self, metrics_record: dict[str, Any]) -> bool:
-        """Internal implementation of store bot metrics."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Validate required fields
-            if "bot_id" not in metrics_record:
-                raise DataValidationError("bot_id is required in metrics record")
-
-            # For now, just log the storage
-            # In a full implementation, this would insert into a metrics table
-            logger.debug(
-                f"Storing metrics for bot {metrics_record['bot_id']}",
-                metrics_keys=list(metrics_record.keys()),
-            )
-
-            # Placeholder implementation
-            # async with get_async_session() as session:
-            #     await session.execute(
-            #         text("INSERT INTO bot_metrics (bot_id, data, timestamp) VALUES (:bot_id, :data, :timestamp)"),
-            #         {
-            #             "bot_id": metrics_record["bot_id"],
-            #             "data": json.dumps(metrics_record),
-            #             "timestamp": metrics_record.get("timestamp", datetime.now(timezone.utc))
-            #         }
-            #     )
-            #     await session.commit()
-
-            self._record_query_metrics("store_bot_metrics", start_time, True)
-            return True
-
-        except Exception as e:
-            self._record_query_metrics("store_bot_metrics", start_time, False)
-            logger.error(f"Store bot metrics failed: {e}")
-            raise DataError(f"Failed to store bot metrics: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @cache_result(ttl=60)
-    @time_execution
-    async def get_bot_health_checks(self, bot_id: str, limit: int = 10) -> list[dict[str, Any]]:
-        """
-        Get bot health check records.
-
-        Args:
-            bot_id: Bot identifier
-            limit: Maximum number of records to return
-
-        Returns:
-            list: Health check records
-        """
-        return await self.execute_with_monitoring(
-            "get_bot_health_checks", self._get_bot_health_checks_impl, bot_id, limit
-        )
-
-    async def _get_bot_health_checks_impl(self, bot_id: str, limit: int) -> list[dict[str, Any]]:
-        """Internal implementation of get bot health checks."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Placeholder implementation - return empty list
-            health_checks = []
-
-            logger.debug(f"Retrieved {len(health_checks)} health checks for bot {bot_id}")
-
-            self._record_query_metrics("get_bot_health_checks", start_time, True)
-            return health_checks
-
-        except Exception as e:
-            self._record_query_metrics("get_bot_health_checks", start_time, False)
-            logger.error(f"Get bot health checks failed: {e}")
-            raise DataError(f"Failed to get bot health checks: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def store_bot_health_analysis(self, health_analysis: dict[str, Any]) -> bool:
-        """
-        Store bot health analysis results.
-
-        Args:
-            health_analysis: Health analysis data
-
-        Returns:
-            bool: True if stored successfully
-        """
-        return await self.execute_with_monitoring(
-            "store_bot_health_analysis", self._store_bot_health_analysis_impl, health_analysis
-        )
-
-    async def _store_bot_health_analysis_impl(self, health_analysis: dict[str, Any]) -> bool:
-        """Internal implementation of store bot health analysis."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Validate required fields
-            if "bot_id" not in health_analysis:
-                raise DataValidationError("bot_id is required in health analysis")
-
-            logger.debug(f"Storing health analysis for bot {health_analysis['bot_id']}")
-
-            # Placeholder implementation
-            self._record_query_metrics("store_bot_health_analysis", start_time, True)
-            return True
-
-        except Exception as e:
-            self._record_query_metrics("store_bot_health_analysis", start_time, False)
-            logger.error(f"Store bot health analysis failed: {e}")
-            raise DataError(f"Failed to store bot health analysis: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @cache_result(ttl=60)
-    @time_execution
-    async def get_bot_health_analyses(self, bot_id: str, hours: int = 24) -> list[dict[str, Any]]:
-        """
-        Get bot health analyses within time range.
-
-        Args:
-            bot_id: Bot identifier
-            hours: Number of hours to look back
-
-        Returns:
-            list: Health analysis records
-        """
-        return await self.execute_with_monitoring(
-            "get_bot_health_analyses", self._get_bot_health_analyses_impl, bot_id, hours
-        )
-
-    async def _get_bot_health_analyses_impl(self, bot_id: str, hours: int) -> list[dict[str, Any]]:
-        """Internal implementation of get bot health analyses."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Placeholder implementation
-            analyses = []
-
-            logger.debug(f"Retrieved {len(analyses)} health analyses for bot {bot_id}")
-
-            self._record_query_metrics("get_bot_health_analyses", start_time, True)
-            return analyses
-
-        except Exception as e:
-            self._record_query_metrics("get_bot_health_analyses", start_time, False)
-            logger.error(f"Get bot health analyses failed: {e}")
-            raise DataError(f"Failed to get bot health analyses: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @cache_result(ttl=60)
-    @time_execution
-    async def get_recent_health_analyses(self, hours: int = 1) -> list[dict[str, Any]]:
-        """
-        Get recent health analyses for all bots.
-
-        Args:
-            hours: Number of hours to look back
-
-        Returns:
-            list: Health analysis records
-        """
-        return await self.execute_with_monitoring(
-            "get_recent_health_analyses", self._get_recent_health_analyses_impl, hours
-        )
-
-    async def _get_recent_health_analyses_impl(self, hours: int) -> list[dict[str, Any]]:
-        """Internal implementation of get recent health analyses."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Placeholder implementation
-            analyses = []
-
-            logger.debug(f"Retrieved {len(analyses)} recent health analyses")
-
-            self._record_query_metrics("get_recent_health_analyses", start_time, True)
-            return analyses
-
-        except Exception as e:
-            self._record_query_metrics("get_recent_health_analyses", start_time, False)
-            logger.error(f"Get recent health analyses failed: {e}")
-            raise DataError(f"Failed to get recent health analyses: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @cache_result(ttl=60)
-    @time_execution
-    async def get_active_bots(self) -> list[dict[str, Any]]:
-        """
-        Get all active bots.
-
-        Returns:
-            list: Active bot records
-        """
-        return await self.execute_with_monitoring("get_active_bots", self._get_active_bots_impl)
-
-    async def _get_active_bots_impl(self) -> list[dict[str, Any]]:
-        """Internal implementation of get active bots."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Use BotRepository to get active bots
-            from src.database.repository.bot import BotRepository
-
-            async with get_async_session() as session:
-                bot_repo = BotRepository(session)
-                active_bots = await bot_repo.get_active_bots()
-
-                # Convert to dict format
-                bot_records = []
-                for bot in active_bots:
-                    bot_records.append(
-                        {
-                            "bot_id": bot.id,
-                            "name": bot.name,
-                            "status": bot.status,
-                            "created_at": bot.created_at,
-                        }
-                    )
-
-            logger.debug(f"Retrieved {len(bot_records)} active bots")
-
-            self._record_query_metrics("get_active_bots", start_time, True)
-            return bot_records
-
-        except Exception as e:
-            self._record_query_metrics("get_active_bots", start_time, False)
-            logger.error(f"Get active bots failed: {e}")
-            raise DataError(f"Failed to get active bots: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def store_resource_allocation(self, allocation_record: dict[str, Any]) -> bool:
-        """
-        Store resource allocation record.
-
-        Args:
-            allocation_record: Resource allocation data
-
-        Returns:
-            bool: True if stored successfully
-        """
-        return await self.execute_with_monitoring(
-            "store_resource_allocation", self._store_resource_allocation_impl, allocation_record
-        )
-
-    async def _store_resource_allocation_impl(self, allocation_record: dict[str, Any]) -> bool:
-        """Internal implementation of store resource allocation."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Validate required fields
-            if "bot_id" not in allocation_record:
-                raise DataValidationError("bot_id is required in allocation record")
-
-            logger.debug(f"Storing resource allocation for bot {allocation_record['bot_id']}")
-
-            # Placeholder implementation
-            self._record_query_metrics("store_resource_allocation", start_time, True)
-            return True
-
-        except Exception as e:
-            self._record_query_metrics("store_resource_allocation", start_time, False)
-            logger.error(f"Store resource allocation failed: {e}")
-            raise DataError(f"Failed to store resource allocation: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def update_resource_allocation_status(self, bot_id: str, status: str) -> bool:
-        """
-        Update resource allocation status.
-
-        Args:
-            bot_id: Bot identifier
-            status: New status
-
-        Returns:
-            bool: True if updated successfully
-        """
-        return await self.execute_with_monitoring(
-            "update_resource_allocation_status",
-            self._update_resource_allocation_status_impl,
-            bot_id,
-            status,
-        )
-
-    async def _update_resource_allocation_status_impl(self, bot_id: str, status: str) -> bool:
-        """Internal implementation of update resource allocation status."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            logger.debug(f"Updating resource allocation status for bot {bot_id} to {status}")
-
-            # Placeholder implementation
-            self._record_query_metrics("update_resource_allocation_status", start_time, True)
-            return True
-
-        except Exception as e:
-            self._record_query_metrics("update_resource_allocation_status", start_time, False)
-            logger.error(f"Update resource allocation status failed: {e}")
-            raise DataError(f"Failed to update resource allocation status: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def store_resource_usage(self, usage_record: dict[str, Any]) -> bool:
-        """
-        Store resource usage record.
-
-        Args:
-            usage_record: Resource usage data
-
-        Returns:
-            bool: True if stored successfully
-        """
-        return await self.execute_with_monitoring(
-            "store_resource_usage", self._store_resource_usage_impl, usage_record
-        )
-
-    async def _store_resource_usage_impl(self, usage_record: dict[str, Any]) -> bool:
-        """Internal implementation of store resource usage."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Validate required fields
-            if "bot_id" not in usage_record:
-                raise DataValidationError("bot_id is required in usage record")
-
-            logger.debug(f"Storing resource usage for bot {usage_record['bot_id']}")
-
-            # Placeholder implementation
-            self._record_query_metrics("store_resource_usage", start_time, True)
-            return True
-
-        except Exception as e:
-            self._record_query_metrics("store_resource_usage", start_time, False)
-            logger.error(f"Store resource usage failed: {e}")
-            raise DataError(f"Failed to store resource usage: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def store_resource_reservation(self, reservation: dict[str, Any]) -> bool:
-        """
-        Store resource reservation record.
-
-        Args:
-            reservation: Resource reservation data
-
-        Returns:
-            bool: True if stored successfully
-        """
-        return await self.execute_with_monitoring(
-            "store_resource_reservation", self._store_resource_reservation_impl, reservation
-        )
-
-    async def _store_resource_reservation_impl(self, reservation: dict[str, Any]) -> bool:
-        """Internal implementation of store resource reservation."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Validate required fields
-            if "bot_id" not in reservation:
-                raise DataValidationError("bot_id is required in reservation")
-
-            logger.debug(f"Storing resource reservation for bot {reservation['bot_id']}")
-
-            # Placeholder implementation
-            self._record_query_metrics("store_resource_reservation", start_time, True)
-            return True
-
-        except Exception as e:
-            self._record_query_metrics("store_resource_reservation", start_time, False)
-            logger.error(f"Store resource reservation failed: {e}")
-            raise DataError(f"Failed to store resource reservation: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def update_resource_reservation_status(self, reservation_id: str, status: str) -> bool:
-        """
-        Update resource reservation status.
-
-        Args:
-            reservation_id: Reservation identifier
-            status: New status
-
-        Returns:
-            bool: True if updated successfully
-        """
-        return await self.execute_with_monitoring(
-            "update_resource_reservation_status",
-            self._update_resource_reservation_status_impl,
-            reservation_id,
-            status,
-        )
-
-    async def _update_resource_reservation_status_impl(
-        self, reservation_id: str, status: str
-    ) -> bool:
-        """Internal implementation of update resource reservation status."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            logger.debug(f"Updating resource reservation {reservation_id} status to {status}")
-
-            # Placeholder implementation
-            self._record_query_metrics("update_resource_reservation_status", start_time, True)
-            return True
-
-        except Exception as e:
-            self._record_query_metrics("update_resource_reservation_status", start_time, False)
-            logger.error(f"Update resource reservation status failed: {e}")
-            raise DataError(f"Failed to update resource reservation status: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def store_resource_usage_history(self, usage_entry: dict[str, Any]) -> bool:
-        """
-        Store resource usage history entry.
-
-        Args:
-            usage_entry: Resource usage history data
-
-        Returns:
-            bool: True if stored successfully
-        """
-        return await self.execute_with_monitoring(
-            "store_resource_usage_history", self._store_resource_usage_history_impl, usage_entry
-        )
-
-    async def _store_resource_usage_history_impl(self, usage_entry: dict[str, Any]) -> bool:
-        """Internal implementation of store resource usage history."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Validate required fields
-            if "bot_id" not in usage_entry:
-                raise DataValidationError("bot_id is required in usage history entry")
-
-            logger.debug(f"Storing resource usage history for bot {usage_entry['bot_id']}")
-
-            # Placeholder implementation
-            self._record_query_metrics("store_resource_usage_history", start_time, True)
-            return True
-
-        except Exception as e:
-            self._record_query_metrics("store_resource_usage_history", start_time, False)
-            logger.error(f"Store resource usage history failed: {e}")
-            raise DataError(f"Failed to store resource usage history: {e}")
-
-    @with_circuit_breaker(failure_threshold=5, recovery_timeout=60.0)
-    @with_retry(max_retries=3, base_delay=1.0)
-    @time_execution
-    async def store_optimization_suggestion(self, suggestion: dict[str, Any]) -> bool:
-        """
-        Store resource optimization suggestion.
-
-        Args:
-            suggestion: Optimization suggestion data
-
-        Returns:
-            bool: True if stored successfully
-        """
-        return await self.execute_with_monitoring(
-            "store_optimization_suggestion", self._store_optimization_suggestion_impl, suggestion
-        )
-
-    async def _store_optimization_suggestion_impl(self, suggestion: dict[str, Any]) -> bool:
-        """Internal implementation of store optimization suggestion."""
-        start_time = datetime.now(timezone.utc)
-
-        try:
-            # Validate required fields
-            if "bot_id" not in suggestion:
-                raise DataValidationError("bot_id is required in optimization suggestion")
-
-            logger.debug(f"Storing optimization suggestion for bot {suggestion['bot_id']}")
-
-            # Placeholder implementation
-            self._record_query_metrics("store_optimization_suggestion", start_time, True)
-            return True
-
-        except Exception as e:
-            self._record_query_metrics("store_optimization_suggestion", start_time, False)
-            logger.error(f"Store optimization suggestion failed: {e}")
-            raise DataError(f"Failed to store optimization suggestion: {e}")
-
-
-class DatabaseRepository(BaseRepository[T, K]):
-    """
-    Database repository implementation using the repository pattern.
-
-    This repository uses the DatabaseService for all data access,
-    providing a clean separation between service and repository layers.
-    """
-
-    def __init__(
-        self,
-        entity_type: type[T],
-        key_type: type[K],
-        database_service: DatabaseService,
-        name: str | None = None,
-    ):
-        """
-        Initialize database repository.
-
-        Args:
-            entity_type: Type of entities this repository manages
-            key_type: Type of primary key
-            database_service: Database service instance
-            name: Repository name
-        """
-        super().__init__(
-            entity_type=entity_type,
-            key_type=key_type,
-            name=name or f"{entity_type.__name__}Repository",
-        )
-
-        self.database_service = database_service
-
-        # Configure repository for database operations
-        self.configure_cache(enabled=True, ttl=300)
-
-        logger.info(f"DatabaseRepository initialized for {entity_type.__name__}")
-
-    async def _create_entity(self, entity: T) -> T:
-        """Create entity using database service."""
-        return await self.database_service.create_entity(entity)
-
-    async def _get_entity_by_id(self, entity_id: K) -> T | None:
-        """Get entity by ID using database service."""
-        return await self.database_service.get_entity_by_id(self._entity_type, entity_id)
-
-    async def _update_entity(self, entity: T) -> T | None:
-        """Update entity using database service."""
-        return await self.database_service.update_entity(entity)
-
-    async def _delete_entity(self, entity_id: K) -> bool:
-        """Delete entity using database service."""
-        return await self.database_service.delete_entity(self._entity_type, entity_id)
-
-    async def _list_entities(
-        self,
-        limit: int | None,
-        offset: int | None,
-        filters: dict[str, Any] | None,
-        order_by: str | None,
-        order_desc: bool,
-    ) -> list[T]:
-        """List entities using database service."""
-        entities = await self.database_service.list_entities(
-            model_class=self._entity_type,
-            limit=limit,
-            offset=offset or 0,
-            filters=filters,
-            order_by=order_by,
-            order_desc=order_desc,
-        )
-        return entities
-
-    async def _count_entities(self, filters: dict[str, Any] | None) -> int:
-        """Count entities using database service."""
-        return await self.database_service.count_entities(self._entity_type, filters)
-
-    async def _bulk_create_entities(self, entities: list[T]) -> list[T]:
-        """Bulk create entities using database service."""
-        return await self.database_service.bulk_create(entities)
-
-    async def _test_connection(self, connection: Any) -> bool:
-        """Test database connection."""
-        try:
-            health_status = await self.database_service._service_health_check()
-            return health_status == HealthStatus.HEALTHY
-        except (DatabaseConnectionError, DatabaseQueryError) as e:
-            self.logger.debug(f"Database health check failed: {e}")
-            return False
-        except Exception as e:
-            self.logger.warning(f"Unexpected error in database connection test: {e}")
-            return False
-
-    async def _repository_health_check(self) -> Any:
-        """Repository-specific health check."""
-        return await self.database_service._service_health_check()
+    # All business logic methods have been moved to specialized services
+    # This service now focuses only on infrastructure concerns

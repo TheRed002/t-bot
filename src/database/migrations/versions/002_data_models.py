@@ -25,18 +25,18 @@ def upgrade() -> None:
         sa.Column("symbol", sa.String(length=20), nullable=False),
         sa.Column("exchange", sa.String(length=50), nullable=False),
         sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("open_price", sa.Float(), nullable=True),
-        sa.Column("high_price", sa.Float(), nullable=True),
-        sa.Column("low_price", sa.Float(), nullable=True),
-        sa.Column("close_price", sa.Float(), nullable=True),
-        sa.Column("price", sa.Float(), nullable=True),
-        sa.Column("volume", sa.Float(), nullable=True),
-        sa.Column("quote_volume", sa.Float(), nullable=True),
+        sa.Column("open_price", sa.Numeric(precision=20, scale=8), nullable=True),
+        sa.Column("high_price", sa.Numeric(precision=20, scale=8), nullable=True),
+        sa.Column("low_price", sa.Numeric(precision=20, scale=8), nullable=True),
+        sa.Column("close_price", sa.Numeric(precision=20, scale=8), nullable=True),
+        sa.Column("price", sa.Numeric(precision=20, scale=8), nullable=True),
+        sa.Column("volume", sa.Numeric(precision=20, scale=8), nullable=True),
+        sa.Column("quote_volume", sa.Numeric(precision=20, scale=8), nullable=True),
         sa.Column("trades_count", sa.Integer(), nullable=True),
-        sa.Column("bid", sa.Float(), nullable=True),
-        sa.Column("ask", sa.Float(), nullable=True),
-        sa.Column("bid_volume", sa.Float(), nullable=True),
-        sa.Column("ask_volume", sa.Float(), nullable=True),
+        sa.Column("bid", sa.Numeric(precision=20, scale=8), nullable=True),
+        sa.Column("ask", sa.Numeric(precision=20, scale=8), nullable=True),
+        sa.Column("bid_volume", sa.Numeric(precision=20, scale=8), nullable=True),
+        sa.Column("ask_volume", sa.Numeric(precision=20, scale=8), nullable=True),
         sa.Column("data_source", sa.String(length=100), nullable=False),
         sa.Column("quality_score", sa.Float(), nullable=True),
         sa.Column("validation_status", sa.String(length=20), nullable=False),
@@ -68,15 +68,9 @@ def upgrade() -> None:
         ["exchange", "timestamp"],
         unique=False,
     )
-    op.create_index(
-        "idx_market_data_quality", "market_data_records", ["quality_score"], unique=False
-    )
-    op.create_index(
-        "idx_market_data_validation", "market_data_records", ["validation_status"], unique=False
-    )
-    op.create_unique_constraint(
-        "uq_market_data_unique", "market_data_records", ["symbol", "exchange", "timestamp"]
-    )
+    op.create_index("idx_market_data_quality", "market_data_records", ["quality_score"], unique=False)
+    op.create_index("idx_market_data_validation", "market_data_records", ["validation_status"], unique=False)
+    op.create_unique_constraint("uq_market_data_unique", "market_data_records", ["symbol", "exchange", "timestamp"])
 
     # Create feature_records table
     op.create_table(
@@ -86,8 +80,8 @@ def upgrade() -> None:
         sa.Column("feature_type", sa.String(length=100), nullable=False),
         sa.Column("feature_name", sa.String(length=100), nullable=False),
         sa.Column("calculation_timestamp", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("feature_value", sa.Float(), nullable=False),
-        sa.Column("confidence_score", sa.Float(), nullable=True),
+        sa.Column("feature_value", sa.Numeric(precision=20, scale=8), nullable=False),
+        sa.Column("confidence_score", sa.Numeric(precision=5, scale=4), nullable=True),
         sa.Column("lookback_period", sa.Integer(), nullable=True),
         sa.Column("parameters", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("calculation_method", sa.String(length=100), nullable=False),
@@ -103,12 +97,8 @@ def upgrade() -> None:
     )
 
     # Create indexes for feature_records
-    op.create_index(
-        "idx_feature_symbol_type", "feature_records", ["symbol", "feature_type"], unique=False
-    )
-    op.create_index(
-        "idx_feature_timestamp", "feature_records", ["calculation_timestamp"], unique=False
-    )
+    op.create_index("idx_feature_symbol_type", "feature_records", ["symbol", "feature_type"], unique=False)
+    op.create_index("idx_feature_timestamp", "feature_records", ["calculation_timestamp"], unique=False)
     op.create_index("idx_feature_name", "feature_records", ["feature_name"], unique=False)
     op.create_unique_constraint(
         "uq_feature_unique",
@@ -157,9 +147,7 @@ def upgrade() -> None:
         ["data_source", "quality_check_timestamp"],
         unique=False,
     )
-    op.create_index(
-        "idx_quality_overall_score", "data_quality_records", ["overall_score"], unique=False
-    )
+    op.create_index("idx_quality_overall_score", "data_quality_records", ["overall_score"], unique=False)
     op.create_index("idx_quality_check_type", "data_quality_records", ["check_type"], unique=False)
 
     # Create data_pipeline_records table
@@ -211,9 +199,7 @@ def upgrade() -> None:
     )
     op.create_index("idx_pipeline_status", "data_pipeline_records", ["status"], unique=False)
     op.create_index("idx_pipeline_stage", "data_pipeline_records", ["stage"], unique=False)
-    op.create_index(
-        "idx_pipeline_execution_id", "data_pipeline_records", ["execution_id"], unique=False
-    )
+    op.create_index("idx_pipeline_execution_id", "data_pipeline_records", ["execution_id"], unique=False)
 
 
 def downgrade() -> None:
@@ -232,14 +218,14 @@ def downgrade() -> None:
     op.drop_table("data_quality_records")
 
     # Drop feature_records table
-    op.drop_unique_constraint("uq_feature_unique", table_name="feature_records")
+    op.drop_constraint("uq_feature_unique", table_name="feature_records", type_="unique")
     op.drop_index("idx_feature_name", table_name="feature_records")
     op.drop_index("idx_feature_timestamp", table_name="feature_records")
     op.drop_index("idx_feature_symbol_type", table_name="feature_records")
     op.drop_table("feature_records")
 
     # Drop market_data_records table
-    op.drop_unique_constraint("uq_market_data_unique", table_name="market_data_records")
+    op.drop_constraint("uq_market_data_unique", table_name="market_data_records", type_="unique")
     op.drop_index("idx_market_data_validation", table_name="market_data_records")
     op.drop_index("idx_market_data_quality", table_name="market_data_records")
     op.drop_index("idx_market_data_exchange_timestamp", table_name="market_data_records")

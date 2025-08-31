@@ -19,9 +19,7 @@ class TimestampMixin:
 
     @declared_attr
     def updated_at(self):
-        return Column(
-            DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
-        )
+        return Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class AuditMixin(TimestampMixin):

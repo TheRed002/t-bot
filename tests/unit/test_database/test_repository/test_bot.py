@@ -16,6 +16,7 @@ import pytest_asyncio
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.exceptions import RepositoryError
 from src.database.models.bot import Bot, BotLog, Signal, Strategy
 from src.database.repository.bot import (
     BotRepository,
@@ -422,8 +423,8 @@ class TestStrategyRepository:
     async def test_update_strategy_metrics_success(self, strategy_repository, sample_strategy):
         """Test successful strategy metrics update."""
         metrics = {
-            "total_trades": 15,
-            "winning_trades": 9
+            "total_signals": 15,
+            "executed_signals": 9
         }
         
         with patch.object(strategy_repository, 'get', return_value=sample_strategy), \
@@ -432,8 +433,8 @@ class TestStrategyRepository:
             result = await strategy_repository.update_strategy_metrics(sample_strategy.id, metrics)
             
             assert result is True
-            assert sample_strategy.total_trades == 15
-            assert sample_strategy.winning_trades == 9
+            assert sample_strategy.total_signals == 15
+            assert sample_strategy.executed_signals == 9
 
 
 class TestSignalRepository:
@@ -455,7 +456,7 @@ class TestSignalRepository:
         return Signal(
             id=str(uuid.uuid4()),
             strategy_id=str(uuid.uuid4()),
-            signal_type="BUY",
+            action="BUY",
             symbol="BTCUSD",
             strength=0.8,
             executed=False,
@@ -810,7 +811,7 @@ class TestBotRepositoryErrorHandling:
         """Test database error handling in repository operations."""
         mock_session.execute.side_effect = SQLAlchemyError("Database connection lost")
         
-        with pytest.raises(SQLAlchemyError):
+        with pytest.raises(RepositoryError):
             await bot_repository.get_active_bots()
 
     @pytest.mark.asyncio
@@ -819,7 +820,7 @@ class TestBotRepositoryErrorHandling:
         bot = Bot(id=str(uuid.uuid4()), name="test_bot", status="RUNNING")
         mock_session.flush.side_effect = IntegrityError("Duplicate key", None, None)
         
-        with pytest.raises(IntegrityError):
+        with pytest.raises(RepositoryError):
             await bot_repository.create(bot)
             
         mock_session.rollback.assert_called_once()

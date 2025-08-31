@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Index, String
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, Index, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -20,9 +20,7 @@ class BotInstance(Base, TimestampMixin, MetadataMixin):
     # Bot configuration
     strategy_type = Column(String(50), nullable=False)
     exchange = Column(String(50), nullable=False)
-    status = Column(
-        String(20), default="stopped", nullable=False
-    )  # stopped, running, paused, error
+    status = Column(String(20), default="stopped", nullable=False)  # stopped, running, paused, error
 
     # Configuration and settings
     config = Column(JSONB, nullable=False, default=dict)
@@ -38,33 +36,33 @@ class BotInstance(Base, TimestampMixin, MetadataMixin):
     execution_audit_logs = relationship(
         "ExecutionAuditLog", foreign_keys="ExecutionAuditLog.bot_id", back_populates="bot_instance"
     )
-    risk_audit_logs = relationship(
-        "RiskAuditLog", foreign_keys="RiskAuditLog.bot_id", back_populates="bot_instance"
-    )
+    risk_audit_logs = relationship("RiskAuditLog", foreign_keys="RiskAuditLog.bot_id", back_populates="bot_instance")
     performance_audit_logs = relationship(
         "PerformanceAuditLog",
         foreign_keys="PerformanceAuditLog.bot_id",
         back_populates="bot_instance",
     )
 
-    # Indexes
+    # Indexes and constraints
     __table_args__ = (
         Index("idx_bot_instances_name", "name"),
         Index("idx_bot_instances_strategy_type", "strategy_type"),
         Index("idx_bot_instances_exchange", "exchange"),
         Index("idx_bot_instances_status", "status"),
         Index("idx_bot_instances_active", "is_active"),
+        Index("idx_bot_instances_last_active", "last_active"),  # Activity tracking
+        Index("idx_bot_instances_strategy_exchange", "strategy_type", "exchange"),  # Composite query optimization
+        CheckConstraint("status IN ('stopped', 'running', 'paused', 'error')", name="check_bot_instance_status"),
+        CheckConstraint("exchange IN ('binance', 'coinbase', 'okx', 'mock')", name="check_bot_instance_exchange"),
     )
 
     def __repr__(self):
         return f"<BotInstance {self.name}: {self.strategy_type} on {self.exchange}>"
 
-    @property
     def is_running(self) -> bool:
         """Check if bot instance is running."""
-        return self.status == "running"
+        return bool(self.status == "running")
 
-    @property
     def is_stopped(self) -> bool:
         """Check if bot instance is stopped."""
-        return self.status == "stopped"
+        return bool(self.status == "stopped")

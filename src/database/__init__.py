@@ -15,7 +15,14 @@ from sqlalchemy.exc import (
     TimeoutError as SQLTimeoutError,
 )
 
-from .connection import get_async_session, get_sync_session
+from .connection import DatabaseConnectionManager, get_async_session, get_sync_session
+from .di_registration import (
+    configure_database_dependencies,
+    get_database_manager,
+    get_database_service,
+    get_uow_factory,
+    register_database_services,
+)
 
 # Expose wrapper with a consistent name
 from .influxdb_client import InfluxDBClientWrapper as InfluxDBClient
@@ -47,6 +54,7 @@ __all__ = [
     "Bot",
     "BotLog",
     "CapitalAuditLog",
+    "DatabaseConnectionManager",
     "DatabaseManager",
     "DatabaseService",
     "ExecutionAuditLog",
@@ -65,7 +73,13 @@ __all__ = [
     "Signal",
     "Strategy",
     "Trade",
+    "configure_database_dependencies",
     # Functions
     "get_async_session",
+    "get_database_manager",
+    "get_database_service",
     "get_sync_session",
+    "get_uow_factory",
+    # Dependency injection
+    "register_database_services",
 ]

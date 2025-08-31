@@ -12,8 +12,8 @@ from decimal import Decimal
 from sqlalchemy import (
     DECIMAL,
     Boolean,
+    CheckConstraint,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -34,9 +34,7 @@ class CapitalAuditLog(Base):
     __tablename__ = "capital_audit_logs"
 
     # Primary key
-    id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # Operation identification
     operation_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
@@ -48,7 +46,10 @@ class CapitalAuditLog(Base):
     strategy_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     exchange: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     bot_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=True, index=True
+        UUID(as_uuid=False),
+        ForeignKey("bot_instances.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
 
     # Operation details
@@ -69,9 +70,15 @@ class CapitalAuditLog(Base):
     risk_assessment: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Performance impact
-    utilization_before: Mapped[float | None] = mapped_column(Float, nullable=True)
-    utilization_after: Mapped[float | None] = mapped_column(Float, nullable=True)
-    efficiency_impact: Mapped[float | None] = mapped_column(Float, nullable=True)
+    utilization_before: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(8, 4), nullable=True
+    )  # 4 decimals for percentages
+    utilization_after: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(8, 4), nullable=True
+    )  # 4 decimals for percentages
+    efficiency_impact: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(8, 4), nullable=True
+    )  # 4 decimals for efficiency scores
 
     # Operation result
     operation_status: Mapped[str] = mapped_column(
@@ -101,12 +108,10 @@ class CapitalAuditLog(Base):
     regulatory_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
-    bot_instance = relationship("BotInstance", foreign_keys=[bot_id])
+    bot_instance = relationship("BotInstance", foreign_keys=[bot_id], back_populates="capital_audit_logs")
 
     # Constraints
     __table_args__ = (
@@ -117,6 +122,17 @@ class CapitalAuditLog(Base):
         Index("idx_capital_audit_timestamp", "created_at"),
         Index("idx_capital_audit_correlation", "correlation_id"),
         Index("idx_capital_audit_requested", "requested_at"),
+        CheckConstraint("amount >= 0", name="check_capital_audit_amount_non_negative"),
+        CheckConstraint("previous_amount >= 0", name="check_capital_audit_previous_amount_non_negative"),
+        CheckConstraint("new_amount >= 0", name="check_capital_audit_new_amount_non_negative"),
+        CheckConstraint(
+            "operation_status IN ('pending', 'completed', 'failed', 'cancelled')",
+            name="check_capital_audit_operation_status",
+        ),
+        CheckConstraint(
+            "approval_level IN ('automatic', 'manual', 'override')",
+            name="check_capital_audit_approval_level",
+        ),
     )
 
 
@@ -126,9 +142,7 @@ class ExecutionAuditLog(Base):
     __tablename__ = "execution_audit_logs"
 
     # Primary key
-    id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # Execution identification
     execution_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -143,7 +157,10 @@ class ExecutionAuditLog(Base):
 
     # Bot and strategy context
     bot_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=True, index=True
+        UUID(as_uuid=False),
+        ForeignKey("bot_instances.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     strategy_name: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
@@ -165,10 +182,16 @@ class ExecutionAuditLog(Base):
     market_price_at_time: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8), nullable=True)
 
     # Execution quality metrics
-    slippage_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
-    market_impact_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
-    timing_cost_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
-    total_cost_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    slippage_bps: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 2), nullable=True)  # BPS with 2 decimal precision
+    market_impact_bps: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(10, 2), nullable=True
+    )  # BPS with 2 decimal precision
+    timing_cost_bps: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(10, 2), nullable=True
+    )  # BPS with 2 decimal precision
+    total_cost_bps: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(10, 2), nullable=True
+    )  # BPS with 2 decimal precision
 
     # Algorithm and routing
     execution_algorithm: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -189,36 +212,24 @@ class ExecutionAuditLog(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Fees and costs
-    total_fees: Mapped[Decimal] = mapped_column(
-        DECIMAL(20, 8), nullable=False, default=Decimal("0")
-    )
+    total_fees: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False, default=Decimal("0"))
     fee_currency: Mapped[str] = mapped_column(String(10), nullable=False, default="USDT")
-    exchange_fees: Mapped[Decimal] = mapped_column(
-        DECIMAL(20, 8), nullable=False, default=Decimal("0")
-    )
-    network_fees: Mapped[Decimal] = mapped_column(
-        DECIMAL(20, 8), nullable=False, default=Decimal("0")
-    )
+    exchange_fees: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False, default=Decimal("0"))
+    network_fees: Mapped[Decimal] = mapped_column(DECIMAL(20, 8), nullable=False, default=Decimal("0"))
 
     # Market conditions
     market_conditions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
-    volatility_at_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volatility_at_time: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(10, 6), nullable=True
+    )  # High precision for volatility
     volume_at_time: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8), nullable=True)
-    spread_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spread_bps: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 2), nullable=True)  # BPS with 2 decimal precision
 
     # Timing details
-    signal_timestamp: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    order_submission_timestamp: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    first_fill_timestamp: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    final_fill_timestamp: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    signal_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    order_submission_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_fill_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    final_fill_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Latency metrics
     decision_to_submission_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -236,12 +247,10 @@ class ExecutionAuditLog(Base):
     best_execution_analysis: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
-    bot_instance = relationship("BotInstance", foreign_keys=[bot_id])
+    bot_instance = relationship("BotInstance", foreign_keys=[bot_id], back_populates="execution_audit_logs")
 
     # Constraints
     __table_args__ = (
@@ -256,6 +265,17 @@ class ExecutionAuditLog(Base):
         Index("idx_execution_audit_correlation", "correlation_id"),
         Index("idx_execution_audit_signal_time", "signal_timestamp"),
         Index("idx_execution_audit_bot_strategy", "bot_id", "strategy_name"),
+        CheckConstraint("requested_quantity > 0", name="check_execution_audit_requested_quantity_positive"),
+        CheckConstraint("executed_quantity >= 0", name="check_execution_audit_executed_quantity_non_negative"),
+        CheckConstraint("remaining_quantity >= 0", name="check_execution_audit_remaining_quantity_non_negative"),
+        CheckConstraint("total_fees >= 0", name="check_execution_audit_total_fees_non_negative"),
+        CheckConstraint("exchange_fees >= 0", name="check_execution_audit_exchange_fees_non_negative"),
+        CheckConstraint("network_fees >= 0", name="check_execution_audit_network_fees_non_negative"),
+        CheckConstraint(
+            "operation_status IN ('pending', 'completed', 'failed', 'cancelled', 'rejected')",
+            name="check_execution_audit_operation_status",
+        ),
+        CheckConstraint("side IN ('buy', 'sell', 'long', 'short')", name="check_execution_audit_side"),
     )
 
 
@@ -265,9 +285,7 @@ class RiskAuditLog(Base):
     __tablename__ = "risk_audit_logs"
 
     # Primary key
-    id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # Risk event identification
     risk_event_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
@@ -277,22 +295,31 @@ class RiskAuditLog(Base):
 
     # Associated entities
     bot_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=True, index=True
+        UUID(as_uuid=False),
+        ForeignKey("bot_instances.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     strategy_name: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     symbol: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
 
     # Risk assessment
-    risk_level: Mapped[str] = mapped_column(
-        String(20), nullable=False, index=True
-    )  # low, medium, high, critical
-    risk_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    risk_level: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # low, medium, high, critical
+    risk_score: Mapped[Decimal] = mapped_column(
+        DECIMAL(8, 4), nullable=False, default=Decimal("0.0")
+    )  # Risk score with 4 decimal precision
     threshold_breached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # Risk metrics
-    current_value: Mapped[float | None] = mapped_column(Float, nullable=True)
-    threshold_value: Mapped[float | None] = mapped_column(Float, nullable=True)
-    threshold_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_value: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(20, 8), nullable=True
+    )  # Financial values with 8 decimal precision
+    threshold_value: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(20, 8), nullable=True
+    )  # Financial values with 8 decimal precision
+    threshold_percentage: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(8, 4), nullable=True
+    )  # Percentages with 4 decimal precision
 
     # Risk details
     risk_description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -328,12 +355,10 @@ class RiskAuditLog(Base):
     audit_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
-    bot_instance = relationship("BotInstance", foreign_keys=[bot_id])
+    bot_instance = relationship("BotInstance", foreign_keys=[bot_id], back_populates="risk_audit_logs")
 
     # Constraints
     __table_args__ = (
@@ -344,6 +369,14 @@ class RiskAuditLog(Base):
         Index("idx_risk_audit_detected", "detected_at"),
         Index("idx_risk_audit_bot_strategy", "bot_id", "strategy_name"),
         Index("idx_risk_audit_correlation", "correlation_id"),
+        CheckConstraint("risk_score >= 0", name="check_risk_audit_risk_score_non_negative"),
+        CheckConstraint("positions_affected >= 0", name="check_risk_audit_positions_affected_non_negative"),
+        CheckConstraint("potential_loss >= 0", name="check_risk_audit_potential_loss_non_negative"),
+        CheckConstraint("actual_impact >= 0", name="check_risk_audit_actual_impact_non_negative"),
+        CheckConstraint(
+            "risk_level IN ('low', 'medium', 'high', 'critical')",
+            name="check_risk_audit_risk_level",
+        ),
     )
 
 
@@ -353,14 +386,10 @@ class PerformanceAuditLog(Base):
     __tablename__ = "performance_audit_logs"
 
     # Primary key
-    id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # Performance event identification
-    performance_event_id: Mapped[str] = mapped_column(
-        String(100), nullable=False, unique=True, index=True
-    )
+    performance_event_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     metric_type: Mapped[str] = mapped_column(
         String(50), nullable=False, index=True
     )  # pnl, sharpe, drawdown, win_rate, execution_quality
@@ -372,36 +401,53 @@ class PerformanceAuditLog(Base):
 
     # Associated entities
     bot_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=False), ForeignKey("bot_instances.id"), nullable=True, index=True
+        UUID(as_uuid=False),
+        ForeignKey("bot_instances.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     strategy_name: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
 
     # Performance metrics
-    metric_value: Mapped[float] = mapped_column(Float, nullable=False)
-    previous_value: Mapped[float | None] = mapped_column(Float, nullable=True)
-    change_percentage: Mapped[float | None] = mapped_column(Float, nullable=True)
-    benchmark_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    metric_value: Mapped[Decimal] = mapped_column(
+        DECIMAL(20, 8), nullable=False
+    )  # High precision for financial metrics
+    previous_value: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(20, 8), nullable=True
+    )  # High precision for financial metrics
+    change_percentage: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(8, 4), nullable=True
+    )  # Percentages with 4 decimal precision
+    benchmark_value: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(20, 8), nullable=True
+    )  # High precision for financial metrics
 
     # Detailed metrics
     performance_details: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     contributing_trades: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # Performance analysis
-    performance_grade: Mapped[str] = mapped_column(
-        String(10), nullable=False, default="C"
-    )  # A+, A, B+, B, C+, C, D, F
+    performance_grade: Mapped[str] = mapped_column(String(10), nullable=False, default="C")  # A+, A, B+, B, C+, C, D, F
     improvement_opportunities: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
 
     # Attribution analysis
-    alpha_contribution: Mapped[float | None] = mapped_column(Float, nullable=True)
-    beta_contribution: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alpha_contribution: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(10, 6), nullable=True
+    )  # High precision for alpha/beta
+    beta_contribution: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(10, 6), nullable=True
+    )  # High precision for alpha/beta
     strategy_attribution: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
     # Risk-adjusted metrics
-    volatility: Mapped[float | None] = mapped_column(Float, nullable=True)
-    sharpe_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
-    sortino_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
-    max_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volatility: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 6), nullable=True)  # High precision for volatility
+    sharpe_ratio: Mapped[Decimal | None] = mapped_column(DECIMAL(8, 4), nullable=True)  # 4 decimal precision for ratios
+    sortino_ratio: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(8, 4), nullable=True
+    )  # 4 decimal precision for ratios
+    max_drawdown: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(8, 4), nullable=True
+    )  # 4 decimal precision for drawdown
 
     # Market context
     market_conditions: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
@@ -413,17 +459,19 @@ class PerformanceAuditLog(Base):
 
     # Audit metadata
     calculation_method: Mapped[str] = mapped_column(String(100), nullable=False, default="standard")
-    data_quality_score: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
-    confidence_level: Mapped[float] = mapped_column(Float, nullable=False, default=0.95)
+    data_quality_score: Mapped[Decimal] = mapped_column(
+        DECIMAL(6, 4), nullable=False, default=Decimal("1.0")
+    )  # Quality score 0-1 with 4 decimals
+    confidence_level: Mapped[Decimal] = mapped_column(
+        DECIMAL(6, 4), nullable=False, default=Decimal("0.95")
+    )  # Confidence level 0-1 with 4 decimals
 
     # Timestamps
     calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
-    bot_instance = relationship("BotInstance", foreign_keys=[bot_id])
+    bot_instance = relationship("BotInstance", foreign_keys=[bot_id], back_populates="performance_audit_logs")
 
     # Constraints
     __table_args__ = (
@@ -439,5 +487,26 @@ class PerformanceAuditLog(Base):
             "period_start",
             "period_end",
             name="unique_performance_audit_record",
+        ),
+        CheckConstraint(
+            "contributing_trades >= 0",
+            name="check_performance_audit_contributing_trades_non_negative",
+        ),
+        CheckConstraint(
+            "data_quality_score >= 0 AND data_quality_score <= 1",
+            name="check_performance_audit_data_quality_score_range",
+        ),
+        CheckConstraint(
+            "confidence_level >= 0 AND confidence_level <= 1",
+            name="check_performance_audit_confidence_level_range",
+        ),
+        CheckConstraint("period_start < period_end", name="check_performance_audit_period_order"),
+        CheckConstraint(
+            "performance_grade IN ('A+', 'A', 'B+', 'B', 'C+', 'C', 'D', 'F')",
+            name="check_performance_audit_grade",
+        ),
+        CheckConstraint(
+            "period_type IN ('daily', 'weekly', 'monthly')",
+            name="check_performance_audit_period_type",
         ),
     )

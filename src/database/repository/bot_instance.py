@@ -6,13 +6,14 @@ providing centralized data access for bot lifecycle management.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.bot_instance import BotInstance
-from src.database.repository.core_compliant_base import DatabaseRepository
+from src.database.repository.base import DatabaseRepository
 
 
 class BotInstanceRepository(DatabaseRepository):
@@ -25,7 +26,13 @@ class BotInstanceRepository(DatabaseRepository):
         Args:
             session: Database session
         """
-        super().__init__(session, BotInstance)
+        super().__init__(
+            session=session,
+            model=BotInstance,
+            entity_type=BotInstance,
+            key_type=str,
+            name="BotInstanceRepository",
+        )
 
     async def get_by_bot_id(self, bot_id: str) -> BotInstance | None:
         """
@@ -70,9 +77,7 @@ class BotInstanceRepository(DatabaseRepository):
             List of bot instances with specified status
         """
         result = await self.session.execute(
-            select(BotInstance)
-            .where(BotInstance.status == status)
-            .order_by(desc(BotInstance.updated_at))
+            select(BotInstance).where(BotInstance.status == status).order_by(desc(BotInstance.updated_at))
         )
         return list(result.scalars().all())
 
@@ -87,9 +92,7 @@ class BotInstanceRepository(DatabaseRepository):
             List of bot instances using the strategy
         """
         result = await self.session.execute(
-            select(BotInstance)
-            .where(BotInstance.strategy_name == strategy_name)
-            .order_by(BotInstance.created_at)
+            select(BotInstance).where(BotInstance.strategy_name == strategy_name).order_by(BotInstance.created_at)
         )
         return list(result.scalars().all())
 
@@ -104,9 +107,7 @@ class BotInstanceRepository(DatabaseRepository):
             List of bot instances for the exchange
         """
         result = await self.session.execute(
-            select(BotInstance)
-            .where(BotInstance.exchange == exchange)
-            .order_by(BotInstance.created_at)
+            select(BotInstance).where(BotInstance.exchange == exchange).order_by(BotInstance.created_at)
         )
         return list(result.scalars().all())
 
@@ -286,7 +287,7 @@ class BotInstanceRepository(DatabaseRepository):
             "error_statistics": {
                 "bots_with_errors": error_row.total_with_errors or 0 if error_row else 0,
                 "total_errors": int(error_row.total_errors or 0) if error_row else 0,
-                "avg_errors_per_bot": float(error_row.avg_errors or 0) if error_row else 0,
+                "avg_errors_per_bot": str(error_row.avg_errors or 0) if error_row else "0",
             },
         }
 
@@ -338,7 +339,7 @@ class BotInstanceRepository(DatabaseRepository):
         )
         return list(result.scalars().all())
 
-    async def get_profitable_bots(self, min_pnl: float = 0.0) -> list[BotInstance]:
+    async def get_profitable_bots(self, min_pnl: Decimal = Decimal("0.0")) -> list[BotInstance]:
         """
         Get profitable bot instances.
 
@@ -364,8 +365,8 @@ class BotInstanceRepository(DatabaseRepository):
         self,
         bot_id: str,
         total_trades: int | None = None,
-        total_pnl: float | None = None,
-        win_rate: float | None = None,
+        total_pnl: Decimal | None = None,
+        win_rate: Decimal | None = None,
         metrics: dict[str, Any] | None = None,
     ) -> BotInstance | None:
         """

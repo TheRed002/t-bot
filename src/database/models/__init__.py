@@ -39,7 +39,14 @@ from .ml import MLModelMetadata, MLPrediction, MLTrainingJob
 from .state import StateBackup, StateCheckpoint, StateHistory, StateMetadata, StateSnapshot
 
 # Import system models
-from .system import Alert, AuditLog, BalanceSnapshot, PerformanceMetrics
+from .system import (
+    Alert,
+    AlertRule,
+    AuditLog,
+    BalanceSnapshot,
+    EscalationPolicy,
+    PerformanceMetrics,
+)
 
 # Import trading models
 from .trading import Order, OrderFill, Position, Trade
@@ -47,9 +54,19 @@ from .trading import Order, OrderFill, Position, Trade
 # Import user models
 from .user import User
 
+# Import analytics models
+from .analytics import (
+    AnalyticsOperationalMetrics,
+    AnalyticsPortfolioMetrics,
+    AnalyticsPositionMetrics,
+    AnalyticsRiskMetrics,
+    AnalyticsStrategyMetrics,
+)
+
 __all__ = [
     # System models
     "Alert",
+    "AlertRule",
     "AuditLog",
     "BalanceSnapshot",
     "Base",
@@ -64,6 +81,7 @@ __all__ = [
     "CurrencyExposureDB",
     "DataPipelineRecord",
     "DataQualityRecord",
+    "EscalationPolicy",
     "ExchangeAllocationDB",
     "ExecutionAuditLog",
     # Data models
@@ -93,4 +111,10 @@ __all__ = [
     "Trade",
     # User models
     "User",
+    # Analytics models  
+    "AnalyticsOperationalMetrics",
+    "AnalyticsPortfolioMetrics",
+    "AnalyticsPositionMetrics",
+    "AnalyticsRiskMetrics",
+    "AnalyticsStrategyMetrics",
 ]

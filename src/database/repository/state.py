@@ -11,10 +11,10 @@ from src.database.models.state import (
     StateMetadata,
     StateSnapshot,
 )
-from src.database.repository.core_compliant_base import DatabaseRepository
+from src.database.repository.base import DatabaseRepository
 
 
-class StateSnapshotRepository(DatabaseRepository[StateSnapshot, str]):
+class StateSnapshotRepository(DatabaseRepository):
     """Repository for StateSnapshot entities."""
 
     def __init__(self, session: AsyncSession):
@@ -35,9 +35,7 @@ class StateSnapshotRepository(DatabaseRepository[StateSnapshot, str]):
         """Get snapshots by type."""
         return await self.get_all(filters={"snapshot_type": snapshot_type}, order_by="-timestamp")
 
-    async def get_latest_snapshot(
-        self, bot_id: str, snapshot_type: str = None
-    ) -> StateSnapshot | None:
+    async def get_latest_snapshot(self, bot_id: str, snapshot_type: str | None = None) -> StateSnapshot | None:
         """Get latest snapshot for bot."""
         filters = {"bot_id": bot_id}
         if snapshot_type:
@@ -64,7 +62,7 @@ class StateSnapshotRepository(DatabaseRepository[StateSnapshot, str]):
         return count
 
 
-class StateCheckpointRepository(DatabaseRepository[StateCheckpoint, str]):
+class StateCheckpointRepository(DatabaseRepository):
     """Repository for StateCheckpoint entities."""
 
     def __init__(self, session: AsyncSession):
@@ -83,9 +81,7 @@ class StateCheckpointRepository(DatabaseRepository[StateCheckpoint, str]):
 
     async def get_by_checkpoint_type(self, checkpoint_type: str) -> list[StateCheckpoint]:
         """Get checkpoints by type."""
-        return await self.get_all(
-            filters={"checkpoint_type": checkpoint_type}, order_by="-timestamp"
-        )
+        return await self.get_all(filters={"checkpoint_type": checkpoint_type}, order_by="-timestamp")
 
     async def get_latest_checkpoint(self, bot_id: str) -> StateCheckpoint | None:
         """Get latest checkpoint for bot."""
@@ -94,12 +90,10 @@ class StateCheckpointRepository(DatabaseRepository[StateCheckpoint, str]):
 
     async def get_valid_checkpoints(self, bot_id: str) -> list[StateCheckpoint]:
         """Get valid checkpoints for bot."""
-        return await self.get_all(
-            filters={"bot_id": bot_id, "is_valid": True}, order_by="-timestamp"
-        )
+        return await self.get_all(filters={"bot_id": bot_id, "is_valid": True}, order_by="-timestamp")
 
 
-class StateHistoryRepository(DatabaseRepository[StateHistory, str]):
+class StateHistoryRepository(DatabaseRepository):
     """Repository for StateHistory entities."""
 
     def __init__(self, session: AsyncSession):
@@ -121,13 +115,9 @@ class StateHistoryRepository(DatabaseRepository[StateHistory, str]):
 
     async def get_by_change_type(self, change_type: str) -> list[StateHistory]:
         """Get history by change type."""
-        return await self.get_all(
-            filters={"change_type": change_type}, order_by="-change_timestamp"
-        )
+        return await self.get_all(filters={"change_type": change_type}, order_by="-change_timestamp")
 
-    async def get_recent_changes(
-        self, entity_type: str, entity_id: str, hours: int = 24
-    ) -> list[StateHistory]:
+    async def get_recent_changes(self, entity_type: str, entity_id: str, hours: int = 24) -> list[StateHistory]:
         """Get recent changes for entity."""
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
         return await self.get_all(
@@ -153,7 +143,7 @@ class StateHistoryRepository(DatabaseRepository[StateHistory, str]):
         )
 
 
-class StateMetadataRepository(DatabaseRepository[StateMetadata, str]):
+class StateMetadataRepository(DatabaseRepository):
     """Repository for StateMetadata entities."""
 
     def __init__(self, session: AsyncSession):
@@ -174,14 +164,14 @@ class StateMetadataRepository(DatabaseRepository[StateMetadata, str]):
         """Get metadata by entity type."""
         return await self.get_all(filters={"entity_type": entity_type})
 
-    async def get_locked_entities(self, entity_type: str = None) -> list[StateMetadata]:
+    async def get_locked_entities(self, entity_type: str | None = None) -> list[StateMetadata]:
         """Get locked entities."""
         filters = {"is_locked": True}
         if entity_type:
             filters["entity_type"] = entity_type
         return await self.get_all(filters=filters)
 
-    async def get_corrupted_entities(self, entity_type: str = None) -> list[StateMetadata]:
+    async def get_corrupted_entities(self, entity_type: str | None = None) -> list[StateMetadata]:
         """Get entities with corruption detected."""
         filters = {"corruption_detected": True}
         if entity_type:
@@ -189,7 +179,7 @@ class StateMetadataRepository(DatabaseRepository[StateMetadata, str]):
         return await self.get_all(filters=filters)
 
 
-class StateBackupRepository(DatabaseRepository[StateBackup, str]):
+class StateBackupRepository(DatabaseRepository):
     """Repository for StateBackup entities."""
 
     def __init__(self, session: AsyncSession):
@@ -208,15 +198,11 @@ class StateBackupRepository(DatabaseRepository[StateBackup, str]):
 
     async def get_by_backup_type(self, backup_type: str) -> list[StateBackup]:
         """Get backups by type."""
-        return await self.get_all(
-            filters={"backup_type": backup_type}, order_by="-backup_timestamp"
-        )
+        return await self.get_all(filters={"backup_type": backup_type}, order_by="-backup_timestamp")
 
     async def get_latest_backup(self, bot_id: str) -> StateBackup | None:
         """Get latest backup for bot."""
-        backups = await self.get_all(
-            filters={"bot_id": bot_id}, order_by="-backup_timestamp", limit=1
-        )
+        backups = await self.get_all(filters={"bot_id": bot_id}, order_by="-backup_timestamp", limit=1)
         return backups[0] if backups else None
 
     async def get_verified_backups(self, bot_id: str) -> list[StateBackup]:
@@ -229,9 +215,7 @@ class StateBackupRepository(DatabaseRepository[StateBackup, str]):
     async def cleanup_old_backups(self, bot_id: str, keep_days: int = 30) -> int:
         """Clean up old backups."""
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=keep_days)
-        old_backups = await self.get_all(
-            filters={"bot_id": bot_id, "backup_timestamp": {"lt": cutoff_date}}
-        )
+        old_backups = await self.get_all(filters={"bot_id": bot_id, "backup_timestamp": {"lt": cutoff_date}})
 
         count = 0
         for backup in old_backups:

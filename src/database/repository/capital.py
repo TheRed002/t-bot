@@ -13,10 +13,11 @@ from src.database.models.capital import (
     ExchangeAllocationDB,
     FundFlowDB,
 )
-from src.database.repository.core_compliant_base import DatabaseRepository
+from src.database.repository.base import DatabaseRepository
+from src.database.repository.utils import RepositoryUtils
 
 
-class CapitalAllocationRepository(DatabaseRepository[CapitalAllocationDB, str]):
+class CapitalAllocationRepository(DatabaseRepository):
     """Repository for CapitalAllocationDB entities."""
 
     def __init__(self, session: AsyncSession):
@@ -31,20 +32,17 @@ class CapitalAllocationRepository(DatabaseRepository[CapitalAllocationDB, str]):
 
     async def get_by_strategy(self, strategy_id: str) -> list[CapitalAllocationDB]:
         """Get allocations by strategy."""
-        return await self.get_all(filters={"strategy_id": strategy_id})
+        return await RepositoryUtils.get_entities_by_field(self, "strategy_id", strategy_id)
 
     async def get_by_exchange(self, exchange: str) -> list[CapitalAllocationDB]:
         """Get allocations by exchange."""
-        return await self.get_all(filters={"exchange": exchange})
+        return await RepositoryUtils.get_entities_by_field(self, "exchange", exchange)
 
-    async def find_by_strategy_exchange(
-        self, strategy_id: str, exchange: str
-    ) -> CapitalAllocationDB | None:
+    async def find_by_strategy_exchange(self, strategy_id: str, exchange: str) -> CapitalAllocationDB | None:
         """Find allocation by strategy and exchange using proper query."""
         try:
-            result = await self.get_all(
-                filters={"strategy_id": strategy_id, "exchange": exchange}, limit=1
-            )
+            filters = {"strategy_id": strategy_id, "exchange": exchange}
+            result = await RepositoryUtils.get_entities_by_multiple_fields(self, filters)
             return result[0] if result else None
         except (IntegrityError, OperationalError) as e:
             raise DatabaseError(f"Failed to find allocation: {e}")
@@ -60,7 +58,7 @@ class CapitalAllocationRepository(DatabaseRepository[CapitalAllocationDB, str]):
         return sum(Decimal(str(alloc.available_amount)) for alloc in allocations)
 
 
-class FundFlowRepository(DatabaseRepository[FundFlowDB, str]):
+class FundFlowRepository(DatabaseRepository):
     """Repository for FundFlowDB entities."""
 
     def __init__(self, session: AsyncSession):
@@ -75,29 +73,27 @@ class FundFlowRepository(DatabaseRepository[FundFlowDB, str]):
 
     async def get_by_from_strategy(self, strategy_id: str) -> list[FundFlowDB]:
         """Get flows from a strategy."""
-        return await self.get_all(filters={"from_strategy": strategy_id}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "from_strategy", strategy_id, "-timestamp")
 
     async def get_by_to_strategy(self, strategy_id: str) -> list[FundFlowDB]:
         """Get flows to a strategy."""
-        return await self.get_all(filters={"to_strategy": strategy_id}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "to_strategy", strategy_id, "-timestamp")
 
     async def get_by_exchange_flow(self, from_exchange: str, to_exchange: str) -> list[FundFlowDB]:
         """Get flows between exchanges."""
-        return await self.get_all(
-            filters={"from_exchange": from_exchange, "to_exchange": to_exchange},
-            order_by="-timestamp",
-        )
+        filters = {"from_exchange": from_exchange, "to_exchange": to_exchange}
+        return await RepositoryUtils.get_entities_by_multiple_fields(self, filters, "-timestamp")
 
     async def get_by_reason(self, reason: str) -> list[FundFlowDB]:
         """Get flows by reason."""
-        return await self.get_all(filters={"reason": reason}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "reason", reason, "-timestamp")
 
     async def get_by_currency(self, currency: str) -> list[FundFlowDB]:
         """Get flows by currency."""
-        return await self.get_all(filters={"currency": currency}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "currency", currency, "-timestamp")
 
 
-class CurrencyExposureRepository(DatabaseRepository[CurrencyExposureDB, str]):
+class CurrencyExposureRepository(DatabaseRepository):
     """Repository for CurrencyExposureDB entities."""
 
     def __init__(self, session: AsyncSession):
@@ -118,13 +114,13 @@ class CurrencyExposureRepository(DatabaseRepository[CurrencyExposureDB, str]):
         """Get exposures that require hedging."""
         return await self.get_all(filters={"hedging_required": True})
 
-    async def get_total_exposure(self) -> float:
+    async def get_total_exposure(self) -> Decimal:
         """Get total currency exposure."""
         exposures = await self.get_all()
-        return sum(exp.base_currency_equivalent for exp in exposures)
+        return sum(exp.total_exposure for exp in exposures)
 
 
-class ExchangeAllocationRepository(DatabaseRepository[ExchangeAllocationDB, str]):
+class ExchangeAllocationRepository(DatabaseRepository):
     """Repository for ExchangeAllocationDB entities."""
 
     def __init__(self, session: AsyncSession):
@@ -141,30 +137,28 @@ class ExchangeAllocationRepository(DatabaseRepository[ExchangeAllocationDB, str]
         """Get allocation by exchange."""
         return await self.get_by(exchange=exchange)
 
-    async def get_total_allocated(self) -> float:
+    async def get_total_allocated(self) -> Decimal:
         """Get total allocated amount across all exchanges."""
         allocations = await self.get_all()
-        return sum(alloc.allocated_amount for alloc in allocations)
+        return sum(alloc.total_allocation for alloc in allocations)
 
-    async def get_total_available(self) -> float:
+    async def get_total_available(self) -> Decimal:
         """Get total available amount across all exchanges."""
         allocations = await self.get_all()
-        return sum(alloc.available_amount for alloc in allocations)
+        # Note: ExchangeAllocationDB doesn't have available_amount field, using unutilized
+        return sum(alloc.total_allocation - alloc.utilized_allocation for alloc in allocations)
 
-    async def get_underutilized_exchanges(
-        self, threshold: float = 0.5
-    ) -> list[ExchangeAllocationDB]:
+    async def get_underutilized_exchanges(self, threshold: Decimal = Decimal("0.5")) -> list[ExchangeAllocationDB]:
         """Get exchanges with low utilization."""
         allocations = await self.get_all()
         return [
             alloc
             for alloc in allocations
-            if alloc.allocated_amount > 0
-            and (alloc.utilized_amount / alloc.allocated_amount) < threshold
+            if alloc.allocated_amount > 0 and (alloc.utilized_amount / alloc.allocated_amount) < threshold
         ]
 
 
-class CapitalAuditLogRepository(DatabaseRepository[CapitalAuditLog, str]):
+class CapitalAuditLogRepository(DatabaseRepository):
     """Repository for capital audit log entities."""
 
     def __init__(self, session: AsyncSession):

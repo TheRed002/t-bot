@@ -6,16 +6,20 @@ predictions, model metadata, and training results.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from sqlalchemy import (
+    DECIMAL,
     BigInteger,
+    CheckConstraint,
     Column,
     DateTime,
-    Float,
+    Index,
     Integer,
     String,
     Text,
 )
+from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base
 
@@ -47,8 +51,10 @@ class MLPrediction(Base):
     )  # When prediction was made
 
     # Prediction results
-    prediction_value = Column(Float, nullable=True)  # Main prediction value
-    confidence_score = Column(Float, nullable=True)  # Confidence/probability score
+    prediction_value: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8))  # Main prediction value
+    confidence_score: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(8, 6)
+    )  # Confidence/probability score (0-1 with 6 decimals)
     prediction_type = Column(String(50), nullable=True)  # e.g., 'price', 'direction', 'volatility'
 
     # Feature information
@@ -56,12 +62,31 @@ class MLPrediction(Base):
     features_metadata = Column(Text, nullable=True)  # JSON string of feature names/types
 
     # Performance tracking
-    actual_value = Column(Float, nullable=True)  # Actual value (filled later for evaluation)
-    prediction_error = Column(Float, nullable=True)  # Calculated error when actual is known
+    actual_value: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8))  # Actual value (filled later for evaluation)
+    prediction_error: Mapped[Decimal | None] = mapped_column(DECIMAL(20, 8))  # Calculated error when actual is known
 
     # Additional metadata
     market_conditions = Column(Text, nullable=True)  # JSON string of market context
     prediction_horizon = Column(Integer, nullable=True)  # Prediction timeframe in minutes
+
+    # Indexes and constraints
+    __table_args__ = (
+        Index("idx_ml_predictions_model_symbol", "model_name", "symbol"),
+        Index("idx_ml_predictions_timestamp", "timestamp"),
+        Index("idx_ml_predictions_prediction_timestamp", "prediction_timestamp"),
+        Index("idx_ml_predictions_model_timestamp", "model_name", "timestamp"),
+        Index("idx_ml_predictions_confidence", "confidence_score"),  # Performance filtering
+        Index("idx_ml_predictions_prediction_type", "prediction_type"),  # Type-based queries
+        Index("idx_ml_predictions_symbol_type", "symbol", "prediction_type"),  # Symbol-specific predictions
+        CheckConstraint(
+            "confidence_score IS NULL OR (confidence_score >= 0 AND confidence_score <= 1)",
+            name="check_confidence_score_range",
+        ),
+        CheckConstraint(
+            "prediction_horizon IS NULL OR prediction_horizon > 0",
+            name="check_prediction_horizon_positive",
+        ),
+    )
 
     def __repr__(self) -> str:
         return (
@@ -86,19 +111,19 @@ class MLModelMetadata(Base):
     # Model identification
     model_name = Column(String(100), nullable=False, index=True)
     model_version = Column(String(50), nullable=False)
-    model_type = Column(
-        String(50), nullable=False
-    )  # e.g., 'price_predictor', 'direction_classifier'
+    model_type = Column(String(50), nullable=False)  # e.g., 'price_predictor', 'direction_classifier'
 
     # Model details
     model_path = Column(String(500), nullable=True)  # Path to saved model file
-    model_size_mb = Column(Float, nullable=True)
+    model_size_mb: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(10, 2), nullable=True
+    )  # Model size in MB with 2 decimal precision
     training_dataset_hash = Column(String(64), nullable=True)
 
     # Performance metrics
-    training_accuracy = Column(Float, nullable=True)
-    validation_accuracy = Column(Float, nullable=True)
-    test_accuracy = Column(Float, nullable=True)
+    training_accuracy: Mapped[Decimal | None] = mapped_column(DECIMAL(8, 6))  # Accuracy score (0-1)
+    validation_accuracy: Mapped[Decimal | None] = mapped_column(DECIMAL(8, 6))  # Validation accuracy (0-1)
+    test_accuracy: Mapped[Decimal | None] = mapped_column(DECIMAL(8, 6))  # Test accuracy (0-1)
 
     # Training information
     training_start_time = Column(DateTime, nullable=True)
@@ -116,7 +141,9 @@ class MLModelMetadata(Base):
 
     # Performance tracking
     prediction_count = Column(BigInteger, default=0)
-    average_prediction_time_ms = Column(Float, nullable=True)
+    average_prediction_time_ms: Mapped[Decimal | None] = mapped_column(
+        DECIMAL(10, 3)
+    )  # Average prediction time in milliseconds
 
     # Timestamps
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
@@ -125,6 +152,26 @@ class MLModelMetadata(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+
+    # Indexes and constraints
+    __table_args__ = (
+        Index("idx_ml_model_metadata_name_version", "model_name", "model_version"),
+        Index("idx_ml_model_metadata_active", "is_active"),
+        Index("idx_ml_model_metadata_created", "created_at"),
+        CheckConstraint(
+            "training_accuracy >= 0 AND training_accuracy <= 1",
+            name="check_training_accuracy_range",
+        ),
+        CheckConstraint(
+            "validation_accuracy >= 0 AND validation_accuracy <= 1",
+            name="check_validation_accuracy_range",
+        ),
+        CheckConstraint("test_accuracy >= 0 AND test_accuracy <= 1", name="check_test_accuracy_range"),
+        CheckConstraint("model_size_mb >= 0", name="check_model_size_non_negative"),
+        CheckConstraint("training_duration_seconds >= 0", name="check_training_duration_non_negative"),
+        CheckConstraint("prediction_count >= 0", name="check_prediction_count_non_negative"),
+        CheckConstraint("is_active IN ('true', 'false')", name="check_is_active_boolean_string"),
     )
 
     def __repr__(self) -> str:
@@ -153,19 +200,17 @@ class MLTrainingJob(Base):
     model_type = Column(String(50), nullable=False)
 
     # Job status
-    status = Column(
-        String(20), nullable=False, default="pending"
-    )  # pending, running, completed, failed
-    progress_percentage = Column(Float, default=0.0)
+    status = Column(String(20), nullable=False, default="pending")  # pending, running, completed, failed
+    progress_percentage: Mapped[Decimal] = mapped_column(DECIMAL(5, 2), default=0.0)  # Progress percentage (0-100)
 
     # Training configuration
     training_config = Column(Text, nullable=True)  # JSON string of training parameters
     dataset_config = Column(Text, nullable=True)  # JSON string of dataset parameters
 
     # Resource usage
-    cpu_usage_percent = Column(Float, nullable=True)
-    memory_usage_mb = Column(Float, nullable=True)
-    gpu_usage_percent = Column(Float, nullable=True)
+    cpu_usage_percent: Mapped[Decimal | None] = mapped_column(DECIMAL(5, 2))  # CPU usage percentage (0-100)
+    memory_usage_mb: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 2))  # Memory usage in MB
+    gpu_usage_percent: Mapped[Decimal | None] = mapped_column(DECIMAL(5, 2))  # GPU usage percentage (0-100)
 
     # Results
     final_model_path = Column(String(500), nullable=True)
@@ -173,8 +218,8 @@ class MLTrainingJob(Base):
     error_message = Column(Text, nullable=True)
 
     # Performance metrics
-    best_validation_score = Column(Float, nullable=True)
-    final_training_score = Column(Float, nullable=True)
+    best_validation_score: Mapped[Decimal | None] = mapped_column(DECIMAL(8, 6))  # Best validation score (0-1)
+    final_training_score: Mapped[Decimal | None] = mapped_column(DECIMAL(8, 6))  # Final training score (0-1)
     epochs_completed = Column(Integer, nullable=True)
     early_stopping_epoch = Column(Integer, nullable=True)
 
@@ -182,6 +227,35 @@ class MLTrainingJob(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+
+    # Indexes and constraints
+    __table_args__ = (
+        Index("idx_ml_training_jobs_job_id", "job_id"),
+        Index("idx_ml_training_jobs_model_name", "model_name"),
+        Index("idx_ml_training_jobs_status", "status"),
+        Index("idx_ml_training_jobs_created", "created_at"),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed')",
+            name="check_training_job_status",
+        ),
+        CheckConstraint(
+            "progress_percentage >= 0 AND progress_percentage <= 100",
+            name="check_progress_percentage_range",
+        ),
+        CheckConstraint("cpu_usage_percent >= 0 AND cpu_usage_percent <= 100", name="check_cpu_usage_range"),
+        CheckConstraint("memory_usage_mb >= 0", name="check_memory_usage_non_negative"),
+        CheckConstraint("gpu_usage_percent >= 0 AND gpu_usage_percent <= 100", name="check_gpu_usage_range"),
+        CheckConstraint(
+            "best_validation_score >= 0 AND best_validation_score <= 1",
+            name="check_validation_score_range",
+        ),
+        CheckConstraint(
+            "final_training_score >= 0 AND final_training_score <= 1",
+            name="check_training_score_range",
+        ),
+        CheckConstraint("epochs_completed >= 0", name="check_epochs_completed_non_negative"),
+        CheckConstraint("early_stopping_epoch >= 0", name="check_early_stopping_epoch_non_negative"),
+    )
 
     def __repr__(self) -> str:
         return (

@@ -6,23 +6,25 @@ checkpointing, audit trails, and backup/restore capabilities.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
+    DECIMAL,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import Mapped, relationship
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from .base import AuditMixin, Base, MetadataMixin, SoftDeleteMixin, TimestampMixin
@@ -44,8 +46,8 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     # Snapshot metadata
     name = Column(String(255), nullable=True)
     description = Column(Text, nullable=True)
-    snapshot_type: Mapped[str] = Column(
-        Enum("manual", "automatic", "checkpoint", "backup", name="snapshot_type_enum"),
+    snapshot_type = Column(
+        String(50),
         nullable=False,
         default="manual",
     )
@@ -64,8 +66,8 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     state_checksum = Column(String(128), nullable=False)  # SHA-256 hash
 
     # Status tracking
-    status: Mapped[str] = Column(
-        Enum("creating", "ready", "corrupted", "archived", name="snapshot_status_enum"),
+    status = Column(
+        String(50),
         nullable=False,
         default="creating",
     )
@@ -75,25 +77,35 @@ class StateSnapshot(Base, AuditMixin, MetadataMixin, SoftDeleteMixin):
     is_protected = Column(Boolean, default=False, nullable=False)  # Prevent auto-deletion
 
     # Relationships
-    checkpoints = relationship(
-        "StateCheckpoint", back_populates="snapshot", cascade="all, delete-orphan"
-    )
+    checkpoints = relationship("StateCheckpoint", back_populates="snapshot", cascade="all, delete-orphan")
 
-    # Indexes for performance
+    # Indexes and constraints for performance and data integrity
     __table_args__ = (
         Index("ix_state_snapshots_created_at", "created_at"),
         Index("ix_state_snapshots_type", "snapshot_type"),
         Index("ix_state_snapshots_status", "status"),
         Index("ix_state_snapshots_checksum", "state_checksum"),
         Index("ix_state_snapshots_protected", "is_protected"),
+        Index("ix_state_snapshots_type_status", "snapshot_type", "status"),
+        UniqueConstraint("state_checksum", name="uq_state_snapshots_checksum"),
+        CheckConstraint("raw_size_bytes >= 0", name="ck_state_snapshots_raw_size_positive"),
+        CheckConstraint("compressed_size_bytes >= 0", name="ck_state_snapshots_compressed_size_positive"),
+        CheckConstraint("retention_days > 0", name="ck_state_snapshots_retention_positive"),
+        CheckConstraint(
+            "snapshot_type IN ('manual', 'automatic', 'scheduled', 'emergency')",
+            name="ck_state_snapshots_type_valid",
+        ),
+        CheckConstraint(
+            "status IN ('creating', 'active', 'failed', 'expired')",
+            name="ck_state_snapshots_status_valid",
+        ),
     )
 
-    @hybrid_property
-    def compression_ratio(self) -> float:
+    def compression_ratio(self) -> Decimal:
         """Calculate compression ratio if compressed."""
         if self.is_compressed and self.compressed_size_bytes and self.raw_size_bytes:
-            return self.compressed_size_bytes / self.raw_size_bytes
-        return 1.0
+            return Decimal(str(self.compressed_size_bytes)) / Decimal(str(self.raw_size_bytes))
+        return Decimal("1.0")
 
     def get_state_by_type(self, state_type: str) -> dict[str, Any] | None:
         """Get state data for a specific state type."""
@@ -125,27 +137,29 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
     # Checkpoint metadata
     name = Column(String(255), nullable=True)
     description = Column(Text, nullable=True)
-    checkpoint_type: Mapped[str] = Column(
-        Enum("incremental", "full", "emergency", name="checkpoint_type_enum"),
+    checkpoint_type = Column(
+        String(50),
         nullable=False,
         default="incremental",
     )
 
     # Reference to base snapshot
     base_snapshot_id = Column(
-        UUID(as_uuid=True), ForeignKey("state_snapshots.snapshot_id"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("state_snapshots.snapshot_id", ondelete="CASCADE", onupdate="CASCADE"),
+        nullable=True,
+        index=True,
     )
-    snapshot = relationship(
-        "StateSnapshot", back_populates="checkpoints", foreign_keys=[base_snapshot_id]
-    )
+    snapshot = relationship("StateSnapshot", back_populates="checkpoints", foreign_keys=[base_snapshot_id])
 
     # Previous checkpoint for chain
     previous_checkpoint_id = Column(
-        UUID(as_uuid=True), ForeignKey("state_checkpoints.checkpoint_id"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey("state_checkpoints.checkpoint_id", ondelete="SET NULL", onupdate="CASCADE"),
+        nullable=True,
+        index=True,
     )
-    previous_checkpoint = relationship(
-        "StateCheckpoint", remote_side="StateCheckpoint.checkpoint_id"
-    )
+    previous_checkpoint = relationship("StateCheckpoint", remote_side="StateCheckpoint.checkpoint_id")
 
     # State changes (delta from base or previous checkpoint)
     state_changes = Column(JSONB, nullable=False)  # Only changed states
@@ -162,8 +176,8 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
     changes_checksum = Column(String(128), nullable=False)
 
     # Status
-    status: Mapped[str] = Column(
-        Enum("creating", "ready", "applied", "rolled_back", name="checkpoint_status_enum"),
+    status = Column(
+        String(50),
         nullable=False,
         default="creating",
     )
@@ -171,13 +185,24 @@ class StateCheckpoint(Base, AuditMixin, MetadataMixin):
     # Cleanup
     retention_days = Column(Integer, nullable=True)
 
-    # Indexes
+    # Indexes and constraints
     __table_args__ = (
         Index("ix_state_checkpoints_created_at", "created_at"),
         Index("ix_state_checkpoints_type", "checkpoint_type"),
         Index("ix_state_checkpoints_status", "status"),
-        Index("ix_state_checkpoints_base_snapshot", "base_snapshot_id"),
-        Index("ix_state_checkpoints_previous", "previous_checkpoint_id"),
+        Index("ix_state_checkpoints_type_status", "checkpoint_type", "status"),
+        UniqueConstraint("changes_checksum", name="uq_state_checkpoints_checksum"),
+        CheckConstraint("changes_count >= 0", name="ck_state_checkpoints_changes_count_positive"),
+        CheckConstraint("size_bytes >= 0", name="ck_state_checkpoints_size_positive"),
+        CheckConstraint("retention_days > 0", name="ck_state_checkpoints_retention_positive"),
+        CheckConstraint(
+            "checkpoint_type IN ('incremental', 'full', 'diff')",
+            name="ck_state_checkpoints_type_valid",
+        ),
+        CheckConstraint(
+            "status IN ('creating', 'active', 'failed', 'applied')",
+            name="ck_state_checkpoints_status_valid",
+        ),
     )
 
     def get_changed_state_ids(self) -> set[str]:
@@ -211,8 +236,8 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
     state_id = Column(String(255), nullable=False, index=True)
 
     # Operation details
-    operation: Mapped[str] = Column(
-        Enum("create", "update", "delete", "restore", "sync", name="state_operation_enum"),
+    operation = Column(
+        String(50),
         nullable=False,
     )
     operation_id = Column(UUID(as_uuid=True), nullable=True)  # Link to persistence operation
@@ -227,7 +252,7 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
     user_id = Column(String(255), nullable=True)
     reason = Column(Text, nullable=True)
     priority = Column(
-        Enum("critical", "high", "medium", "low", name="state_priority_enum"),
+        String(50),
         nullable=False,
         default="medium",
     )
@@ -250,7 +275,7 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
     rolled_back = Column(Boolean, default=False, nullable=False)
     rollback_checkpoint_id = Column(UUID(as_uuid=True), nullable=True)
 
-    # Indexes for efficient querying
+    # Indexes and constraints for efficient querying and data integrity
     __table_args__ = (
         Index("ix_state_history_state_type_id", "state_type", "state_id"),
         Index("ix_state_history_operation", "operation"),
@@ -260,13 +285,23 @@ class StateHistory(Base, TimestampMixin, MetadataMixin):
         Index("ix_state_history_rollback", "can_rollback", "rolled_back"),
         # Compound index for common queries
         Index("ix_state_history_type_id_time", "state_type", "state_id", "created_at"),
+        Index("ix_state_history_operation_time", "operation", "created_at"),
+        CheckConstraint("old_size_bytes >= 0", name="ck_state_history_old_size_positive"),
+        CheckConstraint("new_size_bytes >= 0", name="ck_state_history_new_size_positive"),
+        CheckConstraint(
+            "operation IN ('create', 'update', 'delete', 'restore', 'sync')",
+            name="ck_state_history_operation_valid",
+        ),
+        CheckConstraint(
+            "priority IN ('low', 'medium', 'high', 'critical')",
+            name="ck_state_history_priority_valid",
+        ),
     )
 
-    @hybrid_property
     def size_change_bytes(self) -> int:
         """Calculate size change in bytes."""
-        old_size = self.old_size_bytes or 0
-        new_size = self.new_size_bytes or 0
+        old_size = int(self.old_size_bytes or 0)
+        new_size = int(self.new_size_bytes or 0)
         return new_size - old_size
 
     def get_changed_field_names(self) -> set[str]:
@@ -326,7 +361,7 @@ class StateMetadata(Base, AuditMixin):
     schema_version = Column(String(50), nullable=False, default="1.0.0")
     validation_errors = Column(JSONB, nullable=True)  # Cached validation results
 
-    # Indexes
+    # Indexes and constraints
     __table_args__ = (
         Index("ix_state_metadata_type", "state_type"),
         Index("ix_state_metadata_version", "current_version"),
@@ -339,6 +374,11 @@ class StateMetadata(Base, AuditMixin):
         # Compound indexes for common queries
         Index("ix_state_metadata_type_modified", "state_type", "last_modified"),
         Index("ix_state_metadata_storage_locations", "in_redis", "in_postgresql"),
+        Index("ix_state_metadata_type_critical", "state_type", "is_critical"),
+        CheckConstraint("current_version > 0", name="ck_state_metadata_version_positive"),
+        CheckConstraint("current_size_bytes >= 0", name="ck_state_metadata_size_positive"),
+        CheckConstraint("access_count >= 0", name="ck_state_metadata_access_count_positive"),
+        CheckConstraint("cache_priority >= 0", name="ck_state_metadata_cache_priority_positive"),
     )
 
     def get_tag(self, key: str, default: Any = None) -> Any:
@@ -350,20 +390,22 @@ class StateMetadata(Base, AuditMixin):
     def set_tag(self, key: str, value: Any) -> None:
         """Set a tag value."""
         if not self.tags:
-            self.tags = {}
-        self.tags[key] = value
+            self.tags = {}  # type: ignore
+        tags_dict = dict(self.tags) if self.tags else {}
+        tags_dict[key] = value
+        self.tags = tags_dict  # type: ignore
 
     def increment_access_count(self) -> None:
         """Increment access counter and update last_accessed."""
-        self.access_count += 1
-        self.last_accessed = datetime.now(timezone.utc)
+        self.access_count = int(self.access_count) + 1  # type: ignore
+        self.last_accessed = datetime.now(timezone.utc)  # type: ignore
 
     def is_in_storage_layer(self, layer: str) -> bool:
         """Check if state is stored in a specific layer."""
         layer_map = {
-            "redis": self.in_redis,
-            "postgresql": self.in_postgresql,
-            "influxdb": self.in_influxdb,
+            "redis": bool(self.in_redis),
+            "postgresql": bool(self.in_postgresql),
+            "influxdb": bool(self.in_influxdb),
         }
         return layer_map.get(layer.lower(), False)
 
@@ -385,7 +427,7 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     backup_type = Column(
-        Enum("full", "incremental", "differential", name="backup_type_enum"),
+        String(50),
         nullable=False,
         default="full",
     )
@@ -402,7 +444,7 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
     # Compression and encryption
     is_compressed = Column(Boolean, default=True, nullable=False)
     compression_type = Column(String(50), nullable=True)
-    compression_ratio = Column(String(10), nullable=True)  # "0.3" means 30% of original
+    compression_ratio: Column[Decimal] = Column(DECIMAL(5, 4), nullable=True)  # Precise compression ratio
 
     is_encrypted = Column(Boolean, default=False, nullable=False)
     encryption_algorithm = Column(String(50), nullable=True)
@@ -413,15 +455,7 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
 
     # Status tracking
     status = Column(
-        Enum(
-            "creating",
-            "completed",
-            "failed",
-            "verifying",
-            "corrupted",
-            "archived",
-            name="backup_status_enum",
-        ),
+        String(50),
         nullable=False,
         default="creating",
     )
@@ -444,7 +478,7 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
     restore_count = Column(Integer, default=0, nullable=False)
     last_restored_at = Column(DateTime(timezone=True), nullable=True)
 
-    # Indexes
+    # Indexes and constraints
     __table_args__ = (
         Index("ix_state_backups_name", "name"),
         Index("ix_state_backups_type", "backup_type"),
@@ -453,24 +487,47 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
         Index("ix_state_backups_completed_at", "completed_at"),
         Index("ix_state_backups_expires_at", "expires_at"),
         Index("ix_state_backups_protected", "is_protected"),
+        Index("ix_state_backups_type_status", "backup_type", "status"),
+        Index("ix_state_backups_status_created", "status", "created_at"),
+        UniqueConstraint("backup_checksum", name="uq_state_backups_checksum"),
+        CheckConstraint("total_states >= 0", name="ck_state_backups_total_states_positive"),
+        CheckConstraint("total_size_bytes >= 0", name="ck_state_backups_total_size_positive"),
+        CheckConstraint("duration_seconds >= 0", name="ck_state_backups_duration_positive"),
+        CheckConstraint("retry_count >= 0", name="ck_state_backups_retry_count_positive"),
+        CheckConstraint("retention_days > 0", name="ck_state_backups_retention_positive"),
+        CheckConstraint("restore_count >= 0", name="ck_state_backups_restore_count_positive"),
+        CheckConstraint(
+            "compression_ratio > 0 AND compression_ratio <= 1",
+            name="ck_state_backups_compression_ratio_valid",
+        ),
+        CheckConstraint(
+            "backup_type IN ('full', 'incremental', 'differential')",
+            name="ck_state_backups_type_valid",
+        ),
+        CheckConstraint(
+            "status IN ('creating', 'completed', 'failed', 'expired')",
+            name="ck_state_backups_status_valid",
+        ),
+        CheckConstraint(
+            "storage_type IN ('filesystem', 's3', 'gcs', 'azure')",
+            name="ck_state_backups_storage_type_valid",
+        ),
     )
 
-    @hybrid_property
     def is_expired(self) -> bool:
         """Check if backup is expired."""
         if self.expires_at:
-            return datetime.now(timezone.utc) > self.expires_at
+            return bool(datetime.now(timezone.utc) > self.expires_at)
         return False
 
-    @hybrid_property
-    def backup_success_rate(self) -> float:
+    def backup_success_rate(self) -> Decimal:
         """Calculate backup success rate based on retries."""
-        if self.retry_count == 0:
-            return 100.0 if self.status == "completed" else 0.0
+        if int(self.retry_count) == 0:
+            return Decimal("100.0") if self.status == "completed" else Decimal("0.0")
 
         success_attempts = 1 if self.status == "completed" else 0
-        total_attempts = self.retry_count + 1
-        return (success_attempts / total_attempts) * 100.0
+        total_attempts = int(self.retry_count) + 1
+        return Decimal(str(success_attempts)) / Decimal(str(total_attempts)) * Decimal("100.0")
 
     def get_included_state_types(self) -> set[str]:
         """Get set of included state types."""
@@ -481,7 +538,7 @@ class StateBackup(Base, AuditMixin, MetadataMixin):
     def mark_verified(self, checksum: str) -> bool:
         """Mark backup as integrity verified."""
         if self.backup_checksum == checksum:
-            self.integrity_verified = True
+            self.integrity_verified = True  # type: ignore
             return True
         return False
 

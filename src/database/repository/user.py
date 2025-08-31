@@ -3,18 +3,17 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models.user import User
-from src.database.repository.core_compliant_base import DatabaseRepository
+from src.database.repository.base import DatabaseRepository
+from src.database.repository.utils import RepositoryUtils
 
 
-class UserRepository(DatabaseRepository[User, str]):
+class UserRepository(DatabaseRepository):
     """Repository for User entities."""
 
     def __init__(self, session: AsyncSession):
         """Initialize user repository."""
 
-        super().__init__(
-            session=session, model=User, entity_type=User, key_type=str, name="UserRepository"
-        )
+        super().__init__(session=session, model=User, entity_type=User, key_type=str, name="UserRepository")
 
     async def get_by_username(self, username: str) -> User | None:
         """Get user by username."""
@@ -26,39 +25,24 @@ class UserRepository(DatabaseRepository[User, str]):
 
     async def get_active_users(self) -> list[User]:
         """Get all active users."""
-        return await self.get_all(filters={"is_active": True})
+        return await RepositoryUtils.get_entities_by_field(self, "is_active", True)
 
     async def get_verified_users(self) -> list[User]:
         """Get all verified users."""
-        return await self.get_all(filters={"is_verified": True})
+        return await RepositoryUtils.get_entities_by_field(self, "is_verified", True)
 
     async def get_admin_users(self) -> list[User]:
         """Get all admin users."""
-        return await self.get_all(filters={"is_admin": True})
+        return await RepositoryUtils.get_entities_by_field(self, "is_admin", True)
 
     async def activate_user(self, user_id: str) -> bool:
         """Activate a user."""
-        user = await self.get(user_id)
-        if user:
-            user.is_active = True
-            await self.update(user)
-            return True
-        return False
+        return await RepositoryUtils.mark_entity_field(self, user_id, "is_active", True, "User")
 
     async def deactivate_user(self, user_id: str) -> bool:
         """Deactivate a user."""
-        user = await self.get(user_id)
-        if user:
-            user.is_active = False
-            await self.update(user)
-            return True
-        return False
+        return await RepositoryUtils.mark_entity_field(self, user_id, "is_active", False, "User")
 
     async def verify_user(self, user_id: str) -> bool:
         """Verify a user."""
-        user = await self.get(user_id)
-        if user:
-            user.is_verified = True
-            await self.update(user)
-            return True
-        return False
+        return await RepositoryUtils.mark_entity_field(self, user_id, "is_verified", True, "User")

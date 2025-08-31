@@ -14,19 +14,16 @@ from typing import Any
 
 import redis.asyncio as redis
 
-from src.core.base.component import BaseComponent
+from src.core.base import BaseComponent
 
 # Import core components from P-001
 from src.core.exceptions import DataError, DataSourceError
 
-# Import error handling from P-002A
-from src.error_handling.error_handler import ErrorHandler
-from src.error_handling.recovery_scenarios import NetworkDisconnectionRecovery
-from src.utils.constants import TIMEOUTS
+# Error handling is provided by decorators
+from src.utils.constants import DEFAULT_VALUES, LIMITS, TIMEOUTS
 
 # Import utils from P-007A
 from src.utils.decorators import circuit_breaker, retry, time_execution
-from src.utils.formatters import format_api_response
 
 
 class RedisClient(BaseComponent):
@@ -37,16 +34,16 @@ class RedisClient(BaseComponent):
         # Accept both config object and direct URL
         if hasattr(config_or_url, "redis"):
             self.redis_url = (
-                getattr(config_or_url.redis, "url", "redis://localhost:6379/0")
+                getattr(config_or_url.redis, "url", DEFAULT_VALUES["redis_default_url"])
                 if hasattr(config_or_url, "redis")
-                else "redis://localhost:6379/0"
+                else DEFAULT_VALUES["redis_default_url"]
             )
             self.config = config_or_url
         elif isinstance(config_or_url, str):
             self.redis_url = config_or_url
             self.config = None
         else:
-            self.redis_url = "redis://localhost:6379/0"
+            self.redis_url = DEFAULT_VALUES["redis_default_url"]
             self.config = None
 
         self.client: redis.Redis | None = None
@@ -54,54 +51,122 @@ class RedisClient(BaseComponent):
         self._default_ttl = TIMEOUTS.get("REDIS_DEFAULT_TTL", 3600)
         self.auto_close = auto_close
         self._close_lock = asyncio.Lock()
-        self.error_handler = ErrorHandler(self.config) if self.config else None
+
+        # Backpressure handling - Use constants from utils
+        max_concurrent_ops = LIMITS.get("REDIS_MAX_CONCURRENT_OPS", 100)
+        self._operation_semaphore = asyncio.Semaphore(max_concurrent_ops)
+        self._operation_queue_size = 0
+        self._max_queue_size = LIMITS.get("REDIS_MAX_QUEUE_SIZE", 1000)
+
+        # Connection timeout and heartbeat - Use constants from utils
+        self._last_heartbeat = None
+        self._heartbeat_interval = TIMEOUTS.get("REDIS_HEARTBEAT_INTERVAL", 30)
+        self._heartbeat_task = None
+        self._connection_timeout = TIMEOUTS.get("REDIS_CONNECTION_TIMEOUT", 10)
 
     @time_execution
     @retry(max_attempts=3)
     @circuit_breaker(failure_threshold=3, recovery_timeout=30)
     async def connect(self) -> None:
         """Connect to Redis with proper configuration."""
-        try:
-            self.client = redis.Redis.from_url(
-                self.redis_url,
-                decode_responses=True,
-                max_connections=100,
-                retry_on_timeout=True,
-                health_check_interval=30,
-            )
+        # Use constants for Redis connection configuration
+        max_connections = LIMITS.get("REDIS_MAX_CONNECTIONS", 100)
+        health_check_interval = TIMEOUTS.get("REDIS_HEALTH_CHECK_INTERVAL", 30)
+        socket_connect_timeout = TIMEOUTS.get("REDIS_SOCKET_CONNECT_TIMEOUT", 5)
+        socket_timeout = TIMEOUTS.get("REDIS_SOCKET_TIMEOUT", 10)
 
-            # Test connection
-            await self.client.ping()
-            self.logger.info("Redis connection established")
+        self.client = redis.Redis.from_url(
+            self.redis_url,
+            decode_responses=True,
+            max_connections=max_connections,
+            retry_on_timeout=True,
+            health_check_interval=health_check_interval,
+            socket_connect_timeout=socket_connect_timeout,
+            socket_timeout=socket_timeout,
+            retry_on_error=[redis.BusyLoadingError, redis.ConnectionError, redis.TimeoutError],
+            socket_keepalive=True,
+            socket_keepalive_options={
+                "TCP_KEEPIDLE": 1,
+                "TCP_KEEPINTVL": 3,
+                "TCP_KEEPCNT": 5,
+            },
+        )
 
-        except Exception as e:
-            if self.error_handler and self.config:
-                # Create error context for comprehensive error handling
-                error_context = self.error_handler.create_error_context(
-                    error=e,
-                    component="redis_client",
-                    operation="connect",
-                    details={"redis_url": self.redis_url},
-                )
+        # Test connection with timeout
+        await asyncio.wait_for(self.client.ping(), timeout=5.0)
+        self._last_heartbeat = asyncio.get_event_loop().time()
 
-                # Use ErrorHandler for sophisticated error management
-                recovery_scenario = NetworkDisconnectionRecovery(self.config)
-                handled = await self.error_handler.handle_error(e, error_context, recovery_scenario)
+        # Start heartbeat monitoring
+        self._start_heartbeat_monitoring()
 
-                if not handled:
-                    self.logger.error("Redis connection failed", error=str(e))
-                    raise DataSourceError(f"Redis connection failed: {e!s}")
-                else:
-                    self.logger.info("Redis connection recovered after error handling")
-                    # Retry connection after recovery
-                    await self.connect()
-            else:
-                self.logger.error("Redis connection failed", error=str(e))
-                raise DataSourceError(f"Redis connection failed: {e!s}")
+        self.logger.info("Redis connection established")
+
+    def _start_heartbeat_monitoring(self) -> None:
+        """Start heartbeat monitoring task."""
+        if self._heartbeat_task is None or self._heartbeat_task.done():
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_monitor())
+
+    async def _heartbeat_monitor(self) -> None:
+        """Monitor connection with periodic heartbeat."""
+        while self.client is not None:
+            try:
+                await asyncio.sleep(self._heartbeat_interval)
+                if self.client:
+                    await asyncio.wait_for(self.client.ping(), timeout=5.0)
+                    self._last_heartbeat = asyncio.get_event_loop().time()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.warning(f"Heartbeat failed: {e}")
+                # Connection is unhealthy - will be handled by _ensure_connected
+                break
 
     async def _ensure_connected(self) -> None:
         if self.client is None:
             await self.connect()
+        else:
+            # Check if heartbeat is recent enough
+            current_time = asyncio.get_event_loop().time()
+            if self._last_heartbeat and current_time - self._last_heartbeat > self._heartbeat_interval * 2:
+                self.logger.warning("Redis connection heartbeat stale, reconnecting...")
+                await self._cleanup_connection()
+                await self.connect()
+            else:
+                # Test connection health periodically with timeout
+                try:
+                    await asyncio.wait_for(self.client.ping(), timeout=2.0)
+                    self._last_heartbeat = current_time
+                except (asyncio.TimeoutError, Exception):
+                    self.logger.warning("Redis connection unhealthy, reconnecting...")
+                    await self._cleanup_connection()
+                    await self.connect()
+
+    async def _cleanup_connection(self) -> None:
+        """Clean up connection resources."""
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+            try:
+                await self._heartbeat_task
+            except asyncio.CancelledError:
+                pass
+        self.client = None
+
+    async def _with_backpressure(self, operation):
+        """Execute Redis operation with backpressure control."""
+        # Check queue size to prevent memory issues
+        if self._operation_queue_size >= self._max_queue_size:
+            raise DataError("Redis operation queue full - backpressure applied")
+
+        self._operation_queue_size += 1
+        try:
+            async with self._operation_semaphore:
+                # Apply operation timeout to prevent hanging
+                return await asyncio.wait_for(operation(), timeout=self._connection_timeout)
+        except asyncio.TimeoutError:
+            self.logger.error(f"Redis operation timed out after {self._connection_timeout}s")
+            raise DataError(f"Redis operation timed out after {self._connection_timeout}s")
+        finally:
+            self._operation_queue_size -= 1
 
     async def _maybe_autoclose(self) -> None:
         if self.auto_close and self.client is not None:
@@ -122,30 +187,43 @@ class RedisClient(BaseComponent):
 
     async def disconnect(self) -> None:
         """Disconnect from Redis."""
-        if self.client:
-            try:
+        client = None
+        try:
+            # Cancel heartbeat monitoring first
+            if self._heartbeat_task and not self._heartbeat_task.done():
+                self._heartbeat_task.cancel()
+                try:
+                    await self._heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+
+            client = self.client
+            if client:
                 # Check if aclose method exists (newer redis versions)
-                if hasattr(self.client, "aclose") and callable(self.client.aclose):
-                    await self.client.aclose()
+                if hasattr(client, "aclose") and callable(client.aclose):
+                    await asyncio.wait_for(client.aclose(), timeout=5.0)
                 else:
                     # Fall back to close() for older versions
-                    await self.client.close()
+                    await asyncio.wait_for(client.close(), timeout=5.0)
                 self.logger.info("Redis connection closed")
-            except Exception as e:
-                self.logger.warning(f"Error during disconnect: {e}")
-            finally:
-                self.client = None
+        except asyncio.TimeoutError:
+            self.logger.warning("Redis disconnect timed out")
+        except Exception as e:
+            self.logger.warning(f"Error during disconnect: {e}")
+        finally:
+            # Ensure references are cleared even if close fails
+            self.client = None
+            self._heartbeat_task = None
 
     def _get_namespaced_key(self, key: str, namespace: str = "trading_bot") -> str:
         """Get namespaced key for organization."""
         return f"{namespace}:{key}"
 
     @circuit_breaker(failure_threshold=5, recovery_timeout=30)
-    async def set(
-        self, key: str, value: Any, ttl: int | None = None, namespace: str = "trading_bot"
-    ) -> bool:
+    async def set(self, key: str, value: Any, ttl: int | None = None, namespace: str = "trading_bot") -> bool:
         """Set a key-value pair with optional TTL."""
-        try:
+
+        async def _set_operation():
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
 
@@ -159,19 +237,21 @@ class RedisClient(BaseComponent):
             if ttl is not None:
                 result = await self.client.setex(namespaced_key, ttl, serialized_value)
             else:
-                result = await self.client.setex(
-                    namespaced_key, self._default_ttl, serialized_value
-                )
+                result = await self.client.setex(namespaced_key, self._default_ttl, serialized_value)
+            return result
 
+        try:
+            result = await self._with_backpressure(_set_operation)
             return result
 
         except Exception as e:
             if self.error_handler and self.config:
                 error_context = self.error_handler.create_error_context(
-                    error=e,
-                    component="redis_client",
-                    operation="set",
-                    details={"key": key, "namespace": namespace},
+                    e,
+                    "redis_client",
+                    "set",
+                    key=key,
+                    namespace=namespace,
                 )
                 await self.error_handler.handle_error(e, error_context)
             self.logger.error("Redis set operation failed", key=key, error=str(e))
@@ -181,7 +261,8 @@ class RedisClient(BaseComponent):
 
     async def get(self, key: str, namespace: str = "trading_bot") -> Any | None:
         """Get a value by key."""
-        try:
+
+        async def _get_operation():
             await self._ensure_connected()
             namespaced_key = self._get_namespaced_key(key, namespace)
             value = await self.client.get(namespaced_key)
@@ -194,6 +275,9 @@ class RedisClient(BaseComponent):
                 return json.loads(value)
             except json.JSONDecodeError:
                 return value
+
+        try:
+            return await self._with_backpressure(_get_operation)
 
         except Exception as e:
             self.logger.error("Redis get operation failed", key=key, error=str(e))
@@ -357,6 +441,8 @@ class RedisClient(BaseComponent):
         except Exception as e:
             self.logger.error("Redis lpush operation failed", key=key, error=str(e))
             raise DataError(f"Redis lpush operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def rpush(self, key: str, value: Any, namespace: str = "trading_bot") -> int:
         """Push a value to the right of a list."""
@@ -376,10 +462,10 @@ class RedisClient(BaseComponent):
         except Exception as e:
             self.logger.error("Redis rpush operation failed", key=key, error=str(e))
             raise DataError(f"Redis rpush operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
-    async def lrange(
-        self, key: str, start: int = 0, end: int = -1, namespace: str = "trading_bot"
-    ) -> list[Any]:
+    async def lrange(self, key: str, start: int = 0, end: int = -1, namespace: str = "trading_bot") -> list[Any]:
         """Get a range of elements from a list."""
         try:
             await self._ensure_connected()
@@ -399,6 +485,8 @@ class RedisClient(BaseComponent):
         except Exception as e:
             self.logger.error("Redis lrange operation failed", key=key, error=str(e))
             raise DataError(f"Redis lrange operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     # Set operations
     async def sadd(self, key: str, value: Any, namespace: str = "trading_bot") -> bool:
@@ -419,6 +507,8 @@ class RedisClient(BaseComponent):
         except Exception as e:
             self.logger.error("Redis sadd operation failed", key=key, error=str(e))
             raise DataError(f"Redis sadd operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     async def smembers(self, key: str, namespace: str = "trading_bot") -> list[Any]:
         """Get all members of a set."""
@@ -440,6 +530,8 @@ class RedisClient(BaseComponent):
         except Exception as e:
             self.logger.error("Redis smembers operation failed", key=key, error=str(e))
             raise DataError(f"Redis smembers operation failed: {e!s}")
+        finally:
+            await self._maybe_autoclose()
 
     # Trading-specific utilities
     async def store_market_data(self, symbol: str, data: dict[str, Any], ttl: int = 300) -> bool:
@@ -511,25 +603,3 @@ class RedisClient(BaseComponent):
         except Exception as e:
             self.logger.error("Redis health check failed", error=str(e))
             return False
-
-    # TODO: Remove in production - Debug functions
-    async def debug_info(self) -> dict[str, Any]:
-        """Get debug information about Redis."""
-        try:
-            info = await self.client.info()
-            debug_data = {
-                "connected_clients": info.get("connected_clients", 0),
-                "used_memory_human": info.get("used_memory_human", "0B"),
-                "total_commands_processed": info.get("total_commands_processed", 0),
-                "keyspace_hits": info.get("keyspace_hits", 0),
-                "keyspace_misses": info.get("keyspace_misses", 0),
-                "uptime_in_seconds": info.get("uptime_in_seconds", 0),
-            }
-            # Use utils formatter for consistent API response
-            return format_api_response(
-                debug_data, success=True, message="Redis debug info retrieved"
-            )
-        except Exception as e:
-            return format_api_response(
-                {}, success=False, message=f"Failed to get Redis info: {e!s}"
-            )

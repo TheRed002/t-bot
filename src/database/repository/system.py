@@ -10,32 +10,29 @@ from src.database.models.system import (
     BalanceSnapshot,
     PerformanceMetrics,
 )
-from src.database.repository.core_compliant_base import DatabaseRepository
+from src.database.repository.base import DatabaseRepository
+from src.database.repository.utils import RepositoryUtils
 
 
-class AlertRepository(DatabaseRepository[Alert, str]):
+class AlertRepository(DatabaseRepository):
     """Repository for Alert entities."""
 
     def __init__(self, session: AsyncSession):
         """Initialize alert repository."""
 
-        super().__init__(
-            session=session, model=Alert, entity_type=Alert, key_type=str, name="AlertRepository"
-        )
+        super().__init__(session=session, model=Alert, entity_type=Alert, key_type=str, name="AlertRepository")
 
     async def get_by_user(self, user_id: str) -> list[Alert]:
         """Get alerts by user."""
-        return await self.get_all(filters={"user_id": user_id}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "user_id", user_id, "-timestamp")
 
     async def get_unread_alerts(self, user_id: str) -> list[Alert]:
         """Get unread alerts for user."""
-        return await self.get_all(
-            filters={"user_id": user_id, "is_read": False}, order_by="-timestamp"
-        )
+        return await self.get_all(filters={"user_id": user_id, "is_read": False}, order_by="-timestamp")
 
     async def get_by_severity(self, severity: str) -> list[Alert]:
         """Get alerts by severity."""
-        return await self.get_all(filters={"severity": severity}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "severity", severity, "-timestamp")
 
     async def get_critical_alerts(self) -> list[Alert]:
         """Get critical alerts."""
@@ -43,29 +40,19 @@ class AlertRepository(DatabaseRepository[Alert, str]):
 
     async def get_by_type(self, alert_type: str) -> list[Alert]:
         """Get alerts by type."""
-        return await self.get_all(filters={"alert_type": alert_type}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "alert_type", alert_type, "-timestamp")
 
     async def mark_as_read(self, alert_id: str) -> bool:
         """Mark alert as read."""
-        alert = await self.get(alert_id)
-        if alert:
-            alert.is_read = True
-            await self.update(alert)
-            return True
-        return False
+        return await RepositoryUtils.mark_entity_field(self, alert_id, "is_read", True, "Alert")
 
     async def mark_all_read(self, user_id: str) -> int:
         """Mark all alerts as read for user."""
         alerts = await self.get_unread_alerts(user_id)
-        count = 0
-        for alert in alerts:
-            alert.is_read = True
-            await self.update(alert)
-            count += 1
-        return count
+        return await RepositoryUtils.bulk_mark_entities(self, alerts, "is_read", True, "Alert")
 
 
-class AuditLogRepository(DatabaseRepository[AuditLog, str]):
+class AuditLogRepository(DatabaseRepository):
     """Repository for AuditLog entities."""
 
     def __init__(self, session: AsyncSession):
@@ -81,30 +68,27 @@ class AuditLogRepository(DatabaseRepository[AuditLog, str]):
 
     async def get_by_user(self, user_id: str) -> list[AuditLog]:
         """Get audit logs by user."""
-        return await self.get_all(filters={"user_id": user_id}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "user_id", user_id, "-timestamp")
 
     async def get_by_action(self, action: str) -> list[AuditLog]:
         """Get audit logs by action."""
-        return await self.get_all(filters={"action": action}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "action", action, "-timestamp")
 
     async def get_by_resource_type(self, resource_type: str) -> list[AuditLog]:
         """Get audit logs by resource type."""
-        return await self.get_all(filters={"resource_type": resource_type}, order_by="-timestamp")
+        return await RepositoryUtils.get_entities_by_field(self, "resource_type", resource_type, "-timestamp")
 
     async def get_by_resource(self, resource_type: str, resource_id: str) -> list[AuditLog]:
         """Get audit logs for specific resource."""
-        return await self.get_all(
-            filters={"resource_type": resource_type, "resource_id": resource_id},
-            order_by="-timestamp",
-        )
+        filters = {"resource_type": resource_type, "resource_id": resource_id}
+        return await RepositoryUtils.get_entities_by_multiple_fields(self, filters, "-timestamp")
 
     async def get_recent_logs(self, hours: int = 24) -> list[AuditLog]:
         """Get recent audit logs."""
-        since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        return await self.get_all(filters={"timestamp": {"gte": since}}, order_by="-timestamp")
+        return await RepositoryUtils.get_recent_entities(self, hours, None, "-timestamp")
 
 
-class PerformanceMetricsRepository(DatabaseRepository[PerformanceMetrics, str]):
+class PerformanceMetricsRepository(DatabaseRepository):
     """Repository for PerformanceMetrics entities."""
 
     def __init__(self, session: AsyncSession):
@@ -143,7 +127,7 @@ class PerformanceMetricsRepository(DatabaseRepository[PerformanceMetrics, str]):
         return await self.get_all(order_by="-total_pnl", limit=limit)
 
 
-class BalanceSnapshotRepository(DatabaseRepository[BalanceSnapshot, str]):
+class BalanceSnapshotRepository(DatabaseRepository):
     """Repository for BalanceSnapshot entities."""
 
     def __init__(self, session: AsyncSession):
@@ -169,9 +153,7 @@ class BalanceSnapshotRepository(DatabaseRepository[BalanceSnapshot, str]):
         """Get balance snapshots by currency."""
         return await self.get_all(filters={"currency": currency}, order_by="-timestamp")
 
-    async def get_latest_snapshot(
-        self, user_id: str, exchange: str, currency: str
-    ) -> BalanceSnapshot | None:
+    async def get_latest_snapshot(self, user_id: str, exchange: str, currency: str) -> BalanceSnapshot | None:
         """Get latest balance snapshot."""
         snapshots = await self.get_all(
             filters={"user_id": user_id, "exchange": exchange, "currency": currency},

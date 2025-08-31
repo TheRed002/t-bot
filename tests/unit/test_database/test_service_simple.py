@@ -21,20 +21,28 @@ class TestDatabaseServiceBasic:
     def mock_config_service(self):
         """Create mock ConfigService for testing."""
         config_service = Mock(spec=ConfigService)
-        config_service.get_database_config.return_value = {
-            "postgresql_host": "localhost",
-            "postgresql_port": 5432,
-            "postgresql_database": "test_db",
-            "postgresql_username": "test_user",
-            "postgresql_password": "test_pass",
+        config_service.get_config_dict.return_value = {
+            "database": {
+                "postgresql_host": "localhost",
+                "postgresql_port": 5432,
+                "postgresql_database": "test_db",
+                "postgresql_username": "test_user",
+                "postgresql_password": "test_pass",
+            }
         }
         return config_service
 
     @pytest.fixture
     def mock_validation_service(self):
         """Create mock ValidationService for testing."""
-        validation_service = Mock(spec=ValidationService)
-        validation_service.validate.return_value = True
+        validation_service = Mock()
+        # Mock the async validate method
+        async def mock_validate(*args, **kwargs):
+            return True
+        validation_service.validate = mock_validate
+        validation_service.validate_decimal = Mock(return_value=True)
+        validation_service.validate_price = Mock(return_value=True)
+        validation_service.validate_quantity = Mock(return_value=True)
         return validation_service
 
     def test_database_service_init(self, mock_config_service, mock_validation_service):
@@ -71,5 +79,5 @@ class TestDatabaseServiceBasic:
         
         # Since the actual health check might require database connections,
         # we'll just test that the method exists and is callable
-        assert hasattr(service, 'health_check')
-        assert callable(service.health_check)
+        assert hasattr(service, 'get_health_status')
+        assert callable(service.get_health_status)
