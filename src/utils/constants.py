@@ -145,6 +145,15 @@ TIMEOUTS = {
     "HEALTH_CHECK_INTERVAL": 30,  # Health check interval in seconds
     "DB_POOL_RECYCLE": 3600,  # Database pool recycle time in seconds
     "REDIS_DEFAULT_TTL": 3600,  # Redis default TTL in seconds
+    "REDIS_HEARTBEAT_INTERVAL": 30,  # Redis heartbeat monitoring interval in seconds
+    "REDIS_CONNECTION_TIMEOUT": 10,  # Redis connection timeout in seconds
+    "REDIS_HEALTH_CHECK_INTERVAL": 30,  # Redis health check interval in seconds
+    "REDIS_SOCKET_CONNECT_TIMEOUT": 5,  # Redis socket connection timeout in seconds
+    "REDIS_SOCKET_TIMEOUT": 10,  # Redis socket timeout in seconds
+    "QUERY_CACHE_TTL_LONG": 300,  # Long cache TTL for stable data (5 minutes)
+    "QUERY_CACHE_TTL_SHORT": 60,  # Short cache TTL for frequently changing data (1 minute)
+    "QUERY_CACHE_TTL_REALTIME": 30,  # Realtime cache TTL (30 seconds)
+    "QUERY_TIMEOUT_DEFAULT": 30,  # Default query timeout (30 seconds)
 }
 
 # HTTP status codes
@@ -268,6 +277,9 @@ LIMITS = {
     "DB_MAX_OVERFLOW": 20,  # Database pool max overflow
     "DB_SYNC_POOL_SIZE": 5,  # Database sync pool size
     "DB_SYNC_MAX_OVERFLOW": 10,  # Database sync pool max overflow
+    "REDIS_MAX_CONNECTIONS": 100,  # Redis maximum connections
+    "REDIS_MAX_CONCURRENT_OPS": 100,  # Redis maximum concurrent operations
+    "REDIS_MAX_QUEUE_SIZE": 1000,  # Redis maximum operation queue size
 }
 
 # Thresholds for different operations
@@ -528,3 +540,33 @@ SIGNAL_DIRECTION_VALUES = {"BUY": "buy", "SELL": "sell", "HOLD": "hold"}
 
 # Risk level values
 RISK_LEVEL_VALUES = {"LOW": "low", "MEDIUM": "medium", "HIGH": "high", "CRITICAL": "critical"}
+
+
+# =============================================================================
+# Analytics Constants
+# =============================================================================
+
+# Performance analysis thresholds
+ANALYTICS_PERFORMANCE_THRESHOLDS = {
+    "significant_daily_loss": 10000,  # USD threshold for significant loss alerts
+    "elevated_var_threshold": 50000,  # USD threshold for elevated VaR alerts
+    "strong_sharpe_threshold": 1.5,  # Sharpe ratio threshold for strong performance
+    "weak_sharpe_threshold": 0.5,  # Sharpe ratio threshold for weak performance
+}
+
+# Default VaR calculation parameters
+VAR_CALCULATION_DEFAULTS = {
+    "confidence_level": 0.95,  # 95% confidence level
+    "time_horizon": 1,  # 1-day time horizon
+    "method": "historical",  # Default calculation method
+}
+
+# Report versioning
+ANALYTICS_REPORT_VERSION = "2.0"
+
+# Cache and timing intervals (seconds)
+ANALYTICS_TIMING = {
+    "periodic_report_check_interval": 300,  # 5 minutes
+    "cache_cleanup_interval": 60,  # 1 minute
+    "cache_ttl_seconds": 60,  # 1 minute default cache TTL
+}

@@ -1,12 +1,14 @@
 """Tests for GPU utilities module."""
 
 import logging
+import sys
 from unittest.mock import MagicMock, Mock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from src.core.exceptions import ServiceError
 from src.utils.gpu_utils import (
     GPUManager,
     get_optimal_batch_size,
@@ -501,9 +503,23 @@ class TestSetupGPULogging:
         mock_gpu_manager.is_available.return_value = True
         mock_get_service.return_value = mock_gpu_manager
         
-        # Mock import to raise ImportError for gpustat
-        with patch("builtins.__import__", side_effect=ImportError("gpustat not available")):
+        # Save original __import__
+        import builtins
+        original_import = builtins.__import__
+        
+        def mock_import_side_effect(name, *args, **kwargs):
+            if name == "gpustat":
+                raise ImportError("gpustat not available")
+            # Use the original import for everything else
+            return original_import(name, *args, **kwargs)
+        
+        # Temporarily replace __import__
+        builtins.__import__ = mock_import_side_effect
+        try:
             result = setup_gpu_logging()
+        finally:
+            # Restore original __import__
+            builtins.__import__ = original_import
         
         assert result is None
 
@@ -591,7 +607,7 @@ class TestServiceIntegration:
             with patch("src.utils.service_registry.register_util_services", side_effect=Exception("Registration failed")):
                 from src.utils.gpu_utils import _get_gpu_manager_service
                 
-                with pytest.raises(ValueError, match="GPUManager service not available"):
+                with pytest.raises(ServiceError, match="GPUManager service not available"):
                     _get_gpu_manager_service()
 
 
